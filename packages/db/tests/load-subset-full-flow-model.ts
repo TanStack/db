@@ -372,6 +372,7 @@ export type ExpectedAdapterLifecycleEvent = {
 }
 
 type ActiveDemandAttempts = Map<FullFlowDemandId, Set<FullFlowAttemptId>>
+type AcquisitionAttempts = Map<FullFlowAttemptId, Set<FullFlowAttemptId>>
 
 function addActiveDemandAttempt(
   activeAttempts: ActiveDemandAttempts,
@@ -395,6 +396,30 @@ function releaseActiveDemandAttempt(
   if (!attempts?.delete(attemptId)) return false
   if (attempts.size > 0) return false
   activeAttempts.delete(demandId)
+  return true
+}
+
+function addAcquisitionAttempt(
+  acquisitionAttempts: AcquisitionAttempts,
+  acquisitionId: FullFlowAttemptId,
+  attemptId: FullFlowAttemptId,
+): void {
+  let attempts = acquisitionAttempts.get(acquisitionId)
+  if (!attempts) {
+    attempts = new Set()
+    acquisitionAttempts.set(acquisitionId, attempts)
+  }
+  attempts.add(attemptId)
+}
+
+function releaseAcquisitionAttempt(
+  acquisitionAttempts: AcquisitionAttempts,
+  acquisitionId: FullFlowAttemptId,
+  attemptId: FullFlowAttemptId,
+): boolean {
+  const attempts = acquisitionAttempts.get(acquisitionId)
+  if (!attempts?.delete(attemptId) || attempts.size > 0) return false
+  acquisitionAttempts.delete(acquisitionId)
   return true
 }
 
@@ -520,53 +545,79 @@ export function projectTransportLoads(
   history: ReadonlyArray<LoadSubsetFullFlowEvent>,
 ): number {
   assertWellFormedDemandAttempts(history)
-  const reusableDemands = new Map<FullFlowDemandId, FullFlowAttemptId>()
-  const inFlightDemands = new Map<FullFlowDemandId, FullFlowAttemptId>()
-  const activeAttempts: ActiveDemandAttempts = new Map()
+  const reusableAcquisitions = new Map<FullFlowDemandId, FullFlowAttemptId>()
+  const inFlightAcquisitions = new Map<FullFlowDemandId, FullFlowAttemptId>()
+  const attemptAcquisitions = new Map<FullFlowAttemptId, FullFlowAttemptId>()
+  const acquisitionAttempts: AcquisitionAttempts = new Map()
   let loads = 0
 
   for (const event of history) {
     switch (event.type) {
-      case `requestDemand`:
+      case `requestDemand`: {
         if (event.alreadyAborted) break
-        addActiveDemandAttempt(activeAttempts, event.demandId, event.attemptId)
-        if (
-          !reusableDemands.has(event.demandId) &&
-          !inFlightDemands.has(event.demandId)
-        ) {
+        let acquisitionId =
+          inFlightAcquisitions.get(event.demandId) ??
+          reusableAcquisitions.get(event.demandId)
+        if (acquisitionId === undefined) {
           loads++
-          inFlightDemands.set(event.demandId, event.attemptId)
+          acquisitionId = event.attemptId
+          inFlightAcquisitions.set(event.demandId, acquisitionId)
         }
+        attemptAcquisitions.set(event.attemptId, acquisitionId)
+        addAcquisitionAttempt(
+          acquisitionAttempts,
+          acquisitionId,
+          event.attemptId,
+        )
         break
+      }
       case `applyAuthoritativeRows`: {
-        if (inFlightDemands.get(event.demandId) !== event.attemptId) break
-        inFlightDemands.delete(event.demandId)
-        reusableDemands.set(event.demandId, event.attemptId)
+        const acquisitionId = attemptAcquisitions.get(event.attemptId)
+        if (
+          acquisitionId === undefined ||
+          inFlightAcquisitions.get(event.demandId) !== acquisitionId
+        ) {
+          break
+        }
+        inFlightAcquisitions.delete(event.demandId)
+        reusableAcquisitions.set(event.demandId, acquisitionId)
         break
       }
       case `truncateSource`:
-        reusableDemands.clear()
-        inFlightDemands.clear()
+        reusableAcquisitions.clear()
+        inFlightAcquisitions.clear()
         break
       case `applyUnprovenRows`:
       case `rejectDemand`:
-      case `settleDemandWithoutEvidence`:
-        if (inFlightDemands.get(event.demandId) === event.attemptId) {
-          inFlightDemands.delete(event.demandId)
+      case `settleDemandWithoutEvidence`: {
+        const acquisitionId = attemptAcquisitions.get(event.attemptId)
+        if (
+          acquisitionId !== undefined &&
+          inFlightAcquisitions.get(event.demandId) === acquisitionId
+        ) {
+          inFlightAcquisitions.delete(event.demandId)
         }
         break
-      case `releaseDemand`:
+      }
+      case `releaseDemand`: {
+        const acquisitionId = attemptAcquisitions.get(event.attemptId)
         if (
-          releaseActiveDemandAttempt(
-            activeAttempts,
-            event.demandId,
+          acquisitionId !== undefined &&
+          releaseAcquisitionAttempt(
+            acquisitionAttempts,
+            acquisitionId,
             event.attemptId,
           )
         ) {
-          reusableDemands.delete(event.demandId)
-          inFlightDemands.delete(event.demandId)
+          if (reusableAcquisitions.get(event.demandId) === acquisitionId) {
+            reusableAcquisitions.delete(event.demandId)
+          }
+          if (inFlightAcquisitions.get(event.demandId) === acquisitionId) {
+            inFlightAcquisitions.delete(event.demandId)
+          }
         }
         break
+      }
       case `restartSession`:
       case `cleanupSession`:
       case `advanceWindowRevision`:
@@ -697,6 +748,7 @@ export function projectReusableDemands(
   const currentAcquisitions = new Map<FullFlowDemandId, FullFlowAttemptId>()
   const reusableAcquisitions = new Map<FullFlowDemandId, FullFlowAttemptId>()
   const attemptAcquisitions = new Map<FullFlowAttemptId, FullFlowAttemptId>()
+  const acquisitionAttempts: AcquisitionAttempts = new Map()
 
   for (const event of history) {
     switch (event.type) {
@@ -713,6 +765,11 @@ export function projectReusableDemands(
             event.attemptId
           currentAcquisitions.set(event.demandId, acquisitionId)
           attemptAcquisitions.set(event.attemptId, acquisitionId)
+          addAcquisitionAttempt(
+            acquisitionAttempts,
+            acquisitionId,
+            event.attemptId,
+          )
         }
         break
       case `applyAuthoritativeRows`: {
@@ -730,18 +787,30 @@ export function projectReusableDemands(
         currentAcquisitions.clear()
         reusableAcquisitions.clear()
         break
-      case `releaseDemand`:
+      case `releaseDemand`: {
+        releaseActiveDemandAttempt(
+          activeAttempts,
+          event.demandId,
+          event.attemptId,
+        )
+        const acquisitionId = attemptAcquisitions.get(event.attemptId)
         if (
-          releaseActiveDemandAttempt(
-            activeAttempts,
-            event.demandId,
+          acquisitionId !== undefined &&
+          releaseAcquisitionAttempt(
+            acquisitionAttempts,
+            acquisitionId,
             event.attemptId,
           )
         ) {
-          currentAcquisitions.delete(event.demandId)
-          reusableAcquisitions.delete(event.demandId)
+          if (currentAcquisitions.get(event.demandId) === acquisitionId) {
+            currentAcquisitions.delete(event.demandId)
+          }
+          if (reusableAcquisitions.get(event.demandId) === acquisitionId) {
+            reusableAcquisitions.delete(event.demandId)
+          }
         }
         break
+      }
       case `applyUnprovenRows`:
       case `rejectDemand`:
       case `restartSession`:
@@ -1075,10 +1144,7 @@ export function projectRetainedRowKeys(
     { acquisitionId: FullFlowAttemptId; rows: Set<string> }
   >()
   const attemptAcquisitions = new Map<FullFlowAttemptId, FullFlowAttemptId>()
-  const acquisitionAttempts = new Map<
-    FullFlowAttemptId,
-    Set<FullFlowAttemptId>
-  >()
+  const acquisitionAttempts: AcquisitionAttempts = new Map()
   const rowClaims = new Map<string, Set<FullFlowAttemptId>>()
   const attemptRows = new Map<FullFlowAttemptId, Set<string>>()
 
@@ -1122,12 +1188,7 @@ export function projectRetainedRowKeys(
         event.attemptId
       currentAcquisitions.set(event.demandId, acquisitionId)
       attemptAcquisitions.set(event.attemptId, acquisitionId)
-      let participants = acquisitionAttempts.get(acquisitionId)
-      if (!participants) {
-        participants = new Set()
-        acquisitionAttempts.set(acquisitionId, participants)
-      }
-      participants.add(event.attemptId)
+      addAcquisitionAttempt(acquisitionAttempts, acquisitionId, event.attemptId)
       if (retained) claimRows(event.attemptId, retained.rows)
     }
     if (event.type === `applyAuthoritativeRows`) {
@@ -1173,7 +1234,10 @@ export function projectRetainedRowKeys(
       event.type === `settleDemandWithoutEvidence`
     ) {
       const acquisitionId = attemptAcquisitions.get(event.attemptId)
-      if (currentAcquisitions.get(event.demandId) === acquisitionId) {
+      if (
+        acquisitionId !== undefined &&
+        currentAcquisitions.get(event.demandId) === acquisitionId
+      ) {
         currentAcquisitions.delete(event.demandId)
       }
     }
@@ -1186,18 +1250,26 @@ export function projectRetainedRowKeys(
     if (event.type === `releaseDemand`) {
       activeAttemptIds.delete(event.attemptId)
       const acquisitionId = attemptAcquisitions.get(event.attemptId)
-      if (acquisitionId) {
-        acquisitionAttempts.get(acquisitionId)?.delete(event.attemptId)
-      }
-      const releasedFinalAttempt = releaseActiveDemandAttempt(
+      releaseActiveDemandAttempt(
         activeAttempts,
         event.demandId,
         event.attemptId,
       )
       releaseRows(event.attemptId)
-      if (releasedFinalAttempt) {
-        currentAcquisitions.delete(event.demandId)
-        reusableRows.delete(event.demandId)
+      if (
+        acquisitionId !== undefined &&
+        releaseAcquisitionAttempt(
+          acquisitionAttempts,
+          acquisitionId,
+          event.attemptId,
+        )
+      ) {
+        if (currentAcquisitions.get(event.demandId) === acquisitionId) {
+          currentAcquisitions.delete(event.demandId)
+        }
+        if (reusableRows.get(event.demandId)?.acquisitionId === acquisitionId) {
+          reusableRows.delete(event.demandId)
+        }
       }
     }
   }

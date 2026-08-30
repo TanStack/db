@@ -360,6 +360,41 @@ it(`attaches late rows only to attempts that shared the settling acquisition`, (
   expect(projectReusableDemands(attachedPeer)).toEqual([`shared`])
 })
 
+it(`retires an ownerless acquisition without disturbing another cohort for the same demand`, () => {
+  const demandId = `shared`
+  const request = (attemptId: string): LoadSubsetFullFlowEvent => ({
+    type: `requestDemand`,
+    ownerId: attemptId,
+    sessionId: `session`,
+    demandId,
+    attemptId,
+    alreadyAborted: false,
+  })
+  const history: ReadonlyArray<LoadSubsetFullFlowEvent> = [
+    request(`attempt-a`),
+    { type: `truncateSource`, sessionId: `session` },
+    request(`attempt-b`),
+    {
+      type: `releaseDemand`,
+      ownerId: `attempt-b`,
+      demandId,
+      attemptId: `attempt-b`,
+    },
+    request(`attempt-c`),
+    {
+      type: `applyAuthoritativeRows`,
+      ownerId: `attempt-b`,
+      demandId,
+      attemptId: `attempt-b`,
+      rowKeys: [`stale-b`],
+    },
+  ]
+
+  expect(projectTransportLoads(history)).toBe(3)
+  expect(projectRetainedRowKeys(history)).toEqual([])
+  expect(projectReusableDemands(history)).toEqual([])
+})
+
 it.each([
   {
     name: `one owner releases the first attempt first`,
