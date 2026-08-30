@@ -47,6 +47,8 @@ type PublicKeyRankedRow = Omit<RankedRow, `id`> & {
 type OrderedWork = {
   keys: Array<string>
   sourceReads: Array<string>
+  expectedBucketYields: number
+  bucketYields: number
   expectedKeyComparisons: number
   keyComparisons: number
   totalOrderComparisons: number
@@ -229,11 +231,13 @@ async function observeOrderedPrefix(
 
     let expectedKeyComparisons = 0
     let expectedMatches = 0
+    let expectedBucketYields = 0
     const expectedBuckets =
       direction === `asc`
         ? index.orderedBuckets()
         : index.orderedBucketsReversed()
     for (const [, bucket] of expectedBuckets) {
+      expectedBucketYields++
       const orderedKeys = [...bucket]
       orderedKeys.sort((left, right) => {
         expectedKeyComparisons++
@@ -243,6 +247,23 @@ async function observeOrderedPrefix(
         (key) => rows.find((row) => row.id === key)?.included === true,
       ).length
       if (expectedMatches >= limit) break
+    }
+
+    let bucketYields = 0
+    const originalOrderedBuckets = index.orderedBuckets.bind(index)
+    const originalOrderedBucketsReversed =
+      index.orderedBucketsReversed.bind(index)
+    index.orderedBuckets = function* () {
+      for (const bucket of originalOrderedBuckets()) {
+        bucketYields++
+        yield bucket
+      }
+    }
+    index.orderedBucketsReversed = function* () {
+      for (const bucket of originalOrderedBucketsReversed()) {
+        bucketYields++
+        yield bucket
+      }
     }
 
     const sourceReads: Array<string> = []
@@ -264,6 +285,8 @@ async function observeOrderedPrefix(
       return {
         keys: changes.map(({ key }) => String(key)),
         sourceReads,
+        expectedBucketYields,
+        bucketYields,
         expectedKeyComparisons,
         keyComparisons: keyComparisonCounter.count,
         totalOrderComparisons: compareEntries.mock.calls.length,
@@ -379,6 +402,7 @@ describe(`ordered source work oracle`, () => {
 
       expect(observed.keys).toEqual(scenario.expectedKeys)
       expect(observed.sourceReads).toEqual(scenario.expectedSourceReads)
+      expect(observed.bucketYields).toBe(observed.expectedBucketYields)
       expect(observed.keyComparisons).toBe(observed.expectedKeyComparisons)
       expect(observed.totalOrderComparisons).toBe(0)
     },
@@ -430,6 +454,7 @@ describe(`ordered source work oracle`, () => {
 
           expect(observed.keys).toEqual(scenario.expectedKeys)
           expect(observed.sourceReads).toEqual(scenario.expectedSourceReads)
+          expect(observed.bucketYields).toBe(observed.expectedBucketYields)
           expect(observed.keyComparisons).toBe(observed.expectedKeyComparisons)
           expect(observed.totalOrderComparisons).toBe(0)
         },
@@ -455,6 +480,7 @@ describe(`ordered source work oracle`, () => {
       `tied-02`,
       `tied-04`,
     ])
+    expect(observed.bucketYields).toBe(observed.expectedBucketYields)
     expect(observed.keyComparisons).toBe(observed.expectedKeyComparisons)
     expect(observed.totalOrderComparisons).toBe(0)
   })
