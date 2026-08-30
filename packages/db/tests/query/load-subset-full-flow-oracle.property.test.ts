@@ -1032,6 +1032,81 @@ it.each([`sync throw`, `async reject`] as const)(
   },
 )
 
+it(`publishes once after a loader fills an indexed window across graph turns`, async () => {
+  type Row = { id: string; rank: number }
+  const remoteRows: ReadonlyArray<Row> = [
+    { id: `a`, rank: 1 },
+    { id: `b`, rank: 2 },
+  ]
+  const batches: Array<ReadonlyArray<string>> = []
+  const callbackReads: Array<ReadonlyArray<string>> = []
+  let loads = 0
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: Row }) => void
+  let commit!: () => true | Promise<void>
+  const source = createCollection<Row>({
+    id: `indexed-loader-quiescent-publication`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        params.markReady()
+        return {
+          loadSubset: () => {
+            const row = remoteRows[loads++]
+            if (!row) return true
+            begin()
+            write({ type: `insert`, value: row })
+            const applied = commit()
+            if (applied !== true) {
+              throw new Error(`Expected synchronous source application`)
+            }
+            return true
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection({
+    id: `indexed-loader-quiescent-publication-live`,
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(0),
+    startSync: true,
+  })
+  let subscription: ReturnType<typeof live.subscribeChanges> | undefined
+
+  try {
+    await live.preload()
+    subscription = live.subscribeChanges(
+      (changes) => {
+        batches.push(changes.map(({ key }) => String(key)).sort())
+        callbackReads.push(live.toArray.map(({ id }) => id))
+      },
+      { includeInitialState: false },
+    )
+    await live.utils.setWindow({ offset: 0, limit: 2 })
+    await flushPromises()
+
+    expect(loads).toBe(2)
+    expect(live.toArray.map(({ id }) => id)).toEqual([`a`, `b`])
+    expect(batches).toEqual([[`a`, `b`]])
+    expect(callbackReads).toEqual([[`a`, `b`]])
+  } finally {
+    subscription?.unsubscribe()
+    await Promise.all([live.cleanup(), source.cleanup()])
+  }
+})
+
 it(`fences an unindexed fallback settlement from a cleaned query session`, async () => {
   type Row = { id: string; rank: number }
   type Result = {
@@ -1091,6 +1166,7 @@ it(`fences an unindexed fallback settlement from a cleaned query session`, async
 
     pending[0]!.reject(new Error(`stale fallback failed`))
     await flushPromises()
+    expect(live.utils.lastSubsetError).toBeUndefined()
     const repeatedWindow = live.utils.setWindow({ offset: 0, limit: 2 })
     void Promise.resolve(repeatedWindow).catch(() => {})
     expect(pending).toHaveLength(2)
@@ -1192,11 +1268,17 @@ it(`replays one unindexed fallback and publishes one replacement after truncate`
     const replacement = commit()
     await flushPromises()
     expect(pending).toHaveLength(2)
+    expect(live.toArray.map(({ id }) => id)).toEqual([`a`])
+    expect(batches).toHaveLength(0)
+    expect(callbackReads).toHaveLength(0)
 
     begin()
     write({ type: `insert`, value: { id: `b`, rank: 2 } })
     const replacementApplied = commit()
     if (replacementApplied !== true) await replacementApplied
+    expect(live.toArray.map(({ id }) => id)).toEqual([`a`])
+    expect(batches).toHaveLength(0)
+    expect(callbackReads).toHaveLength(0)
     pending[1]!.resolve({ hasMore: false, appliedRowKeys: [`b`] })
     if (replacement !== true) await replacement
     await flushPromises()
