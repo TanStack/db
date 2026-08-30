@@ -1219,6 +1219,65 @@ coordinates and public window state. A new regression must reduce to this
 grammar or justify a grammar change; it must not add a one-off event named after
 the bug.
 
+The grammar composes these independent axes:
+
+| Axis            | Values owned by this oracle family                                                                            |
+| --------------- | ------------------------------------------------------------------------------------------------------------- |
+| Source shape    | One or many opaque sources; zero, one, or many already-evaluated result contributions                         |
+| Demand relation | Exact, shared, covered, uncovered, ordered, additional, released                                              |
+| Identity        | Owner, session, demand, attempt, acquisition, source, transaction, publication                                |
+| Boundary phase  | Before adapter entry, inside adapter or callback entry, returned/in flight, settled, cleanup                  |
+| Evidence        | Applied row keys plus `unknown`, `continues`, or `exhausted` extent; rejection or abort establishes none      |
+| Publication     | Last complete snapshot, private replacement, failed or superseded generation, cleaned session                 |
+| Origin          | Ordinary source work or the exact ordered/additional acquisition signal lineage that authorized a row version |
+| Observation     | Result rows, readiness, error, ordered boundary, receipt, ownership, and physical-work counts                 |
+
+An executable history chooses values on these axes, then combines them through
+the demand facts above. A logical request installs its owner before adapter
+entry. It either attaches to an acquisition or starts one. Request-scoped sync
+transactions make row versions visible and settle their receipts before the
+acquisition can publish an outcome. Applied evidence may then establish
+caller-relative coverage and row ownership. Ordered evidence may update private
+window progress; only a complete publication snapshot reaches readers.
+Release, truncate, replacement, restart, and cleanup change the relevant
+identity or generation without changing this sequence.
+
+Adapter entry and every result, cleanup, and listener callback are reentrancy
+boundaries. Any otherwise legal event may occur before that boundary returns.
+Work which has entered an adapter but has not yet returned a promise is already
+pending work. A production-boundary driver must include this synchronous phase;
+promise-only overlap does not reconstruct the source.
+
+Each projection may erase axes it does not own. It must preserve the identity
+and cardinality of the fact it claims to check. In particular:
+
+- receipt laws compare each acquisition with its own applied keys;
+- coverage laws keep caller demand separate from acquisition outcome;
+- ownership laws keep logical leases separate from physical row support;
+- publication laws keep demand origin, row version, and generation separate;
+- work laws count physical starts separately from logical owners;
+- renaming laws erase names only after every allowed next-command observation
+  remains equal.
+
+Set unions, final-state equality, and settled promises are therefore supporting
+views, not universal oracles. Each can hide a wrong acquisition, transient
+publication, duplicate start, stale generation, or lost owner.
+
+The reconstruction control for a new finding is:
+
+1. express its source topology as already-evaluated contributions;
+2. name every logical and physical identity involved;
+3. place each action at its exact boundary phase and source origin;
+4. derive evidence, ownership, coverage, and publication independently;
+5. compare the first public or resource observation that can differ; and
+6. verify the same grammar admits the nearest marginal case but rejects a raw
+   relational or materialization problem.
+
+Zero-sized windows, empty sources, unknown extent, and synchronous adapter
+results are marginal cases of this grammar, not separate families. Predicate
+evaluation, join multiplicity, aggregate deltas, and nested materialization are
+outside it and remain negative controls.
+
 DBSP operator suites own incremental relational laws. The includes suites own
 compiled routes and materialized nested results. A load-subset production
 harness may use an eager query from those paths as its relational control, then
