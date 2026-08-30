@@ -1043,29 +1043,15 @@ function removeConditions(
   predicate: BasicExpression<boolean>,
   conditionsToRemove: Array<BasicExpression<boolean>>,
 ): BasicExpression<boolean> | undefined {
-  if (predicate.type === `func` && predicate.name === `and`) {
-    const remainingArgs = predicate.args.filter(
-      (arg) =>
-        !conditionsToRemove.some((cond) =>
-          areExpressionsEqual(arg as BasicExpression<boolean>, cond),
-        ),
-    )
+  const remaining = extractAllConditions(predicate).filter(
+    (candidate) =>
+      !conditionsToRemove.some((condition) =>
+        areExpressionsEqual(candidate, condition),
+      ),
+  )
 
-    if (remainingArgs.length === 0) {
-      return undefined
-    } else if (remainingArgs.length === 1) {
-      return remainingArgs[0]!
-    } else {
-      return {
-        type: `func`,
-        name: `and`,
-        args: remainingArgs,
-      } as BasicExpression<boolean>
-    }
-  }
-
-  // For non-AND predicates, don't remove anything
-  return predicate
+  if (remaining.length === 0) return undefined
+  return combineConditions(remaining)
 }
 
 /**

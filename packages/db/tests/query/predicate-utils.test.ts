@@ -1431,6 +1431,24 @@ describe(`minusWherePredicates`, () => {
   })
 
   describe(`common conditions`, () => {
+    it(`removes a reordered IN condition from a nested conjunction`, () => {
+      const requested = inOp(ref(`score`), [2, -2, 0, -3, -1, 3])
+      const alreadyLoaded = and(
+        inOp(ref(`score`), [0]),
+        and(
+          lt(ref(`score`), val(1)),
+          inOp(ref(`score`), [2, -3, -2, 3, 0, -1]),
+        ),
+      )
+
+      expect(minusWherePredicates(requested, alreadyLoaded)).toEqual(
+        and(
+          requested,
+          func(`not`, and(inOp(ref(`score`), [0]), lt(ref(`score`), val(1)))),
+        ),
+      )
+    })
+
     it(`should handle common conditions: (age > 10 AND status = 'active') - (age > 20 AND status = 'active') = (age > 10 AND age <= 20 AND status = 'active')`, () => {
       const from = and(
         gt(ref(`age`), val(10)),
