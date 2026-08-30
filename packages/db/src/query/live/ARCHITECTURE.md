@@ -873,10 +873,10 @@ options.
 
 Its semantic contract is:
 
-> Every active, satisfiable bucket must be covered by a settled current demand
-> request before initial preload completes.
+> Every active, satisfiable bucket must have its current demand load settle
+> before initial preload completes.
 
-A request may remain in flight after some covered buckets become inactive.
+A request may remain in flight after some buckets it targeted become inactive.
 Those buckets no longer participate in readiness and cannot receive rows
 through routes that no longer exist. Sharing source work never merges the route
 rows themselves.
@@ -1035,12 +1035,13 @@ timely-dataflow frontiers. Do not introduce a general timestamp or frontier
 framework unless a source contract proves that the generation and up-to-date
 protocol cannot express its ordering.
 
-**Initial readiness:** preload is complete when every demand currently
-reachable from the initial query graph is covered by a settled request. Demand
-that is no longer reachable does not block completion. An empty outer relation
-has no child demand, but its root demand must still settle. Later readiness
-transitions follow the existing Collection contract until an executable test
-defines another public behavior.
+**Initial readiness:** preload is complete when the current load for every
+demand reachable from the initial query graph has settled. An outcome-free load
+may settle readiness without proving reusable coverage. Demand that is no
+longer reachable does not block completion. An empty outer relation has no
+child demand, but its root demand must still settle. Later readiness transitions
+follow the existing Collection contract until an executable test defines
+another public behavior.
 
 Pending demand does not hide the parent row. An active empty bucket gives it
 the current canonical bucket value, and available partial source rows produce
@@ -1125,8 +1126,8 @@ create recursive Collection machinery.
    materialized output relation of its children.
 9. **Publication:** reads, events, and downstream queries observe the same
    complete graph result.
-10. **Initial demand:** preload completes when every initially reachable demand
-    is covered; obsolete demand does not block it.
+10. **Initial demand:** preload completes when the current load for every
+    initially reachable demand settles; obsolete demand does not block it.
 11. **Ownership:** a query-db row exists exactly while an explicit owner
     remains.
 12. **Work:** irrelevant rows do not cause unrelated scans or activate unrelated
@@ -1164,6 +1165,8 @@ create recursive Collection machinery.
 - **Coverage fact:** caller-relative proof that applied evidence satisfies a
   demand.
 - **Row ownership:** the acquisition support that keeps applied row keys alive.
+- **Publication snapshot:** the last complete reader-visible rows and ordered
+  boundary.
 - **Source extent:** an authoritative source fact that more rows continue past
   an exact demand, that the source is exhausted there, or that neither is known.
 - **Collection facade:** a stable public Collection view shared by the parents
@@ -1202,9 +1205,11 @@ closed event grammar varies opaque source topology, demand relationships,
 already-evaluated result contributions, public window state, settlement,
 release, and teardown. It owns asynchronous demand, applied evidence, row
 support, coverage, publication, source progress, and resource work. It must not
-interpret query IR, weighted deltas, predicates, joins, grouping, ordering, or
-nested materialization. A new regression must reduce to this grammar or justify
-a grammar change; it must not add a one-off event named after the bug.
+interpret query IR, weighted deltas, predicates, joins, grouping, query-level
+ordering, or nested materialization. It may project already-evaluated total-order
+coordinates and public window state. A new regression must reduce to this
+grammar or justify a grammar change; it must not add a one-off event named after
+the bug.
 
 DBSP operator suites own incremental relational laws. The includes suites own
 compiled routes and materialized nested results. A load-subset production
@@ -1223,9 +1228,9 @@ that this graph does not own.
 Run the DB oracle set with `pnpm test:oracles` from `packages/db`. Broad
 properties use FastCheck's random seed, while structural matrices keep fixed
 seeds so each run covers the same named cells. Increase both corpora with
-`TANSTACK_DB_ORACLE_RUNS_MULTIPLIER=10 pnpm test:oracles`. Preserve FastCheck's
-reported property key, seed, and shrink path while reducing a failure. Replay
-one exact property with:
+`TANSTACK_DB_ORACLE_RUNS_MULTIPLIER=10 pnpm test:oracles`. Preserve the oracle
+property key beside FastCheck's reported seed and shrink path while reducing a
+failure. Replay one exact property with:
 
 ```sh
 TANSTACK_DB_ORACLE_PROPERTY=<property> \
@@ -1234,9 +1239,11 @@ TANSTACK_DB_ORACLE_PATH=<path> \
 pnpm test:oracles
 ```
 
-The replay registry rejects partial, unknown, stale, and duplicate property
-coordinates. A seed without a property and path still runs the broad campaign.
-After shrinking, add the smallest case as a deterministic regression trace.
+The replay registry rejects partial or unknown coordinates and duplicate
+registered names. Its static inventory must stay equal to the property helper
+call sites; a missing registration fails at the helper boundary. A seed without
+a property and path still runs the broad campaign. After shrinking, add the
+smallest case as a deterministic regression trace.
 
 The broad relationship history changes correlation keys rather than freezing
 them. Set `TANSTACK_DB_ORACLE_STATISTICS=1` to print its generated depth,
