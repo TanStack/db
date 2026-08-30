@@ -2,7 +2,11 @@ type OracleEnvironment = Record<string, string | undefined>
 
 export function readOracleRunConfig(
   environment: OracleEnvironment = process.env,
-): { multiplier: number; replaySeed: number | undefined } {
+): {
+  multiplier: number
+  replaySeed: number | undefined
+  replayPath: string | undefined
+} {
   const multiplierValue = environment.TANSTACK_DB_ORACLE_RUNS_MULTIPLIER ?? `1`
   const multiplier = Number(multiplierValue)
   if (
@@ -16,23 +20,42 @@ export function readOracleRunConfig(
   }
 
   const seedValue = environment.TANSTACK_DB_ORACLE_SEED
-  if (seedValue === undefined) return { multiplier, replaySeed: undefined }
+  const replayPath = environment.TANSTACK_DB_ORACLE_PATH
+  if (seedValue === undefined) {
+    if (replayPath !== undefined) {
+      throw new Error(
+        `TANSTACK_DB_ORACLE_PATH requires TANSTACK_DB_ORACLE_SEED`,
+      )
+    }
+    return { multiplier, replaySeed: undefined, replayPath: undefined }
+  }
 
   const replaySeed = Number(seedValue)
   if (seedValue.trim() === `` || !Number.isSafeInteger(replaySeed)) {
     throw new Error(`TANSTACK_DB_ORACLE_SEED must be an integer`)
   }
-  return { multiplier, replaySeed }
+  return { multiplier, replaySeed, replayPath }
 }
 
 export function oracleRandomParameters(
   numRuns: number,
   replaySeed: number | undefined,
-): { numRuns: number; seed?: number } {
-  return replaySeed === undefined ? { numRuns } : { numRuns, seed: replaySeed }
+  replayPath?: string,
+): { numRuns: number; seed?: number; path?: string } {
+  if (replaySeed === undefined) {
+    if (replayPath !== undefined) {
+      throw new Error(`A FastCheck replay path requires a replay seed`)
+    }
+    return { numRuns }
+  }
+  return {
+    numRuns,
+    seed: replaySeed,
+    ...(replayPath === undefined ? {} : { path: replayPath }),
+  }
 }
 
-const { multiplier, replaySeed: seed } = readOracleRunConfig()
+const { multiplier, replaySeed: seed, replayPath: path } = readOracleRunConfig()
 
 /** Keeps ordinary CI bounded while allowing long randomized oracle campaigns. */
 export function oracleRuns(baseRuns: number): number {
@@ -43,9 +66,7 @@ export function oracleRuns(baseRuns: number): number {
 export function oraclePropertyOptions(baseRuns: number): {
   numRuns: number
   seed?: number
+  path?: string
 } {
-  return {
-    numRuns: oracleRuns(baseRuns),
-    ...(seed === undefined ? {} : { seed }),
-  }
+  return oracleRandomParameters(oracleRuns(baseRuns), seed, path)
 }

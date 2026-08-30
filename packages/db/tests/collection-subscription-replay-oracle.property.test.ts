@@ -1809,7 +1809,7 @@ async function runOptimisticReplayScenario(
   }
 }
 
-const { multiplier, replaySeed } = readOracleRunConfig()
+const { multiplier, replaySeed, replayPath } = readOracleRunConfig()
 const generatedRuns = 30 * multiplier
 const generatedTimeout = 5_000 * multiplier
 
@@ -9387,7 +9387,7 @@ describe(`CollectionSubscription replay oracle`, () => {
 
   fcTest.prop(
     [replayScenarioArbitrary],
-    oracleRandomParameters(generatedRuns, replaySeed),
+    oracleRandomParameters(generatedRuns, replaySeed, replayPath),
   )(
     `matches replay and ownership laws for a random or replayed seed`,
     runReplayScenario,
@@ -9396,7 +9396,7 @@ describe(`CollectionSubscription replay oracle`, () => {
 
   fcTest.prop(
     [sequentialReplayScenarioArbitrary],
-    oracleRandomParameters(generatedRuns, replaySeed),
+    oracleRandomParameters(generatedRuns, replaySeed, replayPath),
   )(
     `matches synchronous, asynchronous, and partial-failure replay laws`,
     runSequentialReplayScenario,
@@ -9419,7 +9419,7 @@ describe(`CollectionSubscription replay oracle`, () => {
 
   fcTest.prop(
     [replayCompletionScenarioArbitrary],
-    oracleRandomParameters(generatedRuns, replaySeed),
+    oracleRandomParameters(generatedRuns, replaySeed, replayPath),
   )(
     `preserves replay completion authority for a random or replayed seed`,
     runReplayCompletionScenario,
@@ -9436,7 +9436,7 @@ describe(`CollectionSubscription replay oracle`, () => {
 
   fcTest.prop(
     [cleanupRestartScenarioArbitrary],
-    oracleRandomParameters(generatedRuns, replaySeed),
+    oracleRandomParameters(generatedRuns, replaySeed, replayPath),
   )(
     `isolates cleanup and restart sessions for a random or replayed seed`,
     runCleanupRestartScenario,
@@ -9454,7 +9454,7 @@ describe(`CollectionSubscription replay oracle`, () => {
 
   fcTest.prop(
     [sharedSubscriptionScenarioArbitrary],
-    oracleRandomParameters(generatedRuns, replaySeed),
+    oracleRandomParameters(generatedRuns, replaySeed, replayPath),
   )(
     `keeps shared transport and logical ownership distinct for a random or replayed seed`,
     runSharedSubscriptionScenario,
@@ -9472,7 +9472,7 @@ describe(`CollectionSubscription replay oracle`, () => {
 
   fcTest.prop(
     [optimisticReplayScenarioArbitrary],
-    oracleRandomParameters(generatedRuns, replaySeed),
+    oracleRandomParameters(generatedRuns, replaySeed, replayPath),
   )(
     `preserves optimistic overlays across replay outcomes for a random or replayed seed`,
     runOptimisticReplayScenario,

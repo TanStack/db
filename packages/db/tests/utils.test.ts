@@ -5,19 +5,21 @@ import { isPromiseLike } from '../src/utils/type-guards'
 import { oracleRandomParameters, readOracleRunConfig } from './oracle-config'
 
 describe(`oracle run configuration`, () => {
-  it(`reads the multiplier and replay seed from an explicit environment`, () => {
+  it(`reads the multiplier and replay coordinates from an explicit environment`, () => {
     expect(
       readOracleRunConfig({
         TANSTACK_DB_ORACLE_RUNS_MULTIPLIER: `100`,
         TANSTACK_DB_ORACLE_SEED: `-42`,
+        TANSTACK_DB_ORACLE_PATH: `1:0:2`,
       }),
-    ).toEqual({ multiplier: 100, replaySeed: -42 })
+    ).toEqual({ multiplier: 100, replaySeed: -42, replayPath: `1:0:2` })
   })
 
-  it(`uses one run multiplier and no replay seed by default`, () => {
+  it(`uses one run multiplier and no replay coordinates by default`, () => {
     expect(readOracleRunConfig({})).toEqual({
       multiplier: 1,
       replaySeed: undefined,
+      replayPath: undefined,
     })
   })
 
@@ -27,6 +29,7 @@ describe(`oracle run configuration`, () => {
     [{ TANSTACK_DB_ORACLE_RUNS_MULTIPLIER: ` ` }, `positive integer`],
     [{ TANSTACK_DB_ORACLE_SEED: `1.5` }, `must be an integer`],
     [{ TANSTACK_DB_ORACLE_SEED: ` ` }, `must be an integer`],
+    [{ TANSTACK_DB_ORACLE_PATH: `1:0` }, `requires TANSTACK_DB_ORACLE_SEED`],
   ] satisfies ReadonlyArray<readonly [Record<string, string>, string]>)(
     `rejects invalid environment values`,
     (environment, message) => {
@@ -34,11 +37,15 @@ describe(`oracle run configuration`, () => {
     },
   )
 
-  it(`adds a seed only for replay runs`, () => {
+  it(`adds replay coordinates only for replay runs`, () => {
     expect(oracleRandomParameters(40, undefined)).toEqual({ numRuns: 40 })
-    expect(oracleRandomParameters(40, -42)).toEqual({
+    expect(() => oracleRandomParameters(40, undefined, `1:0:2`)).toThrow(
+      `requires a replay seed`,
+    )
+    expect(oracleRandomParameters(40, -42, `1:0:2`)).toEqual({
       numRuns: 40,
       seed: -42,
+      path: `1:0:2`,
     })
   })
 })

@@ -153,8 +153,11 @@ it(`loads each side of a filtered inner join once`, async () => {
   }
 })
 
-const { multiplier: fullFlowMultiplier, replaySeed: fullFlowReplaySeed } =
-  readOracleRunConfig()
+const {
+  multiplier: fullFlowMultiplier,
+  replaySeed: fullFlowReplaySeed,
+  replayPath: fullFlowReplayPath,
+} = readOracleRunConfig()
 
 type MultiSourceOrderedScenario = {
   primaryRows: ReadonlyArray<{
@@ -300,7 +303,7 @@ if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
       `multiplicity=${new Set(secondaryRows.map(({ joinKey }) => joinKey)).size < secondaryRows.length}`,
       `tied=${new Set(primaryRows.map(({ rank }) => rank)).size < primaryRows.length}`,
     ],
-    oracleRandomParameters(1_000, fullFlowReplaySeed),
+    oracleRandomParameters(1_000, fullFlowReplaySeed, fullFlowReplayPath),
   )
 }
 
@@ -2574,7 +2577,11 @@ fcTest.prop([multiSourceOrderedScenarioArbitrary], {
 
 fcTest.prop(
   [multiSourceOrderedScenarioArbitrary],
-  oracleRandomParameters(12 * fullFlowMultiplier, fullFlowReplaySeed),
+  oracleRandomParameters(
+    12 * fullFlowMultiplier,
+    fullFlowReplaySeed,
+    fullFlowReplayPath,
+  ),
 )(
   `fills joined ordered windows for a random or replayed seed`,
   runMultiSourceOrderedScenario,
@@ -4153,7 +4160,11 @@ fcTest.prop([orderedConsumerParityScenarioArbitrary], {
 
 fcTest.prop(
   [orderedConsumerParityScenarioArbitrary],
-  oracleRandomParameters(12 * fullFlowMultiplier, fullFlowReplaySeed),
+  oracleRandomParameters(
+    12 * fullFlowMultiplier,
+    fullFlowReplaySeed,
+    fullFlowReplayPath,
+  ),
 )(
   `keeps ordered collection consumers equal for a random or replayed seed`,
   assertOrderedConsumerParity,
@@ -4809,7 +4820,7 @@ if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
       )}`,
       `exhaustion=${pages.some((page) => page.extent === `exhausted`)}`,
     ],
-    oracleRandomParameters(1_000, fullFlowReplaySeed),
+    oracleRandomParameters(1_000, fullFlowReplaySeed, fullFlowReplayPath),
   )
 }
 
@@ -5080,7 +5091,11 @@ fcTest.prop(
       maxLength: 8,
     }),
   ],
-  oracleRandomParameters(128 * fullFlowMultiplier, fullFlowReplaySeed),
+  oracleRandomParameters(
+    128 * fullFlowMultiplier,
+    fullFlowReplaySeed,
+    fullFlowReplayPath,
+  ),
 )(
   `starts automatic continuation only for new semantic progress with a random or replayed seed`,
   assertAutomaticOrderedProgress,
@@ -5096,7 +5111,11 @@ fcTest.prop([orderedContinuationEvidenceScenarioArbitrary], {
 
 fcTest.prop(
   [orderedContinuationEvidenceScenarioArbitrary],
-  oracleRandomParameters(64 * fullFlowMultiplier, fullFlowReplaySeed),
+  oracleRandomParameters(
+    64 * fullFlowMultiplier,
+    fullFlowReplaySeed,
+    fullFlowReplayPath,
+  ),
 )(
   `derives ordered progress from applied eligible evidence for a random or replayed seed`,
   runOrderedContinuationEvidenceScenario,
@@ -5427,7 +5446,11 @@ fcTest.prop([orderedBoundaryProvenanceArbitrary], {
 
 fcTest.prop(
   [orderedBoundaryProvenanceArbitrary],
-  oracleRandomParameters(32 * fullFlowMultiplier, fullFlowReplaySeed),
+  oracleRandomParameters(
+    32 * fullFlowMultiplier,
+    fullFlowReplaySeed,
+    fullFlowReplayPath,
+  ),
 )(
   `keeps ordered boundary provenance for a random or replayed seed`,
   runOrderedBoundaryProvenanceScenario,
@@ -6343,7 +6366,11 @@ fcTest.prop([atomicOrderedReplayArbitrary], {
 
 fcTest.prop(
   [atomicOrderedReplayArbitrary],
-  oracleRandomParameters(32 * fullFlowMultiplier, fullFlowReplaySeed),
+  oracleRandomParameters(
+    32 * fullFlowMultiplier,
+    fullFlowReplaySeed,
+    fullFlowReplayPath,
+  ),
 )(
   `keeps ordered replacement publication atomic for a random or replayed seed`,
   runAtomicOrderedReplayScenario,
@@ -6362,7 +6389,11 @@ fcTest.prop([truncateCoverageScenarioArbitrary], {
 
 fcTest.prop(
   [truncateCoverageScenarioArbitrary],
-  oracleRandomParameters(12 * fullFlowMultiplier, fullFlowReplaySeed),
+  oracleRandomParameters(
+    12 * fullFlowMultiplier,
+    fullFlowReplaySeed,
+    fullFlowReplayPath,
+  ),
 )(
   `fences pre-truncate evidence for a random or replayed seed`,
   runTruncateCoverageScenario,

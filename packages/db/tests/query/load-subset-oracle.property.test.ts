@@ -1119,11 +1119,12 @@ async function runAsyncScenarioWithKnownFailures(
   }
 }
 
-const { multiplier, replaySeed } = readOracleRunConfig()
+const { multiplier, replaySeed, replayPath } = readOracleRunConfig()
 const coverageScenarioRuns = 40 * multiplier
 const coverageRandomParameters = oracleRandomParameters(
   coverageScenarioRuns,
   replaySeed,
+  replayPath,
 )
 
 let collectionSequence = 0
