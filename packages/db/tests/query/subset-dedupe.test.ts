@@ -834,6 +834,29 @@ describe(`createDeduplicatedLoadSubset`, () => {
     expect(loadSubsetCalls).toBe(2)
   })
 
+  it(`rejects sparse applied-row evidence without retaining coverage`, async () => {
+    const sparseRowKeys = new Array<string | number>(1)
+    let loadSubsetCalls = 0
+    const loadSubset: LoadSubsetFn = () => {
+      loadSubsetCalls += 1
+      return Promise.resolve(
+        loadSubsetCalls === 1
+          ? { hasMore: true, appliedRowKeys: sparseRowKeys }
+          : { hasMore: undefined },
+      )
+    }
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+
+    await expect(deduplicated.loadSubset({ limit: 1 })).rejects.toThrow(
+      `appliedRowKeys must contain only string or number keys`,
+    )
+
+    const retry = deduplicated.loadSubset({ limit: 1 })
+    expect(retry).toBeInstanceOf(Promise)
+    await retry
+    expect(loadSubsetCalls).toBe(2)
+  })
+
   it(`shares in-flight work while any cancellation owner remains active`, async () => {
     let resolveLoad: (() => void) | undefined
     let sharedSignal: AbortSignal | undefined

@@ -13,6 +13,23 @@ const loadSubsetResultDemandMatchers = new WeakMap<
   (options: LoadSubsetOptions) => boolean
 >()
 
+function snapshotAppliedRowKeys(
+  appliedRowKeys: ReadonlyArray<string | number> | undefined,
+): ReadonlyArray<string | number> | undefined {
+  if (appliedRowKeys === undefined) return undefined
+
+  const snapshot: Array<string | number> = []
+  for (const key of appliedRowKeys) {
+    if (typeof key !== `string` && typeof key !== `number`) {
+      throw new TypeError(
+        `loadSubset appliedRowKeys must contain only string or number keys`,
+      )
+    }
+    snapshot.push(key)
+  }
+  return Object.freeze(snapshot)
+}
+
 export function recordLoadSubsetPromiseDemandMatcher(
   promise: Promise<unknown>,
   matches: (options: LoadSubsetOptions) => boolean,
@@ -29,12 +46,10 @@ export function recordLoadSubsetResultDemandMatcher(
   // Give each physical acquisition its own result identity. A source may reuse
   // one result object across calls with different demands. Snapshot nested
   // source evidence here too, before the caller publishes coverage from it.
-  const appliedRowKeys = result.appliedRowKeys
+  const appliedRowKeys = snapshotAppliedRowKeys(result.appliedRowKeys)
   const retainedResult: LoadSubsetResult = {
     hasMore: result.hasMore,
-    ...(appliedRowKeys === undefined
-      ? {}
-      : { appliedRowKeys: Object.freeze([...appliedRowKeys]) }),
+    ...(appliedRowKeys === undefined ? {} : { appliedRowKeys }),
   }
   loadSubsetResultDemandMatchers.set(retainedResult, matches)
   return retainedResult
@@ -61,7 +76,7 @@ export function createAppliedLoadSubsetOutcome(
   generation: number,
   sourceResult: void | LoadSubsetResult,
 ): AppliedLoadSubsetOutcome {
-  const appliedRowKeys = sourceResult?.appliedRowKeys
+  const appliedRowKeys = snapshotAppliedRowKeys(sourceResult?.appliedRowKeys)
   return {
     collectionId,
     demand,
@@ -72,9 +87,7 @@ export function createAppliedLoadSubsetOutcome(
         : sourceResult?.hasMore === false
           ? `exhausted`
           : `unknown`,
-    ...(appliedRowKeys === undefined
-      ? {}
-      : { appliedRowKeys: Object.freeze([...appliedRowKeys]) }),
+    ...(appliedRowKeys === undefined ? {} : { appliedRowKeys }),
   }
 }
 
