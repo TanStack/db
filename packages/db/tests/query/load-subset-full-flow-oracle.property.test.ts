@@ -409,6 +409,14 @@ async function runMultiSourceOrderedScenario(
 
   const primaryOrder = orderedPrimaryRows(scenario)
   const sourceSteps = await observeOrderedSourceSteps(scenario)
+  expect(
+    sourceSteps.map(({ sourceKey, demandKeys }) => ({ sourceKey, demandKeys })),
+  ).toEqual(
+    primaryOrder.map(({ id, joinKey }) => ({
+      sourceKey: id,
+      demandKeys: [joinKey],
+    })),
+  )
   const projection = projectOrderedSourceProgress({
     sourceSteps,
     offset: scenario.offset,
@@ -838,29 +846,33 @@ async function runMultiSourceOrderedScenario(
         delayedSecondaryReceiptWaiters.map(({ index }) => index).reverse(),
       )
     }
-    if (joinCalls.length > 0) {
-      const requestedJoinKeys = new Set(
-        joinCalls.flatMap(({ where }) =>
-          [...primaryJoinKeys].filter((joinKey) =>
-            evaluateReferenceExpression(where!, {
-              id: `probe-${joinKey}`,
-              joinKey,
-            }),
-          ),
+    const requestedJoinKeys = new Set(
+      joinCalls.flatMap(({ where }) =>
+        [...primaryJoinKeys].filter((joinKey) =>
+          evaluateReferenceExpression(where!, {
+            id: `probe-${joinKey}`,
+            joinKey,
+          }),
         ),
-      )
-      const literalJoinKeys = joinCalls.flatMap(({ where }) =>
-        collectStringLiterals(where!),
-      )
-      expect(
-        literalJoinKeys.every((joinKey) => primaryJoinKeys.has(joinKey)),
-      ).toBe(true)
-      for (const joinKey of projection.demandedKeys) {
+      ),
+    )
+    const literalJoinKeys = joinCalls.flatMap(({ where }) =>
+      collectStringLiterals(where!),
+    )
+    expect(
+      literalJoinKeys.every((joinKey) => primaryJoinKeys.has(joinKey)),
+    ).toBe(true)
+    expect(
+      [...requestedJoinKeys].every((joinKey) => primaryJoinKeys.has(joinKey)),
+    ).toBe(true)
+    const requiredJoinKeys = new Set([
+      ...projection.demandedKeys,
+      ...refinedProjection.demandedKeys,
+    ])
+    if (joinCalls.length > 0) {
+      for (const joinKey of requiredJoinKeys) {
         expect(requestedJoinKeys.has(joinKey)).toBe(true)
       }
-      expect(
-        [...requestedJoinKeys].every((joinKey) => primaryJoinKeys.has(joinKey)),
-      ).toBe(true)
     }
 
     if (scenario.secondaryPublication === `after-primary-continuation`) {
