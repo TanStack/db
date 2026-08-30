@@ -6,6 +6,29 @@ import type { ChangeMessage } from '../../types.js'
 import type { BasicExpression, OrderBy } from '../ir.js'
 import type { TotalOrderBoundary } from '../total-order.js'
 
+/** Compute the exact change set between two materialized publications. */
+export function diffPublications<
+  TRow extends object,
+  TKey extends string | number,
+>(
+  publishedRows: ReadonlyMap<TKey, TRow>,
+  desiredRows: ReadonlyMap<TKey, TRow>,
+): Array<ChangeMessage<TRow, TKey>> {
+  const changes: Array<ChangeMessage<TRow, TKey>> = []
+  for (const [key, previousValue] of publishedRows) {
+    const value = desiredRows.get(key)
+    if (value === undefined) {
+      changes.push({ type: `delete`, key, value: previousValue })
+    } else if (!deepEquals(previousValue, value)) {
+      changes.push({ type: `update`, key, value, previousValue })
+    }
+  }
+  for (const [key, value] of desiredRows) {
+    if (!publishedRows.has(key)) changes.push({ type: `insert`, key, value })
+  }
+  return changes
+}
+
 /**
  * Owns the active ordered demand and its retained local coverage. Rows outside
  * the retained prefix stay in the source collection until a later window
@@ -359,19 +382,7 @@ export class WindowState<
       }
     }
 
-    const changes: Array<ChangeMessage<TRow, TKey>> = []
-    for (const [key, previousValue] of publishedRows) {
-      const value = desired.get(key)
-      if (value === undefined) {
-        changes.push({ type: `delete`, key, value: previousValue })
-      } else if (!deepEquals(previousValue, value)) {
-        changes.push({ type: `update`, key, value, previousValue })
-      }
-    }
-    for (const [key, value] of desired) {
-      if (!publishedRows.has(key)) changes.push({ type: `insert`, key, value })
-    }
-    return changes
+    return diffPublications(publishedRows, desired)
   }
 
   private readPrefix(): Array<ChangeMessage<TRow, TKey>> {

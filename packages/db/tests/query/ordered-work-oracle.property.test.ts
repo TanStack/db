@@ -10,7 +10,10 @@ import { eq } from '../../src/query/builder/functions.js'
 import { compileSingleRowExpression } from '../../src/query/compiler/evaluators.js'
 import { PropRef } from '../../src/query/ir.js'
 import { TotalOrder } from '../../src/query/total-order.js'
-import { WindowState } from '../../src/query/live/window-state.js'
+import {
+  WindowState,
+  diffPublications,
+} from '../../src/query/live/window-state.js'
 import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
 import type * as DbIvm from '@tanstack/db-ivm'
 import type { CollectionImpl } from '../../src/collection/index.js'
@@ -39,6 +42,30 @@ type RankedRow = {
   id: string
   rank: number
   included: boolean
+}
+
+class CountingMap<TKey, TValue> extends Map<TKey, TValue> {
+  iterationReads = 0
+  membershipReads = 0
+  valueReads = 0;
+
+  override *[Symbol.iterator](): Generator<[TKey, TValue], undefined, unknown> {
+    for (const entry of super[Symbol.iterator]()) {
+      this.iterationReads++
+      yield entry
+    }
+    return undefined
+  }
+
+  override get(key: TKey): TValue | undefined {
+    this.valueReads++
+    return super.get(key)
+  }
+
+  override has(key: TKey): boolean {
+    this.membershipReads++
+    return super.has(key)
+  }
 }
 
 type PublicKeyRankedRow = Omit<RankedRow, `id`> & {
@@ -2459,27 +2486,6 @@ it(`reuses a multi-term snapshot while extracting each boundary term once`, () =
 })
 
 it(`scans each source row once when retaining additional-demand rows`, () => {
-  class CountingPublication extends Map<string, RankedRow> {
-    iterationReads = 0
-    membershipReads = 0;
-
-    override *[Symbol.iterator](): Generator<
-      [string, RankedRow],
-      undefined,
-      unknown
-    > {
-      for (const entry of super[Symbol.iterator]()) {
-        this.iterationReads++
-        yield entry
-      }
-      return undefined
-    }
-
-    override has(key: string): boolean {
-      this.membershipReads++
-      return super.has(key)
-    }
-  }
   const rows = new Map<string, RankedRow>([
     [`a`, { id: `a`, rank: 1, included: true }],
     [`b`, { id: `b`, rank: 2, included: true }],
@@ -2511,7 +2517,7 @@ it(`scans each source row once when retaining additional-demand rows`, () => {
   const window = new WindowState(collection, orderBy(`asc`), undefined, 1)
   window.recordInitialCoverage(undefined, true)
 
-  const reconcile = (publishedRows: CountingPublication) => {
+  const reconcile = (publishedRows: CountingMap<string, RankedRow>) => {
     entryReads = 0
     retentionChecks = 0
     const changes = window.reconcile(publishedRows, (candidate) => {
@@ -2525,20 +2531,40 @@ it(`scans each source row once when retaining additional-demand rows`, () => {
     return changes
   }
 
-  expect(reconcile(new CountingPublication()).map(({ key }) => key)).toEqual([
-    `a`,
-    `c`,
-  ])
+  expect(reconcile(new CountingMap()).map(({ key }) => key)).toEqual([`a`, `c`])
   expect(snapshotCalls).toBe(1)
   expect(
     reconcile(
-      new CountingPublication([
+      new CountingMap([
         [`a`, rows.get(`a`)!],
         [`b`, rows.get(`b`)!],
       ]),
     ).map(({ type, key }) => `${type}:${key}`),
   ).toEqual([`delete:b`, `insert:c`])
   expect(snapshotCalls).toBe(1)
+})
+
+it(`scans each side of a publication diff exactly once`, () => {
+  const publishedRows = new CountingMap<string, RankedRow>([
+    [`a`, { id: `a`, rank: 2, included: true }],
+    [`b`, { id: `b`, rank: 2, included: true }],
+  ])
+  const desiredRows = new CountingMap<string, RankedRow>([
+    [`a`, { id: `a`, rank: 1, included: true }],
+    [`c`, { id: `c`, rank: 3, included: true }],
+  ])
+
+  expect(
+    diffPublications(publishedRows, desiredRows).map(
+      ({ type, key }) => `${type}:${key}`,
+    ),
+  ).toEqual([`update:a`, `delete:b`, `insert:c`])
+  expect(publishedRows.iterationReads).toBe(publishedRows.size)
+  expect(publishedRows.membershipReads).toBe(desiredRows.size)
+  expect(publishedRows.valueReads).toBe(0)
+  expect(desiredRows.iterationReads).toBe(desiredRows.size)
+  expect(desiredRows.membershipReads).toBe(0)
+  expect(desiredRows.valueReads).toBe(publishedRows.size)
 })
 
 it(`does one source-order comparison per row needed to close the boundary tie`, () => {
