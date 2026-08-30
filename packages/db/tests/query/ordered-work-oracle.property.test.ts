@@ -47,14 +47,42 @@ type RankedRow = {
 class CountingMap<TKey, TValue> extends Map<TKey, TValue> {
   iterationReads = 0
   membershipReads = 0
-  valueReads = 0;
+  valueReads = 0
 
-  override *[Symbol.iterator](): Generator<[TKey, TValue], undefined, unknown> {
-    for (const entry of super[Symbol.iterator]()) {
+  private *countIterator<T>(
+    iterator: Iterator<T>,
+  ): Generator<T, undefined, unknown> {
+    for (let next = iterator.next(); !next.done; next = iterator.next()) {
       this.iterationReads++
-      yield entry
+      yield next.value
     }
     return undefined
+  }
+
+  override [Symbol.iterator](): Generator<[TKey, TValue], undefined, unknown> {
+    return this.countIterator(super[Symbol.iterator]())
+  }
+
+  override entries(): Generator<[TKey, TValue], undefined, unknown> {
+    return this.countIterator(super.entries())
+  }
+
+  override keys(): Generator<TKey, undefined, unknown> {
+    return this.countIterator(super.keys())
+  }
+
+  override values(): Generator<TValue, undefined, unknown> {
+    return this.countIterator(super.values())
+  }
+
+  override forEach(
+    callback: (value: TValue, key: TKey, map: Map<TKey, TValue>) => void,
+    thisArg?: unknown,
+  ): void {
+    super.forEach((value, key) => {
+      this.iterationReads++
+      callback.call(thisArg, value, key, this)
+    })
   }
 
   override get(key: TKey): TValue | undefined {
@@ -103,6 +131,30 @@ function isArrayIndex(property: PropertyKey): boolean {
   return Number.isSafeInteger(index) && index >= 0 && String(index) === property
 }
 
+const traversalMethods = new Set<PropertyKey>([
+  Symbol.iterator,
+  `entries`,
+  `keys`,
+  `values`,
+  `forEach`,
+])
+
+function observeUnexpectedTraversals<T extends object>(
+  target: T,
+  onTraversal: () => void,
+): T {
+  return new Proxy(target, {
+    get(inner, property) {
+      const member = Reflect.get(inner, property, inner) as unknown
+      if (typeof member !== `function`) return member
+      return (...args: Array<unknown>) => {
+        if (traversalMethods.has(property)) onTraversal()
+        return Reflect.apply(member, inner, args) as unknown
+      }
+    },
+  })
+}
+
 function observeOrderedIndexReads(
   index: BasicIndex<string> | BTreeIndex<string>,
   indexKind: `basic` | `btree`,
@@ -117,9 +169,11 @@ function observeOrderedIndexReads(
     const internals = index as unknown as {
       sortedValues: Array<unknown>
       valueMap: Map<unknown, ReadonlySet<string>>
+      indexedKeys: Set<string>
     }
     const sortedValues = internals.sortedValues
     const valueMap = internals.valueMap
+    const indexedKeys = internals.indexedKeys
     internals.sortedValues = new Proxy(sortedValues, {
       get(target, property, receiver) {
         if (isArrayIndex(property)) valueReads++
@@ -144,6 +198,9 @@ function observeOrderedIndexReads(
         return member
       },
     })
+    internals.indexedKeys = observeUnexpectedTraversals(indexedKeys, () => {
+      unexpectedTraversalCalls++
+    })
     return {
       getValueReads: () => valueReads,
       getBucketReads: () => bucketReads,
@@ -152,6 +209,7 @@ function observeOrderedIndexReads(
       restore: () => {
         internals.sortedValues = sortedValues
         internals.valueMap = valueMap
+        internals.indexedKeys = indexedKeys
       },
     }
   }
@@ -161,8 +219,12 @@ function observeOrderedIndexReads(
       nextHigherPair: (key?: unknown) => readonly [unknown, unknown] | undefined
       nextLowerPair: (key?: unknown) => readonly [unknown, unknown] | undefined
     }
+    valueMap: Map<unknown, ReadonlySet<string>>
+    indexedKeys: Set<string>
   }
   const orderedEntries = internals.orderedEntries
+  const valueMap = internals.valueMap
+  const indexedKeys = internals.indexedKeys
   const expectedMethod =
     direction === `asc` ? `nextHigherPair` : `nextLowerPair`
   internals.orderedEntries = new Proxy(orderedEntries, {
@@ -185,6 +247,12 @@ function observeOrderedIndexReads(
       }
     },
   })
+  internals.valueMap = observeUnexpectedTraversals(valueMap, () => {
+    unexpectedTraversalCalls++
+  })
+  internals.indexedKeys = observeUnexpectedTraversals(indexedKeys, () => {
+    unexpectedTraversalCalls++
+  })
   return {
     getValueReads: () => valueReads,
     getBucketReads: () => bucketReads,
@@ -192,6 +260,8 @@ function observeOrderedIndexReads(
     getUnexpectedTraversalCalls: () => unexpectedTraversalCalls,
     restore: () => {
       internals.orderedEntries = orderedEntries
+      internals.valueMap = valueMap
+      internals.indexedKeys = indexedKeys
     },
   }
 }
@@ -2545,12 +2615,25 @@ it(`scans each source row once when retaining additional-demand rows`, () => {
 })
 
 it(`scans each side of a publication diff exactly once`, () => {
+  const valueReads = { published: 0, desired: 0 }
+  const countedRow = (
+    row: RankedRow,
+    side: keyof typeof valueReads,
+  ): RankedRow =>
+    new Proxy(row, {
+      get(target, property, receiver) {
+        if (typeof property === `string` && Object.hasOwn(target, property)) {
+          valueReads[side]++
+        }
+        return Reflect.get(target, property, receiver) as unknown
+      },
+    })
   const publishedRows = new CountingMap<string, RankedRow>([
-    [`a`, { id: `a`, rank: 2, included: true }],
+    [`a`, countedRow({ id: `a`, rank: 2, included: true }, `published`)],
     [`b`, { id: `b`, rank: 2, included: true }],
   ])
   const desiredRows = new CountingMap<string, RankedRow>([
-    [`a`, { id: `a`, rank: 1, included: true }],
+    [`a`, countedRow({ id: `a`, rank: 1, included: true }, `desired`)],
     [`c`, { id: `c`, rank: 3, included: true }],
   ])
 
@@ -2565,6 +2648,7 @@ it(`scans each side of a publication diff exactly once`, () => {
   expect(desiredRows.iterationReads).toBe(desiredRows.size)
   expect(desiredRows.membershipReads).toBe(0)
   expect(desiredRows.valueReads).toBe(publishedRows.size)
+  expect(valueReads).toEqual({ published: 2, desired: 2 })
 })
 
 it(`does one source-order comparison per row needed to close the boundary tie`, () => {
