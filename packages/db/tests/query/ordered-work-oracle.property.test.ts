@@ -1325,20 +1325,36 @@ describe(`ordered source work oracle`, () => {
             return Reflect.get(target, property, receiver) as unknown
           },
         })
+      const termComparisons: [number, number] = [0, 0]
+      const trackedCompareOptions = (term: 0 | 1): CompareOptions =>
+        new Proxy(
+          {
+            direction: `asc`,
+            nulls: `last`,
+            stringSort: `locale`,
+          } satisfies CompareOptions,
+          {
+            get(target, property, receiver) {
+              if (property === `direction`) termComparisons[term]++
+              return Reflect.get(target, property, receiver) as unknown
+            },
+          },
+        )
       const order: OrderBy = [
         {
           expression: trackedTerm(`rank`),
-          compareOptions: { direction: `asc`, nulls: `last` },
+          compareOptions: trackedCompareOptions(0),
         },
         {
           expression: trackedTerm(`secondary`),
-          compareOptions: { direction: `asc`, nulls: `last` },
+          compareOptions: trackedCompareOptions(1),
         },
       ]
 
       let expectedComparisons = 0
       let expectedRankReads = 0
       let expectedSecondaryReads = 0
+      let expectedKeyComparisons = 0
       const expectedKeys = storedRows
         .filter(({ included }) => included)
         .sort((left, right) => {
@@ -1348,11 +1364,14 @@ describe(`ordered source work oracle`, () => {
           if (rankOrder !== 0) return rankOrder
           expectedSecondaryReads += 2
           const secondaryOrder = left.secondary - right.secondary
-          return secondaryOrder || comparePublicKeys(left.id, right.id)
+          if (secondaryOrder !== 0) return secondaryOrder
+          expectedKeyComparisons++
+          return comparePublicKeys(left.id, right.id)
         })
         .map(({ id }) => id)
       const compareEntries = vi.spyOn(TotalOrder.prototype, `compareEntries`)
       try {
+        keyComparisonCounter.count = 0
         const changes = collection.currentStateAsChanges({
           where: eq(new PropRef([`included`]), true),
           orderBy: order,
@@ -1364,6 +1383,11 @@ describe(`ordered source work oracle`, () => {
         expect(reads.rank).toBe(expectedRankReads)
         expect(reads.secondary).toBe(expectedSecondaryReads)
         expect(compareEntries).toHaveBeenCalledTimes(expectedComparisons)
+        expect(termComparisons).toEqual([
+          expectedComparisons,
+          expectedSecondaryReads / 2,
+        ])
+        expect(keyComparisonCounter.count).toBe(expectedKeyComparisons)
       } finally {
         compareEntries.mockRestore()
       }
@@ -2179,6 +2203,115 @@ it(`does only exact predicate and boundary work when reusing an unbounded snapsh
   }
 })
 
+it(`reuses a multi-term snapshot while extracting each boundary term once`, () => {
+  type MultiTermWindowRow = RankedRow & { secondary: number }
+  const reads = { rank: 0, secondary: 0 }
+  const row = (
+    id: string,
+    rank: number,
+    secondary: number,
+  ): MultiTermWindowRow => ({
+    id,
+    get rank() {
+      reads.rank++
+      return rank
+    },
+    get secondary() {
+      reads.secondary++
+      return secondary
+    },
+    included: true,
+  })
+  const rows = new Map<string, MultiTermWindowRow>([
+    [`a`, row(`a`, 1, 2)],
+    [`b`, row(`b`, 1, 3)],
+    [`c`, row(`c`, 2, 1)],
+  ])
+  let snapshotCalls = 0
+  const collection = {
+    _stateRevision: 0,
+    currentStateAsChanges: () => {
+      snapshotCalls++
+      return [...rows].map(
+        ([key, value]): ChangeMessage<MultiTermWindowRow, string> => ({
+          type: `insert`,
+          key,
+          value,
+        }),
+      )
+    },
+    entries: () => rows.entries(),
+    get: (key: string) => rows.get(key),
+  } as unknown as CollectionImpl<MultiTermWindowRow, string>
+  const order: OrderBy = [
+    {
+      expression: new PropRef([`rank`]),
+      compareOptions: { direction: `asc`, nulls: `last` },
+    },
+    {
+      expression: new PropRef([`secondary`]),
+      compareOptions: { direction: `asc`, nulls: `last` },
+    },
+  ]
+  const window = new WindowState(collection, order, undefined, 2)
+  window.recordInitialCoverage(undefined, true)
+
+  reads.rank = 0
+  reads.secondary = 0
+  expect(observeWindow(window)).toMatchObject({ publication: [`a`, `b`] })
+  expect(snapshotCalls).toBe(1)
+  expect(reads).toEqual({ rank: 3, secondary: 3 })
+
+  expect(observeWindow(window)).toMatchObject({ publication: [`a`, `b`] })
+  expect(snapshotCalls).toBe(1)
+  expect(reads).toEqual({ rank: 6, secondary: 6 })
+})
+
+it(`scans each source row once when retaining additional-demand rows`, () => {
+  const rows = new Map<string, RankedRow>([
+    [`a`, { id: `a`, rank: 1, included: true }],
+    [`b`, { id: `b`, rank: 2, included: true }],
+    [`c`, { id: `c`, rank: 3, included: true }],
+  ])
+  let snapshotCalls = 0
+  let entryReads = 0
+  let retentionChecks = 0
+  const collection = {
+    _stateRevision: 0,
+    currentStateAsChanges: () => {
+      snapshotCalls++
+      return [...rows].map(
+        ([key, value]): ChangeMessage<RankedRow, string> => ({
+          type: `insert`,
+          key,
+          value,
+        }),
+      )
+    },
+    entries: function* () {
+      for (const entry of rows) {
+        entryReads++
+        yield entry
+      }
+    },
+    get: (key: string) => rows.get(key),
+  } as unknown as CollectionImpl<RankedRow, string>
+  const window = new WindowState(collection, orderBy(`asc`), undefined, 1)
+  window.recordInitialCoverage(undefined, true)
+
+  expect(
+    window
+      .reconcile(new Map(), (candidate) => {
+        retentionChecks++
+        return candidate.id === `c`
+      })
+      .map(({ key }) => key),
+  ).toEqual([`a`, `c`])
+  expect(snapshotCalls).toBe(1)
+  expect(entryReads).toBe(rows.size)
+  expect(retentionChecks).toBe(rows.size)
+})
+
 it(`does one source-order comparison per row needed to close the boundary tie`, () => {
   const reads = { rank: 0 }
   const row = (id: string, rank: number): RankedRow => ({
@@ -2223,6 +2356,66 @@ it(`does one source-order comparison per row needed to close the boundary tie`, 
     ])
     expect(compareRows).toHaveBeenCalledTimes(3)
     expect(reads.rank).toBe(6)
+  } finally {
+    compareRows.mockRestore()
+  }
+})
+
+it(`expands a source boundary through a comparator-equivalent string tie`, () => {
+  type CollatedRow = { id: string; value: string }
+  const reads = { value: 0 }
+  const row = (id: string, value: string): CollatedRow => ({
+    id,
+    get value() {
+      reads.value++
+      return value
+    },
+  })
+  const rows = new Map<string, CollatedRow>([
+    [`plain`, row(`plain`, `e`)],
+    [`accent`, row(`accent`, `é`)],
+    [`later`, row(`later`, `z`)],
+  ])
+  const collection = {
+    _stateRevision: 0,
+    currentStateAsChanges: () =>
+      [...rows].map(
+        ([key, value]): ChangeMessage<CollatedRow, string> => ({
+          type: `insert`,
+          key,
+          value,
+        }),
+      ),
+    entries: () => rows.entries(),
+    get: (key: string) => rows.get(key),
+  } as unknown as CollectionImpl<CollatedRow, string>
+  const order: OrderBy = [
+    {
+      expression: new PropRef([`value`]),
+      compareOptions: {
+        direction: `asc`,
+        nulls: `last`,
+        stringSort: `locale`,
+        locale: `en`,
+        localeOptions: { sensitivity: `base` },
+      },
+    },
+  ]
+  const window = new WindowState(collection, order, undefined, 1, true)
+  window.recordInitialCoverage(undefined, true)
+  expect(
+    window.totalOrder.compareRows(rows.get(`plain`)!, rows.get(`accent`)!),
+  ).toBe(0)
+  const compareRows = vi.spyOn(window.totalOrder, `compareRows`)
+
+  try {
+    reads.value = 0
+    expect(window.publicationEntries().map(([key]) => key)).toEqual([
+      `plain`,
+      `accent`,
+    ])
+    expect(compareRows).toHaveBeenCalledTimes(2)
+    expect(reads.value).toBe(4)
   } finally {
     compareRows.mockRestore()
   }
