@@ -1329,6 +1329,10 @@ function transactionErasureHistories(): Array<Array<LoadSubsetFullFlowEvent>> {
   return [
     successfulTransaction(`transaction`, `source`, `row`),
     [
+      ...successfulTransaction(`transaction-a`, `source-a`, `row-a`),
+      ...successfulTransaction(`transaction-b`, `source-b`, `row-b`),
+    ],
+    [
       stage,
       {
         type: `commitSyncTransaction`,
