@@ -777,6 +777,9 @@ describe(`ordered source work oracle`, () => {
         stringSort: 0,
         locale: 0,
         localeOptions: 0,
+        ownKeys: 0,
+        descriptors: 0,
+        prototype: 0,
       },
     },
     {
@@ -791,6 +794,9 @@ describe(`ordered source work oracle`, () => {
         stringSort: 1,
         locale: 1,
         localeOptions: 1,
+        ownKeys: 0,
+        descriptors: 0,
+        prototype: 0,
       },
     },
     {
@@ -805,6 +811,9 @@ describe(`ordered source work oracle`, () => {
         stringSort: 1,
         locale: 1,
         localeOptions: 1,
+        ownKeys: 1,
+        descriptors: 5,
+        prototype: 0,
       },
     },
     {
@@ -819,6 +828,9 @@ describe(`ordered source work oracle`, () => {
         stringSort: 1,
         locale: 1,
         localeOptions: 1,
+        ownKeys: 1,
+        descriptors: 5,
+        prototype: 0,
       },
     },
   ])(
@@ -830,6 +842,9 @@ describe(`ordered source work oracle`, () => {
         stringSort: 0,
         locale: 0,
         localeOptions: 0,
+        ownKeys: 0,
+        descriptors: 0,
+        prototype: 0,
       }
       const options = new Proxy(
         {
@@ -846,10 +861,37 @@ describe(`ordered source work oracle`, () => {
             }
             return Reflect.get(target, property, receiver) as unknown
           },
+          ownKeys(target) {
+            reads.ownKeys++
+            return Reflect.ownKeys(target)
+          },
+          getOwnPropertyDescriptor(target, property) {
+            reads.descriptors++
+            return Reflect.getOwnPropertyDescriptor(target, property)
+          },
+          getPrototypeOf(target) {
+            reads.prototype++
+            return Reflect.getPrototypeOf(target)
+          },
         },
       )
 
-      expect(makeComparator(options)(left, right)).toBe(expected)
+      const descriptorCopies = vi.spyOn(Object, `getOwnPropertyDescriptors`)
+      const prototypeReads = vi.spyOn(Object, `getPrototypeOf`)
+      let actual: number
+      let descriptorCopyCount: number
+      let prototypeReadCount: number
+      try {
+        actual = makeComparator(options)(left, right)
+        descriptorCopyCount = descriptorCopies.mock.calls.length
+        prototypeReadCount = prototypeReads.mock.calls.length
+      } finally {
+        descriptorCopies.mockRestore()
+        prototypeReads.mockRestore()
+      }
+      expect(descriptorCopyCount).toBe(0)
+      expect(prototypeReadCount).toBe(0)
+      expect(actual).toBe(expected)
       expect(reads).toEqual(expectedReads)
     },
   )
@@ -2783,11 +2825,32 @@ it(`scans each side of a publication diff exactly once`, () => {
     [`d`, countedRow({ id: `d`, rank: 4, included: true }, `desired`)],
   ])
 
-  expect(
-    diffPublications(publishedRows, desiredRows).map(
-      ({ type, key }) => `${type}:${key}`,
-    ),
-  ).toEqual([`update:a`, `delete:b`, `insert:c`])
+  const defaultIterator = vi.spyOn(Map.prototype, Symbol.iterator)
+  const entries = vi.spyOn(Map.prototype, `entries`)
+  const keys = vi.spyOn(Map.prototype, `keys`)
+  const values = vi.spyOn(Map.prototype, `values`)
+  const forEach = vi.spyOn(Map.prototype, `forEach`)
+
+  try {
+    expect(
+      diffPublications(publishedRows, desiredRows).map(
+        ({ type, key }) => `${type}:${key}`,
+      ),
+    ).toEqual([`update:a`, `delete:b`, `insert:c`])
+    expect(
+      defaultIterator.mock.calls.length +
+        entries.mock.calls.length +
+        keys.mock.calls.length +
+        values.mock.calls.length +
+        forEach.mock.calls.length,
+    ).toBe(2)
+  } finally {
+    defaultIterator.mockRestore()
+    entries.mockRestore()
+    keys.mockRestore()
+    values.mockRestore()
+    forEach.mockRestore()
+  }
   expect(publishedRows.iterationReads).toBe(publishedRows.size)
   expect(publishedRows.membershipReads).toBe(desiredRows.size)
   expect(publishedRows.valueReads).toBe(0)
