@@ -87,7 +87,11 @@ for (const campaign of refinementCampaigns(1_779_001)) {
 
 type DemandLifecycleCase = {
   history: Array<LoadSubsetFullFlowEvent>
-  expected: Array<{ type: `invoke` | `release`; ownerId: string }>
+  expected: Array<{
+    type: `invoke` | `release`
+    ownerId: string
+    attemptId: string
+  }>
 }
 
 function enumerateDemandLifecycles(): Array<DemandLifecycleCase> {
@@ -117,7 +121,14 @@ function enumerateDemandLifecycles(): Array<DemandLifecycleCase> {
           ],
           alreadyAborted
             ? expected
-            : [...expected, { type: `invoke`, ownerId }],
+            : [
+                ...expected,
+                {
+                  type: `invoke`,
+                  ownerId,
+                  attemptId: `${ownerId}-attempt`,
+                },
+              ],
           unseenOwners.filter((owner) => owner !== ownerId),
           alreadyAborted ? activeOwners : [...activeOwners, ownerId],
         )
@@ -132,12 +143,16 @@ function enumerateDemandLifecycles(): Array<DemandLifecycleCase> {
             ownerId,
             demandId: `demand`,
             attemptId: `${ownerId}-attempt`,
-            rowKeys: [],
-            finalRowOwner: false,
-            invalidatesAdapterEvidence: false,
           },
         ],
-        [...expected, { type: `release`, ownerId }],
+        [
+          ...expected,
+          {
+            type: `release`,
+            ownerId,
+            attemptId: `${ownerId}-attempt`,
+          },
+        ],
         unseenOwners,
         activeOwners.filter((owner) => owner !== ownerId),
       )
@@ -152,17 +167,18 @@ it(`exhaustively projects exact adapter starts and releases for two owners`, () 
   for (const { history, expected } of enumerateDemandLifecycles()) {
     const lifecycle = projectAdapterLifecycle(history)
     expect(lifecycle, JSON.stringify(history)).toEqual(expected)
-    const activeOwners = new Set<string>()
+    const activeAttempts = new Set<string>()
 
     for (const event of lifecycle) {
       if (event.type === `invoke`) {
-        expect(activeOwners.has(event.ownerId), JSON.stringify(history)).toBe(
-          false,
-        )
-        activeOwners.add(event.ownerId)
+        expect(
+          activeAttempts.has(event.attemptId),
+          JSON.stringify(history),
+        ).toBe(false)
+        activeAttempts.add(event.attemptId)
       } else {
         expect(
-          activeOwners.delete(event.ownerId),
+          activeAttempts.delete(event.attemptId),
           JSON.stringify(history),
         ).toBe(true)
       }
@@ -196,9 +212,24 @@ it(`shares concurrent exact demand and retries after evidence-free settlement`, 
         ownerId: `owner-a`,
         demandId: `exact-demand`,
         attemptId: `owner-a-attempt`,
-        rowKeys: [],
-        finalRowOwner: true,
-        invalidatesAdapterEvidence: true,
+      },
+      request(`owner-c`),
+    ]),
+  ).toBe(1)
+  expect(
+    projectTransportLoads([
+      ...concurrent,
+      {
+        type: `releaseDemand`,
+        ownerId: `owner-a`,
+        demandId: `exact-demand`,
+        attemptId: `owner-a-attempt`,
+      },
+      {
+        type: `releaseDemand`,
+        ownerId: `owner-b`,
+        demandId: `exact-demand`,
+        attemptId: `owner-b-attempt`,
       },
       request(`owner-c`),
     ]),
@@ -227,6 +258,158 @@ it(`shares concurrent exact demand and retries after evidence-free settlement`, 
       request(`owner-c`),
     ]),
   ).toBe(1)
+})
+
+it(`retains a row until its last independent demand claim releases`, () => {
+  const request = (
+    demandId: string,
+    attemptId: string,
+  ): LoadSubsetFullFlowEvent => ({
+    type: `requestDemand`,
+    ownerId: attemptId,
+    sessionId: `session`,
+    demandId,
+    attemptId,
+    alreadyAborted: false,
+  })
+  const apply = (
+    demandId: string,
+    attemptId: string,
+  ): LoadSubsetFullFlowEvent => ({
+    type: `applyUnprovenRows`,
+    ownerId: attemptId,
+    demandId,
+    attemptId,
+    rowKeys: [`x`],
+  })
+  const release = (
+    demandId: string,
+    attemptId: string,
+  ): LoadSubsetFullFlowEvent => ({
+    type: `releaseDemand`,
+    ownerId: attemptId,
+    demandId,
+    attemptId,
+  })
+  const sharedClaims = [
+    request(`left`, `left-attempt`),
+    request(`right`, `right-attempt`),
+    apply(`left`, `left-attempt`),
+    apply(`right`, `right-attempt`),
+  ]
+
+  expect(
+    projectRetainedRowKeys([...sharedClaims, release(`left`, `left-attempt`)]),
+  ).toEqual([`x`])
+  expect(
+    projectRetainedRowKeys([
+      ...sharedClaims,
+      release(`left`, `left-attempt`),
+      release(`right`, `right-attempt`),
+    ]),
+  ).toEqual([])
+})
+
+it.each([
+  {
+    name: `one owner releases the first attempt first`,
+    owners: [`owner`, `owner`] as const,
+    releaseOrder: [0, 1] as const,
+  },
+  {
+    name: `one owner releases the second attempt first`,
+    owners: [`owner`, `owner`] as const,
+    releaseOrder: [1, 0] as const,
+  },
+  {
+    name: `two owners release the first attempt first`,
+    owners: [`owner-a`, `owner-b`] as const,
+    releaseOrder: [0, 1] as const,
+  },
+  {
+    name: `two owners release the second attempt first`,
+    owners: [`owner-a`, `owner-b`] as const,
+    releaseOrder: [1, 0] as const,
+  },
+])(`derives shared ownership for $name`, ({ owners, releaseOrder }) => {
+  const demandId = `shared`
+  const attempts = owners.map((ownerId, index) => ({
+    ownerId,
+    attemptId: `attempt-${index}`,
+  }))
+  const requests = attempts.map<LoadSubsetFullFlowEvent>(
+    ({ ownerId, attemptId }) => ({
+      type: `requestDemand`,
+      ownerId,
+      sessionId: `session`,
+      demandId,
+      attemptId,
+      alreadyAborted: false,
+    }),
+  )
+  const settlement: LoadSubsetFullFlowEvent = {
+    type: `applyAuthoritativeRows`,
+    ownerId: attempts[0]!.ownerId,
+    demandId,
+    attemptId: attempts[0]!.attemptId,
+    rowKeys: [`x`],
+  }
+  const releases = releaseOrder.map<LoadSubsetFullFlowEvent>((index) => ({
+    type: `releaseDemand`,
+    ownerId: attempts[index]!.ownerId,
+    demandId,
+    attemptId: attempts[index]!.attemptId,
+  }))
+
+  for (let released = 0; released <= releases.length; released++) {
+    const active = released < releases.length
+    const history = [...requests, settlement, ...releases.slice(0, released)]
+    const lifecycle = projectAdapterLifecycle(history)
+
+    expect(lifecycle.filter(({ type }) => type === `invoke`)).toHaveLength(2)
+    expect(lifecycle.filter(({ type }) => type === `release`)).toHaveLength(
+      released,
+    )
+    expect(projectRetainedRowKeys(history)).toEqual(active ? [`x`] : [])
+    expect(projectReusableDemands(history)).toEqual(active ? [demandId] : [])
+    const peerRequest: LoadSubsetFullFlowEvent = {
+      type: `requestDemand`,
+      ownerId: `peer`,
+      sessionId: `session`,
+      demandId,
+      attemptId: `peer-after-${released}`,
+      alreadyAborted: false,
+    }
+    expect(projectRetainedRowKeys([...history, peerRequest])).toEqual(
+      active ? [`x`] : [],
+    )
+    expect(projectTransportLoads([...history, peerRequest])).toBe(
+      active ? 1 : 2,
+    )
+
+    const publication = projectAtomicOrderedPublicationState(
+      [
+        ...history,
+        {
+          type: `stagePublicationRows`,
+          publicationId: `publication`,
+          demandId: `ordered`,
+          rows: [{ key: `o`, orderValue: 0 }],
+        },
+        {
+          type: `stagePublicationRows`,
+          publicationId: `publication`,
+          demandId,
+          rows: [{ key: `x`, orderValue: 1 }],
+        },
+        { type: `commitPublication`, publicationId: `publication` },
+      ],
+      { demandId: `ordered`, direction: `asc`, initialWindowSize: 1 },
+    )
+    expect(publication.currentPublication?.rows.map(({ key }) => key)).toEqual(
+      active ? [`o`, `x`] : [`o`],
+    )
+  }
 })
 
 it.each([
@@ -274,9 +457,6 @@ it.each([
       ownerId: `old-owner`,
       demandId: `exact-demand`,
       attemptId: `old-attempt`,
-      rowKeys: [],
-      finalRowOwner: true,
-      invalidatesAdapterEvidence: true,
     },
   },
 ] satisfies ReadonlyArray<{
@@ -348,9 +528,6 @@ it(`scopes reusable evidence to the physical attempt when an owner is reused`, (
     ownerId: `stable-owner`,
     demandId: `exact-demand`,
     attemptId: `old-attempt`,
-    rowKeys: [`stale-row`],
-    finalRowOwner: true,
-    invalidatesAdapterEvidence: true,
   }
   const beforeFreshSettlement = [
     oldRequest,
@@ -400,9 +577,6 @@ it(`does not rebuild coverage when a released attempt settles after its replacem
         ownerId: `old-owner`,
         demandId: `exact-demand`,
         attemptId: `old-attempt`,
-        rowKeys: [],
-        finalRowOwner: true,
-        invalidatesAdapterEvidence: true,
       },
       {
         type: `requestDemand`,
@@ -456,9 +630,6 @@ it(`keeps fresh same-epoch work shared after an older rejected attempt releases`
         ownerId: `old-owner`,
         demandId: `exact-demand`,
         attemptId: `old-attempt`,
-        rowKeys: [],
-        finalRowOwner: true,
-        invalidatesAdapterEvidence: true,
       },
       {
         ...freshRequest,
@@ -484,9 +655,6 @@ it(`rejects histories that reuse one demand attempt identity`, () => {
       ownerId: `old-owner`,
       demandId: `exact-demand`,
       attemptId: `reused-attempt`,
-      rowKeys: [],
-      finalRowOwner: true,
-      invalidatesAdapterEvidence: true,
     },
     {
       type: `requestDemand`,
@@ -755,9 +923,6 @@ for (const campaign of refinementCampaigns(1_779_003)) {
           ownerId: `owner`,
           demandId: `demand`,
           attemptId: `attempt`,
-          rowKeys: [`row`],
-          finalRowOwner: true,
-          invalidatesAdapterEvidence: true,
         },
       ]
       const continuationHistory: Array<LoadSubsetFullFlowEvent> = [
@@ -856,9 +1021,10 @@ for (const campaign of refinementCampaigns(1_779_003)) {
           suffix,
           projectAdapterLifecycle,
           (events, renamingSuffix) =>
-            events.map(({ type, ownerId }) => ({
+            events.map(({ type, ownerId, attemptId }) => ({
               type,
               ownerId: removeRenamingSuffix(ownerId, renamingSuffix),
+              attemptId: removeRenamingSuffix(attemptId, renamingSuffix),
             })),
         )
         expectObservationPreservedAfterEveryPrefix(
@@ -1208,9 +1374,6 @@ function demandErasureHistories(): Array<Array<LoadSubsetFullFlowEvent>> {
     ownerId,
     demandId: `demand-a`,
     attemptId,
-    rowKeys: [`row-a`],
-    finalRowOwner: true,
-    invalidatesAdapterEvidence: true,
   })
 
   return [
@@ -1263,9 +1426,6 @@ function demandErasureHistories(): Array<Array<LoadSubsetFullFlowEvent>> {
         ownerId: `owner-a`,
         demandId: `demand-a`,
         attemptId: `attempt-a`,
-        rowKeys: [`row-a`],
-        finalRowOwner: false,
-        invalidatesAdapterEvidence: false,
       },
     ],
     [
@@ -1661,9 +1821,6 @@ function publicationErasureHistories(): Array<Array<LoadSubsetFullFlowEvent>> {
         ownerId: `owner-related`,
         demandId: `related`,
         attemptId: `attempt-related`,
-        rowKeys: [`related`],
-        finalRowOwner: true,
-        invalidatesAdapterEvidence: true,
       },
     ],
     [
@@ -1775,9 +1932,10 @@ for (const campaign of refinementCampaigns(1_779_009)) {
           suffix,
           projectAdapterLifecycle,
           (events, renamingSuffix) =>
-            events.map(({ type, ownerId }) => ({
+            events.map(({ type, ownerId, attemptId }) => ({
               type,
               ownerId: removeRenamingSuffix(ownerId, renamingSuffix),
+              attemptId: removeRenamingSuffix(attemptId, renamingSuffix),
             })),
         )
         expectObservationPreservedAfterEveryPrefix(

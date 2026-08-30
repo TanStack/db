@@ -3117,16 +3117,6 @@ async function runTruncateCoverageScenario(
               ? `old`
               : `fresh`
         }-attempt`,
-        rowKeys:
-          options === initialOptions
-            ? [`initial`]
-            : options === oldOptions
-              ? [`old`]
-              : scenario.freshResult === `reject`
-                ? []
-                : [`fresh`],
-        finalRowOwner: true,
-        invalidatesAdapterEvidence: true,
       })
     }
     expect(unloadSubset.mock.calls.map(([options]) => options)).toEqual(
@@ -3275,6 +3265,155 @@ it.each([
   },
 )
 
+it(`keeps adapter release obligations distinct across attempts by one owner`, () => {
+  const history: ReadonlyArray<LoadSubsetFullFlowEvent> = [
+    {
+      type: `requestDemand`,
+      ownerId: `owner`,
+      sessionId: `session`,
+      demandId: `demand`,
+      attemptId: `attempt-1`,
+      alreadyAborted: false,
+    },
+    {
+      type: `requestDemand`,
+      ownerId: `owner`,
+      sessionId: `session`,
+      demandId: `demand`,
+      attemptId: `attempt-2`,
+      alreadyAborted: false,
+    },
+    {
+      type: `releaseDemand`,
+      ownerId: `owner`,
+      demandId: `demand`,
+      attemptId: `attempt-1`,
+    },
+    {
+      type: `releaseDemand`,
+      ownerId: `owner`,
+      demandId: `demand`,
+      attemptId: `attempt-2`,
+    },
+  ]
+
+  expect(projectAdapterLifecycle(history)).toEqual([
+    { type: `invoke`, ownerId: `owner`, attemptId: `attempt-1` },
+    { type: `invoke`, ownerId: `owner`, attemptId: `attempt-2` },
+    { type: `release`, ownerId: `owner`, attemptId: `attempt-1` },
+    { type: `release`, ownerId: `owner`, attemptId: `attempt-2` },
+  ])
+})
+
+it(`derives shared row and evidence lifetime from active attempts`, () => {
+  const sharedHistory: ReadonlyArray<LoadSubsetFullFlowEvent> = [
+    {
+      type: `requestDemand`,
+      ownerId: `owner-a`,
+      sessionId: `session`,
+      demandId: `shared`,
+      attemptId: `attempt-a`,
+      alreadyAborted: false,
+    },
+    {
+      type: `requestDemand`,
+      ownerId: `owner-b`,
+      sessionId: `session`,
+      demandId: `shared`,
+      attemptId: `attempt-b`,
+      alreadyAborted: false,
+    },
+    {
+      type: `applyAuthoritativeRows`,
+      ownerId: `owner-a`,
+      demandId: `shared`,
+      attemptId: `attempt-a`,
+      rowKeys: [`x`],
+    },
+    {
+      type: `releaseDemand`,
+      ownerId: `owner-a`,
+      demandId: `shared`,
+      attemptId: `attempt-a`,
+    },
+  ]
+
+  expect(projectRetainedRowKeys(sharedHistory)).toEqual([`x`])
+  expect(
+    projectTransportLoads([
+      ...sharedHistory,
+      {
+        type: `requestDemand`,
+        ownerId: `owner-c`,
+        sessionId: `session`,
+        demandId: `shared`,
+        attemptId: `attempt-c`,
+        alreadyAborted: false,
+      },
+    ]),
+  ).toBe(1)
+
+  expect(
+    projectRetainedRowKeys([
+      ...sharedHistory,
+      {
+        type: `releaseDemand`,
+        ownerId: `owner-b`,
+        demandId: `shared`,
+        attemptId: `attempt-b`,
+      },
+    ]),
+  ).toEqual([])
+})
+
+it(`keeps an additional demand active until its final attempt releases`, () => {
+  const history: ReadonlyArray<LoadSubsetFullFlowEvent> = [
+    {
+      type: `requestDemand`,
+      ownerId: `owner-a`,
+      sessionId: `session`,
+      demandId: `other`,
+      attemptId: `attempt-a`,
+      alreadyAborted: false,
+    },
+    {
+      type: `requestDemand`,
+      ownerId: `owner-b`,
+      sessionId: `session`,
+      demandId: `other`,
+      attemptId: `attempt-b`,
+      alreadyAborted: false,
+    },
+    {
+      type: `stagePublicationRows`,
+      publicationId: `next`,
+      demandId: `ordered`,
+      rows: [{ key: `o`, orderValue: 0 }],
+    },
+    {
+      type: `stagePublicationRows`,
+      publicationId: `next`,
+      demandId: `other`,
+      rows: [{ key: `x`, orderValue: 1 }],
+    },
+    {
+      type: `releaseDemand`,
+      ownerId: `owner-a`,
+      demandId: `other`,
+      attemptId: `attempt-a`,
+    },
+    { type: `commitPublication`, publicationId: `next` },
+  ]
+
+  expect(
+    projectAtomicOrderedPublicationState(history, {
+      demandId: `ordered`,
+      direction: `asc`,
+      initialWindowSize: 1,
+    }).currentPublication?.rows.map(({ key }) => key),
+  ).toEqual([`o`, `x`])
+})
+
 it(`does not release physical work when an already-aborted demand skips adapter start`, async () => {
   const ownerId = `aborted-owner`
   const requestEvent: LoadSubsetFullFlowEvent = {
@@ -3292,9 +3431,6 @@ it(`does not release physical work when an already-aborted demand skips adapter 
       ownerId,
       demandId: `all-rows`,
       attemptId: `aborted-attempt`,
-      rowKeys: [],
-      finalRowOwner: false,
-      invalidatesAdapterEvidence: false,
     },
   ]
   const adapterEvents: Array<AdapterLifecycleEvent> = []
@@ -3841,9 +3977,6 @@ it(`reloads authoritative rows after final-owner cleanup invalidates retained ad
       ownerId: `owner-1`,
       demandId: `all-rows`,
       attemptId: `attempt-1`,
-      rowKeys: [row.id],
-      finalRowOwner: true,
-      invalidatesAdapterEvidence: true,
     },
     {
       type: `restartSession`,
@@ -6188,9 +6321,6 @@ async function runAtomicOrderedReplayScenario(
           ownerId: `other-owner`,
           demandId: `other`,
           attemptId: `other-attempt`,
-          rowKeys: [replacementOtherRow.id],
-          finalRowOwner: true,
-          invalidatesAdapterEvidence: true,
         })
         expectPublicationHistory()
       }
@@ -6277,9 +6407,6 @@ async function runAtomicOrderedReplayScenario(
           ownerId: `other-owner`,
           demandId: `other`,
           attemptId: `other-attempt`,
-          rowKeys: [replacementOtherRow.id],
-          finalRowOwner: true,
-          invalidatesAdapterEvidence: true,
         })
         expectPublicationHistory()
       }

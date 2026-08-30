@@ -224,9 +224,6 @@ export type LoadSubsetFullFlowEvent =
       ownerId: FullFlowOwnerId
       demandId: FullFlowDemandId
       attemptId: FullFlowAttemptId
-      rowKeys: ReadonlyArray<string>
-      finalRowOwner: boolean
-      invalidatesAdapterEvidence: boolean
     }
   | {
       type: `restartSession`
@@ -371,6 +368,34 @@ export type LoadSubsetFullFlowEvent =
 export type ExpectedAdapterLifecycleEvent = {
   type: `invoke` | `release`
   ownerId: FullFlowOwnerId
+  attemptId: FullFlowAttemptId
+}
+
+type ActiveDemandAttempts = Map<FullFlowDemandId, Set<FullFlowAttemptId>>
+
+function addActiveDemandAttempt(
+  activeAttempts: ActiveDemandAttempts,
+  demandId: FullFlowDemandId,
+  attemptId: FullFlowAttemptId,
+): void {
+  let attempts = activeAttempts.get(demandId)
+  if (!attempts) {
+    attempts = new Set()
+    activeAttempts.set(demandId, attempts)
+  }
+  attempts.add(attemptId)
+}
+
+function releaseActiveDemandAttempt(
+  activeAttempts: ActiveDemandAttempts,
+  demandId: FullFlowDemandId,
+  attemptId: FullFlowAttemptId,
+): boolean {
+  const attempts = activeAttempts.get(demandId)
+  if (!attempts?.delete(attemptId)) return false
+  if (attempts.size > 0) return false
+  activeAttempts.delete(demandId)
+  return true
 }
 
 type DemandAttemptRecord = {
@@ -455,16 +480,28 @@ function assertWellFormedDemandAttempts(
 export function projectAdapterLifecycle(
   history: ReadonlyArray<LoadSubsetFullFlowEvent>,
 ): Array<ExpectedAdapterLifecycleEvent> {
-  const invokedOwners = new Set<FullFlowOwnerId>()
+  assertWellFormedDemandAttempts(history)
+  const invokedAttempts = new Set<FullFlowAttemptId>()
   const projected: Array<ExpectedAdapterLifecycleEvent> = []
 
   for (const event of history) {
     if (event.type === `requestDemand` && !event.alreadyAborted) {
-      invokedOwners.add(event.ownerId)
-      projected.push({ type: `invoke`, ownerId: event.ownerId })
+      invokedAttempts.add(event.attemptId)
+      projected.push({
+        type: `invoke`,
+        ownerId: event.ownerId,
+        attemptId: event.attemptId,
+      })
     }
-    if (event.type === `releaseDemand` && invokedOwners.delete(event.ownerId)) {
-      projected.push({ type: `release`, ownerId: event.ownerId })
+    if (
+      event.type === `releaseDemand` &&
+      invokedAttempts.delete(event.attemptId)
+    ) {
+      projected.push({
+        type: `release`,
+        ownerId: event.ownerId,
+        attemptId: event.attemptId,
+      })
     }
   }
 
@@ -485,13 +522,15 @@ export function projectTransportLoads(
   assertWellFormedDemandAttempts(history)
   const reusableDemands = new Map<FullFlowDemandId, FullFlowAttemptId>()
   const inFlightDemands = new Map<FullFlowDemandId, FullFlowAttemptId>()
+  const activeAttempts: ActiveDemandAttempts = new Map()
   let loads = 0
 
   for (const event of history) {
     switch (event.type) {
       case `requestDemand`:
+        if (event.alreadyAborted) break
+        addActiveDemandAttempt(activeAttempts, event.demandId, event.attemptId)
         if (
-          !event.alreadyAborted &&
           !reusableDemands.has(event.demandId) &&
           !inFlightDemands.has(event.demandId)
         ) {
@@ -517,13 +556,15 @@ export function projectTransportLoads(
         }
         break
       case `releaseDemand`:
-        if (event.invalidatesAdapterEvidence) {
-          if (reusableDemands.get(event.demandId) === event.attemptId) {
-            reusableDemands.delete(event.demandId)
-          }
-          if (inFlightDemands.get(event.demandId) === event.attemptId) {
-            inFlightDemands.delete(event.demandId)
-          }
+        if (
+          releaseActiveDemandAttempt(
+            activeAttempts,
+            event.demandId,
+            event.attemptId,
+          )
+        ) {
+          reusableDemands.delete(event.demandId)
+          inFlightDemands.delete(event.demandId)
         }
         break
       case `restartSession`:
@@ -654,6 +695,7 @@ export function projectReusableDemands(
   assertWellFormedDemandAttempts(history)
   const reusableDemands = new Map<FullFlowDemandId, FullFlowAttemptId>()
   const attemptEpochs = new Map<FullFlowAttemptId, number>()
+  const activeAttempts: ActiveDemandAttempts = new Map()
   let sourceEpoch = 0
 
   for (const event of history) {
@@ -661,6 +703,11 @@ export function projectReusableDemands(
       case `requestDemand`:
         if (!event.alreadyAborted) {
           attemptEpochs.set(event.attemptId, sourceEpoch)
+          addActiveDemandAttempt(
+            activeAttempts,
+            event.demandId,
+            event.attemptId,
+          )
         }
         break
       case `applyAuthoritativeRows`:
@@ -673,11 +720,15 @@ export function projectReusableDemands(
         reusableDemands.clear()
         break
       case `releaseDemand`:
-        if (event.invalidatesAdapterEvidence) {
-          attemptEpochs.delete(event.attemptId)
-          if (reusableDemands.get(event.demandId) === event.attemptId) {
-            reusableDemands.delete(event.demandId)
-          }
+        attemptEpochs.delete(event.attemptId)
+        if (
+          releaseActiveDemandAttempt(
+            activeAttempts,
+            event.demandId,
+            event.attemptId,
+          )
+        ) {
+          reusableDemands.delete(event.demandId)
         }
         break
       case `applyUnprovenRows`:
@@ -798,6 +849,7 @@ export function projectAtomicOrderedPublicationState(
     initialWindowSize: number
   },
 ): AtomicOrderedPublicationProjection {
+  assertWellFormedDemandAttempts(history)
   const staged = new Map<
     FullFlowPublicationId,
     Map<FullFlowDemandId, ReadonlyArray<FullFlowPublishedOrderRow>>
@@ -811,7 +863,7 @@ export function projectAtomicOrderedPublicationState(
       | undefined
     >
   >()
-  const activeAdditionalDemands = new Set<FullFlowDemandId>()
+  const activeAdditionalDemands: ActiveDemandAttempts = new Map()
   const publications: Array<ReadonlyArray<FullFlowPublishedOrderRow>> = []
   let currentPublication: AtomicOrderedPublicationState | undefined
   let retainsPreviousPublication = false
@@ -839,7 +891,7 @@ export function projectAtomicOrderedPublicationState(
 
     const orderedPrefix = sortRows(orderedRows).slice(0, retainedSize)
     const desired = new Map(orderedPrefix.map((row) => [row.key, row] as const))
-    for (const demandId of activeAdditionalDemands) {
+    for (const demandId of activeAdditionalDemands.keys()) {
       for (const row of publication.get(demandId) ?? []) {
         desired.set(row.key, row)
       }
@@ -886,7 +938,7 @@ export function projectAtomicOrderedPublicationState(
 
     const current = attempts.get(currentReplacement)
     const ordered = current?.get(options.demandId)
-    const activeDemandFailed = [...activeAdditionalDemands].some(
+    const activeDemandFailed = [...activeAdditionalDemands.keys()].some(
       (demandId) => current?.get(demandId)?.outcome !== `success`,
     )
     if (ordered?.outcome !== `success` || activeDemandFailed) {
@@ -958,7 +1010,11 @@ export function projectAtomicOrderedPublicationState(
       }
       case `requestDemand`:
         if (!event.alreadyAborted && event.demandId !== options.demandId) {
-          activeAdditionalDemands.add(event.demandId)
+          addActiveDemandAttempt(
+            activeAdditionalDemands,
+            event.demandId,
+            event.attemptId,
+          )
         }
         break
       case `applyAuthoritativeRows`:
@@ -966,7 +1022,11 @@ export function projectAtomicOrderedPublicationState(
       case `rejectDemand`:
         break
       case `releaseDemand`:
-        activeAdditionalDemands.delete(event.demandId)
+        releaseActiveDemandAttempt(
+          activeAdditionalDemands,
+          event.demandId,
+          event.attemptId,
+        )
         break
       case `truncateSource`:
       case `restartSession`:
@@ -995,22 +1055,80 @@ export function projectAtomicOrderedPublicationState(
 export function projectRetainedRowKeys(
   history: ReadonlyArray<LoadSubsetFullFlowEvent>,
 ): Array<string> {
-  const retainedRows = new Set<string>()
+  assertWellFormedDemandAttempts(history)
+  const activeAttempts: ActiveDemandAttempts = new Map()
+  const reusableRows = new Map<FullFlowDemandId, Set<string>>()
+  const rowClaims = new Map<string, Set<FullFlowAttemptId>>()
+  const attemptRows = new Map<FullFlowAttemptId, Set<string>>()
+
+  const claimRows = (
+    attemptId: FullFlowAttemptId,
+    rowKeys: Iterable<string>,
+  ) => {
+    let claimed = attemptRows.get(attemptId)
+    if (!claimed) {
+      claimed = new Set()
+      attemptRows.set(attemptId, claimed)
+    }
+    for (const rowKey of rowKeys) {
+      claimed.add(rowKey)
+      let claims = rowClaims.get(rowKey)
+      if (!claims) {
+        claims = new Set()
+        rowClaims.set(rowKey, claims)
+      }
+      claims.add(attemptId)
+    }
+  }
+
+  const releaseRows = (attemptId: FullFlowAttemptId) => {
+    for (const rowKey of attemptRows.get(attemptId) ?? []) {
+      const claims = rowClaims.get(rowKey)
+      claims?.delete(attemptId)
+      if (claims?.size === 0) rowClaims.delete(rowKey)
+    }
+    attemptRows.delete(attemptId)
+  }
 
   for (const event of history) {
+    if (event.type === `requestDemand` && !event.alreadyAborted) {
+      addActiveDemandAttempt(activeAttempts, event.demandId, event.attemptId)
+      const retained = reusableRows.get(event.demandId)
+      if (retained) claimRows(event.attemptId, retained)
+    }
+    if (event.type === `applyAuthoritativeRows`) {
+      let retained = reusableRows.get(event.demandId)
+      if (!retained) {
+        retained = new Set()
+        reusableRows.set(event.demandId, retained)
+      }
+      event.rowKeys.forEach((rowKey) => retained.add(rowKey))
+    }
     if (
       event.type === `applyAuthoritativeRows` ||
       event.type === `applyUnprovenRows`
     ) {
-      event.rowKeys.forEach((key) => retainedRows.add(key))
+      for (const attemptId of activeAttempts.get(event.demandId) ?? []) {
+        claimRows(attemptId, event.rowKeys)
+      }
     }
-    if (event.type === `truncateSource`) retainedRows.clear()
-    if (event.type === `releaseDemand` && event.finalRowOwner) {
-      event.rowKeys.forEach((key) => retainedRows.delete(key))
+    if (event.type === `truncateSource`) {
+      reusableRows.clear()
+      rowClaims.clear()
+      attemptRows.clear()
+    }
+    if (event.type === `releaseDemand`) {
+      const releasedFinalAttempt = releaseActiveDemandAttempt(
+        activeAttempts,
+        event.demandId,
+        event.attemptId,
+      )
+      releaseRows(event.attemptId)
+      if (releasedFinalAttempt) reusableRows.delete(event.demandId)
     }
   }
 
-  return [...retainedRows].sort()
+  return [...rowClaims.keys()].sort()
 }
 
 export type ExpectedSyncReceiptState = `pending` | `resolved` | `rejected`
