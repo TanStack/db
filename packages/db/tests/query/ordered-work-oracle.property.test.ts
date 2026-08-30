@@ -10,6 +10,7 @@ import { eq } from '../../src/query/builder/functions.js'
 import { compileSingleRowExpression } from '../../src/query/compiler/evaluators.js'
 import { PropRef } from '../../src/query/ir.js'
 import { TotalOrder } from '../../src/query/total-order.js'
+import { makeComparator } from '../../src/utils/comparison.js'
 import {
   WindowState,
   diffPublications,
@@ -44,10 +45,19 @@ type RankedRow = {
   included: boolean
 }
 
-class CountingMap<TKey, TValue> extends Map<TKey, TValue> {
+class CountingReadonlyMap<TKey, TValue> implements ReadonlyMap<TKey, TValue> {
+  private readonly valuesByKey: Map<TKey, TValue>
   iterationReads = 0
   membershipReads = 0
   valueReads = 0
+
+  constructor(entries: Iterable<readonly [TKey, TValue]> = []) {
+    this.valuesByKey = new Map(entries)
+  }
+
+  get size(): number {
+    return this.valuesByKey.size
+  }
 
   private *countIterator<T>(
     iterator: Iterator<T>,
@@ -59,40 +69,44 @@ class CountingMap<TKey, TValue> extends Map<TKey, TValue> {
     return undefined
   }
 
-  override [Symbol.iterator](): Generator<[TKey, TValue], undefined, unknown> {
-    return this.countIterator(super[Symbol.iterator]())
+  [Symbol.iterator](): Generator<[TKey, TValue], undefined, unknown> {
+    return this.countIterator(this.valuesByKey[Symbol.iterator]())
   }
 
-  override entries(): Generator<[TKey, TValue], undefined, unknown> {
-    return this.countIterator(super.entries())
+  entries(): Generator<[TKey, TValue], undefined, unknown> {
+    return this.countIterator(this.valuesByKey.entries())
   }
 
-  override keys(): Generator<TKey, undefined, unknown> {
-    return this.countIterator(super.keys())
+  keys(): Generator<TKey, undefined, unknown> {
+    return this.countIterator(this.valuesByKey.keys())
   }
 
-  override values(): Generator<TValue, undefined, unknown> {
-    return this.countIterator(super.values())
+  values(): Generator<TValue, undefined, unknown> {
+    return this.countIterator(this.valuesByKey.values())
   }
 
-  override forEach(
-    callback: (value: TValue, key: TKey, map: Map<TKey, TValue>) => void,
+  forEach(
+    callback: (
+      value: TValue,
+      key: TKey,
+      map: ReadonlyMap<TKey, TValue>,
+    ) => void,
     thisArg?: unknown,
   ): void {
-    super.forEach((value, key) => {
+    this.valuesByKey.forEach((value, key) => {
       this.iterationReads++
       callback.call(thisArg, value, key, this)
     })
   }
 
-  override get(key: TKey): TValue | undefined {
+  get(key: TKey): TValue | undefined {
     this.valueReads++
-    return super.get(key)
+    return this.valuesByKey.get(key)
   }
 
-  override has(key: TKey): boolean {
+  has(key: TKey): boolean {
     this.membershipReads++
-    return super.has(key)
+    return this.valuesByKey.has(key)
   }
 }
 
@@ -691,7 +705,7 @@ describe(`ordered source work oracle`, () => {
       const index = collection.createIndex((row) => row.rank, {
         indexType: BTreeIndex,
         options: { compareOptions: publicKeyIndexCompareOptions },
-      })
+      }) as BTreeIndex<string>
       subscription = new CollectionSubscription(collection, () => {}, {})
       subscription.setOrderByIndex(index)
       let orderCompilationReads = 0
@@ -707,21 +721,30 @@ describe(`ordered source work oracle`, () => {
         },
       ]
 
-      subscription.requestLimitedSnapshot({
-        orderBy: order,
-        limit: 0,
-        trackLoadSubsetPromise: false,
-      })
-      expect(
-        (
-          subscription as unknown as {
-            orderedWindow: WindowState | undefined
-          }
-        ).orderedWindow,
-      ).toBeUndefined()
-      // Freezing the request reads the expression tag once. It must not also
-      // construct TotalOrder or compile the frozen expression for no rows.
-      expect(orderCompilationReads).toBe(1)
+      const readProbe = observeOrderedIndexReads(index, `btree`, `asc`)
+      try {
+        subscription.requestLimitedSnapshot({
+          orderBy: order,
+          limit: 0,
+          trackLoadSubsetPromise: false,
+        })
+        expect(
+          (
+            subscription as unknown as {
+              orderedWindow: WindowState | undefined
+            }
+          ).orderedWindow,
+        ).toBeUndefined()
+        // Freezing the request reads the expression tag once. It must not also
+        // construct TotalOrder or compile the frozen expression for no rows.
+        expect(orderCompilationReads).toBe(1)
+        expect(readProbe.getValueReads()).toBe(0)
+        expect(readProbe.getBucketReads()).toBe(0)
+        expect(readProbe.getCursorCalls()).toBe(0)
+        expect(readProbe.getUnexpectedTraversalCalls()).toBe(0)
+      } finally {
+        readProbe.restore()
+      }
 
       subscription.requestLimitedSnapshot({
         orderBy: order,
@@ -740,6 +763,96 @@ describe(`ordered source work oracle`, () => {
       await collection.cleanup()
     }
   })
+
+  it.each([
+    {
+      name: `ascending numbers`,
+      direction: `asc` as const,
+      left: 1,
+      right: 2,
+      expected: -1,
+      expectedReads: {
+        direction: 1,
+        nulls: 1,
+        stringSort: 0,
+        locale: 0,
+        localeOptions: 0,
+      },
+    },
+    {
+      name: `ascending strings`,
+      direction: `asc` as const,
+      left: `a`,
+      right: `b`,
+      expected: -1,
+      expectedReads: {
+        direction: 1,
+        nulls: 1,
+        stringSort: 1,
+        locale: 1,
+        localeOptions: 1,
+      },
+    },
+    {
+      name: `descending numbers`,
+      direction: `desc` as const,
+      left: 1,
+      right: 2,
+      expected: 1,
+      expectedReads: {
+        direction: 2,
+        nulls: 2,
+        stringSort: 1,
+        locale: 1,
+        localeOptions: 1,
+      },
+    },
+    {
+      name: `descending strings`,
+      direction: `desc` as const,
+      left: `a`,
+      right: `b`,
+      expected: 1,
+      expectedReads: {
+        direction: 2,
+        nulls: 2,
+        stringSort: 1,
+        locale: 1,
+        localeOptions: 1,
+      },
+    },
+  ])(
+    `executes the inner comparator once for $name`,
+    ({ direction, left, right, expected, expectedReads }) => {
+      const reads = {
+        direction: 0,
+        nulls: 0,
+        stringSort: 0,
+        locale: 0,
+        localeOptions: 0,
+      }
+      const options = new Proxy(
+        {
+          direction,
+          nulls: `last` as const,
+          stringSort: `locale` as const,
+          locale: `en`,
+          localeOptions: { sensitivity: `base` as const },
+        } satisfies CompareOptions,
+        {
+          get(target, property, receiver) {
+            if (typeof property === `string` && property in reads) {
+              reads[property as keyof typeof reads]++
+            }
+            return Reflect.get(target, property, receiver) as unknown
+          },
+        },
+      )
+
+      expect(makeComparator(options)(left, right)).toBe(expected)
+      expect(reads).toEqual(expectedReads)
+    },
+  )
 
   it.each([
     { indexKind: `basic`, direction: `asc` },
@@ -2587,7 +2700,7 @@ it(`scans each source row once when retaining additional-demand rows`, () => {
   const window = new WindowState(collection, orderBy(`asc`), undefined, 1)
   window.recordInitialCoverage(undefined, true)
 
-  const reconcile = (publishedRows: CountingMap<string, RankedRow>) => {
+  const reconcile = (publishedRows: CountingReadonlyMap<string, RankedRow>) => {
     entryReads = 0
     retentionChecks = 0
     const changes = window.reconcile(publishedRows, (candidate) => {
@@ -2601,11 +2714,14 @@ it(`scans each source row once when retaining additional-demand rows`, () => {
     return changes
   }
 
-  expect(reconcile(new CountingMap()).map(({ key }) => key)).toEqual([`a`, `c`])
+  expect(reconcile(new CountingReadonlyMap()).map(({ key }) => key)).toEqual([
+    `a`,
+    `c`,
+  ])
   expect(snapshotCalls).toBe(1)
   expect(
     reconcile(
-      new CountingMap([
+      new CountingReadonlyMap([
         [`a`, rows.get(`a`)!],
         [`b`, rows.get(`b`)!],
       ]),
@@ -2615,26 +2731,56 @@ it(`scans each source row once when retaining additional-demand rows`, () => {
 })
 
 it(`scans each side of a publication diff exactly once`, () => {
-  const valueReads = { published: 0, desired: 0 }
-  const countedRow = (
-    row: RankedRow,
-    side: keyof typeof valueReads,
-  ): RankedRow =>
+  type RowWork = {
+    valueReads: number
+    keyReads: number
+    membershipReads: number
+    descriptorReads: number
+  }
+  const emptyRowWork = (): RowWork => ({
+    valueReads: 0,
+    keyReads: 0,
+    membershipReads: 0,
+    descriptorReads: 0,
+  })
+  const rowWork = {
+    published: emptyRowWork(),
+    desired: emptyRowWork(),
+  }
+  const countedRow = (row: RankedRow, side: keyof typeof rowWork): RankedRow =>
     new Proxy(row, {
       get(target, property, receiver) {
         if (typeof property === `string` && Object.hasOwn(target, property)) {
-          valueReads[side]++
+          rowWork[side].valueReads++
         }
         return Reflect.get(target, property, receiver) as unknown
       },
+      ownKeys(target) {
+        rowWork[side].keyReads++
+        return Reflect.ownKeys(target)
+      },
+      has(target, property) {
+        if (typeof property === `string` && Object.hasOwn(target, property)) {
+          rowWork[side].membershipReads++
+        }
+        return Reflect.has(target, property)
+      },
+      getOwnPropertyDescriptor(target, property) {
+        if (typeof property === `string` && Object.hasOwn(target, property)) {
+          rowWork[side].descriptorReads++
+        }
+        return Reflect.getOwnPropertyDescriptor(target, property)
+      },
     })
-  const publishedRows = new CountingMap<string, RankedRow>([
+  const publishedRows = new CountingReadonlyMap<string, RankedRow>([
     [`a`, countedRow({ id: `a`, rank: 2, included: true }, `published`)],
     [`b`, { id: `b`, rank: 2, included: true }],
+    [`d`, countedRow({ id: `d`, rank: 4, included: true }, `published`)],
   ])
-  const desiredRows = new CountingMap<string, RankedRow>([
+  const desiredRows = new CountingReadonlyMap<string, RankedRow>([
     [`a`, countedRow({ id: `a`, rank: 1, included: true }, `desired`)],
     [`c`, { id: `c`, rank: 3, included: true }],
+    [`d`, countedRow({ id: `d`, rank: 4, included: true }, `desired`)],
   ])
 
   expect(
@@ -2648,7 +2794,20 @@ it(`scans each side of a publication diff exactly once`, () => {
   expect(desiredRows.iterationReads).toBe(desiredRows.size)
   expect(desiredRows.membershipReads).toBe(0)
   expect(desiredRows.valueReads).toBe(publishedRows.size)
-  expect(valueReads).toEqual({ published: 2, desired: 2 })
+  expect(rowWork).toEqual({
+    published: {
+      valueReads: 5,
+      keyReads: 2,
+      membershipReads: 0,
+      descriptorReads: 6,
+    },
+    desired: {
+      valueReads: 5,
+      keyReads: 2,
+      membershipReads: 5,
+      descriptorReads: 6,
+    },
+  })
 })
 
 it(`does one source-order comparison per row needed to close the boundary tie`, () => {
