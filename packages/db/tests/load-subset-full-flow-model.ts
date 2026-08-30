@@ -26,6 +26,11 @@ export type FullFlowPublishedOrderRow = {
   orderValue: number
 }
 
+export type FullFlowSourceDemand = {
+  sourceId: FullFlowSourceId
+  demandId: FullFlowDemandId
+}
+
 export type OrderedContinuationEvidencePage = {
   requestedPrefix: number
   appliedKeys: ReadonlyArray<string>
@@ -347,6 +352,7 @@ export type LoadSubsetFullFlowEvent =
   | {
       type: `stagePublicationRows`
       publicationId: FullFlowPublicationId
+      sourceId: FullFlowSourceId
       demandId: FullFlowDemandId
       rows: ReadonlyArray<FullFlowPublishedOrderRow>
     }
@@ -357,17 +363,19 @@ export type LoadSubsetFullFlowEvent =
   | {
       type: `beginReplacement`
       publicationId: FullFlowPublicationId
-      demandIds: ReadonlyArray<FullFlowDemandId>
+      demands: ReadonlyArray<FullFlowSourceDemand>
     }
   | {
       type: `settleReplacement`
       publicationId: FullFlowPublicationId
+      sourceId: FullFlowSourceId
       demandId: FullFlowDemandId
       outcome: `failure` | `abort`
     }
   | {
       type: `settleReplacement`
       publicationId: FullFlowPublicationId
+      sourceId: FullFlowSourceId
       demandId: FullFlowDemandId
       outcome: `success`
       extent: `exhausted` | `continues`
@@ -986,6 +994,7 @@ export function projectReusableDemands(
 export function projectOrderedPublicationBoundary(
   history: ReadonlyArray<LoadSubsetFullFlowEvent>,
   options: {
+    sourceId: FullFlowSourceId
     demandId: FullFlowDemandId
     direction: `asc` | `desc`
     prefixSize: number
@@ -993,8 +1002,9 @@ export function projectOrderedPublicationBoundary(
 ): FullFlowPublishedOrderRow | undefined {
   const staged = new Map<
     FullFlowPublicationId,
-    Map<FullFlowDemandId, ReadonlyArray<FullFlowPublishedOrderRow>>
+    Map<ScopedIdentity, ReadonlyArray<FullFlowPublishedOrderRow>>
   >()
+  const targetDemand = sourceDemandIdentity(options.sourceId, options.demandId)
   let committedRows: ReadonlyArray<FullFlowPublishedOrderRow> = []
 
   for (const event of history) {
@@ -1004,13 +1014,16 @@ export function projectOrderedPublicationBoundary(
         publication = new Map()
         staged.set(event.publicationId, publication)
       }
-      publication.set(event.demandId, event.rows)
+      publication.set(
+        sourceDemandIdentity(event.sourceId, event.demandId),
+        event.rows,
+      )
       continue
     }
     if (event.type === `commitPublication`) {
       const publication = staged.get(event.publicationId)
-      if (publication?.has(options.demandId)) {
-        committedRows = publication.get(options.demandId) ?? []
+      if (publication?.has(targetDemand)) {
+        committedRows = publication.get(targetDemand) ?? []
       }
     }
   }
@@ -1042,6 +1055,7 @@ export function projectOrderedPublicationBoundary(
 export function projectAtomicOrderedPublications(
   history: ReadonlyArray<LoadSubsetFullFlowEvent>,
   options: {
+    sourceId: FullFlowSourceId
     demandId: FullFlowDemandId
     direction: `asc` | `desc`
     initialWindowSize: number
@@ -1071,6 +1085,7 @@ export type AtomicOrderedPublicationProjection = {
 export function projectAtomicOrderedPublicationState(
   history: ReadonlyArray<LoadSubsetFullFlowEvent>,
   options: {
+    sourceId: FullFlowSourceId
     demandId: FullFlowDemandId
     direction: `asc` | `desc`
     initialWindowSize: number
@@ -1079,12 +1094,12 @@ export function projectAtomicOrderedPublicationState(
   assertWellFormedDemandAttempts(history)
   const staged = new Map<
     FullFlowPublicationId,
-    Map<FullFlowDemandId, ReadonlyArray<FullFlowPublishedOrderRow>>
+    Map<ScopedIdentity, ReadonlyArray<FullFlowPublishedOrderRow>>
   >()
   const attempts = new Map<
     FullFlowPublicationId,
     Map<
-      FullFlowDemandId,
+      ScopedIdentity,
       | { outcome: `success`; publishable: boolean }
       | { outcome: `failure` | `abort`; publishable: false }
       | undefined
@@ -1097,6 +1112,7 @@ export function projectAtomicOrderedPublicationState(
   let currentReplacement: FullFlowPublicationId | undefined
   let retainedSize = options.initialWindowSize
   let closed = false
+  const targetDemand = sourceDemandIdentity(options.sourceId, options.demandId)
 
   const sortRows = (rows: ReadonlyArray<FullFlowPublishedOrderRow>) =>
     [...rows].sort((left, right) => {
@@ -1113,7 +1129,7 @@ export function projectAtomicOrderedPublicationState(
     publicationId: FullFlowPublicationId,
   ): AtomicOrderedPublicationState | undefined => {
     const publication = staged.get(publicationId)
-    const orderedRows = publication?.get(options.demandId)
+    const orderedRows = publication?.get(targetDemand)
     if (!publication || !orderedRows) return undefined
 
     const orderedPrefix = sortRows(orderedRows).slice(0, retainedSize)
@@ -1164,7 +1180,7 @@ export function projectAtomicOrderedPublicationState(
     }
 
     const current = attempts.get(currentReplacement)
-    const ordered = current?.get(options.demandId)
+    const ordered = current?.get(targetDemand)
     const activeDemandFailed = [...activeAdditionalDemands.keys()].some(
       (demandId) => current?.get(demandId)?.outcome !== `success`,
     )
@@ -1191,7 +1207,10 @@ export function projectAtomicOrderedPublicationState(
           publication = new Map()
           staged.set(event.publicationId, publication)
         }
-        publication.set(event.demandId, event.rows)
+        publication.set(
+          sourceDemandIdentity(event.sourceId, event.demandId),
+          event.rows,
+        )
         break
       }
       case `commitPublication`: {
@@ -1203,7 +1222,12 @@ export function projectAtomicOrderedPublicationState(
       case `beginReplacement`:
         attempts.set(
           event.publicationId,
-          new Map(event.demandIds.map((demandId) => [demandId, undefined])),
+          new Map(
+            event.demands.map(({ sourceId, demandId }) => [
+              sourceDemandIdentity(sourceId, demandId),
+              undefined,
+            ]),
+          ),
         )
         currentReplacement = event.publicationId
         retainsPreviousPublication = true
@@ -1213,9 +1237,10 @@ export function projectAtomicOrderedPublicationState(
         break
       case `settleReplacement`: {
         const attempt = attempts.get(event.publicationId)
-        if (!attempt?.has(event.demandId)) break
+        const demandKey = sourceDemandIdentity(event.sourceId, event.demandId)
+        if (!attempt?.has(demandKey)) break
         attempt.set(
-          event.demandId,
+          demandKey,
           event.outcome === `success`
             ? {
                 outcome: `success`,
@@ -1228,7 +1253,7 @@ export function projectAtomicOrderedPublicationState(
       }
       case `establishReplacementCoverage`: {
         if (event.publicationId !== currentReplacement) break
-        const ordered = attempts.get(event.publicationId)?.get(options.demandId)
+        const ordered = attempts.get(event.publicationId)?.get(targetDemand)
         if (ordered?.outcome === `success`) {
           ordered.publishable = true
           finishCurrentReplacement()
@@ -1236,11 +1261,15 @@ export function projectAtomicOrderedPublicationState(
         break
       }
       case `requestDemand`:
-        if (!event.alreadyAborted && event.demandId !== options.demandId) {
+        if (
+          !event.alreadyAborted &&
+          (event.sourceId !== options.sourceId ||
+            event.demandId !== options.demandId)
+        ) {
           addActiveDemandAttempt(
             activeAdditionalDemands,
-            event.demandId,
-            event.attemptId,
+            sourceDemandIdentity(event.sourceId, event.demandId),
+            sourceAttemptIdentity(event.sourceId, event.attemptId),
           )
         }
         break
@@ -1251,8 +1280,8 @@ export function projectAtomicOrderedPublicationState(
       case `releaseDemand`:
         releaseActiveDemandAttempt(
           activeAdditionalDemands,
-          event.demandId,
-          event.attemptId,
+          sourceDemandIdentity(event.sourceId, event.demandId),
+          sourceAttemptIdentity(event.sourceId, event.attemptId),
         )
         break
       case `truncateSource`:

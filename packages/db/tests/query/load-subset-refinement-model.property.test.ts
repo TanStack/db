@@ -780,18 +780,25 @@ it.each([
         {
           type: `stagePublicationRows`,
           publicationId: `publication`,
+          sourceId: `source`,
           demandId: `ordered`,
           rows: [{ key: `o`, orderValue: 0 }],
         },
         {
           type: `stagePublicationRows`,
           publicationId: `publication`,
+          sourceId: `source`,
           demandId,
           rows: [{ key: `x`, orderValue: 1 }],
         },
         { type: `commitPublication`, publicationId: `publication` },
       ],
-      { demandId: `ordered`, direction: `asc`, initialWindowSize: 1 },
+      {
+        sourceId: `source`,
+        demandId: `ordered`,
+        direction: `asc`,
+        initialWindowSize: 1,
+      },
     )
     expect(publication.currentPublication?.rows.map(({ key }) => key)).toEqual(
       active ? [`o`, `x`] : [`o`],
@@ -824,6 +831,169 @@ it.each([
   expect(projectRetainedRowKeys(fullyReleasedBeforeSettlement)).toEqual([])
   expect(projectReusableDemands(fullyReleasedBeforeSettlement)).toEqual([])
   expect(projectTransportLoads(fullyReleasedBeforeSettlement)).toBe(2)
+})
+
+it(`keeps a same-name publication demand active on its surviving source`, () => {
+  const request = (sourceId: string): LoadSubsetFullFlowEvent => ({
+    type: `requestDemand`,
+    sourceId,
+    ownerId: `owner`,
+    sessionId: `session`,
+    demandId: `shared`,
+    attemptId: `same-attempt`,
+    alreadyAborted: false,
+  })
+  const projection = projectAtomicOrderedPublicationState(
+    [
+      request(`source-a`),
+      request(`source-b`),
+      {
+        type: `stagePublicationRows`,
+        publicationId: `publication`,
+        sourceId: `ordered-source`,
+        demandId: `ordered`,
+        rows: [{ key: `ordered-row`, orderValue: 0 }],
+      },
+      {
+        type: `stagePublicationRows`,
+        publicationId: `publication`,
+        sourceId: `other-ordered-source`,
+        demandId: `ordered`,
+        rows: [{ key: `wrong-ordered-row`, orderValue: -1 }],
+      },
+      {
+        type: `stagePublicationRows`,
+        publicationId: `publication`,
+        sourceId: `source-b`,
+        demandId: `shared`,
+        rows: [{ key: `source-b-row`, orderValue: 1 }],
+      },
+      {
+        type: `releaseDemand`,
+        sourceId: `source-a`,
+        ownerId: `owner`,
+        demandId: `shared`,
+        attemptId: `same-attempt`,
+      },
+      { type: `commitPublication`, publicationId: `publication` },
+    ],
+    {
+      sourceId: `ordered-source`,
+      demandId: `ordered`,
+      direction: `asc`,
+      initialWindowSize: 1,
+    },
+  )
+
+  expect(projection.currentPublication?.rows.map(({ key }) => key)).toEqual([
+    `ordered-row`,
+    `source-b-row`,
+  ])
+})
+
+it(`settles same-name replacement demands independently by source`, () => {
+  const history: Array<LoadSubsetFullFlowEvent> = [
+    {
+      type: `stagePublicationRows`,
+      publicationId: `initial`,
+      sourceId: `ordered-source`,
+      demandId: `ordered`,
+      rows: [{ key: `old-ordered-row`, orderValue: 0 }],
+    },
+    { type: `commitPublication`, publicationId: `initial` },
+    {
+      type: `requestDemand`,
+      sourceId: `source-a`,
+      ownerId: `owner-a`,
+      sessionId: `session`,
+      demandId: `shared`,
+      attemptId: `attempt-a`,
+      alreadyAborted: false,
+    },
+    {
+      type: `requestDemand`,
+      sourceId: `source-b`,
+      ownerId: `owner-b`,
+      sessionId: `session`,
+      demandId: `shared`,
+      attemptId: `attempt-b`,
+      alreadyAborted: false,
+    },
+    {
+      type: `stagePublicationRows`,
+      publicationId: `replacement`,
+      sourceId: `ordered-source`,
+      demandId: `ordered`,
+      rows: [{ key: `new-ordered-row`, orderValue: 0 }],
+    },
+    {
+      type: `stagePublicationRows`,
+      publicationId: `replacement`,
+      sourceId: `source-a`,
+      demandId: `shared`,
+      rows: [{ key: `source-a-row`, orderValue: 1 }],
+    },
+    {
+      type: `stagePublicationRows`,
+      publicationId: `replacement`,
+      sourceId: `source-b`,
+      demandId: `shared`,
+      rows: [{ key: `source-b-row`, orderValue: 2 }],
+    },
+    {
+      type: `beginReplacement`,
+      publicationId: `replacement`,
+      demands: [
+        { sourceId: `ordered-source`, demandId: `ordered` },
+        { sourceId: `source-a`, demandId: `shared` },
+        { sourceId: `source-b`, demandId: `shared` },
+      ],
+    },
+    {
+      type: `settleReplacement`,
+      publicationId: `replacement`,
+      sourceId: `ordered-source`,
+      demandId: `ordered`,
+      outcome: `success`,
+      extent: `exhausted`,
+    },
+    {
+      type: `settleReplacement`,
+      publicationId: `replacement`,
+      sourceId: `source-a`,
+      demandId: `shared`,
+      outcome: `success`,
+      extent: `exhausted`,
+    },
+  ]
+  const options = {
+    sourceId: `ordered-source`,
+    demandId: `ordered`,
+    direction: `asc` as const,
+    initialWindowSize: 1,
+  }
+
+  expect(
+    projectAtomicOrderedPublicationState(
+      history,
+      options,
+    ).currentPublication?.rows.map(({ key }) => key),
+  ).toEqual([`old-ordered-row`])
+
+  history.push({
+    type: `settleReplacement`,
+    publicationId: `replacement`,
+    sourceId: `source-b`,
+    demandId: `shared`,
+    outcome: `success`,
+    extent: `exhausted`,
+  })
+  expect(
+    projectAtomicOrderedPublicationState(
+      history,
+      options,
+    ).currentPublication?.rows.map(({ key }) => key),
+  ).toEqual([`new-ordered-row`, `source-a-row`, `source-b-row`])
 })
 
 it.each([
@@ -1265,6 +1435,7 @@ function renameHistoryIds(
         return {
           ...event,
           publicationId: `${event.publicationId}-${suffix}`,
+          sourceId: `${event.sourceId}-${suffix}`,
           demandId: `${event.demandId}-${suffix}`,
         }
       case `commitPublication`:
@@ -1277,12 +1448,16 @@ function renameHistoryIds(
         return {
           ...event,
           publicationId: `${event.publicationId}-${suffix}`,
-          demandIds: event.demandIds.map((demandId) => `${demandId}-${suffix}`),
+          demands: event.demands.map(({ sourceId, demandId }) => ({
+            sourceId: `${sourceId}-${suffix}`,
+            demandId: `${demandId}-${suffix}`,
+          })),
         }
       case `settleReplacement`:
         return {
           ...event,
           publicationId: `${event.publicationId}-${suffix}`,
+          sourceId: `${event.sourceId}-${suffix}`,
           demandId: `${event.demandId}-${suffix}`,
         }
       default:
@@ -2302,6 +2477,7 @@ function erasedIdentityReferences(
         break
       case `stagePublicationRows`:
         add(eventIndex, `publicationId`, event.publicationId)
+        add(eventIndex, `sourceId`, event.sourceId)
         add(eventIndex, `demandId`, event.demandId)
         break
       case `commitPublication`:
@@ -2310,12 +2486,24 @@ function erasedIdentityReferences(
         break
       case `beginReplacement`:
         add(eventIndex, `publicationId`, event.publicationId)
-        event.demandIds.forEach((demandId, demandIndex) =>
-          add(eventIndex, `demandId`, demandId, `demandIds.${demandIndex}`),
-        )
+        event.demands.forEach(({ sourceId, demandId }, demandIndex) => {
+          add(
+            eventIndex,
+            `sourceId`,
+            sourceId,
+            `demands.${demandIndex}.sourceId`,
+          )
+          add(
+            eventIndex,
+            `demandId`,
+            demandId,
+            `demands.${demandIndex}.demandId`,
+          )
+        })
         break
       case `settleReplacement`:
         add(eventIndex, `publicationId`, event.publicationId)
+        add(eventIndex, `sourceId`, event.sourceId)
         add(eventIndex, `demandId`, event.demandId)
         break
       case `establishPublication`:
@@ -2405,6 +2593,7 @@ function publicationErasureHistories(): Array<Array<LoadSubsetFullFlowEvent>> {
       {
         type: `stagePublicationRows`,
         publicationId: `publication-a`,
+        sourceId: `source`,
         demandId: `ordered`,
         rows: orderedRows,
       },
@@ -2418,6 +2607,7 @@ function publicationErasureHistories(): Array<Array<LoadSubsetFullFlowEvent>> {
       {
         type: `stagePublicationRows`,
         publicationId: `publication-a`,
+        sourceId: `source`,
         demandId: `ordered`,
         rows: orderedRows,
       },
@@ -2429,23 +2619,29 @@ function publicationErasureHistories(): Array<Array<LoadSubsetFullFlowEvent>> {
       {
         type: `stagePublicationRows`,
         publicationId: `publication-b`,
+        sourceId: `source`,
         demandId: `ordered`,
         rows: orderedRows.slice(1),
       },
       {
         type: `stagePublicationRows`,
         publicationId: `publication-b`,
+        sourceId: `source`,
         demandId: `related`,
         rows: relatedRows,
       },
       {
         type: `beginReplacement`,
         publicationId: `publication-b`,
-        demandIds: [`ordered`, `related`],
+        demands: [
+          { sourceId: `source`, demandId: `ordered` },
+          { sourceId: `source`, demandId: `related` },
+        ],
       },
       {
         type: `settleReplacement`,
         publicationId: `publication-b`,
+        sourceId: `source`,
         demandId: `related`,
         outcome: `success`,
         extent: `exhausted`,
@@ -2453,6 +2649,7 @@ function publicationErasureHistories(): Array<Array<LoadSubsetFullFlowEvent>> {
       {
         type: `settleReplacement`,
         publicationId: `publication-b`,
+        sourceId: `source`,
         demandId: `ordered`,
         outcome: `success`,
         extent: `continues`,
@@ -2473,6 +2670,7 @@ function publicationErasureHistories(): Array<Array<LoadSubsetFullFlowEvent>> {
       {
         type: `stagePublicationRows`,
         publicationId: `publication-a`,
+        sourceId: `source`,
         demandId: `ordered`,
         rows: orderedRows,
       },
@@ -2484,17 +2682,22 @@ function publicationErasureHistories(): Array<Array<LoadSubsetFullFlowEvent>> {
       {
         type: `beginReplacement`,
         publicationId: `publication-b`,
-        demandIds: [`ordered`, `related`],
+        demands: [
+          { sourceId: `source`, demandId: `ordered` },
+          { sourceId: `source`, demandId: `related` },
+        ],
       },
       {
         type: `settleReplacement`,
         publicationId: `publication-b`,
+        sourceId: `source`,
         demandId: `related`,
         outcome: `abort`,
       },
       {
         type: `settleReplacement`,
         publicationId: `publication-b`,
+        sourceId: `source`,
         demandId: `ordered`,
         outcome: `failure`,
       },
@@ -2502,6 +2705,7 @@ function publicationErasureHistories(): Array<Array<LoadSubsetFullFlowEvent>> {
       {
         type: `settleReplacement`,
         publicationId: `publication-b`,
+        sourceId: `source`,
         demandId: `ordered`,
         outcome: `success`,
         extent: `exhausted`,
@@ -2644,6 +2848,8 @@ for (const campaign of refinementCampaigns(1_779_009)) {
           renamingSuffix: string,
         ) =>
           projectAtomicOrderedPublicationState(prefix, {
+            sourceId:
+              renamingSuffix === `` ? `source` : `source-${renamingSuffix}`,
             demandId:
               renamingSuffix === `` ? `ordered` : `ordered-${renamingSuffix}`,
             direction: `asc`,
@@ -2659,6 +2865,8 @@ for (const campaign of refinementCampaigns(1_779_009)) {
           suffix,
           (prefix, renamingSuffix) =>
             projectOrderedPublicationBoundary(prefix, {
+              sourceId:
+                renamingSuffix === `` ? `source` : `source-${renamingSuffix}`,
               demandId:
                 renamingSuffix === `` ? `ordered` : `ordered-${renamingSuffix}`,
               direction: `asc`,

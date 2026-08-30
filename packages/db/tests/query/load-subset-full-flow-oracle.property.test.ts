@@ -3533,12 +3533,14 @@ it(`keeps an additional demand active until its final attempt releases`, () => {
     {
       type: `stagePublicationRows`,
       publicationId: `next`,
+      sourceId: `source`,
       demandId: `ordered`,
       rows: [{ key: `o`, orderValue: 0 }],
     },
     {
       type: `stagePublicationRows`,
       publicationId: `next`,
+      sourceId: `source`,
       demandId: `other`,
       rows: [{ key: `x`, orderValue: 1 }],
     },
@@ -3554,6 +3556,7 @@ it(`keeps an additional demand active until its final attempt releases`, () => {
 
   expect(
     projectAtomicOrderedPublicationState(history, {
+      sourceId: `source`,
       demandId: `ordered`,
       direction: `asc`,
       initialWindowSize: 1,
@@ -5825,6 +5828,7 @@ async function runOrderedBoundaryProvenanceScenario(
     {
       type: `stagePublicationRows`,
       publicationId: `initial-publication`,
+      sourceId: `source`,
       demandId: `ordered-window`,
       rows: orderedForDirection.slice(0, prefixSize).map((row) => ({
         key: row.id,
@@ -5840,6 +5844,7 @@ async function runOrderedBoundaryProvenanceScenario(
           {
             type: `stagePublicationRows`,
             publicationId: `additional-publication`,
+            sourceId: `source`,
             demandId: `ordered-window`,
             rows: expectedOrderedPrefix.map((row) => ({
               key: row.id,
@@ -5851,6 +5856,7 @@ async function runOrderedBoundaryProvenanceScenario(
     {
       type: `stagePublicationRows`,
       publicationId: `additional-publication`,
+      sourceId: `source`,
       demandId: `unordered-retention`,
       rows: [{ key: addedRow.id, orderValue: addedRow.rank }],
     },
@@ -5859,6 +5865,7 @@ async function runOrderedBoundaryProvenanceScenario(
     {
       type: `stagePublicationRows`,
       publicationId: `failed-replacement`,
+      sourceId: `source`,
       demandId: `ordered-window`,
       rows: [
         {
@@ -5878,6 +5885,7 @@ async function runOrderedBoundaryProvenanceScenario(
     },
   ]
   const expectedBoundary = projectOrderedPublicationBoundary(history, {
+    sourceId: `source`,
     demandId: `ordered-window`,
     direction: scenario.direction,
     prefixSize,
@@ -6247,6 +6255,7 @@ async function runAtomicOrderedReplayScenario(
     {
       type: `stagePublicationRows`,
       publicationId: `initial`,
+      sourceId: `source`,
       demandId: `ordered`,
       rows: toModelRows(initialRows),
     },
@@ -6345,12 +6354,14 @@ async function runAtomicOrderedReplayScenario(
 
   const expectedPublicationProjection = () =>
     projectAtomicOrderedPublicationState(history, {
+      sourceId: `source`,
       demandId: `ordered`,
       direction: scenario.direction,
       initialWindowSize,
     })
   const expectedPublications = () =>
     projectAtomicOrderedPublications(history, {
+      sourceId: `source`,
       demandId: `ordered`,
       direction: scenario.direction,
       initialWindowSize,
@@ -6387,9 +6398,10 @@ async function runAtomicOrderedReplayScenario(
     history.push({
       type: `beginReplacement`,
       publicationId,
-      demandIds: acquisitions.map((acquisition) =>
-        acquisition === ordered ? `ordered` : `other`,
-      ),
+      demands: acquisitions.map((acquisition) => ({
+        sourceId: `source`,
+        demandId: acquisition === ordered ? `ordered` : `other`,
+      })),
     })
     expectPublicationHistory()
     return { publicationId, acquisitions, ordered } satisfies PendingAttempt
@@ -6414,6 +6426,7 @@ async function runAtomicOrderedReplayScenario(
       history.push({
         type: `stagePublicationRows`,
         publicationId: replay.publicationId,
+        sourceId: `source`,
         demandId: `ordered`,
         rows: toModelRows(rows),
       })
@@ -6453,6 +6466,7 @@ async function runAtomicOrderedReplayScenario(
           ? {
               type: `settleReplacement`,
               publicationId: replay.publicationId,
+              sourceId: `source`,
               demandId,
               outcome: settledOutcome,
               extent: isOrdered ? extent : `exhausted`,
@@ -6460,6 +6474,7 @@ async function runAtomicOrderedReplayScenario(
           : {
               type: `settleReplacement`,
               publicationId: replay.publicationId,
+              sourceId: `source`,
               demandId,
               outcome: settledOutcome,
             },
@@ -6510,6 +6525,7 @@ async function runAtomicOrderedReplayScenario(
         {
           type: `stagePublicationRows`,
           publicationId: `initial`,
+          sourceId: `source`,
           demandId: `other`,
           rows: toModelRows(initialOtherRows),
         },
@@ -6524,6 +6540,7 @@ async function runAtomicOrderedReplayScenario(
       history.push({
         type: `stagePublicationRows`,
         publicationId: firstReplay.publicationId,
+        sourceId: `source`,
         demandId: `ordered`,
         rows: toModelRows([obsoleteRow]),
       })
@@ -6555,6 +6572,7 @@ async function runAtomicOrderedReplayScenario(
       history.push({
         type: `stagePublicationRows`,
         publicationId: currentReplay.publicationId,
+        sourceId: `source`,
         demandId: `other`,
         rows: toModelRows([replacementOtherRow]),
       })
@@ -6577,6 +6595,7 @@ async function runAtomicOrderedReplayScenario(
       history.push({
         type: `stagePublicationRows`,
         publicationId: currentReplay.publicationId,
+        sourceId: `source`,
         demandId: `ordered`,
         rows: toModelRows([sourceDelta]),
       })
@@ -6588,6 +6607,7 @@ async function runAtomicOrderedReplayScenario(
       history.push({
         type: `stagePublicationRows`,
         publicationId: currentReplay.publicationId,
+        sourceId: `source`,
         demandId: `ordered`,
         rows: toModelRows([partialRow]),
       })
@@ -6605,6 +6625,7 @@ async function runAtomicOrderedReplayScenario(
       history.push({
         type: `stagePublicationRows`,
         publicationId: currentReplay.publicationId,
+        sourceId: `source`,
         demandId: `ordered`,
         rows: toModelRows([partialRow, continuationRow]),
       })
@@ -6670,6 +6691,7 @@ async function runAtomicOrderedReplayScenario(
         history.push({
           type: `stagePublicationRows`,
           publicationId: currentReplay.publicationId,
+          sourceId: `source`,
           demandId: `ordered`,
           rows: toModelRows([...finalRows, continuationRow]),
         })

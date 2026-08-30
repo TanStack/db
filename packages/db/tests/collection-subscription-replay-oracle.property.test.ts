@@ -8945,6 +8945,7 @@ describe(`CollectionSubscription replay oracle`, () => {
         {
           type: `stagePublicationRows`,
           publicationId: `initial`,
+          sourceId: `source`,
           demandId: `ordered`,
           rows: [],
         },
@@ -8961,6 +8962,7 @@ describe(`CollectionSubscription replay oracle`, () => {
         {
           type: `stagePublicationRows`,
           publicationId: `initial`,
+          sourceId: `source`,
           demandId: `other`,
           rows: [],
         },
@@ -8968,6 +8970,7 @@ describe(`CollectionSubscription replay oracle`, () => {
       ]
       const expectedBoundary = () =>
         projectAtomicOrderedPublicationState(history, {
+          sourceId: `source`,
           demandId: `ordered`,
           direction: `asc`,
           initialWindowSize: 1,
@@ -9043,7 +9046,10 @@ describe(`CollectionSubscription replay oracle`, () => {
         history.push({
           type: `beginReplacement`,
           publicationId: `replacement`,
-          demandIds: [`ordered`, `other`],
+          demands: [
+            { sourceId: `source`, demandId: `ordered` },
+            { sourceId: `source`, demandId: `other` },
+          ],
         })
 
         const orderedReplay = replayLoads.find(({ options }) => options.orderBy)
@@ -9061,6 +9067,7 @@ describe(`CollectionSubscription replay oracle`, () => {
         history.push({
           type: `stagePublicationRows`,
           publicationId: `replacement`,
+          sourceId: `source`,
           demandId: `ordered`,
           rows: [{ key: `new-ordered`, orderValue: 1 }],
         })
@@ -9071,6 +9078,7 @@ describe(`CollectionSubscription replay oracle`, () => {
         history.push({
           type: `settleReplacement`,
           publicationId: `replacement`,
+          sourceId: `source`,
           demandId: `ordered`,
           outcome: `success`,
           extent: `exhausted`,
@@ -9088,6 +9096,7 @@ describe(`CollectionSubscription replay oracle`, () => {
           history.push({
             type: `settleReplacement`,
             publicationId: `replacement`,
+            sourceId: `source`,
             demandId: `other`,
             outcome: `success`,
             extent: `exhausted`,
@@ -9097,6 +9106,7 @@ describe(`CollectionSubscription replay oracle`, () => {
           history.push({
             type: `settleReplacement`,
             publicationId: `replacement`,
+            sourceId: `source`,
             demandId: `other`,
             outcome: `failure`,
           })
@@ -9121,7 +9131,10 @@ describe(`CollectionSubscription replay oracle`, () => {
           history.push({
             type: `beginReplacement`,
             publicationId: `failed-replacement`,
-            demandIds: [`ordered`, `other`],
+            demands: [
+              { sourceId: `source`, demandId: `ordered` },
+              { sourceId: `source`, demandId: `other` },
+            ],
           })
           const nextOrderedReplay = nextReplayLoads.find(
             ({ options }) => options.orderBy,
@@ -9136,6 +9149,7 @@ describe(`CollectionSubscription replay oracle`, () => {
           history.push({
             type: `settleReplacement`,
             publicationId: `failed-replacement`,
+            sourceId: `source`,
             demandId: `ordered`,
             outcome: `failure`,
           })
@@ -9146,6 +9160,7 @@ describe(`CollectionSubscription replay oracle`, () => {
           history.push({
             type: `settleReplacement`,
             publicationId: `failed-replacement`,
+            sourceId: `source`,
             demandId: `other`,
             outcome: `success`,
             extent: `exhausted`,
