@@ -632,17 +632,16 @@ async function runMultiSourceOrderedScenario(
     rows: ReadonlyArray<SecondaryRow>,
     signal: AbortSignal | undefined,
   ): Promise<Array<string>> => {
-    const freshRows = rows.filter(({ id }) => !establishedSecondaryKeys.has(id))
-    if (freshRows.length === 0) return []
-    secondaryLoadCommitSizes.push(freshRows.length)
+    if (rows.length === 0) return []
+    secondaryLoadCommitSizes.push(rows.length)
     secondaryBegin()
-    for (const row of freshRows) {
+    for (const row of rows) {
       establishedSecondaryKeys.add(row.id)
       secondaryWrite({ type: `insert`, value: row })
     }
     const applied = secondaryCommit(signal)
     if (applied !== true) await applied
-    return freshRows.map(({ id }) => id)
+    return rows.map(({ id }) => id)
   }
   const secondary = createCollection<SecondaryRow>({
     id: `multi-source-ordered-secondary-${multiSourceOrderedHarnessId}`,
@@ -871,19 +870,19 @@ async function runMultiSourceOrderedScenario(
       ),
     ).toBe(true)
 
-    const claimedSecondaryKeys = secondaryReceipts.flat()
-    expect(new Set(claimedSecondaryKeys).size).toBe(claimedSecondaryKeys.length)
-    const expectedClaimedSecondaryKeys = hasPreloadedSecondary(scenario)
-      ? []
-      : scenario.secondaryRows
-          .filter((row) =>
-            secondaryCalls.some(
-              ({ where }) =>
-                where === undefined || evaluateReferenceExpression(where, row),
-            ),
-          )
-          .map(({ id }) => id)
-          .sort()
+    for (const receipt of secondaryReceipts) {
+      expect(new Set(receipt).size).toBe(receipt.length)
+    }
+    const claimedSecondaryKeys = new Set(secondaryReceipts.flat())
+    const expectedClaimedSecondaryKeys = scenario.secondaryRows
+      .filter((row) =>
+        secondaryCalls.some(
+          ({ where }) =>
+            where === undefined || evaluateReferenceExpression(where, row),
+        ),
+      )
+      .map(({ id }) => id)
+      .sort()
     expect([...claimedSecondaryKeys].sort()).toEqual(
       expectedClaimedSecondaryKeys,
     )
