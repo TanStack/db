@@ -462,6 +462,23 @@ describe(`createDeduplicatedLoadSubset`, () => {
     deduplicated.unloadSubset(peerOptions)
   })
 
+  it.each([`sync`, `async`] as const)(
+    `does not retain exact evidence when its sole owner unloads during %s adapter entry`,
+    async (settlement) => {
+      const options = { limit: 2 }
+      const loadSubset = vi.fn(() => {
+        deduplicated.unloadSubset(options)
+        return settlement === `sync` ? (true as const) : Promise.resolve()
+      })
+      const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+
+      await deduplicated.loadSubset(options)
+      await deduplicated.loadSubset({ limit: 2 })
+
+      expect(loadSubset).toHaveBeenCalledTimes(2)
+    },
+  )
+
   it(`keeps shared exact in-flight work while another logical owner remains`, async () => {
     let resolveLoad: (() => void) | undefined
     const loadSubset = vi.fn(

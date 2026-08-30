@@ -27,6 +27,7 @@ type SharedAbortLease = {
 type LogicalLoadReservation = {
   generation: number
   invalidatesCoverage: boolean
+  active: boolean
   acquisition?: AcquisitionOwnership
 }
 
@@ -263,7 +264,11 @@ export class DeduplicatedLoadSubset {
 
     // Handle both sync (true) and async (Promise<void>) return values
     if (resultPromise === true) {
-      if (requestGeneration === this.generation && !lease.aborted) {
+      if (
+        requestGeneration === this.generation &&
+        reservation.active &&
+        !lease.aborted
+      ) {
         this.updateTracking(trackingOptions)
         const acquisition: AcquisitionOwnership = {
           matchesPhysicalRequest,
@@ -276,14 +281,18 @@ export class DeduplicatedLoadSubset {
       lease.dispose()
       return true
     } else {
+      const ownsRequestAtAdapterReturn =
+        requestGeneration === this.generation && reservation.active
       // We need to create a reference to the in-flight entry so we can remove it later
       const inflightEntry: InflightCall = {
         options: trackingOptions,
         lease,
         matchesPhysicalRequest,
         generation: requestGeneration,
-        trackable: true,
-        reservations: new Set([reservation]),
+        trackable: ownsRequestAtAdapterReturn,
+        reservations: ownsRequestAtAdapterReturn
+          ? new Set([reservation])
+          : new Set(),
         promise: resultPromise
           .then((result) => {
             // Only update tracking if this request is still from the current generation
@@ -312,7 +321,14 @@ export class DeduplicatedLoadSubset {
             lease.dispose()
           }),
       }
-      reservation.acquisition = inflightEntry
+      const ownsRequestAfterHandlerInstallation =
+        requestGeneration === this.generation && reservation.active
+      inflightEntry.trackable = ownsRequestAfterHandlerInstallation
+      if (ownsRequestAfterHandlerInstallation) {
+        reservation.acquisition = inflightEntry
+      } else {
+        inflightEntry.reservations.clear()
+      }
 
       recordLoadSubsetPromiseDemandMatcher(
         inflightEntry.promise,
@@ -320,7 +336,7 @@ export class DeduplicatedLoadSubset {
       )
 
       // Store the in-flight entry so concurrent subset calls can wait for it
-      if (requestGeneration === this.generation) {
+      if (ownsRequestAfterHandlerInstallation) {
         this.inflightCalls.push(inflightEntry)
       }
       return projectLoadSubsetResultForCaller(
@@ -387,6 +403,7 @@ export class DeduplicatedLoadSubset {
     const reservation = {
       generation: this.generation,
       invalidatesCoverage,
+      active: true,
     }
     const reservations = this.ownerReservations.get(options)
     if (reservations) reservations.push(reservation)
@@ -399,6 +416,7 @@ export class DeduplicatedLoadSubset {
   ): LogicalLoadReservation | undefined {
     const reservations = this.ownerReservations.get(options)
     const reservation = reservations?.shift()
+    if (reservation) reservation.active = false
     if (reservations?.length === 0) this.ownerReservations.delete(options)
     return reservation
   }
@@ -407,6 +425,7 @@ export class DeduplicatedLoadSubset {
     options: LoadSubsetOptions,
     reservation: LogicalLoadReservation,
   ): void {
+    reservation.active = false
     const reservations = this.ownerReservations.get(options)
     const reservationIndex = reservations?.indexOf(reservation) ?? -1
     if (reservationIndex !== -1) reservations!.splice(reservationIndex, 1)
