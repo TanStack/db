@@ -1705,19 +1705,36 @@ it.each([`async`, `sync`] as const)(
       expect(harness.callbackReads).toEqual([[{ id: `b`, rank: 2 }]])
 
       for (const { options } of harness.pending) {
-        expect(options).toMatchObject({
-          orderBy: [
-            {
-              expression: { type: `ref`, path: [`rank`] },
-              compareOptions: { direction: `asc`, nulls: `first` },
-            },
-          ],
-        })
+        expect(Object.keys(options).sort()).toEqual([
+          `cursor`,
+          `limit`,
+          `orderBy`,
+          `signal`,
+          `subscription`,
+          `where`,
+        ])
+        expect(options.where).toBeUndefined()
         expect(options.limit).toBeUndefined()
         expect(options.offset).toBeUndefined()
         expect(options.cursor).toBeUndefined()
-        expect(options.where).toBeUndefined()
+        expect(options.orderBy).toHaveLength(1)
+        const ordering = options.orderBy![0]!
+        expect(Object.keys(ordering).sort()).toEqual([
+          `compareOptions`,
+          `expression`,
+        ])
+        expect(Object.keys(ordering.expression).sort()).toEqual([
+          `path`,
+          `type`,
+        ])
+        expect(ordering.expression).toEqual({ type: `ref`, path: [`rank`] })
+        expect(ordering.compareOptions).toStrictEqual({
+          direction: `asc`,
+          nulls: `first`,
+          stringSort: `locale`,
+        })
         expect(options.signal).toBeInstanceOf(AbortSignal)
+        expect(options.subscription).toBeDefined()
       }
       expect(
         harness.loadResults.map((result) =>
@@ -1728,8 +1745,11 @@ it.each([`async`, `sync`] as const)(
       expect(new Set(signals)).toHaveLength(3)
       expect(signals.map(({ aborted }) => aborted)).toEqual([true, true, false])
       expect(harness.unloads).toHaveLength(2)
-      expect(harness.unloads[0]).toEqual(harness.pending[0]!.options)
-      expect(harness.unloads[1]).toEqual(harness.pending[1]!.options)
+      expect(
+        harness.unloads.map((options) =>
+          harness.pending.findIndex((pending) => pending.options === options),
+        ),
+      ).toEqual([1, 0])
 
       await harness.cleanup()
       cleaned = true
@@ -1739,9 +1759,11 @@ it.each([`async`, `sync`] as const)(
       expect(harness.readRows()).toEqual([])
       expect(signals.map(({ aborted }) => aborted)).toEqual([true, true, true])
       expect(harness.unloads).toHaveLength(3)
-      for (const [index, options] of harness.unloads.entries()) {
-        expect(options).toEqual(harness.pending[index]!.options)
-      }
+      expect(
+        harness.unloads.map((options) =>
+          harness.pending.findIndex((pending) => pending.options === options),
+        ),
+      ).toEqual([1, 0, 2])
     } finally {
       await Promise.all([
         preload.catch(() => undefined),
