@@ -864,9 +864,16 @@ it(`keeps a same-name publication demand active on its surviving source`, () => 
       {
         type: `stagePublicationRows`,
         publicationId: `publication`,
+        sourceId: `source-a`,
+        demandId: `shared`,
+        rows: [{ key: `source-a-row`, orderValue: 1 }],
+      },
+      {
+        type: `stagePublicationRows`,
+        publicationId: `publication`,
         sourceId: `source-b`,
         demandId: `shared`,
-        rows: [{ key: `source-b-row`, orderValue: 1 }],
+        rows: [{ key: `source-b-row`, orderValue: 2 }],
       },
       {
         type: `releaseDemand`,
@@ -889,6 +896,44 @@ it(`keeps a same-name publication demand active on its surviving source`, () => 
     `ordered-row`,
     `source-b-row`,
   ])
+})
+
+it(`treats a same-name demand from another source as additional`, () => {
+  const history: Array<LoadSubsetFullFlowEvent> = [
+    {
+      type: `requestDemand`,
+      sourceId: `source-b`,
+      ownerId: `owner-b`,
+      sessionId: `session`,
+      demandId: `ordered`,
+      attemptId: `attempt-b`,
+      alreadyAborted: false,
+    },
+    {
+      type: `stagePublicationRows`,
+      publicationId: `publication`,
+      sourceId: `source-a`,
+      demandId: `ordered`,
+      rows: [{ key: `source-a-row`, orderValue: 1 }],
+    },
+    {
+      type: `stagePublicationRows`,
+      publicationId: `publication`,
+      sourceId: `source-b`,
+      demandId: `ordered`,
+      rows: [{ key: `source-b-row`, orderValue: 2 }],
+    },
+    { type: `commitPublication`, publicationId: `publication` },
+  ]
+
+  expect(
+    projectAtomicOrderedPublicationState(history, {
+      sourceId: `source-a`,
+      demandId: `ordered`,
+      direction: `asc`,
+      initialWindowSize: 1,
+    }).currentPublication?.rows.map(({ key }) => key),
+  ).toEqual([`source-a-row`, `source-b-row`])
 })
 
 it(`settles same-name replacement demands independently by source`, () => {
@@ -1068,9 +1113,10 @@ it(`applies target events only to their named source and demand`, () => {
   const establish = (
     sourceId: string,
     demandId = `ordered`,
+    publicationId = `replacement`,
   ): LoadSubsetFullFlowEvent => ({
     type: `establishReplacementCoverage`,
-    publicationId: `replacement`,
+    publicationId,
     sourceId,
     demandId,
   })
@@ -1094,6 +1140,9 @@ it(`applies target events only to their named source and demand`, () => {
   expect(rows([...base, settle, establish(`source-a`, `other`)])).toEqual([
     `old-row`,
   ])
+  expect(
+    rows([...base, settle, establish(`source-a`, `ordered`, `obsolete`)]),
+  ).toEqual([`old-row`])
   expect(rows([...base, settle, establish(`source-a`)])).toEqual([`new-row-a`])
   expect(
     rows([...base, resize(`source-b`), settle, establish(`source-a`)]),
