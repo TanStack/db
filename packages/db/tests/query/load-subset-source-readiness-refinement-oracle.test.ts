@@ -57,7 +57,10 @@ it.each([`resolve`, `reject`] as const)(
     let childWrite!: (message: { type: `insert`; value: Child }) => void
     let childCommit!: () => true | Promise<void>
     const pending: Array<PendingRequest> = []
-    const unloads: Array<LoadSubsetOptions> = []
+    const unloads: Array<{
+      options: LoadSubsetOptions
+      abortedAtUnload: boolean | undefined
+    }> = []
     const child = createCollection<Child>({
       id: childId,
       getKey: (row) => row.id,
@@ -91,7 +94,10 @@ it.each([`resolve`, `reject`] as const)(
               })
             },
             unloadSubset: (options) => {
-              unloads.push(options)
+              unloads.push({
+                options,
+                abortedAtUnload: options.signal?.aborted,
+              })
             },
           }
         },
@@ -144,6 +150,15 @@ it.each([`resolve`, `reject`] as const)(
           (value): value is string => typeof value === `string`,
         )
       })
+    const expectUnloads = (
+      ...expectedOptions: ReadonlyArray<LoadSubsetOptions>
+    ): void => {
+      expect(unloads).toHaveLength(expectedOptions.length)
+      for (const [index, options] of expectedOptions.entries()) {
+        expect(unloads[index]!.options).toBe(options)
+        expect(unloads[index]!.abortedAtUnload).toBe(true)
+      }
+    }
     let liveCleaned = false
 
     try {
@@ -168,7 +183,7 @@ it.each([`resolve`, `reject`] as const)(
       expect(requestedGroups(pending[1]!.options)).toEqual([`fresh`])
       expect(pending[0]!.options.signal?.aborted).toBe(true)
       expect(pending[1]!.options.signal?.aborted).toBe(false)
-      expect(unloads).toEqual([pending[0]!.options])
+      expectUnloads(pending[0]!.options)
       history.push(
         {
           type: `retireSourceDemand`,
@@ -234,12 +249,12 @@ it.each([`resolve`, `reject`] as const)(
         }),
       ])
       expect(pending[1]!.options.signal?.aborted).toBe(false)
-      expect(unloads).toEqual([pending[0]!.options])
+      expectUnloads(pending[0]!.options)
 
       await live.cleanup()
       liveCleaned = true
       expect(pending[1]!.options.signal?.aborted).toBe(true)
-      expect(unloads).toEqual([pending[0]!.options, pending[1]!.options])
+      expectUnloads(pending[0]!.options, pending[1]!.options)
     } finally {
       for (const request of pending) {
         request.rows.resolve([])
