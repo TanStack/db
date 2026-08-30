@@ -7,7 +7,9 @@ import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import {
   projectAcquisitionSettlement,
   projectAdapterLifecycle,
+  projectAtomicOrderedPublicationState,
   projectAuthorizedContinuationStarts,
+  projectOrderedPublicationBoundary,
   projectReplayPublication,
   projectRetainedRowKeys,
   projectReusableDemands,
@@ -566,6 +568,8 @@ function renameHistoryIds(
           demandId: `${event.demandId}-${suffix}`,
           attemptId: `${event.attemptId}-${suffix}`,
         }
+      case `truncateSource`:
+        return { ...event, sessionId: `${event.sessionId}-${suffix}` }
       case `settleDemandWithoutEvidence`:
         return {
           ...event,
@@ -628,10 +632,60 @@ function renameHistoryIds(
           ...event,
           acquisitionId: `${event.acquisitionId}-${suffix}`,
         }
+      case `stagePublicationRows`:
+        return {
+          ...event,
+          publicationId: `${event.publicationId}-${suffix}`,
+          demandId: `${event.demandId}-${suffix}`,
+        }
+      case `commitPublication`:
+      case `establishReplacementCoverage`:
+        return {
+          ...event,
+          publicationId: `${event.publicationId}-${suffix}`,
+        }
+      case `beginReplacement`:
+        return {
+          ...event,
+          publicationId: `${event.publicationId}-${suffix}`,
+          demandIds: event.demandIds.map((demandId) => `${demandId}-${suffix}`),
+        }
+      case `settleReplacement`:
+        return {
+          ...event,
+          publicationId: `${event.publicationId}-${suffix}`,
+          demandId: `${event.demandId}-${suffix}`,
+        }
       default:
         return event
     }
   })
+}
+
+function expectObservationPreservedAfterEveryPrefix<T>(
+  history: ReadonlyArray<LoadSubsetFullFlowEvent>,
+  suffix: string,
+  project: (
+    prefix: ReadonlyArray<LoadSubsetFullFlowEvent>,
+    suffix: string,
+  ) => T,
+  normalize: (observation: T, suffix: string) => unknown = (observation) =>
+    observation,
+): void {
+  for (let prefixLength = 0; prefixLength <= history.length; prefixLength++) {
+    const prefix = history.slice(0, prefixLength)
+    expect(
+      normalize(project(renameHistoryIds(prefix, suffix), suffix), suffix),
+      JSON.stringify({ prefixLength, prefix }),
+    ).toEqual(normalize(project(prefix, ``), ``))
+  }
+}
+
+function removeRenamingSuffix(value: string, suffix: string): string {
+  const marker = `-${suffix}`
+  return suffix !== `` && value.endsWith(marker)
+    ? value.slice(0, -marker.length)
+    : value
 }
 
 for (const campaign of refinementCampaigns(1_779_002)) {
@@ -660,8 +714,10 @@ for (const campaign of refinementCampaigns(1_779_002)) {
         },
       ]
 
-      expect(projectSourceReadiness(renameHistoryIds(history, suffix))).toEqual(
-        projectSourceReadiness(history),
+      expectObservationPreservedAfterEveryPrefix(
+        history,
+        suffix,
+        projectSourceReadiness,
       )
     },
   )
@@ -763,6 +819,47 @@ for (const campaign of refinementCampaigns(1_779_003)) {
           renameHistoryIds(continuationHistory, suffix),
         ),
       ).toBe(projectAuthorizedContinuationStarts(continuationHistory))
+
+      for (const history of [
+        demandHistory,
+        evidenceFreeHistory,
+        continuationHistory,
+      ]) {
+        expectObservationPreservedAfterEveryPrefix(
+          history,
+          suffix,
+          projectTransportLoads,
+        )
+        expectObservationPreservedAfterEveryPrefix(
+          history,
+          suffix,
+          projectRetainedRowKeys,
+        )
+        expectObservationPreservedAfterEveryPrefix(
+          history,
+          suffix,
+          projectReusableDemands,
+          (demandIds, renamingSuffix) =>
+            demandIds.map((demandId) =>
+              removeRenamingSuffix(demandId, renamingSuffix),
+            ),
+        )
+        expectObservationPreservedAfterEveryPrefix(
+          history,
+          suffix,
+          projectAdapterLifecycle,
+          (events, renamingSuffix) =>
+            events.map(({ type, ownerId }) => ({
+              type,
+              ownerId: removeRenamingSuffix(ownerId, renamingSuffix),
+            })),
+        )
+        expectObservationPreservedAfterEveryPrefix(
+          history,
+          suffix,
+          projectAuthorizedContinuationStarts,
+        )
+      }
     },
   )
 }
@@ -786,6 +883,19 @@ for (const campaign of refinementCampaigns(1_779_004)) {
         callbackReads: original.callbackReads,
         receiptStates: original.receipts.map(({ state }) => state),
       })
+
+      expectObservationPreservedAfterEveryPrefix(
+        history,
+        suffix,
+        projectSyncTransactions,
+        (observation, renamingSuffix) => ({
+          ...observation,
+          receipts: observation.receipts.map(({ transactionId, state }) => ({
+            transactionId: removeRenamingSuffix(transactionId, renamingSuffix),
+            state,
+          })),
+        }),
+      )
     },
   )
 }
@@ -818,6 +928,24 @@ for (const campaign of refinementCampaigns(1_779_005)) {
 
       expect(normalizeOwners(projectAcquisitionSettlement(renamed))).toEqual(
         normalizeOwners(projectAcquisitionSettlement(history)),
+      )
+      expectObservationPreservedAfterEveryPrefix(
+        history,
+        suffix,
+        projectAcquisitionSettlement,
+        (observation, renamingSuffix) => ({
+          physicalStarts: observation.physicalStarts.map((acquisitionId) =>
+            removeRenamingSuffix(acquisitionId, renamingSuffix),
+          ),
+          owners: observation.owners.map(
+            ({ ownerId, state, rowKeys: keys }) => ({
+              ownerId: removeRenamingSuffix(ownerId, renamingSuffix),
+              state,
+              rowKeys: keys,
+            }),
+          ),
+          visibleRowKeys: observation.visibleRowKeys,
+        }),
       )
     },
   )
@@ -926,9 +1054,15 @@ for (const campaign of refinementCampaigns(1_779_006)) {
 }
 
 for (const campaign of refinementCampaigns(1_779_007)) {
-  fcTest.prop([fc.integer({ min: -10, max: 10 })], campaign.options)(
+  fcTest.prop(
+    [
+      fc.integer({ min: -10, max: 10 }),
+      fc.string({ minLength: 1, maxLength: 4 }),
+    ],
+    campaign.options,
+  )(
     `replay attempt names are observationally erased (${campaign.label})`,
-    (replacementVersion) => {
+    (replacementVersion, suffix) => {
       const baseline = { sourceId: `source`, rowKey: `row`, version: 0 }
       const replacement = {
         sourceId: `source`,
@@ -936,26 +1070,17 @@ for (const campaign of refinementCampaigns(1_779_007)) {
         version: replacementVersion,
       }
 
-      expect(
-        projectReplayPublication(
-          overlappingReplayHistory(
-            baseline,
-            replacement,
-            `attempt-a`,
-            `attempt-b`,
-            `new-first`,
-          ),
-        ),
-      ).toEqual(
-        projectReplayPublication(
-          overlappingReplayHistory(
-            baseline,
-            replacement,
-            `renamed-old`,
-            `renamed-new`,
-            `new-first`,
-          ),
-        ),
+      const history = overlappingReplayHistory(
+        baseline,
+        replacement,
+        `attempt-a`,
+        `attempt-b`,
+        `new-first`,
+      )
+      expectObservationPreservedAfterEveryPrefix(
+        history,
+        suffix,
+        projectReplayPublication,
       )
     },
   )
@@ -1003,6 +1128,546 @@ function acquisitionHistory(
         attach(`acquisition-b`, `owner-b`),
         settle(`acquisition-b`),
       ]
+}
+
+function sourceErasureHistories(): Array<Array<LoadSubsetFullFlowEvent>> {
+  const register = (
+    sessionId: string,
+    sourceId: string,
+    demandId: string,
+  ): LoadSubsetFullFlowEvent => ({
+    type: `registerSourceDemand`,
+    sessionId,
+    sourceId,
+    demandId,
+  })
+  const settle = (
+    sessionId: string,
+    sourceId: string,
+    demandId: string,
+    outcome: `resolve` | `reject`,
+  ): LoadSubsetFullFlowEvent => ({
+    type: `settleSourceDemand`,
+    sessionId,
+    sourceId,
+    demandId,
+    outcome,
+  })
+
+  return [
+    [
+      register(`session-a`, `source-a`, `demand-a`),
+      register(`session-a`, `source-b`, `demand-b`),
+      settle(`session-a`, `source-a`, `demand-a`, `resolve`),
+      settle(`session-a`, `source-b`, `demand-b`, `reject`),
+    ],
+    [
+      register(`session-a`, `source-a`, `demand-a`),
+      { type: `cleanupSession`, sessionId: `session-a` },
+      settle(`session-a`, `source-a`, `demand-a`, `resolve`),
+    ],
+    [
+      register(`session-a`, `source-a`, `demand-a`),
+      {
+        type: `restartSession`,
+        previousSessionId: `session-a`,
+        nextSessionId: `session-b`,
+      },
+      settle(`session-a`, `source-a`, `demand-a`, `reject`),
+      register(`session-b`, `source-b`, `demand-b`),
+      settle(`session-b`, `source-b`, `demand-b`, `resolve`),
+    ],
+  ]
+}
+
+function demandErasureHistories(): Array<Array<LoadSubsetFullFlowEvent>> {
+  const request = (
+    ownerId: string,
+    attemptId: string,
+    alreadyAborted = false,
+  ): LoadSubsetFullFlowEvent => ({
+    type: `requestDemand`,
+    ownerId,
+    sessionId: `session-a`,
+    demandId: `demand-a`,
+    attemptId,
+    alreadyAborted,
+  })
+  const release = (
+    ownerId: string,
+    attemptId: string,
+  ): LoadSubsetFullFlowEvent => ({
+    type: `releaseDemand`,
+    ownerId,
+    demandId: `demand-a`,
+    attemptId,
+    rowKeys: [`row-a`],
+    finalRowOwner: true,
+    invalidatesAdapterEvidence: true,
+  })
+
+  return [
+    [
+      request(`owner-a`, `attempt-a`),
+      {
+        type: `applyAuthoritativeRows`,
+        ownerId: `owner-a`,
+        demandId: `demand-a`,
+        attemptId: `attempt-a`,
+        rowKeys: [`row-a`],
+      },
+      release(`owner-a`, `attempt-a`),
+    ],
+    [
+      request(`owner-a`, `attempt-a`),
+      {
+        type: `applyUnprovenRows`,
+        ownerId: `owner-a`,
+        demandId: `demand-a`,
+        attemptId: `attempt-a`,
+        rowKeys: [`row-a`],
+      },
+      release(`owner-a`, `attempt-a`),
+    ],
+    [
+      request(`owner-a`, `attempt-a`),
+      {
+        type: `rejectDemand`,
+        ownerId: `owner-a`,
+        demandId: `demand-a`,
+        attemptId: `attempt-a`,
+      },
+      release(`owner-a`, `attempt-a`),
+    ],
+    [
+      request(`owner-a`, `attempt-a`),
+      {
+        type: `settleDemandWithoutEvidence`,
+        demandId: `demand-a`,
+        attemptId: `attempt-a`,
+      },
+      release(`owner-a`, `attempt-a`),
+    ],
+    [request(`owner-a`, `attempt-a`, true), release(`owner-a`, `attempt-a`)],
+    [
+      request(`owner-a`, `attempt-a`),
+      { type: `truncateSource`, sessionId: `session-a` },
+      request(`owner-b`, `attempt-b`),
+      {
+        type: `applyAuthoritativeRows`,
+        ownerId: `owner-a`,
+        demandId: `demand-a`,
+        attemptId: `attempt-a`,
+        rowKeys: [`stale-row`],
+      },
+      {
+        type: `applyAuthoritativeRows`,
+        ownerId: `owner-b`,
+        demandId: `demand-a`,
+        attemptId: `attempt-b`,
+        rowKeys: [`row-a`],
+      },
+    ],
+    [
+      request(`owner-a`, `attempt-a`),
+      {
+        type: `scheduleContinuation`,
+        taskId: `task-a`,
+        sessionId: `session-a`,
+        windowRevision: 0,
+      },
+      {
+        type: `advanceWindowRevision`,
+        sessionId: `session-a`,
+        revision: 1,
+      },
+      { type: `runContinuation`, taskId: `task-a` },
+      { type: `cleanupSession`, sessionId: `session-a` },
+      {
+        type: `restartSession`,
+        previousSessionId: `session-a`,
+        nextSessionId: `session-b`,
+      },
+      {
+        type: `requestDemand`,
+        ownerId: `owner-b`,
+        sessionId: `session-b`,
+        demandId: `demand-b`,
+        attemptId: `attempt-b`,
+        alreadyAborted: false,
+      },
+      {
+        type: `scheduleContinuation`,
+        taskId: `task-b`,
+        sessionId: `session-b`,
+        windowRevision: 0,
+      },
+      { type: `runContinuation`, taskId: `task-b` },
+    ],
+  ]
+}
+
+function transactionErasureHistories(): Array<Array<LoadSubsetFullFlowEvent>> {
+  const stage: LoadSubsetFullFlowEvent = {
+    type: `stageSyncTransaction`,
+    transactionId: `transaction`,
+    sourceId: `source`,
+    rowKeys: [`row`],
+  }
+  const settle: LoadSubsetFullFlowEvent = {
+    type: `settleSyncReceipt`,
+    transactionId: `transaction`,
+  }
+
+  return [
+    successfulTransaction(`transaction`, `source`, `row`),
+    [
+      stage,
+      {
+        type: `commitSyncTransaction`,
+        transactionId: `transaction`,
+        parked: false,
+        signalAborted: true,
+      },
+      settle,
+    ],
+    [
+      stage,
+      {
+        type: `commitSyncTransaction`,
+        transactionId: `transaction`,
+        parked: true,
+        signalAborted: false,
+      },
+      { type: `abortSyncTransaction`, transactionId: `transaction` },
+      settle,
+    ],
+    [
+      stage,
+      {
+        type: `commitSyncTransaction`,
+        transactionId: `transaction`,
+        parked: true,
+        signalAborted: false,
+      },
+      { type: `enterSyncApplication`, transactionId: `transaction` },
+      { type: `publishSyncTransaction`, transactionId: `transaction` },
+      settle,
+    ],
+  ]
+}
+
+function replayErasureHistories(): Array<Array<LoadSubsetFullFlowEvent>> {
+  const baseline = { sourceId: `source`, rowKey: `row`, version: 0 }
+  const replacement = { sourceId: `source`, rowKey: `row`, version: 1 }
+
+  return [
+    overlappingReplayHistory(
+      baseline,
+      replacement,
+      `attempt-a`,
+      `attempt-b`,
+      `old-first`,
+    ),
+    overlappingReplayHistory(
+      baseline,
+      replacement,
+      `attempt-a`,
+      `attempt-b`,
+      `new-first`,
+    ),
+    [
+      { type: `establishPublication`, sourceId: `source`, rows: [baseline] },
+      { type: `startReplay`, attemptId: `attempt-a`, sourceId: `source` },
+      {
+        type: `writeReplayRows`,
+        attemptId: `attempt-a`,
+        rows: [replacement],
+        acceptedByCore: false,
+      },
+      { type: `settleReplay`, attemptId: `attempt-a`, outcome: `resolve` },
+    ],
+    [
+      { type: `establishPublication`, sourceId: `source`, rows: [baseline] },
+      { type: `startReplay`, attemptId: `attempt-a`, sourceId: `source` },
+      { type: `settleReplay`, attemptId: `attempt-a`, outcome: `reject` },
+    ],
+  ]
+}
+
+function publicationErasureHistories(): Array<Array<LoadSubsetFullFlowEvent>> {
+  const orderedRows = [
+    { key: `row-a`, orderValue: 1 },
+    { key: `row-b`, orderValue: 2 },
+  ]
+  const relatedRows = [{ key: `related`, orderValue: 3 }]
+  const requestRelated: LoadSubsetFullFlowEvent = {
+    type: `requestDemand`,
+    ownerId: `owner-related`,
+    sessionId: `session`,
+    demandId: `related`,
+    attemptId: `attempt-related`,
+    alreadyAborted: false,
+  }
+
+  return [
+    [
+      {
+        type: `stagePublicationRows`,
+        publicationId: `publication-a`,
+        demandId: `ordered`,
+        rows: orderedRows,
+      },
+      {
+        type: `commitPublication`,
+        publicationId: `publication-a`,
+      },
+      { type: `resizeOrderedWindow`, size: 2 },
+    ],
+    [
+      {
+        type: `stagePublicationRows`,
+        publicationId: `publication-a`,
+        demandId: `ordered`,
+        rows: orderedRows,
+      },
+      {
+        type: `commitPublication`,
+        publicationId: `publication-a`,
+      },
+      requestRelated,
+      {
+        type: `stagePublicationRows`,
+        publicationId: `publication-b`,
+        demandId: `ordered`,
+        rows: orderedRows.slice(1),
+      },
+      {
+        type: `stagePublicationRows`,
+        publicationId: `publication-b`,
+        demandId: `related`,
+        rows: relatedRows,
+      },
+      {
+        type: `beginReplacement`,
+        publicationId: `publication-b`,
+        demandIds: [`ordered`, `related`],
+      },
+      {
+        type: `settleReplacement`,
+        publicationId: `publication-b`,
+        demandId: `related`,
+        outcome: `success`,
+        extent: `exhausted`,
+      },
+      {
+        type: `settleReplacement`,
+        publicationId: `publication-b`,
+        demandId: `ordered`,
+        outcome: `success`,
+        extent: `continues`,
+      },
+      {
+        type: `establishReplacementCoverage`,
+        publicationId: `publication-b`,
+      },
+      {
+        type: `releaseDemand`,
+        ownerId: `owner-related`,
+        demandId: `related`,
+        attemptId: `attempt-related`,
+        rowKeys: [`related`],
+        finalRowOwner: true,
+        invalidatesAdapterEvidence: true,
+      },
+    ],
+    [
+      {
+        type: `stagePublicationRows`,
+        publicationId: `publication-a`,
+        demandId: `ordered`,
+        rows: orderedRows,
+      },
+      {
+        type: `commitPublication`,
+        publicationId: `publication-a`,
+      },
+      requestRelated,
+      {
+        type: `beginReplacement`,
+        publicationId: `publication-b`,
+        demandIds: [`ordered`, `related`],
+      },
+      {
+        type: `settleReplacement`,
+        publicationId: `publication-b`,
+        demandId: `related`,
+        outcome: `abort`,
+      },
+      {
+        type: `settleReplacement`,
+        publicationId: `publication-b`,
+        demandId: `ordered`,
+        outcome: `failure`,
+      },
+      { type: `cleanupSession`, sessionId: `session` },
+      {
+        type: `settleReplacement`,
+        publicationId: `publication-b`,
+        demandId: `ordered`,
+        outcome: `success`,
+        extent: `exhausted`,
+      },
+    ],
+  ]
+}
+
+for (const campaign of refinementCampaigns(1_779_009)) {
+  fcTest.prop([fc.string({ minLength: 1, maxLength: 4 })], campaign.options)(
+    `erased identities preserve every bounded next-command observation (${campaign.label})`,
+    (suffix) => {
+      for (const history of sourceErasureHistories()) {
+        expectObservationPreservedAfterEveryPrefix(
+          history,
+          suffix,
+          projectSourceReadiness,
+        )
+      }
+
+      for (const history of demandErasureHistories()) {
+        expectObservationPreservedAfterEveryPrefix(
+          history,
+          suffix,
+          projectTransportLoads,
+        )
+        expectObservationPreservedAfterEveryPrefix(
+          history,
+          suffix,
+          projectRetainedRowKeys,
+        )
+        expectObservationPreservedAfterEveryPrefix(
+          history,
+          suffix,
+          projectReusableDemands,
+          (demandIds, renamingSuffix) =>
+            demandIds.map((demandId) =>
+              removeRenamingSuffix(demandId, renamingSuffix),
+            ),
+        )
+        expectObservationPreservedAfterEveryPrefix(
+          history,
+          suffix,
+          projectAdapterLifecycle,
+          (events, renamingSuffix) =>
+            events.map(({ type, ownerId }) => ({
+              type,
+              ownerId: removeRenamingSuffix(ownerId, renamingSuffix),
+            })),
+        )
+        expectObservationPreservedAfterEveryPrefix(
+          history,
+          suffix,
+          projectAuthorizedContinuationStarts,
+        )
+      }
+
+      for (const history of transactionErasureHistories()) {
+        expectObservationPreservedAfterEveryPrefix(
+          history,
+          suffix,
+          projectSyncTransactions,
+          (observation, renamingSuffix) => ({
+            ...observation,
+            receipts: observation.receipts.map(({ transactionId, state }) => ({
+              transactionId: removeRenamingSuffix(
+                transactionId,
+                renamingSuffix,
+              ),
+              state,
+            })),
+          }),
+        )
+      }
+
+      for (const history of replayErasureHistories()) {
+        expectObservationPreservedAfterEveryPrefix(
+          history,
+          suffix,
+          projectReplayPublication,
+        )
+      }
+
+      for (const history of publicationErasureHistories()) {
+        const orderedProjection = (
+          prefix: ReadonlyArray<LoadSubsetFullFlowEvent>,
+          renamingSuffix: string,
+        ) =>
+          projectAtomicOrderedPublicationState(prefix, {
+            demandId:
+              renamingSuffix === `` ? `ordered` : `ordered-${renamingSuffix}`,
+            direction: `asc`,
+            initialWindowSize: 1,
+          })
+        expectObservationPreservedAfterEveryPrefix(
+          history,
+          suffix,
+          orderedProjection,
+        )
+        expectObservationPreservedAfterEveryPrefix(
+          history,
+          suffix,
+          (prefix, renamingSuffix) =>
+            projectOrderedPublicationBoundary(prefix, {
+              demandId:
+                renamingSuffix === `` ? `ordered` : `ordered-${renamingSuffix}`,
+              direction: `asc`,
+              prefixSize: 2,
+            }),
+        )
+      }
+
+      for (const history of [
+        acquisitionHistory(`shared`, [`row-a`, `row-b`]),
+        acquisitionHistory(`separate`, [`row-a`, `row-b`]),
+        [
+          {
+            type: `startAcquisition`,
+            acquisitionId: `acquisition`,
+            sourceId: `source`,
+            demandId: `demand`,
+          },
+          {
+            type: `attachAcquisitionOwner`,
+            acquisitionId: `acquisition`,
+            ownerId: `owner`,
+          },
+          {
+            type: `settleAcquisition`,
+            acquisitionId: `acquisition`,
+            outcome: `reject`,
+            rowKeys: [`ghost-row`],
+          },
+        ] satisfies Array<LoadSubsetFullFlowEvent>,
+      ]) {
+        expectObservationPreservedAfterEveryPrefix(
+          history,
+          suffix,
+          projectAcquisitionSettlement,
+          (observation, renamingSuffix) => ({
+            physicalStarts: observation.physicalStarts.map((acquisitionId) =>
+              removeRenamingSuffix(acquisitionId, renamingSuffix),
+            ),
+            owners: observation.owners.map(({ ownerId, state, rowKeys }) => ({
+              ownerId: removeRenamingSuffix(ownerId, renamingSuffix),
+              state,
+              rowKeys,
+            })),
+            visibleRowKeys: observation.visibleRowKeys,
+          }),
+        )
+      }
+    },
+  )
 }
 
 function semanticAcquisitionResult(
