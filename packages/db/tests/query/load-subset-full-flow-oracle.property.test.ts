@@ -408,13 +408,13 @@ let multiSourceOrderedHarnessId = 0
 async function expectMultiSourceStepToSettle<T>(
   scenario: MultiSourceOrderedScenario,
   step: string,
-  promise: Promise<T>,
-): Promise<T> {
+  result: T,
+): Promise<Awaited<T>> {
   let timeout: ReturnType<typeof setTimeout> | undefined
   try {
     return await Promise.race([
-      promise,
-      new Promise<T>((_, reject) => {
+      Promise.resolve(result),
+      new Promise<never>((_, reject) => {
         timeout = setTimeout(() => {
           reject(
             new Error(`${step} did not settle for ${JSON.stringify(scenario)}`),
