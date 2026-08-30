@@ -765,6 +765,40 @@ describe(`createDeduplicatedLoadSubset`, () => {
     expect(loadSubsetCalls).toBe(1)
   })
 
+  it(`does not retain coverage when fulfilled result normalization throws`, async () => {
+    const resultError = new Error(`result read failed`)
+    const hostileResult = {
+      get hasMore(): boolean | undefined {
+        throw resultError
+      },
+    }
+    const signal = {
+      aborted: false,
+      reason: undefined,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as AbortSignal
+    let loadSubsetCalls = 0
+    const loadSubset: LoadSubsetFn = () => {
+      loadSubsetCalls += 1
+      return Promise.resolve(
+        loadSubsetCalls === 1 ? hostileResult : { hasMore: undefined },
+      )
+    }
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+
+    await expect(deduplicated.loadSubset({ limit: 2, signal })).rejects.toBe(
+      resultError,
+    )
+    expect(signal.addEventListener).toHaveBeenCalledTimes(1)
+    expect(signal.removeEventListener).toHaveBeenCalledTimes(1)
+
+    const retry = deduplicated.loadSubset({ limit: 2 })
+    expect(retry).toBeInstanceOf(Promise)
+    await retry
+    expect(loadSubsetCalls).toBe(2)
+  })
+
   it(`shares in-flight work while any cancellation owner remains active`, async () => {
     let resolveLoad: (() => void) | undefined
     let sharedSignal: AbortSignal | undefined

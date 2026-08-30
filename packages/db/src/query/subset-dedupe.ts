@@ -299,6 +299,12 @@ export class DeduplicatedLoadSubset {
       try {
         observedPromise = normalizedResultPromise
           .then((result) => {
+            // Retain every fallible adapter result field before publishing
+            // coverage. A rejected caller must never leave reusable evidence.
+            const retainedResult = recordLoadSubsetResultDemandMatcher(
+              result,
+              matchesPhysicalRequest,
+            )
             // Only update tracking if this request is still from the current generation
             // If reset() was called, the generation will have incremented and we should
             // not repopulate the state that was just cleared
@@ -310,10 +316,7 @@ export class DeduplicatedLoadSubset {
               this.updateTracking(trackingOptions)
               this.exactAcquisitions.push(installation.entry)
             }
-            return recordLoadSubsetResultDemandMatcher(
-              result,
-              matchesPhysicalRequest,
-            )
+            return retainedResult
           })
           .finally(() => {
             // Always remove from in-flight array on completion OR rejection
