@@ -310,6 +310,56 @@ it(`retains a row until its last independent demand claim releases`, () => {
   ).toEqual([])
 })
 
+it(`attaches late rows only to attempts that shared the settling acquisition`, () => {
+  const request = (
+    ownerId: string,
+    attemptId: string,
+  ): LoadSubsetFullFlowEvent => ({
+    type: `requestDemand`,
+    ownerId,
+    sessionId: `session`,
+    demandId: `shared`,
+    attemptId,
+    alreadyAborted: false,
+  })
+  const release = (
+    ownerId: string,
+    attemptId: string,
+  ): LoadSubsetFullFlowEvent => ({
+    type: `releaseDemand`,
+    ownerId,
+    demandId: `shared`,
+    attemptId,
+  })
+  const lateSettlement: LoadSubsetFullFlowEvent = {
+    type: `applyAuthoritativeRows`,
+    ownerId: `old-owner`,
+    demandId: `shared`,
+    attemptId: `old-attempt`,
+    rowKeys: [`stale-row`],
+  }
+  const oldRequest = request(`old-owner`, `old-attempt`)
+  const oldRelease = release(`old-owner`, `old-attempt`)
+
+  const freshCohort = [
+    oldRequest,
+    oldRelease,
+    request(`fresh-owner`, `fresh-attempt`),
+    lateSettlement,
+  ]
+  expect(projectRetainedRowKeys(freshCohort)).toEqual([])
+  expect(projectReusableDemands(freshCohort)).toEqual([])
+
+  const attachedPeer = [
+    oldRequest,
+    request(`peer-owner`, `peer-attempt`),
+    oldRelease,
+    lateSettlement,
+  ]
+  expect(projectRetainedRowKeys(attachedPeer)).toEqual([`stale-row`])
+  expect(projectReusableDemands(attachedPeer)).toEqual([`shared`])
+})
+
 it.each([
   {
     name: `one owner releases the first attempt first`,
@@ -410,6 +460,32 @@ it.each([
       active ? [`o`, `x`] : [`o`],
     )
   }
+
+  const lateSharedSettlement = [
+    requests[0]!,
+    requests[1]!,
+    releases[0]!,
+    settlement,
+  ]
+  expect(projectRetainedRowKeys(lateSharedSettlement)).toEqual([`x`])
+  expect(projectReusableDemands(lateSharedSettlement)).toEqual([demandId])
+
+  const fullyReleasedBeforeSettlement = [
+    ...requests,
+    ...releases,
+    {
+      type: `requestDemand`,
+      ownerId: `fresh-owner`,
+      sessionId: `session`,
+      demandId,
+      attemptId: `fresh-attempt`,
+      alreadyAborted: false,
+    } satisfies LoadSubsetFullFlowEvent,
+    settlement,
+  ]
+  expect(projectRetainedRowKeys(fullyReleasedBeforeSettlement)).toEqual([])
+  expect(projectReusableDemands(fullyReleasedBeforeSettlement)).toEqual([])
+  expect(projectTransportLoads(fullyReleasedBeforeSettlement)).toBe(2)
 })
 
 it.each([
