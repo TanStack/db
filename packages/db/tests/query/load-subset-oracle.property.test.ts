@@ -1119,13 +1119,10 @@ async function runAsyncScenarioWithKnownFailures(
   }
 }
 
-const { multiplier, replaySeed, replayPath } = readOracleRunConfig()
+const { multiplier, ...replay } = readOracleRunConfig()
 const coverageScenarioRuns = 40 * multiplier
-const coverageRandomParameters = oracleRandomParameters(
-  coverageScenarioRuns,
-  replaySeed,
-  replayPath,
-)
+const coverageRandomParameters = (property: string) =>
+  oracleRandomParameters(coverageScenarioRuns, replay, property)
 
 let collectionSequence = 0
 
@@ -2707,7 +2704,10 @@ describe(`loadSubset coverage oracle`, () => {
     runCoverageTraceWithKnownFailures,
   )
 
-  fcTest.prop([requestTraceArbitrary], coverageRandomParameters)(
+  fcTest.prop(
+    [requestTraceArbitrary],
+    coverageRandomParameters(`load-subset.coverage`),
+  )(
     `matches finite-domain coverage for a random or replayed seed`,
     runCoverageTraceWithKnownFailures,
   )
@@ -2720,7 +2720,10 @@ describe(`loadSubset coverage oracle`, () => {
     runAsyncScenarioWithKnownFailures,
   )
 
-  fcTest.prop([asyncScenarioArbitrary], coverageRandomParameters)(
+  fcTest.prop(
+    [asyncScenarioArbitrary],
+    coverageRandomParameters(`load-subset.async-settlement`),
+  )(
     `settles, retries, and resets in-flight set requests for a random or replayed seed`,
     runAsyncScenarioWithKnownFailures,
   )
@@ -2735,7 +2738,7 @@ describe(`loadSubset coverage oracle`, () => {
 
   fcTest.prop(
     [concurrentAsyncScenarioArbitrary, resultWrapperModeArbitrary],
-    coverageRandomParameters,
+    coverageRandomParameters(`load-subset.concurrent-dedupe`),
   )(
     `deduplicates three or more concurrent requests for a random or replayed seed`,
     runConcurrentAsyncScenario,
@@ -2749,7 +2752,10 @@ describe(`loadSubset coverage oracle`, () => {
     expectDeduplicatedWaiterHandlesRejection,
   )
 
-  fcTest.prop([rejectedWaiterScenarioArbitrary], coverageRandomParameters)(
+  fcTest.prop(
+    [rejectedWaiterScenarioArbitrary],
+    coverageRandomParameters(`load-subset.rejected-waiter`),
+  )(
     `checks rejected requests observed by an in-flight waiter for a random or replayed seed`,
     expectDeduplicatedWaiterHandlesRejection,
   )
@@ -2762,7 +2768,10 @@ describe(`loadSubset coverage oracle`, () => {
     runWindowCoverageTraceWithKnownFailures,
   )
 
-  fcTest.prop([windowTraceArbitrary], coverageRandomParameters)(
+  fcTest.prop(
+    [windowTraceArbitrary],
+    coverageRandomParameters(`load-subset.ordered-window`),
+  )(
     `never treats uncovered ordered windows as loaded for a random or replayed seed`,
     runWindowCoverageTraceWithKnownFailures,
   )
@@ -2775,7 +2784,10 @@ describe(`loadSubset coverage oracle`, () => {
     runWindowCoverageTraceWithKnownFailures,
   )
 
-  fcTest.prop([changingWhereWindowTraceArbitrary], coverageRandomParameters)(
+  fcTest.prop(
+    [changingWhereWindowTraceArbitrary],
+    coverageRandomParameters(`load-subset.changing-predicate`),
+  )(
     `keeps changing predicates distinct across window histories for a random or replayed seed`,
     runWindowCoverageTraceWithKnownFailures,
   )
@@ -2788,7 +2800,10 @@ describe(`loadSubset coverage oracle`, () => {
     expectDistinctWhereStartsDistinctLimitedWindowLoads,
   )
 
-  fcTest.prop([distinctWindowWherePairArbitrary], coverageRandomParameters)(
+  fcTest.prop(
+    [distinctWindowWherePairArbitrary],
+    coverageRandomParameters(`load-subset.distinct-window-predicate`),
+  )(
     `keeps distinct limited-window predicates separate for a random or replayed seed`,
     expectDistinctWhereStartsDistinctLimitedWindowLoads,
   )

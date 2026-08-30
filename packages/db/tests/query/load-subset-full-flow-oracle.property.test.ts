@@ -153,11 +153,8 @@ it(`loads each side of a filtered inner join once`, async () => {
   }
 })
 
-const {
-  multiplier: fullFlowMultiplier,
-  replaySeed: fullFlowReplaySeed,
-  replayPath: fullFlowReplayPath,
-} = readOracleRunConfig()
+const { multiplier: fullFlowMultiplier, ...fullFlowReplay } =
+  readOracleRunConfig()
 
 type MultiSourceOrderedScenario = {
   primaryRows: ReadonlyArray<{
@@ -303,7 +300,11 @@ if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
       `multiplicity=${new Set(secondaryRows.map(({ joinKey }) => joinKey)).size < secondaryRows.length}`,
       `tied=${new Set(primaryRows.map(({ rank }) => rank)).size < primaryRows.length}`,
     ],
-    oracleRandomParameters(1_000, fullFlowReplaySeed, fullFlowReplayPath),
+    oracleRandomParameters(
+      1_000,
+      fullFlowReplay,
+      `load-subset-full-flow.multi-source-statistics`,
+    ),
   )
 }
 
@@ -2579,8 +2580,8 @@ fcTest.prop(
   [multiSourceOrderedScenarioArbitrary],
   oracleRandomParameters(
     12 * fullFlowMultiplier,
-    fullFlowReplaySeed,
-    fullFlowReplayPath,
+    fullFlowReplay,
+    `load-subset-full-flow.multi-source-ordered`,
   ),
 )(
   `fills joined ordered windows for a random or replayed seed`,
@@ -4162,8 +4163,8 @@ fcTest.prop(
   [orderedConsumerParityScenarioArbitrary],
   oracleRandomParameters(
     12 * fullFlowMultiplier,
-    fullFlowReplaySeed,
-    fullFlowReplayPath,
+    fullFlowReplay,
+    `load-subset-full-flow.consumer-parity`,
   ),
 )(
   `keeps ordered collection consumers equal for a random or replayed seed`,
@@ -4820,7 +4821,11 @@ if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
       )}`,
       `exhaustion=${pages.some((page) => page.extent === `exhausted`)}`,
     ],
-    oracleRandomParameters(1_000, fullFlowReplaySeed, fullFlowReplayPath),
+    oracleRandomParameters(
+      1_000,
+      fullFlowReplay,
+      `load-subset-full-flow.continuation-statistics`,
+    ),
   )
 }
 
@@ -5093,8 +5098,8 @@ fcTest.prop(
   ],
   oracleRandomParameters(
     128 * fullFlowMultiplier,
-    fullFlowReplaySeed,
-    fullFlowReplayPath,
+    fullFlowReplay,
+    `load-subset-full-flow.automatic-progress`,
   ),
 )(
   `starts automatic continuation only for new semantic progress with a random or replayed seed`,
@@ -5113,8 +5118,8 @@ fcTest.prop(
   [orderedContinuationEvidenceScenarioArbitrary],
   oracleRandomParameters(
     64 * fullFlowMultiplier,
-    fullFlowReplaySeed,
-    fullFlowReplayPath,
+    fullFlowReplay,
+    `load-subset-full-flow.continuation-evidence`,
   ),
 )(
   `derives ordered progress from applied eligible evidence for a random or replayed seed`,
@@ -5448,8 +5453,8 @@ fcTest.prop(
   [orderedBoundaryProvenanceArbitrary],
   oracleRandomParameters(
     32 * fullFlowMultiplier,
-    fullFlowReplaySeed,
-    fullFlowReplayPath,
+    fullFlowReplay,
+    `load-subset-full-flow.boundary-provenance`,
   ),
 )(
   `keeps ordered boundary provenance for a random or replayed seed`,
@@ -6368,8 +6373,8 @@ fcTest.prop(
   [atomicOrderedReplayArbitrary],
   oracleRandomParameters(
     32 * fullFlowMultiplier,
-    fullFlowReplaySeed,
-    fullFlowReplayPath,
+    fullFlowReplay,
+    `load-subset-full-flow.atomic-replacement`,
   ),
 )(
   `keeps ordered replacement publication atomic for a random or replayed seed`,
@@ -6391,8 +6396,8 @@ fcTest.prop(
   [truncateCoverageScenarioArbitrary],
   oracleRandomParameters(
     12 * fullFlowMultiplier,
-    fullFlowReplaySeed,
-    fullFlowReplayPath,
+    fullFlowReplay,
+    `load-subset-full-flow.truncate-evidence`,
   ),
 )(
   `fences pre-truncate evidence for a random or replayed seed`,

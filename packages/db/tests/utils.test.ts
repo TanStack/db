@@ -11,8 +11,14 @@ describe(`oracle run configuration`, () => {
         TANSTACK_DB_ORACLE_RUNS_MULTIPLIER: `100`,
         TANSTACK_DB_ORACLE_SEED: `-42`,
         TANSTACK_DB_ORACLE_PATH: `1:0:2`,
+        TANSTACK_DB_ORACLE_PROPERTY: `coverage.claim-churn`,
       }),
-    ).toEqual({ multiplier: 100, replaySeed: -42, replayPath: `1:0:2` })
+    ).toEqual({
+      multiplier: 100,
+      replaySeed: -42,
+      replayPath: `1:0:2`,
+      replayProperty: `coverage.claim-churn`,
+    })
   })
 
   it(`uses one run multiplier and no replay coordinates by default`, () => {
@@ -20,6 +26,7 @@ describe(`oracle run configuration`, () => {
       multiplier: 1,
       replaySeed: undefined,
       replayPath: undefined,
+      replayProperty: undefined,
     })
   })
 
@@ -30,6 +37,29 @@ describe(`oracle run configuration`, () => {
     [{ TANSTACK_DB_ORACLE_SEED: `1.5` }, `must be an integer`],
     [{ TANSTACK_DB_ORACLE_SEED: ` ` }, `must be an integer`],
     [{ TANSTACK_DB_ORACLE_PATH: `1:0` }, `requires TANSTACK_DB_ORACLE_SEED`],
+    [
+      {
+        TANSTACK_DB_ORACLE_SEED: `42`,
+        TANSTACK_DB_ORACLE_PATH: ` `,
+        TANSTACK_DB_ORACLE_PROPERTY: `coverage.claim-churn`,
+      },
+      `must be non-empty`,
+    ],
+    [
+      {
+        TANSTACK_DB_ORACLE_SEED: `42`,
+        TANSTACK_DB_ORACLE_PATH: `1:-1`,
+        TANSTACK_DB_ORACLE_PROPERTY: `coverage.claim-churn`,
+      },
+      `colon-separated nonnegative integers`,
+    ],
+    [
+      {
+        TANSTACK_DB_ORACLE_SEED: `42`,
+        TANSTACK_DB_ORACLE_PATH: `1:0`,
+      },
+      `requires TANSTACK_DB_ORACLE_PROPERTY`,
+    ],
   ] satisfies ReadonlyArray<readonly [Record<string, string>, string]>)(
     `rejects invalid environment values`,
     (environment, message) => {
@@ -37,12 +67,30 @@ describe(`oracle run configuration`, () => {
     },
   )
 
-  it(`adds replay coordinates only for replay runs`, () => {
-    expect(oracleRandomParameters(40, undefined)).toEqual({ numRuns: 40 })
-    expect(() => oracleRandomParameters(40, undefined, `1:0:2`)).toThrow(
-      `requires a replay seed`,
+  it(`adds a shrink path only to its named property`, () => {
+    const ordinaryRun = {
+      replaySeed: undefined,
+      replayPath: undefined,
+      replayProperty: undefined,
+    }
+    const replayRun = {
+      replaySeed: -42,
+      replayPath: `1:0:2`,
+      replayProperty: `coverage.claim-churn`,
+    }
+
+    expect(
+      oracleRandomParameters(40, ordinaryRun, `coverage.claim-churn`),
+    ).toEqual({ numRuns: 40 })
+    expect(oracleRandomParameters(40, replayRun, `coverage.other-law`)).toEqual(
+      {
+        numRuns: 40,
+        seed: -42,
+      },
     )
-    expect(oracleRandomParameters(40, -42, `1:0:2`)).toEqual({
+    expect(
+      oracleRandomParameters(40, replayRun, `coverage.claim-churn`),
+    ).toEqual({
       numRuns: 40,
       seed: -42,
       path: `1:0:2`,

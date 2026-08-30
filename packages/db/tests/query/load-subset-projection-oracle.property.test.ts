@@ -256,7 +256,10 @@ const projectionScenarioArbitrary = fc
     return { sourceSize, callerOffset, callerLimit }
   })
 
-fcTest.prop([projectionScenarioArbitrary], oraclePropertyOptions(50))(
+fcTest.prop(
+  [projectionScenarioArbitrary],
+  oraclePropertyOptions(50, `load-subset-projection.state-equivalence`),
+)(
   `projects covering exhaustion relative to a finite source world`,
   async ({ sourceSize, callerOffset, callerLimit }) => {
     const rows = Array.from({ length: sourceSize }, (_, id) => ({ id }))

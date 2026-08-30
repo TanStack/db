@@ -413,7 +413,13 @@ describe(`layered-query publication oracle`, () => {
 
   for (const q1Shape of q1Shapes) {
     for (const q2Shape of q2Shapes) {
-      fcTest.prop([changedValueArbitrary], oraclePropertyOptions(12))(
+      fcTest.prop(
+        [changedValueArbitrary],
+        oraclePropertyOptions(
+          12,
+          `includes-publication.parent-scalar.${q1Shape}.${q2Shape}`,
+        ),
+      )(
         `publishes #1713 updates through a ${q1Shape} Q1 and ${q2Shape} Q2`,
         async (value) => {
           await expectPublicationMatches(
@@ -427,7 +433,10 @@ describe(`layered-query publication oracle`, () => {
 
       fcTest.prop(
         [changedValueArbitrary, changedChildValueArbitrary],
-        oraclePropertyOptions(12),
+        oraclePropertyOptions(
+          12,
+          `includes-publication.parent-then-child.${q1Shape}.${q2Shape}`,
+        ),
       )(
         `recovers a ${q1Shape} Q1 and ${q2Shape} Q2 after a child update`,
         async (parentValue, childValue) => {
@@ -440,7 +449,13 @@ describe(`layered-query publication oracle`, () => {
         },
       )
 
-      fcTest.prop([changedValueArbitrary], oraclePropertyOptions(8))(
+      fcTest.prop(
+        [changedValueArbitrary],
+        oraclePropertyOptions(
+          8,
+          `includes-publication.optimistic-before-confirm.${q1Shape}.${q2Shape}`,
+        ),
+      )(
         `publishes optimistic state before confirmation through a ${q1Shape} Q1 and ${q2Shape} Q2`,
         async (value) => {
           await expectPublicationMatches(
@@ -452,7 +467,13 @@ describe(`layered-query publication oracle`, () => {
         },
       )
 
-      fcTest.prop([changedValueArbitrary], oraclePropertyOptions(8))(
+      fcTest.prop(
+        [changedValueArbitrary],
+        oraclePropertyOptions(
+          8,
+          `includes-publication.optimistic-after-confirm.${q1Shape}.${q2Shape}`,
+        ),
+      )(
         `publishes state after optimistic confirmation through a ${q1Shape} Q1 and ${q2Shape} Q2`,
         async (value) => {
           await expectPublicationMatches(
@@ -466,19 +487,22 @@ describe(`layered-query publication oracle`, () => {
     }
   }
 
-  fcTest.prop([changedChildValueArbitrary], oraclePropertyOptions(100))(
+  fcTest.prop(
+    [changedChildValueArbitrary],
+    oraclePropertyOptions(100, `includes-publication.child-scalar`),
+  )(
     `publishes child-only scalar updates through both layers`,
     async (value) => {
       await expectPublicationMatches({ type: `childScalar`, value })
     },
   )
 
-  fcTest.prop([fc.constantFrom(20, 30)], oraclePropertyOptions(100))(
-    `compares route transitions at both query layers`,
-    async (group) => {
-      await expectPublicationMatches({ type: `parentRoute`, group })
-    },
-  )
+  fcTest.prop(
+    [fc.constantFrom(20, 30)],
+    oraclePropertyOptions(100, `includes-publication.parent-route`),
+  )(`compares route transitions at both query layers`, async (group) => {
+    await expectPublicationMatches({ type: `parentRoute`, group })
+  })
 
   fcTest.prop(
     [
@@ -487,18 +511,21 @@ describe(`layered-query publication oracle`, () => {
         value: changedValueArbitrary,
       }),
     ],
-    oraclePropertyOptions(100),
+    oraclePropertyOptions(
+      100,
+      `includes-publication.atomic-parent-replacement`,
+    ),
   )(`compares atomic parent replacements at both query layers`, async (row) => {
     await expectPublicationMatches({ type: `atomicReplace`, ...row })
   })
 
-  fcTest.prop([changedValueArbitrary], oraclePropertyOptions(100))(
-    `publishes restored state after optimistic rollback`,
-    async (value) => {
-      await expectPublicationMatches({
-        type: `optimisticRollback`,
-        value,
-      })
-    },
-  )
+  fcTest.prop(
+    [changedValueArbitrary],
+    oraclePropertyOptions(100, `includes-publication.optimistic-rollback`),
+  )(`publishes restored state after optimistic rollback`, async (value) => {
+    await expectPublicationMatches({
+      type: `optimisticRollback`,
+      value,
+    })
+  })
 })

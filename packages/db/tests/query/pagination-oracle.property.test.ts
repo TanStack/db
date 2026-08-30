@@ -340,14 +340,9 @@ async function cleanupAll(
   if (rejection) throw rejection.reason
 }
 
-const { multiplier, replaySeed, replayPath } = readOracleRunConfig()
+const { multiplier, ...replay } = readOracleRunConfig()
 const orderedScenarioRuns = 12 * multiplier
 const transitionScenarioRuns = 8 * multiplier
-const orderedScenarioRandomParameters = oracleRandomParameters(
-  orderedScenarioRuns,
-  replaySeed,
-  replayPath,
-)
 
 let collectionSequence = 0
 
@@ -2522,7 +2517,11 @@ describe(`pagination recomputation oracle`, () => {
 
   fcTest.prop(
     [multiOrderScenarioArbitrary],
-    oracleRandomParameters(orderedScenarioRuns, replaySeed, replayPath),
+    oracleRandomParameters(
+      orderedScenarioRuns,
+      replay,
+      `pagination.multi-order`,
+    ),
   )(
     `matches multi-column nullable ordering for a random or replayed seed`,
     runMultiOrderScenario,
@@ -2538,7 +2537,11 @@ describe(`pagination recomputation oracle`, () => {
 
   fcTest.prop(
     [nullableCursorScenarioArbitrary],
-    oracleRandomParameters(transitionScenarioRuns, replaySeed, replayPath),
+    oracleRandomParameters(
+      transitionScenarioRuns,
+      replay,
+      `pagination.nullable-cursor`,
+    ),
   )(
     `matches nullable cursor ordering while an async response is pending for a random or replayed seed`,
     runNullableCursorScenario,
@@ -2972,7 +2975,11 @@ describe(`pagination recomputation oracle`, () => {
 
   fcTest.prop(
     [pendingMutationScenarioArbitrary, responseTimingArbitrary],
-    oracleRandomParameters(transitionScenarioRuns, replaySeed, replayPath),
+    oracleRandomParameters(
+      transitionScenarioRuns,
+      replay,
+      `pagination.pending-mutation`,
+    ),
   )(
     `matches recomputation when source mutations cross a pending cursor response for a random or replayed seed`,
     runPendingMutationScenario,
@@ -2993,7 +3000,11 @@ describe(`pagination recomputation oracle`, () => {
 
   fcTest.prop(
     [pendingHistoryScenarioArbitrary],
-    oracleRandomParameters(transitionScenarioRuns, replaySeed, replayPath),
+    oracleRandomParameters(
+      transitionScenarioRuns,
+      replay,
+      `pagination.pending-history`,
+    ),
   )(
     `matches recomputation across multi-action pending histories for a random or replayed seed`,
     runPendingHistoryScenario,
@@ -3113,7 +3124,14 @@ describe(`pagination recomputation oracle`, () => {
     runPaginationScenario,
   )
 
-  fcTest.prop([scenarioArbitrary], orderedScenarioRandomParameters)(
+  fcTest.prop(
+    [scenarioArbitrary],
+    oracleRandomParameters(
+      orderedScenarioRuns,
+      replay,
+      `pagination.ordered-window`,
+    ),
+  )(
     `matches full recomputation across ordered windows for a random or replayed seed`,
     runPaginationScenario,
   )
@@ -3128,7 +3146,11 @@ describe(`pagination recomputation oracle`, () => {
 
   fcTest.prop(
     [stateScenarioArbitrary],
-    oracleRandomParameters(transitionScenarioRuns, replaySeed, replayPath),
+    oracleRandomParameters(
+      transitionScenarioRuns,
+      replay,
+      `pagination.window-transition`,
+    ),
   )(
     `matches full recomputation across source and window transitions for a random or replayed seed`,
     runPaginationStateScenario,
@@ -3473,7 +3495,11 @@ describe(`pagination recomputation oracle`, () => {
 
   fcTest.prop(
     [scenarioArbitrary],
-    oracleRandomParameters(transitionScenarioRuns, replaySeed, replayPath),
+    oracleRandomParameters(
+      transitionScenarioRuns,
+      replay,
+      `pagination.async-cursor`,
+    ),
   )(
     `matches full recomputation when exact async cursor loads widen ordered coverage for a random or replayed seed`,
     runOnDemandPaginationScenario,

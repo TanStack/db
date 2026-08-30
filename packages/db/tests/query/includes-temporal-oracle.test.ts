@@ -1196,7 +1196,10 @@ describe(`includes temporal oracle`, () => {
     expectObsoleteDemandCannotPublishAfterReactivation,
   )
 
-  fcTest.prop([fc.scheduler()], oraclePropertyOptions(20))(
+  fcTest.prop(
+    [fc.scheduler()],
+    oraclePropertyOptions(20, `includes-temporal.demand-scheduling`),
+  )(
     `obsolete and current demand completions are generation-safe in either order`,
     expectScheduledDemandCompletionsStayGenerationSafe,
   )

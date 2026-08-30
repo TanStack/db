@@ -1329,7 +1329,7 @@ describe(`coverage registry oracle`, () => {
 
   fcTest.prop(
     [claimChurnArbitrary, fc.integer({ min: 1, max: 8 })],
-    oraclePropertyOptions(20),
+    oraclePropertyOptions(20, `coverage-registry.claim-churn`),
   )(`bounds long claim churn for a random or replayed seed`, runClaimChurn)
 
   it(`restores a compacted narrower fact when the wider acquisition retires`, () => {
@@ -1985,7 +1985,7 @@ describe(`coverage registry oracle`, () => {
         maxCommands: 40,
       }),
     ],
-    oraclePropertyOptions(100),
+    oraclePropertyOptions(100, `coverage-registry.state-machine`),
   )(
     `matches the lease, retry, settlement, publication, ownership, and disposal state machine`,
     (commands) => {

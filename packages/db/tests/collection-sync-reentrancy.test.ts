@@ -190,7 +190,7 @@ async function runListenerScenario(scenario: ListenerScenario): Promise<void> {
   }
 }
 
-const { multiplier, replaySeed, replayPath } = readOracleRunConfig()
+const { multiplier, ...replay } = readOracleRunConfig()
 const generatedRuns = 30 * multiplier
 
 describe(`sync publication reentrancy`, () => {
@@ -609,7 +609,11 @@ describe(`sync publication reentrancy`, () => {
 
   fcTest.prop(
     [listenerScenarioArbitrary],
-    oracleRandomParameters(generatedRuns, replaySeed, replayPath),
+    oracleRandomParameters(
+      generatedRuns,
+      replay,
+      `collection-sync.reentrant-drain`,
+    ),
   )(
     `matches the reentrant drain laws for a random or replayed seed`,
     runListenerScenario,

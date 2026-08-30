@@ -33,7 +33,7 @@ function refinementCampaigns(fixedSeed: number) {
     },
     {
       label: `random or replayed seed`,
-      options: oraclePropertyOptions(50),
+      options: oraclePropertyOptions(50, `load-subset-refinement.${fixedSeed}`),
     },
   ] as const
 }
