@@ -1200,7 +1200,13 @@ it(`preserves a synchronous unindexed load error after reentrant cleanup`, async
   try {
     await live.preload()
 
-    expect(() => live.utils.setWindow({ offset: 0, limit: 1 })).toThrow(failure)
+    let thrown: unknown
+    try {
+      live.utils.setWindow({ offset: 0, limit: 1 })
+    } catch (error) {
+      thrown = error
+    }
+    expect(thrown).toBe(failure)
   } finally {
     await Promise.all([live.cleanup(), source.cleanup()])
   }
@@ -1266,6 +1272,8 @@ it.each([
     let commit!: () => true | Promise<void>
     let cleanupLive: () => Promise<void> = () => Promise.resolve()
     let staleFailure: ReturnType<typeof createDeferred<void>> | undefined
+    const signals: Array<AbortSignal> = []
+    let unloads = 0
     const source = createCollection<Row>({
       id: `zero-refinement-${autoIndex}-${failureMode}-${reentrantCleanup}`,
       getKey: (row) => row.id,
@@ -1280,8 +1288,9 @@ it.each([
           commit = params.commit
           params.markReady()
           return {
-            loadSubset: () => {
+            loadSubset: ({ signal }) => {
               attempts++
+              signals.push(signal)
               if (attempts === 1) {
                 if (reentrantCleanup) void cleanupLive()
                 if (failureMode === `sync throw`) throw failure
@@ -1299,7 +1308,9 @@ it.each([
                 ? Promise.resolve(outcome)
                 : applied.then(() => outcome)
             },
-            unloadSubset: () => {},
+            unloadSubset: () => {
+              unloads++
+            },
           }
         },
       },
@@ -1320,9 +1331,13 @@ it.each([
       expect(attempts).toBe(0)
 
       if (failureMode === `sync throw`) {
-        expect(() => live.utils.setWindow({ offset: 0, limit: 1 })).toThrow(
-          failure,
-        )
+        let thrown: unknown
+        try {
+          live.utils.setWindow({ offset: 0, limit: 1 })
+        } catch (error) {
+          thrown = error
+        }
+        expect(thrown).toBe(failure)
       } else if (reentrantCleanup) {
         expect(live.utils.setWindow({ offset: 0, limit: 1 })).toBe(true)
       } else {
@@ -1338,6 +1353,9 @@ it.each([
         expect(live.isLoadingSubset).toBe(false)
         expect(live.utils.lastSubsetError).toBeUndefined()
         expect(live.toArray).toEqual([])
+        expect(signals).toHaveLength(1)
+        expect(signals[0]!.aborted).toBe(true)
+        expect(unloads).toBe(1)
         expect(live.utils.getWindow()).toEqual({
           offset: 0,
           limit: failureMode === `sync throw` ? 0 : 1,
