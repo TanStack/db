@@ -47,11 +47,125 @@ type PublicKeyRankedRow = Omit<RankedRow, `id`> & {
 type OrderedWork = {
   keys: Array<string>
   sourceReads: Array<string>
+  expectedValueReads: number
+  valueReads: number
+  expectedBucketReads: number
+  bucketReads: number
+  expectedCursorCalls: number
+  cursorCalls: number
   expectedBucketYields: number
   bucketYields: number
+  unexpectedTraversalCalls: number
   expectedKeyComparisons: number
   keyComparisons: number
   totalOrderComparisons: number
+}
+
+type OrderedReadProbe = {
+  getValueReads: () => number
+  getBucketReads: () => number
+  getCursorCalls: () => number
+  getUnexpectedTraversalCalls: () => number
+  restore: () => void
+}
+
+function isArrayIndex(property: PropertyKey): boolean {
+  if (typeof property !== `string` || property.length === 0) return false
+  const index = Number(property)
+  return Number.isSafeInteger(index) && index >= 0 && String(index) === property
+}
+
+function observeOrderedIndexReads(
+  index: BasicIndex<string> | BTreeIndex<string>,
+  indexKind: `basic` | `btree`,
+  direction: OrderByDirection,
+): OrderedReadProbe {
+  let valueReads = 0
+  let bucketReads = 0
+  let cursorCalls = 0
+  let unexpectedTraversalCalls = 0
+
+  if (indexKind === `basic`) {
+    const internals = index as unknown as {
+      sortedValues: Array<unknown>
+      valueMap: Map<unknown, ReadonlySet<string>>
+    }
+    const sortedValues = internals.sortedValues
+    const valueMap = internals.valueMap
+    internals.sortedValues = new Proxy(sortedValues, {
+      get(target, property, receiver) {
+        if (isArrayIndex(property)) valueReads++
+        return Reflect.get(target, property, receiver) as unknown
+      },
+    })
+    internals.valueMap = new Proxy(valueMap, {
+      get(target, property) {
+        const member = Reflect.get(target, property, target) as unknown
+        if (property === `get`) {
+          return (value: unknown) => {
+            bucketReads++
+            return target.get(value)
+          }
+        }
+        if (typeof member === `function`) {
+          return (...args: Array<unknown>) => {
+            unexpectedTraversalCalls++
+            return member.apply(target, args)
+          }
+        }
+        return member
+      },
+    })
+    return {
+      getValueReads: () => valueReads,
+      getBucketReads: () => bucketReads,
+      getCursorCalls: () => cursorCalls,
+      getUnexpectedTraversalCalls: () => unexpectedTraversalCalls,
+      restore: () => {
+        internals.sortedValues = sortedValues
+        internals.valueMap = valueMap
+      },
+    }
+  }
+
+  const internals = index as unknown as {
+    orderedEntries: {
+      nextHigherPair: (key?: unknown) => readonly [unknown, unknown] | undefined
+      nextLowerPair: (key?: unknown) => readonly [unknown, unknown] | undefined
+    }
+  }
+  const orderedEntries = internals.orderedEntries
+  const expectedMethod =
+    direction === `asc` ? `nextHigherPair` : `nextLowerPair`
+  internals.orderedEntries = new Proxy(orderedEntries, {
+    get(target, property) {
+      if (property !== expectedMethod) unexpectedTraversalCalls++
+      const member = Reflect.get(target, property, target) as unknown
+      if (typeof member !== `function`) return member
+      return (...args: Array<unknown>) => {
+        if (property === expectedMethod) cursorCalls++
+        const result = member.apply(target, args) as
+          | readonly [unknown, unknown]
+          | undefined
+        if (property === `nextHigherPair` || property === `nextLowerPair`) {
+          if (result !== undefined) {
+            valueReads++
+            bucketReads++
+          }
+        }
+        return result
+      }
+    },
+  })
+  return {
+    getValueReads: () => valueReads,
+    getBucketReads: () => bucketReads,
+    getCursorCalls: () => cursorCalls,
+    getUnexpectedTraversalCalls: () => unexpectedTraversalCalls,
+    restore: () => {
+      internals.orderedEntries = orderedEntries
+    },
+  }
 }
 
 function orderedWorkCampaigns(property: string, fixedSeed: number) {
@@ -232,22 +346,38 @@ async function observeOrderedPrefix(
     let expectedKeyComparisons = 0
     let expectedMatches = 0
     let expectedBucketYields = 0
-    const expectedBuckets =
-      direction === `asc`
-        ? index.orderedBuckets()
-        : index.orderedBucketsReversed()
-    for (const [, bucket] of expectedBuckets) {
-      expectedBucketYields++
-      const orderedKeys = [...bucket]
-      orderedKeys.sort((left, right) => {
-        expectedKeyComparisons++
-        return left < right ? -1 : left > right ? 1 : 0
-      })
-      expectedMatches += orderedKeys.filter(
-        (key) => rows.find((row) => row.id === key)?.included === true,
-      ).length
-      if (expectedMatches >= limit) break
+    if (limit > 0) {
+      const expectedBuckets =
+        direction === `asc`
+          ? index.orderedBuckets()
+          : index.orderedBucketsReversed()
+      for (const [, bucket] of expectedBuckets) {
+        expectedBucketYields++
+        const orderedKeys = [...bucket]
+        orderedKeys.sort((left, right) => {
+          expectedKeyComparisons++
+          return left < right ? -1 : left > right ? 1 : 0
+        })
+        expectedMatches += orderedKeys.filter(
+          (key) => rows.find((row) => row.id === key)?.included === true,
+        ).length
+        if (expectedMatches >= limit) break
+      }
     }
+
+    // Observe private value traversal and bucket construction independently
+    // from public generator yields. A generator can materialize all private
+    // values or groups before yielding only the requested prefix.
+    const readProbe = observeOrderedIndexReads(index, indexKind, direction)
+    const distinctValueCount = new Set(rows.map(({ rank }) => rank)).size
+    const expectedValueReads =
+      indexKind === `btree` || limit === 0
+        ? expectedBucketYields
+        : Math.min(
+            distinctValueCount,
+            expectedBucketYields +
+              (expectedBucketYields < distinctValueCount ? 1 : 0),
+          )
 
     let bucketYields = 0
     const originalOrderedBuckets = index.orderedBuckets.bind(index)
@@ -285,14 +415,22 @@ async function observeOrderedPrefix(
       return {
         keys: changes.map(({ key }) => String(key)),
         sourceReads,
+        expectedValueReads,
+        valueReads: readProbe.getValueReads(),
+        expectedBucketReads: expectedBucketYields,
+        bucketReads: readProbe.getBucketReads(),
+        expectedCursorCalls: indexKind === `btree` ? expectedBucketYields : 0,
+        cursorCalls: readProbe.getCursorCalls(),
         expectedBucketYields,
         bucketYields,
+        unexpectedTraversalCalls: readProbe.getUnexpectedTraversalCalls(),
         expectedKeyComparisons,
         keyComparisons: keyComparisonCounter.count,
         totalOrderComparisons: compareEntries.mock.calls.length,
       }
     } finally {
       compareEntries.mockRestore()
+      readProbe.restore()
     }
   } finally {
     await collection.cleanup()
@@ -369,7 +507,8 @@ function createOrderedPrefixRows(
     expectedKeys,
     // Every row through the boundary bucket is tested once. The selected rows
     // are then read once more to materialize their change messages.
-    expectedSourceReads: [...expectedCandidateReads, ...expectedKeys],
+    expectedSourceReads:
+      options.limit === 0 ? [] : [...expectedCandidateReads, ...expectedKeys],
   }
 }
 
@@ -402,7 +541,11 @@ describe(`ordered source work oracle`, () => {
 
       expect(observed.keys).toEqual(scenario.expectedKeys)
       expect(observed.sourceReads).toEqual(scenario.expectedSourceReads)
+      expect(observed.valueReads).toBe(observed.expectedValueReads)
+      expect(observed.bucketReads).toBe(observed.expectedBucketReads)
+      expect(observed.cursorCalls).toBe(observed.expectedCursorCalls)
       expect(observed.bucketYields).toBe(observed.expectedBucketYields)
+      expect(observed.unexpectedTraversalCalls).toBe(0)
       expect(observed.keyComparisons).toBe(observed.expectedKeyComparisons)
       expect(observed.totalOrderComparisons).toBe(0)
     },
@@ -418,7 +561,7 @@ describe(`ordered source work oracle`, () => {
       fcTest.prop(
         [
           fc.integer({ min: 0, max: 8 }),
-          fc.integer({ min: 1, max: 5 }),
+          fc.integer({ min: 0, max: 5 }),
           fc.integer({ min: 0, max: 5 }),
           fc.integer({ min: 0, max: 8 }),
           fc.integer({ min: 0, max: 60 }),
@@ -454,7 +597,11 @@ describe(`ordered source work oracle`, () => {
 
           expect(observed.keys).toEqual(scenario.expectedKeys)
           expect(observed.sourceReads).toEqual(scenario.expectedSourceReads)
+          expect(observed.valueReads).toBe(observed.expectedValueReads)
+          expect(observed.bucketReads).toBe(observed.expectedBucketReads)
+          expect(observed.cursorCalls).toBe(observed.expectedCursorCalls)
           expect(observed.bucketYields).toBe(observed.expectedBucketYields)
+          expect(observed.unexpectedTraversalCalls).toBe(0)
           expect(observed.keyComparisons).toBe(observed.expectedKeyComparisons)
           expect(observed.totalOrderComparisons).toBe(0)
         },
@@ -480,10 +627,72 @@ describe(`ordered source work oracle`, () => {
       `tied-02`,
       `tied-04`,
     ])
+    expect(observed.valueReads).toBe(observed.expectedValueReads)
+    expect(observed.bucketReads).toBe(observed.expectedBucketReads)
+    expect(observed.cursorCalls).toBe(observed.expectedCursorCalls)
     expect(observed.bucketYields).toBe(observed.expectedBucketYields)
+    expect(observed.unexpectedTraversalCalls).toBe(0)
     expect(observed.keyComparisons).toBe(observed.expectedKeyComparisons)
     expect(observed.totalOrderComparisons).toBe(0)
   })
+
+  it.each([
+    { direction: `asc`, indexNulls: `first` },
+    { direction: `desc`, indexNulls: `last` },
+  ] as const)(
+    `stops Basic $direction traversal after a multi-value nullish tie`,
+    async ({ direction, indexNulls }) => {
+      type NullableRankedRow = Omit<RankedRow, `rank`> & {
+        rank: number | null | undefined
+      }
+      const collection = createCollection(
+        localOnlyCollectionOptions<NullableRankedRow>({
+          id: `ordered-work-basic-nullish-${direction}`,
+          getKey: (row) => row.id,
+          initialData: [
+            { id: `undefined`, rank: undefined, included: true },
+            { id: `null`, rank: null, included: true },
+            { id: `one`, rank: 1, included: true },
+            { id: `two`, rank: 2, included: true },
+          ],
+        }),
+      )
+
+      try {
+        await collection.preload()
+        const index = collection.createIndex((row) => row.rank, {
+          indexType: BasicIndex,
+          options: {
+            compareOptions: {
+              direction: `asc`,
+              nulls: indexNulls,
+              stringSort: `locale`,
+            },
+          },
+        }) as BasicIndex<string>
+        const readProbe = observeOrderedIndexReads(index, `basic`, direction)
+
+        try {
+          const changes = collection.currentStateAsChanges({
+            orderBy: orderBy(direction, `first`),
+            limit: 1,
+          })!
+
+          expect(changes.map(({ key }) => key)).toEqual([`null`])
+          // The two exact nullish values form one comparator bucket. Basic
+          // reads one worse value to close that group, but it must not scan the
+          // second worse value or construct either worse bucket.
+          expect(readProbe.getValueReads()).toBe(3)
+          expect(readProbe.getBucketReads()).toBe(2)
+          expect(readProbe.getUnexpectedTraversalCalls()).toBe(0)
+        } finally {
+          readProbe.restore()
+        }
+      } finally {
+        await collection.cleanup()
+      }
+    },
+  )
 
   it(`keeps comparator-equivalent BTree values in one ordered tie class`, async () => {
     type NullableRankedRow = Omit<RankedRow, `rank`> & {
@@ -618,6 +827,7 @@ describe(`ordered source work oracle`, () => {
       const laterRank = direction === `asc` ? 2 : 1
       const rows: Array<RankedRow> = [
         { id: `later`, rank: laterRank, included: true },
+        { id: `tie-c`, rank: tieRank, included: true },
         { id: `tie-b`, rank: tieRank, included: true },
         { id: `tie-a`, rank: tieRank, included: true },
       ]
@@ -641,6 +851,7 @@ describe(`ordered source work oracle`, () => {
             },
           },
         }) as BTreeIndex<string>
+        const requestedCounts: Array<number> = []
         const customIndex = new Proxy(index, {
           get(target, property) {
             if (
@@ -654,6 +865,7 @@ describe(`ordered source work oracle`, () => {
                 ...(direction === `desc`
                   ? [[laterRank, new Set([`later`])]]
                   : []),
+                [tieRank, new Set([`tie-c`])],
                 [tieRank, new Set([`tie-b`])],
                 [tieRank, new Set([`tie-a`])],
                 ...(direction === `asc`
@@ -666,6 +878,7 @@ describe(`ordered source work oracle`, () => {
                 ...(direction === `asc`
                   ? [[laterRank, new Set([`later`])]]
                   : []),
+                [tieRank, new Set([`tie-c`])],
                 [tieRank, new Set([`tie-b`])],
                 [tieRank, new Set([`tie-a`])],
                 ...(direction === `desc`
@@ -674,6 +887,16 @@ describe(`ordered source work oracle`, () => {
               ]
             }
             const value = Reflect.get(target, property, target) as unknown
+            if (
+              typeof value === `function` &&
+              (property === `takeFromStart` ||
+                property === `takeReversedFromEnd`)
+            ) {
+              return (count: number, ...args: Array<unknown>) => {
+                requestedCounts.push(count)
+                return value.apply(target, [count, ...args])
+              }
+            }
             return typeof value === `function` ? value.bind(target) : value
           },
         })
@@ -692,6 +915,7 @@ describe(`ordered source work oracle`, () => {
           })!
 
           expect(changes.map(({ key }) => key)).toEqual([`tie-a`])
+          expect(requestedCounts).toEqual([index.keyCount])
           expect(compareEntries).toHaveBeenCalled()
         } finally {
           compareEntries.mockRestore()
