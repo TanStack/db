@@ -27,8 +27,15 @@ export function recordLoadSubsetResultDemandMatcher(
   if (typeof result !== `object`) return result
 
   // Give each physical acquisition its own result identity. A source may reuse
-  // one result object across calls with different demands.
-  const retainedResult = { ...result }
+  // one result object across calls with different demands. Snapshot nested
+  // source evidence here too, before the caller publishes coverage from it.
+  const appliedRowKeys = result.appliedRowKeys
+  const retainedResult: LoadSubsetResult = {
+    hasMore: result.hasMore,
+    ...(appliedRowKeys === undefined
+      ? {}
+      : { appliedRowKeys: Object.freeze([...appliedRowKeys]) }),
+  }
   loadSubsetResultDemandMatchers.set(retainedResult, matches)
   return retainedResult
 }

@@ -6,7 +6,11 @@ import {
 import { Func, PropRef, Value } from '../../src/query/ir'
 import { createCrossRealmUint8Array } from '../utils'
 import type { BasicExpression, OrderBy } from '../../src/query/ir'
-import type { LoadSubsetFn, LoadSubsetOptions } from '../../src/types'
+import type {
+  LoadSubsetFn,
+  LoadSubsetOptions,
+  LoadSubsetResult,
+} from '../../src/types'
 
 // Helper functions to build expressions more easily
 function ref(path: string | Array<string>): PropRef {
@@ -792,6 +796,37 @@ describe(`createDeduplicatedLoadSubset`, () => {
     )
     expect(signal.addEventListener).toHaveBeenCalledTimes(1)
     expect(signal.removeEventListener).toHaveBeenCalledTimes(1)
+
+    const retry = deduplicated.loadSubset({ limit: 2 })
+    expect(retry).toBeInstanceOf(Promise)
+    await retry
+    expect(loadSubsetCalls).toBe(2)
+  })
+
+  it(`does not retain coverage when row-key snapshotting throws`, async () => {
+    const resultError = new Error(`row-key snapshot failed`)
+    const hostileRowKeys = new Proxy<ReadonlyArray<string | number>>([1], {
+      get: (target, property, receiver) => {
+        if (property === Symbol.iterator) throw resultError
+        return Reflect.get(target, property, receiver)
+      },
+    })
+    const hostileResult: LoadSubsetResult = {
+      hasMore: false,
+      appliedRowKeys: hostileRowKeys,
+    }
+    let loadSubsetCalls = 0
+    const loadSubset: LoadSubsetFn = () => {
+      loadSubsetCalls += 1
+      return Promise.resolve(
+        loadSubsetCalls === 1 ? hostileResult : { hasMore: undefined },
+      )
+    }
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+
+    await expect(deduplicated.loadSubset({ limit: 2 })).rejects.toBe(
+      resultError,
+    )
 
     const retry = deduplicated.loadSubset({ limit: 2 })
     expect(retry).toBeInstanceOf(Promise)
