@@ -51,7 +51,11 @@ class CountingReadonlyMap<TKey, TValue> implements ReadonlyMap<TKey, TValue> {
   membershipReads = 0
   valueReads = 0
 
-  constructor(entries: Iterable<readonly [TKey, TValue]> = []) {
+  constructor(
+    entries: Iterable<readonly [TKey, TValue]> = [],
+    private readonly onIteration?: () => void,
+    private readonly onMembershipRead?: () => void,
+  ) {
     this.valuesByKey = new Map(entries)
   }
 
@@ -64,6 +68,7 @@ class CountingReadonlyMap<TKey, TValue> implements ReadonlyMap<TKey, TValue> {
   ): Generator<T, undefined, unknown> {
     for (let next = iterator.next(); !next.done; next = iterator.next()) {
       this.iterationReads++
+      this.onIteration?.()
       yield next.value
     }
     return undefined
@@ -95,6 +100,7 @@ class CountingReadonlyMap<TKey, TValue> implements ReadonlyMap<TKey, TValue> {
   ): void {
     this.valuesByKey.forEach((value, key) => {
       this.iterationReads++
+      this.onIteration?.()
       callback.call(thisArg, value, key, this)
     })
   }
@@ -106,6 +112,7 @@ class CountingReadonlyMap<TKey, TValue> implements ReadonlyMap<TKey, TValue> {
 
   has(key: TKey): boolean {
     this.membershipReads++
+    this.onMembershipRead?.()
     return this.valuesByKey.has(key)
   }
 }
@@ -2814,43 +2821,41 @@ it(`scans each side of a publication diff exactly once`, () => {
         return Reflect.getOwnPropertyDescriptor(target, property)
       },
     })
-  const publishedRows = new CountingReadonlyMap<string, RankedRow>([
-    [`a`, countedRow({ id: `a`, rank: 2, included: true }, `published`)],
-    [`b`, { id: `b`, rank: 2, included: true }],
-    [`d`, countedRow({ id: `d`, rank: 4, included: true }, `published`)],
-  ])
-  const desiredRows = new CountingReadonlyMap<string, RankedRow>([
-    [`a`, countedRow({ id: `a`, rank: 1, included: true }, `desired`)],
-    [`c`, { id: `c`, rank: 3, included: true }],
-    [`d`, countedRow({ id: `d`, rank: 4, included: true }, `desired`)],
-  ])
+  let unmatchedDesiredEntries = 0
+  let maximumUnmatchedDesiredEntries = 0
+  const publishedRows = new CountingReadonlyMap<string, RankedRow>(
+    [
+      [`a`, countedRow({ id: `a`, rank: 2, included: true }, `published`)],
+      [`b`, { id: `b`, rank: 2, included: true }],
+      [`d`, countedRow({ id: `d`, rank: 4, included: true }, `published`)],
+    ],
+    undefined,
+    () => {
+      unmatchedDesiredEntries--
+    },
+  )
+  const desiredRows = new CountingReadonlyMap<string, RankedRow>(
+    [
+      [`a`, countedRow({ id: `a`, rank: 1, included: true }, `desired`)],
+      [`c`, { id: `c`, rank: 3, included: true }],
+      [`d`, countedRow({ id: `d`, rank: 4, included: true }, `desired`)],
+    ],
+    () => {
+      unmatchedDesiredEntries++
+      maximumUnmatchedDesiredEntries = Math.max(
+        maximumUnmatchedDesiredEntries,
+        unmatchedDesiredEntries,
+      )
+    },
+  )
 
-  const defaultIterator = vi.spyOn(Map.prototype, Symbol.iterator)
-  const entries = vi.spyOn(Map.prototype, `entries`)
-  const keys = vi.spyOn(Map.prototype, `keys`)
-  const values = vi.spyOn(Map.prototype, `values`)
-  const forEach = vi.spyOn(Map.prototype, `forEach`)
-
-  try {
-    expect(
-      diffPublications(publishedRows, desiredRows).map(
-        ({ type, key }) => `${type}:${key}`,
-      ),
-    ).toEqual([`update:a`, `delete:b`, `insert:c`])
-    expect(
-      defaultIterator.mock.calls.length +
-        entries.mock.calls.length +
-        keys.mock.calls.length +
-        values.mock.calls.length +
-        forEach.mock.calls.length,
-    ).toBe(2)
-  } finally {
-    defaultIterator.mockRestore()
-    entries.mockRestore()
-    keys.mockRestore()
-    values.mockRestore()
-    forEach.mockRestore()
-  }
+  expect(
+    diffPublications(publishedRows, desiredRows).map(
+      ({ type, key }) => `${type}:${key}`,
+    ),
+  ).toEqual([`update:a`, `delete:b`, `insert:c`])
+  expect(maximumUnmatchedDesiredEntries).toBe(1)
+  expect(unmatchedDesiredEntries).toBe(0)
   expect(publishedRows.iterationReads).toBe(publishedRows.size)
   expect(publishedRows.membershipReads).toBe(desiredRows.size)
   expect(publishedRows.valueReads).toBe(0)
