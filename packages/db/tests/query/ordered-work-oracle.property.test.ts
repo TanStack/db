@@ -17,6 +17,7 @@ import type { CompareOptions } from '../../src/query/builder/types.js'
 import type {
   ChangeMessage,
   CurrentStateAsChangesOptions,
+  StringCollationConfig,
 } from '../../src/types.js'
 import type { OrderBy, OrderByDirection } from '../../src/query/ir.js'
 
@@ -80,6 +81,20 @@ function orderByWithOptions(compareOptions: CompareOptions): OrderBy {
   return [{ expression: new PropRef([`rank`]), compareOptions }]
 }
 
+const publicKeyIndexCompareOptions = {
+  direction: `asc`,
+  nulls: `last`,
+  stringSort: `locale`,
+} satisfies CompareOptions
+
+function publicKeyOrderBy(direction: OrderByDirection): OrderBy {
+  return orderByWithOptions({
+    ...publicKeyIndexCompareOptions,
+    direction,
+    nulls: direction === `asc` ? `last` : `first`,
+  })
+}
+
 function comparePublicKeys(
   left: string | number,
   right: string | number,
@@ -114,6 +129,69 @@ const orderedIndexCompatibilityCases = ([`asc`, `desc`] as const).flatMap(
         })),
       ),
     ),
+)
+
+const stringComparisonVariants = [
+  {
+    name: `the same locale options`,
+    collation: {
+      stringSort: `locale`,
+      locale: `en`,
+      localeOptions: { numeric: true, sensitivity: `base` },
+    },
+    compatible: true,
+  },
+  {
+    name: `lexical string order`,
+    collation: { stringSort: `lexical` },
+    compatible: false,
+  },
+  {
+    name: `another locale`,
+    collation: {
+      stringSort: `locale`,
+      locale: `de`,
+      localeOptions: { numeric: true, sensitivity: `base` },
+    },
+    compatible: false,
+  },
+  {
+    name: `another numeric option`,
+    collation: {
+      stringSort: `locale`,
+      locale: `en`,
+      localeOptions: { numeric: false, sensitivity: `base` },
+    },
+    compatible: false,
+  },
+  {
+    name: `another sensitivity option`,
+    collation: {
+      stringSort: `locale`,
+      locale: `en`,
+      localeOptions: { numeric: true, sensitivity: `accent` },
+    },
+    compatible: false,
+  },
+] satisfies Array<{
+  name: string
+  collation: StringCollationConfig
+  compatible: boolean
+}>
+
+const orderedStringCompatibilityCases = ([`asc`, `desc`] as const).flatMap(
+  (queryDirection) =>
+    stringComparisonVariants.map(({ name, collation, compatible }) => ({
+      name,
+      queryDirection,
+      compareOptions: {
+        ...collation,
+        direction: queryDirection,
+        nulls:
+          queryDirection === `asc` ? (`last` as const) : (`first` as const),
+      } satisfies CompareOptions,
+      compatible,
+    })),
 )
 
 async function observeOrderedPrefix(
@@ -670,18 +748,28 @@ describe(`ordered source work oracle`, () => {
 
       try {
         await collection.preload()
-        collection.createIndex((row) => row.rank, { indexType: IndexType })
+        collection.createIndex((row) => row.rank, {
+          indexType: IndexType,
+          options: { compareOptions: publicKeyIndexCompareOptions },
+        })
         const z = collection.insert({ id: `z`, rank: 1, included: true })
         await z.isPersisted.promise
         const a = collection.insert({ id: `a`, rank: 1, included: true })
         await a.isPersisted.promise
 
-        const changes = collection.currentStateAsChanges({
-          orderBy: orderBy(direction),
-          limit: 2,
-        })!
+        const compareEntries = vi.spyOn(TotalOrder.prototype, `compareEntries`)
+        try {
+          const changes = collection.currentStateAsChanges({
+            orderBy: publicKeyOrderBy(direction),
+            limit: 2,
+            optimizedOnly: true,
+          })!
 
-        expect(changes.map(({ key }) => key)).toEqual(expectedKeys)
+          expect(changes.map(({ key }) => key)).toEqual(expectedKeys)
+          expect(compareEntries).not.toHaveBeenCalled()
+        } finally {
+          compareEntries.mockRestore()
+        }
       } finally {
         await collection.cleanup()
       }
@@ -697,7 +785,8 @@ describe(`ordered source work oracle`, () => {
     ).flatMap(({ name, IndexType }) =>
       ([`asc`, `desc`] as const).flatMap((direction) =>
         [
-          { domain: `number`, keys: [10, 2] },
+          { domain: `signed number`, keys: [1, -2] },
+          { domain: `case-sensitive string`, keys: [`a`, `A`] },
           { domain: `mixed`, keys: [10, `2`, 2, `10`] },
         ].map(({ domain, keys }) => ({
           name,
@@ -720,7 +809,10 @@ describe(`ordered source work oracle`, () => {
 
       try {
         await collection.preload()
-        collection.createIndex((row) => row.rank, { indexType: IndexType })
+        collection.createIndex((row) => row.rank, {
+          indexType: IndexType,
+          options: { compareOptions: publicKeyIndexCompareOptions },
+        })
         for (const key of keys) {
           const transaction = collection.insert({
             id: key,
@@ -730,13 +822,21 @@ describe(`ordered source work oracle`, () => {
           await transaction.isPersisted.promise
         }
 
-        const changes = collection.currentStateAsChanges({
-          orderBy: orderBy(direction),
-        })!
+        const compareEntries = vi.spyOn(TotalOrder.prototype, `compareEntries`)
+        try {
+          const changes = collection.currentStateAsChanges({
+            orderBy: publicKeyOrderBy(direction),
+            limit: keys.length,
+            optimizedOnly: true,
+          })!
 
-        expect(changes.map(({ key }) => key)).toEqual(
-          [...keys].sort(comparePublicKeys),
-        )
+          expect(changes.map(({ key }) => key)).toEqual(
+            [...keys].sort(comparePublicKeys),
+          )
+          expect(compareEntries).not.toHaveBeenCalled()
+        } finally {
+          compareEntries.mockRestore()
+        }
       } finally {
         await collection.cleanup()
       }
@@ -749,7 +849,7 @@ describe(`ordered source work oracle`, () => {
   )) {
     fcTest.prop(
       [
-        fc.uniqueArray(fc.integer({ min: 0, max: 999 }), {
+        fc.uniqueArray(fc.integer({ min: -999, max: 999 }), {
           minLength: 2,
           maxLength: 8,
         }),
@@ -768,7 +868,9 @@ describe(`ordered source work oracle`, () => {
       async (keyNumbers, requestedLimit, indexKind, direction, keyDomain) => {
         const keys: Array<string | number> =
           keyDomain === `string`
-            ? keyNumbers.map((key) => `key-${key}`)
+            ? keyNumbers.map((key, index) =>
+                index % 2 === 0 ? `key-${key}` : `Key-${key}`,
+              )
             : keyDomain === `number`
               ? keyNumbers
               : keyNumbers.flatMap((key) => [String(key), key])
@@ -784,6 +886,7 @@ describe(`ordered source work oracle`, () => {
           await collection.preload()
           collection.createIndex((row) => row.rank, {
             indexType: indexKind === `basic` ? BasicIndex : BTreeIndex,
+            options: { compareOptions: publicKeyIndexCompareOptions },
           })
           for (const key of keys) {
             const transaction = collection.insert({
@@ -794,14 +897,24 @@ describe(`ordered source work oracle`, () => {
             await transaction.isPersisted.promise
           }
 
-          const changes = collection.currentStateAsChanges({
-            orderBy: orderBy(direction),
-            limit,
-          })!
-
-          expect(changes.map(({ key }) => key)).toEqual(
-            [...keys].sort(comparePublicKeys).slice(0, limit),
+          const compareEntries = vi.spyOn(
+            TotalOrder.prototype,
+            `compareEntries`,
           )
+          try {
+            const changes = collection.currentStateAsChanges({
+              orderBy: publicKeyOrderBy(direction),
+              limit,
+              optimizedOnly: true,
+            })!
+
+            expect(changes.map(({ key }) => key)).toEqual(
+              [...keys].sort(comparePublicKeys).slice(0, limit),
+            )
+            expect(compareEntries).not.toHaveBeenCalled()
+          } finally {
+            compareEntries.mockRestore()
+          }
         } finally {
           await collection.cleanup()
         }
@@ -860,67 +973,9 @@ describe(`ordered source work oracle`, () => {
     }
   })
 
-  it.each([
-    {
-      name: `the same locale options`,
-      compareOptions: {
-        direction: `asc`,
-        nulls: `last`,
-        stringSort: `locale`,
-        locale: `en`,
-        localeOptions: { numeric: true, sensitivity: `base` },
-      },
-      compatible: true,
-    },
-    {
-      name: `lexical string order`,
-      compareOptions: {
-        direction: `asc`,
-        nulls: `last`,
-        stringSort: `lexical`,
-      },
-      compatible: false,
-    },
-    {
-      name: `another locale`,
-      compareOptions: {
-        direction: `asc`,
-        nulls: `last`,
-        stringSort: `locale`,
-        locale: `de`,
-        localeOptions: { numeric: true, sensitivity: `base` },
-      },
-      compatible: false,
-    },
-    {
-      name: `another numeric option`,
-      compareOptions: {
-        direction: `asc`,
-        nulls: `last`,
-        stringSort: `locale`,
-        locale: `en`,
-        localeOptions: { numeric: false, sensitivity: `base` },
-      },
-      compatible: false,
-    },
-    {
-      name: `another sensitivity option`,
-      compareOptions: {
-        direction: `asc`,
-        nulls: `last`,
-        stringSort: `locale`,
-        locale: `en`,
-        localeOptions: { numeric: true, sensitivity: `accent` },
-      },
-      compatible: false,
-    },
-  ] satisfies Array<{
-    name: string
-    compareOptions: CompareOptions
-    compatible: boolean
-  }>)(
-    `matches an index against $name: $compatible`,
-    async ({ compareOptions, compatible }) => {
+  it.each(orderedStringCompatibilityCases)(
+    `matches an index against $name in $queryDirection order: $compatible`,
+    async ({ queryDirection, compareOptions, compatible }) => {
       type TextRankedRow = Omit<RankedRow, `rank`> & { rank: string }
       const indexCompareOptions = {
         direction: `asc`,
@@ -953,7 +1008,11 @@ describe(`ordered source work oracle`, () => {
         })
 
         expect(changes?.map(({ key }) => key)).toEqual(
-          compatible ? [`item-2`, `item-10`] : undefined,
+          compatible
+            ? queryDirection === `asc`
+              ? [`item-2`, `item-10`]
+              : [`item-10`, `item-2`]
+            : undefined,
         )
       } finally {
         await collection.cleanup()
