@@ -697,17 +697,19 @@ in-flight Promise guard owns the request until settlement.
 An ordered window with an active limit of zero creates no ordered transport
 demand. Its coordinator remains alive so a later window change can load from
 the same order, but neither the initial offset nor a result deficit may turn
-the empty window into a positive request. The dedupe helper applies the same
-law when adapters call it directly: a zero-width request establishes no
-coverage and owns no physical acquisition. This also holds when no usable
-order index exists: core defers the full-snapshot fallback until the window
-first becomes positive. One successful or pending fallback covers that
-subscription session. A synchronous throw or rejected fallback clears only
-that subscription's guard, so the same live query can retry. Cleanup creates a
-new subscription and a late settlement from the old one cannot clear the new
-guard. Truncate replay belongs to the subscription's retained demand; the live
-coordinator must not add a second fallback while that replay is in flight. A
-replay that starts after an earlier rejection reclaims the same subscription
+the empty window into a positive request. Its local source snapshot also
+returns before predicate compilation, source enumeration, sorting, or index
+creation. The dedupe helper applies the same law when adapters call it
+directly: a zero-width request establishes no coverage and owns no physical
+acquisition. This also holds when no usable order index exists: core defers the
+full-snapshot fallback until the window first becomes positive. One successful
+or pending fallback covers that subscription session. A synchronous throw or
+rejected fallback clears only that subscription's guard, so the same live query
+can retry. Cleanup creates a new subscription and a late settlement from the
+old one cannot clear the new guard. Truncate replay belongs to the
+subscription's retained demand; the live coordinator must not add a second
+fallback while that replay is in flight. A replay that starts after an earlier
+rejection reclaims the same subscription
 guard. Success keeps it claimed, so replacement publication cannot schedule a
 duplicate full-source fallback; rejection releases it for a later retry.
 Cleanup also aborts and settles the subscription-visible acquisition before a

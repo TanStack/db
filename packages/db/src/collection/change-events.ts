@@ -103,6 +103,12 @@ export function currentStateAsChanges<
     throw new Error(`limit cannot be used without orderBy`)
   }
 
+  // An empty ordered window has no source work. Return before compiling its
+  // predicate or finding, creating, and traversing an order index.
+  if (options.limit === 0) {
+    return []
+  }
+
   // First check if orderBy is present (optionally with limit)
   if (options.orderBy) {
     // Create where filter function if present
@@ -401,7 +407,6 @@ function getOrderedKeys<T extends object, TKey extends string | number>(
         // public-key suffix remains ascending in both directions. Stop after
         // the first complete bucket that proves the requested prefix because
         // filtering can otherwise select the wrong key from a boundary tie.
-        if (limit === 0) return []
         const keys: Array<TKey> = []
         for (const [, bucket] of orderedBuckets) {
           const matchingKeys = [...bucket].sort(compareKeys).filter(filterFn)

@@ -419,7 +419,10 @@ async function observeOrderedPrefix(
         valueReads: readProbe.getValueReads(),
         expectedBucketReads: expectedBucketYields,
         bucketReads: readProbe.getBucketReads(),
-        expectedCursorCalls: indexKind === `btree` ? expectedBucketYields : 0,
+        expectedCursorCalls:
+          indexKind === `btree`
+            ? expectedBucketYields + Number(expectedMatches < limit)
+            : 0,
         cursorCalls: readProbe.getCursorCalls(),
         expectedBucketYields,
         bucketYields,
@@ -513,6 +516,57 @@ function createOrderedPrefixRows(
 }
 
 describe(`ordered source work oracle`, () => {
+  it.each([`off`, `eager`] as const)(
+    `does no setup work for an empty ordered window with auto-indexing %s`,
+    async (autoIndex) => {
+      const collection = createCollection(
+        localOnlyCollectionOptions<RankedRow>({
+          id: `ordered-work-empty-${autoIndex}`,
+          getKey: (row) => row.id,
+          initialData: [
+            { id: `one`, rank: 1, included: true },
+            { id: `two`, rank: 2, included: false },
+            { id: `three`, rank: 3, included: true },
+          ],
+          autoIndex,
+          ...(autoIndex === `eager` && { defaultIndexType: BTreeIndex }),
+        }),
+      )
+
+      try {
+        await collection.preload()
+        let whereExpressionReads = 0
+        const where = new Proxy(eq(new PropRef([`included`]), true), {
+          get(target, property, receiver) {
+            whereExpressionReads++
+            return Reflect.get(target, property, receiver) as unknown
+          },
+        })
+        const entries = vi.spyOn(collection, `entries`)
+        const get = vi.spyOn(collection, `get`)
+        const createIndex = vi.spyOn(collection, `createIndex`)
+        const compareEntries = vi.spyOn(TotalOrder.prototype, `compareEntries`)
+        const indexesBefore = collection.indexes.size
+
+        const changes = collection.currentStateAsChanges({
+          where,
+          orderBy: orderBy(`asc`, `last`),
+          limit: 0,
+        })
+
+        expect(changes).toEqual([])
+        expect(whereExpressionReads).toBe(0)
+        expect(entries).not.toHaveBeenCalled()
+        expect(get).not.toHaveBeenCalled()
+        expect(createIndex).not.toHaveBeenCalled()
+        expect(collection.indexes.size).toBe(indexesBefore)
+        expect(compareEntries).not.toHaveBeenCalled()
+      } finally {
+        await collection.cleanup()
+      }
+    },
+  )
+
   it.each([
     { indexKind: `basic`, direction: `asc` },
     { indexKind: `basic`, direction: `desc` },
@@ -597,6 +651,61 @@ describe(`ordered source work oracle`, () => {
 
           expect(observed.keys).toEqual(scenario.expectedKeys)
           expect(observed.sourceReads).toEqual(scenario.expectedSourceReads)
+          expect(observed.valueReads).toBe(observed.expectedValueReads)
+          expect(observed.bucketReads).toBe(observed.expectedBucketReads)
+          expect(observed.cursorCalls).toBe(observed.expectedCursorCalls)
+          expect(observed.bucketYields).toBe(observed.expectedBucketYields)
+          expect(observed.unexpectedTraversalCalls).toBe(0)
+          expect(observed.keyComparisons).toBe(observed.expectedKeyComparisons)
+          expect(observed.totalOrderComparisons).toBe(0)
+        },
+      )
+    }
+  }
+
+  for (const direction of [`asc`, `desc`] as const) {
+    const property =
+      direction === `asc`
+        ? `ordered-work.forward-exhaustion`
+        : `ordered-work.reverse-exhaustion`
+    const seed = direction === `asc` ? 1_780_105 : 1_780_106
+    for (const campaign of orderedWorkCampaigns(property, seed)) {
+      fcTest.prop(
+        [
+          fc.integer({ min: 0, max: 60 }),
+          fc.constantFrom<`basic` | `btree`>(`basic`, `btree`),
+        ],
+        campaign.options,
+      )(
+        `reads each ${direction} bucket once before proving exhaustion (${campaign.label})`,
+        async (rowCount, indexKind) => {
+          const rows = Array.from(
+            { length: rowCount },
+            (_, index): RankedRow => ({
+              id: `rejected-${index.toString().padStart(2, `0`)}`,
+              rank: Math.floor(index / 2),
+              included: false,
+            }),
+          ).reverse()
+          const expectedSourceReads = [...rows]
+            .sort((left, right) => {
+              const valueOrder = left.rank - right.rank
+              if (valueOrder !== 0) {
+                return direction === `asc` ? valueOrder : -valueOrder
+              }
+              return comparePublicKeys(left.id, right.id)
+            })
+            .map(({ id }) => id)
+
+          const observed = await observeOrderedPrefix(
+            rows,
+            1,
+            indexKind,
+            direction,
+          )
+
+          expect(observed.keys).toEqual([])
+          expect(observed.sourceReads).toEqual(expectedSourceReads)
           expect(observed.valueReads).toBe(observed.expectedValueReads)
           expect(observed.bucketReads).toBe(observed.expectedBucketReads)
           expect(observed.cursorCalls).toBe(observed.expectedCursorCalls)
