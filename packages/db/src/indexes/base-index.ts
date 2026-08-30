@@ -174,12 +174,20 @@ export abstract class BaseIndex<
 
   /**
    * Checks if the compare options match the index's compare options.
-   * The direction is ignored because the index can be reversed if the direction is different.
+   * Reversing an index also reverses null placement, so opposite directions
+   * are compatible only when their requested null placement is opposite too.
    */
   matchesCompareOptions(compareOptions: CompareOptions): boolean {
+    const reversesDirection =
+      this.compareOptions.direction !== compareOptions.direction
     const thisCompareOptionsWithoutDirection = {
       ...this.compareOptions,
       direction: undefined,
+      nulls: reversesDirection
+        ? this.compareOptions.nulls === `first`
+          ? `last`
+          : `first`
+        : this.compareOptions.nulls,
     }
     const compareOptionsWithoutDirection = {
       ...compareOptions,

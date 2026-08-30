@@ -364,6 +364,28 @@ function getOrderedKeys<T extends object, TKey extends string | number>(
           return index.takeFromStart(limit ?? index.keyCount, filterFn)
         }
 
+        // Public custom indexes predate lazy bucket iteration. Preserve their
+        // semantics with the full TotalOrder refinement instead of assuming
+        // their materialized entries expose complete comparator tie classes.
+        if (!index.supportsOrderedBucketIteration) {
+          const totalOrder = new TotalOrder(orderBy, collection)
+          const indexedEntries = index
+            .takeFromStart(index.keyCount, filterFn)
+            .flatMap((key) => {
+              const value = collection.get(key)
+              return value === undefined ? [] : [{ key, value }]
+            })
+          indexedEntries.sort((left, right) =>
+            totalOrder.compareEntries(
+              [left.key, left.value],
+              [right.key, right.value],
+            ),
+          )
+          return indexedEntries
+            .slice(0, limit ?? indexedEntries.length)
+            .map(({ key }) => key)
+        }
+
         // Reversing a value index must not reverse the public-key suffix of the
         // query's total order. Walk value buckets in reverse value order, sort
         // keys inside each bucket ascending, and stop after the first bucket

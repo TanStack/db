@@ -74,6 +74,15 @@ export class ReverseIndex<
     return this.originalIndex.orderedEntriesArray
   }
 
+  get supportsOrderedBucketIteration(): boolean {
+    const orderedIndex = this.originalIndex as IndexInterface<TKey> &
+      Partial<OrderedBucketIndex<TKey>>
+    return (
+      typeof orderedIndex.orderedBuckets === `function` &&
+      typeof orderedIndex.orderedBucketsReversed === `function`
+    )
+  }
+
   orderedBuckets(): IterableIterator<readonly [unknown, ReadonlySet<TKey>]> {
     const orderedIndex = this.originalIndex as IndexInterface<TKey> &
       Partial<OrderedBucketIndex<TKey>>

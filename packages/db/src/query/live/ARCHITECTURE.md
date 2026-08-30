@@ -1281,6 +1281,15 @@ refinement work. An all-tied source is the deliberate worst case: the one
 boundary bucket is the whole source and must be inspected before the public-key
 suffix can choose top-K.
 
+An ordered bucket is a comparator-equivalence class, not an exact Map-key
+bucket. Distinct values such as `null` and `undefined`, or values equated by a
+custom comparator, contribute all of their public keys to the same tie class.
+Reversing an index also reverses its null placement. The optimizer may reuse a
+reverse index only when the requested direction and null placement describe
+that reversed order; otherwise it creates a matching index or falls back to a
+full `TotalOrder` refinement. Public custom indexes without lazy bucket
+iteration keep that full-refinement fallback.
+
 Runtime reference identity has a different lifetime again. Objects use weak
 identity, but JavaScript symbols cannot be weak keys. Stable equality for the
 same live symbol therefore retains one strong entry per distinct symbol for the
