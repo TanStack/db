@@ -1402,15 +1402,116 @@ function replayErasureHistories(): Array<Array<LoadSubsetFullFlowEvent>> {
   ]
 }
 
-function replayAttemptIds(
+function erasedIdentityReferences(
   history: ReadonlyArray<LoadSubsetFullFlowEvent>,
-): Array<string> {
-  return history.flatMap((event) =>
-    event.type === `startReplay` ||
-    event.type === `writeReplayRows` ||
-    event.type === `settleReplay`
-      ? [event.attemptId]
-      : [],
+): Array<{ field: string; value: string }> {
+  const references: Array<{ field: string; value: string }> = []
+  const add = (field: string, value: string) => {
+    references.push({ field, value })
+  }
+
+  for (const event of history) {
+    switch (event.type) {
+      case `requestDemand`:
+        add(`ownerId`, event.ownerId)
+        add(`sessionId`, event.sessionId)
+        add(`demandId`, event.demandId)
+        add(`attemptId`, event.attemptId)
+        break
+      case `applyAuthoritativeRows`:
+      case `applyUnprovenRows`:
+      case `rejectDemand`:
+      case `releaseDemand`:
+        add(`ownerId`, event.ownerId)
+        add(`demandId`, event.demandId)
+        add(`attemptId`, event.attemptId)
+        break
+      case `settleDemandWithoutEvidence`:
+        add(`demandId`, event.demandId)
+        add(`attemptId`, event.attemptId)
+        break
+      case `truncateSource`:
+      case `cleanupSession`:
+      case `advanceWindowRevision`:
+        add(`sessionId`, event.sessionId)
+        break
+      case `restartSession`:
+        add(`previousSessionId`, event.previousSessionId)
+        add(`nextSessionId`, event.nextSessionId)
+        break
+      case `scheduleContinuation`:
+        add(`taskId`, event.taskId)
+        add(`sessionId`, event.sessionId)
+        break
+      case `runContinuation`:
+        add(`taskId`, event.taskId)
+        break
+      case `stageSyncTransaction`:
+      case `commitSyncTransaction`:
+      case `enterSyncApplication`:
+      case `abortSyncTransaction`:
+      case `publishSyncTransaction`:
+      case `settleSyncReceipt`:
+        add(`transactionId`, event.transactionId)
+        break
+      case `startReplay`:
+      case `writeReplayRows`:
+      case `settleReplay`:
+        add(`attemptId`, event.attemptId)
+        break
+      case `registerSourceDemand`:
+      case `settleSourceDemand`:
+        add(`sessionId`, event.sessionId)
+        add(`demandId`, event.demandId)
+        break
+      case `startAcquisition`:
+        add(`acquisitionId`, event.acquisitionId)
+        add(`demandId`, event.demandId)
+        break
+      case `attachAcquisitionOwner`:
+        add(`acquisitionId`, event.acquisitionId)
+        add(`ownerId`, event.ownerId)
+        break
+      case `settleAcquisition`:
+        add(`acquisitionId`, event.acquisitionId)
+        break
+      case `stagePublicationRows`:
+        add(`publicationId`, event.publicationId)
+        add(`demandId`, event.demandId)
+        break
+      case `commitPublication`:
+      case `establishReplacementCoverage`:
+        add(`publicationId`, event.publicationId)
+        break
+      case `beginReplacement`:
+        add(`publicationId`, event.publicationId)
+        event.demandIds.forEach((demandId) => add(`demandId`, demandId))
+        break
+      case `settleReplacement`:
+        add(`publicationId`, event.publicationId)
+        add(`demandId`, event.demandId)
+        break
+      case `establishPublication`:
+      case `resizeOrderedWindow`:
+        break
+    }
+  }
+
+  return references
+}
+
+function expectEveryErasedIdentityRenamed(
+  history: ReadonlyArray<LoadSubsetFullFlowEvent>,
+  suffix: string,
+): void {
+  expect(
+    erasedIdentityReferences(renameHistoryIds(history, suffix)),
+    JSON.stringify(history),
+  ).toEqual(
+    erasedIdentityReferences(history).map(({ field, value }) => ({
+      field,
+      value: `${value}-${suffix}`,
+    })),
   )
 }
 
@@ -1545,6 +1646,37 @@ for (const campaign of refinementCampaigns(1_779_009)) {
   fcTest.prop([fc.string({ minLength: 1, maxLength: 4 })], campaign.options)(
     `erased identities preserve every bounded next-command observation (${campaign.label})`,
     (suffix) => {
+      for (const history of [
+        ...sourceErasureHistories(),
+        ...demandErasureHistories(),
+        ...transactionErasureHistories(),
+        ...replayErasureHistories(),
+        ...publicationErasureHistories(),
+        acquisitionHistory(`shared`, [`row-a`, `row-b`]),
+        acquisitionHistory(`separate`, [`row-a`, `row-b`]),
+        [
+          {
+            type: `startAcquisition`,
+            acquisitionId: `acquisition`,
+            sourceId: `source`,
+            demandId: `demand`,
+          },
+          {
+            type: `attachAcquisitionOwner`,
+            acquisitionId: `acquisition`,
+            ownerId: `owner`,
+          },
+          {
+            type: `settleAcquisition`,
+            acquisitionId: `acquisition`,
+            outcome: `reject`,
+            rowKeys: [`ghost-row`],
+          },
+        ] satisfies Array<LoadSubsetFullFlowEvent>,
+      ]) {
+        expectEveryErasedIdentityRenamed(history, suffix)
+      }
+
       for (const history of sourceErasureHistories()) {
         expectObservationPreservedAfterEveryPrefix(
           history,
@@ -1609,11 +1741,6 @@ for (const campaign of refinementCampaigns(1_779_009)) {
       }
 
       for (const history of replayErasureHistories()) {
-        expect(replayAttemptIds(renameHistoryIds(history, suffix))).toEqual(
-          replayAttemptIds(history).map(
-            (attemptId) => `${attemptId}-${suffix}`,
-          ),
-        )
         expectObservationPreservedAfterEveryPrefix(
           history,
           suffix,
