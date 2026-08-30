@@ -1986,6 +1986,14 @@ async function runAcquisitionTopology(
   }> = []
   let settledBatches: Array<Array<Array<string>>> = [[], []]
   let settledCallbackReads: Array<Array<Array<string>>> = [[], []]
+  let initialPhysicalStarts = 0
+  let initialLogicalStarts = 0
+  let initialDeduplications = 0
+  let remountRowKeys: Array<string> = []
+  let remountBatches: Array<Array<string>> = []
+  let remountCallbackReads: Array<Array<string>> = []
+  let remountBatchesAfterUnsubscribe: Array<Array<string>> = []
+  let remountCallbackReadsAfterUnsubscribe: Array<Array<string>> = []
 
   try {
     for (
@@ -2024,6 +2032,49 @@ async function runAcquisitionTopology(
     settledCallbackReads = callbackReads.map((ownerReads) =>
       ownerReads.map((read) => [...read]),
     )
+
+    initialPhysicalStarts = physicalStarts
+    initialLogicalStarts = logicalStarts
+    initialDeduplications = deduplications
+    subscriptions.forEach((subscription) => subscription.unsubscribe())
+    await Promise.all(liveQueries.map((live) => live.cleanup()))
+    expect(logicalReleases).toBe(2)
+
+    const remount = createLiveQueryCollection({
+      id: `refinement-acquisition-${runId}-remount`,
+      query: (q) => q.from({ row: sharedSource }),
+      startSync: false,
+    })
+    const observedRemountBatches: Array<Array<string>> = []
+    const observedRemountCallbackReads: Array<Array<string>> = []
+    const remountSubscription = remount.subscribeChanges(
+      (changes) => {
+        observedRemountBatches.push(
+          changes.map(({ key }) => String(key)).sort(),
+        )
+        observedRemountCallbackReads.push(
+          remount.toArray.map(({ id }) => String(id)).sort(),
+        )
+      },
+      { includeInitialState: false },
+    )
+    try {
+      await remount.preload()
+      remountRowKeys = remount.toArray.map(({ id }) => String(id)).sort()
+      remountBatches = observedRemountBatches.map((batch) => [...batch])
+      remountCallbackReads = observedRemountCallbackReads.map((read) => [
+        ...read,
+      ])
+    } finally {
+      remountSubscription.unsubscribe()
+      await remount.cleanup()
+      remountBatchesAfterUnsubscribe = observedRemountBatches.map((batch) => [
+        ...batch,
+      ])
+      remountCallbackReadsAfterUnsubscribe = observedRemountCallbackReads.map(
+        (read) => [...read],
+      )
+    }
   } finally {
     delivery.resolve()
     subscriptions.forEach((subscription) => subscription.unsubscribe())
@@ -2034,10 +2085,13 @@ async function runAcquisitionTopology(
   }
 
   return {
-    physicalStarts,
-    logicalStarts,
+    initialPhysicalStarts,
+    initialLogicalStarts,
+    initialDeduplications,
+    totalPhysicalStarts: physicalStarts,
+    totalLogicalStarts: logicalStarts,
     logicalReleases,
-    deduplications,
+    totalDeduplications: deduplications,
     owners,
     visibleRowKeys: [
       ...new Set(owners.flatMap(({ rowKeys: keys }) => keys)),
@@ -2046,6 +2100,11 @@ async function runAcquisitionTopology(
     callbackReads: settledCallbackReads,
     batchesAfterUnsubscribe: batches,
     callbackReadsAfterUnsubscribe: callbackReads,
+    remountRowKeys,
+    remountBatches,
+    remountCallbackReads,
+    remountBatchesAfterUnsubscribe,
+    remountCallbackReadsAfterUnsubscribe,
   }
 }
 
@@ -2107,20 +2166,50 @@ for (const campaign of refinementCampaigns(1_779_008)) {
       expect(separateActual.callbackReadsAfterUnsubscribe).toEqual(
         separateActual.callbackReads,
       )
-      expect(sharedActual.logicalStarts).toBe(2)
-      expect(separateActual.logicalStarts).toBe(2)
-      expect(sharedActual.logicalReleases).toBe(2)
-      expect(separateActual.logicalReleases).toBe(2)
-      expect(sharedActual.physicalStarts).toBe(1)
-      expect(separateActual.physicalStarts).toBe(2)
-      expect(sharedActual.deduplications).toBe(1)
-      expect(separateActual.deduplications).toBe(0)
-      expect(sharedActual.physicalStarts + sharedActual.deduplications).toBe(
-        sharedActual.logicalStarts,
+      expect(sharedActual.initialLogicalStarts).toBe(2)
+      expect(separateActual.initialLogicalStarts).toBe(2)
+      expect(sharedActual.initialPhysicalStarts).toBe(1)
+      expect(separateActual.initialPhysicalStarts).toBe(2)
+      expect(sharedActual.initialDeduplications).toBe(1)
+      expect(separateActual.initialDeduplications).toBe(0)
+      expect(sharedActual.remountRowKeys).toEqual(expectedKeys)
+      expect(separateActual.remountRowKeys).toEqual(expectedKeys)
+      expect(sharedActual.remountBatches).toEqual([expectedKeys, []])
+      expect(separateActual.remountBatches).toEqual([expectedKeys, []])
+      expect(sharedActual.remountCallbackReads).toEqual([
+        expectedKeys,
+        expectedKeys,
+      ])
+      expect(separateActual.remountCallbackReads).toEqual([
+        expectedKeys,
+        expectedKeys,
+      ])
+      expect(sharedActual.remountBatchesAfterUnsubscribe).toEqual(
+        sharedActual.remountBatches,
       )
+      expect(sharedActual.remountCallbackReadsAfterUnsubscribe).toEqual(
+        sharedActual.remountCallbackReads,
+      )
+      expect(separateActual.remountBatchesAfterUnsubscribe).toEqual(
+        separateActual.remountBatches,
+      )
+      expect(separateActual.remountCallbackReadsAfterUnsubscribe).toEqual(
+        separateActual.remountCallbackReads,
+      )
+      expect(sharedActual.totalLogicalStarts).toBe(3)
+      expect(separateActual.totalLogicalStarts).toBe(3)
+      expect(sharedActual.logicalReleases).toBe(3)
+      expect(separateActual.logicalReleases).toBe(3)
+      expect(sharedActual.totalPhysicalStarts).toBe(2)
+      expect(separateActual.totalPhysicalStarts).toBe(3)
+      expect(sharedActual.totalDeduplications).toBe(1)
+      expect(separateActual.totalDeduplications).toBe(0)
       expect(
-        separateActual.physicalStarts + separateActual.deduplications,
-      ).toBe(separateActual.logicalStarts)
+        sharedActual.totalPhysicalStarts + sharedActual.totalDeduplications,
+      ).toBe(sharedActual.totalLogicalStarts)
+      expect(
+        separateActual.totalPhysicalStarts + separateActual.totalDeduplications,
+      ).toBe(separateActual.totalLogicalStarts)
     },
   )
 }
