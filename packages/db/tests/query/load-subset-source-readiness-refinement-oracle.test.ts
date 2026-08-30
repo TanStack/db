@@ -168,10 +168,7 @@ it.each([`resolve`, `reject`] as const)(
       expect(requestedGroups(pending[1]!.options)).toEqual([`fresh`])
       expect(pending[0]!.options.signal?.aborted).toBe(true)
       expect(pending[1]!.options.signal?.aborted).toBe(false)
-      expect(
-        unloads.filter((options) => options === pending[0]!.options),
-      ).toHaveLength(1)
-      expect(unloads).not.toContain(pending[1]!.options)
+      expect(unloads).toEqual([pending[0]!.options])
       history.push(
         {
           type: `retireSourceDemand`,
@@ -237,14 +234,12 @@ it.each([`resolve`, `reject`] as const)(
         }),
       ])
       expect(pending[1]!.options.signal?.aborted).toBe(false)
-      expect(unloads).not.toContain(pending[1]!.options)
+      expect(unloads).toEqual([pending[0]!.options])
 
       await live.cleanup()
       liveCleaned = true
       expect(pending[1]!.options.signal?.aborted).toBe(true)
-      expect(
-        unloads.filter((options) => options === pending[1]!.options),
-      ).toHaveLength(1)
+      expect(unloads).toEqual([pending[0]!.options, pending[1]!.options])
     } finally {
       for (const request of pending) {
         request.rows.resolve([])
