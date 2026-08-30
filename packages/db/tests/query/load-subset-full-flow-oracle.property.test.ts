@@ -1478,6 +1478,190 @@ it(`replays one unindexed fallback and publishes one replacement after truncate`
   }
 })
 
+type UnindexedReplayRow = { id: string; rank: number }
+type UnindexedReplayResult = {
+  hasMore: boolean
+  appliedRowKeys: ReadonlyArray<string>
+}
+type UnindexedReplayObservedChange = {
+  type: `insert` | `update` | `delete`
+  key: string
+  value: UnindexedReplayRow
+}
+
+function createUnindexedReplayHarness(id: string) {
+  const pending: Array<{
+    options: LoadSubsetOptions
+    request: ReturnType<typeof createDeferred<UnindexedReplayResult>>
+  }> = []
+  const batches: Array<ReadonlyArray<UnindexedReplayObservedChange>> = []
+  const callbackReads: Array<ReadonlyArray<UnindexedReplayRow>> = []
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: UnindexedReplayRow }) => void
+  let commit!: () => true | Promise<void>
+  let truncate!: () => void
+  const source = createCollection<UnindexedReplayRow>({
+    id: `${id}-source`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `off`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        truncate = params.truncate
+        params.markReady()
+        return {
+          loadSubset: (options) => {
+            const request = createDeferred<UnindexedReplayResult>()
+            pending.push({ options, request })
+            return request.promise
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection({
+    id: `${id}-live`,
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(1),
+    startSync: true,
+  })
+  const readRows = () =>
+    live.toArray.map(({ id: rowId, rank }) => ({ id: rowId, rank }))
+  let observer: ReturnType<typeof live.subscribeChanges> | undefined
+  const startObserving = () => {
+    observer = live.subscribeChanges(
+      (changes) => {
+        batches.push(
+          changes
+            .map<UnindexedReplayObservedChange>(({ type, key, value }) => ({
+              type,
+              key: String(key),
+              value: { id: value.id, rank: value.rank },
+            }))
+            .sort((left, right) => left.key.localeCompare(right.key)),
+        )
+        callbackReads.push(readRows())
+      },
+      { includeInitialState: false },
+    )
+  }
+  const stopObserving = () => {
+    observer?.unsubscribe()
+    observer = undefined
+  }
+  const clearObservations = () => {
+    batches.length = 0
+    callbackReads.length = 0
+  }
+  const applyRows = async (rows: ReadonlyArray<UnindexedReplayRow>) => {
+    begin()
+    for (const row of rows) write({ type: `insert`, value: row })
+    const receipt = commit()
+    if (receipt !== true) await receipt
+  }
+  const startTruncate = () => {
+    begin()
+    truncate()
+    return commit()
+  }
+  const cleanup = async () => {
+    for (const { request } of pending) {
+      request.reject(new Error(`test cleanup`))
+    }
+    stopObserving()
+    await Promise.all([live.cleanup(), source.cleanup()])
+  }
+
+  startObserving()
+  return {
+    source,
+    live,
+    pending,
+    batches,
+    callbackReads,
+    readRows,
+    startObserving,
+    stopObserving,
+    clearObservations,
+    applyRows,
+    startTruncate,
+    cleanup,
+  }
+}
+
+it(`retries one unindexed fallback after a rejected truncate replay`, async () => {
+  const harness = createUnindexedReplayHarness(
+    `unindexed-rejected-truncate-retry`,
+  )
+  const preload = harness.live.preload()
+
+  try {
+    expect(harness.pending).toHaveLength(1)
+    await harness.applyRows([{ id: `a`, rank: 1 }])
+    harness.pending[0]!.request.resolve({
+      hasMore: false,
+      appliedRowKeys: [`a`],
+    })
+    await preload
+    await flushPromises()
+    expect(harness.readRows()).toEqual([{ id: `a`, rank: 1 }])
+
+    harness.clearObservations()
+    const replayFailure = new Error(`truncate replay failed`)
+    const failedReplacement = harness.startTruncate()
+    await flushPromises()
+    expect(harness.pending).toHaveLength(2)
+    expect(harness.live.status).toBe(`ready`)
+    expect(harness.live.isLoadingSubset).toBe(true)
+    harness.pending[1]!.request.reject(replayFailure)
+    await Promise.resolve(failedReplacement).catch(() => undefined)
+    await flushPromises()
+
+    expect(harness.pending).toHaveLength(2)
+    expect(harness.live.status).toBe(`ready`)
+    expect(harness.live.isLoadingSubset).toBe(false)
+    expect(harness.live.utils.lastSubsetError).toBe(replayFailure)
+    expect(harness.readRows()).toEqual([{ id: `a`, rank: 1 }])
+    expect(harness.batches).toEqual([])
+    expect(harness.callbackReads).toEqual([])
+
+    const successfulReplacement = harness.startTruncate()
+    await flushPromises()
+    expect(harness.pending).toHaveLength(3)
+    expect(harness.live.isLoadingSubset).toBe(true)
+    await harness.applyRows([{ id: `b`, rank: 2 }])
+    harness.pending[2]!.request.resolve({
+      hasMore: false,
+      appliedRowKeys: [`b`],
+    })
+    if (successfulReplacement !== true) await successfulReplacement
+    await flushPromises()
+
+    expect(harness.pending).toHaveLength(3)
+    expect(harness.live.status).toBe(`ready`)
+    expect(harness.live.isLoadingSubset).toBe(false)
+    expect(harness.readRows()).toEqual([{ id: `b`, rank: 2 }])
+    expect(harness.batches).toEqual([
+      [
+        { type: `delete`, key: `a`, value: { id: `a`, rank: 1 } },
+        { type: `insert`, key: `b`, value: { id: `b`, rank: 2 } },
+      ],
+    ])
+    expect(harness.callbackReads).toEqual([[{ id: `b`, rank: 2 }]])
+  } finally {
+    await Promise.all([preload.catch(() => undefined), harness.cleanup()])
+  }
+})
+
 it.each([`eager`, `off`] as const)(
   `keeps an Effect zero-limit join free of ordered transport work with autoIndex %s`,
   async (autoIndex) => {

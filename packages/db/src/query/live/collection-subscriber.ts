@@ -561,6 +561,12 @@ export class CollectionSubscriber<
         orderBy,
         trackLoadSubsetPromise: false,
         onLoadSubsetResult: (result, demand) => {
+          if (
+            this.unindexedSnapshotSubscription === undefined ||
+            this.unindexedSnapshotSubscription === subscription
+          ) {
+            this.unindexedSnapshotSubscription = subscription
+          }
           if (result instanceof Promise) {
             void result.catch(() => {
               if (this.unindexedSnapshotSubscription === subscription) {

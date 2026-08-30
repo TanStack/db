@@ -698,7 +698,10 @@ subscription session. A synchronous throw or rejected fallback clears only
 that subscription's guard, so the same live query can retry. Cleanup creates a
 new subscription and a late settlement from the old one cannot clear the new
 guard. Truncate replay belongs to the subscription's retained demand; the live
-coordinator must not add a second fallback while that replay is in flight.
+coordinator must not add a second fallback while that replay is in flight. A
+replay that starts after an earlier rejection reclaims the same subscription
+guard. Success keeps it claimed, so replacement publication cannot schedule a
+duplicate full-source fallback; rejection releases it for a later retry.
 Cleanup also aborts and settles the subscription-visible acquisition before a
 raw adapter promise can affect a replacement session. The live coordinator's
 subscription-identity check is a second fence, not a substitute for that lower
