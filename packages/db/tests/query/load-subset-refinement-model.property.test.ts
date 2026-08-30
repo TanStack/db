@@ -1408,47 +1408,52 @@ function replayErasureHistories(): Array<Array<LoadSubsetFullFlowEvent>> {
 
 function erasedIdentityReferences(
   history: ReadonlyArray<LoadSubsetFullFlowEvent>,
-): Array<{ field: string; value: string }> {
-  const references: Array<{ field: string; value: string }> = []
-  const add = (field: string, value: string) => {
-    references.push({ field, value })
+): Array<{ path: string; field: string; value: string }> {
+  const references: Array<{ path: string; field: string; value: string }> = []
+  const add = (
+    eventIndex: number,
+    field: string,
+    value: string,
+    fieldPath = field,
+  ) => {
+    references.push({ path: `${eventIndex}.${fieldPath}`, field, value })
   }
 
-  for (const event of history) {
+  for (const [eventIndex, event] of history.entries()) {
     switch (event.type) {
       case `requestDemand`:
-        add(`ownerId`, event.ownerId)
-        add(`sessionId`, event.sessionId)
-        add(`demandId`, event.demandId)
-        add(`attemptId`, event.attemptId)
+        add(eventIndex, `ownerId`, event.ownerId)
+        add(eventIndex, `sessionId`, event.sessionId)
+        add(eventIndex, `demandId`, event.demandId)
+        add(eventIndex, `attemptId`, event.attemptId)
         break
       case `applyAuthoritativeRows`:
       case `applyUnprovenRows`:
       case `rejectDemand`:
       case `releaseDemand`:
-        add(`ownerId`, event.ownerId)
-        add(`demandId`, event.demandId)
-        add(`attemptId`, event.attemptId)
+        add(eventIndex, `ownerId`, event.ownerId)
+        add(eventIndex, `demandId`, event.demandId)
+        add(eventIndex, `attemptId`, event.attemptId)
         break
       case `settleDemandWithoutEvidence`:
-        add(`demandId`, event.demandId)
-        add(`attemptId`, event.attemptId)
+        add(eventIndex, `demandId`, event.demandId)
+        add(eventIndex, `attemptId`, event.attemptId)
         break
       case `truncateSource`:
       case `cleanupSession`:
       case `advanceWindowRevision`:
-        add(`sessionId`, event.sessionId)
+        add(eventIndex, `sessionId`, event.sessionId)
         break
       case `restartSession`:
-        add(`previousSessionId`, event.previousSessionId)
-        add(`nextSessionId`, event.nextSessionId)
+        add(eventIndex, `previousSessionId`, event.previousSessionId)
+        add(eventIndex, `nextSessionId`, event.nextSessionId)
         break
       case `scheduleContinuation`:
-        add(`taskId`, event.taskId)
-        add(`sessionId`, event.sessionId)
+        add(eventIndex, `taskId`, event.taskId)
+        add(eventIndex, `sessionId`, event.sessionId)
         break
       case `runContinuation`:
-        add(`taskId`, event.taskId)
+        add(eventIndex, `taskId`, event.taskId)
         break
       case `stageSyncTransaction`:
       case `commitSyncTransaction`:
@@ -1456,44 +1461,46 @@ function erasedIdentityReferences(
       case `abortSyncTransaction`:
       case `publishSyncTransaction`:
       case `settleSyncReceipt`:
-        add(`transactionId`, event.transactionId)
+        add(eventIndex, `transactionId`, event.transactionId)
         break
       case `startReplay`:
       case `writeReplayRows`:
       case `settleReplay`:
-        add(`attemptId`, event.attemptId)
+        add(eventIndex, `attemptId`, event.attemptId)
         break
       case `registerSourceDemand`:
       case `settleSourceDemand`:
-        add(`sessionId`, event.sessionId)
-        add(`demandId`, event.demandId)
+        add(eventIndex, `sessionId`, event.sessionId)
+        add(eventIndex, `demandId`, event.demandId)
         break
       case `startAcquisition`:
-        add(`acquisitionId`, event.acquisitionId)
-        add(`demandId`, event.demandId)
+        add(eventIndex, `acquisitionId`, event.acquisitionId)
+        add(eventIndex, `demandId`, event.demandId)
         break
       case `attachAcquisitionOwner`:
-        add(`acquisitionId`, event.acquisitionId)
-        add(`ownerId`, event.ownerId)
+        add(eventIndex, `acquisitionId`, event.acquisitionId)
+        add(eventIndex, `ownerId`, event.ownerId)
         break
       case `settleAcquisition`:
-        add(`acquisitionId`, event.acquisitionId)
+        add(eventIndex, `acquisitionId`, event.acquisitionId)
         break
       case `stagePublicationRows`:
-        add(`publicationId`, event.publicationId)
-        add(`demandId`, event.demandId)
+        add(eventIndex, `publicationId`, event.publicationId)
+        add(eventIndex, `demandId`, event.demandId)
         break
       case `commitPublication`:
       case `establishReplacementCoverage`:
-        add(`publicationId`, event.publicationId)
+        add(eventIndex, `publicationId`, event.publicationId)
         break
       case `beginReplacement`:
-        add(`publicationId`, event.publicationId)
-        event.demandIds.forEach((demandId) => add(`demandId`, demandId))
+        add(eventIndex, `publicationId`, event.publicationId)
+        event.demandIds.forEach((demandId, demandIndex) =>
+          add(eventIndex, `demandId`, demandId, `demandIds.${demandIndex}`),
+        )
         break
       case `settleReplacement`:
-        add(`publicationId`, event.publicationId)
-        add(`demandId`, event.demandId)
+        add(eventIndex, `publicationId`, event.publicationId)
+        add(eventIndex, `demandId`, event.demandId)
         break
       case `establishPublication`:
       case `resizeOrderedWindow`:
@@ -1504,19 +1511,61 @@ function erasedIdentityReferences(
   return references
 }
 
+function changedLeafPaths(
+  left: unknown,
+  right: unknown,
+  path = ``,
+): Array<string> {
+  if (Object.is(left, right)) return []
+  if (Array.isArray(left) && Array.isArray(right)) {
+    if (left.length !== right.length) return [path]
+    return left.flatMap((value, index) =>
+      changedLeafPaths(
+        value,
+        right[index],
+        path === `` ? `${index}` : `${path}.${index}`,
+      ),
+    )
+  }
+  if (
+    typeof left === `object` &&
+    left !== null &&
+    typeof right === `object` &&
+    right !== null
+  ) {
+    const leftRecord = left as Record<string, unknown>
+    const rightRecord = right as Record<string, unknown>
+    const keys = [
+      ...new Set([...Object.keys(leftRecord), ...Object.keys(rightRecord)]),
+    ].sort()
+    return keys.flatMap((key) =>
+      changedLeafPaths(
+        leftRecord[key],
+        rightRecord[key],
+        path === `` ? key : `${path}.${key}`,
+      ),
+    )
+  }
+  return [path]
+}
+
 function expectEveryErasedIdentityRenamed(
   history: ReadonlyArray<LoadSubsetFullFlowEvent>,
   suffix: string,
 ): void {
-  expect(
-    erasedIdentityReferences(renameHistoryIds(history, suffix)),
-    JSON.stringify(history),
-  ).toEqual(
-    erasedIdentityReferences(history).map(({ field, value }) => ({
+  const renamed = renameHistoryIds(history, suffix)
+  const references = erasedIdentityReferences(history)
+  expect(erasedIdentityReferences(renamed), JSON.stringify(history)).toEqual(
+    references.map(({ path, field, value }) => ({
+      path,
       field,
       value: `${value}-${suffix}`,
     })),
   )
+  expect(
+    changedLeafPaths(history, renamed).sort(),
+    JSON.stringify(history),
+  ).toEqual(references.map(({ path }) => path).sort())
 }
 
 function publicationErasureHistories(): Array<Array<LoadSubsetFullFlowEvent>> {
