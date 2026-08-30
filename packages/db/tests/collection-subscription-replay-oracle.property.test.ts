@@ -2757,6 +2757,145 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
+  it(`keeps an ordinary same-key write authoritative while an unordered request is pending`, async () => {
+    type Row = { id: `a` | `x`; rank: number }
+    type Outcome = {
+      hasMore: boolean
+      appliedRowKeys: ReadonlyArray<Row[`id`]>
+    }
+    type Phase = `initial` | `replay` | `additional` | `probe`
+
+    const replayFailure = new Error(`sibling replay failed`)
+    const additionalLoad = createDeferred<Outcome>()
+    const loads: Array<{ phase: Phase; options: LoadSubsetOptions }> = []
+    let phase: Phase = `initial`
+    let begin!: () => void
+    let write!: (
+      message: ChangeMessageOrDeleteKeyMessage<Row, Row[`id`]>,
+    ) => void
+    let commit!: (signal?: AbortSignal) => true | Promise<void>
+    let truncate!: () => void
+
+    const collection = createCollection<Row>({
+      id: `ordinary-write-during-unordered-request`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          truncate = params.truncate
+          params.markReady()
+
+          const apply = (
+            row: Row,
+            signal: AbortSignal | undefined,
+          ): Outcome => {
+            begin()
+            write({ type: `insert`, value: row })
+            commit(signal)
+            return { hasMore: false, appliedRowKeys: [row.id] }
+          }
+
+          return {
+            loadSubset: (options) => {
+              loads.push({ phase, options })
+              if (phase === `initial`) {
+                return options.orderBy
+                  ? Promise.resolve(apply({ id: `a`, rank: 1 }, options.signal))
+                  : Promise.resolve({
+                      hasMore: false,
+                      appliedRowKeys: [] as const,
+                    })
+              }
+              if (phase === `replay`) {
+                return options.orderBy
+                  ? Promise.resolve(apply({ id: `x`, rank: 0 }, options.signal))
+                  : Promise.reject(replayFailure)
+              }
+              if (phase === `additional`) return additionalLoad.promise
+              return Promise.resolve({
+                hasMore: false,
+                appliedRowKeys: [] as const,
+              })
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const index = collection.createIndex((row) => row.rank, {
+      indexType: BTreeIndex,
+    })
+    const orderBy: OrderBy = [
+      {
+        expression: new PropRef([`rank`]),
+        compareOptions: { direction: `asc`, nulls: `first` },
+      },
+    ]
+    const seedWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
+    const additionalWhere = new Func(`eq`, [
+      new PropRef([`id`]),
+      new Value(`x`),
+    ])
+    const visible = new Set<Row[`id`]>()
+    const subscription = collection.subscribeChanges((changes) => {
+      for (const change of changes) {
+        const key = change.key as Row[`id`]
+        if (change.type === `delete`) visible.delete(key)
+        else visible.add(key)
+      }
+    })
+    subscription.setOrderByIndex(index)
+
+    try {
+      subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+      subscription.requestSnapshot({ where: seedWhere })
+      await flushPromises()
+      expect([...visible]).toEqual([`a`])
+
+      phase = `replay`
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+      await flushPromises()
+      expect(subscription.lastError).toBe(replayFailure)
+      expect(subscription.orderedBoundaryKey).toBe(`a`)
+      expect([...visible]).toEqual([`a`])
+
+      phase = `additional`
+      subscription.requestSnapshot({ where: additionalWhere })
+      await flushPromises()
+      expect(loads.at(-1)).toMatchObject({ phase: `additional` })
+      expect(loads.at(-1)?.options.orderBy).toBeUndefined()
+
+      begin()
+      write({ type: `update`, value: { id: `x`, rank: -1 } })
+      commit()
+      expect(subscription.orderedBoundaryKey).toBe(`x`)
+      expect([...visible].sort()).toEqual([`a`, `x`])
+
+      additionalLoad.reject(new Error(`sibling acquisition failed`))
+      await flushPromises()
+      subscription.releaseSnapshot(additionalWhere)
+      expect(subscription.orderedBoundaryKey).toBe(`x`)
+      expect([...visible].sort()).toEqual([`a`, `x`])
+
+      phase = `probe`
+      subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+      await flushPromises()
+      expect(loads.at(-1)).toMatchObject({
+        phase: `probe`,
+        options: { cursor: { lastKey: `x` } },
+      })
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   it.each([
     `sync`,
     `async`,
