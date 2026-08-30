@@ -722,14 +722,47 @@ describe(`createDeduplicatedLoadSubset`, () => {
     }
     const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
 
-    expect(() => deduplicated.loadSubset({ limit: 2, signal })).toThrow(
-      `then install failed`,
-    )
+    const failedLoad = deduplicated.loadSubset({ limit: 2, signal })
+
+    expect(failedLoad).toBeInstanceOf(Promise)
+    await expect(failedLoad).rejects.toThrow(`then install failed`)
     expect(signal.addEventListener).toHaveBeenCalledTimes(1)
     expect(signal.removeEventListener).toHaveBeenCalledTimes(1)
 
     await deduplicated.loadSubset({ limit: 2 })
     expect(loadSubsetCalls).toBe(2)
+  })
+
+  it(`retains exact evidence when a Promise subclass settles during handler installation`, async () => {
+    class SynchronousThenPromise extends Promise<void> {
+      static get [Symbol.species](): PromiseConstructor {
+        return Promise
+      }
+
+      override then<TResult1 = void, TResult2 = never>(
+        onfulfilled?:
+          | ((value: void) => TResult1 | PromiseLike<TResult1>)
+          | null,
+        _onrejected?:
+          | ((reason: unknown) => TResult2 | PromiseLike<TResult2>)
+          | null,
+      ): Promise<TResult1 | TResult2> {
+        return Promise.resolve(onfulfilled?.()) as Promise<TResult1 | TResult2>
+      }
+    }
+    let loadSubsetCalls = 0
+    const loadSubset: LoadSubsetFn = () => {
+      loadSubsetCalls += 1
+      return loadSubsetCalls === 1
+        ? new SynchronousThenPromise((resolve) => resolve())
+        : Promise.resolve()
+    }
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+
+    await deduplicated.loadSubset({ limit: 2 })
+
+    expect(deduplicated.loadSubset({ limit: 2 })).toBe(true)
+    expect(loadSubsetCalls).toBe(1)
   })
 
   it(`shares in-flight work while any cancellation owner remains active`, async () => {

@@ -283,15 +283,21 @@ export class DeduplicatedLoadSubset {
     } else {
       const ownsRequestAtAdapterReturn =
         requestGeneration === this.generation && reservation.active
-      // Promise subclasses can run or throw from handler installation. Keep the
-      // entry optional until the complete observation chain exists so failed
-      // installation cannot leave an owner or abort lease behind.
+      // Assimilate foreign Promise implementations before installing stateful
+      // handlers. Calling their `then` now preserves reentrant adapter effects,
+      // while the native bridge defers fulfillment, rejection, and thrown errors
+      // until the entry below exists.
+      const normalizedResultPromise = new Promise<void | LoadSubsetResult>(
+        (resolve, reject) => {
+          resultPromise.then(resolve, reject)
+        },
+      )
       const installation: { entry: InflightCall | undefined } = {
         entry: undefined,
       }
       let observedPromise: Promise<void | LoadSubsetResult>
       try {
-        observedPromise = resultPromise
+        observedPromise = normalizedResultPromise
           .then((result) => {
             // Only update tracking if this request is still from the current generation
             // If reset() was called, the generation will have incremented and we should

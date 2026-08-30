@@ -1940,14 +1940,20 @@ async function expectDerivedSyncDuringOptimisticMutation(): Promise<void> {
 async function expectDeduplicatedWaiterHandlesRejection(
   scenario: RejectedWaiterScenario,
 ): Promise<void> {
-  const detachedBranches: Array<Promise<unknown>> = []
+  let sourceRejectionObservers = 0
   class LocallyTrackedPromise<T> extends Promise<T> {
-    catch<TResult = never>(
-      onRejected?: ((reason: unknown) => TResult | PromiseLike<TResult>) | null,
-    ): Promise<T | TResult> {
-      const branch = super.catch(onRejected)
-      detachedBranches.push(branch)
-      return branch
+    static get [Symbol.species](): PromiseConstructor {
+      return Promise
+    }
+
+    override then<TResult1 = T, TResult2 = never>(
+      onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | null,
+      onrejected?:
+        | ((reason: unknown) => TResult2 | PromiseLike<TResult2>)
+        | null,
+    ): Promise<TResult1 | TResult2> {
+      if (onrejected) sourceRejectionObservers += 1
+      return super.then(onfulfilled, onrejected)
     }
   }
 
@@ -1970,7 +1976,6 @@ async function expectDeduplicatedWaiterHandlesRejection(
   }
 
   const callerOutcomes = Promise.allSettled([first, second])
-  const detachedOutcomes = Promise.allSettled(detachedBranches)
   rejectSource(new Error(`transport failed`))
   expect((await callerOutcomes).map(({ status }) => status)).toEqual([
     `rejected`,
@@ -1978,10 +1983,7 @@ async function expectDeduplicatedWaiterHandlesRejection(
   ])
 
   try {
-    expect({
-      branchCount: detachedBranches.length,
-      statuses: (await detachedOutcomes).map(({ status }) => status),
-    }).toEqual({ branchCount: 1, statuses: [`fulfilled`] })
+    expect(sourceRejectionObservers).toBe(1)
   } catch (error) {
     throw new TraceAssertionError(0, error)
   }
