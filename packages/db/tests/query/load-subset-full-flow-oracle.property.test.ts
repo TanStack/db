@@ -1958,6 +1958,177 @@ it.each([`resolve`, `reject`] as const)(
   },
 )
 
+it.each(
+  ([`resolve`, `reject`] as const).flatMap((supersededSettlement) =>
+    ([`superseded-first`, `current-first`] as const).map((settlementOrder) => ({
+      supersededSettlement,
+      settlementOrder,
+    })),
+  ),
+)(
+  `publishes only the current replay when an overlapping replay settles $settlementOrder with $supersededSettlement`,
+  async ({ supersededSettlement, settlementOrder }) => {
+    const harness = createUnindexedReplayHarness(
+      `unindexed-overlapping-replays-${supersededSettlement}-${settlementOrder}`,
+    )
+    const preload = harness.live.preload()
+    let firstReplacement: true | Promise<void> | undefined
+    let currentReplacement: true | Promise<void> | undefined
+    let cleaned = false
+
+    try {
+      expect(harness.pending).toHaveLength(1)
+      await harness.applyRows([{ id: `a`, rank: 1 }])
+      harness.pending[0]!.request!.resolve({
+        hasMore: false,
+        appliedRowKeys: [`a`],
+      })
+      await preload
+      await flushPromises()
+      expect(harness.live.status).toBe(`ready`)
+      expect(harness.live.isLoadingSubset).toBe(false)
+      expect(harness.live.utils.lastSubsetError).toBeUndefined()
+      expect(harness.readRows()).toEqual([{ id: `a`, rank: 1 }])
+
+      harness.clearObservations()
+      firstReplacement = harness.startTruncate()
+      void Promise.resolve(firstReplacement).catch(() => {})
+      await flushPromises()
+      expect(harness.pending).toHaveLength(2)
+
+      currentReplacement = harness.startTruncate()
+      void Promise.resolve(currentReplacement).catch(() => {})
+      await flushPromises()
+      expect(harness.pending).toHaveLength(3)
+      expect(harness.live.status).toBe(`ready`)
+      expect(harness.live.isLoadingSubset).toBe(true)
+      expect(harness.live.utils.lastSubsetError).toBeUndefined()
+      expect(harness.readRows()).toEqual([{ id: `a`, rank: 1 }])
+      expect(harness.batches).toEqual([])
+      expect(harness.callbackReads).toEqual([])
+
+      const signals = harness.pending.map(({ options }) => options.signal!)
+      expect(new Set(signals)).toHaveLength(3)
+      expect(signals.map(({ aborted }) => aborted)).toEqual([true, true, false])
+      expect(
+        new Set(harness.pending.map(({ options }) => options.subscription)),
+      ).toHaveLength(1)
+      expect(harness.unloads).toEqual([])
+
+      await expect(
+        harness.applyRowsForRequest(1, [{ id: `stale`, rank: -1 }]),
+      ).rejects.toBeInstanceOf(SyncTransactionAbortedError)
+      await harness.applyRowsForRequest(2, [{ id: `c`, rank: 3 }])
+      expect(harness.readRows()).toEqual([{ id: `a`, rank: 1 }])
+      expect(harness.batches).toEqual([])
+      expect(harness.callbackReads).toEqual([])
+
+      const supersededError = new Error(`superseded replay failed`)
+      const settleSuperseded = () => {
+        if (supersededSettlement === `resolve`) {
+          harness.pending[1]!.request!.resolve({
+            hasMore: false,
+            appliedRowKeys: [`stale`],
+          })
+        } else {
+          harness.pending[1]!.request!.reject(supersededError)
+        }
+      }
+      const settleCurrent = () => {
+        harness.pending[2]!.request!.resolve({
+          hasMore: false,
+          appliedRowKeys: [`c`],
+        })
+      }
+      const settleFirst =
+        settlementOrder === `superseded-first`
+          ? settleSuperseded
+          : settleCurrent
+      const settleLast =
+        settlementOrder === `superseded-first`
+          ? settleCurrent
+          : settleSuperseded
+
+      settleFirst()
+      await flushPromises()
+      expect(harness.live.status).toBe(`ready`)
+      expect(harness.live.isLoadingSubset).toBe(true)
+      expect(harness.live.utils.lastSubsetError).toBeUndefined()
+      expect(harness.readRows()).toEqual([{ id: `a`, rank: 1 }])
+      expect(harness.batches).toEqual([])
+      expect(harness.callbackReads).toEqual([])
+      expect(acquisitionIndices(harness.pending, harness.unloads)).toEqual(
+        settlementOrder === `superseded-first` ? [1] : [0],
+      )
+
+      settleLast()
+      await Promise.all([
+        Promise.resolve(firstReplacement).catch(() => undefined),
+        Promise.resolve(currentReplacement).catch(() => undefined),
+      ])
+      await flushPromises()
+
+      expect(harness.pending).toHaveLength(3)
+      expect(harness.live.status).toBe(`ready`)
+      expect(harness.live.isLoadingSubset).toBe(false)
+      expect(harness.live.utils.lastSubsetError).toBeUndefined()
+      expect(harness.readRows()).toEqual([{ id: `c`, rank: 3 }])
+      expect(harness.batches).toEqual([
+        [
+          { type: `delete`, key: `a`, value: { id: `a`, rank: 1 } },
+          { type: `insert`, key: `c`, value: { id: `c`, rank: 3 } },
+        ],
+      ])
+      expect(harness.callbackReads).toEqual([[{ id: `c`, rank: 3 }]])
+      expect(acquisitionIndices(harness.pending, harness.unloads)).toEqual(
+        settlementOrder === `superseded-first` ? [1, 0] : [0, 1],
+      )
+
+      for (const { options } of harness.pending) {
+        expectUnindexedFullSnapshotRequest(options)
+      }
+      const loadResults = await Promise.allSettled(
+        harness.loadResults.map((result) => Promise.resolve(result)),
+      )
+      expect(loadResults[0]).toStrictEqual({
+        status: `fulfilled`,
+        value: { hasMore: false, appliedRowKeys: [`a`] },
+      })
+      if (supersededSettlement === `resolve`) {
+        expect(loadResults[1]).toStrictEqual({
+          status: `fulfilled`,
+          value: { hasMore: false, appliedRowKeys: [`stale`] },
+        })
+      } else {
+        expect(loadResults[1]!.status).toBe(`rejected`)
+        if (loadResults[1]!.status === `rejected`) {
+          expect(loadResults[1]!.reason).toBe(supersededError)
+        }
+      }
+      expect(loadResults[2]).toStrictEqual({
+        status: `fulfilled`,
+        value: { hasMore: false, appliedRowKeys: [`c`] },
+      })
+
+      await harness.cleanup()
+      cleaned = true
+      expect(harness.live.status).toBe(`cleaned-up`)
+      expect(harness.live.isLoadingSubset).toBe(false)
+      expect(harness.live.utils.lastSubsetError).toBeUndefined()
+      expect(harness.readRows()).toEqual([])
+      expect(signals.map(({ aborted }) => aborted)).toEqual([true, true, true])
+      expect(acquisitionIndices(harness.pending, harness.unloads)).toEqual(
+        settlementOrder === `superseded-first` ? [1, 0, 2] : [0, 1, 2],
+      )
+    } finally {
+      await Promise.all([
+        preload.catch(() => undefined),
+        cleaned ? Promise.resolve() : harness.cleanup(),
+      ])
+    }
+  },
+)
+
 it.each([`eager`, `off`] as const)(
   `keeps an Effect zero-limit join free of ordered transport work with autoIndex %s`,
   async (autoIndex) => {

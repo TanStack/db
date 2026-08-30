@@ -61,7 +61,14 @@ export class CollectionSubscriber<
   private pendingOrderedLoadPromise:
     | Promise<AppliedLoadSubsetOutcome>
     | undefined
-  private unindexedSnapshotSubscription: CollectionSubscription | undefined
+  // Overlapping replays share one subscription, so only the latest result
+  // token may clear the full-source acquisition guard.
+  private unindexedSnapshot:
+    | {
+        subscription: CollectionSubscription
+        token: symbol
+      }
+    | undefined
   private readonly demand = new SubsetDemandController()
 
   constructor(
@@ -355,7 +362,7 @@ export class CollectionSubscriber<
     onLoadSubsetError: (event: SubscriptionLoadSubsetErrorEvent) => void,
   ): CollectionSubscription {
     const { orderBy, offset, limit, index } = orderByInfo
-    this.unindexedSnapshotSubscription = undefined
+    this.unindexedSnapshot = undefined
 
     // Store the callback so loadNextItems can also use direct tracking.
     // Track in-flight ordered loads to avoid issuing redundant requests while
@@ -424,8 +431,8 @@ export class CollectionSubscriber<
       subscriptionHolder.current = undefined
       this.lastLoadRequestKey = undefined
       this.lastNoProgressRequestKey = undefined
-      if (this.unindexedSnapshotSubscription === subscription) {
-        this.unindexedSnapshotSubscription = undefined
+      if (this.unindexedSnapshot?.subscription === subscription) {
+        this.unindexedSnapshot = undefined
       }
 
       // Ordered continuations belong to this subscription session. A settled
@@ -553,24 +560,28 @@ export class CollectionSubscriber<
     subscription: CollectionSubscription,
     orderBy: LoadSubsetOptions[`orderBy`],
   ): void {
-    if (this.unindexedSnapshotSubscription === subscription) return
+    if (this.unindexedSnapshot?.subscription === subscription) return
 
-    this.unindexedSnapshotSubscription = subscription
+    const requestToken = Symbol()
+    this.unindexedSnapshot = {
+      subscription,
+      token: requestToken,
+    }
     try {
       subscription.requestSnapshot({
         orderBy,
         trackLoadSubsetPromise: false,
         onLoadSubsetResult: (result, demand) => {
-          if (
-            this.unindexedSnapshotSubscription === undefined ||
-            this.unindexedSnapshotSubscription === subscription
-          ) {
-            this.unindexedSnapshotSubscription = subscription
-          }
+          const token = Symbol()
+          this.unindexedSnapshot = { subscription, token }
           if (result instanceof Promise) {
             void result.catch(() => {
-              if (this.unindexedSnapshotSubscription === subscription) {
-                this.unindexedSnapshotSubscription = undefined
+              const current = this.unindexedSnapshot
+              if (
+                current?.subscription === subscription &&
+                current.token === token
+              ) {
+                this.unindexedSnapshot = undefined
               }
             })
           }
@@ -578,8 +589,12 @@ export class CollectionSubscriber<
         },
       })
     } catch (error) {
-      if (this.unindexedSnapshotSubscription === subscription) {
-        this.unindexedSnapshotSubscription = undefined
+      const current = this.unindexedSnapshot
+      if (
+        current.subscription === subscription &&
+        current.token === requestToken
+      ) {
+        this.unindexedSnapshot = undefined
       }
       throw error
     }
