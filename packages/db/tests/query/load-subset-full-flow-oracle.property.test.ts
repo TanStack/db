@@ -1744,6 +1744,9 @@ it.each([`async`, `sync`] as const)(
       const signals = harness.pending.map(({ options }) => options.signal!)
       expect(new Set(signals)).toHaveLength(3)
       expect(signals.map(({ aborted }) => aborted)).toEqual([true, true, false])
+      expect(
+        new Set(harness.pending.map(({ options }) => options.subscription)),
+      ).toHaveLength(1)
       expect(harness.unloads).toHaveLength(2)
       expect(
         harness.unloads.map((options) =>
