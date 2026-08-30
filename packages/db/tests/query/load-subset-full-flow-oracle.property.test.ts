@@ -1621,6 +1621,42 @@ function createUnindexedReplayHarness(id: string) {
   }
 }
 
+function expectUnindexedFullSnapshotRequest(options: LoadSubsetOptions): void {
+  expect(Object.keys(options).sort()).toEqual([
+    `cursor`,
+    `limit`,
+    `orderBy`,
+    `signal`,
+    `subscription`,
+    `where`,
+  ])
+  expect(options.where).toBeUndefined()
+  expect(options.limit).toBeUndefined()
+  expect(options.offset).toBeUndefined()
+  expect(options.cursor).toBeUndefined()
+  expect(options.orderBy).toHaveLength(1)
+  const ordering = options.orderBy![0]!
+  expect(Object.keys(ordering).sort()).toEqual([`compareOptions`, `expression`])
+  expect(Object.keys(ordering.expression).sort()).toEqual([`path`, `type`])
+  expect(ordering.expression).toEqual({ type: `ref`, path: [`rank`] })
+  expect(ordering.compareOptions).toStrictEqual({
+    direction: `asc`,
+    nulls: `first`,
+    stringSort: `locale`,
+  })
+  expect(options.signal).toBeInstanceOf(AbortSignal)
+  expect(options.subscription).toBeDefined()
+}
+
+function acquisitionIndices(
+  acquisitions: ReadonlyArray<{ options: LoadSubsetOptions }>,
+  releases: ReadonlyArray<LoadSubsetOptions>,
+): ReadonlyArray<number> {
+  return releases.map((options) =>
+    acquisitions.findIndex((acquisition) => acquisition.options === options),
+  )
+}
+
 it.each([`async`, `sync`] as const)(
   `retries one unindexed fallback after a rejected truncate replay with %s success`,
   async (successMode) => {
@@ -1705,36 +1741,7 @@ it.each([`async`, `sync`] as const)(
       expect(harness.callbackReads).toEqual([[{ id: `b`, rank: 2 }]])
 
       for (const { options } of harness.pending) {
-        expect(Object.keys(options).sort()).toEqual([
-          `cursor`,
-          `limit`,
-          `orderBy`,
-          `signal`,
-          `subscription`,
-          `where`,
-        ])
-        expect(options.where).toBeUndefined()
-        expect(options.limit).toBeUndefined()
-        expect(options.offset).toBeUndefined()
-        expect(options.cursor).toBeUndefined()
-        expect(options.orderBy).toHaveLength(1)
-        const ordering = options.orderBy![0]!
-        expect(Object.keys(ordering).sort()).toEqual([
-          `compareOptions`,
-          `expression`,
-        ])
-        expect(Object.keys(ordering.expression).sort()).toEqual([
-          `path`,
-          `type`,
-        ])
-        expect(ordering.expression).toEqual({ type: `ref`, path: [`rank`] })
-        expect(ordering.compareOptions).toStrictEqual({
-          direction: `asc`,
-          nulls: `first`,
-          stringSort: `locale`,
-        })
-        expect(options.signal).toBeInstanceOf(AbortSignal)
-        expect(options.subscription).toBeDefined()
+        expectUnindexedFullSnapshotRequest(options)
       }
       expect(
         harness.loadResults.map((result) =>
@@ -1748,11 +1755,9 @@ it.each([`async`, `sync`] as const)(
         new Set(harness.pending.map(({ options }) => options.subscription)),
       ).toHaveLength(1)
       expect(harness.unloads).toHaveLength(2)
-      expect(
-        harness.unloads.map((options) =>
-          harness.pending.findIndex((pending) => pending.options === options),
-        ),
-      ).toEqual([1, 0])
+      expect(acquisitionIndices(harness.pending, harness.unloads)).toEqual([
+        1, 0,
+      ])
 
       await harness.cleanup()
       cleaned = true
@@ -1762,14 +1767,157 @@ it.each([`async`, `sync`] as const)(
       expect(harness.readRows()).toEqual([])
       expect(signals.map(({ aborted }) => aborted)).toEqual([true, true, true])
       expect(harness.unloads).toHaveLength(3)
-      expect(
-        harness.unloads.map((options) =>
-          harness.pending.findIndex((pending) => pending.options === options),
-        ),
-      ).toEqual([1, 0, 2])
+      expect(acquisitionIndices(harness.pending, harness.unloads)).toEqual([
+        1, 0, 2,
+      ])
     } finally {
       await Promise.all([
         preload.catch(() => undefined),
+        cleaned ? Promise.resolve() : harness.cleanup(),
+      ])
+    }
+  },
+)
+
+it.each([`resolve`, `reject`] as const)(
+  `fences a %s settlement from a truncate replay cleaned before completion`,
+  async (lateSettlement) => {
+    const harness = createUnindexedReplayHarness(
+      `unindexed-pending-replay-cleanup-${lateSettlement}`,
+    )
+    const firstPreload = harness.live.preload()
+    let restartPreload: Promise<void> | undefined
+    let replacement: true | Promise<void> | undefined
+    let cleaned = false
+
+    try {
+      expect(harness.pending).toHaveLength(1)
+      await harness.applyRows([{ id: `a`, rank: 1 }])
+      harness.pending[0]!.request!.resolve({
+        hasMore: false,
+        appliedRowKeys: [`a`],
+      })
+      await firstPreload
+      await flushPromises()
+      expect(harness.live.status).toBe(`ready`)
+      expect(harness.live.isLoadingSubset).toBe(false)
+      expect(harness.live.utils.lastSubsetError).toBeUndefined()
+      expect(harness.readRows()).toEqual([{ id: `a`, rank: 1 }])
+
+      harness.clearObservations()
+      replacement = harness.startTruncate()
+      void Promise.resolve(replacement).catch(() => {})
+      await flushPromises()
+      expect(harness.pending).toHaveLength(2)
+      expect(harness.live.status).toBe(`ready`)
+      expect(harness.live.isLoadingSubset).toBe(true)
+      expect(harness.live.utils.lastSubsetError).toBeUndefined()
+      expect(harness.readRows()).toEqual([{ id: `a`, rank: 1 }])
+      expect(harness.batches).toEqual([])
+      expect(harness.callbackReads).toEqual([])
+
+      const firstSessionSubscription = harness.pending[0]!.options.subscription
+      harness.stopObserving()
+      await harness.live.cleanup()
+      expect(harness.live.status).toBe(`cleaned-up`)
+      expect(harness.live.isLoadingSubset).toBe(false)
+      expect(harness.live.utils.lastSubsetError).toBeUndefined()
+      expect(harness.readRows()).toEqual([])
+      expect(harness.batches).toEqual([])
+      expect(harness.callbackReads).toEqual([])
+      expect(harness.unloads).toHaveLength(2)
+      expect(acquisitionIndices(harness.pending, harness.unloads)).toEqual([
+        1, 0,
+      ])
+
+      restartPreload = harness.live.preload()
+      harness.startObserving()
+      await flushPromises()
+      expect(harness.pending).toHaveLength(3)
+      expect(harness.live.status).toBe(`loading`)
+      expect(harness.live.isLoadingSubset).toBe(true)
+      expect(harness.live.utils.lastSubsetError).toBeUndefined()
+      expect(harness.readRows()).toEqual([])
+
+      const staleError = new Error(`stale replay failed`)
+      if (lateSettlement === `resolve`) {
+        harness.pending[1]!.request!.resolve({
+          hasMore: false,
+          appliedRowKeys: [],
+        })
+      } else {
+        harness.pending[1]!.request!.reject(staleError)
+      }
+      await Promise.resolve(replacement).catch(() => undefined)
+      await flushPromises()
+      expect(harness.pending).toHaveLength(3)
+      expect(harness.live.status).toBe(`loading`)
+      expect(harness.live.isLoadingSubset).toBe(true)
+      expect(harness.live.utils.lastSubsetError).toBeUndefined()
+      expect(harness.readRows()).toEqual([])
+      expect(harness.batches).toEqual([])
+      expect(harness.callbackReads).toEqual([])
+
+      await harness.applyRows([{ id: `c`, rank: 3 }])
+      expect(harness.readRows()).toEqual([{ id: `c`, rank: 3 }])
+      expect(harness.batches).toEqual([
+        [{ type: `insert`, key: `c`, value: { id: `c`, rank: 3 } }],
+      ])
+      expect(harness.callbackReads).toEqual([[{ id: `c`, rank: 3 }]])
+      const appliedStateRevision = harness.live._stateRevision
+      const appliedLayoutRevision = harness.live._layoutRevision
+      harness.pending[2]!.request!.resolve({
+        hasMore: false,
+        appliedRowKeys: [`c`],
+      })
+      await restartPreload
+      await flushPromises()
+
+      expect(harness.pending).toHaveLength(3)
+      expect(harness.live.status).toBe(`ready`)
+      expect(harness.live.isLoadingSubset).toBe(false)
+      expect(harness.live.utils.lastSubsetError).toBeUndefined()
+      expect(harness.readRows()).toEqual([{ id: `c`, rank: 3 }])
+      expect(harness.batches).toEqual([
+        [{ type: `insert`, key: `c`, value: { id: `c`, rank: 3 } }],
+        [],
+      ])
+      expect(harness.callbackReads).toEqual([
+        [{ id: `c`, rank: 3 }],
+        [{ id: `c`, rank: 3 }],
+      ])
+      expect(harness.live._stateRevision).toBe(appliedStateRevision)
+      expect(harness.live._layoutRevision).toBe(appliedLayoutRevision)
+
+      for (const { options } of harness.pending) {
+        expectUnindexedFullSnapshotRequest(options)
+      }
+      const signals = harness.pending.map(({ options }) => options.signal!)
+      expect(new Set(signals)).toHaveLength(3)
+      expect(signals.map(({ aborted }) => aborted)).toEqual([true, true, false])
+      expect(harness.pending[1]!.options.subscription).toBe(
+        firstSessionSubscription,
+      )
+      expect(harness.pending[2]!.options.subscription).not.toBe(
+        firstSessionSubscription,
+      )
+      expect(harness.loadResults.every((result) => result !== true)).toBe(true)
+
+      await harness.cleanup()
+      cleaned = true
+      expect(harness.live.status).toBe(`cleaned-up`)
+      expect(harness.live.isLoadingSubset).toBe(false)
+      expect(harness.live.utils.lastSubsetError).toBeUndefined()
+      expect(harness.readRows()).toEqual([])
+      expect(signals.map(({ aborted }) => aborted)).toEqual([true, true, true])
+      expect(harness.unloads).toHaveLength(3)
+      expect(acquisitionIndices(harness.pending, harness.unloads)).toEqual([
+        1, 0, 2,
+      ])
+    } finally {
+      await Promise.all([
+        firstPreload.catch(() => undefined),
+        restartPreload?.catch(() => undefined),
         cleaned ? Promise.resolve() : harness.cleanup(),
       ])
     }
