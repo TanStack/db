@@ -1899,6 +1899,9 @@ async function runAcquisitionTopology(
 ) {
   const runId = ++acquisitionRunId
   let physicalStarts = 0
+  let logicalStarts = 0
+  let logicalReleases = 0
+  let deduplications = 0
   const delivery = createDeferred<void>()
   const createSource = (suffix: string) => {
     type Row = { id: string }
@@ -1918,6 +1921,9 @@ async function runAcquisitionTopology(
           appliedRowKeys: rowKeys,
         } satisfies LoadSubsetResult
       },
+      onDeduplicate: () => {
+        deduplications++
+      },
     })
     return createCollection<Row>({
       id: `refinement-acquisition-${runId}-${suffix}`,
@@ -1931,8 +1937,14 @@ async function runAcquisitionTopology(
           commit = params.commit
           params.markReady()
           return {
-            loadSubset: deduplicated.loadSubset,
-            unloadSubset: deduplicated.unloadSubset,
+            loadSubset: (options) => {
+              logicalStarts++
+              return deduplicated.loadSubset(options)
+            },
+            unloadSubset: (options) => {
+              logicalReleases++
+              deduplicated.unloadSubset(options)
+            },
           }
         },
       },
@@ -1967,6 +1979,13 @@ async function runAcquisitionTopology(
   )
   const preloads = liveQueries.map((live) => live.preload())
   const expectedPhysicalStarts = topology === `shared` ? 1 : 2
+  let owners: Array<{
+    ownerId: (typeof ownerIds)[number]
+    state: `resolved`
+    rowKeys: Array<string>
+  }> = []
+  let settledBatches: Array<Array<Array<string>>> = [[], []]
+  let settledCallbackReads: Array<Array<Array<string>>> = [[], []]
 
   try {
     for (
@@ -1977,23 +1996,34 @@ async function runAcquisitionTopology(
       await flushPromises()
     }
     expect(physicalStarts).toBe(expectedPhysicalStarts)
+    expect(logicalStarts).toBe(2)
+    expect(liveQueries.map((live) => live.isReady())).toEqual([false, false])
+    expect(liveQueries.map((live) => live.isLoadingSubset)).toEqual([
+      true,
+      true,
+    ])
+    expect(liveQueries.map((live) => live.toArray)).toEqual([[], []])
+    expect(batches).toEqual([[], []])
+    expect(callbackReads).toEqual([[], []])
     delivery.resolve()
     await Promise.all(preloads)
 
-    const owners = liveQueries.map((live, index) => ({
+    owners = liveQueries.map((live, index) => ({
       ownerId: ownerIds[index]!,
       state: `resolved` as const,
       rowKeys: live.toArray.map(({ id }) => String(id)).sort(),
     }))
-    return {
-      physicalStarts,
-      owners,
-      visibleRowKeys: [
-        ...new Set(owners.flatMap(({ rowKeys: keys }) => keys)),
-      ].sort(),
-      batches,
-      callbackReads,
-    }
+    expect(liveQueries.map((live) => live.isReady())).toEqual([true, true])
+    expect(liveQueries.map((live) => live.isLoadingSubset)).toEqual([
+      false,
+      false,
+    ])
+    settledBatches = batches.map((ownerBatches) =>
+      ownerBatches.map((batch) => [...batch]),
+    )
+    settledCallbackReads = callbackReads.map((ownerReads) =>
+      ownerReads.map((read) => [...read]),
+    )
   } finally {
     delivery.resolve()
     subscriptions.forEach((subscription) => subscription.unsubscribe())
@@ -2001,6 +2031,21 @@ async function runAcquisitionTopology(
       ...liveQueries.map((live) => live.cleanup()),
       ...sources.map((source) => source.cleanup()),
     ])
+  }
+
+  return {
+    physicalStarts,
+    logicalStarts,
+    logicalReleases,
+    deduplications,
+    owners,
+    visibleRowKeys: [
+      ...new Set(owners.flatMap(({ rowKeys: keys }) => keys)),
+    ].sort(),
+    batches: settledBatches,
+    callbackReads: settledCallbackReads,
+    batchesAfterUnsubscribe: batches,
+    callbackReadsAfterUnsubscribe: callbackReads,
   }
 }
 
@@ -2041,8 +2086,41 @@ for (const campaign of refinementCampaigns(1_779_008)) {
       }).toEqual(separateSemantic)
       expect(sharedActual.batches).toEqual(separateActual.batches)
       expect(sharedActual.callbackReads).toEqual(separateActual.callbackReads)
+      const expectedKeys = [...rowKeys].sort()
+      const expectedBatches = [
+        [expectedKeys, []],
+        [expectedKeys, []],
+      ]
+      const expectedCallbackReads = [
+        [expectedKeys, expectedKeys],
+        [expectedKeys, expectedKeys],
+      ]
+      expect(sharedActual.batches).toEqual(expectedBatches)
+      expect(sharedActual.callbackReads).toEqual(expectedCallbackReads)
+      expect(sharedActual.batchesAfterUnsubscribe).toEqual(sharedActual.batches)
+      expect(sharedActual.callbackReadsAfterUnsubscribe).toEqual(
+        sharedActual.callbackReads,
+      )
+      expect(separateActual.batchesAfterUnsubscribe).toEqual(
+        separateActual.batches,
+      )
+      expect(separateActual.callbackReadsAfterUnsubscribe).toEqual(
+        separateActual.callbackReads,
+      )
+      expect(sharedActual.logicalStarts).toBe(2)
+      expect(separateActual.logicalStarts).toBe(2)
+      expect(sharedActual.logicalReleases).toBe(2)
+      expect(separateActual.logicalReleases).toBe(2)
       expect(sharedActual.physicalStarts).toBe(1)
       expect(separateActual.physicalStarts).toBe(2)
+      expect(sharedActual.deduplications).toBe(1)
+      expect(separateActual.deduplications).toBe(0)
+      expect(sharedActual.physicalStarts + sharedActual.deduplications).toBe(
+        sharedActual.logicalStarts,
+      )
+      expect(
+        separateActual.physicalStarts + separateActual.deduplications,
+      ).toBe(separateActual.logicalStarts)
     },
   )
 }
