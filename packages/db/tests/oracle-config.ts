@@ -46,6 +46,7 @@ const staticOracleProperties = [
   `load-subset.ordered-window`,
   `load-subset.rejected-waiter`,
   `ordered-work.forward-prefix`,
+  `ordered-work.custom-comparator-fallback`,
   `ordered-work.public-key-suffix`,
   `ordered-work.reverse-prefix`,
   `ordered-work.snapshot-reuse`,

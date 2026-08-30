@@ -230,8 +230,13 @@ export class BasicIndex<
       }
     }
 
-    // Build sorted array from unique values
-    this.sortedValues = Array.from(this.valueMap.keys()).sort(this.compareFn)
+    // Array.sort always moves bare undefined elements to the end without
+    // consulting the comparator. Wrap values while sorting so null placement
+    // and comparator-equivalent null/undefined tie classes stay authoritative.
+    this.sortedValues = Array.from(this.valueMap.keys())
+      .map((value) => ({ value }))
+      .sort((left, right) => this.compareFn(left.value, right.value))
+      .map(({ value }) => value)
 
     this.updateTimestamp()
   }

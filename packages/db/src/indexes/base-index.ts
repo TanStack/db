@@ -70,11 +70,11 @@ export interface IndexInterface<
   supports: (operation: IndexOperation) => boolean
 
   /**
-   * Whether range lookups (gt/gte/lt/lte) on this index can be trusted to
-   * return every matching key. Range traversal relies on the index ordering, so
-   * it is unsafe when the index uses a custom comparator, whose order may not
-   * match the WHERE evaluator's relational operators. Callers must fall back to
-   * a full scan when this is `false`.
+   * Whether range lookups (gt/gte/lt/lte) and ordered traversal on this index
+   * can be trusted to match query comparison semantics. Both rely on the index
+   * ordering, so they are unsafe when the index uses a custom comparator whose
+   * order may not match the WHERE or ORDER BY evaluator. Callers must fall back
+   * to a full scan when this is `false`.
    */
   get supportsRangeOptimization(): boolean
 

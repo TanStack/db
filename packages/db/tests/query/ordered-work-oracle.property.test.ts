@@ -113,20 +113,23 @@ function comparePublicKeys(
   return left < right ? -1 : left > right ? 1 : 0
 }
 
-const orderedIndexCompatibilityCases = ([`asc`, `desc`] as const).flatMap(
-  (indexDirection) =>
-    ([`first`, `last`] as const).flatMap((indexNulls) =>
-      ([`asc`, `desc`] as const).flatMap((queryDirection) =>
-        ([`first`, `last`] as const).map((queryNulls) => ({
-          indexDirection,
-          indexNulls,
-          queryDirection,
-          queryNulls,
-          compatible:
-            indexDirection === queryDirection
-              ? indexNulls === queryNulls
-              : indexNulls !== queryNulls,
-        })),
+const orderedIndexCompatibilityCases = ([`basic`, `btree`] as const).flatMap(
+  (indexKind) =>
+    ([`asc`, `desc`] as const).flatMap((indexDirection) =>
+      ([`first`, `last`] as const).flatMap((indexNulls) =>
+        ([`asc`, `desc`] as const).flatMap((queryDirection) =>
+          ([`first`, `last`] as const).map((queryNulls) => ({
+            indexKind,
+            indexDirection,
+            indexNulls,
+            queryDirection,
+            queryNulls,
+            compatible:
+              indexDirection === queryDirection
+                ? indexNulls === queryNulls
+                : indexNulls !== queryNulls,
+          })),
+        ),
       ),
     ),
 )
@@ -179,19 +182,22 @@ const stringComparisonVariants = [
   compatible: boolean
 }>
 
-const orderedStringCompatibilityCases = ([`asc`, `desc`] as const).flatMap(
-  (queryDirection) =>
-    stringComparisonVariants.map(({ name, collation, compatible }) => ({
-      name,
-      queryDirection,
-      compareOptions: {
-        ...collation,
-        direction: queryDirection,
-        nulls:
-          queryDirection === `asc` ? (`last` as const) : (`first` as const),
-      } satisfies CompareOptions,
-      compatible,
-    })),
+const orderedStringCompatibilityCases = ([`basic`, `btree`] as const).flatMap(
+  (indexKind) =>
+    ([`asc`, `desc`] as const).flatMap((queryDirection) =>
+      stringComparisonVariants.map(({ name, collation, compatible }) => ({
+        name,
+        indexKind,
+        queryDirection,
+        compareOptions: {
+          ...collation,
+          direction: queryDirection,
+          nulls:
+            queryDirection === `asc` ? (`last` as const) : (`first` as const),
+        } satisfies CompareOptions,
+        compatible,
+      })),
+    ),
 )
 
 async function observeOrderedPrefix(
@@ -524,8 +530,9 @@ describe(`ordered source work oracle`, () => {
   })
 
   it.each(orderedIndexCompatibilityCases)(
-    `matches index $indexDirection/nulls-$indexNulls to query $queryDirection/nulls-$queryNulls: $compatible`,
+    `matches $indexKind index $indexDirection/nulls-$indexNulls to query $queryDirection/nulls-$queryNulls: $compatible`,
     async ({
+      indexKind,
       indexDirection,
       indexNulls,
       queryDirection,
@@ -550,7 +557,7 @@ describe(`ordered source work oracle`, () => {
       try {
         await collection.preload()
         collection.createIndex((row) => row.rank, {
-          indexType: BTreeIndex,
+          indexType: indexKind === `basic` ? BasicIndex : BTreeIndex,
           options: {
             compareOptions: {
               direction: indexDirection,
@@ -669,6 +676,140 @@ describe(`ordered source work oracle`, () => {
     },
   )
 
+  it.each(
+    (
+      [
+        { name: `BasicIndex`, IndexType: BasicIndex },
+        { name: `BTreeIndex`, IndexType: BTreeIndex },
+      ] as const
+    ).flatMap(({ name, IndexType }) =>
+      ([`asc`, `desc`] as const).map((direction) => ({
+        name,
+        IndexType,
+        direction,
+      })),
+    ),
+  )(
+    `fully refines a $name custom comparator in $direction order`,
+    async ({ name, IndexType, direction }) => {
+      const collection = createCollection(
+        localOnlyCollectionOptions<RankedRow>({
+          id: `ordered-work-custom-comparator-${name}-${direction}`,
+          getKey: (row) => row.id,
+          initialData: [
+            { id: `one`, rank: 1, included: true },
+            { id: `two`, rank: 2, included: true },
+            { id: `three`, rank: 3, included: true },
+          ],
+        }),
+      )
+
+      try {
+        await collection.preload()
+        collection.createIndex((row) => row.rank, {
+          indexType: IndexType,
+          options: {
+            compareOptions: publicKeyIndexCompareOptions,
+            compareFn: (left: number, right: number) => right - left,
+          },
+        })
+
+        const compareEntries = vi.spyOn(TotalOrder.prototype, `compareEntries`)
+        try {
+          const changes = collection.currentStateAsChanges({
+            orderBy: publicKeyOrderBy(direction),
+            limit: 2,
+          })!
+
+          expect(changes.map(({ key }) => key)).toEqual(
+            direction === `asc` ? [`one`, `two`] : [`three`, `two`],
+          )
+          expect(compareEntries).toHaveBeenCalled()
+        } finally {
+          compareEntries.mockRestore()
+        }
+      } finally {
+        await collection.cleanup()
+      }
+    },
+  )
+
+  for (const campaign of orderedWorkCampaigns(
+    `ordered-work.custom-comparator-fallback`,
+    1_780_104,
+  )) {
+    fcTest.prop(
+      [
+        fc.array(fc.integer({ min: -20, max: 20 }), {
+          minLength: 2,
+          maxLength: 8,
+        }),
+        fc.integer({ min: 1, max: 8 }),
+        fc.constantFrom<`basic` | `btree`>(`basic`, `btree`),
+        fc.constantFrom<OrderByDirection>(`asc`, `desc`),
+      ],
+      campaign.options,
+    )(
+      `fully refines generated custom comparator indexes (${campaign.label})`,
+      async (ranks, requestedLimit, indexKind, direction) => {
+        const rows = ranks.map(
+          (rank, index): RankedRow => ({
+            id: `row-${index.toString().padStart(2, `0`)}`,
+            rank,
+            included: true,
+          }),
+        )
+        const limit = Math.min(requestedLimit, rows.length)
+        const expectedKeys = [...rows]
+          .sort((left, right) => {
+            const rankOrder = left.rank - right.rank
+            if (rankOrder !== 0) {
+              return direction === `asc` ? rankOrder : -rankOrder
+            }
+            return comparePublicKeys(left.id, right.id)
+          })
+          .slice(0, limit)
+          .map(({ id }) => id)
+        const collection = createCollection(
+          localOnlyCollectionOptions<RankedRow>({
+            id: `ordered-work-custom-comparator-property-${Math.random()}`,
+            getKey: (row) => row.id,
+            initialData: rows,
+          }),
+        )
+
+        try {
+          await collection.preload()
+          collection.createIndex((row) => row.rank, {
+            indexType: indexKind === `basic` ? BasicIndex : BTreeIndex,
+            options: {
+              compareOptions: publicKeyIndexCompareOptions,
+              compareFn: (left: number, right: number) => right - left,
+            },
+          })
+
+          const compareEntries = vi.spyOn(
+            TotalOrder.prototype,
+            `compareEntries`,
+          )
+          try {
+            const changes = collection.currentStateAsChanges({
+              orderBy: publicKeyOrderBy(direction),
+              limit,
+            })!
+
+            expect(changes.map(({ key }) => key)).toEqual(expectedKeys)
+            expect(compareEntries).toHaveBeenCalled()
+          } finally {
+            compareEntries.mockRestore()
+          }
+        } finally {
+          await collection.cleanup()
+        }
+      },
+    )
+  }
+
   it(`groups comparator-equivalent values in every built-in index direction`, () => {
     type TextRow = { id: string; value: string }
     const rows: Array<TextRow> = [
@@ -786,6 +927,7 @@ describe(`ordered source work oracle`, () => {
       ([`asc`, `desc`] as const).flatMap((direction) =>
         [
           { domain: `signed number`, keys: [1, -2] },
+          { domain: `NaN number`, keys: [Number.NaN, 2, -1] },
           { domain: `case-sensitive string`, keys: [`a`, `A`] },
           { domain: `mixed`, keys: [10, `2`, 2, `10`] },
         ].map(({ domain, keys }) => ({
@@ -849,10 +991,16 @@ describe(`ordered source work oracle`, () => {
   )) {
     fcTest.prop(
       [
-        fc.uniqueArray(fc.integer({ min: -999, max: 999 }), {
-          minLength: 2,
-          maxLength: 8,
-        }),
+        fc.uniqueArray(
+          fc.oneof(
+            fc.integer({ min: -999, max: 999 }),
+            fc.constant(Number.NaN),
+          ),
+          {
+            minLength: 2,
+            maxLength: 8,
+          },
+        ),
         fc.integer({ min: 1, max: 16 }),
         fc.constantFrom<`basic` | `btree`>(`basic`, `btree`),
         fc.constantFrom<OrderByDirection>(`asc`, `desc`),
@@ -974,8 +1122,8 @@ describe(`ordered source work oracle`, () => {
   })
 
   it.each(orderedStringCompatibilityCases)(
-    `matches an index against $name in $queryDirection order: $compatible`,
-    async ({ queryDirection, compareOptions, compatible }) => {
+    `matches a $indexKind index against $name in $queryDirection order: $compatible`,
+    async ({ indexKind, queryDirection, compareOptions, compatible }) => {
       type TextRankedRow = Omit<RankedRow, `rank`> & { rank: string }
       const indexCompareOptions = {
         direction: `asc`,
@@ -998,7 +1146,7 @@ describe(`ordered source work oracle`, () => {
       try {
         await collection.preload()
         collection.createIndex((row) => row.rank, {
-          indexType: BTreeIndex,
+          indexType: indexKind === `basic` ? BasicIndex : BTreeIndex,
           options: { compareOptions: indexCompareOptions },
         })
 

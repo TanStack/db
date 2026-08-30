@@ -1289,8 +1289,10 @@ custom comparator, contribute all of their public keys to the same tie class.
 Reversing an index also reverses its null placement. The optimizer may reuse a
 reverse index only when the requested direction and null placement describe
 that reversed order; otherwise it creates a matching index or falls back to a
-full `TotalOrder` refinement. Public custom indexes without lazy bucket
-iteration keep that full-refinement fallback.
+full `TotalOrder` refinement. A built-in index configured with a custom
+comparator also keeps the full-refinement fallback: comparison metadata cannot
+prove that an opaque comparator has the query's order. Public custom indexes
+without lazy bucket iteration keep the same fallback.
 
 Runtime reference identity has a different lifetime again. Objects use weak
 identity, but JavaScript symbols cannot be weak keys. Stable equality for the
