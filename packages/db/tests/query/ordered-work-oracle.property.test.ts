@@ -73,6 +73,7 @@ function orderBy(
 async function observeDescendingPrefix(
   rows: ReadonlyArray<RankedRow>,
   limit: number,
+  indexKind: `basic` | `btree` = `btree`,
 ): Promise<OrderedWork> {
   const collection = createCollection(
     localOnlyCollectionOptions<RankedRow>({
@@ -85,7 +86,7 @@ async function observeDescendingPrefix(
   try {
     await collection.preload()
     const index = collection.createIndex((row) => row.rank, {
-      indexType: BTreeIndex,
+      indexType: indexKind === `basic` ? BasicIndex : BTreeIndex,
       options: {
         compareOptions: {
           direction: `asc`,
@@ -93,7 +94,7 @@ async function observeDescendingPrefix(
           stringSort: `locale`,
         },
       },
-    }) as BTreeIndex<string>
+    }) as BasicIndex<string> | BTreeIndex<string>
 
     let expectedKeyComparisons = 0
     let expectedMatches = 0
@@ -230,6 +231,7 @@ describe(`ordered source work oracle`, () => {
         fc.integer({ min: 0, max: 5 }),
         fc.integer({ min: 0, max: 8 }),
         fc.integer({ min: 0, max: 60 }),
+        fc.constantFrom<`basic` | `btree`>(`basic`, `btree`),
       ],
       campaign.options,
     )(
@@ -240,6 +242,7 @@ describe(`ordered source work oracle`, () => {
         extraBoundaryMatches,
         boundaryRejects,
         trailingRows,
+        indexKind,
       ) => {
         const scenario = createReversePrefixRows({
           leadingRejects,
@@ -248,7 +251,11 @@ describe(`ordered source work oracle`, () => {
           boundaryRejects,
           trailingRows,
         })
-        const observed = await observeDescendingPrefix(scenario.rows, limit)
+        const observed = await observeDescendingPrefix(
+          scenario.rows,
+          limit,
+          indexKind,
+        )
 
         expect(observed.keys).toEqual(scenario.expectedKeys)
         expect(observed.sourceReads).toHaveLength(scenario.expectedSourceReads)
@@ -379,6 +386,20 @@ describe(`ordered source work oracle`, () => {
           ) {
             return undefined
           }
+          if (property === `orderedEntriesArray`) {
+            return [
+              [1, new Set([`later`])],
+              [2, new Set([`tie-a`])],
+              [2, new Set([`tie-b`])],
+            ]
+          }
+          if (property === `orderedEntriesArrayReversed`) {
+            return [
+              [2, new Set([`tie-b`])],
+              [2, new Set([`tie-a`])],
+              [1, new Set([`later`])],
+            ]
+          }
           const value = Reflect.get(target, property, target) as unknown
           return typeof value === `function` ? value.bind(target) : value
         },
@@ -388,12 +409,18 @@ describe(`ordered source work oracle`, () => {
         false,
       )
 
-      const changes = collection.currentStateAsChanges({
-        orderBy: orderBy(`desc`, `first`),
-        limit: 2,
-      })!
+      const compareEntries = vi.spyOn(TotalOrder.prototype, `compareEntries`)
+      try {
+        const changes = collection.currentStateAsChanges({
+          orderBy: orderBy(`desc`, `first`),
+          limit: 1,
+        })!
 
-      expect(changes.map(({ key }) => key)).toEqual([`tie-a`, `tie-b`])
+        expect(changes.map(({ key }) => key)).toEqual([`tie-a`])
+        expect(compareEntries).toHaveBeenCalled()
+      } finally {
+        compareEntries.mockRestore()
+      }
     } finally {
       await collection.cleanup()
     }
@@ -431,10 +458,164 @@ describe(`ordered source work oracle`, () => {
         ),
       ).toEqual([[`later`], [`lower`, `upper`]])
 
-      index.remove(`upper`, rows[0])
+      index.remove(`lower`, rows[1])
+      expect([...index.equalityLookup(`A`)]).toEqual([`upper`])
+      expect([...index.equalityLookup(`a`)]).toEqual([])
       expect(
         [...index.orderedBuckets()].map(([, keys]) => [...keys].sort()),
-      ).toEqual([[`lower`], [`later`]])
+      ).toEqual([[`upper`], [`later`]])
+    }
+  })
+
+  it.each([
+    {
+      name: `BasicIndex`,
+      IndexType: BasicIndex,
+      direction: `asc`,
+      expectedKeys: [`a`, `z`],
+    },
+    {
+      name: `BasicIndex`,
+      IndexType: BasicIndex,
+      direction: `desc`,
+      expectedKeys: [`m`, `a`],
+    },
+    {
+      name: `BTreeIndex`,
+      IndexType: BTreeIndex,
+      direction: `asc`,
+      expectedKeys: [`a`, `z`],
+    },
+    {
+      name: `BTreeIndex`,
+      IndexType: BTreeIndex,
+      direction: `desc`,
+      expectedKeys: [`m`, `a`],
+    },
+  ] as const)(
+    `keeps the public-key suffix ascending for $name in $direction order`,
+    async ({ name, IndexType, direction, expectedKeys }) => {
+      const collection = createCollection(
+        localOnlyCollectionOptions<RankedRow>({
+          id: `ordered-work-key-suffix-${name}-${direction}`,
+          getKey: (row) => row.id,
+          initialData: [{ id: `m`, rank: 2, included: true }],
+        }),
+      )
+
+      try {
+        await collection.preload()
+        collection.createIndex((row) => row.rank, { indexType: IndexType })
+        const z = collection.insert({ id: `z`, rank: 1, included: true })
+        await z.isPersisted.promise
+        const a = collection.insert({ id: `a`, rank: 1, included: true })
+        await a.isPersisted.promise
+
+        const changes = collection.currentStateAsChanges({
+          orderBy: orderBy(direction),
+          limit: 2,
+        })!
+
+        expect(changes.map(({ key }) => key)).toEqual(expectedKeys)
+      } finally {
+        await collection.cleanup()
+      }
+    },
+  )
+
+  for (const campaign of orderedWorkCampaigns(
+    `ordered-work.public-key-suffix`,
+    1_780_102,
+  )) {
+    fcTest.prop(
+      [
+        fc.uniqueArray(fc.integer({ min: 0, max: 999 }), {
+          minLength: 2,
+          maxLength: 8,
+        }),
+        fc.integer({ min: 1, max: 8 }),
+        fc.constantFrom<`basic` | `btree`>(`basic`, `btree`),
+        fc.constantFrom<OrderByDirection>(`asc`, `desc`),
+      ],
+      campaign.options,
+    )(
+      `orders dynamic tie keys for every built-in path (${campaign.label})`,
+      async (keyNumbers, requestedLimit, indexKind, direction) => {
+        const keys = keyNumbers.map(
+          (key) => `key-${key.toString().padStart(3, `0`)}`,
+        )
+        const limit = Math.min(requestedLimit, keys.length)
+        const collection = createCollection(
+          localOnlyCollectionOptions<RankedRow>({
+            id: `ordered-work-key-property-${Math.random()}`,
+            getKey: (row) => row.id,
+          }),
+        )
+
+        try {
+          await collection.preload()
+          collection.createIndex((row) => row.rank, {
+            indexType: indexKind === `basic` ? BasicIndex : BTreeIndex,
+          })
+          for (const key of keys) {
+            const transaction = collection.insert({
+              id: key,
+              rank: 1,
+              included: true,
+            })
+            await transaction.isPersisted.promise
+          }
+
+          const changes = collection.currentStateAsChanges({
+            orderBy: orderBy(direction),
+            limit,
+          })!
+
+          expect(changes.map(({ key }) => key)).toEqual(
+            [...keys].sort().slice(0, limit),
+          )
+        } finally {
+          await collection.cleanup()
+        }
+      },
+    )
+  }
+
+  it(`retains requested comparison metadata on an automatic index`, async () => {
+    type NullableRankedRow = Omit<RankedRow, `rank`> & {
+      rank: number | null | undefined
+    }
+    const collection = createCollection(
+      localOnlyCollectionOptions<NullableRankedRow>({
+        id: `ordered-work-auto-index-options`,
+        getKey: (row) => row.id,
+        initialData: [
+          { id: `undefined`, rank: undefined, included: true },
+          { id: `null`, rank: null, included: true },
+          { id: `one`, rank: 1, included: true },
+        ],
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+      }),
+    )
+
+    try {
+      await collection.preload()
+      const compareEntries = vi.spyOn(TotalOrder.prototype, `compareEntries`)
+      try {
+        const changes = collection.currentStateAsChanges({
+          orderBy: orderBy(`desc`, `first`),
+          limit: 2,
+          optimizedOnly: true,
+        })
+
+        expect(changes?.map(({ key }) => key)).toEqual([`null`, `undefined`])
+        expect(compareEntries).not.toHaveBeenCalled()
+      } finally {
+        compareEntries.mockRestore()
+      }
+    } finally {
+      await collection.cleanup()
     }
   })
 })

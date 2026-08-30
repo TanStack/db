@@ -22,9 +22,25 @@ import type {
   SubscribeChangesOptions,
 } from '../types'
 import type { CollectionImpl } from './index.js'
+import type { IndexInterface } from '../indexes/base-index.js'
 import type { SingleRowRefProxy } from '../query/builder/ref-proxy'
 import type { BasicExpression, OrderBy } from '../query/ir.js'
 import type { WithVirtualProps } from '../virtual-props.js'
+
+type OrderedBucketIndex<TKey extends string | number> = {
+  orderedBuckets: () => IterableIterator<readonly [unknown, ReadonlySet<TKey>]>
+}
+
+function getOrderedBuckets<TKey extends string | number>(
+  index: IndexInterface<TKey>,
+): IterableIterator<readonly [unknown, ReadonlySet<TKey>]> | undefined {
+  if (index instanceof ReverseIndex && !index.supportsOrderedBucketIteration) {
+    return
+  }
+  return (
+    index as IndexInterface<TKey> & Partial<OrderedBucketIndex<TKey>>
+  ).orderedBuckets?.()
+}
 
 /**
  * Returns the current state of the collection as an array of changes
@@ -357,17 +373,12 @@ function getOrderedKeys<T extends object, TKey extends string | number>(
           return whereFilter?.(value) ?? true
         }
 
-        // Take the keys that match the filter and limit
-        // if no limit is provided `index.keyCount` is used,
-        // i.e. we will take all keys that match the filter
-        if (!(index instanceof ReverseIndex)) {
-          return index.takeFromStart(limit ?? index.keyCount, filterFn)
-        }
+        const orderedBuckets = getOrderedBuckets(index)
 
         // Public custom indexes predate lazy bucket iteration. Preserve their
         // semantics with the full TotalOrder refinement instead of assuming
         // their materialized entries expose complete comparator tie classes.
-        if (!index.supportsOrderedBucketIteration) {
+        if (!orderedBuckets) {
           const totalOrder = new TotalOrder(orderBy, collection)
           const indexedEntries = index
             .takeFromStart(index.keyCount, filterFn)
@@ -386,14 +397,13 @@ function getOrderedKeys<T extends object, TKey extends string | number>(
             .map(({ key }) => key)
         }
 
-        // Reversing a value index must not reverse the public-key suffix of the
-        // query's total order. Walk value buckets in reverse value order, sort
-        // keys inside each bucket ascending, and stop after the first bucket
-        // that proves the requested prefix. The complete boundary bucket must
-        // be inspected because filtering can otherwise select the wrong key.
+        // Value order comes from the matching index or its reverse view. The
+        // public-key suffix remains ascending in both directions. Stop after
+        // the first complete bucket that proves the requested prefix because
+        // filtering can otherwise select the wrong key from a boundary tie.
         if (limit === 0) return []
         const keys: Array<TKey> = []
-        for (const [, bucket] of index.orderedBuckets()) {
+        for (const [, bucket] of orderedBuckets) {
           const matchingKeys = [...bucket].sort(compareKeys).filter(filterFn)
           const remaining =
             limit === undefined ? undefined : limit - keys.length

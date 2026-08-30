@@ -1273,10 +1273,12 @@ is compiled once with the window and is evaluated over the shared ordered
 snapshot, so another view of the same revision does not rescan, resort, or
 recompile it.
 
-A descending single-column index walks indexed-value buckets in query order.
-It evaluates complete buckets until the requested filtered prefix is known,
-orders public keys ascending within each bucket, and stops after the sufficient
-boundary bucket. Rows in worse buckets cannot add source reads or total-order
+A compatible single-column built-in index walks indexed-value buckets in query
+order, whether the matching view is direct or reversed. It evaluates complete
+buckets until the requested filtered prefix is known, orders public keys
+ascending within each bucket, and stops after the sufficient boundary bucket.
+The public-key suffix does not depend on index insertion order or query
+direction. Rows in worse buckets cannot add source reads or total-order
 refinement work. An all-tied source is the deliberate worst case: the one
 boundary bucket is the whole source and must be inspected before the public-key
 suffix can choose top-K.
