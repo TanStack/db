@@ -318,7 +318,7 @@ const orderedStringCompatibilityCases = ([`basic`, `btree`] as const).flatMap(
 
 async function observeOrderedPrefix(
   rows: ReadonlyArray<RankedRow>,
-  limit: number,
+  limit: number | undefined,
   indexKind: `basic` | `btree` = `btree`,
   direction: OrderByDirection = `desc`,
 ): Promise<OrderedWork> {
@@ -346,7 +346,7 @@ async function observeOrderedPrefix(
     let expectedKeyComparisons = 0
     let expectedMatches = 0
     let expectedBucketYields = 0
-    if (limit > 0) {
+    if (limit === undefined || limit > 0) {
       const expectedBuckets =
         direction === `asc`
           ? index.orderedBuckets()
@@ -361,7 +361,7 @@ async function observeOrderedPrefix(
         expectedMatches += orderedKeys.filter(
           (key) => rows.find((row) => row.id === key)?.included === true,
         ).length
-        if (expectedMatches >= limit) break
+        if (limit !== undefined && expectedMatches >= limit) break
       }
     }
 
@@ -373,11 +373,13 @@ async function observeOrderedPrefix(
     const expectedValueReads =
       indexKind === `btree` || limit === 0
         ? expectedBucketYields
-        : Math.min(
-            distinctValueCount,
-            expectedBucketYields +
-              (expectedBucketYields < distinctValueCount ? 1 : 0),
-          )
+        : limit === undefined
+          ? distinctValueCount
+          : Math.min(
+              distinctValueCount,
+              expectedBucketYields +
+                (expectedBucketYields < distinctValueCount ? 1 : 0),
+            )
 
     let bucketYields = 0
     const originalOrderedBuckets = index.orderedBuckets.bind(index)
@@ -421,7 +423,8 @@ async function observeOrderedPrefix(
         bucketReads: readProbe.getBucketReads(),
         expectedCursorCalls:
           indexKind === `btree`
-            ? expectedBucketYields + Number(expectedMatches < limit)
+            ? expectedBucketYields +
+              Number(limit === undefined || expectedMatches < limit)
             : 0,
         cursorCalls: readProbe.getCursorCalls(),
         expectedBucketYields,
@@ -744,6 +747,68 @@ describe(`ordered source work oracle`, () => {
     expect(observed.keyComparisons).toBe(observed.expectedKeyComparisons)
     expect(observed.totalOrderComparisons).toBe(0)
   })
+
+  it.each(
+    ([`basic`, `btree`] as const).flatMap((indexKind) =>
+      ([`asc`, `desc`] as const).flatMap((direction) =>
+        ([`one tie bucket`, `many buckets`] as const).map((bucketShape) => ({
+          indexKind,
+          direction,
+          bucketShape,
+        })),
+      ),
+    ),
+  )(
+    `does exact unbounded work for $indexKind $direction order with $bucketShape`,
+    async ({ indexKind, direction, bucketShape }) => {
+      const rows: Array<RankedRow> =
+        bucketShape === `one tie bucket`
+          ? [
+              { id: `d`, rank: 1, included: true },
+              { id: `b`, rank: 1, included: false },
+              { id: `c`, rank: 1, included: true },
+              { id: `a`, rank: 1, included: true },
+            ]
+          : [
+              { id: `d`, rank: 3, included: true },
+              { id: `b`, rank: 1, included: false },
+              { id: `e`, rank: 3, included: false },
+              { id: `c`, rank: 2, included: true },
+              { id: `a`, rank: 1, included: true },
+            ]
+      const orderedRows = [...rows].sort((left, right) => {
+        const valueOrder = left.rank - right.rank
+        if (valueOrder !== 0) {
+          return direction === `asc` ? valueOrder : -valueOrder
+        }
+        return comparePublicKeys(left.id, right.id)
+      })
+      const expectedKeys = orderedRows
+        .filter(({ included }) => included)
+        .map(({ id }) => id)
+      const expectedSourceReads = [
+        ...orderedRows.map(({ id }) => id),
+        ...expectedKeys,
+      ]
+
+      const observed = await observeOrderedPrefix(
+        rows,
+        undefined,
+        indexKind,
+        direction,
+      )
+
+      expect(observed.keys).toEqual(expectedKeys)
+      expect(observed.sourceReads).toEqual(expectedSourceReads)
+      expect(observed.valueReads).toBe(observed.expectedValueReads)
+      expect(observed.bucketReads).toBe(observed.expectedBucketReads)
+      expect(observed.cursorCalls).toBe(observed.expectedCursorCalls)
+      expect(observed.bucketYields).toBe(observed.expectedBucketYields)
+      expect(observed.unexpectedTraversalCalls).toBe(0)
+      expect(observed.keyComparisons).toBe(observed.expectedKeyComparisons)
+      expect(observed.totalOrderComparisons).toBe(0)
+    },
+  )
 
   it.each([
     { direction: `asc`, indexNulls: `first` },
@@ -1198,6 +1263,114 @@ describe(`ordered source work oracle`, () => {
       }
     },
   )
+
+  it(`does exact short-circuit work for a multi-term TotalOrder fallback`, async () => {
+    type MultiTermRow = RankedRow & { secondary: number }
+    const specs: Array<MultiTermRow> = [
+      { id: `d`, rank: 2, secondary: 1, included: true },
+      { id: `b`, rank: 1, secondary: 2, included: true },
+      { id: `a`, rank: 1, secondary: 2, included: true },
+      { id: `c`, rank: 1, secondary: 1, included: true },
+      { id: `hidden`, rank: 0, secondary: 0, included: false },
+    ]
+    const reads = { rank: 0, secondary: 0, included: 0 }
+    const collection = createCollection(
+      localOnlyCollectionOptions<MultiTermRow>({
+        id: `ordered-work-multi-term-fallback`,
+        getKey: (row) => row.id,
+        initialData: specs,
+        autoIndex: `off`,
+      }),
+    )
+
+    try {
+      await collection.preload()
+      const originalEntries = collection.entries.bind(collection)
+      const storedRows = [...originalEntries()].map(([, value]) => value)
+      collection.entries = function* () {
+        for (const [key, value] of originalEntries()) {
+          yield [
+            key,
+            new Proxy(value, {
+              get(target, property, receiver) {
+                if (property === `rank`) reads.rank++
+                if (property === `secondary`) reads.secondary++
+                if (property === `included`) reads.included++
+                return Reflect.get(target, property, receiver) as unknown
+              },
+            }),
+          ] as const
+        }
+      }
+      reads.rank = 0
+      reads.secondary = 0
+      reads.included = 0
+
+      let referenceCompilationReads = 0
+      compileSingleRowExpression(
+        new Proxy(new PropRef([`rank`]), {
+          get(target, property, receiver) {
+            if (property === `type`) referenceCompilationReads++
+            return Reflect.get(target, property, receiver) as unknown
+          },
+        }),
+      )
+      expect(referenceCompilationReads).toBeGreaterThan(0)
+
+      let termCompilationReads = 0
+      const trackedTerm = (propertyName: `rank` | `secondary`) =>
+        new Proxy(new PropRef([propertyName]), {
+          get(target, property, receiver) {
+            if (property === `type`) termCompilationReads++
+            return Reflect.get(target, property, receiver) as unknown
+          },
+        })
+      const order: OrderBy = [
+        {
+          expression: trackedTerm(`rank`),
+          compareOptions: { direction: `asc`, nulls: `last` },
+        },
+        {
+          expression: trackedTerm(`secondary`),
+          compareOptions: { direction: `asc`, nulls: `last` },
+        },
+      ]
+
+      let expectedComparisons = 0
+      let expectedRankReads = 0
+      let expectedSecondaryReads = 0
+      const expectedKeys = storedRows
+        .filter(({ included }) => included)
+        .sort((left, right) => {
+          expectedComparisons++
+          expectedRankReads += 2
+          const rankOrder = left.rank - right.rank
+          if (rankOrder !== 0) return rankOrder
+          expectedSecondaryReads += 2
+          const secondaryOrder = left.secondary - right.secondary
+          return secondaryOrder || comparePublicKeys(left.id, right.id)
+        })
+        .map(({ id }) => id)
+      const compareEntries = vi.spyOn(TotalOrder.prototype, `compareEntries`)
+      try {
+        const changes = collection.currentStateAsChanges({
+          where: eq(new PropRef([`included`]), true),
+          orderBy: order,
+        })!
+
+        expect(changes.map(({ key }) => key)).toEqual(expectedKeys)
+        expect(termCompilationReads).toBe(referenceCompilationReads * 2)
+        expect(reads.included).toBe(specs.length)
+        expect(reads.rank).toBe(expectedRankReads)
+        expect(reads.secondary).toBe(expectedSecondaryReads)
+        expect(compareEntries).toHaveBeenCalledTimes(expectedComparisons)
+      } finally {
+        compareEntries.mockRestore()
+      }
+    } finally {
+      await collection.cleanup()
+    }
+  })
 
   it.each(
     ([`asc`, `desc`] as const).flatMap((direction) =>
@@ -1899,7 +2072,8 @@ it(`reuses one ordered source snapshot until the collection revision changes`, (
   expect(fixture.snapshotRevisions).toEqual([0, 1])
 })
 
-it(`does no source or ordering work when reusing an unbounded snapshot`, async () => {
+it(`does only exact predicate and boundary work when reusing an unbounded snapshot`, async () => {
+  const reads = { rank: 0, included: 0 }
   const rows: Array<RankedRow> = [`é`, `e`, `Ω`, `ß`, `A`].map((id) => ({
     id,
     rank: 1,
@@ -1930,21 +2104,40 @@ it(`does no source or ordering work when reusing an unbounded snapshot`, async (
     const readProbe = observeOrderedIndexReads(index, `btree`, `asc`)
     const sourceReads: Array<string | number> = []
     const originalGet = collection.get.bind(collection)
+    const observedValues = new Map<
+      Parameters<typeof originalGet>[0],
+      NonNullable<ReturnType<typeof originalGet>>
+    >()
     collection.get = (key) => {
       sourceReads.push(key)
-      return originalGet(key)
+      const value = originalGet(key)
+      if (value === undefined) return
+      let observed = observedValues.get(key)
+      if (observed === undefined) {
+        observed = new Proxy(value, {
+          get(target, property, receiver) {
+            if (property === `rank`) reads.rank++
+            if (property === `included`) reads.included++
+            return Reflect.get(target, property, receiver) as unknown
+          },
+        })
+        observedValues.set(key, observed)
+      }
+      return observed
     }
     const compareEntries = vi.spyOn(TotalOrder.prototype, `compareEntries`)
     const window = new WindowState(
       collection,
       publicKeyOrderBy(`asc`),
-      undefined,
+      eq(new PropRef([`included`]), true),
       3,
     )
     window.recordInitialCoverage(undefined, true)
 
     try {
       keyComparisonCounter.count = 0
+      reads.rank = 0
+      reads.included = 0
       expect(observeWindow(window)).toMatchObject({
         publication: expectedKeys.slice(0, 3),
       })
@@ -1955,12 +2148,16 @@ it(`does no source or ordering work when reusing an unbounded snapshot`, async (
       expect(readProbe.getUnexpectedTraversalCalls()).toBe(0)
       expect(keyComparisonCounter.count).toBe(expectedKeyComparisons)
       expect(compareEntries).not.toHaveBeenCalled()
+      expect(reads.included).toBe(rows.length * 5)
+      expect(reads.rank).toBe(3)
 
       const firstReadCount = sourceReads.length
       const firstValueReads = readProbe.getValueReads()
       const firstBucketReads = readProbe.getBucketReads()
       const firstCursorCalls = readProbe.getCursorCalls()
       const firstKeyComparisons = keyComparisonCounter.count
+      const firstPredicateReads = reads.included
+      const firstOrderTermReads = reads.rank
 
       expect(observeWindow(window)).toMatchObject({
         publication: expectedKeys.slice(0, 3),
@@ -1971,12 +2168,63 @@ it(`does no source or ordering work when reusing an unbounded snapshot`, async (
       expect(readProbe.getCursorCalls()).toBe(firstCursorCalls)
       expect(keyComparisonCounter.count).toBe(firstKeyComparisons)
       expect(compareEntries).not.toHaveBeenCalled()
+      expect(reads.included - firstPredicateReads).toBe(rows.length * 5)
+      expect(reads.rank - firstOrderTermReads).toBe(3)
     } finally {
       compareEntries.mockRestore()
       readProbe.restore()
     }
   } finally {
     await collection.cleanup()
+  }
+})
+
+it(`does one source-order comparison per row needed to close the boundary tie`, () => {
+  const reads = { rank: 0 }
+  const row = (id: string, rank: number): RankedRow => ({
+    id,
+    get rank() {
+      reads.rank++
+      return rank
+    },
+    included: true,
+  })
+  const rows = new Map<string, RankedRow>([
+    [`a`, row(`a`, 1)],
+    [`b`, row(`b`, 2)],
+    [`c`, row(`c`, 2)],
+    [`d`, row(`d`, 2)],
+    [`e`, row(`e`, 3)],
+  ])
+  const collection = {
+    _stateRevision: 0,
+    currentStateAsChanges: () =>
+      [...rows].map(
+        ([key, value]): ChangeMessage<RankedRow, string> => ({
+          type: `insert`,
+          key,
+          value,
+        }),
+      ),
+    entries: () => rows.entries(),
+    get: (key: string) => rows.get(key),
+  } as unknown as CollectionImpl<RankedRow, string>
+  const window = new WindowState(collection, orderBy(`asc`), undefined, 2, true)
+  window.recordInitialCoverage(undefined, true)
+  const compareRows = vi.spyOn(window.totalOrder, `compareRows`)
+
+  try {
+    reads.rank = 0
+    expect(window.publicationEntries().map(([key]) => key)).toEqual([
+      `a`,
+      `b`,
+      `c`,
+      `d`,
+    ])
+    expect(compareRows).toHaveBeenCalledTimes(3)
+    expect(reads.rank).toBe(6)
+  } finally {
+    compareRows.mockRestore()
   }
 })
 
