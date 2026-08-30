@@ -1162,20 +1162,114 @@ it(`does not start duplicate ordered work from an applying receipt`, async () =>
   })
 })
 
-it.each([`sync throw`, `async reject`] as const)(
-  `retries unindexed transport after a %s during zero-to-positive refinement`,
-  async (failureMode) => {
+it(`preserves a synchronous unindexed load error after reentrant cleanup`, async () => {
+  type Row = { id: string; rank: number }
+  const failure = new Error(`unindexed load failed after cleanup`)
+  let cleanupLive: () => Promise<void> = () => Promise.resolve()
+  const source = createCollection<Row>({
+    id: `unindexed-reentrant-cleanup-error`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `off`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: ({ markReady }) => {
+        markReady()
+        return {
+          loadSubset: () => {
+            void cleanupLive()
+            throw failure
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection({
+    id: `unindexed-reentrant-cleanup-error-live`,
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(0),
+    startSync: true,
+  })
+  cleanupLive = () => live.cleanup()
+
+  try {
+    await live.preload()
+
+    expect(() => live.utils.setWindow({ offset: 0, limit: 1 })).toThrow(failure)
+  } finally {
+    await Promise.all([live.cleanup(), source.cleanup()])
+  }
+})
+
+it.each([
+  {
+    name: `indexed sync throw without cleanup`,
+    autoIndex: `eager` as const,
+    failureMode: `sync throw` as const,
+    reentrantCleanup: false,
+  },
+  {
+    name: `indexed async reject without cleanup`,
+    autoIndex: `eager` as const,
+    failureMode: `async reject` as const,
+    reentrantCleanup: false,
+  },
+  {
+    name: `unindexed sync throw without cleanup`,
+    autoIndex: `off` as const,
+    failureMode: `sync throw` as const,
+    reentrantCleanup: false,
+  },
+  {
+    name: `unindexed async reject without cleanup`,
+    autoIndex: `off` as const,
+    failureMode: `async reject` as const,
+    reentrantCleanup: false,
+  },
+  {
+    name: `indexed sync throw with cleanup`,
+    autoIndex: `eager` as const,
+    failureMode: `sync throw` as const,
+    reentrantCleanup: true,
+  },
+  {
+    name: `indexed async reject with cleanup`,
+    autoIndex: `eager` as const,
+    failureMode: `async reject` as const,
+    reentrantCleanup: true,
+  },
+  {
+    name: `unindexed sync throw with cleanup`,
+    autoIndex: `off` as const,
+    failureMode: `sync throw` as const,
+    reentrantCleanup: true,
+  },
+  {
+    name: `unindexed async reject with cleanup`,
+    autoIndex: `off` as const,
+    failureMode: `async reject` as const,
+    reentrantCleanup: true,
+  },
+])(
+  `preserves refinement failure and retry state for $name`,
+  async ({ autoIndex, failureMode, reentrantCleanup }) => {
     type Row = { id: string; rank: number }
     let attempts = 0
     let begin!: () => void
     let write!: (message: { type: `insert`; value: Row }) => void
     let commit!: () => true | Promise<void>
+    let cleanupLive: () => Promise<void> = () => Promise.resolve()
     const source = createCollection<Row>({
-      id: `unindexed-zero-refinement-retry`,
+      id: `zero-refinement-${autoIndex}-${failureMode}-${reentrantCleanup}`,
       getKey: (row) => row.id,
       syncMode: `on-demand`,
       startSync: true,
-      autoIndex: `off`,
+      autoIndex,
       defaultIndexType: BTreeIndex,
       sync: {
         sync: (params) => {
@@ -1188,6 +1282,7 @@ it.each([`sync throw`, `async reject`] as const)(
               attempts++
               if (attempts === 1) {
                 const error = new Error(`fallback failed`)
+                if (reentrantCleanup) void cleanupLive()
                 if (failureMode === `sync throw`) throw error
                 return Promise.reject(error)
               }
@@ -1205,7 +1300,7 @@ it.each([`sync throw`, `async reject`] as const)(
       },
     })
     const live = createLiveQueryCollection({
-      id: `unindexed-zero-refinement-retry-live`,
+      id: `zero-refinement-${autoIndex}-${failureMode}-${reentrantCleanup}-live`,
       query: (q) =>
         q
           .from({ row: source })
@@ -1213,6 +1308,7 @@ it.each([`sync throw`, `async reject`] as const)(
           .limit(0),
       startSync: true,
     })
+    cleanupLive = () => live.cleanup()
 
     try {
       await live.preload()
@@ -1222,12 +1318,20 @@ it.each([`sync throw`, `async reject`] as const)(
         expect(() => live.utils.setWindow({ offset: 0, limit: 1 })).toThrow(
           `fallback failed`,
         )
+      } else if (reentrantCleanup) {
+        expect(live.utils.setWindow({ offset: 0, limit: 1 })).toBe(true)
       } else {
         await expect(
           live.utils.setWindow({ offset: 0, limit: 1 }),
         ).rejects.toThrow(`fallback failed`)
       }
       await flushPromises()
+
+      if (reentrantCleanup) {
+        expect(attempts).toBe(1)
+        return
+      }
+
       await live.utils.setWindow({ offset: 0, limit: 1 })
       await flushPromises()
 

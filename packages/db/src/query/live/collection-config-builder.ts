@@ -323,6 +323,8 @@ export class CollectionConfigBuilder<
     } catch (error) {
       if (
         previousWindow &&
+        syncSession === this.syncSession &&
+        this.currentSyncConfig !== undefined &&
         windowOperationGeneration === this.windowOperationGeneration
       ) {
         try {
@@ -559,8 +561,11 @@ export class CollectionConfigBuilder<
     this.isGraphRunning = true
 
     try {
-      const { begin, commit } = this.currentSyncConfig
+      const config = this.currentSyncConfig
+      const { begin, commit } = config
       const syncState = this.currentSyncState
+      const sessionIsActive = () =>
+        this.currentSyncConfig === config && this.currentSyncState === syncState
 
       // Don't run if the live query is in an error state
       if (this.isInErrorState) {
@@ -574,23 +579,29 @@ export class CollectionConfigBuilder<
         // becomes part of this same quiescence pass.
         if (!syncState.graph.pendingWork()) {
           callback?.()
+          if (!sessionIsActive()) return
         }
 
         while (syncState.graph.pendingWork()) {
           syncState.graph.run()
+          if (!sessionIsActive()) return
           callback?.()
+          if (!sessionIsActive()) return
         }
 
         // Publish only after every operator has reached quiescence. A source
         // change can reach sibling materializations in different graph steps;
         // flushing between those steps would expose a mixed root snapshot.
         syncState.flushPendingChanges?.()
+        if (!sessionIsActive()) return
 
         // On the initial run, we may need to do an empty commit to ensure that
         // the collection is initialized
         if (syncState.messagesCount === 0) {
           begin()
+          if (!sessionIsActive()) return
           commit()
+          if (!sessionIsActive()) return
         }
 
         // After graph processing completes, check if we should mark ready.
@@ -598,7 +609,7 @@ export class CollectionConfigBuilder<
         // 1. All data has been processed through the graph
         // 2. All source collections have had a chance to send their initial data
         // This prevents marking ready before data is processed (fixes isReady=true with empty data)
-        this.updateLiveQueryStatus(this.currentSyncConfig)
+        this.updateLiveQueryStatus(config)
       }
     } finally {
       this.isGraphRunning = false

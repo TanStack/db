@@ -597,7 +597,9 @@ export class CollectionSubscriber<
     } catch (error) {
       const current = this.unindexedSnapshot
       if (
-        current.subscription === subscription &&
+        // requestSnapshot can reentrantly unsubscribe and clear this field.
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        current?.subscription === subscription &&
         current.token === requestToken
       ) {
         this.unindexedSnapshot = undefined
