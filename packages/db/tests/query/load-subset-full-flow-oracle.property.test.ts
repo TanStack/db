@@ -405,6 +405,28 @@ function collectStringLiterals(
 
 let multiSourceOrderedHarnessId = 0
 
+async function expectMultiSourceStepToSettle<T>(
+  scenario: MultiSourceOrderedScenario,
+  step: string,
+  promise: Promise<T>,
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeout = setTimeout(() => {
+          reject(
+            new Error(`${step} did not settle for ${JSON.stringify(scenario)}`),
+          )
+        }, 5_000)
+      }),
+    ])
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout)
+  }
+}
+
 async function runMultiSourceOrderedScenario(
   scenario: MultiSourceOrderedScenario,
 ): Promise<void> {
@@ -412,7 +434,11 @@ async function runMultiSourceOrderedScenario(
   type SecondaryRow = { id: string; joinKey: string }
 
   const primaryOrder = orderedPrimaryRows(scenario)
-  const sourceSteps = await observeOrderedSourceSteps(scenario)
+  const sourceSteps = await expectMultiSourceStepToSettle(
+    scenario,
+    `control projection`,
+    observeOrderedSourceSteps(scenario),
+  )
   expect(
     sourceSteps.map(({ sourceKey, demandKeys }) => ({ sourceKey, demandKeys })),
   ).toEqual(
@@ -455,23 +481,23 @@ async function runMultiSourceOrderedScenario(
   let primaryKeysBeforeSecondaryPublication: ReadonlyArray<string> | undefined
   let primaryBegin!: () => void
   let primaryWrite!: (message: { type: `insert`; value: PrimaryRow }) => void
-  let primaryCommit!: () => true | Promise<void>
+  let primaryCommit!: (signal?: AbortSignal) => true | Promise<void>
 
   const applyPrimaryRows = async (
     rows: ReadonlyArray<PrimaryRow>,
+    signal: AbortSignal | undefined,
   ): Promise<Array<string>> => {
-    const freshRows = rows.filter(({ id }) => !establishedPrimaryKeys.has(id))
-    if (freshRows.length === 0) return []
+    if (rows.length === 0) return []
     primaryBegin()
-    for (const row of freshRows) {
+    for (const row of rows) {
       establishedPrimaryKeys.add(row.id)
       primaryKeysEstablishedByLoads.add(row.id)
       primaryWrite({ type: `insert`, value: row })
     }
-    const applied = primaryCommit()
+    const applied = primaryCommit(signal)
     if (applied !== true) await applied
-    for (const row of freshRows) committedPrimaryKeys.add(row.id)
-    return freshRows.map(({ id }) => id)
+    for (const row of rows) committedPrimaryKeys.add(row.id)
+    return rows.map(({ id }) => id)
   }
 
   const releaseSecondaryPublication = (): void => {
@@ -484,6 +510,16 @@ async function runMultiSourceOrderedScenario(
 
   const recordPrimaryCall = (options: LoadSubsetOptions): void => {
     primaryCalls.push(options)
+    // Four source rows, one initial window, and one positive refinement cannot
+    // require an unbounded number of physical acquisitions. Keep a generous
+    // ceiling so a microtask refill loop becomes a shrinkable oracle failure.
+    if (primaryCalls.length > 32) {
+      throw new Error(
+        `primary loadSubset exceeded the bounded source grammar at call ${primaryCalls.length}: ${JSON.stringify(
+          { limit: options.limit, cursor: options.cursor },
+        )}`,
+      )
+    }
     primaryCallProgress.push({
       demandKey: getLoadSubsetDemandKey(options) ?? `unfiltered`,
       establishedPrimaryCount: establishedPrimaryKeys.size,
@@ -513,7 +549,10 @@ async function runMultiSourceOrderedScenario(
                   options.where === undefined ||
                   evaluateReferenceExpression(options.where, row),
               )
-              const appliedRowKeys = await applyPrimaryRows(rows)
+              const appliedRowKeys = await applyPrimaryRows(
+                rows,
+                options.signal,
+              )
               primaryReceipts.push(appliedRowKeys)
               return {
                 hasMore: false,
@@ -526,7 +565,10 @@ async function runMultiSourceOrderedScenario(
               primaryOrderedVisitedKeys.push(
                 ...primaryOrder.map(({ id }) => id),
               )
-              const appliedRowKeys = await applyPrimaryRows(primaryOrder)
+              const appliedRowKeys = await applyPrimaryRows(
+                primaryOrder,
+                options.signal,
+              )
               if (
                 scenario.secondaryPublication ===
                   `after-primary-continuation` ||
@@ -552,7 +594,7 @@ async function runMultiSourceOrderedScenario(
             let appliedRowKeys: Array<string> = []
             if (row) {
               primaryOrderedVisitedKeys.push(row.id)
-              appliedRowKeys = await applyPrimaryRows([row])
+              appliedRowKeys = await applyPrimaryRows([row], options.signal)
             }
             const hasMore = previousIndex + 1 < primaryOrder.length - 1
             if (
@@ -584,10 +626,11 @@ async function runMultiSourceOrderedScenario(
     type: `insert`
     value: SecondaryRow
   }) => void
-  let secondaryCommit!: () => true | Promise<void>
+  let secondaryCommit!: (signal?: AbortSignal) => true | Promise<void>
   const secondaryRows = scenario.secondaryRows
   const applySecondaryRows = async (
     rows: ReadonlyArray<SecondaryRow>,
+    signal: AbortSignal | undefined,
   ): Promise<Array<string>> => {
     const freshRows = rows.filter(({ id }) => !establishedSecondaryKeys.has(id))
     if (freshRows.length === 0) return []
@@ -597,7 +640,7 @@ async function runMultiSourceOrderedScenario(
       establishedSecondaryKeys.add(row.id)
       secondaryWrite({ type: `insert`, value: row })
     }
-    const applied = secondaryCommit()
+    const applied = secondaryCommit(signal)
     if (applied !== true) await applied
     return freshRows.map(({ id }) => id)
   }
@@ -628,6 +671,11 @@ async function runMultiSourceOrderedScenario(
         return {
           loadSubset: async (options) => {
             secondaryCalls.push(options)
+            if (secondaryCalls.length > 32) {
+              throw new Error(
+                `secondary loadSubset exceeded the bounded source grammar`,
+              )
+            }
             if (!hasPreloadedSecondary(scenario)) {
               await secondaryPublicationGate.promise
               primaryKeysBeforeSecondaryPublication ??= [
@@ -667,6 +715,7 @@ async function runMultiSourceOrderedScenario(
                     index,
                     index + scenario.secondaryPageSize,
                   ),
+                  options.signal,
                 )),
               )
             }
@@ -721,7 +770,7 @@ async function runMultiSourceOrderedScenario(
         await flushPromises()
       }
     }
-    await preload
+    await expectMultiSourceStepToSettle(scenario, `preload`, preload)
     await flushPromises()
     expect(preloadSettled).toBe(true)
 
@@ -747,10 +796,14 @@ async function runMultiSourceOrderedScenario(
       offset: refinedOffset,
       limit: refinedLimit,
     })
-    await live.utils.setWindow({
-      offset: refinedOffset,
-      limit: refinedLimit,
-    })
+    await expectMultiSourceStepToSettle(
+      scenario,
+      `positive window refinement`,
+      live.utils.setWindow({
+        offset: refinedOffset,
+        limit: refinedLimit,
+      }),
+    )
     await flushPromises()
     expect(
       live.toArray.map(
@@ -769,7 +822,11 @@ async function runMultiSourceOrderedScenario(
     }
 
     const primaryCallsBeforeZeroShrink = primaryCalls.length
-    await live.utils.setWindow({ offset: 2, limit: 0 })
+    await expectMultiSourceStepToSettle(
+      scenario,
+      `zero window refinement`,
+      live.utils.setWindow({ offset: 2, limit: 0 }),
+    )
     await flushPromises()
     expect(live.toArray).toEqual([])
     expect(
@@ -801,13 +858,15 @@ async function runMultiSourceOrderedScenario(
       }
       previousProgressByDemand.set(progress.demandKey, progress)
     }
-    const claimedPrimaryKeys = primaryReceipts.flat()
-    expect(new Set(claimedPrimaryKeys).size).toBe(claimedPrimaryKeys.length)
+    for (const receipt of primaryReceipts) {
+      expect(new Set(receipt).size).toBe(receipt.length)
+    }
+    const claimedPrimaryKeys = new Set(primaryReceipts.flat())
     expect([...claimedPrimaryKeys].sort()).toEqual(
       [...primaryKeysEstablishedByLoads].sort(),
     )
     expect(
-      claimedPrimaryKeys.every((key) =>
+      [...claimedPrimaryKeys].every((key) =>
         scenario.primaryRows.some(({ id }) => id === key),
       ),
     ).toBe(true)
@@ -909,8 +968,13 @@ async function runMultiSourceOrderedScenario(
       }
     }
   } finally {
+    secondaryPublicationGate.resolve()
     for (const waiter of delayedSecondaryReceiptWaiters) waiter.gate.resolve()
-    await Promise.all([live.cleanup(), primary.cleanup(), secondary.cleanup()])
+    await expectMultiSourceStepToSettle(
+      scenario,
+      `cleanup`,
+      Promise.all([live.cleanup(), primary.cleanup(), secondary.cleanup()]),
+    )
   }
 }
 
@@ -1020,6 +1084,70 @@ it.each([
     ...scenario,
     primaryRows: orderedPrimaryFixture,
     direction: `asc`,
+  })
+})
+
+it(`settles a late secondary load after tied primary continuations`, async () => {
+  await runMultiSourceOrderedScenario({
+    offset: 0,
+    limit: 1,
+    direction: `asc`,
+    primaryAutoIndex: `eager`,
+    secondaryPublication: `after-primary-continuation`,
+    secondaryPageSize: 1,
+    secondaryCommitOrder: `reverse`,
+    primaryRows: [
+      { id: `a`, rank: 2, joinKey: `x` },
+      { id: `b`, rank: 0, joinKey: `z` },
+      { id: `c`, rank: 0, joinKey: `y` },
+      { id: `d`, rank: 2, joinKey: `y` },
+    ],
+    secondaryRows: [
+      { id: `x-0`, joinKey: `x` },
+      { id: `z-0`, joinKey: `z` },
+    ],
+  })
+})
+
+it(`settles an empty join after exhausting tied primary rows`, async () => {
+  await runMultiSourceOrderedScenario({
+    offset: 0,
+    limit: 1,
+    direction: `asc`,
+    primaryAutoIndex: `eager`,
+    secondaryPublication: `after-primary-exhaustion`,
+    secondaryPageSize: 1,
+    secondaryCommitOrder: `insertion`,
+    primaryRows: [
+      { id: `a`, rank: 0, joinKey: `x` },
+      { id: `b`, rank: 0, joinKey: `x` },
+      { id: `c`, rank: 0, joinKey: `x` },
+      { id: `d`, rank: 0, joinKey: `x` },
+    ],
+    secondaryRows: [],
+  })
+})
+
+it(`does not start duplicate ordered work from an applying receipt`, async () => {
+  await runMultiSourceOrderedScenario({
+    offset: 0,
+    limit: 2,
+    direction: `asc`,
+    primaryAutoIndex: `eager`,
+    secondaryPublication: `after-primary-continuation`,
+    secondaryPageSize: 1,
+    secondaryCommitOrder: `insertion`,
+    primaryRows: [
+      { id: `a`, rank: 0, joinKey: `y` },
+      { id: `b`, rank: 1, joinKey: `x` },
+      { id: `c`, rank: 1, joinKey: `y` },
+      { id: `d`, rank: 0, joinKey: `z` },
+    ],
+    secondaryRows: [
+      { id: `z-0`, joinKey: `z` },
+      { id: `z-1`, joinKey: `z` },
+      { id: `y-0`, joinKey: `y` },
+    ],
   })
 })
 

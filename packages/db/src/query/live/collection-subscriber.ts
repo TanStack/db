@@ -61,6 +61,10 @@ export class CollectionSubscriber<
   private pendingOrderedLoadPromise:
     | Promise<AppliedLoadSubsetOutcome>
     | undefined
+  // A sync commit can publish rows before an async loadSubset call returns its
+  // Promise. Block graph callbacks in that entry window; the Promise guard
+  // takes over as soon as requestLimitedSnapshot returns.
+  private orderedLoadStartInProgress = false
   // Overlapping replays share one subscription, so only the latest result
   // token may clear the full-source acquisition guard.
   private unindexedSnapshot:
@@ -512,6 +516,8 @@ export class CollectionSubscriber<
       return true
     }
 
+    if (this.orderedLoadStartInProgress) return true
+
     if (this.pendingOrderedLoadPromise) {
       // The current window still needs the in-flight coverage. Attach it to
       // this operation without making an unrelated or superseded request a
@@ -666,22 +672,27 @@ export class CollectionSubscriber<
     // Omit offset so requestLimitedSnapshot can advance based on
     // the number of rows already loaded (supports offset-based backends).
     try {
-      subscription.requestLimitedSnapshot({
-        orderBy: cursor.normalizedOrderBy,
-        limit: n,
-        minValues: cursor.minValues,
-        trackLoadSubsetPromise: false,
-        onLoadSubsetResult: (result, demand) => {
-          if (result instanceof Promise) {
-            void result.catch(() => {
-              if (this.lastLoadRequestKey === loadRequestKey) {
-                this.lastLoadRequestKey = undefined
-              }
-            })
-          }
-          this.orderedLoadSubsetResult?.(result, demand)
-        },
-      })
+      this.orderedLoadStartInProgress = true
+      try {
+        subscription.requestLimitedSnapshot({
+          orderBy: cursor.normalizedOrderBy,
+          limit: n,
+          minValues: cursor.minValues,
+          trackLoadSubsetPromise: false,
+          onLoadSubsetResult: (result, demand) => {
+            if (result instanceof Promise) {
+              void result.catch(() => {
+                if (this.lastLoadRequestKey === loadRequestKey) {
+                  this.lastLoadRequestKey = undefined
+                }
+              })
+            }
+            this.orderedLoadSubsetResult?.(result, demand)
+          },
+        })
+      } finally {
+        this.orderedLoadStartInProgress = false
+      }
     } catch (error) {
       if (this.lastLoadRequestKey === loadRequestKey) {
         this.lastLoadRequestKey = undefined

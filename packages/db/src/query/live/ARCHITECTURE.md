@@ -422,6 +422,10 @@ offset, cursor, and boundary-class refinement requests. Every applied row key
 must name a row established by that acquisition. Tests that withhold rows while
 claiming exhaustion, or ignore a refinement request, do not model a valid
 adapter and cannot establish a runtime defect.
+An acquisition may establish a row that is already readable by applying the
+same authoritative value again under its own request signal and awaiting that
+receipt. Merely observing a row installed by another demand does not transfer
+ownership or make it an applied row of the new acquisition.
 
 Every continuation boundary comes from rows established by the same ordered
 demand. Rows retained for another query, join, or window cannot move it. During
@@ -685,6 +689,10 @@ start another request only when that prefix grows or that boundary moves. If a
 continuing page establishes neither fact, core leaves the window uncovered,
 does not repeat the same request, and records a nonfatal no-progress diagnostic
 in `lastSubsetError`.
+Adapter entry is itself pending work. A request-scoped commit can publish rows
+before an async `loadSubset` call returns its Promise, so graph callbacks during
+that entry cannot start another ordered request. Once entry returns, the normal
+in-flight Promise guard owns the request until settlement.
 
 An ordered window with an active limit of zero creates no ordered transport
 demand. Its coordinator remains alive so a later window change can load from
