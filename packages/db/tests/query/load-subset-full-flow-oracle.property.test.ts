@@ -1365,7 +1365,27 @@ it.each([
         expect(live.isLoadingSubset).toBe(false)
         expect(live.utils.lastSubsetError).toBeUndefined()
         expect(live.toArray.map(({ id }) => id)).toEqual([`a`])
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
         return
+      }
+
+      expect(attempts).toBe(1)
+      expect(live.status).toBe(`ready`)
+      expect(live.isLoadingSubset).toBe(false)
+      expect(live.utils.lastSubsetError).toBe(failure)
+      expect(live.toArray).toEqual([])
+      expect(live.utils.getWindow()).toEqual({
+        offset: 0,
+        limit: failureMode === `sync throw` ? 0 : 1,
+      })
+
+      if (failureMode === `sync throw`) {
+        begin()
+        write({ type: `insert`, value: { id: `b`, rank: 2 } })
+        await commit()
+        await flushPromises()
+        expect(live.toArray).toEqual([])
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 0 })
       }
 
       await live.utils.setWindow({ offset: 0, limit: 1 })
