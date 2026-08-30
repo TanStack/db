@@ -1016,15 +1016,26 @@ describe(`ordered source work oracle`, () => {
           ).toBe(false)
         }
 
+        const sourceReads: Array<string> = []
+        const originalGet = collection.get.bind(collection)
+        collection.get = (key) => {
+          sourceReads.push(String(key))
+          return originalGet(key)
+        }
         const compareEntries = vi.spyOn(TotalOrder.prototype, `compareEntries`)
         try {
           const changes = collection.currentStateAsChanges({
             orderBy: orderBy(direction, direction === `asc` ? `last` : `first`),
             limit: 1,
           })!
+          const indexReads =
+            direction === `asc`
+              ? [`tie-a`, `tie-b`, `tie-c`, `later`]
+              : [`tie-c`, `tie-b`, `tie-a`, `later`]
 
           expect(changes.map(({ key }) => key)).toEqual([`tie-a`])
           expect(requestedCounts).toEqual([index.keyCount])
+          expect(sourceReads).toEqual([...indexReads, ...indexReads, `tie-a`])
           expect(compareEntries).toHaveBeenCalled()
         } finally {
           compareEntries.mockRestore()
