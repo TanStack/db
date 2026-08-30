@@ -903,6 +903,46 @@ describe(`ordered source work oracle`, () => {
     },
   )
 
+  it.each([`asc`, `desc`] as const)(
+    `executes the materialized inner comparator once for dates in %s order`,
+    (direction) => {
+      const getTime = vi.spyOn(Date.prototype, `getTime`)
+      try {
+        expect(
+          makeComparator({ direction, nulls: `last` })(
+            new Date(0),
+            new Date(1),
+          ),
+        ).toBe(direction === `asc` ? -1 : 1)
+        // Each valid Date is read once while checking the unorderable case and
+        // once more for the comparison itself.
+        expect(getTime).toHaveBeenCalledTimes(4)
+      } finally {
+        getTime.mockRestore()
+      }
+    },
+  )
+
+  it.each([`asc`, `desc`] as const)(
+    `executes the materialized inner comparator once for strings in %s order`,
+    (direction) => {
+      const localeCompare = vi.spyOn(String.prototype, `localeCompare`)
+      try {
+        expect(
+          makeComparator({
+            direction,
+            nulls: `last`,
+            stringSort: `locale`,
+            locale: `en`,
+          })(`a`, `b`),
+        ).toBe(direction === `asc` ? -1 : 1)
+        expect(localeCompare).toHaveBeenCalledTimes(1)
+      } finally {
+        localeCompare.mockRestore()
+      }
+    },
+  )
+
   it.each([
     { indexKind: `basic`, direction: `asc` },
     { indexKind: `basic`, direction: `desc` },
