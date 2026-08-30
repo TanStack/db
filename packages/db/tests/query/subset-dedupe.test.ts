@@ -690,6 +690,48 @@ describe(`createDeduplicatedLoadSubset`, () => {
     await Promise.all([oldLoad, freshLoad])
   })
 
+  it(`releases its abort lease when Promise handler installation throws`, async () => {
+    class ThrowOnThenPromise extends Promise<void> {
+      static get [Symbol.species](): PromiseConstructor {
+        return Promise
+      }
+
+      override then<TResult1 = void, TResult2 = never>(
+        _onfulfilled?:
+          | ((value: void) => TResult1 | PromiseLike<TResult1>)
+          | null,
+        _onrejected?:
+          | ((reason: unknown) => TResult2 | PromiseLike<TResult2>)
+          | null,
+      ): Promise<TResult1 | TResult2> {
+        throw new Error(`then install failed`)
+      }
+    }
+    const signal = {
+      aborted: false,
+      reason: undefined,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as AbortSignal
+    let loadSubsetCalls = 0
+    const loadSubset: LoadSubsetFn = () => {
+      loadSubsetCalls += 1
+      return loadSubsetCalls === 1
+        ? new ThrowOnThenPromise((resolve) => resolve())
+        : Promise.resolve()
+    }
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+
+    expect(() => deduplicated.loadSubset({ limit: 2, signal })).toThrow(
+      `then install failed`,
+    )
+    expect(signal.addEventListener).toHaveBeenCalledTimes(1)
+    expect(signal.removeEventListener).toHaveBeenCalledTimes(1)
+
+    await deduplicated.loadSubset({ limit: 2 })
+    expect(loadSubsetCalls).toBe(2)
+  })
+
   it(`shares in-flight work while any cancellation owner remains active`, async () => {
     let resolveLoad: (() => void) | undefined
     let sharedSignal: AbortSignal | undefined

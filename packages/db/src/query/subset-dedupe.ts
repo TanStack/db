@@ -283,28 +283,26 @@ export class DeduplicatedLoadSubset {
     } else {
       const ownsRequestAtAdapterReturn =
         requestGeneration === this.generation && reservation.active
-      // We need to create a reference to the in-flight entry so we can remove it later
-      const inflightEntry: InflightCall = {
-        options: trackingOptions,
-        lease,
-        matchesPhysicalRequest,
-        generation: requestGeneration,
-        trackable: ownsRequestAtAdapterReturn,
-        reservations: ownsRequestAtAdapterReturn
-          ? new Set([reservation])
-          : new Set(),
-        promise: resultPromise
+      // Promise subclasses can run or throw from handler installation. Keep the
+      // entry optional until the complete observation chain exists so failed
+      // installation cannot leave an owner or abort lease behind.
+      const installation: { entry: InflightCall | undefined } = {
+        entry: undefined,
+      }
+      let observedPromise: Promise<void | LoadSubsetResult>
+      try {
+        observedPromise = resultPromise
           .then((result) => {
             // Only update tracking if this request is still from the current generation
             // If reset() was called, the generation will have incremented and we should
             // not repopulate the state that was just cleared
             if (
-              inflightEntry.trackable &&
-              inflightEntry.generation === this.generation &&
+              installation.entry?.trackable &&
+              installation.entry.generation === this.generation &&
               !lease.aborted
             ) {
               this.updateTracking(trackingOptions)
-              this.exactAcquisitions.push(inflightEntry)
+              this.exactAcquisitions.push(installation.entry)
             }
             return recordLoadSubsetResultDemandMatcher(
               result,
@@ -314,13 +312,30 @@ export class DeduplicatedLoadSubset {
           .finally(() => {
             // Always remove from in-flight array on completion OR rejection
             // This ensures failed requests can be retried instead of being cached forever
-            const index = this.inflightCalls.indexOf(inflightEntry)
-            if (index !== -1) {
-              this.inflightCalls.splice(index, 1)
+            if (installation.entry) {
+              const index = this.inflightCalls.indexOf(installation.entry)
+              if (index !== -1) {
+                this.inflightCalls.splice(index, 1)
+              }
             }
             lease.dispose()
-          }),
+          })
+      } catch (error) {
+        lease.dispose()
+        throw error
       }
+      const inflightEntry: InflightCall = {
+        options: trackingOptions,
+        lease,
+        matchesPhysicalRequest,
+        generation: requestGeneration,
+        trackable: ownsRequestAtAdapterReturn,
+        reservations: ownsRequestAtAdapterReturn
+          ? new Set([reservation])
+          : new Set(),
+        promise: observedPromise,
+      }
+      installation.entry = inflightEntry
       const ownsRequestAfterHandlerInstallation =
         requestGeneration === this.generation && reservation.active
       inflightEntry.trackable = ownsRequestAfterHandlerInstallation
