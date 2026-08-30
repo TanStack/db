@@ -1065,16 +1065,22 @@ it(`applies target events only to their named source and demand`, () => {
     outcome: `success`,
     extent: `continues`,
   }
-  const establish = (sourceId: string): LoadSubsetFullFlowEvent => ({
+  const establish = (
+    sourceId: string,
+    demandId = `ordered`,
+  ): LoadSubsetFullFlowEvent => ({
     type: `establishReplacementCoverage`,
     publicationId: `replacement`,
     sourceId,
-    demandId: `ordered`,
+    demandId,
   })
-  const resize = (sourceId: string): LoadSubsetFullFlowEvent => ({
+  const resize = (
+    sourceId: string,
+    demandId = `ordered`,
+  ): LoadSubsetFullFlowEvent => ({
     type: `resizeOrderedWindow`,
     sourceId,
-    demandId: `ordered`,
+    demandId,
     size: 2,
   })
   const rows = (history: ReadonlyArray<LoadSubsetFullFlowEvent>) =>
@@ -1085,9 +1091,15 @@ it(`applies target events only to their named source and demand`, () => {
     }).currentPublication?.rows.map(({ key }) => key)
 
   expect(rows([...base, settle, establish(`source-b`)])).toEqual([`old-row`])
+  expect(rows([...base, settle, establish(`source-a`, `other`)])).toEqual([
+    `old-row`,
+  ])
   expect(rows([...base, settle, establish(`source-a`)])).toEqual([`new-row-a`])
   expect(
     rows([...base, resize(`source-b`), settle, establish(`source-a`)]),
+  ).toEqual([`new-row-a`])
+  expect(
+    rows([...base, resize(`source-a`, `other`), settle, establish(`source-a`)]),
   ).toEqual([`new-row-a`])
   expect(
     rows([...base, resize(`source-a`), settle, establish(`source-a`)]),
