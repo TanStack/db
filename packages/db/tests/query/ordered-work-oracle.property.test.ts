@@ -929,20 +929,51 @@ describe(`ordered source work oracle`, () => {
     },
   )
 
-  it.each([`asc`, `desc`] as const)(
-    `keeps custom indexes on the materialized %s-order fallback`,
-    async (direction) => {
-      const tieRank = direction === `asc` ? 1 : 2
-      const laterRank = direction === `asc` ? 2 : 1
-      const rows: Array<RankedRow> = [
-        { id: `later`, rank: laterRank, included: true },
-        { id: `tie-c`, rank: tieRank, included: true },
-        { id: `tie-b`, rank: tieRank, included: true },
-        { id: `tie-a`, rank: tieRank, included: true },
+  it.each(
+    ([`asc`, `desc`] as const).flatMap((direction) =>
+      [
+        {
+          domain: `signed number`,
+          tieKeys: [1, -2],
+          rejectedKey: -999,
+          laterKey: 999,
+        },
+        {
+          domain: `NaN number`,
+          tieKeys: [Number.NaN, 2, -1],
+          rejectedKey: -999,
+          laterKey: 999,
+        },
+        {
+          domain: `case-sensitive string`,
+          tieKeys: [`a`, `A`],
+          rejectedKey: `rejected`,
+          laterKey: `later`,
+        },
+        {
+          domain: `mixed`,
+          tieKeys: [10, `2`, 2, `10`],
+          rejectedKey: `rejected`,
+          laterKey: `later`,
+        },
+      ].map((keyCase) => ({ direction, ...keyCase })),
+    ),
+  )(
+    `fully refines a filtered $domain custom-index fallback in $direction order`,
+    async ({ direction, domain, tieKeys, rejectedKey, laterKey }) => {
+      const tieRank = 1
+      const rejectedRank = direction === `asc` ? 0 : 2
+      const laterRank = direction === `asc` ? 2 : 0
+      const rows: Array<PublicKeyRankedRow> = [
+        { id: laterKey, rank: laterRank, included: true },
+        ...tieKeys
+          .map((id) => ({ id, rank: tieRank, included: true }))
+          .reverse(),
+        { id: rejectedKey, rank: rejectedRank, included: false },
       ]
       const collection = createCollection(
-        localOnlyCollectionOptions<RankedRow>({
-          id: `ordered-work-custom-index-fallback-${direction}`,
+        localOnlyCollectionOptions<PublicKeyRankedRow, string | number>({
+          id: `ordered-work-custom-index-fallback-${direction}-${domain}`,
           getKey: (row) => row.id,
           initialData: rows,
         }),
@@ -952,14 +983,8 @@ describe(`ordered source work oracle`, () => {
         await collection.preload()
         const index = collection.createIndex((row) => row.rank, {
           indexType: BTreeIndex,
-          options: {
-            compareOptions: {
-              direction: `asc`,
-              nulls: `last`,
-              stringSort: `locale`,
-            },
-          },
-        }) as BTreeIndex<string>
+          options: { compareOptions: publicKeyIndexCompareOptions },
+        }) as BTreeIndex<string | number>
         const requestedCounts: Array<number> = []
         const customIndex = new Proxy(index, {
           get(target, property) {
@@ -968,32 +993,6 @@ describe(`ordered source work oracle`, () => {
               property === `orderedBucketsReversed`
             ) {
               return undefined
-            }
-            if (property === `orderedEntriesArray`) {
-              return [
-                ...(direction === `desc`
-                  ? [[laterRank, new Set([`later`])]]
-                  : []),
-                [tieRank, new Set([`tie-c`])],
-                [tieRank, new Set([`tie-b`])],
-                [tieRank, new Set([`tie-a`])],
-                ...(direction === `asc`
-                  ? [[laterRank, new Set([`later`])]]
-                  : []),
-              ]
-            }
-            if (property === `orderedEntriesArrayReversed`) {
-              return [
-                ...(direction === `asc`
-                  ? [[laterRank, new Set([`later`])]]
-                  : []),
-                [tieRank, new Set([`tie-c`])],
-                [tieRank, new Set([`tie-b`])],
-                [tieRank, new Set([`tie-a`])],
-                ...(direction === `desc`
-                  ? [[laterRank, new Set([`later`])]]
-                  : []),
-              ]
             }
             const value = Reflect.get(target, property, target) as unknown
             if (
@@ -1016,27 +1015,50 @@ describe(`ordered source work oracle`, () => {
           ).toBe(false)
         }
 
-        const sourceReads: Array<string> = []
+        const orderedTieKeys = [...tieKeys].sort(comparePublicKeys)
+        const indexTieKeys =
+          direction === `asc` ? orderedTieKeys : [...orderedTieKeys].reverse()
+        const indexScanKeys = [rejectedKey, ...indexTieKeys, laterKey]
+        const matchingIndexKeys = [...indexTieKeys, laterKey]
+        const rowsByKey = new Map(rows.map((row) => [row.id, row]))
+        let expectedTotalOrderComparisons = 0
+        const expectedKeys = [...matchingIndexKeys]
+          .sort((left, right) => {
+            expectedTotalOrderComparisons++
+            const leftRow = rowsByKey.get(left)!
+            const rightRow = rowsByKey.get(right)!
+            const rankOrder = leftRow.rank - rightRow.rank
+            if (rankOrder !== 0) {
+              return direction === `asc` ? rankOrder : -rankOrder
+            }
+            return comparePublicKeys(left, right)
+          })
+          .slice(0, 2)
+
+        const sourceReads: Array<string | number> = []
         const originalGet = collection.get.bind(collection)
         collection.get = (key) => {
-          sourceReads.push(String(key))
+          sourceReads.push(key)
           return originalGet(key)
         }
         const compareEntries = vi.spyOn(TotalOrder.prototype, `compareEntries`)
         try {
           const changes = collection.currentStateAsChanges({
-            orderBy: orderBy(direction, direction === `asc` ? `last` : `first`),
-            limit: 1,
+            where: eq(new PropRef([`included`]), true),
+            orderBy: publicKeyOrderBy(direction),
+            limit: 2,
           })!
-          const indexReads =
-            direction === `asc`
-              ? [`tie-a`, `tie-b`, `tie-c`, `later`]
-              : [`tie-c`, `tie-b`, `tie-a`, `later`]
 
-          expect(changes.map(({ key }) => key)).toEqual([`tie-a`])
+          expect(changes.map(({ key }) => key)).toEqual(expectedKeys)
           expect(requestedCounts).toEqual([index.keyCount])
-          expect(sourceReads).toEqual([...indexReads, ...indexReads, `tie-a`])
-          expect(compareEntries).toHaveBeenCalled()
+          expect(sourceReads).toEqual([
+            ...indexScanKeys,
+            ...matchingIndexKeys,
+            ...expectedKeys,
+          ])
+          expect(compareEntries).toHaveBeenCalledTimes(
+            expectedTotalOrderComparisons,
+          )
         } finally {
           compareEntries.mockRestore()
         }
