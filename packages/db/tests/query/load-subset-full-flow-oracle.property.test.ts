@@ -24,7 +24,9 @@ import {
   projectOrderedPublicationBoundary,
   projectOrderedSourceProgress,
   projectRetainedRowKeys,
+  projectRetainedSourceRows,
   projectReusableDemands,
+  projectReusableSourceDemands,
   projectTransportLoads,
 } from '../load-subset-full-flow-model.js'
 import {
@@ -2991,6 +2993,7 @@ async function runTruncateCoverageScenario(
   const request = (ownerId: string, options: LoadSubsetOptions) => {
     histories.push({
       type: `requestDemand`,
+      sourceId: `source`,
       ownerId,
       sessionId: `session`,
       demandId: `prefix-${options.limit}`,
@@ -3020,6 +3023,7 @@ async function runTruncateCoverageScenario(
     histories.push({
       type:
         hasMore === undefined ? `applyUnprovenRows` : `applyAuthoritativeRows`,
+      sourceId: `source`,
       ownerId,
       demandId: `prefix-${options.limit}`,
       attemptId: `${ownerId}-attempt`,
@@ -3031,6 +3035,7 @@ async function runTruncateCoverageScenario(
     pending.get(options)!.reject(new Error(`fresh replay failed`))
     histories.push({
       type: `rejectDemand`,
+      sourceId: `source`,
       ownerId,
       demandId: `prefix-${options.limit}`,
       attemptId: `${ownerId}-attempt`,
@@ -3065,7 +3070,11 @@ async function runTruncateCoverageScenario(
     truncate()
     const truncated = commit()
     if (truncated !== true) await truncated
-    histories.push({ type: `truncateSource`, sessionId: `session` })
+    histories.push({
+      type: `truncateSource`,
+      sessionId: `session`,
+      sourceId: `source`,
+    })
     expectModel()
 
     const freshLoad = request(`fresh`, freshOptions)
@@ -3103,6 +3112,7 @@ async function runTruncateCoverageScenario(
       source._sync.unloadSubset(options)
       histories.push({
         type: `releaseDemand`,
+        sourceId: `source`,
         ownerId:
           options === initialOptions
             ? `initial`
@@ -3269,6 +3279,7 @@ it(`keeps adapter release obligations distinct across attempts by one owner`, ()
   const history: ReadonlyArray<LoadSubsetFullFlowEvent> = [
     {
       type: `requestDemand`,
+      sourceId: `source`,
       ownerId: `owner`,
       sessionId: `session`,
       demandId: `demand`,
@@ -3277,6 +3288,7 @@ it(`keeps adapter release obligations distinct across attempts by one owner`, ()
     },
     {
       type: `requestDemand`,
+      sourceId: `source`,
       ownerId: `owner`,
       sessionId: `session`,
       demandId: `demand`,
@@ -3285,12 +3297,14 @@ it(`keeps adapter release obligations distinct across attempts by one owner`, ()
     },
     {
       type: `releaseDemand`,
+      sourceId: `source`,
       ownerId: `owner`,
       demandId: `demand`,
       attemptId: `attempt-1`,
     },
     {
       type: `releaseDemand`,
+      sourceId: `source`,
       ownerId: `owner`,
       demandId: `demand`,
       attemptId: `attempt-2`,
@@ -3298,17 +3312,142 @@ it(`keeps adapter release obligations distinct across attempts by one owner`, ()
   ]
 
   expect(projectAdapterLifecycle(history)).toEqual([
-    { type: `invoke`, ownerId: `owner`, attemptId: `attempt-1` },
-    { type: `invoke`, ownerId: `owner`, attemptId: `attempt-2` },
-    { type: `release`, ownerId: `owner`, attemptId: `attempt-1` },
-    { type: `release`, ownerId: `owner`, attemptId: `attempt-2` },
+    {
+      type: `invoke`,
+      ownerId: `owner`,
+      sourceId: `source`,
+      attemptId: `attempt-1`,
+    },
+    {
+      type: `invoke`,
+      ownerId: `owner`,
+      sourceId: `source`,
+      attemptId: `attempt-2`,
+    },
+    {
+      type: `release`,
+      ownerId: `owner`,
+      sourceId: `source`,
+      attemptId: `attempt-1`,
+    },
+    {
+      type: `release`,
+      ownerId: `owner`,
+      sourceId: `source`,
+      attemptId: `attempt-2`,
+    },
   ])
+})
+
+let sourceIdentityHarnessId = 0
+
+it(`keeps identical demand and row identities local to each source`, async () => {
+  type Row = { id: string }
+  type Result = { hasMore: false; appliedRowKeys: ReadonlyArray<string> }
+  const createSource = (sourceId: string) => {
+    const result = createDeferred<Result>()
+    let begin!: () => void
+    let write!: (message: { type: `insert`; value: Row }) => void
+    let commit!: () => true | Promise<void>
+    const collection = createCollection<Row>({
+      id: `source-identity-${sourceIdentityHarnessId++}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          params.markReady()
+          return { loadSubset: () => result.promise }
+        },
+      },
+    })
+    const options = { limit: 1 }
+    const load = collection._sync.loadSubset(options)
+    if (load === true) throw new Error(`Expected a controlled async load`)
+    return {
+      sourceId,
+      collection,
+      options,
+      load,
+      settle: async () => {
+        begin()
+        write({ type: `insert`, value: { id: `shared-row` } })
+        const applied = commit()
+        if (applied !== true) await applied
+        result.resolve({ hasMore: false, appliedRowKeys: [`shared-row`] })
+        await load
+      },
+    }
+  }
+  const sourceA = createSource(`source-a`)
+  const sourceB = createSource(`source-b`)
+  const request = (sourceId: string): LoadSubsetFullFlowEvent => ({
+    type: `requestDemand`,
+    sourceId,
+    ownerId: `owner`,
+    sessionId: `session`,
+    demandId: `shared-demand`,
+    attemptId: `shared-attempt`,
+    alreadyAborted: false,
+  })
+  const settle = (sourceId: string): LoadSubsetFullFlowEvent => ({
+    type: `applyAuthoritativeRows`,
+    sourceId,
+    ownerId: `owner`,
+    demandId: `shared-demand`,
+    attemptId: `shared-attempt`,
+    rowKeys: [`shared-row`],
+  })
+  const history: Array<LoadSubsetFullFlowEvent> = [
+    request(sourceA.sourceId),
+    request(sourceB.sourceId),
+  ]
+  const actualRows = () =>
+    [sourceA, sourceB].flatMap(({ sourceId, collection }) =>
+      Array.from(collection.keys(), (rowKey) => ({ sourceId, rowKey })),
+    )
+
+  try {
+    await sourceA.settle()
+    history.push(settle(sourceA.sourceId))
+    expect(actualRows()).toEqual(projectRetainedSourceRows(history))
+    expect(projectReusableSourceDemands(history)).toEqual([
+      { sourceId: `source-a`, demandId: `shared-demand` },
+    ])
+
+    await sourceB.settle()
+    history.push(settle(sourceB.sourceId))
+    expect(actualRows()).toEqual(projectRetainedSourceRows(history))
+    expect(projectTransportLoads(history)).toBe(2)
+
+    sourceA.collection._sync.unloadSubset(sourceA.options)
+    history.push({
+      type: `releaseDemand`,
+      sourceId: sourceA.sourceId,
+      ownerId: `owner`,
+      demandId: `shared-demand`,
+      attemptId: `shared-attempt`,
+    })
+    expect(actualRows()).toEqual(projectRetainedSourceRows(history))
+    expect(projectReusableSourceDemands(history)).toEqual([
+      { sourceId: `source-b`, demandId: `shared-demand` },
+    ])
+  } finally {
+    await Promise.all([
+      sourceA.collection.cleanup(),
+      sourceB.collection.cleanup(),
+    ])
+  }
 })
 
 it(`derives shared row and evidence lifetime from active attempts`, () => {
   const sharedHistory: ReadonlyArray<LoadSubsetFullFlowEvent> = [
     {
       type: `requestDemand`,
+      sourceId: `source`,
       ownerId: `owner-a`,
       sessionId: `session`,
       demandId: `shared`,
@@ -3317,6 +3456,7 @@ it(`derives shared row and evidence lifetime from active attempts`, () => {
     },
     {
       type: `requestDemand`,
+      sourceId: `source`,
       ownerId: `owner-b`,
       sessionId: `session`,
       demandId: `shared`,
@@ -3325,6 +3465,7 @@ it(`derives shared row and evidence lifetime from active attempts`, () => {
     },
     {
       type: `applyAuthoritativeRows`,
+      sourceId: `source`,
       ownerId: `owner-a`,
       demandId: `shared`,
       attemptId: `attempt-a`,
@@ -3332,6 +3473,7 @@ it(`derives shared row and evidence lifetime from active attempts`, () => {
     },
     {
       type: `releaseDemand`,
+      sourceId: `source`,
       ownerId: `owner-a`,
       demandId: `shared`,
       attemptId: `attempt-a`,
@@ -3344,6 +3486,7 @@ it(`derives shared row and evidence lifetime from active attempts`, () => {
       ...sharedHistory,
       {
         type: `requestDemand`,
+        sourceId: `source`,
         ownerId: `owner-c`,
         sessionId: `session`,
         demandId: `shared`,
@@ -3358,6 +3501,7 @@ it(`derives shared row and evidence lifetime from active attempts`, () => {
       ...sharedHistory,
       {
         type: `releaseDemand`,
+        sourceId: `source`,
         ownerId: `owner-b`,
         demandId: `shared`,
         attemptId: `attempt-b`,
@@ -3370,6 +3514,7 @@ it(`keeps an additional demand active until its final attempt releases`, () => {
   const history: ReadonlyArray<LoadSubsetFullFlowEvent> = [
     {
       type: `requestDemand`,
+      sourceId: `source`,
       ownerId: `owner-a`,
       sessionId: `session`,
       demandId: `other`,
@@ -3378,6 +3523,7 @@ it(`keeps an additional demand active until its final attempt releases`, () => {
     },
     {
       type: `requestDemand`,
+      sourceId: `source`,
       ownerId: `owner-b`,
       sessionId: `session`,
       demandId: `other`,
@@ -3398,6 +3544,7 @@ it(`keeps an additional demand active until its final attempt releases`, () => {
     },
     {
       type: `releaseDemand`,
+      sourceId: `source`,
       ownerId: `owner-a`,
       demandId: `other`,
       attemptId: `attempt-a`,
@@ -3418,6 +3565,7 @@ it(`does not release physical work when an already-aborted demand skips adapter 
   const ownerId = `aborted-owner`
   const requestEvent: LoadSubsetFullFlowEvent = {
     type: `requestDemand`,
+    sourceId: `source`,
     ownerId,
     sessionId: `session-1`,
     demandId: `all-rows`,
@@ -3428,6 +3576,7 @@ it(`does not release physical work when an already-aborted demand skips adapter 
     requestEvent,
     {
       type: `releaseDemand`,
+      sourceId: `source`,
       ownerId,
       demandId: `all-rows`,
       attemptId: `aborted-attempt`,
@@ -3959,6 +4108,7 @@ it(`reloads authoritative rows after final-owner cleanup invalidates retained ad
   const history: ReadonlyArray<LoadSubsetFullFlowEvent> = [
     {
       type: `requestDemand`,
+      sourceId: `source`,
       ownerId: `owner-1`,
       sessionId: `session-1`,
       demandId: `all-rows`,
@@ -3967,6 +4117,7 @@ it(`reloads authoritative rows after final-owner cleanup invalidates retained ad
     },
     {
       type: `applyAuthoritativeRows`,
+      sourceId: `source`,
       ownerId: `owner-1`,
       demandId: `all-rows`,
       attemptId: `attempt-1`,
@@ -3974,6 +4125,7 @@ it(`reloads authoritative rows after final-owner cleanup invalidates retained ad
     },
     {
       type: `releaseDemand`,
+      sourceId: `source`,
       ownerId: `owner-1`,
       demandId: `all-rows`,
       attemptId: `attempt-1`,
@@ -3985,6 +4137,7 @@ it(`reloads authoritative rows after final-owner cleanup invalidates retained ad
     },
     {
       type: `requestDemand`,
+      sourceId: `source`,
       ownerId: `owner-2`,
       sessionId: `session-2`,
       demandId: `all-rows`,
@@ -3993,6 +4146,7 @@ it(`reloads authoritative rows after final-owner cleanup invalidates retained ad
     },
     {
       type: `applyAuthoritativeRows`,
+      sourceId: `source`,
       ownerId: `owner-2`,
       demandId: `all-rows`,
       attemptId: `attempt-2`,
@@ -4070,6 +4224,7 @@ it(`does not let an ordered continuation from a cleaned session start new work a
   const history: ReadonlyArray<LoadSubsetFullFlowEvent> = [
     {
       type: `requestDemand`,
+      sourceId: `source`,
       ownerId: `owner-1`,
       sessionId: `session-1`,
       demandId: `top-1`,
@@ -4090,6 +4245,7 @@ it(`does not let an ordered continuation from a cleaned session start new work a
     },
     {
       type: `requestDemand`,
+      sourceId: `source`,
       ownerId: `owner-2`,
       sessionId: `session-2`,
       demandId: `top-1`,
@@ -5699,7 +5855,7 @@ async function runOrderedBoundaryProvenanceScenario(
       rows: [{ key: addedRow.id, orderValue: addedRow.rank }],
     },
     { type: `commitPublication`, publicationId: `additional-publication` },
-    { type: `truncateSource`, sessionId: `session` },
+    { type: `truncateSource`, sessionId: `session`, sourceId: `source` },
     {
       type: `stagePublicationRows`,
       publicationId: `failed-replacement`,
@@ -5715,6 +5871,7 @@ async function runOrderedBoundaryProvenanceScenario(
     },
     {
       type: `rejectDemand`,
+      sourceId: `source`,
       ownerId: `ordered-owner`,
       demandId: `ordered-window`,
       attemptId: `ordered-attempt`,
@@ -6318,6 +6475,7 @@ async function runAtomicOrderedReplayScenario(
         expect(released?.options.signal?.aborted).toBe(true)
         history.push({
           type: `releaseDemand`,
+          sourceId: `source`,
           ownerId: `other-owner`,
           demandId: `other`,
           attemptId: `other-attempt`,
@@ -6339,6 +6497,7 @@ async function runAtomicOrderedReplayScenario(
     if (scenario.otherDemand !== `none`) {
       history.push({
         type: `requestDemand`,
+        sourceId: `source`,
         ownerId: `other-owner`,
         sessionId: `atomic-session`,
         demandId: `other`,
@@ -6404,6 +6563,7 @@ async function runAtomicOrderedReplayScenario(
         subscription.releaseSnapshot(otherWhere)
         history.push({
           type: `releaseDemand`,
+          sourceId: `source`,
           ownerId: `other-owner`,
           demandId: `other`,
           attemptId: `other-attempt`,

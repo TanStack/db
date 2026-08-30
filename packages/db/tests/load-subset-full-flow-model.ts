@@ -186,6 +186,7 @@ export type LoadSubsetFullFlowEvent =
       type: `requestDemand`
       ownerId: FullFlowOwnerId
       sessionId: FullFlowSessionId
+      sourceId: FullFlowSourceId
       demandId: FullFlowDemandId
       attemptId: FullFlowAttemptId
       alreadyAborted: boolean
@@ -193,18 +194,21 @@ export type LoadSubsetFullFlowEvent =
   | {
       type: `applyAuthoritativeRows`
       ownerId: FullFlowOwnerId
+      sourceId: FullFlowSourceId
       demandId: FullFlowDemandId
       attemptId: FullFlowAttemptId
       rowKeys: ReadonlyArray<string>
     }
   | {
       type: `settleDemandWithoutEvidence`
+      sourceId: FullFlowSourceId
       demandId: FullFlowDemandId
       attemptId: FullFlowAttemptId
     }
   | {
       type: `applyUnprovenRows`
       ownerId: FullFlowOwnerId
+      sourceId: FullFlowSourceId
       demandId: FullFlowDemandId
       attemptId: FullFlowAttemptId
       rowKeys: ReadonlyArray<string>
@@ -212,16 +216,19 @@ export type LoadSubsetFullFlowEvent =
   | {
       type: `rejectDemand`
       ownerId: FullFlowOwnerId
+      sourceId: FullFlowSourceId
       demandId: FullFlowDemandId
       attemptId: FullFlowAttemptId
     }
   | {
       type: `truncateSource`
       sessionId: FullFlowSessionId
+      sourceId: FullFlowSourceId
     }
   | {
       type: `releaseDemand`
       ownerId: FullFlowOwnerId
+      sourceId: FullFlowSourceId
       demandId: FullFlowDemandId
       attemptId: FullFlowAttemptId
     }
@@ -303,13 +310,22 @@ export type LoadSubsetFullFlowEvent =
       sessionId: FullFlowSessionId
       sourceId: FullFlowSourceId
       demandId: FullFlowDemandId
+      attemptId: FullFlowAttemptId
     }
   | {
       type: `settleSourceDemand`
       sessionId: FullFlowSessionId
       sourceId: FullFlowSourceId
       demandId: FullFlowDemandId
+      attemptId: FullFlowAttemptId
       outcome: `resolve` | `reject`
+    }
+  | {
+      type: `retireSourceDemand`
+      sessionId: FullFlowSessionId
+      sourceId: FullFlowSourceId
+      demandId: FullFlowDemandId
+      attemptId: FullFlowAttemptId
     }
   | {
       type: `startAcquisition`
@@ -368,16 +384,58 @@ export type LoadSubsetFullFlowEvent =
 export type ExpectedAdapterLifecycleEvent = {
   type: `invoke` | `release`
   ownerId: FullFlowOwnerId
+  sourceId: FullFlowSourceId
   attemptId: FullFlowAttemptId
 }
 
-type ActiveDemandAttempts = Map<FullFlowDemandId, Set<FullFlowAttemptId>>
-type AcquisitionAttempts = Map<FullFlowAttemptId, Set<FullFlowAttemptId>>
+type ScopedIdentity = string
+type ActiveDemandAttempts = Map<ScopedIdentity, Set<ScopedIdentity>>
+type AcquisitionAttempts = Map<ScopedIdentity, Set<ScopedIdentity>>
+
+function scopedIdentity(...parts: ReadonlyArray<string>): ScopedIdentity {
+  return parts.map((part) => `${part.length}:${part}`).join(`|`)
+}
+
+function sourceDemandIdentity(
+  sourceId: FullFlowSourceId,
+  demandId: FullFlowDemandId,
+): ScopedIdentity {
+  return scopedIdentity(sourceId, demandId)
+}
+
+function sourceAttemptIdentity(
+  sourceId: FullFlowSourceId,
+  attemptId: FullFlowAttemptId,
+): ScopedIdentity {
+  return scopedIdentity(sourceId, attemptId)
+}
+
+function sourceDemandAttemptIdentity(
+  sourceId: FullFlowSourceId,
+  demandId: FullFlowDemandId,
+  attemptId: FullFlowAttemptId,
+): ScopedIdentity {
+  return scopedIdentity(sourceId, demandId, attemptId)
+}
+
+function sourceRowIdentity(
+  sourceId: FullFlowSourceId,
+  rowKey: string,
+): ScopedIdentity {
+  return scopedIdentity(sourceId, rowKey)
+}
+
+function belongsToSource(
+  identity: ScopedIdentity,
+  sourceId: FullFlowSourceId,
+): boolean {
+  return identity.startsWith(`${sourceId.length}:${sourceId}|`)
+}
 
 function addActiveDemandAttempt(
   activeAttempts: ActiveDemandAttempts,
-  demandId: FullFlowDemandId,
-  attemptId: FullFlowAttemptId,
+  demandId: ScopedIdentity,
+  attemptId: ScopedIdentity,
 ): void {
   let attempts = activeAttempts.get(demandId)
   if (!attempts) {
@@ -389,8 +447,8 @@ function addActiveDemandAttempt(
 
 function releaseActiveDemandAttempt(
   activeAttempts: ActiveDemandAttempts,
-  demandId: FullFlowDemandId,
-  attemptId: FullFlowAttemptId,
+  demandId: ScopedIdentity,
+  attemptId: ScopedIdentity,
 ): boolean {
   const attempts = activeAttempts.get(demandId)
   if (!attempts?.delete(attemptId)) return false
@@ -401,8 +459,8 @@ function releaseActiveDemandAttempt(
 
 function addAcquisitionAttempt(
   acquisitionAttempts: AcquisitionAttempts,
-  acquisitionId: FullFlowAttemptId,
-  attemptId: FullFlowAttemptId,
+  acquisitionId: ScopedIdentity,
+  attemptId: ScopedIdentity,
 ): void {
   let attempts = acquisitionAttempts.get(acquisitionId)
   if (!attempts) {
@@ -414,8 +472,8 @@ function addAcquisitionAttempt(
 
 function releaseAcquisitionAttempt(
   acquisitionAttempts: AcquisitionAttempts,
-  acquisitionId: FullFlowAttemptId,
-  attemptId: FullFlowAttemptId,
+  acquisitionId: ScopedIdentity,
+  attemptId: ScopedIdentity,
 ): boolean {
   const attempts = acquisitionAttempts.get(acquisitionId)
   if (!attempts?.delete(attemptId) || attempts.size > 0) return false
@@ -434,16 +492,17 @@ type DemandAttemptRecord = {
 function assertWellFormedDemandAttempts(
   history: ReadonlyArray<LoadSubsetFullFlowEvent>,
 ): void {
-  const attempts = new Map<FullFlowAttemptId, DemandAttemptRecord>()
+  const attempts = new Map<ScopedIdentity, DemandAttemptRecord>()
 
   for (const event of history) {
     if (event.type === `requestDemand`) {
-      if (attempts.has(event.attemptId)) {
+      const attemptKey = sourceAttemptIdentity(event.sourceId, event.attemptId)
+      if (attempts.has(attemptKey)) {
         throw new Error(
           `Demand attempt "${event.attemptId}" was requested more than once`,
         )
       }
-      attempts.set(event.attemptId, {
+      attempts.set(attemptKey, {
         ownerId: event.ownerId,
         demandId: event.demandId,
         settled: false,
@@ -460,7 +519,9 @@ function assertWellFormedDemandAttempts(
       event.type === `releaseDemand`
     if (!usesDemandAttempt) continue
 
-    const attempt = attempts.get(event.attemptId)
+    const attempt = attempts.get(
+      sourceAttemptIdentity(event.sourceId, event.attemptId),
+    )
     if (!attempt) {
       throw new Error(
         `Demand attempt "${event.attemptId}" was used before it was requested`,
@@ -506,25 +567,31 @@ export function projectAdapterLifecycle(
   history: ReadonlyArray<LoadSubsetFullFlowEvent>,
 ): Array<ExpectedAdapterLifecycleEvent> {
   assertWellFormedDemandAttempts(history)
-  const invokedAttempts = new Set<FullFlowAttemptId>()
+  const invokedAttempts = new Set<ScopedIdentity>()
   const projected: Array<ExpectedAdapterLifecycleEvent> = []
 
   for (const event of history) {
     if (event.type === `requestDemand` && !event.alreadyAborted) {
-      invokedAttempts.add(event.attemptId)
+      invokedAttempts.add(
+        sourceAttemptIdentity(event.sourceId, event.attemptId),
+      )
       projected.push({
         type: `invoke`,
         ownerId: event.ownerId,
+        sourceId: event.sourceId,
         attemptId: event.attemptId,
       })
     }
     if (
       event.type === `releaseDemand` &&
-      invokedAttempts.delete(event.attemptId)
+      invokedAttempts.delete(
+        sourceAttemptIdentity(event.sourceId, event.attemptId),
+      )
     ) {
       projected.push({
         type: `release`,
         ownerId: event.ownerId,
+        sourceId: event.sourceId,
         attemptId: event.attemptId,
       })
     }
@@ -545,9 +612,9 @@ export function projectTransportLoads(
   history: ReadonlyArray<LoadSubsetFullFlowEvent>,
 ): number {
   assertWellFormedDemandAttempts(history)
-  const reusableAcquisitions = new Map<FullFlowDemandId, FullFlowAttemptId>()
-  const inFlightAcquisitions = new Map<FullFlowDemandId, FullFlowAttemptId>()
-  const attemptAcquisitions = new Map<FullFlowAttemptId, FullFlowAttemptId>()
+  const reusableAcquisitions = new Map<ScopedIdentity, ScopedIdentity>()
+  const inFlightAcquisitions = new Map<ScopedIdentity, ScopedIdentity>()
+  const attemptAcquisitions = new Map<ScopedIdentity, ScopedIdentity>()
   const acquisitionAttempts: AcquisitionAttempts = new Map()
   let loads = 0
 
@@ -555,65 +622,89 @@ export function projectTransportLoads(
     switch (event.type) {
       case `requestDemand`: {
         if (event.alreadyAborted) break
-        let acquisitionId =
-          inFlightAcquisitions.get(event.demandId) ??
-          reusableAcquisitions.get(event.demandId)
-        if (acquisitionId === undefined) {
-          loads++
-          acquisitionId = event.attemptId
-          inFlightAcquisitions.set(event.demandId, acquisitionId)
-        }
-        attemptAcquisitions.set(event.attemptId, acquisitionId)
-        addAcquisitionAttempt(
-          acquisitionAttempts,
-          acquisitionId,
+        const demandKey = sourceDemandIdentity(event.sourceId, event.demandId)
+        const attemptKey = sourceAttemptIdentity(
+          event.sourceId,
           event.attemptId,
         )
+        let acquisitionId =
+          inFlightAcquisitions.get(demandKey) ??
+          reusableAcquisitions.get(demandKey)
+        if (acquisitionId === undefined) {
+          loads++
+          acquisitionId = attemptKey
+          inFlightAcquisitions.set(demandKey, acquisitionId)
+        }
+        attemptAcquisitions.set(attemptKey, acquisitionId)
+        addAcquisitionAttempt(acquisitionAttempts, acquisitionId, attemptKey)
         break
       }
       case `applyAuthoritativeRows`: {
-        const acquisitionId = attemptAcquisitions.get(event.attemptId)
+        const demandKey = sourceDemandIdentity(event.sourceId, event.demandId)
+        const attemptKey = sourceAttemptIdentity(
+          event.sourceId,
+          event.attemptId,
+        )
+        const acquisitionId = attemptAcquisitions.get(attemptKey)
         if (
           acquisitionId === undefined ||
-          inFlightAcquisitions.get(event.demandId) !== acquisitionId
+          inFlightAcquisitions.get(demandKey) !== acquisitionId
         ) {
           break
         }
-        inFlightAcquisitions.delete(event.demandId)
-        reusableAcquisitions.set(event.demandId, acquisitionId)
+        inFlightAcquisitions.delete(demandKey)
+        reusableAcquisitions.set(demandKey, acquisitionId)
         break
       }
       case `truncateSource`:
-        reusableAcquisitions.clear()
-        inFlightAcquisitions.clear()
+        for (const demandKey of reusableAcquisitions.keys()) {
+          if (belongsToSource(demandKey, event.sourceId)) {
+            reusableAcquisitions.delete(demandKey)
+          }
+        }
+        for (const demandKey of inFlightAcquisitions.keys()) {
+          if (belongsToSource(demandKey, event.sourceId)) {
+            inFlightAcquisitions.delete(demandKey)
+          }
+        }
         break
       case `applyUnprovenRows`:
       case `rejectDemand`:
       case `settleDemandWithoutEvidence`: {
-        const acquisitionId = attemptAcquisitions.get(event.attemptId)
+        const demandKey = sourceDemandIdentity(event.sourceId, event.demandId)
+        const attemptKey = sourceAttemptIdentity(
+          event.sourceId,
+          event.attemptId,
+        )
+        const acquisitionId = attemptAcquisitions.get(attemptKey)
         if (
           acquisitionId !== undefined &&
-          inFlightAcquisitions.get(event.demandId) === acquisitionId
+          inFlightAcquisitions.get(demandKey) === acquisitionId
         ) {
-          inFlightAcquisitions.delete(event.demandId)
+          inFlightAcquisitions.delete(demandKey)
         }
         break
       }
       case `releaseDemand`: {
-        const acquisitionId = attemptAcquisitions.get(event.attemptId)
+        const demandKey = sourceDemandIdentity(event.sourceId, event.demandId)
+        const attemptKey = sourceAttemptIdentity(
+          event.sourceId,
+          event.attemptId,
+        )
+        const acquisitionId = attemptAcquisitions.get(attemptKey)
         if (
           acquisitionId !== undefined &&
           releaseAcquisitionAttempt(
             acquisitionAttempts,
             acquisitionId,
-            event.attemptId,
+            attemptKey,
           )
         ) {
-          if (reusableAcquisitions.get(event.demandId) === acquisitionId) {
-            reusableAcquisitions.delete(event.demandId)
+          if (reusableAcquisitions.get(demandKey) === acquisitionId) {
+            reusableAcquisitions.delete(demandKey)
           }
-          if (inFlightAcquisitions.get(event.demandId) === acquisitionId) {
-            inFlightAcquisitions.delete(event.demandId)
+          if (inFlightAcquisitions.get(demandKey) === acquisitionId) {
+            inFlightAcquisitions.delete(demandKey)
           }
         }
         break
@@ -635,6 +726,7 @@ export function projectTransportLoads(
       case `settleReplay`:
       case `registerSourceDemand`:
       case `settleSourceDemand`:
+      case `retireSourceDemand`:
       case `startAcquisition`:
       case `attachAcquisitionOwner`:
       case `settleAcquisition`:
@@ -723,6 +815,7 @@ export function projectAuthorizedContinuationStarts(
       case `settleReplay`:
       case `registerSourceDemand`:
       case `settleSourceDemand`:
+      case `retireSourceDemand`:
       case `startAcquisition`:
       case `attachAcquisitionOwner`:
       case `settleAcquisition`:
@@ -739,85 +832,126 @@ export function projectAuthorizedContinuationStarts(
   return starts
 }
 
-/** Projects reusable demand evidence without using registry state. */
-export function projectReusableDemands(
+export type ExpectedReusableDemand = {
+  sourceId: FullFlowSourceId
+  demandId: FullFlowDemandId
+}
+
+/** Projects source-qualified reusable demand evidence without registry state. */
+export function projectReusableSourceDemands(
   history: ReadonlyArray<LoadSubsetFullFlowEvent>,
-): Array<FullFlowDemandId> {
+): Array<ExpectedReusableDemand> {
   assertWellFormedDemandAttempts(history)
   const activeAttempts: ActiveDemandAttempts = new Map()
-  const currentAcquisitions = new Map<FullFlowDemandId, FullFlowAttemptId>()
-  const reusableAcquisitions = new Map<FullFlowDemandId, FullFlowAttemptId>()
-  const attemptAcquisitions = new Map<FullFlowAttemptId, FullFlowAttemptId>()
+  const currentAcquisitions = new Map<ScopedIdentity, ScopedIdentity>()
+  const reusableAcquisitions = new Map<
+    ScopedIdentity,
+    { acquisitionId: ScopedIdentity; demand: ExpectedReusableDemand }
+  >()
+  const attemptAcquisitions = new Map<ScopedIdentity, ScopedIdentity>()
   const acquisitionAttempts: AcquisitionAttempts = new Map()
 
   for (const event of history) {
     switch (event.type) {
       case `requestDemand`:
         if (!event.alreadyAborted) {
-          addActiveDemandAttempt(
-            activeAttempts,
-            event.demandId,
+          const demandKey = sourceDemandIdentity(event.sourceId, event.demandId)
+          const attemptKey = sourceAttemptIdentity(
+            event.sourceId,
             event.attemptId,
           )
+          addActiveDemandAttempt(activeAttempts, demandKey, attemptKey)
           const acquisitionId =
-            currentAcquisitions.get(event.demandId) ??
-            reusableAcquisitions.get(event.demandId) ??
-            event.attemptId
-          currentAcquisitions.set(event.demandId, acquisitionId)
-          attemptAcquisitions.set(event.attemptId, acquisitionId)
-          addAcquisitionAttempt(
-            acquisitionAttempts,
-            acquisitionId,
-            event.attemptId,
-          )
+            currentAcquisitions.get(demandKey) ??
+            reusableAcquisitions.get(demandKey)?.acquisitionId ??
+            attemptKey
+          currentAcquisitions.set(demandKey, acquisitionId)
+          attemptAcquisitions.set(attemptKey, acquisitionId)
+          addAcquisitionAttempt(acquisitionAttempts, acquisitionId, attemptKey)
         }
         break
       case `applyAuthoritativeRows`: {
-        const acquisitionId = attemptAcquisitions.get(event.attemptId)
+        const demandKey = sourceDemandIdentity(event.sourceId, event.demandId)
+        const attemptKey = sourceAttemptIdentity(
+          event.sourceId,
+          event.attemptId,
+        )
+        const acquisitionId = attemptAcquisitions.get(attemptKey)
         if (
           acquisitionId !== undefined &&
-          currentAcquisitions.get(event.demandId) === acquisitionId
+          currentAcquisitions.get(demandKey) === acquisitionId
         ) {
-          reusableAcquisitions.set(event.demandId, acquisitionId)
-          currentAcquisitions.delete(event.demandId)
+          reusableAcquisitions.set(demandKey, {
+            acquisitionId,
+            demand: { sourceId: event.sourceId, demandId: event.demandId },
+          })
+          currentAcquisitions.delete(demandKey)
         }
         break
       }
       case `truncateSource`:
-        currentAcquisitions.clear()
-        reusableAcquisitions.clear()
+        for (const demandKey of currentAcquisitions.keys()) {
+          if (belongsToSource(demandKey, event.sourceId)) {
+            currentAcquisitions.delete(demandKey)
+          }
+        }
+        for (const demandKey of reusableAcquisitions.keys()) {
+          if (belongsToSource(demandKey, event.sourceId)) {
+            reusableAcquisitions.delete(demandKey)
+          }
+        }
         break
       case `releaseDemand`: {
-        releaseActiveDemandAttempt(
-          activeAttempts,
-          event.demandId,
+        const demandKey = sourceDemandIdentity(event.sourceId, event.demandId)
+        const attemptKey = sourceAttemptIdentity(
+          event.sourceId,
           event.attemptId,
         )
-        const acquisitionId = attemptAcquisitions.get(event.attemptId)
+        releaseActiveDemandAttempt(activeAttempts, demandKey, attemptKey)
+        const acquisitionId = attemptAcquisitions.get(attemptKey)
         if (
           acquisitionId !== undefined &&
           releaseAcquisitionAttempt(
             acquisitionAttempts,
             acquisitionId,
-            event.attemptId,
+            attemptKey,
           )
         ) {
-          if (currentAcquisitions.get(event.demandId) === acquisitionId) {
-            currentAcquisitions.delete(event.demandId)
+          if (currentAcquisitions.get(demandKey) === acquisitionId) {
+            currentAcquisitions.delete(demandKey)
           }
-          if (reusableAcquisitions.get(event.demandId) === acquisitionId) {
-            reusableAcquisitions.delete(event.demandId)
+          if (
+            reusableAcquisitions.get(demandKey)?.acquisitionId === acquisitionId
+          ) {
+            reusableAcquisitions.delete(demandKey)
           }
         }
         break
       }
       case `applyUnprovenRows`:
       case `rejectDemand`:
+      case `settleDemandWithoutEvidence`:
       case `restartSession`:
       case `cleanupSession`:
       case `advanceWindowRevision`:
       case `scheduleContinuation`:
       case `runContinuation`:
+      case `stageSyncTransaction`:
+      case `commitSyncTransaction`:
+      case `enterSyncApplication`:
+      case `abortSyncTransaction`:
+      case `publishSyncTransaction`:
+      case `settleSyncReceipt`:
+      case `establishPublication`:
+      case `startReplay`:
+      case `writeReplayRows`:
+      case `settleReplay`:
+      case `registerSourceDemand`:
+      case `settleSourceDemand`:
+      case `retireSourceDemand`:
+      case `startAcquisition`:
+      case `attachAcquisitionOwner`:
+      case `settleAcquisition`:
       case `stagePublicationRows`:
       case `commitPublication`:
       case `beginReplacement`:
@@ -828,7 +962,20 @@ export function projectReusableDemands(
     }
   }
 
-  return [...reusableAcquisitions.keys()].sort()
+  return [...reusableAcquisitions.values()]
+    .map(({ demand }) => demand)
+    .sort((left, right) =>
+      left.sourceId === right.sourceId
+        ? left.demandId.localeCompare(right.demandId)
+        : left.sourceId.localeCompare(right.sourceId),
+    )
+}
+
+/** Single-source convenience projection retained for existing controls. */
+export function projectReusableDemands(
+  history: ReadonlyArray<LoadSubsetFullFlowEvent>,
+): Array<FullFlowDemandId> {
+  return projectReusableSourceDemands(history).map(({ demandId }) => demandId)
 }
 
 /**
@@ -1131,150 +1278,203 @@ export function projectAtomicOrderedPublicationState(
   }
 }
 
-/** Derives visible row identity without consulting Collection implementation. */
-export function projectRetainedRowKeys(
+/** Derives source-qualified row identity without consulting Collection state. */
+export function projectRetainedSourceRows(
   history: ReadonlyArray<LoadSubsetFullFlowEvent>,
-): Array<string> {
+): Array<ExpectedPublicRow> {
   assertWellFormedDemandAttempts(history)
   const activeAttempts: ActiveDemandAttempts = new Map()
-  const activeAttemptIds = new Set<FullFlowAttemptId>()
-  const currentAcquisitions = new Map<FullFlowDemandId, FullFlowAttemptId>()
+  const activeAttemptIds = new Set<ScopedIdentity>()
+  const currentAcquisitions = new Map<ScopedIdentity, ScopedIdentity>()
   const reusableRows = new Map<
-    FullFlowDemandId,
-    { acquisitionId: FullFlowAttemptId; rows: Set<string> }
+    ScopedIdentity,
+    { acquisitionId: ScopedIdentity; rows: Set<string> }
   >()
-  const attemptAcquisitions = new Map<FullFlowAttemptId, FullFlowAttemptId>()
+  const attemptAcquisitions = new Map<ScopedIdentity, ScopedIdentity>()
   const acquisitionAttempts: AcquisitionAttempts = new Map()
-  const rowClaims = new Map<string, Set<FullFlowAttemptId>>()
-  const attemptRows = new Map<FullFlowAttemptId, Set<string>>()
+  const rowClaims = new Map<
+    ScopedIdentity,
+    { row: ExpectedPublicRow; attempts: Set<ScopedIdentity> }
+  >()
+  const attemptRows = new Map<ScopedIdentity, Set<ScopedIdentity>>()
 
   const claimRows = (
-    attemptId: FullFlowAttemptId,
+    attemptKey: ScopedIdentity,
+    sourceId: FullFlowSourceId,
     rowKeys: Iterable<string>,
   ) => {
-    let claimed = attemptRows.get(attemptId)
+    let claimed = attemptRows.get(attemptKey)
     if (!claimed) {
       claimed = new Set()
-      attemptRows.set(attemptId, claimed)
+      attemptRows.set(attemptKey, claimed)
     }
     for (const rowKey of rowKeys) {
-      claimed.add(rowKey)
-      let claims = rowClaims.get(rowKey)
-      if (!claims) {
-        claims = new Set()
-        rowClaims.set(rowKey, claims)
+      const rowIdentity = sourceRowIdentity(sourceId, rowKey)
+      claimed.add(rowIdentity)
+      let claim = rowClaims.get(rowIdentity)
+      if (!claim) {
+        claim = { row: { sourceId, rowKey }, attempts: new Set() }
+        rowClaims.set(rowIdentity, claim)
       }
-      claims.add(attemptId)
+      claim.attempts.add(attemptKey)
     }
   }
 
-  const releaseRows = (attemptId: FullFlowAttemptId) => {
-    for (const rowKey of attemptRows.get(attemptId) ?? []) {
-      const claims = rowClaims.get(rowKey)
-      claims?.delete(attemptId)
-      if (claims?.size === 0) rowClaims.delete(rowKey)
+  const releaseRows = (attemptKey: ScopedIdentity) => {
+    for (const rowIdentity of attemptRows.get(attemptKey) ?? []) {
+      const claim = rowClaims.get(rowIdentity)
+      claim?.attempts.delete(attemptKey)
+      if (claim?.attempts.size === 0) rowClaims.delete(rowIdentity)
     }
-    attemptRows.delete(attemptId)
+    attemptRows.delete(attemptKey)
   }
 
   for (const event of history) {
-    if (event.type === `requestDemand` && !event.alreadyAborted) {
-      addActiveDemandAttempt(activeAttempts, event.demandId, event.attemptId)
-      activeAttemptIds.add(event.attemptId)
-      const retained = reusableRows.get(event.demandId)
-      const acquisitionId =
-        currentAcquisitions.get(event.demandId) ??
-        retained?.acquisitionId ??
-        event.attemptId
-      currentAcquisitions.set(event.demandId, acquisitionId)
-      attemptAcquisitions.set(event.attemptId, acquisitionId)
-      addAcquisitionAttempt(acquisitionAttempts, acquisitionId, event.attemptId)
-      if (retained) claimRows(event.attemptId, retained.rows)
-    }
-    if (event.type === `applyAuthoritativeRows`) {
-      const acquisitionId = attemptAcquisitions.get(event.attemptId)
-      const participants =
-        acquisitionId === undefined
-          ? []
-          : (acquisitionAttempts.get(acquisitionId) ?? [])
-      if (
-        acquisitionId !== undefined &&
-        currentAcquisitions.get(event.demandId) === acquisitionId
-      ) {
-        const rows = new Set(event.rowKeys)
-        reusableRows.set(event.demandId, { acquisitionId, rows })
-        currentAcquisitions.delete(event.demandId)
-      }
-      for (const attemptId of participants) {
-        if (activeAttemptIds.has(attemptId)) {
-          claimRows(attemptId, event.rowKeys)
-        }
-      }
-    }
-    if (event.type === `applyUnprovenRows`) {
-      const acquisitionId = attemptAcquisitions.get(event.attemptId)
-      if (
-        acquisitionId !== undefined &&
-        currentAcquisitions.get(event.demandId) === acquisitionId
-      ) {
-        currentAcquisitions.delete(event.demandId)
-      }
-      const participants =
-        acquisitionId === undefined
-          ? []
-          : (acquisitionAttempts.get(acquisitionId) ?? [])
-      for (const attemptId of participants) {
-        if (activeAttemptIds.has(attemptId)) {
-          claimRows(attemptId, event.rowKeys)
-        }
-      }
-    }
-    if (
-      event.type === `rejectDemand` ||
-      event.type === `settleDemandWithoutEvidence`
-    ) {
-      const acquisitionId = attemptAcquisitions.get(event.attemptId)
-      if (
-        acquisitionId !== undefined &&
-        currentAcquisitions.get(event.demandId) === acquisitionId
-      ) {
-        currentAcquisitions.delete(event.demandId)
-      }
-    }
-    if (event.type === `truncateSource`) {
-      currentAcquisitions.clear()
-      reusableRows.clear()
-      rowClaims.clear()
-      attemptRows.clear()
-    }
-    if (event.type === `releaseDemand`) {
-      activeAttemptIds.delete(event.attemptId)
-      const acquisitionId = attemptAcquisitions.get(event.attemptId)
-      releaseActiveDemandAttempt(
-        activeAttempts,
-        event.demandId,
-        event.attemptId,
-      )
-      releaseRows(event.attemptId)
-      if (
-        acquisitionId !== undefined &&
-        releaseAcquisitionAttempt(
-          acquisitionAttempts,
-          acquisitionId,
+    switch (event.type) {
+      case `requestDemand`: {
+        if (event.alreadyAborted) break
+        const demandKey = sourceDemandIdentity(event.sourceId, event.demandId)
+        const attemptKey = sourceAttemptIdentity(
+          event.sourceId,
           event.attemptId,
         )
-      ) {
-        if (currentAcquisitions.get(event.demandId) === acquisitionId) {
-          currentAcquisitions.delete(event.demandId)
-        }
-        if (reusableRows.get(event.demandId)?.acquisitionId === acquisitionId) {
-          reusableRows.delete(event.demandId)
-        }
+        addActiveDemandAttempt(activeAttempts, demandKey, attemptKey)
+        activeAttemptIds.add(attemptKey)
+        const retained = reusableRows.get(demandKey)
+        const acquisitionId =
+          currentAcquisitions.get(demandKey) ??
+          retained?.acquisitionId ??
+          attemptKey
+        currentAcquisitions.set(demandKey, acquisitionId)
+        attemptAcquisitions.set(attemptKey, acquisitionId)
+        addAcquisitionAttempt(acquisitionAttempts, acquisitionId, attemptKey)
+        if (retained) claimRows(attemptKey, event.sourceId, retained.rows)
+        break
       }
+      case `applyAuthoritativeRows`: {
+        const demandKey = sourceDemandIdentity(event.sourceId, event.demandId)
+        const attemptKey = sourceAttemptIdentity(
+          event.sourceId,
+          event.attemptId,
+        )
+        const acquisitionId = attemptAcquisitions.get(attemptKey)
+        const participants =
+          acquisitionId === undefined
+            ? []
+            : (acquisitionAttempts.get(acquisitionId) ?? [])
+        if (
+          acquisitionId !== undefined &&
+          currentAcquisitions.get(demandKey) === acquisitionId
+        ) {
+          const rows = new Set(event.rowKeys)
+          reusableRows.set(demandKey, { acquisitionId, rows })
+          currentAcquisitions.delete(demandKey)
+        }
+        for (const participant of participants) {
+          if (activeAttemptIds.has(participant)) {
+            claimRows(participant, event.sourceId, event.rowKeys)
+          }
+        }
+        break
+      }
+      case `applyUnprovenRows`: {
+        const demandKey = sourceDemandIdentity(event.sourceId, event.demandId)
+        const attemptKey = sourceAttemptIdentity(
+          event.sourceId,
+          event.attemptId,
+        )
+        const acquisitionId = attemptAcquisitions.get(attemptKey)
+        if (
+          acquisitionId !== undefined &&
+          currentAcquisitions.get(demandKey) === acquisitionId
+        ) {
+          currentAcquisitions.delete(demandKey)
+        }
+        const participants =
+          acquisitionId === undefined
+            ? []
+            : (acquisitionAttempts.get(acquisitionId) ?? [])
+        for (const participant of participants) {
+          if (activeAttemptIds.has(participant)) {
+            claimRows(participant, event.sourceId, event.rowKeys)
+          }
+        }
+        break
+      }
+      case `rejectDemand`:
+      case `settleDemandWithoutEvidence`: {
+        const demandKey = sourceDemandIdentity(event.sourceId, event.demandId)
+        const attemptKey = sourceAttemptIdentity(
+          event.sourceId,
+          event.attemptId,
+        )
+        const acquisitionId = attemptAcquisitions.get(attemptKey)
+        if (
+          acquisitionId !== undefined &&
+          currentAcquisitions.get(demandKey) === acquisitionId
+        ) {
+          currentAcquisitions.delete(demandKey)
+        }
+        break
+      }
+      case `truncateSource`:
+        for (const scope of currentAcquisitions.keys()) {
+          if (belongsToSource(scope, event.sourceId)) {
+            currentAcquisitions.delete(scope)
+          }
+        }
+        for (const scope of reusableRows.keys()) {
+          if (belongsToSource(scope, event.sourceId)) {
+            reusableRows.delete(scope)
+          }
+        }
+        for (const rowIdentity of rowClaims.keys()) {
+          if (belongsToSource(rowIdentity, event.sourceId)) {
+            rowClaims.delete(rowIdentity)
+            for (const rows of attemptRows.values()) rows.delete(rowIdentity)
+          }
+        }
+        break
+      case `releaseDemand`: {
+        const demandKey = sourceDemandIdentity(event.sourceId, event.demandId)
+        const attemptKey = sourceAttemptIdentity(
+          event.sourceId,
+          event.attemptId,
+        )
+        activeAttemptIds.delete(attemptKey)
+        const acquisitionId = attemptAcquisitions.get(attemptKey)
+        releaseActiveDemandAttempt(activeAttempts, demandKey, attemptKey)
+        releaseRows(attemptKey)
+        if (
+          acquisitionId !== undefined &&
+          releaseAcquisitionAttempt(
+            acquisitionAttempts,
+            acquisitionId,
+            attemptKey,
+          )
+        ) {
+          if (currentAcquisitions.get(demandKey) === acquisitionId) {
+            currentAcquisitions.delete(demandKey)
+          }
+          if (reusableRows.get(demandKey)?.acquisitionId === acquisitionId) {
+            reusableRows.delete(demandKey)
+          }
+        }
+        break
+      }
+      default:
+        break
     }
   }
 
-  return [...rowClaims.keys()].sort()
+  return sortPublicRows([...rowClaims.values()].map(({ row }) => row))
+}
+
+/** Single-source convenience projection retained for existing controls. */
+export function projectRetainedRowKeys(
+  history: ReadonlyArray<LoadSubsetFullFlowEvent>,
+): Array<string> {
+  return projectRetainedSourceRows(history).map(({ rowKey }) => rowKey)
 }
 
 export type ExpectedSyncReceiptState = `pending` | `resolved` | `rejected`
@@ -1413,6 +1613,7 @@ export function projectSyncTransactions(
       case `settleReplay`:
       case `registerSourceDemand`:
       case `settleSourceDemand`:
+      case `retireSourceDemand`:
       case `startAcquisition`:
       case `attachAcquisitionOwner`:
       case `settleAcquisition`:
@@ -1619,6 +1820,7 @@ export function projectReplayPublication(
       case `settleSyncReceipt`:
       case `registerSourceDemand`:
       case `settleSourceDemand`:
+      case `retireSourceDemand`:
       case `startAcquisition`:
       case `attachAcquisitionOwner`:
       case `settleAcquisition`:
@@ -1648,6 +1850,8 @@ export function projectSourceReadiness(
     string,
     {
       sourceId: FullFlowSourceId
+      demandId: FullFlowDemandId
+      attemptId: FullFlowAttemptId
       state: `pending` | `resolved` | `rejected`
     }
   >()
@@ -1660,18 +1864,43 @@ export function projectSourceReadiness(
         currentSession ??= event.sessionId
         if (event.sessionId !== currentSession) break
         cleanedUp = false
-        demands.set(`${event.sourceId}\u0000${event.demandId}`, {
-          sourceId: event.sourceId,
-          state: `pending`,
-        })
+        demands.set(
+          sourceDemandAttemptIdentity(
+            event.sourceId,
+            event.demandId,
+            event.attemptId,
+          ),
+          {
+            sourceId: event.sourceId,
+            demandId: event.demandId,
+            attemptId: event.attemptId,
+            state: `pending`,
+          },
+        )
         break
       case `settleSourceDemand`: {
         if (event.sessionId !== currentSession) break
-        const demand = demands.get(`${event.sourceId}\u0000${event.demandId}`)
+        const demand = demands.get(
+          sourceDemandAttemptIdentity(
+            event.sourceId,
+            event.demandId,
+            event.attemptId,
+          ),
+        )
         if (demand)
           demand.state = event.outcome === `resolve` ? `resolved` : `rejected`
         break
       }
+      case `retireSourceDemand`:
+        if (event.sessionId !== currentSession) break
+        demands.delete(
+          sourceDemandAttemptIdentity(
+            event.sourceId,
+            event.demandId,
+            event.attemptId,
+          ),
+        )
+        break
       case `cleanupSession`:
         if (event.sessionId === currentSession) {
           cleanedUp = true

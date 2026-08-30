@@ -23,12 +23,14 @@ it.each([`resolve`, `reject`, `cleanup`] as const)(
         sessionId,
         sourceId: leftId,
         demandId: `all`,
+        attemptId: `left-attempt`,
       },
       {
         type: `registerSourceDemand`,
         sessionId,
         sourceId: rightId,
         demandId: `all`,
+        attemptId: `right-attempt`,
       },
     ]
     const createSource = (
@@ -96,6 +98,7 @@ it.each([`resolve`, `reject`, `cleanup`] as const)(
         sessionId,
         sourceId: leftId,
         demandId: `all`,
+        attemptId: `left-attempt`,
         outcome: `resolve`,
       })
       await flushPromises()
@@ -114,6 +117,7 @@ it.each([`resolve`, `reject`, `cleanup`] as const)(
           sessionId,
           sourceId: rightId,
           demandId: `all`,
+          attemptId: `right-attempt`,
           outcome: `resolve`,
         })
         await flushPromises()
@@ -131,6 +135,7 @@ it.each([`resolve`, `reject`, `cleanup`] as const)(
         sessionId,
         sourceId: rightId,
         demandId: `all`,
+        attemptId: `right-attempt`,
         outcome: secondOutcome,
       })
       await flushPromises()

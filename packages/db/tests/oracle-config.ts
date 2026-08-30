@@ -74,7 +74,7 @@ const publicationProperties = [
 )
 
 const refinementProperties = Array.from(
-  { length: 9 },
+  { length: 11 },
   (_, index) => `load-subset-refinement.${1_779_001 + index}`,
 )
 

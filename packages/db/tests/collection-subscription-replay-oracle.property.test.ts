@@ -8951,6 +8951,7 @@ describe(`CollectionSubscription replay oracle`, () => {
         { type: `commitPublication`, publicationId: `initial` },
         {
           type: `requestDemand`,
+          sourceId: `source`,
           ownerId: `other-owner`,
           sessionId: `session`,
           demandId: `other`,
