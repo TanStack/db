@@ -6,6 +6,7 @@ import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { ReverseIndex } from '../../src/indexes/reverse-index.js'
 import { localOnlyCollectionOptions } from '../../src/local-only.js'
 import { eq } from '../../src/query/builder/functions.js'
+import { compileSingleRowExpression } from '../../src/query/compiler/evaluators.js'
 import { PropRef } from '../../src/query/ir.js'
 import { TotalOrder } from '../../src/query/total-order.js'
 import { WindowState } from '../../src/query/live/window-state.js'
@@ -70,10 +71,29 @@ function orderBy(
   ]
 }
 
-async function observeDescendingPrefix(
+const orderedIndexCompatibilityCases = ([`asc`, `desc`] as const).flatMap(
+  (indexDirection) =>
+    ([`first`, `last`] as const).flatMap((indexNulls) =>
+      ([`asc`, `desc`] as const).flatMap((queryDirection) =>
+        ([`first`, `last`] as const).map((queryNulls) => ({
+          indexDirection,
+          indexNulls,
+          queryDirection,
+          queryNulls,
+          compatible:
+            indexDirection === queryDirection
+              ? indexNulls === queryNulls
+              : indexNulls !== queryNulls,
+        })),
+      ),
+    ),
+)
+
+async function observeOrderedPrefix(
   rows: ReadonlyArray<RankedRow>,
   limit: number,
   indexKind: `basic` | `btree` = `btree`,
+  direction: OrderByDirection = `desc`,
 ): Promise<OrderedWork> {
   const collection = createCollection(
     localOnlyCollectionOptions<RankedRow>({
@@ -98,7 +118,11 @@ async function observeDescendingPrefix(
 
     let expectedKeyComparisons = 0
     let expectedMatches = 0
-    for (const [, bucket] of index.orderedBucketsReversed()) {
+    const expectedBuckets =
+      direction === `asc`
+        ? index.orderedBuckets()
+        : index.orderedBucketsReversed()
+    for (const [, bucket] of expectedBuckets) {
       const orderedKeys = [...bucket]
       orderedKeys.sort((left, right) => {
         expectedKeyComparisons++
@@ -122,7 +146,7 @@ async function observeDescendingPrefix(
       keyComparisonCounter.count = 0
       const changes = collection.currentStateAsChanges({
         where: eq(new PropRef([`included`]), true),
-        orderBy: orderBy(`desc`),
+        orderBy: orderBy(direction, direction === `asc` ? `last` : `first`),
         limit,
       })!
 
@@ -141,22 +165,27 @@ async function observeDescendingPrefix(
   }
 }
 
-function createReversePrefixRows(options: {
-  leadingRejects: number
-  limit: number
-  extraBoundaryMatches: number
-  boundaryRejects: number
-  trailingRows: number
-}): {
+function createOrderedPrefixRows(
+  options: {
+    leadingRejects: number
+    limit: number
+    extraBoundaryMatches: number
+    boundaryRejects: number
+    trailingRows: number
+  },
+  direction: OrderByDirection = `desc`,
+): {
   rows: Array<RankedRow>
   expectedKeys: Array<string>
   expectedSourceReads: number
 } {
+  const rank = (descendingRank: number) =>
+    direction === `desc` ? descendingRank : -descendingRank
   const leading = Array.from(
     { length: options.leadingRejects },
     (_, index): RankedRow => ({
       id: `leading-${index.toString().padStart(2, `0`)}`,
-      rank: 100 + index,
+      rank: rank(100 + index),
       included: false,
     }),
   )
@@ -164,7 +193,7 @@ function createReversePrefixRows(options: {
     { length: options.limit + options.extraBoundaryMatches },
     (_, index): RankedRow => ({
       id: `boundary-match-${index.toString().padStart(2, `0`)}`,
-      rank: 50,
+      rank: rank(50),
       included: true,
     }),
   ).reverse()
@@ -172,7 +201,7 @@ function createReversePrefixRows(options: {
     { length: options.boundaryRejects },
     (_, index): RankedRow => ({
       id: `boundary-reject-${index.toString().padStart(2, `0`)}`,
-      rank: 50,
+      rank: rank(50),
       included: false,
     }),
   )
@@ -180,7 +209,7 @@ function createReversePrefixRows(options: {
     { length: options.trailingRows },
     (_, index): RankedRow => ({
       id: `trailing-${index.toString().padStart(3, `0`)}`,
-      rank: 10 - index,
+      rank: rank(10 - index),
       included: true,
     }),
   )
@@ -202,67 +231,93 @@ function createReversePrefixRows(options: {
 }
 
 describe(`ordered source work oracle`, () => {
-  it(`does not read worse reverse-index buckets after filling top-K`, async () => {
-    const scenario = createReversePrefixRows({
-      leadingRejects: 2,
-      limit: 2,
-      extraBoundaryMatches: 1,
-      boundaryRejects: 2,
-      trailingRows: 40,
-    })
+  it.each([
+    { indexKind: `basic`, direction: `asc` },
+    { indexKind: `basic`, direction: `desc` },
+    { indexKind: `btree`, direction: `asc` },
+    { indexKind: `btree`, direction: `desc` },
+  ] as const)(
+    `does not read worse $indexKind index buckets in $direction order`,
+    async ({ indexKind, direction }) => {
+      const scenario = createOrderedPrefixRows(
+        {
+          leadingRejects: 2,
+          limit: 2,
+          extraBoundaryMatches: 1,
+          boundaryRejects: 2,
+          trailingRows: 40,
+        },
+        direction,
+      )
 
-    const observed = await observeDescendingPrefix(scenario.rows, 2)
-
-    expect(observed.keys).toEqual(scenario.expectedKeys)
-    expect(observed.sourceReads).toHaveLength(scenario.expectedSourceReads)
-    expect(observed.sourceReads).not.toContain(`trailing-000`)
-    expect(observed.keyComparisons).toBe(observed.expectedKeyComparisons)
-    expect(observed.totalOrderComparisons).toBe(0)
-  })
-
-  for (const campaign of orderedWorkCampaigns(
-    `ordered-work.reverse-prefix`,
-    1_780_101,
-  )) {
-    fcTest.prop(
-      [
-        fc.integer({ min: 0, max: 8 }),
-        fc.integer({ min: 1, max: 5 }),
-        fc.integer({ min: 0, max: 5 }),
-        fc.integer({ min: 0, max: 8 }),
-        fc.integer({ min: 0, max: 60 }),
-        fc.constantFrom<`basic` | `btree`>(`basic`, `btree`),
-      ],
-      campaign.options,
-    )(
-      `bounds reverse-index reads at the sufficient bucket (${campaign.label})`,
-      async (
-        leadingRejects,
-        limit,
-        extraBoundaryMatches,
-        boundaryRejects,
-        trailingRows,
+      const observed = await observeOrderedPrefix(
+        scenario.rows,
+        2,
         indexKind,
-      ) => {
-        const scenario = createReversePrefixRows({
+        direction,
+      )
+
+      expect(observed.keys).toEqual(scenario.expectedKeys)
+      expect(observed.sourceReads).toHaveLength(scenario.expectedSourceReads)
+      expect(observed.sourceReads).not.toContain(`trailing-000`)
+      expect(observed.keyComparisons).toBe(observed.expectedKeyComparisons)
+      expect(observed.totalOrderComparisons).toBe(0)
+    },
+  )
+
+  for (const direction of [`asc`, `desc`] as const) {
+    const property =
+      direction === `asc`
+        ? `ordered-work.forward-prefix`
+        : `ordered-work.reverse-prefix`
+    const seed = direction === `asc` ? 1_780_103 : 1_780_101
+    for (const campaign of orderedWorkCampaigns(property, seed)) {
+      fcTest.prop(
+        [
+          fc.integer({ min: 0, max: 8 }),
+          fc.integer({ min: 1, max: 5 }),
+          fc.integer({ min: 0, max: 5 }),
+          fc.integer({ min: 0, max: 8 }),
+          fc.integer({ min: 0, max: 60 }),
+          fc.constantFrom<`basic` | `btree`>(`basic`, `btree`),
+        ],
+        campaign.options,
+      )(
+        `bounds ${direction} index reads at the sufficient bucket (${campaign.label})`,
+        async (
           leadingRejects,
           limit,
           extraBoundaryMatches,
           boundaryRejects,
           trailingRows,
-        })
-        const observed = await observeDescendingPrefix(
-          scenario.rows,
-          limit,
           indexKind,
-        )
+        ) => {
+          const scenario = createOrderedPrefixRows(
+            {
+              leadingRejects,
+              limit,
+              extraBoundaryMatches,
+              boundaryRejects,
+              trailingRows,
+            },
+            direction,
+          )
+          const observed = await observeOrderedPrefix(
+            scenario.rows,
+            limit,
+            indexKind,
+            direction,
+          )
 
-        expect(observed.keys).toEqual(scenario.expectedKeys)
-        expect(observed.sourceReads).toHaveLength(scenario.expectedSourceReads)
-        expect(observed.keyComparisons).toBe(observed.expectedKeyComparisons)
-        expect(observed.totalOrderComparisons).toBe(0)
-      },
-    )
+          expect(observed.keys).toEqual(scenario.expectedKeys)
+          expect(observed.sourceReads).toHaveLength(
+            scenario.expectedSourceReads,
+          )
+          expect(observed.keyComparisons).toBe(observed.expectedKeyComparisons)
+          expect(observed.totalOrderComparisons).toBe(0)
+        },
+      )
+    }
   }
 
   it(`reads the complete tied boundary when every candidate is tied`, async () => {
@@ -275,7 +330,7 @@ describe(`ordered source work oracle`, () => {
       }),
     ).reverse()
 
-    const observed = await observeDescendingPrefix(rows, 3)
+    const observed = await observeOrderedPrefix(rows, 3)
     expect(observed.keys).toEqual([`tied-00`, `tied-02`, `tied-04`])
     expect(observed.sourceReads).toHaveLength(rows.length + 3)
     expect(observed.keyComparisons).toBe(observed.expectedKeyComparisons)
@@ -352,79 +407,151 @@ describe(`ordered source work oracle`, () => {
     }
   })
 
-  it(`keeps custom indexes on the materialized reverse-order fallback`, async () => {
-    const rows: Array<RankedRow> = [
-      { id: `later`, rank: 1, included: true },
-      { id: `tie-b`, rank: 2, included: true },
-      { id: `tie-a`, rank: 2, included: true },
-    ]
-    const collection = createCollection(
-      localOnlyCollectionOptions<RankedRow>({
-        id: `ordered-work-custom-index-fallback`,
-        getKey: (row) => row.id,
-        initialData: rows,
-      }),
-    )
-
-    try {
-      await collection.preload()
-      const index = collection.createIndex((row) => row.rank, {
-        indexType: BTreeIndex,
-        options: {
-          compareOptions: {
-            direction: `asc`,
-            nulls: `last`,
-            stringSort: `locale`,
-          },
-        },
-      }) as BTreeIndex<string>
-      const customIndex = new Proxy(index, {
-        get(target, property) {
-          if (
-            property === `orderedBuckets` ||
-            property === `orderedBucketsReversed`
-          ) {
-            return undefined
-          }
-          if (property === `orderedEntriesArray`) {
-            return [
-              [1, new Set([`later`])],
-              [2, new Set([`tie-a`])],
-              [2, new Set([`tie-b`])],
-            ]
-          }
-          if (property === `orderedEntriesArrayReversed`) {
-            return [
-              [2, new Set([`tie-b`])],
-              [2, new Set([`tie-a`])],
-              [1, new Set([`later`])],
-            ]
-          }
-          const value = Reflect.get(target, property, target) as unknown
-          return typeof value === `function` ? value.bind(target) : value
-        },
-      })
-      collection.indexes.set(index.id, customIndex)
-      expect(new ReverseIndex(customIndex).supportsOrderedBucketIteration).toBe(
-        false,
+  it.each(orderedIndexCompatibilityCases)(
+    `matches index $indexDirection/nulls-$indexNulls to query $queryDirection/nulls-$queryNulls: $compatible`,
+    async ({
+      indexDirection,
+      indexNulls,
+      queryDirection,
+      queryNulls,
+      compatible,
+    }) => {
+      type NullableRankedRow = Omit<RankedRow, `rank`> & {
+        rank: number | null | undefined
+      }
+      const collection = createCollection(
+        localOnlyCollectionOptions<NullableRankedRow>({
+          id: `ordered-work-index-compatibility-${indexDirection}-${indexNulls}-${queryDirection}-${queryNulls}`,
+          getKey: (row) => row.id,
+          initialData: [
+            { id: `undefined`, rank: undefined, included: true },
+            { id: `null`, rank: null, included: true },
+            { id: `one`, rank: 1, included: true },
+          ],
+        }),
       )
 
-      const compareEntries = vi.spyOn(TotalOrder.prototype, `compareEntries`)
       try {
-        const changes = collection.currentStateAsChanges({
-          orderBy: orderBy(`desc`, `first`),
-          limit: 1,
-        })!
+        await collection.preload()
+        collection.createIndex((row) => row.rank, {
+          indexType: BTreeIndex,
+          options: {
+            compareOptions: {
+              direction: indexDirection,
+              nulls: indexNulls,
+              stringSort: `locale`,
+            },
+          },
+        })
 
-        expect(changes.map(({ key }) => key)).toEqual([`tie-a`])
-        expect(compareEntries).toHaveBeenCalled()
+        const changes = collection.currentStateAsChanges({
+          orderBy: orderBy(queryDirection, queryNulls),
+          optimizedOnly: true,
+        })
+
+        expect(changes?.map(({ key }) => key)).toEqual(
+          compatible
+            ? queryNulls === `first`
+              ? [`null`, `undefined`, `one`]
+              : [`one`, `null`, `undefined`]
+            : undefined,
+        )
       } finally {
-        compareEntries.mockRestore()
+        await collection.cleanup()
       }
-    } finally {
-      await collection.cleanup()
-    }
-  })
+    },
+  )
+
+  it.each([`asc`, `desc`] as const)(
+    `keeps custom indexes on the materialized %s-order fallback`,
+    async (direction) => {
+      const tieRank = direction === `asc` ? 1 : 2
+      const laterRank = direction === `asc` ? 2 : 1
+      const rows: Array<RankedRow> = [
+        { id: `later`, rank: laterRank, included: true },
+        { id: `tie-b`, rank: tieRank, included: true },
+        { id: `tie-a`, rank: tieRank, included: true },
+      ]
+      const collection = createCollection(
+        localOnlyCollectionOptions<RankedRow>({
+          id: `ordered-work-custom-index-fallback-${direction}`,
+          getKey: (row) => row.id,
+          initialData: rows,
+        }),
+      )
+
+      try {
+        await collection.preload()
+        const index = collection.createIndex((row) => row.rank, {
+          indexType: BTreeIndex,
+          options: {
+            compareOptions: {
+              direction: `asc`,
+              nulls: `last`,
+              stringSort: `locale`,
+            },
+          },
+        }) as BTreeIndex<string>
+        const customIndex = new Proxy(index, {
+          get(target, property) {
+            if (
+              property === `orderedBuckets` ||
+              property === `orderedBucketsReversed`
+            ) {
+              return undefined
+            }
+            if (property === `orderedEntriesArray`) {
+              return [
+                ...(direction === `desc`
+                  ? [[laterRank, new Set([`later`])]]
+                  : []),
+                [tieRank, new Set([`tie-b`])],
+                [tieRank, new Set([`tie-a`])],
+                ...(direction === `asc`
+                  ? [[laterRank, new Set([`later`])]]
+                  : []),
+              ]
+            }
+            if (property === `orderedEntriesArrayReversed`) {
+              return [
+                ...(direction === `asc`
+                  ? [[laterRank, new Set([`later`])]]
+                  : []),
+                [tieRank, new Set([`tie-b`])],
+                [tieRank, new Set([`tie-a`])],
+                ...(direction === `desc`
+                  ? [[laterRank, new Set([`later`])]]
+                  : []),
+              ]
+            }
+            const value = Reflect.get(target, property, target) as unknown
+            return typeof value === `function` ? value.bind(target) : value
+          },
+        })
+        collection.indexes.set(index.id, customIndex)
+        if (direction === `desc`) {
+          expect(
+            new ReverseIndex(customIndex).supportsOrderedBucketIteration,
+          ).toBe(false)
+        }
+
+        const compareEntries = vi.spyOn(TotalOrder.prototype, `compareEntries`)
+        try {
+          const changes = collection.currentStateAsChanges({
+            orderBy: orderBy(direction, direction === `asc` ? `last` : `first`),
+            limit: 1,
+          })!
+
+          expect(changes.map(({ key }) => key)).toEqual([`tie-a`])
+          expect(compareEntries).toHaveBeenCalled()
+        } finally {
+          compareEntries.mockRestore()
+        }
+      } finally {
+        await collection.cleanup()
+      }
+    },
+  )
 
   it(`groups comparator-equivalent values in every built-in index direction`, () => {
     type TextRow = { id: string; value: string }
@@ -721,6 +848,16 @@ it(`compiles the ordered predicate once for the lifetime of a window`, () => {
     { id: `a`, rank: 1, included: true },
     { id: `hidden`, rank: 0, included: false },
   ])
+  let referenceCompilationReads = 0
+  const referenceWhere = new Proxy(eq(new PropRef([`included`]), true), {
+    get(target, property, receiver) {
+      if (property === `type`) referenceCompilationReads++
+      return Reflect.get(target, property, receiver)
+    },
+  })
+  compileSingleRowExpression(referenceWhere)
+  expect(referenceCompilationReads).toBeGreaterThan(0)
+
   let compilationReads = 0
   const where = new Proxy(eq(new PropRef([`included`]), true), {
     get(target, property, receiver) {
@@ -730,7 +867,7 @@ it(`compiles the ordered predicate once for the lifetime of a window`, () => {
   })
   const window = new WindowState(fixture.collection, orderBy(`asc`), where, 1)
   const readsAfterConstruction = compilationReads
-  expect(readsAfterConstruction).toBeGreaterThan(0)
+  expect(readsAfterConstruction).toBe(referenceCompilationReads)
   window.recordInitialCoverage(undefined, true)
 
   observeWindow(window)
