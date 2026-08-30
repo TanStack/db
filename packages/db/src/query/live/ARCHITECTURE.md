@@ -1221,16 +1221,17 @@ the bug.
 
 The grammar composes these independent axes:
 
-| Axis            | Values owned by this oracle family                                                                            |
-| --------------- | ------------------------------------------------------------------------------------------------------------- |
-| Source shape    | One or many opaque sources; zero, one, or many already-evaluated result contributions                         |
-| Demand relation | Exact, shared, covered, uncovered, ordered, additional, released                                              |
-| Identity        | Owner, session, demand, attempt, acquisition, source, transaction, publication                                |
-| Boundary phase  | Before adapter entry, inside adapter or callback entry, returned/in flight, settled, cleanup                  |
-| Evidence        | Applied row keys plus `unknown`, `continues`, or `exhausted` extent; rejection or abort establishes none      |
-| Publication     | Last complete snapshot, private replacement, failed or superseded generation, cleaned session                 |
-| Origin          | Ordinary source work or the exact ordered/additional acquisition signal lineage that authorized a row version |
-| Observation     | Result rows, readiness, error, ordered boundary, receipt, ownership, and physical-work counts                 |
+| Axis            | Values owned by this oracle family                                                                                                                                  |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Source shape    | One or many opaque sources; zero, one, or many already-evaluated result contributions                                                                               |
+| Demand relation | Exact, shared, covered, uncovered, ordered, additional, release-pending, durably released or disposed                                                               |
+| Identity        | Owner, session, window revision, continuation task, demand, attempt, acquisition, source, transaction, row version, publication, boundary frame, failure occurrence |
+| Boundary phase  | Before adapter entry, inside adapter or callback entry, returned/in flight, settled, cleanup                                                                        |
+| Capability      | Indexed or unindexed order; expressible or opaque boundary and collation; authoritative or unknown extent                                                           |
+| Evidence        | Applied row keys plus `unknown`, `continues`, or `exhausted` extent; rejection or abort establishes none                                                            |
+| Publication     | Last complete snapshot, private replacement, failed or superseded generation, cleaned session                                                                       |
+| Origin          | Ordinary source work or the exact ordered/additional acquisition signal lineage that authorized a row version                                                       |
+| Observation     | Result rows, readiness, ordered boundary, exact error occurrences, receipts, ownership, physical starts, and retained-space counts                                  |
 
 An executable history chooses values on these axes, then combines them through
 the demand facts above. A logical request installs its owner before adapter
@@ -1242,11 +1243,25 @@ window progress; only a complete publication snapshot reaches readers.
 Release, truncate, replacement, restart, and cleanup change the relevant
 identity or generation without changing this sequence.
 
+Logical release and durable physical release are separate transitions. A
+throwing cleanup leaves a release-pending acquisition, its coverage, and row
+support as retryable debt. Only accepted cleanup retires those physical facts.
+Resource observations therefore count leases, acquisitions, coverage claims,
+unsettled claims, retained demands, outcomes, and row-key slots separately from
+transport starts.
+
 Adapter entry and every result, cleanup, and listener callback are reentrancy
 boundaries. Any otherwise legal event may occur before that boundary returns.
 Work which has entered an adapter but has not yet returned a promise is already
 pending work. A production-boundary driver must include this synchronous phase;
 promise-only overlap does not reconstruct the source.
+
+Failures also carry boundary identity. One occurrence names its originating
+options, creation order, and containing callback or acquisition frames. A
+private propagation token may carry that occurrence through an authorized
+nested frame, but payload equality never merges two boundaries. `undefined`,
+`NaN`, primitives, and the same `Error` object can each be the payload of a
+distinct occurrence.
 
 Each projection may erase axes it does not own. It must preserve the identity
 and cardinality of the fact it claims to check. In particular:
@@ -1256,6 +1271,10 @@ and cardinality of the fact it claims to check. In particular:
 - ownership laws keep logical leases separate from physical row support;
 - publication laws keep demand origin, row version, and generation separate;
 - work laws count physical starts separately from logical owners;
+- space laws count each retained resource category separately;
+- release laws distinguish requested, retryable, accepted, and disposed work;
+- error laws preserve occurrence, originating options, and report order rather
+  than deduplicating by payload;
 - renaming laws erase names only after every allowed next-command observation
   remains equal.
 
@@ -1267,10 +1286,12 @@ The reconstruction control for a new finding is:
 
 1. express its source topology as already-evaluated contributions;
 2. name every logical and physical identity involved;
-3. place each action at its exact boundary phase and source origin;
-4. derive evidence, ownership, coverage, and publication independently;
-5. compare the first public or resource observation that can differ; and
-6. verify the same grammar admits the nearest marginal case but rejects a raw
+3. state the adapter capability which makes each transport transition legal;
+4. place each action at its exact boundary phase and source origin;
+5. derive evidence, ownership, coverage, publication, failure occurrences, and
+   retained resources independently;
+6. compare the first public or resource observation that can differ; and
+7. verify the same grammar admits the nearest marginal case but rejects a raw
    relational or materialization problem.
 
 Zero-sized windows, empty sources, unknown extent, and synchronous adapter
