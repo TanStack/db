@@ -2063,8 +2063,8 @@ it.each(
 
       settleLast()
       await Promise.all([
-        Promise.resolve(firstReplacement).catch(() => undefined),
-        Promise.resolve(currentReplacement).catch(() => undefined),
+        Promise.resolve(firstReplacement),
+        Promise.resolve(currentReplacement),
       ])
       await flushPromises()
 
