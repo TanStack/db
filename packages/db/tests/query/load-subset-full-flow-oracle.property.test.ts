@@ -1259,11 +1259,13 @@ it.each([
   `preserves refinement failure and retry state for $name`,
   async ({ autoIndex, failureMode, reentrantCleanup }) => {
     type Row = { id: string; rank: number }
+    const failure = new Error(`fallback failed`)
     let attempts = 0
     let begin!: () => void
     let write!: (message: { type: `insert`; value: Row }) => void
     let commit!: () => true | Promise<void>
     let cleanupLive: () => Promise<void> = () => Promise.resolve()
+    let staleFailure: ReturnType<typeof createDeferred<void>> | undefined
     const source = createCollection<Row>({
       id: `zero-refinement-${autoIndex}-${failureMode}-${reentrantCleanup}`,
       getKey: (row) => row.id,
@@ -1281,10 +1283,13 @@ it.each([
             loadSubset: () => {
               attempts++
               if (attempts === 1) {
-                const error = new Error(`fallback failed`)
                 if (reentrantCleanup) void cleanupLive()
-                if (failureMode === `sync throw`) throw error
-                return Promise.reject(error)
+                if (failureMode === `sync throw`) throw failure
+                if (reentrantCleanup) {
+                  staleFailure = createDeferred<void>()
+                  return staleFailure.promise
+                }
+                return Promise.reject(failure)
               }
               begin()
               write({ type: `insert`, value: { id: `a`, rank: 1 } })
@@ -1316,19 +1321,50 @@ it.each([
 
       if (failureMode === `sync throw`) {
         expect(() => live.utils.setWindow({ offset: 0, limit: 1 })).toThrow(
-          `fallback failed`,
+          failure,
         )
       } else if (reentrantCleanup) {
         expect(live.utils.setWindow({ offset: 0, limit: 1 })).toBe(true)
       } else {
         await expect(
           live.utils.setWindow({ offset: 0, limit: 1 }),
-        ).rejects.toThrow(`fallback failed`)
+        ).rejects.toBe(failure)
       }
       await flushPromises()
 
       if (reentrantCleanup) {
         expect(attempts).toBe(1)
+        expect(live.status).toBe(`cleaned-up`)
+        expect(live.isLoadingSubset).toBe(false)
+        expect(live.utils.lastSubsetError).toBeUndefined()
+        expect(live.toArray).toEqual([])
+        expect(live.utils.getWindow()).toEqual({
+          offset: 0,
+          limit: failureMode === `sync throw` ? 0 : 1,
+        })
+
+        await live.preload()
+        if (failureMode === `sync throw`) {
+          expect(attempts).toBe(1)
+          await live.utils.setWindow({ offset: 0, limit: 1 })
+        }
+        await flushPromises()
+
+        expect(attempts).toBe(2)
+        expect(live.status).toBe(`ready`)
+        expect(live.isLoadingSubset).toBe(false)
+        expect(live.utils.lastSubsetError).toBeUndefined()
+        expect(live.toArray.map(({ id }) => id)).toEqual([`a`])
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
+
+        staleFailure?.reject(failure)
+        await flushPromises()
+
+        expect(attempts).toBe(2)
+        expect(live.status).toBe(`ready`)
+        expect(live.isLoadingSubset).toBe(false)
+        expect(live.utils.lastSubsetError).toBeUndefined()
+        expect(live.toArray.map(({ id }) => id)).toEqual([`a`])
         return
       }
 
@@ -1338,6 +1374,7 @@ it.each([
       expect(attempts).toBe(2)
       expect(live.toArray.map(({ id }) => id)).toEqual([`a`])
     } finally {
+      staleFailure?.reject(failure)
       await Promise.all([live.cleanup(), source.cleanup()])
     }
   },
