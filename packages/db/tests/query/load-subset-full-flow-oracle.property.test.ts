@@ -2,6 +2,7 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
+import { SyncTransactionAbortedError } from '../../src/errors.js'
 import { BTreeIndex, ReverseIndex } from '../../src/index.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
 import { createEffect } from '../../src/query/effect.js'
@@ -1501,7 +1502,7 @@ function createUnindexedReplayHarness(id: string) {
   const callbackReads: Array<ReadonlyArray<UnindexedReplayRow>> = []
   let begin!: () => void
   let write!: (message: { type: `insert`; value: UnindexedReplayRow }) => void
-  let commit!: () => true | Promise<void>
+  let commit!: (signal?: AbortSignal) => true | Promise<void>
   let truncate!: () => void
   const source = createCollection<UnindexedReplayRow>({
     id: `${id}-source`,
@@ -1588,6 +1589,14 @@ function createUnindexedReplayHarness(id: string) {
     const receipt = commit()
     if (receipt !== true) await receipt
   }
+  const applyRowsForRequest = (
+    requestIndex: number,
+    rows: ReadonlyArray<UnindexedReplayRow>,
+  ): Promise<true | void> => {
+    begin()
+    for (const row of rows) write({ type: `insert`, value: row })
+    return Promise.resolve(commit(pending[requestIndex]!.options.signal))
+  }
   const startTruncate = () => {
     begin()
     truncate()
@@ -1616,6 +1625,7 @@ function createUnindexedReplayHarness(id: string) {
     stopObserving,
     clearObservations,
     applyRows,
+    applyRowsForRequest,
     startTruncate,
     cleanup,
   }
@@ -1840,10 +1850,13 @@ it.each([`resolve`, `reject`] as const)(
       expect(harness.readRows()).toEqual([])
 
       const staleError = new Error(`stale replay failed`)
+      await expect(
+        harness.applyRowsForRequest(1, [{ id: `stale`, rank: -1 }]),
+      ).rejects.toBeInstanceOf(SyncTransactionAbortedError)
       if (lateSettlement === `resolve`) {
         harness.pending[1]!.request!.resolve({
           hasMore: false,
-          appliedRowKeys: [],
+          appliedRowKeys: [`stale`],
         })
       } else {
         harness.pending[1]!.request!.reject(staleError)
@@ -1901,7 +1914,28 @@ it.each([`resolve`, `reject`] as const)(
       expect(harness.pending[2]!.options.subscription).not.toBe(
         firstSessionSubscription,
       )
-      expect(harness.loadResults.every((result) => result !== true)).toBe(true)
+      const loadResults = await Promise.allSettled(
+        harness.loadResults.map((result) => Promise.resolve(result)),
+      )
+      expect(loadResults[0]).toStrictEqual({
+        status: `fulfilled`,
+        value: { hasMore: false, appliedRowKeys: [`a`] },
+      })
+      if (lateSettlement === `resolve`) {
+        expect(loadResults[1]).toStrictEqual({
+          status: `fulfilled`,
+          value: { hasMore: false, appliedRowKeys: [`stale`] },
+        })
+      } else {
+        expect(loadResults[1]!.status).toBe(`rejected`)
+        if (loadResults[1]!.status === `rejected`) {
+          expect(loadResults[1]!.reason).toBe(staleError)
+        }
+      }
+      expect(loadResults[2]).toStrictEqual({
+        status: `fulfilled`,
+        value: { hasMore: false, appliedRowKeys: [`c`] },
+      })
 
       await harness.cleanup()
       cleaned = true
