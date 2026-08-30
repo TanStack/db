@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
 import { deepEquals } from '../src/utils'
 import { isPromiseLike } from '../src/utils/type-guards'
-import { oracleRandomParameters, readOracleRunConfig } from './oracle-config'
+import {
+  oracleRandomParameters,
+  readOracleRunConfig,
+  validateOraclePropertyRegistry,
+} from './oracle-config'
 
 describe(`oracle run configuration`, () => {
   it(`reads the multiplier and replay coordinates from an explicit environment`, () => {
@@ -11,13 +15,13 @@ describe(`oracle run configuration`, () => {
         TANSTACK_DB_ORACLE_RUNS_MULTIPLIER: `100`,
         TANSTACK_DB_ORACLE_SEED: `-42`,
         TANSTACK_DB_ORACLE_PATH: `1:0:2`,
-        TANSTACK_DB_ORACLE_PROPERTY: `coverage.claim-churn`,
+        TANSTACK_DB_ORACLE_PROPERTY: `coverage-registry.claim-churn`,
       }),
     ).toEqual({
       multiplier: 100,
       replaySeed: -42,
       replayPath: `1:0:2`,
-      replayProperty: `coverage.claim-churn`,
+      replayProperty: `coverage-registry.claim-churn`,
     })
   })
 
@@ -39,9 +43,15 @@ describe(`oracle run configuration`, () => {
     [{ TANSTACK_DB_ORACLE_PATH: `1:0` }, `requires TANSTACK_DB_ORACLE_SEED`],
     [
       {
+        TANSTACK_DB_ORACLE_PROPERTY: `coverage-registry.claim-churn`,
+      },
+      `requires TANSTACK_DB_ORACLE_PATH`,
+    ],
+    [
+      {
         TANSTACK_DB_ORACLE_SEED: `42`,
         TANSTACK_DB_ORACLE_PATH: ` `,
-        TANSTACK_DB_ORACLE_PROPERTY: `coverage.claim-churn`,
+        TANSTACK_DB_ORACLE_PROPERTY: `coverage-registry.claim-churn`,
       },
       `must be non-empty`,
     ],
@@ -49,7 +59,7 @@ describe(`oracle run configuration`, () => {
       {
         TANSTACK_DB_ORACLE_SEED: `42`,
         TANSTACK_DB_ORACLE_PATH: `1:-1`,
-        TANSTACK_DB_ORACLE_PROPERTY: `coverage.claim-churn`,
+        TANSTACK_DB_ORACLE_PROPERTY: `coverage-registry.claim-churn`,
       },
       `colon-separated nonnegative integers`,
     ],
@@ -60,12 +70,33 @@ describe(`oracle run configuration`, () => {
       },
       `requires TANSTACK_DB_ORACLE_PROPERTY`,
     ],
+    [
+      {
+        TANSTACK_DB_ORACLE_SEED: `42`,
+        TANSTACK_DB_ORACLE_PATH: `1:0`,
+        TANSTACK_DB_ORACLE_PROPERTY: `coverage-registry.typo`,
+      },
+      `unknown oracle property`,
+    ],
+    [
+      {
+        TANSTACK_DB_ORACLE_SEED: `42`,
+        TANSTACK_DB_ORACLE_PROPERTY: `coverage-registry.claim-churn`,
+      },
+      `requires TANSTACK_DB_ORACLE_PATH`,
+    ],
   ] satisfies ReadonlyArray<readonly [Record<string, string>, string]>)(
     `rejects invalid environment values`,
     (environment, message) => {
       expect(() => readOracleRunConfig(environment)).toThrow(message)
     },
   )
+
+  it(`rejects duplicate registered property names`, () => {
+    expect(() =>
+      validateOraclePropertyRegistry([`one.property`, `one.property`]),
+    ).toThrow(`duplicate oracle property`)
+  })
 
   it(`adds a shrink path only to its named property`, () => {
     const ordinaryRun = {
@@ -76,20 +107,20 @@ describe(`oracle run configuration`, () => {
     const replayRun = {
       replaySeed: -42,
       replayPath: `1:0:2`,
-      replayProperty: `coverage.claim-churn`,
+      replayProperty: `coverage-registry.claim-churn`,
     }
 
     expect(
-      oracleRandomParameters(40, ordinaryRun, `coverage.claim-churn`),
+      oracleRandomParameters(40, ordinaryRun, `coverage-registry.claim-churn`),
     ).toEqual({ numRuns: 40 })
-    expect(oracleRandomParameters(40, replayRun, `coverage.other-law`)).toEqual(
-      {
-        numRuns: 40,
-        seed: -42,
-      },
-    )
     expect(
-      oracleRandomParameters(40, replayRun, `coverage.claim-churn`),
+      oracleRandomParameters(40, replayRun, `coverage-registry.state-machine`),
+    ).toEqual({
+      numRuns: 40,
+      seed: -42,
+    })
+    expect(
+      oracleRandomParameters(40, replayRun, `coverage-registry.claim-churn`),
     ).toEqual({
       numRuns: 40,
       seed: -42,
