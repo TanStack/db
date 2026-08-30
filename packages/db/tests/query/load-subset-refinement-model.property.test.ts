@@ -1258,6 +1258,18 @@ function demandErasureHistories(): Array<Array<LoadSubsetFullFlowEvent>> {
     [request(`owner-a`, `attempt-a`, true), release(`owner-a`, `attempt-a`)],
     [
       request(`owner-a`, `attempt-a`),
+      {
+        type: `releaseDemand`,
+        ownerId: `owner-a`,
+        demandId: `demand-a`,
+        attemptId: `attempt-a`,
+        rowKeys: [`row-a`],
+        finalRowOwner: false,
+        invalidatesAdapterEvidence: false,
+      },
+    ],
+    [
+      request(`owner-a`, `attempt-a`),
       { type: `truncateSource`, sessionId: `session-a` },
       request(`owner-b`, `attempt-b`),
       {
