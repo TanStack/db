@@ -1221,19 +1221,19 @@ the bug.
 
 The grammar composes these independent axes:
 
-| Axis            | Values owned by this oracle family                                                                                                                                                                                                                      |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Source shape    | One or many opaque sources; zero, one, or many already-evaluated result contributions                                                                                                                                                                   |
-| Row key domain  | String or number identity; unordered membership for ownership plus shared `compareKeys` order for removal publication                                                                                                                                   |
-| Demand relation | Exact, shared, covered, uncovered, ordered, additional, release-pending, durably released or disposed                                                                                                                                                   |
-| Operation       | Current or superseded imperative caller; open, waiting, settled, canceled, or cleaned; zero, one, or many attached physical requests                                                                                                                    |
-| Identity        | Owner, operation, session, window revision, continuation task, demand, attempt, acquisition, source, transaction, row version, publication, boundary frame, failure occurrence                                                                          |
-| Boundary phase  | Before adapter entry, inside adapter or callback entry, returned/in flight, settled, terminal listener delivery, cleanup                                                                                                                                |
-| Capability      | Indexed or unindexed order; expressible or opaque boundary and collation; authoritative or unknown extent                                                                                                                                               |
-| Evidence        | Applied row keys plus `unknown`, `continues`, or `exhausted` extent; rejection or abort establishes none                                                                                                                                                |
-| Publication     | Last complete snapshot, private replacement, failed or superseded generation, cleaned session                                                                                                                                                           |
-| Origin          | Ordinary source work or the exact ordered/additional acquisition signal lineage that authorized a row version                                                                                                                                           |
-| Observation     | Final rows, ordered change/adapter/release/lifecycle traces, callback-time reads, readiness, boundary, canonical removals, exact errors, operation outcomes, receipts, ownership, physical starts, evidence work, ordered-path work, and retained space |
+| Axis            | Values owned by this oracle family                                                                                                                                                                                                                                                                  |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Source shape    | One or many opaque sources; zero, one, or many already-evaluated result contributions                                                                                                                                                                                                               |
+| Row key domain  | String or number identity; unordered membership for ownership plus shared `compareKeys` order for removal publication                                                                                                                                                                               |
+| Demand relation | Exact, shared, covered, uncovered, ordered, additional, release-pending, durably released or disposed                                                                                                                                                                                               |
+| Operation       | Current or superseded imperative caller; open, waiting, settled, canceled, or cleaned; zero, one, or many attached physical requests                                                                                                                                                                |
+| Identity        | Owner, operation, session, window revision, continuation task, demand, attempt, acquisition, source, transaction, row version, publication, boundary frame, failure occurrence, runtime reference slot                                                                                              |
+| Boundary phase  | Before adapter entry, inside adapter or callback entry, returned/in flight, settled, terminal listener delivery, cleanup                                                                                                                                                                            |
+| Capability      | Indexed or unindexed order; expressible or opaque boundary and collation; authoritative or unknown extent                                                                                                                                                                                           |
+| Evidence        | Applied row keys plus `unknown`, `continues`, or `exhausted` extent; rejection or abort establishes none                                                                                                                                                                                            |
+| Publication     | Last complete snapshot, private replacement, failed or superseded generation, cleaned session                                                                                                                                                                                                       |
+| Origin          | Ordinary source work or the exact ordered/additional acquisition signal lineage that authorized a row version                                                                                                                                                                                       |
+| Observation     | Final rows, ordered change/adapter/release/lifecycle traces, callback-time reads, readiness, boundary, canonical removals, exact errors, operation outcomes, receipts, ownership, physical starts, evidence work, ordered-path work, transient retained space, and lifetime symbol-identity entries |
 
 An executable history chooses values on these axes, then combines them through
 the demand facts above. A logical request installs its owner before adapter
@@ -1265,6 +1265,14 @@ source work is separate again: preserve the exact scan and cursor sequence, and
 count source reads or snapshots, sorts or total-order refinements, and predicate
 compilations independently. A stable result and request trace can still hide
 repeated local work.
+
+Runtime reference identity has a different lifetime again. Objects use weak
+identity, but JavaScript symbols cannot be weak keys. Stable equality for the
+same live symbol therefore retains one strong entry per distinct symbol for the
+runtime identity factory's lifetime. This monotonic, usage-proportional cost is
+not part of the live-demand resource bound. Eviction is not valid unless the
+platform supplies weak symbol identity or another scheme proves that one live
+symbol can never receive a different identity.
 
 Adapter entry and every result, cleanup, and listener callback are reentrancy
 boundaries. Any otherwise legal event may occur before that boundary returns.
@@ -1302,6 +1310,8 @@ and cardinality of the fact it claims to check. In particular:
   count source snapshots, sorts or total-order refinements, and predicate
   compilations separately from transport and coverage-evidence work;
 - space laws count each retained resource category separately;
+- identity-space laws count process-lifetime symbol entries separately from
+  transient demand resources and preserve stable same-symbol identity;
 - release laws distinguish requested, retryable, accepted, and disposed work;
 - removal laws preserve the shared `compareKeys` sequence across mixed string,
   number, ASCII, and non-ASCII keys rather than comparing only a set;
@@ -1325,7 +1335,8 @@ The reconstruction control for a new finding is:
 4. place each action at its exact boundary phase and source origin;
 5. derive operation settlement, evidence, ownership, coverage, publication,
    ordered observation traces, failure occurrences, canonical removal order,
-   evidence-path work, ordered-path work, and retained resources independently;
+   evidence-path work, ordered-path work, transient retained resources, and
+   lifetime identity entries independently;
 6. compare the first public, algorithmic-work, or retained-resource observation
    that can differ; and
 7. verify the same grammar admits the nearest marginal case but rejects a raw
@@ -1337,7 +1348,9 @@ operations, reentrant terminal cleanup, zero-contribution source steps,
 all-tied boundaries, and mixed string/number or non-ASCII row keys are marginal
 cases of this grammar, not separate families. Predicate evaluation, join
 multiplicity, aggregate deltas, and nested materialization are outside it and
-remain negative controls.
+remain negative controls. Reclaiming live symbol-identity entries is also
+outside the current platform contract; their accepted factory-lifetime cost
+must remain visible.
 
 DBSP operator suites own incremental relational laws. The includes suites own
 compiled routes and materialized nested results. A load-subset production
