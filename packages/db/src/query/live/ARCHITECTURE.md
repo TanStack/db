@@ -794,6 +794,24 @@ type DemandSet = readonly [
 ]
 ```
 
+### Demand facts
+
+The demand plane keeps these facts separate. One fact may justify creating the
+next, but none is an alias for another.
+
+| Fact                 | Meaning                                                                             | What it does not prove                                        |
+| -------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| Demand snapshot      | Immutable semantic work requested by one caller                                     | That any source work started or any row arrived               |
+| Logical lease        | One active owner of that demand                                                     | That it owns a distinct physical request                      |
+| Physical acquisition | One exact adapter attempt, signal, options snapshot, and settlement                 | That its requested region was applied or is reusable          |
+| Applied outcome      | Extent and row keys established by that acquisition after its writes became visible | Coverage for a different demand or generation                 |
+| Coverage fact        | Caller-relative proof that an applied outcome satisfies a demand                    | Row lifetime or consumer publication                          |
+| Row ownership        | Acquisition support for applied row keys                                            | Ordered-prefix membership or public visibility                |
+| Publication snapshot | The last complete reader-visible rows and ordered boundary                          | Current private progress, request extent, or source ownership |
+
+Consumer-local scheduling, loading state, and error state are observations over
+these facts. They are not extra coverage or ownership facts.
+
 One request may cover many buckets, and the adapter may coalesce or reuse
 requests according to the compiled demand plan. A coalesced request has one
 shared abort lease. If one owner releases its lease, the source request remains
@@ -863,6 +881,8 @@ Those buckets no longer participate in readiness and cannot receive rows
 through routes that no longer exist. Sharing source work never merges the route
 rows themselves.
 
+### Adapter obligations
+
 The source contract stays abstract: a demand request eventually establishes
 one coherent baseline and identifies when that baseline is complete. Each
 request receives an `AbortSignal`. Cancellation is cooperative at this source
@@ -872,6 +892,17 @@ baseline or later request-scoped result. Core cannot prevent an arbitrary
 adapter from writing after it ignores that signal. Buffering, snapshot tokens,
 shape offsets, Collection transactions, and local indexes are source-specific
 ways to satisfy that contract; they are not materializer state.
+
+A conforming adapter must:
+
+- treat the received options snapshot and signal as one exact acquisition;
+- honor cancellation immediately before publishing request-scoped rows;
+- await or return every applied receipt which establishes its result;
+- report only row keys established by that acquisition and report source extent
+  only when it knows it authoritatively;
+- make every supplied release callback idempotent and non-throwing, and return
+  the paired `unloadSubset` callback when it keeps dedupe state across
+  lifetimes.
 
 Every sync `commit()` returns an applied receipt: `true` when that
 transaction's writes and events are already visible, or a promise when the
@@ -978,6 +1009,26 @@ preload that waits for a queued sync commit can wait on the mutation that is
 waiting on the preload. Use an adapter's documented mutation acknowledgement
 helper instead; it must confirm the optimistic write without starting new
 collection demand.
+
+### Conservative fallbacks
+
+When evidence is missing, core chooses less reuse or more source work instead
+of guessing:
+
+- an omitted outcome or unknown extent proves no reusable coverage;
+- requested limits and current Collection rows never stand in for applied row
+  evidence;
+- an order that lacks an expressible total boundary, exact collation, or usable
+  range index loads the full filtered source region and lets D2 refine it;
+- an unsupported demand value fails before retention instead of receiving a
+  lossy snapshot or identity;
+- a throwing release keeps its lease, acquisition, coverage, and row ownership
+  as retryable cleanup debt;
+- automatic continuation stops when it makes no semantic progress and resumes
+  only after demand or authoritative evidence changes.
+
+These fallbacks may cost work or delay reclamation. They must not change the
+query result, invent coverage, or expose a private replacement publication.
 
 This project uses a single graph-run order rather than multi-dimensional
 timely-dataflow frontiers. Do not introduce a general timestamp or frontier
@@ -1104,6 +1155,15 @@ create recursive Collection machinery.
 - **Hydration:** establishing an initial snapshot before forwarding later
   changes.
 - **Generation:** a token that rejects obsolete asynchronous work.
+- **Demand snapshot:** an immutable description of work requested by one
+  logical caller.
+- **Logical lease:** one active owner of a demand.
+- **Physical acquisition:** one exact adapter attempt and its settlement.
+- **Applied outcome:** the source extent and row keys established by one
+  acquisition after its writes become visible.
+- **Coverage fact:** caller-relative proof that applied evidence satisfies a
+  demand.
+- **Row ownership:** the acquisition support that keeps applied row keys alive.
 - **Source extent:** an authoritative source fact that more rows continue past
   an exact demand, that the source is exhausted there, or that neither is known.
 - **Collection facade:** a stable public Collection view shared by the parents
@@ -1129,20 +1189,22 @@ create recursive Collection machinery.
 | Applied coverage publication through the Collection sync boundary            | `packages/db/tests/load-subset-outcome.test.ts`                            |
 | Scheduled acquisition, release retry, and stale settlement                   | `packages/db/tests/query/load-subset-lifecycle-oracle.property.test.ts`    |
 | End-to-end demand, multi-source ordered continuation, and outcome boundaries | `packages/db/tests/query/load-subset-full-flow-oracle.property.test.ts`    |
-| Subset acquisition, readiness, receipt, and replay refinement laws           | `packages/db/tests/query/load-subset-refinement-*.property.test.ts`        |
-| Production-boundary refinement drivers                                       | `packages/db/tests/query/load-subset-*-refinement-oracle.property.test.ts` |
+| Shared subset acquisition, readiness, receipt, and replay interpreter        | `packages/db/tests/query/load-subset-refinement-model.property.test.ts`    |
+| Production-boundary refinement drivers                                       | `packages/db/tests/query/load-subset-*-refinement-oracle.test.ts`          |
 | Adapter final-owner release and remount transport                            | Electric `electric-live-query.test.ts`; PowerSync `on-demand-sync.test.ts` |
 | Query-db ownership                                                           | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`    |
 | Reachable nested shape                                                       | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts`  |
 
 ### Oracle family boundary
 
-The shared load-subset refinement model begins after relational evaluation. It
-may vary opaque source topology, demand relationships, already-evaluated result
-contributions, and public window state. It owns asynchronous demand, applied
-evidence, row support, coverage, publication, source progress, and resource
-work. It must not interpret query IR, weighted deltas, predicates, joins,
-grouping, ordering, or nested materialization.
+The shared load-subset refinement model begins after relational evaluation. Its
+closed event grammar varies opaque source topology, demand relationships,
+already-evaluated result contributions, public window state, settlement,
+release, and teardown. It owns asynchronous demand, applied evidence, row
+support, coverage, publication, source progress, and resource work. It must not
+interpret query IR, weighted deltas, predicates, joins, grouping, ordering, or
+nested materialization. A new regression must reduce to this grammar or justify
+a grammar change; it must not add a one-off event named after the bug.
 
 DBSP operator suites own incremental relational laws. The includes suites own
 compiled routes and materialized nested results. A load-subset production
@@ -1151,19 +1213,30 @@ compare lazy demand and source progress with a small refinement projection. It
 must not copy those paths into a second relational engine inside the shared
 model.
 
-Each oracle identifies the first divergent checkpoint and compares either the
-whole result or one exact structural difference. Correlated-materialization
-scenarios use direct assertions. A boundary suite may retain an exact
-expected-failure guard for a planner or ownership defect that this graph does
-not own.
+Each model law has its own projection instead of one monolithic expected-state
+reducer. Each oracle identifies the first divergent checkpoint and compares
+either the whole result or one exact structural difference.
+Correlated-materialization scenarios use direct assertions. A boundary suite
+may retain an exact expected-failure guard for a planner or ownership defect
+that this graph does not own.
 
 Run the DB oracle set with `pnpm test:oracles` from `packages/db`. Broad
 properties use FastCheck's random seed, while structural matrices keep fixed
 seeds so each run covers the same named cells. Increase both corpora with
 `TANSTACK_DB_ORACLE_RUNS_MULTIPLIER=10 pnpm test:oracles`. Preserve FastCheck's
-reported seed and shrink path while reducing a failure. Replay a broad
-campaign with `TANSTACK_DB_ORACLE_SEED=<seed> pnpm test:oracles`, then add the
-smallest case as a deterministic regression trace.
+reported property key, seed, and shrink path while reducing a failure. Replay
+one exact property with:
+
+```sh
+TANSTACK_DB_ORACLE_PROPERTY=<property> \
+TANSTACK_DB_ORACLE_SEED=<seed> \
+TANSTACK_DB_ORACLE_PATH=<path> \
+pnpm test:oracles
+```
+
+The replay registry rejects partial, unknown, stale, and duplicate property
+coordinates. A seed without a property and path still runs the broad campaign.
+After shrinking, add the smallest case as a deterministic regression trace.
 
 The broad relationship history changes correlation keys rather than freezing
 them. Set `TANSTACK_DB_ORACLE_STATISTICS=1` to print its generated depth,
