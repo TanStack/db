@@ -458,10 +458,18 @@ async function runMultiSourceOrderedScenario(
     establishedPrimaryCount: number
     establishedSecondaryCount: number
   }> = []
-  const primaryReceipts: Array<ReadonlyArray<string>> = []
+  const primaryReceipts: Array<{
+    demandKey: string
+    expectedRowKeys: ReadonlyArray<string>
+    appliedRowKeys: ReadonlyArray<string>
+  }> = []
   const primaryOrderedVisitedKeys: Array<string> = []
   const secondaryCalls: Array<LoadSubsetOptions> = []
-  const secondaryReceipts: Array<ReadonlyArray<string>> = []
+  const secondaryReceipts: Array<{
+    demandKey: string
+    expectedRowKeys: ReadonlyArray<string>
+    appliedRowKeys: ReadonlyArray<string>
+  }> = []
   const secondaryLoadCommitSizes: Array<number> = []
   const delayedSecondaryReceiptWaiters: Array<{
     index: number
@@ -472,7 +480,6 @@ async function runMultiSourceOrderedScenario(
   const secondaryPublicationGate = createDeferred<void>()
   const establishedPrimaryKeys = new Set<string>()
   const committedPrimaryKeys = new Set<string>()
-  const primaryKeysEstablishedByLoads = new Set<string>()
   const establishedSecondaryKeys = new Set<string>()
   let primaryOrderedCallCount = 0
   let primaryOrderedCallCountAtSecondaryRelease: number | undefined
@@ -491,7 +498,6 @@ async function runMultiSourceOrderedScenario(
     primaryBegin()
     for (const row of rows) {
       establishedPrimaryKeys.add(row.id)
-      primaryKeysEstablishedByLoads.add(row.id)
       primaryWrite({ type: `insert`, value: row })
     }
     const applied = primaryCommit(signal)
@@ -553,7 +559,11 @@ async function runMultiSourceOrderedScenario(
                 rows,
                 options.signal,
               )
-              primaryReceipts.push(appliedRowKeys)
+              primaryReceipts.push({
+                demandKey: getLoadSubsetDemandKey(options) ?? `unfiltered`,
+                expectedRowKeys: rows.map(({ id }) => id),
+                appliedRowKeys,
+              })
               return {
                 hasMore: false,
                 appliedRowKeys,
@@ -576,7 +586,11 @@ async function runMultiSourceOrderedScenario(
               ) {
                 releaseSecondaryPublication()
               }
-              primaryReceipts.push(appliedRowKeys)
+              primaryReceipts.push({
+                demandKey: getLoadSubsetDemandKey(options) ?? `unfiltered`,
+                expectedRowKeys: primaryOrder.map(({ id }) => id),
+                appliedRowKeys,
+              })
               return {
                 hasMore: false,
                 appliedRowKeys,
@@ -609,7 +623,11 @@ async function runMultiSourceOrderedScenario(
             ) {
               releaseSecondaryPublication()
             }
-            primaryReceipts.push(appliedRowKeys)
+            primaryReceipts.push({
+              demandKey: getLoadSubsetDemandKey(options) ?? `unfiltered`,
+              expectedRowKeys: row ? [row.id] : [],
+              appliedRowKeys,
+            })
             return {
               hasMore,
               appliedRowKeys,
@@ -718,7 +736,11 @@ async function runMultiSourceOrderedScenario(
                 )),
               )
             }
-            secondaryReceipts.push(appliedRowKeys)
+            secondaryReceipts.push({
+              demandKey: getLoadSubsetDemandKey(options) ?? `unfiltered`,
+              expectedRowKeys: rowsInCommitOrder.map(({ id }) => id),
+              appliedRowKeys,
+            })
             return {
               hasMore: false,
               appliedRowKeys,
@@ -857,35 +879,25 @@ async function runMultiSourceOrderedScenario(
       }
       previousProgressByDemand.set(progress.demandKey, progress)
     }
+    expect(primaryReceipts).toHaveLength(primaryCalls.length)
     for (const receipt of primaryReceipts) {
-      expect(new Set(receipt).size).toBe(receipt.length)
-    }
-    const claimedPrimaryKeys = new Set(primaryReceipts.flat())
-    expect([...claimedPrimaryKeys].sort()).toEqual(
-      [...primaryKeysEstablishedByLoads].sort(),
-    )
-    expect(
-      [...claimedPrimaryKeys].every((key) =>
-        scenario.primaryRows.some(({ id }) => id === key),
-      ),
-    ).toBe(true)
-
-    for (const receipt of secondaryReceipts) {
-      expect(new Set(receipt).size).toBe(receipt.length)
-    }
-    const claimedSecondaryKeys = new Set(secondaryReceipts.flat())
-    const expectedClaimedSecondaryKeys = scenario.secondaryRows
-      .filter((row) =>
-        secondaryCalls.some(
-          ({ where }) =>
-            where === undefined || evaluateReferenceExpression(where, row),
-        ),
+      expect(new Set(receipt.appliedRowKeys).size).toBe(
+        receipt.appliedRowKeys.length,
       )
-      .map(({ id }) => id)
-      .sort()
-    expect([...claimedSecondaryKeys].sort()).toEqual(
-      expectedClaimedSecondaryKeys,
-    )
+      expect([...receipt.appliedRowKeys].sort(), receipt.demandKey).toEqual(
+        [...receipt.expectedRowKeys].sort(),
+      )
+    }
+
+    expect(secondaryReceipts).toHaveLength(secondaryCalls.length)
+    for (const receipt of secondaryReceipts) {
+      expect(new Set(receipt.appliedRowKeys).size).toBe(
+        receipt.appliedRowKeys.length,
+      )
+      expect([...receipt.appliedRowKeys].sort(), receipt.demandKey).toEqual(
+        [...receipt.expectedRowKeys].sort(),
+      )
+    }
     expect(
       secondaryLoadCommitSizes.every(
         (commitSize) => commitSize <= scenario.secondaryPageSize,
