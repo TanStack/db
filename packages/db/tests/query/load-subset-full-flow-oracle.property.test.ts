@@ -1089,7 +1089,14 @@ it(`publishes once after a loader fills an indexed window across graph turns`, a
     await live.preload()
     subscription = live.subscribeChanges(
       (changes) => {
-        batches.push(changes.map(({ key }) => String(key)).sort())
+        batches.push(
+          changes
+            .map(
+              ({ type, key, value }) =>
+                `${type}:${String(key)}:${String(value.id)}`,
+            )
+            .sort(),
+        )
         callbackReads.push(live.toArray.map(({ id }) => id))
       },
       { includeInitialState: false },
@@ -1099,7 +1106,7 @@ it(`publishes once after a loader fills an indexed window across graph turns`, a
 
     expect(loads).toBe(2)
     expect(live.toArray.map(({ id }) => id)).toEqual([`a`, `b`])
-    expect(batches).toEqual([[`a`, `b`]])
+    expect(batches).toEqual([[`insert:a:a`, `insert:b:b`]])
     expect(callbackReads).toEqual([[`a`, `b`]])
   } finally {
     subscription?.unsubscribe()
@@ -1150,44 +1157,164 @@ it(`fences an unindexed fallback settlement from a cleaned query session`, async
         .limit(0),
     startSync: true,
   })
+  let failedWindow: true | Promise<void> | undefined
   let firstWindow: true | Promise<void> | undefined
   let secondWindow: true | Promise<void> | undefined
+  let repeatedWindow: true | Promise<void> | undefined
 
   try {
     await live.preload()
+    expect(live.status).toBe(`ready`)
+    expect(live.isLoadingSubset).toBe(false)
+
+    const visibleFailure = new Error(`visible fallback failed`)
+    failedWindow = live.utils.setWindow({ offset: 0, limit: 1 })
+    expect(pending).toHaveLength(1)
+    expect(live.isLoadingSubset).toBe(true)
+    pending[0]!.reject(visibleFailure)
+    await expect(Promise.resolve(failedWindow)).rejects.toBe(visibleFailure)
+    await flushPromises()
+    expect(live.status).toBe(`ready`)
+    expect(live.isLoadingSubset).toBe(false)
+    expect(live.utils.lastSubsetError).toBe(visibleFailure)
+
     firstWindow = live.utils.setWindow({ offset: 0, limit: 1 })
     void Promise.resolve(firstWindow).catch(() => {})
-    expect(pending).toHaveLength(1)
+    expect(pending).toHaveLength(2)
+    expect(live.isLoadingSubset).toBe(true)
 
     await live.cleanup()
     await live.preload()
+    expect(live.status).toBe(`ready`)
+    expect(live.isLoadingSubset).toBe(false)
+    expect(live.utils.lastSubsetError).toBeUndefined()
     secondWindow = live.utils.setWindow({ offset: 0, limit: 1 })
-    expect(pending).toHaveLength(2)
+    expect(pending).toHaveLength(3)
+    expect(live.isLoadingSubset).toBe(true)
 
-    pending[0]!.reject(new Error(`stale fallback failed`))
+    pending[1]!.reject(new Error(`stale fallback failed`))
     await flushPromises()
     expect(live.utils.lastSubsetError).toBeUndefined()
-    const repeatedWindow = live.utils.setWindow({ offset: 0, limit: 2 })
+    expect(live.status).toBe(`ready`)
+    expect(live.isLoadingSubset).toBe(true)
+    repeatedWindow = live.utils.setWindow({ offset: 0, limit: 2 })
     void Promise.resolve(repeatedWindow).catch(() => {})
-    expect(pending).toHaveLength(2)
+    expect(pending).toHaveLength(3)
 
     begin()
     write({ type: `insert`, value: { id: `a`, rank: 1 } })
     const applied = commit()
     if (applied !== true) await applied
-    pending[1]!.resolve({ hasMore: false, appliedRowKeys: [`a`] })
-    await secondWindow
+    pending[2]!.resolve({ hasMore: false, appliedRowKeys: [`a`] })
+    await Promise.all([secondWindow, repeatedWindow])
     await flushPromises()
 
-    expect(pending).toHaveLength(2)
+    expect(pending).toHaveLength(3)
+    expect(live.status).toBe(`ready`)
+    expect(live.isLoadingSubset).toBe(false)
+    expect(live.utils.lastSubsetError).toBeUndefined()
     expect(live.toArray.map(({ id }) => id)).toEqual([`a`])
   } finally {
     for (const request of pending) {
       request.reject(new Error(`test cleanup`))
     }
     await Promise.all([
+      Promise.resolve(failedWindow).catch(() => undefined),
       Promise.resolve(firstWindow).catch(() => undefined),
       Promise.resolve(secondWindow).catch(() => undefined),
+      Promise.resolve(repeatedWindow).catch(() => undefined),
+      live.cleanup(),
+      source.cleanup(),
+    ])
+  }
+})
+
+it(`keeps an initial unindexed load scoped to its query session`, async () => {
+  type Row = { id: string; rank: number }
+  type Result = {
+    hasMore: boolean
+    appliedRowKeys: ReadonlyArray<string>
+  }
+  const pending: Array<ReturnType<typeof createDeferred<Result>>> = []
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: Row }) => void
+  let commit!: () => true | Promise<void>
+  const source = createCollection<Row>({
+    id: `unindexed-initial-session-fence`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `off`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        params.markReady()
+        return {
+          loadSubset: () => {
+            const request = createDeferred<Result>()
+            pending.push(request)
+            return request.promise
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection({
+    id: `unindexed-initial-session-fence-live`,
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(1),
+    startSync: true,
+  })
+  let firstPreload: Promise<void> | undefined
+  let secondPreload: Promise<void> | undefined
+
+  try {
+    firstPreload = live.preload()
+    void firstPreload.catch(() => {})
+    expect(pending).toHaveLength(1)
+    expect(live.status).toBe(`loading`)
+    expect(live.isLoadingSubset).toBe(true)
+
+    await live.cleanup()
+    secondPreload = live.preload()
+    expect(pending).toHaveLength(2)
+    expect(live.status).toBe(`loading`)
+    expect(live.isLoadingSubset).toBe(true)
+    expect(live.utils.lastSubsetError).toBeUndefined()
+
+    pending[0]!.reject(new Error(`stale initial fallback failed`))
+    await flushPromises()
+    expect(live.status).toBe(`loading`)
+    expect(live.isLoadingSubset).toBe(true)
+    expect(live.utils.lastSubsetError).toBeUndefined()
+
+    begin()
+    write({ type: `insert`, value: { id: `a`, rank: 1 } })
+    const applied = commit()
+    if (applied !== true) await applied
+    pending[1]!.resolve({ hasMore: false, appliedRowKeys: [`a`] })
+    await secondPreload
+    await flushPromises()
+
+    expect(pending).toHaveLength(2)
+    expect(live.status).toBe(`ready`)
+    expect(live.isLoadingSubset).toBe(false)
+    expect(live.utils.lastSubsetError).toBeUndefined()
+    expect(live.toArray.map(({ id }) => id)).toEqual([`a`])
+  } finally {
+    for (const request of pending) {
+      request.reject(new Error(`test cleanup`))
+    }
+    await Promise.all([
+      firstPreload?.catch(() => undefined),
+      secondPreload?.catch(() => undefined),
       live.cleanup(),
       source.cleanup(),
     ])
@@ -1243,7 +1370,14 @@ it(`replays one unindexed fallback and publishes one replacement after truncate`
   })
   const subscription = live.subscribeChanges(
     (changes) => {
-      batches.push(changes.map(({ key }) => String(key)).sort())
+      batches.push(
+        changes
+          .map(
+            ({ type, key, value }) =>
+              `${type}:${String(key)}:${String(value.id)}`,
+          )
+          .sort(),
+      )
       callbackReads.push(live.toArray.map(({ id }) => id).sort())
     },
     { includeInitialState: false },
@@ -1265,7 +1399,13 @@ it(`replays one unindexed fallback and publishes one replacement after truncate`
     callbackReads.length = 0
     begin()
     truncate()
+    expect(live.toArray.map(({ id }) => id)).toEqual([`a`])
+    expect(batches).toHaveLength(0)
+    expect(callbackReads).toHaveLength(0)
     const replacement = commit()
+    expect(live.toArray.map(({ id }) => id)).toEqual([`a`])
+    expect(batches).toHaveLength(0)
+    expect(callbackReads).toHaveLength(0)
     await flushPromises()
     expect(pending).toHaveLength(2)
     expect(live.toArray.map(({ id }) => id)).toEqual([`a`])
@@ -1274,7 +1414,13 @@ it(`replays one unindexed fallback and publishes one replacement after truncate`
 
     begin()
     write({ type: `insert`, value: { id: `b`, rank: 2 } })
+    expect(live.toArray.map(({ id }) => id)).toEqual([`a`])
+    expect(batches).toHaveLength(0)
+    expect(callbackReads).toHaveLength(0)
     const replacementApplied = commit()
+    expect(live.toArray.map(({ id }) => id)).toEqual([`a`])
+    expect(batches).toHaveLength(0)
+    expect(callbackReads).toHaveLength(0)
     if (replacementApplied !== true) await replacementApplied
     expect(live.toArray.map(({ id }) => id)).toEqual([`a`])
     expect(batches).toHaveLength(0)
@@ -1285,7 +1431,7 @@ it(`replays one unindexed fallback and publishes one replacement after truncate`
 
     expect(pending).toHaveLength(2)
     expect(live.toArray.map(({ id }) => id)).toEqual([`b`])
-    expect(batches).toHaveLength(1)
+    expect(batches).toEqual([[`delete:a:a`, `insert:b:b`]])
     expect(callbackReads).toEqual([[`b`]])
   } finally {
     for (const request of pending) {

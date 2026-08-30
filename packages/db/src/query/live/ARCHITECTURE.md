@@ -699,6 +699,11 @@ that subscription's guard, so the same live query can retry. Cleanup creates a
 new subscription and a late settlement from the old one cannot clear the new
 guard. Truncate replay belongs to the subscription's retained demand; the live
 coordinator must not add a second fallback while that replay is in flight.
+Cleanup also aborts and settles the subscription-visible acquisition before a
+raw adapter promise can affect a replacement session. The live coordinator's
+subscription-identity check is a second fence, not a substitute for that lower
+abort boundary. Session tests must prove the public loading, readiness, error,
+and row history rather than depend on reaching either private fence alone.
 
 The graph loader is part of the same quiescence pass as source processing. If a
 window change reaches the pass with no graph work, core calls the loader first.
