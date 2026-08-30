@@ -13,6 +13,7 @@ import { WindowState } from '../../src/query/live/window-state.js'
 import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
 import type * as DbIvm from '@tanstack/db-ivm'
 import type { CollectionImpl } from '../../src/collection/index.js'
+import type { CompareOptions } from '../../src/query/builder/types.js'
 import type {
   ChangeMessage,
   CurrentStateAsChangesOptions,
@@ -36,6 +37,10 @@ type RankedRow = {
   id: string
   rank: number
   included: boolean
+}
+
+type PublicKeyRankedRow = Omit<RankedRow, `id`> & {
+  id: string | number
 }
 
 type OrderedWork = {
@@ -69,6 +74,28 @@ function orderBy(
       compareOptions: { direction, nulls },
     },
   ]
+}
+
+function orderByWithOptions(compareOptions: CompareOptions): OrderBy {
+  return [{ expression: new PropRef([`rank`]), compareOptions }]
+}
+
+function comparePublicKeys(
+  left: string | number,
+  right: string | number,
+): number {
+  if (typeof left !== typeof right) {
+    return typeof left === `string` ? -1 : 1
+  }
+  if (typeof left === `number` && typeof right === `number`) {
+    const leftIsNaN = Number.isNaN(left)
+    const rightIsNaN = Number.isNaN(right)
+    if (leftIsNaN || rightIsNaN) {
+      if (leftIsNaN && rightIsNaN) return 0
+      return leftIsNaN ? 1 : -1
+    }
+  }
+  return left < right ? -1 : left > right ? 1 : 0
 }
 
 const orderedIndexCompatibilityCases = ([`asc`, `desc`] as const).flatMap(
@@ -177,7 +204,7 @@ function createOrderedPrefixRows(
 ): {
   rows: Array<RankedRow>
   expectedKeys: Array<string>
-  expectedSourceReads: number
+  expectedSourceReads: Array<string>
 } {
   const rank = (descendingRank: number) =>
     direction === `desc` ? descendingRank : -descendingRank
@@ -217,16 +244,25 @@ function createOrderedPrefixRows(
     .map(({ id }) => id)
     .sort()
     .slice(0, options.limit)
+  const expectedCandidateReads = [
+    ...leading,
+    ...matchingBoundary,
+    ...rejectedBoundary,
+  ]
+    .sort((left, right) => {
+      const valueOrder = left.rank - right.rank
+      if (valueOrder !== 0) {
+        return direction === `asc` ? valueOrder : -valueOrder
+      }
+      return comparePublicKeys(left.id, right.id)
+    })
+    .map(({ id }) => id)
   return {
     rows: [...trailing, ...rejectedBoundary, ...matchingBoundary, ...leading],
     expectedKeys,
     // Every row through the boundary bucket is tested once. The selected rows
     // are then read once more to materialize their change messages.
-    expectedSourceReads:
-      leading.length +
-      matchingBoundary.length +
-      rejectedBoundary.length +
-      options.limit,
+    expectedSourceReads: [...expectedCandidateReads, ...expectedKeys],
   }
 }
 
@@ -258,8 +294,7 @@ describe(`ordered source work oracle`, () => {
       )
 
       expect(observed.keys).toEqual(scenario.expectedKeys)
-      expect(observed.sourceReads).toHaveLength(scenario.expectedSourceReads)
-      expect(observed.sourceReads).not.toContain(`trailing-000`)
+      expect(observed.sourceReads).toEqual(scenario.expectedSourceReads)
       expect(observed.keyComparisons).toBe(observed.expectedKeyComparisons)
       expect(observed.totalOrderComparisons).toBe(0)
     },
@@ -310,9 +345,7 @@ describe(`ordered source work oracle`, () => {
           )
 
           expect(observed.keys).toEqual(scenario.expectedKeys)
-          expect(observed.sourceReads).toHaveLength(
-            scenario.expectedSourceReads,
-          )
+          expect(observed.sourceReads).toEqual(scenario.expectedSourceReads)
           expect(observed.keyComparisons).toBe(observed.expectedKeyComparisons)
           expect(observed.totalOrderComparisons).toBe(0)
         },
@@ -332,7 +365,12 @@ describe(`ordered source work oracle`, () => {
 
     const observed = await observeOrderedPrefix(rows, 3)
     expect(observed.keys).toEqual([`tied-00`, `tied-02`, `tied-04`])
-    expect(observed.sourceReads).toHaveLength(rows.length + 3)
+    expect(observed.sourceReads).toEqual([
+      ...rows.map(({ id }) => id).sort(comparePublicKeys),
+      `tied-00`,
+      `tied-02`,
+      `tied-04`,
+    ])
     expect(observed.keyComparisons).toBe(observed.expectedKeyComparisons)
     expect(observed.totalOrderComparisons).toBe(0)
   })
@@ -650,6 +688,61 @@ describe(`ordered source work oracle`, () => {
     },
   )
 
+  it.each(
+    (
+      [
+        { name: `BasicIndex`, IndexType: BasicIndex },
+        { name: `BTreeIndex`, IndexType: BTreeIndex },
+      ] as const
+    ).flatMap(({ name, IndexType }) =>
+      ([`asc`, `desc`] as const).flatMap((direction) =>
+        [
+          { domain: `number`, keys: [10, 2] },
+          { domain: `mixed`, keys: [10, `2`, 2, `10`] },
+        ].map(({ domain, keys }) => ({
+          name,
+          IndexType,
+          direction,
+          domain,
+          keys,
+        })),
+      ),
+    ),
+  )(
+    `keeps $domain public keys in compareKeys order for $name in $direction order`,
+    async ({ name, IndexType, direction, keys }) => {
+      const collection = createCollection(
+        localOnlyCollectionOptions<PublicKeyRankedRow, string | number>({
+          id: `ordered-work-${name}-${direction}-${keys.join(`-`)}`,
+          getKey: (row) => row.id,
+        }),
+      )
+
+      try {
+        await collection.preload()
+        collection.createIndex((row) => row.rank, { indexType: IndexType })
+        for (const key of keys) {
+          const transaction = collection.insert({
+            id: key,
+            rank: 1,
+            included: true,
+          })
+          await transaction.isPersisted.promise
+        }
+
+        const changes = collection.currentStateAsChanges({
+          orderBy: orderBy(direction),
+        })!
+
+        expect(changes.map(({ key }) => key)).toEqual(
+          [...keys].sort(comparePublicKeys),
+        )
+      } finally {
+        await collection.cleanup()
+      }
+    },
+  )
+
   for (const campaign of orderedWorkCampaigns(
     `ordered-work.public-key-suffix`,
     1_780_102,
@@ -660,20 +753,28 @@ describe(`ordered source work oracle`, () => {
           minLength: 2,
           maxLength: 8,
         }),
-        fc.integer({ min: 1, max: 8 }),
+        fc.integer({ min: 1, max: 16 }),
         fc.constantFrom<`basic` | `btree`>(`basic`, `btree`),
         fc.constantFrom<OrderByDirection>(`asc`, `desc`),
+        fc.constantFrom<`string` | `number` | `mixed`>(
+          `string`,
+          `number`,
+          `mixed`,
+        ),
       ],
       campaign.options,
     )(
       `orders dynamic tie keys for every built-in path (${campaign.label})`,
-      async (keyNumbers, requestedLimit, indexKind, direction) => {
-        const keys = keyNumbers.map(
-          (key) => `key-${key.toString().padStart(3, `0`)}`,
-        )
+      async (keyNumbers, requestedLimit, indexKind, direction, keyDomain) => {
+        const keys: Array<string | number> =
+          keyDomain === `string`
+            ? keyNumbers.map((key) => `key-${key}`)
+            : keyDomain === `number`
+              ? keyNumbers
+              : keyNumbers.flatMap((key) => [String(key), key])
         const limit = Math.min(requestedLimit, keys.length)
         const collection = createCollection(
-          localOnlyCollectionOptions<RankedRow>({
+          localOnlyCollectionOptions<PublicKeyRankedRow, string | number>({
             id: `ordered-work-key-property-${Math.random()}`,
             getKey: (row) => row.id,
           }),
@@ -699,7 +800,7 @@ describe(`ordered source work oracle`, () => {
           })!
 
           expect(changes.map(({ key }) => key)).toEqual(
-            [...keys].sort().slice(0, limit),
+            [...keys].sort(comparePublicKeys).slice(0, limit),
           )
         } finally {
           await collection.cleanup()
@@ -710,8 +811,15 @@ describe(`ordered source work oracle`, () => {
 
   it(`retains requested comparison metadata on an automatic index`, async () => {
     type NullableRankedRow = Omit<RankedRow, `rank`> & {
-      rank: number | null | undefined
+      rank: string | null | undefined
     }
+    const compareOptions = {
+      direction: `desc`,
+      nulls: `first`,
+      stringSort: `locale`,
+      locale: `en`,
+      localeOptions: { numeric: true, sensitivity: `base` },
+    } satisfies CompareOptions
     const collection = createCollection(
       localOnlyCollectionOptions<NullableRankedRow>({
         id: `ordered-work-auto-index-options`,
@@ -719,7 +827,8 @@ describe(`ordered source work oracle`, () => {
         initialData: [
           { id: `undefined`, rank: undefined, included: true },
           { id: `null`, rank: null, included: true },
-          { id: `one`, rank: 1, included: true },
+          { id: `item-2`, rank: `item-2`, included: true },
+          { id: `item-10`, rank: `item-10`, included: true },
         ],
         autoIndex: `eager`,
         defaultIndexType: BTreeIndex,
@@ -731,12 +840,17 @@ describe(`ordered source work oracle`, () => {
       const compareEntries = vi.spyOn(TotalOrder.prototype, `compareEntries`)
       try {
         const changes = collection.currentStateAsChanges({
-          orderBy: orderBy(`desc`, `first`),
-          limit: 2,
+          orderBy: orderByWithOptions(compareOptions),
+          limit: 4,
           optimizedOnly: true,
         })
 
-        expect(changes?.map(({ key }) => key)).toEqual([`null`, `undefined`])
+        expect(changes?.map(({ key }) => key)).toEqual([
+          `null`,
+          `undefined`,
+          `item-10`,
+          `item-2`,
+        ])
         expect(compareEntries).not.toHaveBeenCalled()
       } finally {
         compareEntries.mockRestore()
@@ -745,6 +859,107 @@ describe(`ordered source work oracle`, () => {
       await collection.cleanup()
     }
   })
+
+  it.each([
+    {
+      name: `the same locale options`,
+      compareOptions: {
+        direction: `asc`,
+        nulls: `last`,
+        stringSort: `locale`,
+        locale: `en`,
+        localeOptions: { numeric: true, sensitivity: `base` },
+      },
+      compatible: true,
+    },
+    {
+      name: `lexical string order`,
+      compareOptions: {
+        direction: `asc`,
+        nulls: `last`,
+        stringSort: `lexical`,
+      },
+      compatible: false,
+    },
+    {
+      name: `another locale`,
+      compareOptions: {
+        direction: `asc`,
+        nulls: `last`,
+        stringSort: `locale`,
+        locale: `de`,
+        localeOptions: { numeric: true, sensitivity: `base` },
+      },
+      compatible: false,
+    },
+    {
+      name: `another numeric option`,
+      compareOptions: {
+        direction: `asc`,
+        nulls: `last`,
+        stringSort: `locale`,
+        locale: `en`,
+        localeOptions: { numeric: false, sensitivity: `base` },
+      },
+      compatible: false,
+    },
+    {
+      name: `another sensitivity option`,
+      compareOptions: {
+        direction: `asc`,
+        nulls: `last`,
+        stringSort: `locale`,
+        locale: `en`,
+        localeOptions: { numeric: true, sensitivity: `accent` },
+      },
+      compatible: false,
+    },
+  ] satisfies Array<{
+    name: string
+    compareOptions: CompareOptions
+    compatible: boolean
+  }>)(
+    `matches an index against $name: $compatible`,
+    async ({ compareOptions, compatible }) => {
+      type TextRankedRow = Omit<RankedRow, `rank`> & { rank: string }
+      const indexCompareOptions = {
+        direction: `asc`,
+        nulls: `last`,
+        stringSort: `locale`,
+        locale: `en`,
+        localeOptions: { numeric: true, sensitivity: `base` },
+      } satisfies CompareOptions
+      const collection = createCollection(
+        localOnlyCollectionOptions<TextRankedRow>({
+          id: `ordered-work-string-options-${Math.random()}`,
+          getKey: (row) => row.id,
+          initialData: [
+            { id: `item-10`, rank: `item-10`, included: true },
+            { id: `item-2`, rank: `item-2`, included: true },
+          ],
+        }),
+      )
+
+      try {
+        await collection.preload()
+        collection.createIndex((row) => row.rank, {
+          indexType: BTreeIndex,
+          options: { compareOptions: indexCompareOptions },
+        })
+
+        const changes = collection.currentStateAsChanges({
+          orderBy: orderByWithOptions(compareOptions),
+          optimizedOnly: true,
+        })
+
+        expect(changes?.map(({ key }) => key)).toEqual(
+          compatible ? [`item-2`, `item-10`] : undefined,
+        )
+      } finally {
+        await collection.cleanup()
+      }
+    },
+  )
 })
 
 type SnapshotFixture = {
