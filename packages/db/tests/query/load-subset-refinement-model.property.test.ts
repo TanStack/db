@@ -615,6 +615,13 @@ function renameHistoryIds(
           ...event,
           transactionId: `${event.transactionId}-${suffix}`,
         }
+      case `startReplay`:
+      case `writeReplayRows`:
+      case `settleReplay`:
+        return {
+          ...event,
+          attemptId: `${event.attemptId}-${suffix}`,
+        }
       case `startAcquisition`:
         return {
           ...event,
@@ -1395,6 +1402,18 @@ function replayErasureHistories(): Array<Array<LoadSubsetFullFlowEvent>> {
   ]
 }
 
+function replayAttemptIds(
+  history: ReadonlyArray<LoadSubsetFullFlowEvent>,
+): Array<string> {
+  return history.flatMap((event) =>
+    event.type === `startReplay` ||
+    event.type === `writeReplayRows` ||
+    event.type === `settleReplay`
+      ? [event.attemptId]
+      : [],
+  )
+}
+
 function publicationErasureHistories(): Array<Array<LoadSubsetFullFlowEvent>> {
   const orderedRows = [
     { key: `row-a`, orderValue: 1 },
@@ -1590,6 +1609,11 @@ for (const campaign of refinementCampaigns(1_779_009)) {
       }
 
       for (const history of replayErasureHistories()) {
+        expect(replayAttemptIds(renameHistoryIds(history, suffix))).toEqual(
+          replayAttemptIds(history).map(
+            (attemptId) => `${attemptId}-${suffix}`,
+          ),
+        )
         expectObservationPreservedAfterEveryPrefix(
           history,
           suffix,
