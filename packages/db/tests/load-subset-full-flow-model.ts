@@ -1114,6 +1114,7 @@ export function projectAtomicOrderedPublicationState(
   let currentPublication: AtomicOrderedPublicationState | undefined
   let retainsPreviousPublication = false
   let currentReplacement: FullFlowPublicationId | undefined
+  let currentPublicationId: FullFlowPublicationId | undefined
   let retainedSize = options.initialWindowSize
   let closed = false
   const targetDemand = sourceDemandIdentity(options.sourceId, options.demandId)
@@ -1131,12 +1132,13 @@ export function projectAtomicOrderedPublicationState(
 
   const publicationState = (
     publicationId: FullFlowPublicationId,
+    orderedPrefixSize = retainedSize,
   ): AtomicOrderedPublicationState | undefined => {
     const publication = staged.get(publicationId)
     const orderedRows = publication?.get(targetDemand)
     if (!publication || !orderedRows) return undefined
 
-    const orderedPrefix = sortRows(orderedRows).slice(0, retainedSize)
+    const orderedPrefix = sortRows(orderedRows).slice(0, orderedPrefixSize)
     const desired = new Map(orderedPrefix.map((row) => [row.key, row] as const))
     for (const demandId of activeAdditionalDemands.keys()) {
       for (const row of publication.get(demandId) ?? []) {
@@ -1150,12 +1152,16 @@ export function projectAtomicOrderedPublicationState(
     }
   }
 
-  const publish = (publicationId: FullFlowPublicationId) => {
-    const next = publicationState(publicationId)
+  const publish = (
+    publicationId: FullFlowPublicationId,
+    orderedPrefixSize?: number,
+  ) => {
+    const next = publicationState(publicationId, orderedPrefixSize)
     if (!next) return
     const previous = publications.at(-1)
     if (previous === undefined && next.rows.length === 0) {
       currentPublication = next
+      currentPublicationId = publicationId
       return
     }
     if (
@@ -1167,10 +1173,12 @@ export function projectAtomicOrderedPublicationState(
       )
     ) {
       currentPublication = next
+      currentPublicationId = publicationId
       return
     }
     publications.push(next.rows)
     currentPublication = next
+    currentPublicationId = publicationId
   }
 
   const finishCurrentReplacement = () => {
@@ -1294,11 +1302,24 @@ export function projectAtomicOrderedPublicationState(
       case `rejectDemand`:
         break
       case `releaseDemand`:
-        releaseActiveDemandAttempt(
-          activeAdditionalDemands,
-          sourceDemandIdentity(event.sourceId, event.demandId),
-          sourceAttemptIdentity(event.sourceId, event.attemptId),
-        )
+        if (
+          releaseActiveDemandAttempt(
+            activeAdditionalDemands,
+            sourceDemandIdentity(event.sourceId, event.demandId),
+            sourceAttemptIdentity(event.sourceId, event.attemptId),
+          ) &&
+          currentPublicationId !== undefined
+        ) {
+          // A private replacement may have grown the target window. Releasing
+          // another demand filters the last complete public prefix; it cannot
+          // expose rows known only to the private replacement.
+          publish(
+            currentPublicationId,
+            currentReplacement === undefined
+              ? retainedSize
+              : currentPublication?.orderedPrefixSize,
+          )
+        }
         break
       case `truncateSource`:
       case `restartSession`:

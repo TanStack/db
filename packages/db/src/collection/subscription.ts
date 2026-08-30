@@ -1354,6 +1354,45 @@ export class CollectionSubscription
     return changes
   }
 
+  /** Apply logical demand release to the public baseline of a private replay. */
+  private reconcileBufferedOrderedPublicationOnRelease(): Array<
+    ChangeMessage<any, any>
+  > {
+    const publication = this.truncateReplaySession?.publicationState
+    const ordered = publication?.ordered
+    const window = this.orderedWindow
+    if (!publication || !ordered || !window) return []
+
+    const orderedRows = [...ordered.candidateRows]
+      .sort((left, right) => window.totalOrder.compareEntries(left, right))
+      .slice(0, ordered.prefixSize)
+    const desired = new Map<string | number, object>(orderedRows)
+    const additionalFilters = this.activeAdditionalFilters()
+    for (const [key, row] of publication.publishedRows) {
+      if (additionalFilters.some((filter) => filter(row))) {
+        desired.set(key, row)
+      }
+    }
+
+    const lastOrderedRow = orderedRows.at(-1)
+    const nextOrdered: OrderedPublicationState = {
+      prefixSize: orderedRows.length,
+      boundary:
+        lastOrderedRow === undefined
+          ? undefined
+          : window.totalOrder.boundary(lastOrderedRow[1], lastOrderedRow[0]),
+      candidateRows: ordered.candidateRows,
+    }
+    publication.publishedRows = new Map(desired)
+    publication.sentKeys = new Set(desired.keys())
+    publication.ordered = nextOrdered
+    this.orderedPublication = {
+      ...nextOrdered,
+      candidateRows: new Map(nextOrdered.candidateRows),
+    }
+    return this.diffPublishedRows(desired)
+  }
+
   /**
    * Evolve a failed replay's last good ordered publication without admitting
    * rows installed by the rejected replacement. Later source deltas form a
@@ -2348,10 +2387,12 @@ export class CollectionSubscription
       releaseFailure = { error }
     } finally {
       this.collectReleasedDemand(demand)
-      if (this.orderedWindow && !this.isBufferingForTruncate) {
-        const changes = this.stalePublication?.ordered
-          ? this.reconcileStaleOrderedPublication([])
-          : this.reconcileOrderedWindow()
+      if (this.orderedWindow) {
+        const changes = this.isBufferingForTruncate
+          ? this.reconcileBufferedOrderedPublicationOnRelease()
+          : this.stalePublication?.ordered
+            ? this.reconcileStaleOrderedPublication([])
+            : this.reconcileOrderedWindow()
         if (changes.length > 0) this.callback(changes)
       }
     }

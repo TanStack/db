@@ -15,9 +15,14 @@ import type { LoadSubsetOptions } from '../../src/types.js'
 
 type Row = { id: string; group: string }
 
-it.each([`resolve`, `reject`] as const)(
-  `fences a retired source-demand attempt when it settles late: %s`,
-  async (oldOutcome) => {
+it.each([
+  { oldOutcome: `resolve`, settlementOrder: `old-first` },
+  { oldOutcome: `reject`, settlementOrder: `old-first` },
+  { oldOutcome: `resolve`, settlementOrder: `fresh-first` },
+  { oldOutcome: `reject`, settlementOrder: `fresh-first` },
+] as const)(
+  `fences a retired source-demand attempt across $settlementOrder $oldOutcome settlement`,
+  async ({ oldOutcome, settlementOrder }) => {
     type Parent = { id: string; group: string }
     type Child = { id: string; group: string }
     type PendingRequest = {
@@ -25,8 +30,9 @@ it.each([`resolve`, `reject`] as const)(
       rows: ReturnType<typeof createDeferred<ReadonlyArray<Child>>>
     }
     const sessionId = `session`
-    const parentId = `readiness-generation-parent-${oldOutcome}`
-    const childId = `readiness-generation-child-${oldOutcome}`
+    const caseId = `${oldOutcome}-${settlementOrder}`
+    const parentId = `readiness-generation-parent-${caseId}`
+    const childId = `readiness-generation-child-${caseId}`
     const oldAttemptId = `old-attempt`
     const freshAttemptId = `fresh-attempt`
     let parentBegin!: () => void
@@ -104,7 +110,7 @@ it.each([`resolve`, `reject`] as const)(
       },
     })
     const live = createLiveQueryCollection({
-      id: `readiness-generation-live-${oldOutcome}`,
+      id: `readiness-generation-live-${caseId}`,
       query: (q) =>
         q.from({ parent }).select(({ parent: parentRow }) => ({
           id: parentRow.id,
@@ -203,36 +209,51 @@ it.each([`resolve`, `reject`] as const)(
       expect(live.status).toBe(projectSourceReadiness(history).status)
       expect(preloadState).toBe(`pending`)
 
-      if (oldOutcome === `resolve`) {
-        pending[0]!.rows.resolve([])
-      } else {
-        pending[0]!.rows.reject(new Error(`retired source demand failed`))
-      }
-      history.push({
-        type: `settleSourceDemand`,
-        sessionId,
-        sourceId: childId,
-        demandId: `children`,
-        attemptId: oldAttemptId,
-        outcome: oldOutcome,
-      })
-      await flushPromises()
-
-      expect(live.status).toBe(projectSourceReadiness(history).status)
-      expect(preloadState).toBe(`pending`)
-      expect(live.utils.lastSubsetError).toBeUndefined()
-
       const freshChild: Child = { id: `fresh-child`, group: `fresh` }
-      expect(child.get(freshChild.id)).toBeUndefined()
-      pending[1]!.rows.resolve([freshChild])
-      history.push({
-        type: `settleSourceDemand`,
-        sessionId,
-        sourceId: childId,
-        demandId: `children`,
-        attemptId: freshAttemptId,
-        outcome: `resolve`,
-      })
+      const settleOld = async () => {
+        if (oldOutcome === `resolve`) {
+          pending[0]!.rows.resolve([])
+        } else {
+          pending[0]!.rows.reject(new Error(`retired source demand failed`))
+        }
+        history.push({
+          type: `settleSourceDemand`,
+          sessionId,
+          sourceId: childId,
+          demandId: `children`,
+          attemptId: oldAttemptId,
+          outcome: oldOutcome,
+        })
+        await flushPromises()
+      }
+      const settleFresh = async () => {
+        expect(child.get(freshChild.id)).toBeUndefined()
+        pending[1]!.rows.resolve([freshChild])
+        history.push({
+          type: `settleSourceDemand`,
+          sessionId,
+          sourceId: childId,
+          demandId: `children`,
+          attemptId: freshAttemptId,
+          outcome: `resolve`,
+        })
+        await flushPromises()
+      }
+      const settlements =
+        settlementOrder === `old-first`
+          ? [settleOld, settleFresh]
+          : [settleFresh, settleOld]
+      for (const settle of settlements) {
+        await settle()
+        expect(live.status).toBe(projectSourceReadiness(history).status)
+        expect(preloadState).toBe(
+          projectSourceReadiness(history).status === `ready`
+            ? `resolved`
+            : `pending`,
+        )
+        expect(live.utils.lastSubsetError).toBeUndefined()
+      }
+
       await preload
       await flushPromises()
 

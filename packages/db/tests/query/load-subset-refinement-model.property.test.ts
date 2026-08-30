@@ -532,6 +532,406 @@ for (const campaign of refinementCampaigns(1_779_011)) {
   )
 }
 
+type LegalOrderAction =
+  | `release-old`
+  | `release-peer`
+  | `settle-old`
+  | `settle-fresh`
+
+function interleaveLegalOrderChains(
+  left: ReadonlyArray<LegalOrderAction>,
+  right: ReadonlyArray<LegalOrderAction>,
+): Array<Array<LegalOrderAction>> {
+  if (left.length === 0) return [[...right]]
+  if (right.length === 0) return [[...left]]
+
+  return [
+    ...interleaveLegalOrderChains(left.slice(1), right).map((suffix) => [
+      left[0]!,
+      ...suffix,
+    ]),
+    ...interleaveLegalOrderChains(left, right.slice(1)).map((suffix) => [
+      right[0]!,
+      ...suffix,
+    ]),
+  ]
+}
+
+function legalOrderBaseHistory(): Array<LoadSubsetFullFlowEvent> {
+  return [
+    {
+      type: `requestDemand`,
+      sourceId: `source-a`,
+      ownerId: `owner-old`,
+      sessionId: `session`,
+      demandId: `shared`,
+      attemptId: `attempt-old`,
+      alreadyAborted: false,
+    },
+    {
+      type: `registerSourceDemand`,
+      sessionId: `session`,
+      sourceId: `source-a`,
+      demandId: `shared`,
+      attemptId: `attempt-old`,
+    },
+    {
+      type: `requestDemand`,
+      sourceId: `source-b`,
+      ownerId: `owner-peer`,
+      sessionId: `session`,
+      demandId: `shared`,
+      attemptId: `attempt-peer`,
+      alreadyAborted: false,
+    },
+    {
+      type: `registerSourceDemand`,
+      sessionId: `session`,
+      sourceId: `source-b`,
+      demandId: `shared`,
+      attemptId: `attempt-peer`,
+    },
+    {
+      type: `applyAuthoritativeRows`,
+      sourceId: `source-b`,
+      ownerId: `owner-peer`,
+      demandId: `shared`,
+      attemptId: `attempt-peer`,
+      rowKeys: [`peer-row`],
+    },
+    {
+      type: `settleSourceDemand`,
+      sessionId: `session`,
+      sourceId: `source-b`,
+      demandId: `shared`,
+      attemptId: `attempt-peer`,
+      outcome: `resolve`,
+    },
+    {
+      type: `stagePublicationRows`,
+      publicationId: `initial-publication`,
+      sourceId: `ordered-source`,
+      demandId: `ordered`,
+      rows: [{ key: `old-ordered-row`, orderValue: 0 }],
+    },
+    {
+      type: `stagePublicationRows`,
+      publicationId: `initial-publication`,
+      sourceId: `source-b`,
+      demandId: `shared`,
+      rows: [{ key: `peer-row`, orderValue: 2 }],
+    },
+    { type: `commitPublication`, publicationId: `initial-publication` },
+    {
+      type: `stagePublicationRows`,
+      publicationId: `old-replacement`,
+      sourceId: `ordered-source`,
+      demandId: `ordered`,
+      rows: [{ key: `obsolete-ordered-row`, orderValue: 0 }],
+    },
+    {
+      type: `stagePublicationRows`,
+      publicationId: `old-replacement`,
+      sourceId: `source-a`,
+      demandId: `shared`,
+      rows: [{ key: `stale-row`, orderValue: 1 }],
+    },
+    {
+      type: `beginReplacement`,
+      publicationId: `old-replacement`,
+      demands: [
+        { sourceId: `ordered-source`, demandId: `ordered` },
+        { sourceId: `source-a`, demandId: `shared` },
+      ],
+    },
+    {
+      type: `settleReplacement`,
+      publicationId: `old-replacement`,
+      sourceId: `ordered-source`,
+      demandId: `ordered`,
+      outcome: `success`,
+      extent: `exhausted`,
+    },
+    { type: `truncateSource`, sessionId: `session`, sourceId: `source-a` },
+    {
+      type: `retireSourceDemand`,
+      sessionId: `session`,
+      sourceId: `source-a`,
+      demandId: `shared`,
+      attemptId: `attempt-old`,
+    },
+    {
+      type: `requestDemand`,
+      sourceId: `source-a`,
+      ownerId: `owner-fresh`,
+      sessionId: `session`,
+      demandId: `shared`,
+      attemptId: `attempt-fresh`,
+      alreadyAborted: false,
+    },
+    {
+      type: `registerSourceDemand`,
+      sessionId: `session`,
+      sourceId: `source-a`,
+      demandId: `shared`,
+      attemptId: `attempt-fresh`,
+    },
+    {
+      type: `stagePublicationRows`,
+      publicationId: `fresh-replacement`,
+      sourceId: `ordered-source`,
+      demandId: `ordered`,
+      rows: [{ key: `fresh-ordered-row`, orderValue: 0 }],
+    },
+    {
+      type: `stagePublicationRows`,
+      publicationId: `fresh-replacement`,
+      sourceId: `source-a`,
+      demandId: `shared`,
+      rows: [{ key: `fresh-row`, orderValue: 1 }],
+    },
+    {
+      type: `stagePublicationRows`,
+      publicationId: `fresh-replacement`,
+      sourceId: `source-b`,
+      demandId: `shared`,
+      rows: [{ key: `peer-row`, orderValue: 2 }],
+    },
+    {
+      type: `beginReplacement`,
+      publicationId: `fresh-replacement`,
+      demands: [
+        { sourceId: `ordered-source`, demandId: `ordered` },
+        { sourceId: `source-a`, demandId: `shared` },
+        { sourceId: `source-b`, demandId: `shared` },
+      ],
+    },
+    {
+      type: `settleReplacement`,
+      publicationId: `fresh-replacement`,
+      sourceId: `ordered-source`,
+      demandId: `ordered`,
+      outcome: `success`,
+      extent: `exhausted`,
+    },
+    {
+      type: `settleReplacement`,
+      publicationId: `fresh-replacement`,
+      sourceId: `source-b`,
+      demandId: `shared`,
+      outcome: `success`,
+      extent: `exhausted`,
+    },
+  ]
+}
+
+function legalOrderEvents(
+  action: LegalOrderAction,
+  oldOutcome: `resolve` | `reject`,
+): Array<LoadSubsetFullFlowEvent> {
+  switch (action) {
+    case `release-old`:
+      return [
+        {
+          type: `releaseDemand`,
+          sourceId: `source-a`,
+          ownerId: `owner-old`,
+          demandId: `shared`,
+          attemptId: `attempt-old`,
+        },
+      ]
+    case `release-peer`:
+      return [
+        {
+          type: `releaseDemand`,
+          sourceId: `source-b`,
+          ownerId: `owner-peer`,
+          demandId: `shared`,
+          attemptId: `attempt-peer`,
+        },
+        {
+          type: `retireSourceDemand`,
+          sessionId: `session`,
+          sourceId: `source-b`,
+          demandId: `shared`,
+          attemptId: `attempt-peer`,
+        },
+      ]
+    case `settle-old`:
+      return [
+        oldOutcome === `resolve`
+          ? {
+              type: `applyAuthoritativeRows`,
+              sourceId: `source-a`,
+              ownerId: `owner-old`,
+              demandId: `shared`,
+              attemptId: `attempt-old`,
+              rowKeys: [`stale-row`],
+            }
+          : {
+              type: `rejectDemand`,
+              sourceId: `source-a`,
+              ownerId: `owner-old`,
+              demandId: `shared`,
+              attemptId: `attempt-old`,
+            },
+        {
+          type: `settleSourceDemand`,
+          sessionId: `session`,
+          sourceId: `source-a`,
+          demandId: `shared`,
+          attemptId: `attempt-old`,
+          outcome: oldOutcome,
+        },
+        oldOutcome === `resolve`
+          ? {
+              type: `settleReplacement`,
+              publicationId: `old-replacement`,
+              sourceId: `source-a`,
+              demandId: `shared`,
+              outcome: `success`,
+              extent: `exhausted`,
+            }
+          : {
+              type: `settleReplacement`,
+              publicationId: `old-replacement`,
+              sourceId: `source-a`,
+              demandId: `shared`,
+              outcome: `failure`,
+            },
+      ]
+    case `settle-fresh`:
+      return [
+        {
+          type: `applyAuthoritativeRows`,
+          sourceId: `source-a`,
+          ownerId: `owner-fresh`,
+          demandId: `shared`,
+          attemptId: `attempt-fresh`,
+          rowKeys: [`fresh-row`],
+        },
+        {
+          type: `settleSourceDemand`,
+          sessionId: `session`,
+          sourceId: `source-a`,
+          demandId: `shared`,
+          attemptId: `attempt-fresh`,
+          outcome: `resolve`,
+        },
+        {
+          type: `settleReplacement`,
+          publicationId: `fresh-replacement`,
+          sourceId: `source-a`,
+          demandId: `shared`,
+          outcome: `success`,
+          extent: `exhausted`,
+        },
+      ]
+  }
+}
+
+it(`enumerates legal release and settlement orders across every refinement projection`, () => {
+  const publicationOptions = {
+    sourceId: `ordered-source`,
+    demandId: `ordered`,
+    direction: `asc` as const,
+    initialWindowSize: 1,
+  }
+
+  for (const releaseOrder of [
+    [`release-old`, `release-peer`],
+    [`release-peer`, `release-old`],
+  ] as const) {
+    for (const settlementOrder of [
+      [`settle-old`, `settle-fresh`],
+      [`settle-fresh`, `settle-old`],
+    ] as const) {
+      for (const actions of interleaveLegalOrderChains(
+        releaseOrder,
+        settlementOrder,
+      )) {
+        for (const oldOutcome of [`resolve`, `reject`] as const) {
+          for (
+            let prefixLength = 0;
+            prefixLength <= actions.length;
+            prefixLength++
+          ) {
+            const prefix = actions.slice(0, prefixLength)
+            const history = [
+              ...legalOrderBaseHistory(),
+              ...prefix.flatMap((action) =>
+                legalOrderEvents(action, oldOutcome),
+              ),
+            ]
+            const diagnostic = JSON.stringify({
+              releaseOrder,
+              settlementOrder,
+              actions,
+              oldOutcome,
+              prefixLength,
+            })
+            const oldReleased = prefix.includes(`release-old`)
+            const peerReleased = prefix.includes(`release-peer`)
+            const oldSettled = prefix.includes(`settle-old`)
+            const freshSettled = prefix.includes(`settle-fresh`)
+            const replacementComplete = oldSettled && freshSettled
+            const expectedRows = [
+              ...(freshSettled
+                ? [{ sourceId: `source-a`, rowKey: `fresh-row` }]
+                : []),
+              ...(oldSettled && oldOutcome === `resolve` && !oldReleased
+                ? [{ sourceId: `source-a`, rowKey: `stale-row` }]
+                : []),
+              ...(!peerReleased
+                ? [{ sourceId: `source-b`, rowKey: `peer-row` }]
+                : []),
+            ]
+            const expectedEvidence = [
+              ...(freshSettled
+                ? [{ sourceId: `source-a`, demandId: `shared` }]
+                : []),
+              ...(!peerReleased
+                ? [{ sourceId: `source-b`, demandId: `shared` }]
+                : []),
+            ]
+            const expectedPublicationRows = replacementComplete
+              ? [
+                  `fresh-ordered-row`,
+                  `fresh-row`,
+                  ...(!peerReleased ? [`peer-row`] : []),
+                ]
+              : [`old-ordered-row`, ...(!peerReleased ? [`peer-row`] : [])]
+
+            expect(projectTransportLoads(history), diagnostic).toBe(3)
+            expect(projectRetainedSourceRows(history), diagnostic).toEqual(
+              expectedRows,
+            )
+            expect(projectReusableSourceDemands(history), diagnostic).toEqual(
+              expectedEvidence,
+            )
+            expect(projectSourceReadiness(history), diagnostic).toEqual({
+              status: freshSettled ? `ready` : `loading`,
+              pendingSources: freshSettled ? [] : [`source-a`],
+              failedSources: [],
+            })
+            const publication = projectAtomicOrderedPublicationState(
+              history,
+              publicationOptions,
+            )
+            expect(
+              publication.currentPublication?.rows.map(({ key }) => key),
+              diagnostic,
+            ).toEqual(expectedPublicationRows)
+            expect(publication.retainsPreviousPublication, diagnostic).toBe(
+              !replacementComplete,
+            )
+          }
+        }
+      }
+    }
+  }
+})
+
 it(`retains a row until its last independent demand claim releases`, () => {
   const request = (
     demandId: string,
