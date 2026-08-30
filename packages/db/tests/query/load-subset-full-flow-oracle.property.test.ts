@@ -1272,7 +1272,7 @@ it.each([
     let commit!: () => true | Promise<void>
     let cleanupLive: () => Promise<void> = () => Promise.resolve()
     let staleFailure: ReturnType<typeof createDeferred<void>> | undefined
-    const signals: Array<AbortSignal> = []
+    const signals: Array<AbortSignal | undefined> = []
     let unloads = 0
     const source = createCollection<Row>({
       id: `zero-refinement-${autoIndex}-${failureMode}-${reentrantCleanup}`,
@@ -1354,7 +1354,8 @@ it.each([
         expect(live.utils.lastSubsetError).toBeUndefined()
         expect(live.toArray).toEqual([])
         expect(signals).toHaveLength(1)
-        expect(signals[0]!.aborted).toBe(true)
+        expect(signals[0]).toBeInstanceOf(AbortSignal)
+        expect(signals[0]?.aborted).toBe(true)
         expect(unloads).toBe(1)
         expect(live.utils.getWindow()).toEqual({
           offset: 0,
