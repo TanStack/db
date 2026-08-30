@@ -1221,17 +1221,18 @@ the bug.
 
 The grammar composes these independent axes:
 
-| Axis            | Values owned by this oracle family                                                                                                                                  |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Source shape    | One or many opaque sources; zero, one, or many already-evaluated result contributions                                                                               |
-| Demand relation | Exact, shared, covered, uncovered, ordered, additional, release-pending, durably released or disposed                                                               |
-| Identity        | Owner, session, window revision, continuation task, demand, attempt, acquisition, source, transaction, row version, publication, boundary frame, failure occurrence |
-| Boundary phase  | Before adapter entry, inside adapter or callback entry, returned/in flight, settled, cleanup                                                                        |
-| Capability      | Indexed or unindexed order; expressible or opaque boundary and collation; authoritative or unknown extent                                                           |
-| Evidence        | Applied row keys plus `unknown`, `continues`, or `exhausted` extent; rejection or abort establishes none                                                            |
-| Publication     | Last complete snapshot, private replacement, failed or superseded generation, cleaned session                                                                       |
-| Origin          | Ordinary source work or the exact ordered/additional acquisition signal lineage that authorized a row version                                                       |
-| Observation     | Result rows, readiness, ordered boundary, exact error occurrences, receipts, ownership, physical starts, and retained-space counts                                  |
+| Axis            | Values owned by this oracle family                                                                                                                                                   |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Source shape    | One or many opaque sources; zero, one, or many already-evaluated result contributions                                                                                                |
+| Row key domain  | String or number identity; unordered membership for ownership plus shared `compareKeys` order for removal publication                                                                |
+| Demand relation | Exact, shared, covered, uncovered, ordered, additional, release-pending, durably released or disposed                                                                                |
+| Identity        | Owner, session, window revision, continuation task, demand, attempt, acquisition, source, transaction, row version, publication, boundary frame, failure occurrence                  |
+| Boundary phase  | Before adapter entry, inside adapter or callback entry, returned/in flight, settled, cleanup                                                                                         |
+| Capability      | Indexed or unindexed order; expressible or opaque boundary and collation; authoritative or unknown extent                                                                            |
+| Evidence        | Applied row keys plus `unknown`, `continues`, or `exhausted` extent; rejection or abort establishes none                                                                             |
+| Publication     | Last complete snapshot, private replacement, failed or superseded generation, cleaned session                                                                                        |
+| Origin          | Ordinary source work or the exact ordered/additional acquisition signal lineage that authorized a row version                                                                        |
+| Observation     | Result rows, readiness, ordered boundary, canonically ordered removals, exact error occurrences, receipts, ownership, physical starts, evidence-path work, and retained-space counts |
 
 An executable history chooses values on these axes, then combines them through
 the demand facts above. A logical request installs its owner before adapter
@@ -1248,7 +1249,9 @@ throwing cleanup leaves a release-pending acquisition, its coverage, and row
 support as retryable debt. Only accepted cleanup retires those physical facts.
 Resource observations therefore count leases, acquisitions, coverage claims,
 unsettled claims, retained demands, outcomes, and row-key slots separately from
-transport starts.
+transport starts. Algorithmic work is another independent observation: count
+row-key copies, demand snapshots, and demand-key derivations rather than using
+transport starts or retained space as a proxy for evidence computation.
 
 Adapter entry and every result, cleanup, and listener callback are reentrancy
 boundaries. Any otherwise legal event may occur before that boundary returns.
@@ -1271,8 +1274,12 @@ and cardinality of the fact it claims to check. In particular:
 - ownership laws keep logical leases separate from physical row support;
 - publication laws keep demand origin, row version, and generation separate;
 - work laws count physical starts separately from logical owners;
+- evidence-work laws count row-key copies, demand snapshots, and demand-key
+  derivations separately and bound them independently of candidate count;
 - space laws count each retained resource category separately;
 - release laws distinguish requested, retryable, accepted, and disposed work;
+- removal laws preserve the shared `compareKeys` sequence across mixed string,
+  number, ASCII, and non-ASCII keys rather than comparing only a set;
 - error laws preserve occurrence, originating options, and report order rather
   than deduplicating by payload;
 - renaming laws erase names only after every allowed next-command observation
@@ -1288,16 +1295,19 @@ The reconstruction control for a new finding is:
 2. name every logical and physical identity involved;
 3. state the adapter capability which makes each transport transition legal;
 4. place each action at its exact boundary phase and source origin;
-5. derive evidence, ownership, coverage, publication, failure occurrences, and
-   retained resources independently;
-6. compare the first public or resource observation that can differ; and
+5. derive evidence, ownership, coverage, publication, failure occurrences,
+   canonical removal order, evidence-path work, and retained resources
+   independently;
+6. compare the first public, algorithmic-work, or retained-resource observation
+   that can differ; and
 7. verify the same grammar admits the nearest marginal case but rejects a raw
    relational or materialization problem.
 
-Zero-sized windows, empty sources, unknown extent, and synchronous adapter
-results are marginal cases of this grammar, not separate families. Predicate
-evaluation, join multiplicity, aggregate deltas, and nested materialization are
-outside it and remain negative controls.
+Zero-sized windows, empty sources, unknown extent, synchronous adapter results,
+and mixed string/number or non-ASCII row keys are marginal cases of this
+grammar, not separate families. Predicate evaluation, join multiplicity,
+aggregate deltas, and nested materialization are outside it and remain negative
+controls.
 
 DBSP operator suites own incremental relational laws. The includes suites own
 compiled routes and materialized nested results. A load-subset production
