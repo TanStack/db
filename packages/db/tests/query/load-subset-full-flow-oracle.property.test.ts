@@ -4,6 +4,7 @@ import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { SyncTransactionAbortedError } from '../../src/errors.js'
 import { BTreeIndex, ReverseIndex } from '../../src/index.js'
+import { localOnlyCollectionOptions } from '../../src/local-only.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
 import { createEffect } from '../../src/query/effect.js'
 import { createLiveQueryCollection, eq, gte } from '../../src/query/index.js'
@@ -19,9 +20,9 @@ import {
   projectAtomicOrderedPublicationState,
   projectAtomicOrderedPublications,
   projectAuthorizedContinuationStarts,
-  projectMultiSourceOrderedWindow,
   projectOrderedContinuationEvidence,
   projectOrderedPublicationBoundary,
+  projectOrderedSourceProgress,
   projectRetainedRowKeys,
   projectReusableDemands,
   projectTransportLoads,
@@ -37,7 +38,10 @@ import {
 } from '../oracle-config.js'
 import type { InitialQueryBuilder } from '../../src/query/builder/index.js'
 import type { LoadSubsetOptions, WritableDeep } from '../../src/types.js'
-import type { LoadSubsetFullFlowEvent } from '../load-subset-full-flow-model.js'
+import type {
+  LoadSubsetFullFlowEvent,
+  OrderedSourceStep,
+} from '../load-subset-full-flow-model.js'
 
 type AdapterLifecycleEvent =
   | { type: `start`; options: LoadSubsetOptions }
@@ -312,6 +316,66 @@ function orderedPrimaryRows(
   })
 }
 
+let multiSourceOrderedControlId = 0
+
+async function observeOrderedSourceSteps(
+  scenario: MultiSourceOrderedScenario,
+): Promise<Array<OrderedSourceStep>> {
+  const controlId = multiSourceOrderedControlId++
+  const primary = createCollection(
+    localOnlyCollectionOptions({
+      id: `multi-source-control-primary-${controlId}`,
+      getKey: (row) => row.id,
+      initialData: [...scenario.primaryRows],
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+    }),
+  )
+  const secondary = createCollection(
+    localOnlyCollectionOptions({
+      id: `multi-source-control-secondary-${controlId}`,
+      getKey: (row) => row.id,
+      initialData: [...scenario.secondaryRows],
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+    }),
+  )
+  const result = createLiveQueryCollection({
+    id: `multi-source-control-result-${controlId}`,
+    query: (q) =>
+      q
+        .from({ primaryRow: primary })
+        .innerJoin(
+          { secondaryRow: secondary },
+          ({ primaryRow, secondaryRow }) =>
+            eq(primaryRow.joinKey, secondaryRow.joinKey),
+        )
+        .orderBy(({ primaryRow }) => primaryRow.rank, scenario.direction),
+    startSync: true,
+  })
+
+  try {
+    await result.preload()
+    const resultKeysBySource = new Map<string, Array<string>>()
+    for (const { primaryRow, secondaryRow } of result.toArray) {
+      const keys = resultKeysBySource.get(primaryRow.id) ?? []
+      keys.push(`${primaryRow.id}:${secondaryRow.id}`)
+      resultKeysBySource.set(primaryRow.id, keys)
+    }
+    return orderedPrimaryRows(scenario).map((row) => ({
+      sourceKey: row.id,
+      resultKeys: resultKeysBySource.get(row.id) ?? [],
+      demandKeys: [row.joinKey],
+    }))
+  } finally {
+    await Promise.all([
+      result.cleanup(),
+      primary.cleanup(),
+      secondary.cleanup(),
+    ])
+  }
+}
+
 function hasPreloadedSecondary(scenario: MultiSourceOrderedScenario): boolean {
   return (
     scenario.secondaryPublication === `preloaded` ||
@@ -344,15 +408,9 @@ async function runMultiSourceOrderedScenario(
   type SecondaryRow = { id: string; joinKey: string }
 
   const primaryOrder = orderedPrimaryRows(scenario)
-  const projection = projectMultiSourceOrderedWindow({
-    primaryOrder: primaryOrder.map(({ id, joinKey }) => ({
-      key: id,
-      joinKey,
-    })),
-    secondaryRows: scenario.secondaryRows.map(({ id, joinKey }) => ({
-      key: id,
-      joinKey,
-    })),
+  const sourceSteps = await observeOrderedSourceSteps(scenario)
+  const projection = projectOrderedSourceProgress({
+    sourceSteps,
     offset: scenario.offset,
     limit: scenario.limit,
   })
@@ -659,7 +717,7 @@ async function runMultiSourceOrderedScenario(
       live.toArray.map(
         ({ primaryRow, secondaryRow }) => `${primaryRow.id}:${secondaryRow.id}`,
       ),
-    ).toEqual(projection.visiblePairKeys)
+    ).toEqual(projection.visibleResultKeys)
 
     const initialPrimaryCallCount = primaryCalls.length
     if (scenario.limit === 0) {
@@ -672,15 +730,8 @@ async function runMultiSourceOrderedScenario(
 
     const refinedOffset = scenario.offset === 0 ? 1 : 0
     const refinedLimit = scenario.limit === 0 ? 1 : scenario.limit + 1
-    const refinedProjection = projectMultiSourceOrderedWindow({
-      primaryOrder: primaryOrder.map(({ id, joinKey }) => ({
-        key: id,
-        joinKey,
-      })),
-      secondaryRows: scenario.secondaryRows.map(({ id, joinKey }) => ({
-        key: id,
-        joinKey,
-      })),
+    const refinedProjection = projectOrderedSourceProgress({
+      sourceSteps,
       offset: refinedOffset,
       limit: refinedLimit,
     })
@@ -693,7 +744,7 @@ async function runMultiSourceOrderedScenario(
       live.toArray.map(
         ({ primaryRow, secondaryRow }) => `${primaryRow.id}:${secondaryRow.id}`,
       ),
-    ).toEqual(refinedProjection.visiblePairKeys)
+    ).toEqual(refinedProjection.visibleResultKeys)
     if (scenario.limit === 0) {
       const refinementCalls = primaryCalls
         .slice(initialPrimaryCallCount)
@@ -804,7 +855,7 @@ async function runMultiSourceOrderedScenario(
       expect(
         literalJoinKeys.every((joinKey) => primaryJoinKeys.has(joinKey)),
       ).toBe(true)
-      for (const joinKey of projection.demandedJoinKeys) {
+      for (const joinKey of projection.demandedKeys) {
         expect(requestedJoinKeys.has(joinKey)).toBe(true)
       }
       expect(
@@ -2379,67 +2430,66 @@ it(`settles concurrent secondary loads out of order across paged commits`, async
   }
 })
 
-it(`projects the minimal primary prefix needed by a joined window`, () => {
-  const projection = projectMultiSourceOrderedWindow({
-    primaryOrder: [
-      { key: `a`, joinKey: `x` },
-      { key: `b`, joinKey: `y` },
-      { key: `c`, joinKey: `z` },
-      { key: `d`, joinKey: `x` },
-    ],
-    secondaryRows: [
-      { key: `x-0`, joinKey: `x` },
-      { key: `z-0`, joinKey: `z` },
+it(`projects the minimal source prefix needed by evaluated result contributions`, () => {
+  const projection = projectOrderedSourceProgress({
+    sourceSteps: [
+      { sourceKey: `a`, resultKeys: [`a:x-0`], demandKeys: [`x`] },
+      { sourceKey: `b`, resultKeys: [], demandKeys: [`y`] },
+      { sourceKey: `c`, resultKeys: [`c:z-0`], demandKeys: [`z`] },
+      { sourceKey: `d`, resultKeys: [`d:x-0`], demandKeys: [`x`] },
     ],
     offset: 0,
     limit: 2,
   })
 
   expect(projection).toEqual({
-    visiblePairKeys: [`a:x-0`, `c:z-0`],
-    scannedPrimaryKeys: [`a`, `b`, `c`],
-    primaryCursorKeys: [undefined, `a`, `b`],
-    demandedJoinKeys: [`x`, `y`, `z`],
+    visibleResultKeys: [`a:x-0`, `c:z-0`],
+    scannedSourceKeys: [`a`, `b`, `c`],
+    sourceCursorKeys: [undefined, `a`, `b`],
+    demandedKeys: [`x`, `y`, `z`],
     rowsNeeded: 0,
     sourceExhausted: false,
   })
 })
 
-it(`erases join-key spelling and ignores unreachable secondary rows`, () => {
-  const original = projectMultiSourceOrderedWindow({
-    primaryOrder: [
-      { key: `a`, joinKey: `x` },
-      { key: `b`, joinKey: `y` },
-      { key: `c`, joinKey: `x` },
-    ],
-    secondaryRows: [
-      { key: `match-0`, joinKey: `x` },
-      { key: `unreachable`, joinKey: `unused` },
+it(`erases demand-key spelling without changing source progress`, () => {
+  const original = projectOrderedSourceProgress({
+    sourceSteps: [
+      { sourceKey: `a`, resultKeys: [`a:match-0`], demandKeys: [`x`] },
+      { sourceKey: `b`, resultKeys: [], demandKeys: [`y`] },
+      { sourceKey: `c`, resultKeys: [`c:match-0`], demandKeys: [`x`] },
     ],
     offset: 0,
     limit: 2,
   })
-  const renamed = projectMultiSourceOrderedWindow({
-    primaryOrder: [
-      { key: `a`, joinKey: `renamed-x` },
-      { key: `b`, joinKey: `renamed-y` },
-      { key: `c`, joinKey: `renamed-x` },
+  const renamed = projectOrderedSourceProgress({
+    sourceSteps: [
+      {
+        sourceKey: `a`,
+        resultKeys: [`a:match-0`],
+        demandKeys: [`renamed-x`],
+      },
+      { sourceKey: `b`, resultKeys: [], demandKeys: [`renamed-y`] },
+      {
+        sourceKey: `c`,
+        resultKeys: [`c:match-0`],
+        demandKeys: [`renamed-x`],
+      },
     ],
-    secondaryRows: [{ key: `match-0`, joinKey: `renamed-x` }],
     offset: 0,
     limit: 2,
   })
 
   expect({
-    visiblePairKeys: original.visiblePairKeys,
-    scannedPrimaryKeys: original.scannedPrimaryKeys,
-    primaryCursorKeys: original.primaryCursorKeys,
+    visibleResultKeys: original.visibleResultKeys,
+    scannedSourceKeys: original.scannedSourceKeys,
+    sourceCursorKeys: original.sourceCursorKeys,
     rowsNeeded: original.rowsNeeded,
     sourceExhausted: original.sourceExhausted,
   }).toEqual({
-    visiblePairKeys: renamed.visiblePairKeys,
-    scannedPrimaryKeys: renamed.scannedPrimaryKeys,
-    primaryCursorKeys: renamed.primaryCursorKeys,
+    visibleResultKeys: renamed.visibleResultKeys,
+    scannedSourceKeys: renamed.scannedSourceKeys,
+    sourceCursorKeys: renamed.sourceCursorKeys,
     rowsNeeded: renamed.rowsNeeded,
     sourceExhausted: renamed.sourceExhausted,
   })
@@ -2451,52 +2501,44 @@ it(`exhausts the bounded multi-source ordered-window model`, () => {
     { key: `b`, joinKey: `y` },
     { key: `c`, joinKey: `z` },
   ]
-  const joinKeys = [`x`, `y`, `z`] as const
-
   for (const xCount of [0, 1, 2]) {
     for (const yCount of [0, 1, 2]) {
       for (const zCount of [0, 1, 2]) {
         const counts = [xCount, yCount, zCount]
-        const secondaryRows = joinKeys.flatMap((joinKey, index) =>
-          Array.from({ length: counts[index]! }, (_, matchIndex) => ({
-            key: `${joinKey}-${matchIndex}`,
-            joinKey,
-          })),
-        )
+        const sourceSteps = rows.map((row, index) => ({
+          sourceKey: row.key,
+          resultKeys: Array.from(
+            { length: counts[index]! },
+            (_, matchIndex) => `${row.key}:${row.joinKey}-${matchIndex}`,
+          ),
+          demandKeys: [row.joinKey],
+        }))
         for (const offset of [0, 1, 2]) {
           for (const limit of [0, 1, 2]) {
-            const projection = projectMultiSourceOrderedWindow({
-              primaryOrder: rows,
-              secondaryRows,
+            const projection = projectOrderedSourceProgress({
+              sourceSteps,
               offset,
               limit,
             })
-            const direct = rows
-              .flatMap((row) =>
-                secondaryRows
-                  .filter(({ joinKey }) => joinKey === row.joinKey)
-                  .map((secondaryRow) => `${row.key}:${secondaryRow.key}`),
-              )
+            const direct = sourceSteps
+              .flatMap(({ resultKeys }) => resultKeys)
               .slice(offset, offset + limit)
 
-            expect(projection.visiblePairKeys).toEqual(direct)
+            expect(projection.visibleResultKeys).toEqual(direct)
             expect(projection.rowsNeeded).toBe(
               Math.max(0, limit - direct.length),
             )
             if (limit === 0) {
-              expect(projection.scannedPrimaryKeys).toEqual([])
+              expect(projection.scannedSourceKeys).toEqual([])
               continue
             }
-            if (projection.scannedPrimaryKeys.length < rows.length) {
-              const shorterPrefix = rows.slice(
+            if (projection.scannedSourceKeys.length < sourceSteps.length) {
+              const shorterPrefix = sourceSteps.slice(
                 0,
-                projection.scannedPrimaryKeys.length - 1,
+                projection.scannedSourceKeys.length - 1,
               )
               const shorterPairCount = shorterPrefix.reduce(
-                (count, row) =>
-                  count +
-                  secondaryRows.filter(({ joinKey }) => joinKey === row.joinKey)
-                    .length,
+                (count, step) => count + step.resultKeys.length,
                 0,
               )
               expect(shorterPairCount).toBeLessThan(offset + limit)

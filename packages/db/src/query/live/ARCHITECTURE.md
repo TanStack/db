@@ -1135,6 +1135,22 @@ create recursive Collection machinery.
 | Query-db ownership                                                           | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`    |
 | Reachable nested shape                                                       | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts`  |
 
+### Oracle family boundary
+
+The shared load-subset refinement model begins after relational evaluation. It
+may vary opaque source topology, demand relationships, already-evaluated result
+contributions, and public window state. It owns asynchronous demand, applied
+evidence, row support, coverage, publication, source progress, and resource
+work. It must not interpret query IR, weighted deltas, predicates, joins,
+grouping, ordering, or nested materialization.
+
+DBSP operator suites own incremental relational laws. The includes suites own
+compiled routes and materialized nested results. A load-subset production
+harness may use an eager query from those paths as its relational control, then
+compare lazy demand and source progress with a small refinement projection. It
+must not copy those paths into a second relational engine inside the shared
+model.
+
 Each oracle identifies the first divergent checkpoint and compares either the
 whole result or one exact structural difference. Correlated-materialization
 scenarios use direct assertions. A boundary suite may retain an exact

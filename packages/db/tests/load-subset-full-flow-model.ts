@@ -40,77 +40,65 @@ export type OrderedContinuationEvidence = {
   rowsNeeded: number
 }
 
-export type MultiSourceOrderedRow = {
-  key: string
-  joinKey: string
+export type OrderedSourceStep = {
+  sourceKey: string
+  resultKeys: ReadonlyArray<string>
+  demandKeys: ReadonlyArray<string>
 }
 
-export type MultiSourceSecondaryRow = {
-  key: string
-  joinKey: string
-}
-
-export type MultiSourceOrderedWindow = {
-  visiblePairKeys: ReadonlyArray<string>
-  scannedPrimaryKeys: ReadonlyArray<string>
-  primaryCursorKeys: ReadonlyArray<string | undefined>
-  demandedJoinKeys: ReadonlyArray<string>
+export type OrderedSourceProgress = {
+  visibleResultKeys: ReadonlyArray<string>
+  scannedSourceKeys: ReadonlyArray<string>
+  sourceCursorKeys: ReadonlyArray<string | undefined>
+  demandedKeys: ReadonlyArray<string>
   rowsNeeded: number
   sourceExhausted: boolean
 }
 
 /**
- * Projects the smallest forward primary-source scan that fills a joined
- * window. The caller supplies primary rows in total order, so this projector
- * only owns the cross-source relational law: every scanned primary row advances
- * source progress, while joined pair multiplicity fills offset plus limit.
- * Production may prove the same result with reverse authoritative demands; the
- * boundary harness compares the public result and each transport law separately.
+ * Projects the smallest forward source scan that fills a result window. Each
+ * step contains result contributions already evaluated by the owning DBSP
+ * oracle or an eager production control. This model owns source progress only;
+ * it does not interpret predicates, joins, grouping, ordering, or includes.
  */
-export function projectMultiSourceOrderedWindow(options: {
-  primaryOrder: ReadonlyArray<MultiSourceOrderedRow>
-  secondaryRows: ReadonlyArray<MultiSourceSecondaryRow>
+export function projectOrderedSourceProgress(options: {
+  sourceSteps: ReadonlyArray<OrderedSourceStep>
   offset: number
   limit: number
-}): MultiSourceOrderedWindow {
-  const scannedPrimaryKeys: Array<string> = []
-  const joinedPairKeys: Array<string> = []
-  const demandedJoinKeys: Array<string> = []
-  const seenJoinKeys = new Set<string>()
+}): OrderedSourceProgress {
+  const scannedSourceKeys: Array<string> = []
+  const resultKeys: Array<string> = []
+  const demandedKeys: Array<string> = []
+  const seenDemandKeys = new Set<string>()
   const targetSize = options.limit === 0 ? 0 : options.offset + options.limit
-  const secondaryRows = [...options.secondaryRows].sort((left, right) =>
-    left.key.localeCompare(right.key),
-  )
 
-  for (const row of options.primaryOrder) {
-    if (joinedPairKeys.length >= targetSize) break
+  for (const step of options.sourceSteps) {
+    if (resultKeys.length >= targetSize) break
 
-    scannedPrimaryKeys.push(row.key)
-    if (!seenJoinKeys.has(row.joinKey)) {
-      seenJoinKeys.add(row.joinKey)
-      demandedJoinKeys.push(row.joinKey)
-    }
-    for (const secondaryRow of secondaryRows) {
-      if (secondaryRow.joinKey === row.joinKey) {
-        joinedPairKeys.push(`${row.key}:${secondaryRow.key}`)
+    scannedSourceKeys.push(step.sourceKey)
+    for (const demandKey of step.demandKeys) {
+      if (!seenDemandKeys.has(demandKey)) {
+        seenDemandKeys.add(demandKey)
+        demandedKeys.push(demandKey)
       }
     }
+    resultKeys.push(...step.resultKeys)
   }
 
-  const visiblePairKeys = joinedPairKeys.slice(
+  const visibleResultKeys = resultKeys.slice(
     options.offset,
     options.offset + options.limit,
   )
 
   return {
-    visiblePairKeys,
-    scannedPrimaryKeys,
-    primaryCursorKeys: scannedPrimaryKeys.map((_, index) =>
-      index === 0 ? undefined : scannedPrimaryKeys[index - 1],
+    visibleResultKeys,
+    scannedSourceKeys,
+    sourceCursorKeys: scannedSourceKeys.map((_, index) =>
+      index === 0 ? undefined : scannedSourceKeys[index - 1],
     ),
-    demandedJoinKeys,
-    rowsNeeded: Math.max(0, options.limit - visiblePairKeys.length),
-    sourceExhausted: scannedPrimaryKeys.length === options.primaryOrder.length,
+    demandedKeys,
+    rowsNeeded: Math.max(0, options.limit - visibleResultKeys.length),
+    sourceExhausted: scannedSourceKeys.length === options.sourceSteps.length,
   }
 }
 
