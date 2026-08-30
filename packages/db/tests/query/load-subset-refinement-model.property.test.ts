@@ -1989,6 +1989,16 @@ async function runAcquisitionTopology(
   let initialPhysicalStarts = 0
   let initialLogicalStarts = 0
   let initialDeduplications = 0
+  let retainedOwnerRowKeys: Array<string> = []
+  let retainedOwnerReady = false
+  let coOwnerPhysicalStarts = 0
+  let coOwnerLogicalStarts = 0
+  let coOwnerDeduplications = 0
+  let coOwnerRowKeys: Array<string> = []
+  let coOwnerBatches: Array<Array<string>> = []
+  let coOwnerCallbackReads: Array<Array<string>> = []
+  let coOwnerBatchesAfterUnsubscribe: Array<Array<string>> = []
+  let coOwnerCallbackReadsAfterUnsubscribe: Array<Array<string>> = []
   let remountRowKeys: Array<string> = []
   let remountBatches: Array<Array<string>> = []
   let remountCallbackReads: Array<Array<string>> = []
@@ -2036,9 +2046,56 @@ async function runAcquisitionTopology(
     initialPhysicalStarts = physicalStarts
     initialLogicalStarts = logicalStarts
     initialDeduplications = deduplications
-    subscriptions.forEach((subscription) => subscription.unsubscribe())
-    await Promise.all(liveQueries.map((live) => live.cleanup()))
-    expect(logicalReleases).toBe(2)
+    subscriptions[0]!.unsubscribe()
+    await liveQueries[0]!.cleanup()
+    expect(logicalReleases).toBe(1)
+
+    const coOwner = createLiveQueryCollection({
+      id: `refinement-acquisition-${runId}-co-owner`,
+      query: (q) => q.from({ row: sharedSource }),
+      startSync: false,
+    })
+    const observedCoOwnerBatches: Array<Array<string>> = []
+    const observedCoOwnerCallbackReads: Array<Array<string>> = []
+    const coOwnerSubscription = coOwner.subscribeChanges(
+      (changes) => {
+        observedCoOwnerBatches.push(
+          changes.map(({ key }) => String(key)).sort(),
+        )
+        observedCoOwnerCallbackReads.push(
+          coOwner.toArray.map(({ id }) => String(id)).sort(),
+        )
+      },
+      { includeInitialState: false },
+    )
+    try {
+      await coOwner.preload()
+      retainedOwnerRowKeys = liveQueries[1]!.toArray
+        .map(({ id }) => String(id))
+        .sort()
+      retainedOwnerReady = liveQueries[1]!.isReady()
+      coOwnerPhysicalStarts = physicalStarts
+      coOwnerLogicalStarts = logicalStarts
+      coOwnerDeduplications = deduplications
+      coOwnerRowKeys = coOwner.toArray.map(({ id }) => String(id)).sort()
+      coOwnerBatches = observedCoOwnerBatches.map((batch) => [...batch])
+      coOwnerCallbackReads = observedCoOwnerCallbackReads.map((read) => [
+        ...read,
+      ])
+
+      subscriptions[1]!.unsubscribe()
+      await liveQueries[1]!.cleanup()
+    } finally {
+      coOwnerSubscription.unsubscribe()
+      await coOwner.cleanup()
+      coOwnerBatchesAfterUnsubscribe = observedCoOwnerBatches.map((batch) => [
+        ...batch,
+      ])
+      coOwnerCallbackReadsAfterUnsubscribe = observedCoOwnerCallbackReads.map(
+        (read) => [...read],
+      )
+    }
+    expect(logicalReleases).toBe(3)
 
     const remount = createLiveQueryCollection({
       id: `refinement-acquisition-${runId}-remount`,
@@ -2088,6 +2145,16 @@ async function runAcquisitionTopology(
     initialPhysicalStarts,
     initialLogicalStarts,
     initialDeduplications,
+    retainedOwnerRowKeys,
+    retainedOwnerReady,
+    coOwnerPhysicalStarts,
+    coOwnerLogicalStarts,
+    coOwnerDeduplications,
+    coOwnerRowKeys,
+    coOwnerBatches,
+    coOwnerCallbackReads,
+    coOwnerBatchesAfterUnsubscribe,
+    coOwnerCallbackReadsAfterUnsubscribe,
     totalPhysicalStarts: physicalStarts,
     totalLogicalStarts: logicalStarts,
     logicalReleases,
@@ -2172,6 +2239,37 @@ for (const campaign of refinementCampaigns(1_779_008)) {
       expect(separateActual.initialPhysicalStarts).toBe(2)
       expect(sharedActual.initialDeduplications).toBe(1)
       expect(separateActual.initialDeduplications).toBe(0)
+      expect(sharedActual.retainedOwnerRowKeys).toEqual(expectedKeys)
+      expect(separateActual.retainedOwnerRowKeys).toEqual(expectedKeys)
+      expect(sharedActual.retainedOwnerReady).toBe(true)
+      expect(separateActual.retainedOwnerReady).toBe(true)
+      expect(sharedActual.coOwnerRowKeys).toEqual(expectedKeys)
+      expect(separateActual.coOwnerRowKeys).toEqual(expectedKeys)
+      expect(sharedActual.coOwnerBatches).toEqual([])
+      expect(separateActual.coOwnerBatches).toEqual([expectedKeys, []])
+      expect(sharedActual.coOwnerCallbackReads).toEqual([])
+      expect(separateActual.coOwnerCallbackReads).toEqual([
+        expectedKeys,
+        expectedKeys,
+      ])
+      expect(sharedActual.coOwnerBatchesAfterUnsubscribe).toEqual(
+        sharedActual.coOwnerBatches,
+      )
+      expect(sharedActual.coOwnerCallbackReadsAfterUnsubscribe).toEqual(
+        sharedActual.coOwnerCallbackReads,
+      )
+      expect(separateActual.coOwnerBatchesAfterUnsubscribe).toEqual(
+        separateActual.coOwnerBatches,
+      )
+      expect(separateActual.coOwnerCallbackReadsAfterUnsubscribe).toEqual(
+        separateActual.coOwnerCallbackReads,
+      )
+      expect(sharedActual.coOwnerLogicalStarts).toBe(3)
+      expect(separateActual.coOwnerLogicalStarts).toBe(3)
+      expect(sharedActual.coOwnerPhysicalStarts).toBe(1)
+      expect(separateActual.coOwnerPhysicalStarts).toBe(3)
+      expect(sharedActual.coOwnerDeduplications).toBe(2)
+      expect(separateActual.coOwnerDeduplications).toBe(0)
       expect(sharedActual.remountRowKeys).toEqual(expectedKeys)
       expect(separateActual.remountRowKeys).toEqual(expectedKeys)
       expect(sharedActual.remountBatches).toEqual([expectedKeys, []])
@@ -2196,13 +2294,13 @@ for (const campaign of refinementCampaigns(1_779_008)) {
       expect(separateActual.remountCallbackReadsAfterUnsubscribe).toEqual(
         separateActual.remountCallbackReads,
       )
-      expect(sharedActual.totalLogicalStarts).toBe(3)
-      expect(separateActual.totalLogicalStarts).toBe(3)
-      expect(sharedActual.logicalReleases).toBe(3)
-      expect(separateActual.logicalReleases).toBe(3)
+      expect(sharedActual.totalLogicalStarts).toBe(4)
+      expect(separateActual.totalLogicalStarts).toBe(4)
+      expect(sharedActual.logicalReleases).toBe(4)
+      expect(separateActual.logicalReleases).toBe(4)
       expect(sharedActual.totalPhysicalStarts).toBe(2)
-      expect(separateActual.totalPhysicalStarts).toBe(3)
-      expect(sharedActual.totalDeduplications).toBe(1)
+      expect(separateActual.totalPhysicalStarts).toBe(4)
+      expect(sharedActual.totalDeduplications).toBe(2)
       expect(separateActual.totalDeduplications).toBe(0)
       expect(
         sharedActual.totalPhysicalStarts + sharedActual.totalDeduplications,

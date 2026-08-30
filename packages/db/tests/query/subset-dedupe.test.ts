@@ -315,19 +315,26 @@ describe(`createDeduplicatedLoadSubset`, () => {
       })),
     ),
   )(
-    `invalidates $settlement $name settled coverage on unload`,
+    `invalidates $settlement $name settled coverage after its final owner unloads`,
     async ({ createOptions, settlement }) => {
       const loadSubset = vi.fn(() =>
         settlement === `sync` ? (true as const) : Promise.resolve(),
       )
       const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
       const owner = createOptions()
+      const peer = createOptions()
 
       await deduplicated.loadSubset(owner)
-      expect(deduplicated.loadSubset(createOptions())).toBe(true)
+      expect(deduplicated.loadSubset(peer)).toBe(true)
       expect(loadSubset).toHaveBeenCalledTimes(1)
 
       deduplicated.unloadSubset(owner)
+      const coOwner = createOptions()
+      expect(deduplicated.loadSubset(coOwner)).toBe(true)
+      expect(loadSubset).toHaveBeenCalledTimes(1)
+
+      deduplicated.unloadSubset(peer)
+      deduplicated.unloadSubset(coOwner)
       await deduplicated.loadSubset(createOptions())
 
       expect(loadSubset).toHaveBeenCalledTimes(2)

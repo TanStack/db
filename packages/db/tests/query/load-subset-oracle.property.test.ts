@@ -2428,19 +2428,15 @@ describe(`loadSubset coverage oracle`, () => {
     ),
   )
 
-  it(
-    `discovered trace: a composed predicate state forgets one loaded region`,
-    expectExactCountFailure(
-      () =>
-        countLoads([
-          { kind: `in`, values: [0] },
-          { kind: `in`, values: [2] },
-          { kind: `eq`, value: 2 },
-        ]),
-      3,
-      2,
-    ),
-  )
+  it(`retains exact coverage when predicate regions compose`, () => {
+    expect(
+      countLoads([
+        { kind: `in`, values: [0] },
+        { kind: `in`, values: [2] },
+        { kind: `eq`, value: 2 },
+      ]),
+    ).toBe(2)
+  })
 
   it(`rejects repeated transport work for one identical compound predicate`, () => {
     const predicate: PredicateSpec = {
@@ -2689,11 +2685,8 @@ describe(`loadSubset coverage oracle`, () => {
     },
   )
 
-  it(`discovered trace: settled predicate regions cover their union`, async () => {
-    await expectAssertionFailure(runAsyncScenario, {
-      checkpoint: 2,
-      classify: ({ actual, expected }) => actual === true && expected === false,
-    })({
+  it(`settled predicate regions cover their union`, async () => {
+    await runAsyncScenario({
       first: [0],
       second: [1],
       firstOutcome: `resolve`,

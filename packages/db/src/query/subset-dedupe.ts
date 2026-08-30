@@ -27,17 +27,26 @@ type SharedAbortLease = {
 type LogicalLoadReservation = {
   generation: number
   invalidatesCoverage: boolean
-  inflight?: InflightCall
+  acquisition?: AcquisitionOwnership
 }
 
-type InflightCall = {
+type AcquisitionOwnership = {
+  matchesPhysicalRequest: (options: LoadSubsetOptions) => boolean
+  generation: number
+  reservations: Set<LogicalLoadReservation>
+}
+
+type InflightCall = AcquisitionOwnership & {
   options: LoadSubsetOptions
   promise: Promise<void | LoadSubsetResult>
   lease: SharedAbortLease
-  matchesPhysicalRequest: (options: LoadSubsetOptions) => boolean
-  generation: number
   trackable: boolean
-  reservations: Set<LogicalLoadReservation>
+}
+
+function isInflightCall(
+  acquisition: AcquisitionOwnership,
+): acquisition is InflightCall {
+  return `lease` in acquisition
 }
 
 /**
@@ -86,6 +95,10 @@ export class DeduplicatedLoadSubset {
   // Track in-flight calls to prevent concurrent duplicate requests
   // Each entry also owns the shared cancellation lease for its requesters.
   private inflightCalls: Array<InflightCall> = []
+
+  // Retain exact acquisition ownership after settlement so a later exact
+  // owner can share its evidence until the final logical lease releases.
+  private exactAcquisitions: Array<AcquisitionOwnership> = []
 
   // Generation counter to invalidate in-flight requests after reset()
   // When reset() is called, this increments, and any in-flight completion handlers
@@ -141,6 +154,18 @@ export class DeduplicatedLoadSubset {
     options: LoadSubsetOptions,
     reservation: LogicalLoadReservation,
   ): true | Promise<void | LoadSubsetResult> {
+    const exactAcquisition = this.exactAcquisitions.find(
+      (acquisition) =>
+        acquisition.generation === this.generation &&
+        acquisition.matchesPhysicalRequest(options),
+    )
+    if (exactAcquisition) {
+      exactAcquisition.reservations.add(reservation)
+      reservation.acquisition = exactAcquisition
+      this.onDeduplicate?.(options)
+      return true
+    }
+
     // If we've loaded all data, everything is covered
     if (this.hasLoadedAllData) {
       this.onDeduplicate?.(options)
@@ -178,7 +203,7 @@ export class DeduplicatedLoadSubset {
 
     if (matchingInflight !== undefined) {
       matchingInflight.reservations.add(reservation)
-      reservation.inflight = matchingInflight
+      reservation.acquisition = matchingInflight
       matchingInflight.lease.attach(options.signal)
       // An in-flight call will load data that covers this request
       // Every requester shares the physical work and cancellation lease. A
@@ -240,6 +265,13 @@ export class DeduplicatedLoadSubset {
     if (resultPromise === true) {
       if (requestGeneration === this.generation && !lease.aborted) {
         this.updateTracking(trackingOptions)
+        const acquisition: AcquisitionOwnership = {
+          matchesPhysicalRequest,
+          generation: requestGeneration,
+          reservations: new Set([reservation]),
+        }
+        reservation.acquisition = acquisition
+        this.exactAcquisitions.push(acquisition)
       }
       lease.dispose()
       return true
@@ -263,6 +295,7 @@ export class DeduplicatedLoadSubset {
               !lease.aborted
             ) {
               this.updateTracking(trackingOptions)
+              this.exactAcquisitions.push(inflightEntry)
             }
             return recordLoadSubsetResultDemandMatcher(
               result,
@@ -279,7 +312,7 @@ export class DeduplicatedLoadSubset {
             lease.dispose()
           }),
       }
-      reservation.inflight = inflightEntry
+      reservation.acquisition = inflightEntry
 
       recordLoadSubsetPromiseDemandMatcher(
         inflightEntry.promise,
@@ -307,10 +340,11 @@ export class DeduplicatedLoadSubset {
    * across live-query lifetimes must return this method as their unloadSubset
    * callback.
    *
-   * Settled evidence is invalidated conservatively. In-flight work is tracked
-   * by exact logical owner, so a late release cannot retire a newer generation
-   * or work that another owner still needs. Core must release the same options
-   * object that it passed to loadSubset; unmatched releases are no-ops.
+   * Settled exact evidence and in-flight work are tracked by logical owner, so
+   * a late release cannot retire a newer generation or work that another owner
+   * still needs. Broader inferred coverage remains conservative. Core must
+   * release the same options object that it passed to loadSubset; unmatched
+   * releases are no-ops.
    */
   unloadSubset = (options: LoadSubsetOptions): void => {
     const reservation = this.shiftOwnerReservation(options)
@@ -320,16 +354,13 @@ export class DeduplicatedLoadSubset {
     if (!reservation || reservation.generation !== this.generation) return
     if (!reservation.invalidatesCoverage) return
 
+    const acquisition = reservation.acquisition
+    if (acquisition) {
+      acquisition.reservations.delete(reservation)
+      if (acquisition.reservations.size > 0) return
+      this.retireAcquisition(acquisition)
+    }
     this.clearLoadedTracking()
-    const inflight = reservation.inflight
-    if (!inflight) return
-
-    inflight.reservations.delete(reservation)
-    if (inflight.reservations.size > 0) return
-
-    inflight.trackable = false
-    const index = this.inflightCalls.indexOf(inflight)
-    if (index !== -1) this.inflightCalls.splice(index, 1)
   }
 
   /**
@@ -381,12 +412,19 @@ export class DeduplicatedLoadSubset {
     if (reservationIndex !== -1) reservations!.splice(reservationIndex, 1)
     if (reservations?.length === 0) this.ownerReservations.delete(options)
 
-    const inflight = reservation.inflight
-    if (!inflight) return
-    inflight.reservations.delete(reservation)
-    if (inflight.reservations.size > 0) return
-    inflight.trackable = false
-    const inflightIndex = this.inflightCalls.indexOf(inflight)
+    const acquisition = reservation.acquisition
+    if (!acquisition) return
+    acquisition.reservations.delete(reservation)
+    if (acquisition.reservations.size > 0) return
+    this.retireAcquisition(acquisition)
+  }
+
+  private retireAcquisition(acquisition: AcquisitionOwnership): void {
+    const exactIndex = this.exactAcquisitions.indexOf(acquisition)
+    if (exactIndex !== -1) this.exactAcquisitions.splice(exactIndex, 1)
+    if (!isInflightCall(acquisition)) return
+    acquisition.trackable = false
+    const inflightIndex = this.inflightCalls.indexOf(acquisition)
     if (inflightIndex !== -1) this.inflightCalls.splice(inflightIndex, 1)
   }
 
@@ -394,6 +432,7 @@ export class DeduplicatedLoadSubset {
     this.unlimitedWhere = undefined
     this.hasLoadedAllData = false
     this.limitedCalls = []
+    this.exactAcquisitions = []
   }
 
   private updateTracking(options: LoadSubsetOptions): void {
