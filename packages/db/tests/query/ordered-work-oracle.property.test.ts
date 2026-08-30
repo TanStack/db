@@ -347,16 +347,24 @@ async function observeOrderedPrefix(
     let expectedMatches = 0
     let expectedBucketYields = 0
     if (limit === undefined || limit > 0) {
-      const expectedBuckets =
-        direction === `asc`
-          ? index.orderedBuckets()
-          : index.orderedBucketsReversed()
-      for (const [, bucket] of expectedBuckets) {
+      const keysByRank = new Map<number, Array<string>>()
+      const rowsInCollectionOrder = [...rows].sort((left, right) =>
+        comparePublicKeys(left.id, right.id),
+      )
+      for (const { id, rank } of rowsInCollectionOrder) {
+        const bucket = keysByRank.get(rank)
+        if (bucket === undefined) keysByRank.set(rank, [id])
+        else bucket.push(id)
+      }
+      const expectedRanks = [...keysByRank.keys()].sort((left, right) =>
+        direction === `asc` ? left - right : right - left,
+      )
+      for (const rank of expectedRanks) {
         expectedBucketYields++
-        const orderedKeys = [...bucket]
+        const orderedKeys = [...keysByRank.get(rank)!]
         orderedKeys.sort((left, right) => {
           expectedKeyComparisons++
-          return left < right ? -1 : left > right ? 1 : 0
+          return comparePublicKeys(left, right)
         })
         expectedMatches += orderedKeys.filter(
           (key) => rows.find((row) => row.id === key)?.included === true,
@@ -2299,17 +2307,29 @@ it(`scans each source row once when retaining additional-demand rows`, () => {
   const window = new WindowState(collection, orderBy(`asc`), undefined, 1)
   window.recordInitialCoverage(undefined, true)
 
-  expect(
-    window
-      .reconcile(new Map(), (candidate) => {
-        retentionChecks++
-        return candidate.id === `c`
-      })
-      .map(({ key }) => key),
-  ).toEqual([`a`, `c`])
+  const reconcile = (publishedRows: ReadonlyMap<string, RankedRow>) => {
+    entryReads = 0
+    retentionChecks = 0
+    const changes = window.reconcile(publishedRows, (candidate) => {
+      retentionChecks++
+      return candidate.id === `c`
+    })
+    expect(entryReads).toBe(rows.size)
+    expect(retentionChecks).toBe(rows.size)
+    return changes
+  }
+
+  expect(reconcile(new Map()).map(({ key }) => key)).toEqual([`a`, `c`])
   expect(snapshotCalls).toBe(1)
-  expect(entryReads).toBe(rows.size)
-  expect(retentionChecks).toBe(rows.size)
+  expect(
+    reconcile(
+      new Map([
+        [`a`, rows.get(`a`)!],
+        [`b`, rows.get(`b`)!],
+      ]),
+    ).map(({ type, key }) => `${type}:${key}`),
+  ).toEqual([`delete:b`, `insert:c`])
+  expect(snapshotCalls).toBe(1)
 })
 
 it(`does one source-order comparison per row needed to close the boundary tie`, () => {
@@ -2420,6 +2440,118 @@ it(`expands a source boundary through a comparator-equivalent string tie`, () =>
     compareRows.mockRestore()
   }
 })
+
+it.each([
+  {
+    name: `one ascending term`,
+    direction: `asc` as const,
+    orderArity: 1 as const,
+    limit: 1,
+    sourceRows: [
+      { id: `tie-a`, primary: `e`, secondary: 0 },
+      { id: `tie-b`, primary: `é`, secondary: 0 },
+      { id: `later`, primary: `z`, secondary: 0 },
+    ],
+    expectedKeys: [`tie-a`, `tie-b`],
+  },
+  {
+    name: `one descending term`,
+    direction: `desc` as const,
+    orderArity: 1 as const,
+    limit: 2,
+    sourceRows: [
+      { id: `prefix`, primary: `z`, secondary: 0 },
+      { id: `tie-a`, primary: `e`, secondary: 0 },
+      { id: `tie-b`, primary: `é`, secondary: 0 },
+      { id: `later`, primary: `a`, secondary: 0 },
+    ],
+    expectedKeys: [`prefix`, `tie-a`, `tie-b`],
+  },
+  {
+    name: `two ascending terms`,
+    direction: `asc` as const,
+    orderArity: 2 as const,
+    limit: 2,
+    sourceRows: [
+      { id: `prefix`, primary: `a`, secondary: 0 },
+      { id: `tie-a`, primary: `b`, secondary: `e` },
+      { id: `tie-b`, primary: `b`, secondary: `é` },
+      { id: `later`, primary: `c`, secondary: 0 },
+    ],
+    expectedKeys: [`prefix`, `tie-a`, `tie-b`],
+  },
+  {
+    name: `two descending terms`,
+    direction: `desc` as const,
+    orderArity: 2 as const,
+    limit: 2,
+    sourceRows: [
+      { id: `prefix`, primary: `c`, secondary: 0 },
+      { id: `tie-a`, primary: `b`, secondary: `e` },
+      { id: `tie-b`, primary: `b`, secondary: `é` },
+      { id: `later`, primary: `a`, secondary: 0 },
+    ],
+    expectedKeys: [`prefix`, `tie-a`, `tie-b`],
+  },
+])(
+  `expands source ties for $name`,
+  ({ direction, orderArity, limit, sourceRows, expectedKeys }) => {
+    type SourceTieRow = {
+      id: string
+      primary: string
+      secondary: string | number
+    }
+    const rows = new Map<string, SourceTieRow>(
+      sourceRows.map((row) => [row.id, row]),
+    )
+    const compareOptions = {
+      direction,
+      nulls: direction === `asc` ? (`last` as const) : (`first` as const),
+      stringSort: `locale`,
+      locale: `en`,
+      localeOptions: { sensitivity: `base` as const },
+    } satisfies CompareOptions
+    const order: OrderBy = [
+      {
+        expression: new PropRef([`primary`]),
+        compareOptions,
+      },
+      ...(orderArity === 2
+        ? [
+            {
+              expression: new PropRef([`secondary`]),
+              compareOptions,
+            },
+          ]
+        : []),
+    ]
+    const collection = {
+      _stateRevision: 0,
+      currentStateAsChanges: () =>
+        [...rows].map(
+          ([key, value]): ChangeMessage<SourceTieRow, string> => ({
+            type: `insert`,
+            key,
+            value,
+          }),
+        ),
+      entries: () => rows.entries(),
+      get: (key: string) => rows.get(key),
+    } as unknown as CollectionImpl<SourceTieRow, string>
+    const window = new WindowState(collection, order, undefined, limit, true)
+    window.recordInitialCoverage(undefined, true)
+    const compareRows = vi.spyOn(window.totalOrder, `compareRows`)
+
+    try {
+      expect(window.publicationEntries().map(([key]) => key)).toEqual(
+        expectedKeys,
+      )
+      expect(compareRows).toHaveBeenCalledTimes(2)
+    } finally {
+      compareRows.mockRestore()
+    }
+  },
+)
 
 it(`compiles the ordered predicate once for the lifetime of a window`, () => {
   const fixture = createSnapshotFixture([
