@@ -2426,6 +2426,18 @@ export class CollectionSubscription
     orderBy = orderedRequest.orderBy!
     const where = orderedRequest.where
 
+    // Preserve the order for a later positive window without compiling its
+    // predicate or constructing a coordinator that cannot admit any rows.
+    if (limit === 0) {
+      onLoadSubsetResult?.(true, {
+        where,
+        orderBy,
+        limit: 0,
+        subscription: this,
+      })
+      return
+    }
+
     this.orderedWindow ??= new WindowState(
       this.collection,
       orderBy,
@@ -2479,18 +2491,6 @@ export class CollectionSubscription
         : []
 
     if (changes.length > 0) this.callback(changes)
-
-    // A zero window establishes no remote demand, but it must still create the
-    // ordered coordinator so a later setWindow can load from the same order.
-    if (limit === 0) {
-      onLoadSubsetResult?.(true, {
-        where,
-        orderBy,
-        limit: 0,
-        subscription: this,
-      })
-      return
-    }
 
     if (!retainedPublication && this.orderedWindow.coversActiveWindow) {
       // No adapter request was made. Use an impossible zero-window demand so

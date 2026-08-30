@@ -488,8 +488,8 @@ export class CollectionSubscriber<
     const { dataNeeded, index, offset, limit, refillFromResultDeficit } =
       orderByInfo
 
-    // The ordered subscription keeps its coordinator for later window changes,
-    // but an empty active window must not start continuation work.
+    // The ordered subscription keeps its frozen order for later window changes,
+    // but an empty active window has no coordinator or continuation work.
     if (limit === 0) return true
 
     if (!index) {

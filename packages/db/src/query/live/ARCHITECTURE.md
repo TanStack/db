@@ -695,10 +695,11 @@ that entry cannot start another ordered request. Once entry returns, the normal
 in-flight Promise guard owns the request until settlement.
 
 An ordered window with an active limit of zero creates no ordered transport
-demand. Its coordinator remains alive so a later window change can load from
-the same order, but neither the initial offset nor a result deficit may turn
-the empty window into a positive request. Its local source snapshot also
-returns before predicate compilation, source enumeration, sorting, or index
+demand. The subscription freezes the order request so a later window change
+can load from the same order, but it does not construct `WindowState` until the
+window first becomes positive. Neither the initial offset nor a result deficit
+may turn the empty window into a positive request. The zero-width path returns
+before predicate or order compilation, source enumeration, sorting, or index
 creation. The dedupe helper applies the same law when adapters call it
 directly: a zero-width request establishes no coverage and owns no physical
 acquisition. This also holds when no usable order index exists: core defers the

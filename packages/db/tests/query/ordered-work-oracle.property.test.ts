@@ -1,6 +1,7 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
+import { CollectionSubscription } from '../../src/collection/subscription.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { ReverseIndex } from '../../src/indexes/reverse-index.js'
@@ -577,6 +578,71 @@ describe(`ordered source work oracle`, () => {
       }
     },
   )
+
+  it(`defers live ordered setup until a zero window becomes positive`, async () => {
+    const collection = createCollection(
+      localOnlyCollectionOptions<RankedRow>({
+        id: `ordered-work-live-zero-window`,
+        getKey: (row) => row.id,
+        initialData: [{ id: `one`, rank: 1, included: true }],
+      }),
+    )
+    let subscription: CollectionSubscription | undefined
+
+    try {
+      await collection.preload()
+      const index = collection.createIndex((row) => row.rank, {
+        indexType: BTreeIndex,
+        options: { compareOptions: publicKeyIndexCompareOptions },
+      })
+      subscription = new CollectionSubscription(collection, () => {}, {})
+      subscription.setOrderByIndex(index)
+      let orderCompilationReads = 0
+      const order: OrderBy = [
+        {
+          expression: new Proxy(new PropRef([`rank`]), {
+            get(target, property, receiver) {
+              if (property === `type`) orderCompilationReads++
+              return Reflect.get(target, property, receiver) as unknown
+            },
+          }),
+          compareOptions: publicKeyIndexCompareOptions,
+        },
+      ]
+
+      subscription.requestLimitedSnapshot({
+        orderBy: order,
+        limit: 0,
+        trackLoadSubsetPromise: false,
+      })
+      expect(
+        (
+          subscription as unknown as {
+            orderedWindow: WindowState | undefined
+          }
+        ).orderedWindow,
+      ).toBeUndefined()
+      // Freezing the request reads the expression tag once. It must not also
+      // construct TotalOrder or compile the frozen expression for no rows.
+      expect(orderCompilationReads).toBe(1)
+
+      subscription.requestLimitedSnapshot({
+        orderBy: order,
+        limit: 1,
+        trackLoadSubsetPromise: false,
+      })
+      expect(
+        (
+          subscription as unknown as {
+            orderedWindow: WindowState | undefined
+          }
+        ).orderedWindow,
+      ).toBeDefined()
+    } finally {
+      subscription?.unsubscribe()
+      await collection.cleanup()
+    }
+  })
 
   it.each([
     { indexKind: `basic`, direction: `asc` },
@@ -1802,18 +1868,30 @@ describe(`ordered source work oracle`, () => {
           })
           await transaction.isPersisted.promise
         }
+        let expectedKeyComparisons = 0
+        const expectedKeys = [...keys].sort((left, right) => {
+          expectedKeyComparisons++
+          return comparePublicKeys(left, right)
+        })
+        const sourceReads: Array<string | number> = []
+        const originalGet = collection.get.bind(collection)
+        collection.get = (key) => {
+          sourceReads.push(key)
+          return originalGet(key)
+        }
 
         const compareEntries = vi.spyOn(TotalOrder.prototype, `compareEntries`)
         try {
+          keyComparisonCounter.count = 0
           const changes = collection.currentStateAsChanges({
             orderBy: publicKeyOrderBy(direction),
             limit: keys.length,
             optimizedOnly: true,
           })!
 
-          expect(changes.map(({ key }) => key)).toEqual(
-            [...keys].sort(comparePublicKeys),
-          )
+          expect(changes.map(({ key }) => key)).toEqual(expectedKeys)
+          expect(sourceReads).toEqual([...expectedKeys, ...expectedKeys])
+          expect(keyComparisonCounter.count).toBe(expectedKeyComparisons)
           expect(compareEntries).not.toHaveBeenCalled()
         } finally {
           compareEntries.mockRestore()
@@ -1908,6 +1986,116 @@ describe(`ordered source work oracle`, () => {
       },
     )
   }
+
+  it.each(
+    ([`basic`, `btree`] as const).flatMap((indexKind) =>
+      ([`asc`, `desc`] as const).flatMap((direction) =>
+        ([`string`, `nullish`] as const).map((orderDomain) => ({
+          indexKind,
+          direction,
+          orderDomain,
+        })),
+      ),
+    ),
+  )(
+    `does exact optimized work for $indexKind $direction $orderDomain order values`,
+    async ({ indexKind, direction, orderDomain }) => {
+      type DomainRow = Omit<RankedRow, `rank`> & {
+        rank: string | number | null | undefined
+      }
+      const rows: Array<DomainRow> =
+        orderDomain === `string`
+          ? [
+              { id: `item-10`, rank: `item-10`, included: true },
+              { id: `item-2`, rank: `item-2`, included: true },
+            ]
+          : [
+              { id: `undefined`, rank: undefined, included: true },
+              { id: `null`, rank: null, included: true },
+              { id: `two`, rank: 2, included: true },
+              { id: `one`, rank: 1, included: true },
+            ]
+      const expectedKeys =
+        orderDomain === `string`
+          ? direction === `asc`
+            ? [`item-2`, `item-10`]
+            : [`item-10`, `item-2`]
+          : direction === `asc`
+            ? [`one`, `two`, `null`, `undefined`]
+            : [`null`, `undefined`, `two`, `one`]
+      const indexCompareOptions = {
+        direction: `asc`,
+        nulls: `last`,
+        stringSort: `locale`,
+        locale: `en`,
+        localeOptions: { numeric: true, sensitivity: `base` as const },
+      } satisfies CompareOptions
+      const queryCompareOptions = {
+        ...indexCompareOptions,
+        direction,
+        nulls: direction === `asc` ? (`last` as const) : (`first` as const),
+      } satisfies CompareOptions
+      const collection = createCollection(
+        localOnlyCollectionOptions<DomainRow>({
+          id: `ordered-work-domain-${indexKind}-${direction}-${orderDomain}`,
+          getKey: (row) => row.id,
+          initialData: rows,
+        }),
+      )
+
+      try {
+        await collection.preload()
+        const index = collection.createIndex((row) => row.rank, {
+          indexType: indexKind === `basic` ? BasicIndex : BTreeIndex,
+          options: { compareOptions: indexCompareOptions },
+        }) as BasicIndex<string> | BTreeIndex<string>
+        const readProbe = observeOrderedIndexReads(index, indexKind, direction)
+        const sourceReads: Array<string | number> = []
+        let predicateReads = 0
+        const originalGet = collection.get.bind(collection)
+        collection.get = (key) => {
+          sourceReads.push(key)
+          const value = originalGet(key)
+          return value === undefined
+            ? undefined
+            : new Proxy(value, {
+                get(target, property, receiver) {
+                  if (property === `included`) predicateReads++
+                  return Reflect.get(target, property, receiver) as unknown
+                },
+              })
+        }
+        const bucketCount =
+          orderDomain === `string` ? 2 : indexKind === `basic` ? 4 : 3
+
+        try {
+          keyComparisonCounter.count = 0
+          const changes = collection.currentStateAsChanges({
+            where: eq(new PropRef([`included`]), true),
+            orderBy: orderByWithOptions(queryCompareOptions),
+            optimizedOnly: true,
+          })!
+
+          expect(changes.map(({ key }) => key)).toEqual(expectedKeys)
+          expect(sourceReads).toEqual([...expectedKeys, ...expectedKeys])
+          expect(predicateReads).toBe(rows.length)
+          expect(readProbe.getValueReads()).toBe(bucketCount)
+          expect(readProbe.getBucketReads()).toBe(bucketCount)
+          expect(readProbe.getCursorCalls()).toBe(
+            indexKind === `btree` ? bucketCount + 1 : 0,
+          )
+          expect(readProbe.getUnexpectedTraversalCalls()).toBe(0)
+          expect(keyComparisonCounter.count).toBe(
+            orderDomain === `nullish` ? 1 : 0,
+          )
+        } finally {
+          readProbe.restore()
+        }
+      } finally {
+        await collection.cleanup()
+      }
+    },
+  )
 
   it(`retains requested comparison metadata on an automatic index`, async () => {
     type NullableRankedRow = Omit<RankedRow, `rank`> & {
@@ -2125,13 +2313,8 @@ it(`does only exact predicate and boundary work when reusing an unbounded snapsh
       indexType: BTreeIndex,
       options: { compareOptions: publicKeyIndexCompareOptions },
     }) as BTreeIndex<string>
-    const [bucket] = [...index.orderedBuckets()]
-    const bucketKeys = [...bucket![1]]
-    let expectedKeyComparisons = 0
-    const expectedKeys = bucketKeys.sort((left, right) => {
-      expectedKeyComparisons++
-      return comparePublicKeys(left, right)
-    })
+    const expectedKeys = rows.map(({ id }) => id).sort(comparePublicKeys)
+    const expectedKeyComparisons = Math.max(0, expectedKeys.length - 1)
 
     const readProbe = observeOrderedIndexReads(index, `btree`, `asc`)
     const sourceReads: Array<string | number> = []
@@ -2276,6 +2459,27 @@ it(`reuses a multi-term snapshot while extracting each boundary term once`, () =
 })
 
 it(`scans each source row once when retaining additional-demand rows`, () => {
+  class CountingPublication extends Map<string, RankedRow> {
+    iterationReads = 0
+    membershipReads = 0;
+
+    override *[Symbol.iterator](): Generator<
+      [string, RankedRow],
+      undefined,
+      unknown
+    > {
+      for (const entry of super[Symbol.iterator]()) {
+        this.iterationReads++
+        yield entry
+      }
+      return undefined
+    }
+
+    override has(key: string): boolean {
+      this.membershipReads++
+      return super.has(key)
+    }
+  }
   const rows = new Map<string, RankedRow>([
     [`a`, { id: `a`, rank: 1, included: true }],
     [`b`, { id: `b`, rank: 2, included: true }],
@@ -2307,7 +2511,7 @@ it(`scans each source row once when retaining additional-demand rows`, () => {
   const window = new WindowState(collection, orderBy(`asc`), undefined, 1)
   window.recordInitialCoverage(undefined, true)
 
-  const reconcile = (publishedRows: ReadonlyMap<string, RankedRow>) => {
+  const reconcile = (publishedRows: CountingPublication) => {
     entryReads = 0
     retentionChecks = 0
     const changes = window.reconcile(publishedRows, (candidate) => {
@@ -2316,14 +2520,19 @@ it(`scans each source row once when retaining additional-demand rows`, () => {
     })
     expect(entryReads).toBe(rows.size)
     expect(retentionChecks).toBe(rows.size)
+    expect(publishedRows.iterationReads).toBe(publishedRows.size)
+    expect(publishedRows.membershipReads).toBe(2)
     return changes
   }
 
-  expect(reconcile(new Map()).map(({ key }) => key)).toEqual([`a`, `c`])
+  expect(reconcile(new CountingPublication()).map(({ key }) => key)).toEqual([
+    `a`,
+    `c`,
+  ])
   expect(snapshotCalls).toBe(1)
   expect(
     reconcile(
-      new Map([
+      new CountingPublication([
         [`a`, rows.get(`a`)!],
         [`b`, rows.get(`b`)!],
       ]),
@@ -2468,6 +2677,31 @@ it.each([
     expectedKeys: [`prefix`, `tie-a`, `tie-b`],
   },
   {
+    name: `one ascending numeric term`,
+    direction: `asc` as const,
+    orderArity: 1 as const,
+    limit: 1,
+    sourceRows: [
+      { id: `tie-a`, primary: 1, secondary: 0 },
+      { id: `tie-b`, primary: 1, secondary: 0 },
+      { id: `later`, primary: 2, secondary: 0 },
+    ],
+    expectedKeys: [`tie-a`, `tie-b`],
+  },
+  {
+    name: `one descending numeric term`,
+    direction: `desc` as const,
+    orderArity: 1 as const,
+    limit: 2,
+    sourceRows: [
+      { id: `prefix`, primary: 3, secondary: 0 },
+      { id: `tie-a`, primary: 1, secondary: 0 },
+      { id: `tie-b`, primary: 1, secondary: 0 },
+      { id: `later`, primary: 0, secondary: 0 },
+    ],
+    expectedKeys: [`prefix`, `tie-a`, `tie-b`],
+  },
+  {
     name: `two ascending terms`,
     direction: `asc` as const,
     orderArity: 2 as const,
@@ -2498,29 +2732,53 @@ it.each([
   ({ direction, orderArity, limit, sourceRows, expectedKeys }) => {
     type SourceTieRow = {
       id: string
-      primary: string
+      primary: string | number
       secondary: string | number
     }
+    const termReads: [number, number] = [0, 0]
+    const termComparisons: [number, number] = [0, 0]
     const rows = new Map<string, SourceTieRow>(
-      sourceRows.map((row) => [row.id, row]),
+      sourceRows.map((spec) => [
+        spec.id,
+        {
+          id: spec.id,
+          get primary() {
+            termReads[0]++
+            return spec.primary
+          },
+          get secondary() {
+            termReads[1]++
+            return spec.secondary
+          },
+        },
+      ]),
     )
-    const compareOptions = {
-      direction,
-      nulls: direction === `asc` ? (`last` as const) : (`first` as const),
-      stringSort: `locale`,
-      locale: `en`,
-      localeOptions: { sensitivity: `base` as const },
-    } satisfies CompareOptions
+    const trackedCompareOptions = (term: 0 | 1): CompareOptions =>
+      new Proxy(
+        {
+          direction,
+          nulls: direction === `asc` ? (`last` as const) : (`first` as const),
+          stringSort: `locale`,
+          locale: `en`,
+          localeOptions: { sensitivity: `base` as const },
+        } satisfies CompareOptions,
+        {
+          get(target, property, receiver) {
+            if (property === `direction`) termComparisons[term]++
+            return Reflect.get(target, property, receiver) as unknown
+          },
+        },
+      )
     const order: OrderBy = [
       {
         expression: new PropRef([`primary`]),
-        compareOptions,
+        compareOptions: trackedCompareOptions(0),
       },
       ...(orderArity === 2
         ? [
             {
               expression: new PropRef([`secondary`]),
-              compareOptions,
+              compareOptions: trackedCompareOptions(1),
             },
           ]
         : []),
@@ -2543,10 +2801,20 @@ it.each([
     const compareRows = vi.spyOn(window.totalOrder, `compareRows`)
 
     try {
+      termReads[0] = 0
+      termReads[1] = 0
+      termComparisons[0] = 0
+      termComparisons[1] = 0
       expect(window.publicationEntries().map(([key]) => key)).toEqual(
         expectedKeys,
       )
       expect(compareRows).toHaveBeenCalledTimes(2)
+      expect(termReads).toEqual([4, orderArity === 2 ? 2 : 0])
+      const optionReadsPerComparison = direction === `asc` ? 1 : 2
+      expect(termComparisons).toEqual([
+        2 * optionReadsPerComparison,
+        orderArity === 2 ? optionReadsPerComparison : 0,
+      ])
     } finally {
       compareRows.mockRestore()
     }
