@@ -393,6 +393,22 @@ it(`retires an ownerless acquisition without disturbing another cohort for the s
   expect(projectTransportLoads(history)).toBe(3)
   expect(projectRetainedRowKeys(history)).toEqual([])
   expect(projectReusableDemands(history)).toEqual([])
+
+  const survivingAcquisitionSettles = [
+    ...history,
+    {
+      type: `applyAuthoritativeRows`,
+      ownerId: `attempt-a`,
+      demandId,
+      attemptId: `attempt-a`,
+      rowKeys: [`live-a`],
+    } satisfies LoadSubsetFullFlowEvent,
+  ]
+  expect(projectTransportLoads(survivingAcquisitionSettles)).toBe(3)
+  expect(projectRetainedRowKeys(survivingAcquisitionSettles)).toEqual([
+    `live-a`,
+  ])
+  expect(projectReusableDemands(survivingAcquisitionSettles)).toEqual([])
 })
 
 it.each([
