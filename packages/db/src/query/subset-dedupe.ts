@@ -360,7 +360,7 @@ export class DeduplicatedLoadSubset {
       if (acquisition.reservations.size > 0) return
       this.retireAcquisition(acquisition)
     }
-    this.clearLoadedTracking()
+    this.clearInferredTracking()
   }
 
   /**
@@ -429,10 +429,14 @@ export class DeduplicatedLoadSubset {
   }
 
   private clearLoadedTracking(): void {
+    this.clearInferredTracking()
+    this.exactAcquisitions = []
+  }
+
+  private clearInferredTracking(): void {
     this.unlimitedWhere = undefined
     this.hasLoadedAllData = false
     this.limitedCalls = []
-    this.exactAcquisitions = []
   }
 
   private updateTracking(options: LoadSubsetOptions): void {

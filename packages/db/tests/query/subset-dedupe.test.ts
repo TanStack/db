@@ -341,7 +341,7 @@ describe(`createDeduplicatedLoadSubset`, () => {
     },
   )
 
-  it(`bounds conservative adapter-wide invalidation to one refetch per revisited demand`, async () => {
+  it(`invalidates a released acquisition without erasing other exact owners`, async () => {
     const loadSubset = vi.fn(() => Promise.resolve())
     const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
     const demands = Array.from({ length: 6 }, (_, id) => ({
@@ -352,24 +352,24 @@ describe(`createDeduplicatedLoadSubset`, () => {
     for (const demand of demands) await deduplicated.loadSubset(demand)
     expect(loadSubset).toHaveBeenCalledTimes(demands.length)
 
-    // Core may delete rows owned by any remembered request when one collection
-    // owner leaves. Without adapter row provenance, preserving the other five
-    // request facts would be unsafe, so one release invalidates all six.
+    // A release invalidates broader coverage inferred from the combined
+    // request history, but each other physical acquisition still has a live
+    // exact owner and therefore retains its own evidence.
     deduplicated.unloadSubset(demands[0]!)
-    for (const demand of demands.slice(1)) {
-      await deduplicated.loadSubset(demand)
-    }
-    expect(loadSubset).toHaveBeenCalledTimes(
-      demands.length + demands.length - 1,
-    )
-
-    // Once those demands have rebuilt the cache, revisiting them is free again.
     for (const demand of demands.slice(1)) {
       expect(deduplicated.loadSubset(demand)).toBe(true)
     }
-    expect(loadSubset).toHaveBeenCalledTimes(
-      demands.length + demands.length - 1,
-    )
+    expect(loadSubset).toHaveBeenCalledTimes(demands.length)
+
+    await deduplicated.loadSubset(demands[0]!)
+    expect(loadSubset).toHaveBeenCalledTimes(demands.length + 1)
+
+    // Once the released demand has rebuilt its acquisition, every exact owner
+    // can be revisited without transport.
+    for (const demand of demands) {
+      expect(deduplicated.loadSubset(demand)).toBe(true)
+    }
+    expect(loadSubset).toHaveBeenCalledTimes(demands.length + 1)
   })
 
   it(`does not restore invalidated coverage when unloaded work settles late`, async () => {
@@ -429,6 +429,38 @@ describe(`createDeduplicatedLoadSubset`, () => {
       await Promise.all([freshLoad, peerLoad])
     },
   )
+
+  it(`keeps newer settled exact work when a rejected older owner unloads late`, async () => {
+    const pending: Array<{
+      resolve: () => void
+      reject: (error: Error) => void
+    }> = []
+    const loadSubset = vi.fn(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          pending.push({ resolve, reject })
+        }),
+    )
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const reusedOptions = { limit: 2 }
+    const oldLoad = deduplicated.loadSubset(reusedOptions)
+    const rejected = expect(oldLoad).rejects.toThrow(`old failed`)
+
+    pending[0]!.reject(new Error(`old failed`))
+    await rejected
+
+    const freshLoad = deduplicated.loadSubset(reusedOptions)
+    pending[1]!.resolve()
+    await freshLoad
+
+    deduplicated.unloadSubset(reusedOptions)
+    const peerOptions = { limit: 2 }
+    expect(deduplicated.loadSubset(peerOptions)).toBe(true)
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+
+    deduplicated.unloadSubset(reusedOptions)
+    deduplicated.unloadSubset(peerOptions)
+  })
 
   it(`keeps shared exact in-flight work while another logical owner remains`, async () => {
     let resolveLoad: (() => void) | undefined
