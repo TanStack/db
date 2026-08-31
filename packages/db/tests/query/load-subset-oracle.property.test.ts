@@ -2,7 +2,6 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
-import { createOptimisticAction } from '../../src/optimistic-action.js'
 import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
@@ -71,11 +70,6 @@ type WindowRequest = {
 type PersistedLoadRow = {
   id: string
   projectId: string
-}
-
-type OptimisticDerivedRow = {
-  id: string
-  value: string
 }
 
 type CoverageSubject = {
@@ -1877,64 +1871,6 @@ async function expectCleanupRejectsReceiptOnce() {
   await source.cleanup()
 }
 
-async function expectDerivedSyncDuringOptimisticMutation(): Promise<void> {
-  let begin!: () => void
-  let write!: (message: { type: `insert`; value: OptimisticDerivedRow }) => void
-  let commit!: () => void
-  const source = createCollection<OptimisticDerivedRow>({
-    id: `optimistic-derived-source-${collectionSequence++}`,
-    getKey: (row) => row.id,
-    sync: {
-      sync: (params) => {
-        begin = params.begin
-        write = params.write
-        commit = params.commit
-        params.markReady()
-      },
-    },
-  })
-  const derived = createLiveQueryCollection({
-    query: (query) =>
-      query
-        .from({ row: source })
-        .select(({ row }) => ({ id: row.id, value: row.value })),
-    getKey: (row) => row.id,
-    startSync: true,
-  })
-  const persistence = createDeferred<void>()
-  // Query collections currently expose read-side virtual properties in their
-  // insert input type even though the runtime accepts the plain selected row.
-  const insertDerived = derived.insert.bind(derived) as unknown as (
-    row: OptimisticDerivedRow,
-  ) => ReturnType<typeof derived.insert>
-  const insertOptimistically = createOptimisticAction<OptimisticDerivedRow>({
-    onMutate: insertDerived,
-    mutationFn: () => persistence.promise,
-  })
-
-  await derived.preload()
-  const transaction = insertOptimistically({
-    id: `optimistic`,
-    value: `optimistic`,
-  })
-  try {
-    begin()
-    write({ type: `insert`, value: { id: `synced`, value: `synced` } })
-    commit()
-
-    try {
-      expect([...derived.keys()].sort()).toEqual([`optimistic`, `synced`])
-    } catch (error) {
-      throw new TraceAssertionError(0, error)
-    }
-  } finally {
-    persistence.resolve()
-    await transaction.isPersisted.promise
-    await derived.cleanup()
-    await source.cleanup()
-  }
-}
-
 async function expectDeduplicatedWaiterHandlesRejection(
   scenario: RejectedWaiterScenario,
 ): Promise<void> {
@@ -2872,17 +2808,6 @@ describe(`loadSubset coverage oracle`, () => {
 
   it(`rejects an abandoned receipt once without publishing coverage`, async () => {
     await expectCleanupRejectsReceiptOnce()
-  })
-
-  it(`publishes synced source rows while a derived mutation persists`, async () => {
-    await expectAssertionFailure(expectDerivedSyncDuringOptimisticMutation, {
-      checkpoint: 0,
-      classify: ({ actual, expected }) =>
-        Array.isArray(actual) &&
-        actual.join(`,`) === `optimistic` &&
-        Array.isArray(expected) &&
-        expected.join(`,`) === `optimistic,synced`,
-    })()
   })
 
   it(

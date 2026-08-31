@@ -1,6 +1,8 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect } from 'vitest'
+import { describe, expect, it } from 'vitest'
+import { createDeferred } from '../../src/deferred.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
+import { createOptimisticAction } from '../../src/optimistic-action.js'
 import {
   createLiveQueryCollection,
   eq,
@@ -37,6 +39,13 @@ type PublishedRow = {
 
 type Q2Shape = `passThrough` | `where` | `orderBy` | `select`
 type Q1Shape = `direct` | `joined`
+type PendingPublicationOperation = `insert` | `update` | `delete`
+type PendingPublicationDepth = `direct` | `layered`
+
+type PendingPublicationRow = {
+  id: number
+  value: number
+}
 
 const initialParent: ParentRow = { id: 1, group: 10, value: 0 }
 const initialChild: ChildRow = { id: 100, parentGroup: 10, value: 1 }
@@ -401,6 +410,210 @@ async function expectPublicationMatches(
 const q2Shapes = [`passThrough`, `where`, `orderBy`, `select`] as const
 const q1Shapes = [`direct`, `joined`] as const
 
+const pendingPublicationOperations = [`insert`, `update`, `delete`] as const
+const pendingPublicationDepths = [`direct`, `layered`] as const
+
+const optimisticExistingRow: PendingPublicationRow = { id: 1, value: 10 }
+const sourceExistingRow: PendingPublicationRow = { id: 2, value: 20 }
+const optimisticInsertedRow: PendingPublicationRow = { id: 3, value: 30 }
+const sourceInsertedRow: PendingPublicationRow = { id: 4, value: 40 }
+
+function pendingOperationRow(
+  operation: PendingPublicationOperation,
+  owner: `optimistic` | `source`,
+): PendingPublicationRow {
+  if (owner === `optimistic`) {
+    if (operation === `insert`) return { ...optimisticInsertedRow }
+    if (operation === `update`) return { ...optimisticExistingRow, value: 11 }
+    return { ...optimisticExistingRow }
+  }
+
+  if (operation === `insert`) return { ...sourceInsertedRow }
+  if (operation === `update`) return { ...sourceExistingRow, value: 21 }
+  return { ...sourceExistingRow }
+}
+
+function applyPendingOperation(
+  rows: Map<number, PendingPublicationRow>,
+  operation: PendingPublicationOperation,
+  row: PendingPublicationRow,
+): void {
+  if (operation === `delete`) rows.delete(row.id)
+  else rows.set(row.id, { ...row })
+}
+
+function expectedPendingRows(
+  rows: ReadonlyMap<number, PendingPublicationRow>,
+): Array<PendingPublicationRow> {
+  return [...rows.values()]
+    .map((row) => ({ ...row }))
+    .sort((left, right) => left.id - right.id)
+}
+
+function inversePendingOperation(
+  operation: PendingPublicationOperation,
+): PendingPublicationOperation {
+  if (operation === `insert`) return `delete`
+  if (operation === `delete`) return `insert`
+  return `update`
+}
+
+async function expectSourcePublicationDuringPendingMutation(
+  optimisticOperation: PendingPublicationOperation,
+  sourceOperation: PendingPublicationOperation,
+  depth: PendingPublicationDepth,
+  sameKey = false,
+): Promise<void> {
+  const initialRows = [optimisticExistingRow, sourceExistingRow]
+  const source = createControlledCollection(
+    `pending-publication-source`,
+    initialRows,
+  )
+  const q1 = createLiveQueryCollection({
+    id: `pending-publication-q1-${nextCollectionId++}`,
+    query: (q) =>
+      q.from({ row: source.collection }).select(({ row }) => ({
+        id: row.id,
+        value: row.value,
+      })),
+    getKey: (row) => row.id,
+  })
+  const q2 = createLiveQueryCollection({
+    id: `pending-publication-q2-${nextCollectionId++}`,
+    query: (q) =>
+      q.from({ row: q1 }).select(({ row }) => ({
+        id: row.id,
+        value: row.value,
+      })),
+    getKey: (row) => row.id,
+  })
+  const target = depth === `direct` ? q1 : q2
+  const persistence = createDeferred<void>()
+  const observedBatches: Array<
+    Array<{ type: `insert` | `update` | `delete`; key: number }>
+  > = []
+  const callbackSnapshots: Array<Array<PendingPublicationRow>> = []
+  const currentRows = () =>
+    target.toArray
+      .map((row) => ({ id: row.id, value: row.value }))
+      .sort((left, right) => left.id - right.id)
+
+  await target.preload()
+  const subscription = target.subscribeChanges(
+    (changes) => {
+      observedBatches.push(
+        changes.map(({ type, key }) => ({ type, key: Number(key) })),
+      )
+      callbackSnapshots.push(currentRows())
+    },
+    { includeInitialState: false },
+  )
+
+  const optimisticRow = pendingOperationRow(optimisticOperation, `optimistic`)
+  const sourceRow = sameKey
+    ? { ...optimisticRow }
+    : pendingOperationRow(sourceOperation, `source`)
+  const insertTarget = target.insert.bind(target) as unknown as (
+    row: PendingPublicationRow,
+  ) => unknown
+  const mutate = createOptimisticAction<PendingPublicationOperation>({
+    onMutate: (operation) => {
+      if (operation === `insert`) {
+        insertTarget(optimisticRow)
+      } else if (operation === `update`) {
+        target.update(optimisticRow.id, (draft) => {
+          draft.value = optimisticRow.value
+        })
+      } else {
+        target.delete(optimisticRow.id)
+      }
+    },
+    mutationFn: () => persistence.promise,
+  })
+
+  const transaction = mutate(optimisticOperation)
+  const afterOptimistic = new Map(
+    initialRows.map((row) => [row.id, { ...row }] as const),
+  )
+  applyPendingOperation(afterOptimistic, optimisticOperation, optimisticRow)
+
+  try {
+    expect(observedBatches).toEqual([
+      [{ type: optimisticOperation, key: optimisticRow.id }],
+    ])
+    expect(callbackSnapshots).toEqual([expectedPendingRows(afterOptimistic)])
+    expect(currentRows()).toEqual(expectedPendingRows(afterOptimistic))
+
+    source.write(sourceOperation, sourceRow)
+    const afterSource = new Map(
+      initialRows.map((row) => [row.id, { ...row }] as const),
+    )
+    applyPendingOperation(afterSource, sourceOperation, sourceRow)
+    const whilePending = new Map(afterSource)
+    applyPendingOperation(whilePending, optimisticOperation, optimisticRow)
+
+    if (sameKey) {
+      expect(observedBatches).toEqual([
+        [{ type: optimisticOperation, key: optimisticRow.id }],
+      ])
+      expect(callbackSnapshots).toEqual([expectedPendingRows(whilePending)])
+    } else {
+      expect(observedBatches).toEqual([
+        [{ type: optimisticOperation, key: optimisticRow.id }],
+        [{ type: sourceOperation, key: sourceRow.id }],
+      ])
+      expect(callbackSnapshots).toEqual([
+        expectedPendingRows(afterOptimistic),
+        expectedPendingRows(whilePending),
+      ])
+    }
+    expect(currentRows()).toEqual(expectedPendingRows(whilePending))
+
+    persistence.resolve()
+    await transaction.isPersisted.promise
+    await flushPromises()
+
+    if (sameKey) {
+      const confirmationBatches =
+        optimisticOperation === `delete`
+          ? []
+          : [[{ type: `update` as const, key: optimisticRow.id }]]
+      expect(observedBatches).toEqual([
+        [{ type: optimisticOperation, key: optimisticRow.id }],
+        ...confirmationBatches,
+      ])
+      expect(callbackSnapshots).toEqual([
+        expectedPendingRows(afterSource),
+        ...confirmationBatches.map(() => expectedPendingRows(afterSource)),
+      ])
+    } else {
+      expect(observedBatches).toEqual([
+        [{ type: optimisticOperation, key: optimisticRow.id }],
+        [{ type: sourceOperation, key: sourceRow.id }],
+        [
+          {
+            type: inversePendingOperation(optimisticOperation),
+            key: optimisticRow.id,
+          },
+        ],
+      ])
+      expect(callbackSnapshots).toEqual([
+        expectedPendingRows(afterOptimistic),
+        expectedPendingRows(whilePending),
+        expectedPendingRows(afterSource),
+      ])
+    }
+    expect(currentRows()).toEqual(expectedPendingRows(afterSource))
+  } finally {
+    persistence.resolve()
+    await transaction.isPersisted.promise.catch(() => undefined)
+    subscription.unsubscribe()
+    await q2.cleanup()
+    await q1.cleanup()
+    await source.collection.cleanup()
+  }
+}
+
 describe(`layered-query publication oracle`, () => {
   const changedValueArbitrary = fc.oneof(
     fc.integer({ min: -100, max: -1 }),
@@ -420,7 +633,7 @@ describe(`layered-query publication oracle`, () => {
           `includes-publication.parent-scalar.${q1Shape}.${q2Shape}`,
         ),
       )(
-        `publishes #1713 updates through a ${q1Shape} Q1 and ${q2Shape} Q2`,
+        `publishes scalar parent updates through a ${q1Shape} Q1 and ${q2Shape} Q2`,
         async (value) => {
           await expectPublicationMatches(
             { type: `parentScalar`, value },
@@ -528,4 +741,29 @@ describe(`layered-query publication oracle`, () => {
       value,
     })
   })
+})
+
+describe(`source publication across pending derived mutations`, () => {
+  for (const depth of pendingPublicationDepths) {
+    for (const optimisticOperation of pendingPublicationOperations) {
+      for (const sourceOperation of pendingPublicationOperations) {
+        it(`publishes a disjoint source ${sourceOperation} through a ${depth} query while an optimistic ${optimisticOperation} persists`, async () => {
+          await expectSourcePublicationDuringPendingMutation(
+            optimisticOperation,
+            sourceOperation,
+            depth,
+          )
+        })
+      }
+
+      it(`retains a same-key source ${optimisticOperation} through a ${depth} query while its optimistic confirmation persists`, async () => {
+        await expectSourcePublicationDuringPendingMutation(
+          optimisticOperation,
+          optimisticOperation,
+          depth,
+          true,
+        )
+      })
+    }
+  }
 })

@@ -928,8 +928,12 @@ priority merely to make a subset load settle.
 Existing immediate bootstrap and persistence-hydration paths, plus truncate,
 retain their queue-bypass contract; if one applies a parked subset transaction
 as part of that prefix, the subset receipt settles only after the writes are
-visible. Rejected, canceled, and obsolete acquisitions establish no coverage.
-Sources must honor cancellation before publishing request-scoped rows.
+visible. A quiescent live-query graph output uses the same queue bypass so a
+direct source change can update a derived Collection while an optimistic
+mutation on that Collection persists. The normal optimistic overlay still wins
+for conflicting keys, and the graph output remains one coherent publication.
+Rejected, canceled, and obsolete acquisitions establish no coverage. Sources
+must honor cancellation before publishing request-scoped rows.
 
 After those writes are applied, `loadSubset` may resolve with
 `{ hasMore: boolean | undefined, appliedRowKeys?: readonly Key[] }`. Core

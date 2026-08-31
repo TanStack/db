@@ -43,7 +43,7 @@ async function makeOrderedByAge(source: ReturnType<typeof makeSource>) {
 
 const flush = () => new Promise((r) => setTimeout(r, 0))
 
-describe(`order-only move (RFC #1623 phase 4)`, () => {
+describe(`order-only move publication`, () => {
   it(`republishes the ordered result when a row moves but its value is unchanged`, async () => {
     const source = makeSource()
     const lq = await makeOrderedByAge(source)
@@ -117,7 +117,7 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
     observer.dispose()
   })
 
-  it(`refreshes a detached observer when an order-only sync is parked`, async () => {
+  it(`refreshes a detached observer while a separate mutation persists`, async () => {
     const source = makeSource()
     const persist = createDeferred<void>()
     const lq = createLiveQueryCollection({
@@ -158,13 +158,12 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
     source.utils.commit()
     await flush()
 
-    const parked = observer.getSnapshot()
-    expect((parked.data as Array<any>).map((row) => row.id)).toEqual([
-      `2`,
-      `1`,
-      `3`,
-    ])
-    expect(lq._layoutRevision).toBe(collectionLayoutRevisionBefore)
+    const whilePersisting = observer.getSnapshot()
+    expect(
+      (whilePersisting.data as Array<any>).map((row) => row.id),
+    ).toEqual([`1`, `3`, `2`])
+    expect(lq._layoutRevision).toBeGreaterThan(collectionLayoutRevisionBefore)
+    const publishedLayoutRevision = lq._layoutRevision
 
     persist.resolve()
     await mutation.isPersisted.promise
@@ -176,7 +175,7 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
       `3`,
       `2`,
     ])
-    expect(lq._layoutRevision).toBeGreaterThan(collectionLayoutRevisionBefore)
+    expect(lq._layoutRevision).toBe(publishedLayoutRevision)
     observer.dispose()
   })
 

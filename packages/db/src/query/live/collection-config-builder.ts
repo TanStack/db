@@ -1074,7 +1074,10 @@ export class CollectionConfigBuilder<
         )
 
         if (hasParentChanges) {
-          begin()
+          // The graph has already reached quiescence, so this is one complete
+          // derived publication. Apply it beneath any pending optimistic
+          // overlay instead of parking source progress behind that mutation.
+          begin({ immediate: true })
           changesToApply.forEach(this.applyChanges.bind(this, config))
           if (hasOrderOnlyMove(changesToApply)) {
             markLayoutChange(config.collection)
