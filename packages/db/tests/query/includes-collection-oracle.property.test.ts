@@ -300,6 +300,7 @@ async function expectFacadeCandidateScan({
     })),
   )
   let subscription: { unsubscribe: () => void } | undefined
+  let restoreFacadeGetKey: (() => void) | undefined
 
   try {
     await live.preload()
@@ -318,20 +319,37 @@ async function expectFacadeCandidateScan({
       { includeInitialState: false },
     )
     const revision = facade._layoutRevision
+    const candidateRow = initialRows[candidatePosition === `first` ? 0 : 1]!
+    const valueRow = initialRows[candidatePosition === `first` ? 1 : 0]!
+    const changedKeyOrder: Array<number> = []
+    const originalGetKey = facade.config.getKey
+    facade.config.getKey = (row) => {
+      const key = Number(originalGetKey(row))
+      if (
+        (key === candidateRow.id || key === valueRow.id) &&
+        !changedKeyOrder.includes(key)
+      ) {
+        changedKeyOrder.push(key)
+      }
+      return key
+    }
+    restoreFacadeGetKey = () => {
+      facade.config.getKey = originalGetKey
+    }
     const valueUpdate = {
       type: `update` as const,
-      value: { ...initialRows[0]!, value: 11 },
+      value: { ...valueRow, value: valueRow.value + 1 },
     }
     const orderUpdates = [
       {
         type: `update` as const,
-        value: { ...initialRows[1]!, position: 3 },
+        value: { ...candidateRow, position: 3 },
       },
       ...(finalLayout === `restored`
         ? [
             {
               type: `update` as const,
-              value: initialRows[1]!,
+              value: candidateRow,
             },
           ]
         : []),
@@ -344,18 +362,32 @@ async function expectFacadeCandidateScan({
     )
 
     const expectedKeys =
-      finalLayout === `moved` ? [10, 30, 20] : [10, 20, 30]
-    const expectedValues =
-      finalLayout === `moved` ? [11, 30, 20] : [11, 20, 30]
+      finalLayout === `moved`
+        ? initialRows
+            .filter(({ id }) => id !== candidateRow.id)
+            .map(({ id }) => id)
+            .concat(candidateRow.id)
+        : initialRows.map(({ id }) => id)
+    const expectedValues = expectedKeys.map((id) =>
+      id === valueRow.id ? valueRow.value + 1 : id,
+    )
+    if (finalLayout === `moved`) {
+      expect(changedKeyOrder).toEqual([10, 20])
+      expect(
+        changedKeyOrder[candidatePosition === `first` ? 0 : 1],
+      ).toBe(candidateRow.id)
+    } else {
+      expect(changedKeyOrder).toEqual([valueRow.id])
+    }
     expect(keys()).toEqual(expectedKeys)
     expect(values()).toEqual(expectedValues)
     expect(publications).toEqual([
       [
         {
           type: `update`,
-          key: 10,
-          value: 11,
-          previousValue: 10,
+          key: valueRow.id,
+          value: valueRow.value + 1,
+          previousValue: valueRow.value,
         },
       ],
     ])
@@ -365,6 +397,7 @@ async function expectFacadeCandidateScan({
       revision + (finalLayout === `moved` ? 1 : 0),
     )
   } finally {
+    restoreFacadeGetKey?.()
     subscription?.unsubscribe()
     await Promise.all([
       live.cleanup(),
