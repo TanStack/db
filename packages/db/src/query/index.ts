@@ -107,6 +107,8 @@ export {
   type QueryIdentity,
 } from './ir-stable-identity.js'
 
+export { union, unionFromLiveQuery } from './union.js'
+
 // Predicate utilities for predicate push-down
 export {
   isWhereSubset,
