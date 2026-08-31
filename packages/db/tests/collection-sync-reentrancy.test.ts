@@ -407,8 +407,8 @@ describe(`sync publication reentrancy`, () => {
     }
   })
 
-  it.each([`first`, `middle`, `last`] as const)(
-    `honors a %s-position layout mark in an immediate causal prefix`,
+  it.each([`first`, `middle`, `last`, `first-and-middle`] as const)(
+    `honors %s layout marks in an immediate causal prefix`,
     async (markPosition) => {
       const updatePersistence = createDeferred<void>()
       const insertPersistence = createDeferred<void>()
@@ -451,11 +451,13 @@ describe(`sync publication reentrancy`, () => {
         sync.write({
           type: `update`,
           value:
-            markPosition === `first`
+            markPosition === `first` || markPosition === `first-and-middle`
               ? { id: 1, value: `one`, rank: 2 }
               : { id: 2, value: `server-two-a`, rank: 1 },
         })
-        if (markPosition === `first`) sync.collection._markLayoutChange()
+        if (markPosition === `first` || markPosition === `first-and-middle`) {
+          sync.collection._markLayoutChange()
+        }
         const firstReceipt = sync.commit()
         expect(firstReceipt).not.toBe(true)
         if (firstReceipt !== true) {
@@ -480,7 +482,9 @@ describe(`sync publication reentrancy`, () => {
               ? { id: 1, value: `one`, rank: 2 }
               : { id: 2, value: `server-two-b`, rank: 1 },
         })
-        if (markPosition === `middle`) sync.collection._markLayoutChange()
+        if (markPosition === `middle` || markPosition === `first-and-middle`) {
+          sync.collection._markLayoutChange()
+        }
         const middleReceipt = sync.commit()
         expect(middleReceipt).not.toBe(true)
 
