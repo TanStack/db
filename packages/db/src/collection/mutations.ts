@@ -37,6 +37,19 @@ import type { TransactionScope } from '../transactions'
 import type { CollectionLifecycleManager } from './lifecycle'
 import type { CollectionStateManager } from './state'
 
+function copyNonEnumerableSymbols<T extends object>(
+  target: T,
+  source: object,
+): T {
+  for (const symbol of Object.getOwnPropertySymbols(source)) {
+    const descriptor = Object.getOwnPropertyDescriptor(source, symbol)
+    if (descriptor && !descriptor.enumerable) {
+      Object.defineProperty(target, symbol, descriptor)
+    }
+  }
+  return target
+}
+
 export class CollectionMutationsManager<
   TOutput extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -369,10 +382,9 @@ export class CollectionMutationsManager<
         )
 
         // Construct the full modified item by applying the validated update payload to the original item
-        const modifiedItem = Object.assign(
-          {},
+        const modifiedItem = copyNonEnumerableSymbols(
+          Object.assign({}, originalItem, validatedUpdatePayload),
           originalItem,
-          validatedUpdatePayload,
         )
 
         // Check if the ID of the item is being changed

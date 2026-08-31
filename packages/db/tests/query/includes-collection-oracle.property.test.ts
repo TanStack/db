@@ -411,14 +411,33 @@ function applyPendingFacadeOperation(
 function expectedPendingFacadeRows(
   rows: ReadonlyMap<number, ChildRow>,
   shape: PendingFacadeShape = `unordered`,
+  orderRows: ReadonlyMap<number, ChildRow> = rows,
 ): Array<ChildRow> {
   return [...rows.values()]
     .map((row) => ({ ...row }))
-    .sort((left, right) =>
-      shape === `ordered`
-        ? left.value - right.value || left.id - right.id
-        : left.id - right.id,
-    )
+    .sort((left, right) => {
+      if (shape === `unordered`) return left.id - right.id
+      const leftOrder = orderRows.get(left.id)?.value
+      const rightOrder = orderRows.get(right.id)?.value
+      if (leftOrder === rightOrder) return left.id - right.id
+      if (leftOrder === undefined) return 1
+      if (rightOrder === undefined) return -1
+      return leftOrder - rightOrder
+    })
+}
+
+function projectPendingFacadeRows(
+  rows: ReadonlyArray<ChildRow>,
+  shape: PendingFacadeShape,
+): Array<ChildRow> {
+  const projected = rows.map(({ id, parentGroup, value }) => ({
+    id,
+    parentGroup,
+    value,
+  }))
+  return shape === `ordered`
+    ? projected
+    : projected.sort((left, right) => left.id - right.id)
 }
 
 function expectedPendingFacadeChange(
@@ -932,28 +951,13 @@ describe(`Collection-valued includes oracle`, () => {
                 await live.preload()
                 const facade = live.get(1)!.children
                 const childRows = () =>
-                  expectedPendingFacadeRows(
-                    new Map(
-                      facade.toArray.map(({ id, parentGroup, value }) => [
-                        id,
-                        { id, parentGroup, value },
-                      ]),
-                    ),
-                    shape,
-                  )
+                  projectPendingFacadeRows(facade.toArray, shape)
                 const rootRows = () =>
                   live.toArray.map(
                     ({ id: parentId, children: rootFacade }) => ({
                       id: parentId,
-                      children: expectedPendingFacadeRows(
-                        new Map(
-                          rootFacade.toArray.map(
-                            ({ id: childId, parentGroup, value }) => [
-                              childId,
-                              { id: childId, parentGroup, value },
-                            ],
-                          ),
-                        ),
+                      children: projectPendingFacadeRows(
+                        rootFacade.toArray,
                         shape,
                       ),
                     }),
@@ -1038,25 +1042,41 @@ describe(`Collection-valued includes oracle`, () => {
                 const optimisticRows = expectedPendingFacadeRows(
                   afterOptimistic,
                   shape,
+                  initialRows,
                 )
                 const pendingRows = expectedPendingFacadeRows(
                   whilePending,
                   shape,
+                  afterSource,
                 )
                 const settledRows = expectedPendingFacadeRows(
                   afterSource,
                   shape,
+                  afterSource,
                 )
+                const sourceLayoutChanged =
+                  shape === `ordered` &&
+                  (optimisticRows.length !== pendingRows.length ||
+                    optimisticRows.some(
+                      (row, index) => row.id !== pendingRows[index]?.id,
+                    ))
+                const expectedSourcePublication = expectedSourceChange
+                  ? [expectedSourceChange]
+                  : sourceLayoutChanged
+                    ? []
+                    : undefined
                 const expectedSourcePublications = [
                   [expectedOptimisticChange],
-                  ...(expectedSourceChange ? [[expectedSourceChange]] : []),
+                  ...(expectedSourcePublication
+                    ? [expectedSourcePublication]
+                    : []),
                 ]
                 const expectedSourceSnapshots = [
                   {
                     facade: optimisticRows,
                     root: [{ id: 1, children: optimisticRows }],
                   },
-                  ...(expectedSourceChange
+                  ...(expectedSourcePublication
                     ? [
                         {
                           facade: pendingRows,
@@ -1136,6 +1156,365 @@ describe(`Collection-valued includes oracle`, () => {
       }
     }
   }
+
+  for (const settlement of pendingFacadeSettlements) {
+    fcTest(
+      `publishes a non-projected same-key order move while its facade update ${settlement}s`,
+      async () => {
+        type OrderedSourceChild = ChildRow & { position: number }
+        const parents = createControlledCollection(`hidden-order-parents`, [
+          { id: 1, group: 1 },
+        ])
+        const children = createControlledCollection<OrderedSourceChild>(
+          `hidden-order-children`,
+          [
+            { id: 10, parentGroup: 1, value: 10, position: 0 },
+            { id: 20, parentGroup: 1, value: 20, position: 1 },
+          ],
+        )
+        const live = createLiveQueryCollection((q) =>
+          q.from({ parent: parents.collection }).select(({ parent }) => ({
+            id: parent.id,
+            children: q
+              .from({ child: children.collection })
+              .where(({ child }) => eq(child.parentGroup, parent.group))
+              .orderBy(({ child }) => child.position)
+              .select(({ child }) => ({
+                id: child.id,
+                parentGroup: child.parentGroup,
+                value: child.value,
+              })),
+          })),
+        )
+        const persistence = createDeferred<void>()
+
+        await live.preload()
+        const facade = live.get(1)!.children
+        const ids = () => facade.toArray.map(({ id }) => id)
+        const values = () => facade.toArray.map(({ value }) => value)
+        const publications: Array<Array<ProjectedChildChange>> = []
+        const callbackIds: Array<Array<number>> = []
+        const callbackValues: Array<Array<number>> = []
+        const subscription = facade.subscribeChanges(
+          (batch) => {
+            publications.push(batch.map(projectChildChange))
+            callbackIds.push(ids())
+            callbackValues.push(values())
+          },
+          { includeInitialState: false },
+        )
+        const mutate = createOptimisticAction<void>({
+          onMutate: () => {
+            facade.update(10, (draft) => {
+              draft.value = 11
+            })
+          },
+          mutationFn: () => persistence.promise,
+        })
+        const transaction = mutate()
+        const revisionBeforeSource = facade._layoutRevision
+
+        try {
+          expect(ids()).toEqual([10, 20])
+          expect(values()).toEqual([11, 20])
+          expect(publications).toEqual([
+            [
+              {
+                type: `update`,
+                key: 10,
+                value: { id: 10, parentGroup: 1, value: 11 },
+                previousValue: { id: 10, parentGroup: 1, value: 10 },
+              },
+            ],
+          ])
+
+          children.write(`update`, {
+            id: 10,
+            parentGroup: 1,
+            value: 10,
+            position: 2,
+          })
+
+          expect(ids()).toEqual([20, 10])
+          expect(values()).toEqual([20, 11])
+          expect(facade._layoutRevision).toBe(revisionBeforeSource + 1)
+          expect(publications).toEqual([
+            [
+              {
+                type: `update`,
+                key: 10,
+                value: { id: 10, parentGroup: 1, value: 11 },
+                previousValue: { id: 10, parentGroup: 1, value: 10 },
+              },
+            ],
+            [],
+          ])
+          expect(callbackIds).toEqual([
+            [10, 20],
+            [20, 10],
+          ])
+          expect(callbackValues).toEqual([
+            [11, 20],
+            [20, 11],
+          ])
+
+          const persisted = transaction.isPersisted.promise.catch(
+            () => undefined,
+          )
+          if (settlement === `resolve`) persistence.resolve()
+          else persistence.reject(new Error(`hidden order mutation rejected`))
+          await persisted
+          await flushPromises()
+
+          expect(ids()).toEqual([20, 10])
+          expect(values()).toEqual([20, 10])
+          expect(facade._layoutRevision).toBe(revisionBeforeSource + 1)
+          expect(publications).toEqual([
+            [
+              {
+                type: `update`,
+                key: 10,
+                value: { id: 10, parentGroup: 1, value: 11 },
+                previousValue: { id: 10, parentGroup: 1, value: 10 },
+              },
+            ],
+            [],
+            [
+              {
+                type: `update`,
+                key: 10,
+                value: { id: 10, parentGroup: 1, value: 10 },
+                previousValue: { id: 10, parentGroup: 1, value: 11 },
+              },
+            ],
+          ])
+          expect(callbackIds).toEqual([
+            [10, 20],
+            [20, 10],
+            [20, 10],
+          ])
+          expect(callbackValues).toEqual([
+            [11, 20],
+            [20, 11],
+            [20, 10],
+          ])
+        } finally {
+          persistence.resolve()
+          await transaction.isPersisted.promise.catch(() => undefined)
+          subscription.unsubscribe()
+          await Promise.all([
+            live.cleanup(),
+            parents.collection.cleanup(),
+            children.collection.cleanup(),
+          ])
+        }
+      },
+    )
+  }
+
+  for (const settlement of pendingFacadeSettlements) {
+    fcTest(
+      `publishes an independent joined order move while a facade update ${settlement}s`,
+      async () => {
+        type SortRow = { id: number; childId: number; position: number }
+        const parents = createControlledCollection(`joined-order-parents`, [
+          { id: 1, group: 1 },
+        ])
+        const children = createControlledCollection(`joined-order-children`, [
+          { id: 10, parentGroup: 1, value: 10 },
+          { id: 20, parentGroup: 1, value: 20 },
+        ])
+        const sorts = createControlledCollection<SortRow>(
+          `joined-order-sorts`,
+          [
+            { id: 100, childId: 10, position: 0 },
+            { id: 200, childId: 20, position: 1 },
+          ],
+        )
+        const live = createLiveQueryCollection((q) =>
+          q.from({ parent: parents.collection }).select(({ parent }) => ({
+            id: parent.id,
+            children: q
+              .from({ child: children.collection })
+              .join({ sort: sorts.collection }, ({ child, sort }) =>
+                eq(child.id, sort.childId),
+              )
+              .where(({ child }) => eq(child.parentGroup, parent.group))
+              .orderBy(({ sort }) => sort.position)
+              .select(({ child }) => child),
+          })),
+        )
+        const persistence = createDeferred<void>()
+
+        await live.preload()
+        const facade = live.get(1)!.children
+        const ids = () => facade.toArray.map(({ id }) => id)
+        const values = () => facade.toArray.map(({ value }) => value)
+        const publications: Array<Array<ProjectedChildChange>> = []
+        const callbackIds: Array<Array<number>> = []
+        const callbackValues: Array<Array<number>> = []
+        const subscription = facade.subscribeChanges(
+          (batch) => {
+            publications.push(batch.map(projectChildChange))
+            callbackIds.push(ids())
+            callbackValues.push(values())
+          },
+          { includeInitialState: false },
+        )
+        const mutate = createOptimisticAction<void>({
+          onMutate: () => {
+            facade.update(10, (draft) => {
+              draft.value = 11
+            })
+          },
+          mutationFn: () => persistence.promise,
+        })
+        const transaction = mutate()
+        const revisionBeforeSource = facade._layoutRevision
+
+        try {
+          expect(ids()).toEqual([10, 20])
+          expect(values()).toEqual([11, 20])
+
+          sorts.write(`update`, { id: 100, childId: 10, position: 2 })
+
+          expect(ids()).toEqual([20, 10])
+          expect(values()).toEqual([20, 11])
+          expect(facade._layoutRevision).toBe(revisionBeforeSource + 1)
+          expect(publications).toEqual([
+            [
+              {
+                type: `update`,
+                key: 10,
+                value: { id: 10, parentGroup: 1, value: 11 },
+                previousValue: { id: 10, parentGroup: 1, value: 10 },
+              },
+            ],
+            [],
+          ])
+          expect(callbackIds).toEqual([
+            [10, 20],
+            [20, 10],
+          ])
+          expect(callbackValues).toEqual([
+            [11, 20],
+            [20, 11],
+          ])
+
+          const persisted = transaction.isPersisted.promise.catch(
+            () => undefined,
+          )
+          if (settlement === `resolve`) persistence.resolve()
+          else persistence.reject(new Error(`joined order mutation rejected`))
+          await persisted
+          await flushPromises()
+
+          expect(ids()).toEqual([20, 10])
+          expect(values()).toEqual([20, 10])
+          expect(facade._layoutRevision).toBe(revisionBeforeSource + 1)
+          expect(publications).toEqual([
+            [
+              {
+                type: `update`,
+                key: 10,
+                value: { id: 10, parentGroup: 1, value: 11 },
+                previousValue: { id: 10, parentGroup: 1, value: 10 },
+              },
+            ],
+            [],
+            [
+              {
+                type: `update`,
+                key: 10,
+                value: { id: 10, parentGroup: 1, value: 10 },
+                previousValue: { id: 10, parentGroup: 1, value: 11 },
+              },
+            ],
+          ])
+          expect(callbackIds).toEqual([
+            [10, 20],
+            [20, 10],
+            [20, 10],
+          ])
+          expect(callbackValues).toEqual([
+            [11, 20],
+            [20, 11],
+            [20, 10],
+          ])
+        } finally {
+          persistence.resolve()
+          await transaction.isPersisted.promise.catch(() => undefined)
+          subscription.unsubscribe()
+          await Promise.all([
+            live.cleanup(),
+            parents.collection.cleanup(),
+            children.collection.cleanup(),
+            sorts.collection.cleanup(),
+          ])
+        }
+      },
+    )
+  }
+
+  fcTest(
+    `does not publish an order token change that preserves facade layout`,
+    async () => {
+      type OrderedSourceChild = ChildRow & { position: number }
+      const parents = createControlledCollection(`stable-order-parents`, [
+        { id: 1, group: 1 },
+      ])
+      const children = createControlledCollection<OrderedSourceChild>(
+        `stable-order-children`,
+        [
+          { id: 10, parentGroup: 1, value: 10, position: 0 },
+          { id: 20, parentGroup: 1, value: 20, position: 2 },
+        ],
+      )
+      const live = createLiveQueryCollection((q) =>
+        q.from({ parent: parents.collection }).select(({ parent }) => ({
+          id: parent.id,
+          children: q
+            .from({ child: children.collection })
+            .where(({ child }) => eq(child.parentGroup, parent.group))
+            .orderBy(({ child }) => child.position)
+            .select(({ child }) => ({
+              id: child.id,
+              parentGroup: child.parentGroup,
+              value: child.value,
+            })),
+        })),
+      )
+
+      await live.preload()
+      const facade = live.get(1)!.children
+      const publications: Array<Array<ProjectedChildChange>> = []
+      const subscription = facade.subscribeChanges(
+        (batch) => publications.push(batch.map(projectChildChange)),
+        { includeInitialState: false },
+      )
+      const revision = facade._layoutRevision
+
+      try {
+        children.write(`update`, {
+          id: 10,
+          parentGroup: 1,
+          value: 10,
+          position: 1,
+        })
+
+        expect(facade.toArray.map(({ id }) => id)).toEqual([10, 20])
+        expect(facade._layoutRevision).toBe(revision)
+        expect(publications).toEqual([])
+      } finally {
+        subscription.unsubscribe()
+        await Promise.all([
+          live.cleanup(),
+          parents.collection.cleanup(),
+          children.collection.cleanup(),
+        ])
+      }
+    },
+  )
 
   for (const settlement of pendingFacadeSettlements) {
     for (const optimisticOperation of pendingFacadeOptimisticOperations) {

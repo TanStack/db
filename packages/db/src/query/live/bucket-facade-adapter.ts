@@ -13,6 +13,9 @@ import type {
 
 type FacadeSync = Parameters<SyncConfig<any>[`sync`]>[0]
 
+const BUCKET_FACADE_PUBLIC_KEY = Symbol(`bucketFacadePublicKey`)
+const BUCKET_FACADE_ORDER = Symbol(`bucketFacadeOrder`)
+
 type PendingRow = {
   deletes: number
   inserts: number
@@ -372,15 +375,16 @@ export class BucketFacadeAdapter {
     const collection = createCollection<any, string | number>({
       id: `__bucket-facade:${this.parentId}:${edgeId}:${bucketKey}`,
       getKey: (row) => {
-        const key = keys.get(row) ?? row?.$key
+        const key =
+          keys.get(row) ?? row?.[BUCKET_FACADE_PUBLIC_KEY] ?? row?.$key
         if (typeof key !== `string` && typeof key !== `number`) {
           throw new Error(`Bucket facade row has no public key`)
         }
         return key
       },
       compare: (left, right) => {
-        const leftOrder = order.get(left)
-        const rightOrder = order.get(right)
+        const leftOrder = order.get(left) ?? left?.[BUCKET_FACADE_ORDER]
+        const rightOrder = order.get(right) ?? right?.[BUCKET_FACADE_ORDER]
         if (leftOrder === rightOrder) return 0
         if (leftOrder === undefined) return 1
         if (rightOrder === undefined) return -1
@@ -426,18 +430,26 @@ export class BucketFacadeAdapter {
     const hasSyncedRow = entry.collection._state.syncedData.has(key)
     const previousSyncedRow = entry.collection._state.syncedData.get(key)
     const orderChanged = hasSyncedRow && previousOrder !== nextOrder
-    const orderChangeIsVisible =
-      orderChanged &&
-      !entry.collection._state.optimisticDeletes.has(key) &&
-      !entry.collection._state.optimisticUpserts.has(key)
     const resolvedRow = this.resolve(change.value.value)
+    // Order metadata lives in a WeakMap keyed by row identity. Never attach a
+    // new base order to an object that may also back the optimistic overlay.
     const row =
       orderChanged && previousSyncedRow === resolvedRow
         ? { ...resolvedRow }
         : resolvedRow
     entry.keys.set(row, key)
+    // Collection updates clone the public row. Keep its route key on an
+    // internal symbol so projected facade rows retain their identity.
+    Object.defineProperty(row, BUCKET_FACADE_PUBLIC_KEY, {
+      configurable: true,
+      value: key,
+    })
     if (nextOrder !== undefined) {
       entry.order.set(row, nextOrder)
+      Object.defineProperty(row, BUCKET_FACADE_ORDER, {
+        configurable: true,
+        value: nextOrder,
+      })
     }
 
     if (change.inserts > change.deletes) {
@@ -450,11 +462,20 @@ export class BucketFacadeAdapter {
     } else if (change.deletes > 0) {
       sync.write({ type: `delete`, key })
       entry.currentOrder.delete(key)
+      // Deleting the synced base moves a still-visible optimistic upsert out
+      // of the base ordering and into the optimistic-only suffix.
+      if (hasOrderBy && entry.collection._state.optimisticUpserts.has(key)) {
+        sync.collection._markLayoutChange()
+      }
       return
     }
 
     entry.currentOrder.set(key, nextOrder)
-    if (hasOrderBy && orderChangeIsVisible) {
+    if (
+      hasOrderBy &&
+      orderChanged &&
+      !entry.collection._state.optimisticDeletes.has(key)
+    ) {
       sync.collection._markLayoutChange()
     }
   }

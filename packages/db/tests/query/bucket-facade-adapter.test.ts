@@ -18,6 +18,52 @@ import type { Context } from '../../src/query/builder/types.js'
 type FacadeSync = Parameters<SyncConfig<Record<string, unknown>>[`sync`]>[0]
 
 describe(`BucketFacadeAdapter`, () => {
+  it(`moves a row when the graph reuses its object for a new order`, async () => {
+    const graph = new D2()
+    const rows = graph.newInput<[string, BucketRow]>()
+    const activeBuckets = graph.newInput<[string, true]>()
+    const adapter = new BucketFacadeAdapter(
+      `facade-order-parent`,
+      [{ edgeId: `children`, rows, activeBuckets, hasOrderBy: true }],
+      () => {},
+    )
+    graph.finalize()
+
+    const bucketKey = `group-1`
+    const moving = { id: 1, value: `moving` }
+    const fixed = { id: 2, value: `fixed` }
+    activeBuckets.sendData(new MultiSet([[[bucketKey, true], 1]]))
+    rows.sendData(
+      new MultiSet([
+        [[bucketKey, { publicKey: moving.id, value: moving, order: `0` }], 1],
+        [[bucketKey, { publicKey: fixed.id, value: fixed, order: `1` }], 1],
+      ]),
+    )
+    graph.run()
+    adapter.flush().publish()
+
+    const facadeRef: BucketFacadeRef = {
+      [BUCKET_FACADE_REF]: { edgeId: `children`, bucketKey },
+    }
+    const facade = adapter.resolve(facadeRef) as unknown as Collection<
+      typeof moving,
+      number
+    >
+    expect(facade.toArray.map(({ id }) => id)).toEqual([1, 2])
+
+    rows.sendData(
+      new MultiSet([
+        [[bucketKey, { publicKey: moving.id, value: moving, order: `0` }], -1],
+        [[bucketKey, { publicKey: moving.id, value: moving, order: `2` }], 1],
+      ]),
+    )
+    graph.run()
+    adapter.flush().publish()
+
+    expect(facade.toArray.map(({ id }) => id)).toEqual([2, 1])
+    await adapter.cleanup()
+  })
+
   it(`restores facade state when a flush fails after writing`, async () => {
     const graph = new D2()
     const rows = graph.newInput<[string, BucketRow]>()

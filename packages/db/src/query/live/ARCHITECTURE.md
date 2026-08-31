@@ -265,6 +265,14 @@ row. A negative aggregate is an invariant violation.
 This is a specialized use of the existing D2 keyed reduction. It is not a
 separate contribution-ledger subsystem.
 
+Collection-valued facades keep the canonical public key and order token as
+non-enumerable row metadata. Optimistic Collection updates preserve that
+metadata when they clone a row. It is adapter state, not part of the selected
+query value: projections need not expose a key field, and equality or change
+payloads must not acquire one. An order update that reuses the canonical row
+object clones that row before replacing its order metadata, so the ordered map
+can remove the old position before it installs the new one.
+
 ## Routes and buckets are relations
 
 For each materialization edge, the compiler produces these keyed relations:
@@ -935,7 +943,12 @@ root or containing-facade transaction that removed its final route drains that
 retirement too. A direct source change therefore updates the whole derived
 publication while an optimistic mutation on either Collection persists. The
 normal optimistic overlay still wins for conflicting keys, and the graph
-output remains one coherent publication.
+output remains one coherent publication. The overlay replaces the row value,
+not the graph-owned key order. A source order move publishes a layout change
+when that key remains visible, including beneath an optimistic update. An
+optimistic delete hides the key and its order moves. If the synced base is
+deleted beneath an optimistic update, the still-visible row moves to the
+optimistic-only suffix and that layout change also publishes.
 Rejected, canceled, and obsolete acquisitions establish no coverage. Sources
 must honor cancellation before publishing request-scoped rows.
 
