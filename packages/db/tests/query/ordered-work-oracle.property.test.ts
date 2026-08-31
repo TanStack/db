@@ -1018,6 +1018,14 @@ describe(`ordered source work oracle`, () => {
           expectedArrayReads: { lengths: 2, elements: 3 },
           ascendingSign: -1,
         },
+        {
+          name: `equal nested prefix then outer length`,
+          left: [[1]],
+          right: [[1], 2],
+          expectedNullReads: 3,
+          expectedArrayReads: { lengths: 2, elements: 2 },
+          ascendingSign: -1,
+        },
       ].map((scenario) => ({ direction, ...scenario })),
     ),
   )(
