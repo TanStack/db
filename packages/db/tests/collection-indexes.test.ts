@@ -15,6 +15,7 @@ import {
 } from '../src/query/builder/functions'
 import { PropRef } from '../src/query/ir'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
+import { DEFAULT_COMPARE_OPTIONS } from '../src/utils.js'
 import { expectIndexUsage, stripVirtualProps, withIndexTracking } from './utils'
 import type { Collection } from '../src/collection/index.js'
 import type { MutationFn, PendingMutation } from '../src/types'
@@ -159,6 +160,54 @@ describe(`Collection Indexes`, () => {
 
       expect(index.name).toBe(`ageIndex`)
       expect(index.indexedKeysSet.size).toBe(5)
+    })
+
+    it(`should match compare options by collation semantics`, () => {
+      const index = collection.createIndex((row) => row.status)
+
+      expect(
+        index.matchesCompareOptions({
+          ...DEFAULT_COMPARE_OPTIONS,
+          locale: undefined,
+          localeOptions: undefined,
+        }),
+      ).toBe(true)
+      expect(
+        index.matchesCompareOptions({
+          ...DEFAULT_COMPARE_OPTIONS,
+          localeOptions: { sensitivity: undefined },
+        }),
+      ).toBe(true)
+      expect(
+        index.matchesCompareOptions({
+          ...DEFAULT_COMPARE_OPTIONS,
+          direction: `desc`,
+        }),
+      ).toBe(true)
+      expect(
+        index.matchesCompareOptions({
+          ...DEFAULT_COMPARE_OPTIONS,
+          locale: `de-DE`,
+        }),
+      ).toBe(false)
+      expect(
+        index.matchesCompareOptions({
+          ...DEFAULT_COMPARE_OPTIONS,
+          localeOptions: { sensitivity: `base` },
+        }),
+      ).toBe(false)
+      expect(
+        index.matchesCompareOptions({
+          ...DEFAULT_COMPARE_OPTIONS,
+          nulls: `last`,
+        }),
+      ).toBe(false)
+      expect(
+        index.matchesCompareOptions({
+          ...DEFAULT_COMPARE_OPTIONS,
+          stringSort: `lexical`,
+        }),
+      ).toBe(false)
     })
 
     it(`should create multiple indexes`, () => {

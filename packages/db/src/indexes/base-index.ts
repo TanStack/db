@@ -6,6 +6,12 @@ import type { RangeQueryOptions } from './btree-index.js'
 import type { CompareOptions } from '../query/builder/types.js'
 import type { BasicExpression, OrderByDirection } from '../query/ir.js'
 
+function normalizeLocaleOptions(options: object | undefined): object {
+  return Object.fromEntries(
+    Object.entries(options ?? {}).filter(([, value]) => value !== undefined),
+  )
+}
+
 /**
  * Operations that indexes can support, imported from available comparison functions
  */
@@ -177,18 +183,28 @@ export abstract class BaseIndex<
    * The direction is ignored because the index can be reversed if the direction is different.
    */
   matchesCompareOptions(compareOptions: CompareOptions): boolean {
-    const thisCompareOptionsWithoutDirection = {
-      ...this.compareOptions,
-      direction: undefined,
-    }
-    const compareOptionsWithoutDirection = {
-      ...compareOptions,
-      direction: undefined,
+    const indexStringSort =
+      this.compareOptions.stringSort ?? DEFAULT_COMPARE_OPTIONS.stringSort
+    const requestedStringSort =
+      compareOptions.stringSort ?? DEFAULT_COMPARE_OPTIONS.stringSort
+
+    if (
+      this.compareOptions.nulls !== compareOptions.nulls ||
+      indexStringSort !== requestedStringSort
+    ) {
+      return false
     }
 
-    return deepEquals(
-      thisCompareOptionsWithoutDirection,
-      compareOptionsWithoutDirection,
+    if (indexStringSort !== `locale`) {
+      return true
+    }
+
+    return (
+      this.compareOptions.locale === compareOptions.locale &&
+      deepEquals(
+        normalizeLocaleOptions(this.compareOptions.localeOptions),
+        normalizeLocaleOptions(compareOptions.localeOptions),
+      )
     )
   }
 
