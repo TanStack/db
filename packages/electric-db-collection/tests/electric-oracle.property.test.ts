@@ -263,12 +263,12 @@ function applyReferenceBatch(
       continue
     }
     if (!(`value` in message)) continue
-    const value = message.value as Partial<OracleRow> & { id: number }
+    const value = message.value
     const id = value.id
     if (headers.operation === `delete`) {
       state.pending.delete(id)
     } else if (headers.operation === `insert`) {
-      state.pending.set(id, value as OracleRow)
+      state.pending.set(id, value)
     } else {
       const current = state.pending.get(id)
       if (current) {
@@ -328,11 +328,11 @@ function recomputeCommittedRows(
   for (const message of committedPrefix.slice(resetIndex + 1)) {
     if (!(`value` in message)) continue
     const headers = message.headers as Record<string, unknown>
-    const value = message.value as Partial<OracleRow> & { id: number }
+    const value = message.value
     if (headers.operation === `delete`) {
       rows.delete(value.id)
     } else if (headers.operation === `insert`) {
-      rows.set(value.id, value as OracleRow)
+      rows.set(value.id, value)
     } else {
       const current = rows.get(value.id)
       if (current) {
@@ -342,7 +342,7 @@ function recomputeCommittedRows(
         typeof value.name === `string` &&
         typeof value.stable === `string`
       ) {
-        rows.set(value.id, value as OracleRow)
+        rows.set(value.id, value)
       }
     }
   }
@@ -2095,6 +2095,49 @@ describe(`Electric adapter laws`, () => {
     await collection.cleanup()
   })
 
+  it(`keeps descriptor utilities captured before collection startup live`, async () => {
+    let subscriber!: (messages: Array<Message<OracleRow>>) => void
+    mockSubscribe.mockImplementation((callback) => {
+      subscriber = callback
+      return vi.fn()
+    })
+    const options = electricCollectionOptions<OracleRow>({
+      id: `captured-descriptor-utilities`,
+      shapeOptions: {
+        url: `http://test-url`,
+        params: { table: `test_table` },
+      },
+      getKey: (row) => row.id,
+      startSync: false,
+    })
+    const { awaitMatch, awaitTxId } = options.utils
+    const collection = createCollection(options)
+    const pendingMatch = awaitMatch(
+      (message) => `value` in message && message.value.id === 77,
+      100,
+    )
+    const pendingTxid = awaitTxId(77, 100)
+
+    const preload = collection.preload()
+    const evidenceChange = change(
+      `insert`,
+      77,
+      `captured utilities`,
+    ) as ChangeMessage<OracleRow>
+    subscriber([
+      {
+        ...evidenceChange,
+        headers: { operation: `insert`, txids: [77] },
+      },
+      upToDate,
+    ])
+
+    await expect(pendingMatch).resolves.toBe(true)
+    await expect(pendingTxid).resolves.toBe(true)
+    await preload
+    await collection.cleanup()
+  })
+
   it(`retires a pending pre-start match when a lazy collection is cleaned up`, async () => {
     mockSubscribe.mockImplementation(() => vi.fn())
     const collection = createCollection(
@@ -2155,6 +2198,74 @@ describe(`Electric adapter laws`, () => {
 
     await matchOutcome
     await txidOutcome
+    expect(mockSubscribe).not.toHaveBeenCalled()
+    metadataGate.resolve()
+    await preload
+  })
+
+  it(`retires pre-start waiters through automatic collection GC`, async () => {
+    const metadataGate = createDeferred<void>()
+    const adapter = createPersistedAdapter(new Map(), new Map())
+    adapter.loadCollectionMetadata = vi.fn(async () => {
+      await metadataGate.promise
+      return []
+    })
+    const collection = createCollection(
+      persistedCollectionOptions<
+        OracleRow,
+        string | number,
+        never,
+        ElectricCollectionUtils<OracleRow>
+      >({
+        ...electricCollectionOptions<OracleRow>({
+          id: `persisted-gc-waiter-cleanup`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+          },
+          getKey: (row) => row.id,
+          startSync: false,
+          gcTime: 10,
+        }),
+        persistence: { adapter },
+      }),
+    )
+    const pendingMatch = collection.utils.awaitMatch(() => false, 5000)
+    const pendingTxid = collection.utils.awaitTxId(703, 5000)
+    const preload = collection.preload()
+    await vi.waitFor(
+      () => expect(adapter.loadCollectionMetadata).toHaveBeenCalledOnce(),
+      { interval: 1, timeout: 250 },
+    )
+    const subscription = collection.subscribeChanges(() => {})
+    const matchOutcome = pendingMatch.catch((error: unknown) => error)
+    const txidOutcome = pendingTxid.catch((error: unknown) => error)
+
+    subscription.unsubscribe()
+    await vi.waitFor(() => expect(collection.status).toBe(`cleaned-up`), {
+      interval: 10,
+      timeout: 1500,
+    })
+    const pendingSentinel = Symbol(`pending`)
+    const matchResult = await Promise.race([
+      matchOutcome,
+      new Promise((resolve) => setTimeout(() => resolve(pendingSentinel), 50)),
+    ])
+    const txidResult = await Promise.race([
+      txidOutcome,
+      new Promise((resolve) => setTimeout(() => resolve(pendingSentinel), 50)),
+    ])
+
+    expect(matchResult).toEqual(
+      expect.objectContaining({
+        message: expect.stringMatching(/aborted/i),
+      }),
+    )
+    expect(txidResult).toEqual(
+      expect.objectContaining({
+        message: expect.stringMatching(/aborted/i),
+      }),
+    )
     expect(mockSubscribe).not.toHaveBeenCalled()
     metadataGate.resolve()
     await preload

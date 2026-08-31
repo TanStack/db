@@ -4,7 +4,6 @@ import {
   isControlMessage,
   isVisibleInSnapshot,
 } from '@electric-sql/client'
-import { Store } from '@tanstack/store'
 import DebugModule from 'debug'
 import {
   DeduplicatedLoadSubset,
@@ -126,9 +125,9 @@ type ElectricSyncMeta = {
 }
 
 type ElectricLifecycleEvidence = {
-  seenTxids: Store<Set<Txid>>
-  seenSnapshots: Store<Array<PostgresSnapshot>>
-  hydratedResumeState: Store<ElectricResumeState | undefined>
+  seenTxids: Set<Txid>
+  seenSnapshots: Array<PostgresSnapshot>
+  hydratedResumeState?: ElectricResumeState
 }
 
 type ElectricPendingMatch<T extends Row<unknown>> = {
@@ -137,7 +136,6 @@ type ElectricPendingMatch<T extends Row<unknown>> = {
   reject: (error: Error) => void
   timeoutId: ReturnType<typeof setTimeout>
   matched: boolean
-  lifecycleKey?: object
 }
 
 type ElectricMatchBuffer<T extends Row<unknown>> = {
@@ -145,24 +143,14 @@ type ElectricMatchBuffer<T extends Row<unknown>> = {
   committed: boolean
 }
 
-function cloneElectricLifecycleEvidence(
-  evidence: ElectricLifecycleEvidence,
-): ElectricLifecycleEvidence {
-  return {
-    seenTxids: new Store(new Set(evidence.seenTxids.state)),
-    seenSnapshots: new Store([...evidence.seenSnapshots.state]),
-    hydratedResumeState: new Store(evidence.hydratedResumeState.state),
-  }
-}
-
 function exportElectricSyncMeta(
   evidence: ElectricLifecycleEvidence,
 ): ElectricSyncMeta {
-  const resume = evidence.hydratedResumeState.state
+  const resume = evidence.hydratedResumeState
   return {
     version: 1,
     ...(resume ? { resume } : {}),
-    seenTxids: Array.from(evidence.seenTxids.state).sort((a, b) => a - b),
+    seenTxids: Array.from(evidence.seenTxids).sort((a, b) => a - b),
   }
 }
 
@@ -173,8 +161,8 @@ function importElectricSyncMeta(
   const parsed = parseElectricSyncMeta(meta)
   if (!parsed) return
 
-  evidence.hydratedResumeState.setState(() => parsed.resume)
-  evidence.seenTxids.setState(() => new Set(parsed.seenTxids))
+  evidence.hydratedResumeState = parsed.resume
+  evidence.seenTxids = new Set(parsed.seenTxids)
 }
 
 function parseElectricResumeState(
@@ -519,6 +507,47 @@ function isMustRefetchMessage<T extends Row<unknown>>(
   return isControlMessage(message) && message.headers.control === `must-refetch`
 }
 
+function planBatchPresence<T extends Row<unknown>>(
+  messages: ReadonlyArray<Message<T>>,
+  getKey: (row: T) => string | number,
+  hasKnownKey: (key: string | number) => boolean,
+  validatesResume: boolean,
+): {
+  messageKeys: Map<Message<T>, string | number>
+  hasUnseenUpdate: boolean
+} {
+  const presence = new Map<string | number, boolean>()
+  const messageKeys = new Map<Message<T>, string | number>()
+  let usesKnownBaseline = true
+
+  for (const message of messages) {
+    if (isMustRefetchMessage(message)) {
+      presence.clear()
+      usesKnownBaseline = false
+      validatesResume = false
+      continue
+    }
+    if (!isChangeMessage(message)) continue
+
+    const rowId = getKey(message.value)
+    messageKeys.set(message, rowId)
+    const operation = message.headers.operation
+    if (operation === `delete`) {
+      presence.set(rowId, false)
+      continue
+    }
+
+    const isKnown =
+      presence.get(rowId) ?? (usesKnownBaseline && hasKnownKey(rowId))
+    if (validatesResume && operation === `update` && !isKnown) {
+      return { messageKeys, hasUnseenUpdate: true }
+    }
+    presence.set(rowId, true)
+  }
+
+  return { messageKeys, hasUnseenUpdate: false }
+}
+
 function isSnapshotEndMessage<T extends Row<unknown>>(
   message: Message<T>,
 ): message is SnapshotEndMessage {
@@ -806,6 +835,230 @@ export interface ElectricCollectionUtils<
   awaitMatch: AwaitMatchFn<T>
 }
 
+/** Owns evidence and pending work for one materialized Collection. */
+class ElectricLifecycle<T extends Row<unknown>> {
+  private readonly evidence: ElectricLifecycleEvidence = {
+    seenTxids: new Set(),
+    seenSnapshots: [],
+  }
+
+  private readonly pendingMatches = new Map<number, ElectricPendingMatch<T>>()
+  private readonly pendingTxidWaits = new Map<
+    number,
+    {
+      txId: Txid
+      resolve: (value: boolean) => void
+      reject: (error: Error) => void
+      timeoutId: ReturnType<typeof setTimeout>
+    }
+  >()
+  private matchBuffer: ElectricMatchBuffer<T> = {
+    messages: [],
+    committed: false,
+  }
+  private nextWaiterId = 0
+  private epoch = 0
+  private active = false
+
+  constructor(private readonly collectionId?: string) {}
+
+  readonly utils: ElectricCollectionUtils<T> = {
+    awaitTxId: (txId, timeout) => this.awaitTxId(txId, timeout),
+    awaitMatch: (matchFn, timeout) => this.awaitMatch(matchFn, timeout),
+  }
+
+  start(): number {
+    if (this.active) this.retire()
+    this.active = true
+    this.epoch++
+    this.matchBuffer = { messages: [], committed: false }
+    return this.epoch
+  }
+
+  isActive(epoch: number): boolean {
+    return this.active && this.epoch === epoch
+  }
+
+  retire(epoch?: number): void {
+    if (epoch !== undefined && !this.isActive(epoch)) return
+    this.active = false
+    this.epoch++
+
+    for (const match of this.pendingMatches.values()) {
+      clearTimeout(match.timeoutId)
+      match.reject(new StreamAbortedError(this.collectionId))
+    }
+    this.pendingMatches.clear()
+
+    for (const waiter of this.pendingTxidWaits.values()) {
+      clearTimeout(waiter.timeoutId)
+      waiter.reject(new StreamAbortedError(this.collectionId))
+    }
+    this.pendingTxidWaits.clear()
+    this.matchBuffer = { messages: [], committed: false }
+    this.evidence.hydratedResumeState = undefined
+  }
+
+  exportMeta(): ElectricSyncMeta {
+    return exportElectricSyncMeta(this.evidence)
+  }
+
+  importMeta(meta: unknown): void {
+    importElectricSyncMeta(this.evidence, meta)
+    this.resolveTxidWaiters()
+  }
+
+  get resumeState(): ElectricResumeState | undefined {
+    return this.evidence.hydratedResumeState
+  }
+
+  set resumeState(value: ElectricResumeState | undefined) {
+    this.evidence.hydratedResumeState = value
+  }
+
+  publishEvidence(
+    txids: ReadonlySet<Txid>,
+    snapshots: ReadonlyArray<PostgresSnapshot>,
+  ): void {
+    txids.forEach((txid) => this.evidence.seenTxids.add(txid))
+    this.evidence.seenSnapshots.push(...snapshots)
+    this.resolveTxidWaiters()
+  }
+
+  private hasTxid(txId: Txid): boolean {
+    return (
+      this.evidence.seenTxids.has(txId) ||
+      this.evidence.seenSnapshots.some((snapshot) =>
+        isVisibleInSnapshot(txId, snapshot),
+      )
+    )
+  }
+
+  private resolveTxidWaiters(): void {
+    for (const [waitId, waiter] of this.pendingTxidWaits) {
+      if (!this.hasTxid(waiter.txId)) continue
+      clearTimeout(waiter.timeoutId)
+      this.pendingTxidWaits.delete(waitId)
+      waiter.resolve(true)
+    }
+  }
+
+  private async awaitTxId(
+    txId: Txid,
+    timeout: number = 5000,
+  ): Promise<boolean> {
+    debug(
+      `${this.collectionId ? `[${this.collectionId}] ` : ``}awaitTxId called with txid %d`,
+      txId,
+    )
+    if (typeof txId !== `number`) {
+      throw new ExpectedNumberInAwaitTxIdError(typeof txId, this.collectionId)
+    }
+    if (this.hasTxid(txId)) return true
+
+    return new Promise((resolve, reject) => {
+      const waitId = this.nextWaiterId++
+      const timeoutId = setTimeout(() => {
+        this.pendingTxidWaits.delete(waitId)
+        reject(new TimeoutWaitingForTxIdError(txId, this.collectionId))
+      }, timeout)
+      this.pendingTxidWaits.set(waitId, {
+        txId,
+        resolve,
+        reject,
+        timeoutId,
+      })
+    })
+  }
+
+  private async awaitMatch(
+    matchFn: MatchFunction<T>,
+    timeout: number = 3000,
+  ): Promise<boolean> {
+    debug(
+      `${this.collectionId ? `[${this.collectionId}] ` : ``}awaitMatch called with custom function`,
+    )
+
+    for (const message of this.matchBuffer.messages) {
+      if (!matchFn(message)) continue
+      if (this.matchBuffer.committed) return true
+      return this.registerMatch(matchFn, timeout, true)
+    }
+    return this.registerMatch(matchFn, timeout, false)
+  }
+
+  private registerMatch(
+    matchFn: MatchFunction<T>,
+    timeout: number,
+    matched: boolean,
+  ): Promise<boolean> {
+    return new Promise((resolve, reject) => {
+      const matchId = this.nextWaiterId++
+      const timeoutId = setTimeout(() => {
+        this.pendingMatches.delete(matchId)
+        reject(new TimeoutWaitingForMatchError(this.collectionId))
+      }, timeout)
+      this.pendingMatches.set(matchId, {
+        matchFn,
+        resolve,
+        reject,
+        timeoutId,
+        matched,
+      })
+    })
+  }
+
+  beginMatchGeneration(messages: ReadonlyArray<Message<T>>): void {
+    const startsNewGeneration = messages.some(
+      (message) =>
+        isChangeMessage(message) ||
+        isMoveOutMessage(message) ||
+        isMoveInMessage(message) ||
+        isMustRefetchMessage(message),
+    )
+    if (!startsNewGeneration) return
+    if (this.matchBuffer.committed) this.matchBuffer.messages = []
+    this.matchBuffer.committed = false
+  }
+
+  observeMatchMessage(message: Message<T>): void {
+    if (
+      isChangeMessage(message) ||
+      isMoveOutMessage(message) ||
+      isMoveInMessage(message)
+    ) {
+      this.matchBuffer.messages.push(message)
+      if (this.matchBuffer.messages.length > 1000) {
+        this.matchBuffer.messages.splice(
+          0,
+          this.matchBuffer.messages.length - 1000,
+        )
+      }
+    }
+
+    for (const [matchId, match] of this.pendingMatches) {
+      if (match.matched) continue
+      try {
+        match.matched = match.matchFn(message)
+      } catch (error) {
+        clearTimeout(match.timeoutId)
+        this.pendingMatches.delete(matchId)
+        match.reject(error instanceof Error ? error : new Error(String(error)))
+      }
+    }
+  }
+
+  commitMatches(): void {
+    this.matchBuffer.committed = true
+    for (const [matchId, match] of this.pendingMatches) {
+      if (!match.matched) continue
+      clearTimeout(match.timeoutId)
+      this.pendingMatches.delete(matchId)
+      match.resolve(true)
+    }
+  }
+}
+
 /**
  * Creates Electric collection options for use with a standard Collection
  *
@@ -859,309 +1112,27 @@ export function electricCollectionOptions<T extends Row<unknown>>(
   utils: ElectricCollectionUtils<T>
   schema?: any
 } {
-  const seenTxids = new Store<Set<Txid>>(new Set([]))
-  const seenSnapshots = new Store<Array<PostgresSnapshot>>([])
-  const hydratedResumeState = new Store<ElectricResumeState | undefined>(
-    undefined,
-  )
-  const descriptorEvidence: ElectricLifecycleEvidence = {
-    seenTxids,
-    seenSnapshots,
-    hydratedResumeState,
-  }
-  const lifecycleEvidence = new WeakMap<object, ElectricLifecycleEvidence>()
-  const getLifecycleEvidence = (
-    lifecycleKey: object,
-  ): ElectricLifecycleEvidence => {
-    const existing = lifecycleEvidence.get(lifecycleKey)
-    if (existing) return existing
-
-    const created = cloneElectricLifecycleEvidence(descriptorEvidence)
-    lifecycleEvidence.set(lifecycleKey, created)
-    return created
-  }
+  let descriptorLifecycle = new ElectricLifecycle<T>(config.id)
+  let utilityLifecycle = descriptorLifecycle
   const internalSyncMode = config.syncMode ?? `eager`
   const finalSyncMode =
     internalSyncMode === `progressive` ? `on-demand` : internalSyncMode
-  const pendingMatches = new Store<Map<string, ElectricPendingMatch<any>>>(
-    new Map(),
-  )
-  const pendingTxidWaits = new Map<
-    string,
-    { lifecycleKey?: object; abort: () => void }
-  >()
-
-  const matchBuffers = new WeakMap<object, ElectricMatchBuffer<any>>()
-  const unboundMatchBuffer = {
-    messages: [] as Array<Message<any>>,
-    committed: false,
-  }
-  let defaultMatchLifecycleKey: object | undefined
-
-  /**
-   * Helper function to remove multiple matches from the pendingMatches store
-   */
-  const removePendingMatches = (matchIds: Array<string>) => {
-    if (matchIds.length > 0) {
-      pendingMatches.setState((current) => {
-        const newMatches = new Map(current)
-        matchIds.forEach((id) => newMatches.delete(id))
-        return newMatches
-      })
-    }
-  }
-
-  const rejectPendingMatches = (lifecycleKey: object) => {
-    const rejected: Array<string> = []
-    pendingMatches.state.forEach((match, matchId) => {
-      if (match.lifecycleKey !== lifecycleKey) return
-      clearTimeout(match.timeoutId)
-      match.reject(new StreamAbortedError(config.id))
-      rejected.push(matchId)
-    })
-    removePendingMatches(rejected)
-  }
-
-  const rejectPendingTxidWaits = (lifecycleKey: object) => {
-    pendingTxidWaits.forEach((waiter) => {
-      if (waiter.lifecycleKey === lifecycleKey) waiter.abort()
-    })
-  }
-
-  /**
-   * Helper function to resolve and cleanup matched pending matches
-   */
-  const resolveMatchedPendingMatches = (lifecycleKey: object) => {
-    const matchesToResolve: Array<string> = []
-    pendingMatches.state.forEach((match, matchId) => {
-      if (match.lifecycleKey === lifecycleKey && match.matched) {
-        clearTimeout(match.timeoutId)
-        match.resolve(true)
-        matchesToResolve.push(matchId)
-        debug(
-          `${config.id ? `[${config.id}] ` : ``}awaitMatch resolved on up-to-date for match %s`,
-          matchId,
-        )
-      }
-    })
-    removePendingMatches(matchesToResolve)
-  }
-
-  /**
-   * Wait for a specific transaction ID to be synced
-   * @param txId The transaction ID to wait for as a number
-   * @param timeout Optional timeout in milliseconds (defaults to 5000ms)
-   * @returns Promise that resolves when the txId is synced
-   */
-  const awaitTxIdFor = async (
-    lifecycleKey: object | undefined,
-    txId: Txid,
-    timeout: number = 5000,
-  ): Promise<boolean> => {
-    debug(
-      `${config.id ? `[${config.id}] ` : ``}awaitTxId called with txid %d`,
-      txId,
-    )
-    if (typeof txId !== `number`) {
-      throw new ExpectedNumberInAwaitTxIdError(typeof txId, config.id)
-    }
-
-    const evidence = lifecycleKey
-      ? getLifecycleEvidence(lifecycleKey)
-      : descriptorEvidence
-
-    // First check if the txid is in the lifecycle's seenTxids store
-    const hasTxid = evidence.seenTxids.state.has(txId)
-    if (hasTxid) return true
-
-    // Then check if the txid is in any of the seen snapshots
-    const hasSnapshot = evidence.seenSnapshots.state.some((snapshot) =>
-      isVisibleInSnapshot(txId, snapshot),
-    )
-    if (hasSnapshot) return true
-
-    return new Promise((resolve, reject) => {
-      const waitId = Math.random().toString(36)
-      const cleanup = () => {
-        clearTimeout(timeoutId)
-        subSeenTxids.unsubscribe()
-        subSeenSnapshots.unsubscribe()
-        pendingTxidWaits.delete(waitId)
-      }
-
-      const abort = () => {
-        cleanup()
-        reject(new StreamAbortedError(config.id))
-      }
-
-      const timeoutId = setTimeout(() => {
-        cleanup()
-        reject(new TimeoutWaitingForTxIdError(txId, config.id))
-      }, timeout)
-
-      const subSeenTxids = evidence.seenTxids.subscribe(() => {
-        if (evidence.seenTxids.state.has(txId)) {
-          debug(
-            `${config.id ? `[${config.id}] ` : ``}awaitTxId found match for txid %o`,
-            txId,
-          )
-          cleanup()
-          resolve(true)
-        }
-      })
-
-      const subSeenSnapshots = evidence.seenSnapshots.subscribe(() => {
-        const visibleSnapshot = evidence.seenSnapshots.state.find((snapshot) =>
-          isVisibleInSnapshot(txId, snapshot),
-        )
-        if (visibleSnapshot) {
-          debug(
-            `${config.id ? `[${config.id}] ` : ``}awaitTxId found match for txid %o in snapshot %o`,
-            txId,
-            visibleSnapshot,
-          )
-          cleanup()
-          resolve(true)
-        }
-      })
-
-      pendingTxidWaits.set(waitId, { lifecycleKey, abort })
-    })
-  }
-
+  const boundLifecycles = new WeakMap<object, ElectricLifecycle<T>>()
   const awaitTxId: AwaitTxIdFn = (txId, timeout) =>
-    awaitTxIdFor(undefined, txId, timeout)
+    utilityLifecycle.utils.awaitTxId(txId, timeout)
 
-  /**
-   * Wait for a custom match function to find a matching message
-   * @param matchFn Function that returns true when a message matches
-   * @param timeout Optional timeout in milliseconds (defaults to 5000ms)
-   * @returns Promise that resolves when a matching message is found
-   */
-  const awaitMatchFor = async (
-    lifecycleKey: object | undefined,
-    matchFn: MatchFunction<any>,
-    timeout: number = 3000,
-  ): Promise<boolean> => {
-    debug(
-      `${config.id ? `[${config.id}] ` : ``}awaitMatch called with custom function`,
-    )
+  const awaitMatch: AwaitMatchFn<T> = (matchFn, timeout) =>
+    utilityLifecycle.utils.awaitMatch(matchFn, timeout)
 
-    return new Promise((resolve, reject) => {
-      const matchId = Math.random().toString(36)
-      const matchBuffer = lifecycleKey
-        ? matchBuffers.get(lifecycleKey)
-        : unboundMatchBuffer
-
-      const cleanupMatch = () => {
-        pendingMatches.setState((current) => {
-          const newMatches = new Map(current)
-          newMatches.delete(matchId)
-          return newMatches
-        })
-      }
-
-      const onTimeout = () => {
-        cleanupMatch()
-        reject(new TimeoutWaitingForMatchError(config.id))
-      }
-
-      const timeoutId = setTimeout(onTimeout, timeout)
-
-      // We need access to the stream messages to check against the match function
-      // This will be handled by the sync configuration
-      const checkMatch = (message: Message<any>) => {
-        if (matchFn(message)) {
-          debug(
-            `${config.id ? `[${config.id}] ` : ``}awaitMatch found matching message, waiting for up-to-date`,
-          )
-          // Mark as matched but don't resolve yet - wait for up-to-date
-          pendingMatches.setState((current) => {
-            const newMatches = new Map(current)
-            const existing = newMatches.get(matchId)
-            if (existing) {
-              newMatches.set(matchId, { ...existing, matched: true })
-            }
-            return newMatches
-          })
-          return true
-        }
-        return false
-      }
-
-      // Check against current batch messages first to handle race conditions
-      for (const message of matchBuffer?.messages ?? []) {
-        if (matchFn(message)) {
-          // If batch is committed (up-to-date already received), resolve immediately
-          // just like awaitTxId does when it finds a txid in seenTxids
-          if (matchBuffer?.committed) {
-            debug(
-              `${config.id ? `[${config.id}] ` : ``}awaitMatch found immediate match in committed batch, resolving immediately`,
-            )
-            clearTimeout(timeoutId)
-            resolve(true)
-            return
-          }
-
-          // If batch is not yet committed, register match and wait for up-to-date
-          debug(
-            `${config.id ? `[${config.id}] ` : ``}awaitMatch found immediate match in current batch, waiting for up-to-date`,
-          )
-          pendingMatches.setState((current) => {
-            const newMatches = new Map(current)
-            newMatches.set(matchId, {
-              matchFn: checkMatch,
-              resolve,
-              reject,
-              timeoutId,
-              matched: true, // Already matched, will resolve on up-to-date
-              lifecycleKey,
-            })
-            return newMatches
-          })
-          return
-        }
-      }
-
-      // Store the match function for the sync process to use
-      // We'll add this to a pending matches store
-      pendingMatches.setState((current) => {
-        const newMatches = new Map(current)
-        newMatches.set(matchId, {
-          matchFn: checkMatch,
-          resolve,
-          reject,
-          timeoutId,
-          matched: false,
-          lifecycleKey,
-        })
-        return newMatches
-      })
+  const createSync = () =>
+    createElectricSync<T>(config.shapeOptions, {
+      getLifecycle: (collection) =>
+        boundLifecycles.get(collection) ?? descriptorLifecycle,
+      syncMode: internalSyncMode,
+      collectionId: config.id,
+      testHooks: config[ELECTRIC_TEST_HOOKS],
     })
-  }
-
-  const awaitMatch: AwaitMatchFn<any> = (matchFn, timeout) =>
-    awaitMatchFor(defaultMatchLifecycleKey, matchFn, timeout)
-
-  const sync = createElectricSync<T>(config.shapeOptions, {
-    getLifecycleEvidence,
-    syncMode: internalSyncMode,
-    pendingMatches,
-    matchBuffers,
-    createAwaitMatch: (lifecycleKey) => (matchFn, timeout) =>
-      awaitMatchFor(lifecycleKey, matchFn, timeout),
-    createAwaitTxId: (lifecycleKey) => (txId, timeout) =>
-      awaitTxIdFor(lifecycleKey, txId, timeout),
-    activateAwaitMatch: (lifecycleKey) => {
-      defaultMatchLifecycleKey = lifecycleKey
-    },
-    removePendingMatches,
-    rejectPendingMatches,
-    rejectPendingTxidWaits,
-    resolveMatchedPendingMatches,
-    collectionId: config.id,
-    testHooks: config[ELECTRIC_TEST_HOOKS],
-  })
+  const sync = createSync()
 
   /**
    * Process matching strategy and wait for synchronization
@@ -1256,68 +1227,41 @@ export function electricCollectionOptions<T extends Row<unknown>>(
     awaitTxId,
     awaitMatch,
   }
-  const consumeDescriptorEvidence = (): ElectricLifecycleEvidence => {
-    const evidence = cloneElectricLifecycleEvidence(descriptorEvidence)
-    seenTxids.setState(() => new Set())
-    seenSnapshots.setState(() => [])
-    hydratedResumeState.setState(() => undefined)
-    return evidence
+  const consumeDescriptorLifecycle = (): ElectricLifecycle<T> => {
+    const lifecycle = descriptorLifecycle
+    descriptorLifecycle = new ElectricLifecycle<T>(config.id)
+    utilityLifecycle = lifecycle
+    return lifecycle
   }
   const createBoundSync = (
     source: SyncConfig<T>,
     utilities: object,
   ): SyncConfig<T> => {
-    const namespaceKey = {}
-    let boundLifecycleKey: object | undefined
-    const evidence = consumeDescriptorEvidence()
-    lifecycleEvidence.set(namespaceKey, evidence)
-    Object.assign(utilities, {
-      awaitMatch: (matchFn: MatchFunction<T>, timeout?: number) =>
-        awaitMatchFor(namespaceKey, matchFn, timeout),
-      awaitTxId: (txId: Txid, timeout?: number) =>
-        awaitTxIdFor(namespaceKey, txId, timeout),
-    })
+    const lifecycle = consumeDescriptorLifecycle()
+    let collectionKey: object | undefined
+    Object.assign(utilities, lifecycle.utils)
 
     const boundSync: SyncConfig<T> = {
       ...source,
       sync: (params) => {
-        boundLifecycleKey = params.collection
-        // Bind metadata and stream evidence to the same collection-local store.
-        lifecycleEvidence.set(params.collection, evidence)
-        pendingMatches.setState((current) => {
-          const rebound = new Map(current)
-          current.forEach((match, matchId) => {
-            if (match.lifecycleKey !== namespaceKey) return
-            rebound.set(matchId, {
-              ...match,
-              lifecycleKey: params.collection,
-            })
-          })
-          return rebound
-        })
+        collectionKey = params.collection
+        boundLifecycles.set(params.collection, lifecycle)
         return source.sync(params)
       },
-      exportSyncMeta: () => exportElectricSyncMeta(evidence),
-      importSyncMeta: (meta) => importElectricSyncMeta(evidence, meta),
+      exportSyncMeta: () => lifecycle.exportMeta(),
+      importSyncMeta: (meta) => lifecycle.importMeta(meta),
       mergeSyncMeta: mergeElectricSyncMeta,
     }
     return withCollectionSyncConfigCleanup(boundSync, () => {
-      rejectPendingMatches(namespaceKey)
-      rejectPendingTxidWaits(namespaceKey)
-      matchBuffers.delete(namespaceKey)
-      if (boundLifecycleKey) {
-        rejectPendingMatches(boundLifecycleKey)
-        rejectPendingTxidWaits(boundLifecycleKey)
-        matchBuffers.delete(boundLifecycleKey)
-      }
+      lifecycle.retire()
+      if (collectionKey) boundLifecycles.delete(collectionKey)
     })
   }
   const syncTemplate = withCollectionSyncConfigFactory(
     {
       ...sync,
-      exportSyncMeta: () => exportElectricSyncMeta(descriptorEvidence),
-      importSyncMeta: (meta) =>
-        importElectricSyncMeta(descriptorEvidence, meta),
+      exportSyncMeta: () => descriptorLifecycle.exportMeta(),
+      importSyncMeta: (meta) => descriptorLifecycle.importMeta(meta),
       mergeSyncMeta: mergeElectricSyncMeta,
     },
     createBoundSync,
@@ -1352,40 +1296,14 @@ function createElectricSync<T extends Row<unknown>>(
   shapeOptions: ShapeStreamOptions<GetExtensions<T>>,
   options: {
     syncMode: ElectricSyncMode
-    getLifecycleEvidence: (lifecycleKey: object) => ElectricLifecycleEvidence
-    pendingMatches: Store<Map<string, ElectricPendingMatch<T>>>
-    matchBuffers: WeakMap<object, ElectricMatchBuffer<T>>
-    createAwaitMatch: (lifecycleKey: object) => AwaitMatchFn<T>
-    createAwaitTxId: (lifecycleKey: object) => AwaitTxIdFn
-    activateAwaitMatch: (lifecycleKey: object) => void
-    removePendingMatches: (matchIds: Array<string>) => void
-    rejectPendingMatches: (lifecycleKey: object) => void
-    rejectPendingTxidWaits: (lifecycleKey: object) => void
-    resolveMatchedPendingMatches: (lifecycleKey: object) => void
+    getLifecycle: (collection: object) => ElectricLifecycle<T>
     collectionId?: string
     testHooks?: ElectricTestHooks
   },
 ): SyncConfig<T> {
-  const {
-    getLifecycleEvidence,
-    syncMode,
-    pendingMatches,
-    matchBuffers,
-    createAwaitMatch,
-    createAwaitTxId,
-    activateAwaitMatch,
-    removePendingMatches,
-    rejectPendingMatches,
-    rejectPendingTxidWaits,
-    resolveMatchedPendingMatches,
-    collectionId,
-    testHooks,
-  } = options
-  const MAX_BATCH_MESSAGES = 1000 // Safety limit for message buffer
-  const lifecycleGenerations = new WeakMap<object, number>()
+  const { getLifecycle, syncMode, collectionId, testHooks } = options
 
-  // Store for the relation schema information
-  const relationSchema = new Store<string | undefined>(undefined)
+  let relationSchema: string | undefined
 
   const tagCache = new Map<MoveTag, ParsedMoveTag>()
 
@@ -1619,6 +1537,7 @@ function createElectricSync<T extends Row<unknown>>(
     begin: () => void,
     write: (message: ChangeMessageOrDeleteKeyMessage<T>) => void,
     transactionStarted: boolean,
+    onDelete: (rowId: RowId) => void,
   ): boolean => {
     if (tagLength === undefined) {
       debug(
@@ -1646,6 +1565,7 @@ function createElectricSync<T extends Row<unknown>>(
             type: `delete`,
             key: rowId,
           })
+          onDelete(rowId)
         }
       }
     }
@@ -1683,7 +1603,7 @@ function createElectricSync<T extends Row<unknown>>(
    */
   const getSyncMetadata = (): Record<string, unknown> => {
     // Use the stored schema if available, otherwise default to 'public'
-    const schema = relationSchema.state || `public`
+    const schema = relationSchema || `public`
 
     return {
       relation: shapeOptions.params?.table
@@ -1694,30 +1614,10 @@ function createElectricSync<T extends Row<unknown>>(
 
   return {
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
-      const lifecycleKey = params.collection
-      const previousLifecycleGeneration =
-        lifecycleGenerations.get(lifecycleKey) ?? 0
-      const lifecycleGeneration = previousLifecycleGeneration + 1
-      lifecycleGenerations.set(lifecycleKey, lifecycleGeneration)
-      const isActiveLifecycle = () =>
-        lifecycleGenerations.get(lifecycleKey) === lifecycleGeneration
-      const matchBuffer = {
-        messages: [] as Array<Message<T>>,
-        committed: false,
-      }
-      const { seenTxids, seenSnapshots, hydratedResumeState } =
-        getLifecycleEvidence(lifecycleKey)
-      matchBuffers.set(lifecycleKey, matchBuffer)
-      Object.assign(params.collection.utils, {
-        awaitMatch: createAwaitMatch(lifecycleKey),
-        awaitTxId: createAwaitTxId(lifecycleKey),
-      })
-      activateAwaitMatch(lifecycleKey)
-
-      if (previousLifecycleGeneration > 0) {
-        rejectPendingMatches(lifecycleKey)
-        rejectPendingTxidWaits(lifecycleKey)
-      }
+      const lifecycle = getLifecycle(params.collection)
+      const lifecycleEpoch = lifecycle.start()
+      const isActiveLifecycle = () => lifecycle.isActive(lifecycleEpoch)
+      Object.assign(params.collection.utils, lifecycle.utils)
 
       const {
         begin,
@@ -1756,7 +1656,7 @@ function createElectricSync<T extends Row<unknown>>(
 
       const persistedResumeState = getNewestElectricResumeState(
         readPersistedResumeState(),
-        hydratedResumeState.state,
+        lifecycle.resumeState,
       )
       const shapeIdentity = getStableShapeIdentity({
         url: shapeOptions.url,
@@ -1824,19 +1724,8 @@ function createElectricSync<T extends Row<unknown>>(
         }
       }
 
-      // Cleanup pending matches on abort
       abortController.signal.addEventListener(`abort`, () => {
-        if (!isActiveLifecycle()) return
-        pendingMatches.setState((current) => {
-          const remaining = new Map(current)
-          current.forEach((match, matchId) => {
-            if (match.lifecycleKey !== lifecycleKey) return
-            clearTimeout(match.timeoutId)
-            match.reject(new StreamAbortedError())
-            remaining.delete(matchId)
-          })
-          return remaining
-        })
+        lifecycle.retire(lifecycleEpoch)
       })
 
       const stream = new ShapeStream({
@@ -1934,7 +1823,7 @@ function createElectricSync<T extends Row<unknown>>(
           shapeId: shapeIdentity,
           updatedAt: Date.now(),
         }
-        hydratedResumeState.setState(() => resumeState)
+        lifecycle.resumeState = resumeState
         metadata?.collection.set(`electric:resume`, resumeState)
       }
 
@@ -1943,7 +1832,7 @@ function createElectricSync<T extends Row<unknown>>(
           kind: `reset`,
           updatedAt: Date.now(),
         }
-        hydratedResumeState.setState(() => resetState)
+        lifecycle.resumeState = resetState
 
         if (metadata) {
           begin({ immediate: true })
@@ -2053,30 +1942,15 @@ function createElectricSync<T extends Row<unknown>>(
         if (!isActiveLifecycle() || resumeInvalid) {
           return
         }
-        activateAwaitMatch(lifecycleKey)
 
-        const batchKeys = new Set(knownKeys)
-        let validatesPersistedResume =
-          requiresCompleteResume && !isResettingSnapshot
-        const hasUnseenUpdate = messages.some((message) => {
-          if (isMustRefetchMessage(message)) {
-            batchKeys.clear()
-            validatesPersistedResume = false
-            return false
-          }
-          if (!isChangeMessage(message)) return false
-
-          const rowId = collection.getKeyFromItem(message.value)
-          const operation = message.headers.operation
-          if (operation === `delete`) {
-            batchKeys.delete(rowId)
-            return false
-          }
-
-          const isUnseen = operation === `update` && !batchKeys.has(rowId)
-          batchKeys.add(rowId)
-          return validatesPersistedResume && isUnseen
-        })
+        // Plan against a sparse callback overlay. This keeps one-row live
+        // updates O(batch size), regardless of the materialized row count.
+        const { messageKeys, hasUnseenUpdate } = planBatchPresence(
+          messages,
+          (row) => collection.getKeyFromItem(row),
+          (rowId) => knownKeys.has(rowId),
+          requiresCompleteResume && !isResettingSnapshot,
+        )
 
         // A resumed eager/progressive stream assumes its persisted rows form a
         // complete materialization at the saved offset. Electric updates only
@@ -2109,24 +1983,11 @@ function createElectricSync<T extends Row<unknown>>(
         // Track commit point type - up-to-date takes precedence as it also triggers progressive mode atomic swap
         let commitPoint: `up-to-date` | `subset-end` | null = null
 
-        // Preserve messages across callbacks until their commit point. Once
-        // later data, move, or reset work begins, rotate the prior committed
-        // generation so it cannot satisfy awaitMatch for new work.
-        const startsNewMatchGeneration = messages.some(
-          (message) =>
-            isChangeMessage(message) ||
-            isMoveOutMessage(message) ||
-            isMoveInMessage(message) ||
-            isMustRefetchMessage(message),
-        )
-        if (startsNewMatchGeneration) {
-          if (matchBuffer.committed) matchBuffer.messages = []
-          matchBuffer.committed = false
-        }
+        lifecycle.beginMatchGeneration(messages)
 
         for (const message of messages) {
           if (isChangeMessage(message)) {
-            const rowId = collection.getKeyFromItem(message.value)
+            const rowId = messageKeys.get(message)!
             const operation = message.headers.operation
             if (operation === `update` && !knownKeys.has(rowId)) {
               continue
@@ -2138,20 +1999,7 @@ function createElectricSync<T extends Row<unknown>>(
             }
           }
 
-          // Add message to current batch buffer (for race condition handling)
-          if (
-            isChangeMessage(message) ||
-            isMoveOutMessage(message) ||
-            isMoveInMessage(message)
-          ) {
-            matchBuffer.messages.push(message)
-            if (matchBuffer.messages.length > MAX_BATCH_MESSAGES) {
-              matchBuffer.messages.splice(
-                0,
-                matchBuffer.messages.length - MAX_BATCH_MESSAGES,
-              )
-            }
-          }
+          lifecycle.observeMatchMessage(message)
 
           // Check for txids in the message and add them to our store
           // Skip during buffered initial sync in progressive mode (txids will be extracted during atomic swap)
@@ -2164,34 +2012,12 @@ function createElectricSync<T extends Row<unknown>>(
             message.headers.txids?.forEach((txid) => newTxids.add(txid))
           }
 
-          // Check pending matches against this message
-          // Note: matchFn will mark matches internally, we don't resolve here
-          const matchesToRemove: Array<string> = []
-          pendingMatches.state.forEach((match, matchId) => {
-            if (match.lifecycleKey === lifecycleKey && !match.matched) {
-              try {
-                match.matchFn(message)
-              } catch (err) {
-                // If matchFn throws, clean up and reject the promise
-                clearTimeout(match.timeoutId)
-                match.reject(
-                  err instanceof Error ? err : new Error(String(err)),
-                )
-                matchesToRemove.push(matchId)
-                debug(`matchFn error: %o`, err)
-              }
-            }
-          })
-
-          // Remove matches that errored
-          removePendingMatches(matchesToRemove)
-
           if (isChangeMessage(message)) {
             // Check if the message contains schema information
             const schema = message.headers.schema
             if (schema && typeof schema === `string`) {
               // Store the schema for future use if it's a valid string
-              relationSchema.setState(() => schema)
+              relationSchema = schema
             }
 
             // In buffered initial sync of progressive mode, buffer messages instead of writing
@@ -2237,6 +2063,10 @@ function createElectricSync<T extends Row<unknown>>(
                 begin,
                 write,
                 transactionStarted,
+                (rowId) => {
+                  knownKeys.delete(rowId)
+                  syncedKeys.delete(rowId)
+                },
               )
             }
           } else if (isMoveInMessage(message)) {
@@ -2333,6 +2163,10 @@ function createElectricSync<T extends Row<unknown>>(
                   begin,
                   write,
                   transactionStarted,
+                  (rowId) => {
+                    knownKeys.delete(rowId)
+                    syncedKeys.delete(rowId)
+                  },
                 )
               } else if (isMoveInMessage(bufferedMsg)) {
                 // Process buffered move-in messages during atomic swap
@@ -2398,33 +2232,22 @@ function createElectricSync<T extends Row<unknown>>(
           // Stream evidence is the acknowledgement boundary used by mutation
           // handlers. It must publish before a parked applied receipt or the
           // optimistic transaction and its acknowledgement can deadlock.
-          seenTxids.setState((currentTxids) => {
-            const clonedSeen = new Set<Txid>(currentTxids)
-            if (newTxids.size > 0) {
-              debug(
-                `${collectionId ? `[${collectionId}] ` : ``}new txids synced from pg %O`,
-                Array.from(newTxids),
-              )
-            }
-            newTxids.forEach((txid) => clonedSeen.add(txid))
-            newTxids.clear()
-            return clonedSeen
-          })
-
-          seenSnapshots.setState((currentSnapshots) => {
-            const seen = [...currentSnapshots, ...newSnapshots]
-            newSnapshots.forEach((snapshot) =>
-              debug(
-                `${collectionId ? `[${collectionId}] ` : ``}new snapshot synced from pg %o`,
-                snapshot,
-              ),
+          if (newTxids.size > 0) {
+            debug(
+              `${collectionId ? `[${collectionId}] ` : ``}new txids synced from pg %O`,
+              Array.from(newTxids),
             )
-            newSnapshots.length = 0
-            return seen
-          })
-
-          matchBuffer.committed = true
-          resolveMatchedPendingMatches(lifecycleKey)
+          }
+          newSnapshots.forEach((snapshot) =>
+            debug(
+              `${collectionId ? `[${collectionId}] ` : ``}new snapshot synced from pg %o`,
+              snapshot,
+            ),
+          )
+          lifecycle.publishEvidence(newTxids, newSnapshots)
+          newTxids.clear()
+          newSnapshots.length = 0
+          lifecycle.commitMatches()
         }
       }
 
@@ -2476,13 +2299,7 @@ function createElectricSync<T extends Row<unknown>>(
           pendingResumeBatches.length = 0
           // Reset deduplication tracking so collection can load fresh data if restarted
           loadSubsetDedupe?.reset()
-          if (isActiveLifecycle()) {
-            rejectPendingMatches(lifecycleKey)
-            rejectPendingTxidWaits(lifecycleKey)
-            matchBuffers.delete(lifecycleKey)
-            hydratedResumeState.setState(() => undefined)
-            lifecycleGenerations.set(lifecycleKey, lifecycleGeneration + 1)
-          }
+          lifecycle.retire(lifecycleEpoch)
         },
       }
     },

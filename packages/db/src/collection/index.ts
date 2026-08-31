@@ -413,7 +413,9 @@ export class CollectionImpl<
     this._changes = new CollectionChangesManager()
     this._events = new CollectionEventsManager()
     this._indexes = new CollectionIndexesManager()
-    this._lifecycle = new CollectionLifecycleManager(this.config, this.id)
+    this._lifecycle = new CollectionLifecycleManager(this.config, this.id, () =>
+      cleanupCollectionSyncConfig(this.config.sync),
+    )
     this._mutations = new CollectionMutationsManager(this.config, this.id)
     this._state = new CollectionStateManager(this.config)
     this._sync = new CollectionSyncManager(this.config, this.id)
@@ -1101,7 +1103,6 @@ export class CollectionImpl<
    * This can be called manually or automatically by garbage collection
    */
   public async cleanup(): Promise<void> {
-    cleanupCollectionSyncConfig(this.config.sync)
     this._lifecycle.cleanup()
     return Promise.resolve()
   }

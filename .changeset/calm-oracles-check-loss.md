@@ -7,4 +7,6 @@
 
 Retain query-backed rows until their explicit owners release them.
 
-Reject partial Electric updates after an invalid persisted resume or snapshot reset. Preserve row identity across batch partitions and persistence hydration, keep overlapping reset generations isolated, and scope stream cleanup, transaction evidence, sync metadata, mutation matches, and transaction waiters to the collection lifecycle that created them. Bind lazy utilities before sync starts, retire every pending waiter on cleanup even when a persistence wrapper is still loading metadata, preserve committed match evidence across control-only callbacks, rehydrate persisted state after restart, and resolve conflicting resume metadata conservatively.
+Harden Electric resume and lifecycle handling so partial updates cannot materialize unknown or moved-out rows, stale async work and waiters cannot cross cleanup or restart—including automatic garbage collection—and valid batches behave the same across callback partitions and persistence hydration.
+
+Reduce live-update work to scale with the incoming batch instead of the full collection while preserving conservative reset recovery and committed mutation evidence.

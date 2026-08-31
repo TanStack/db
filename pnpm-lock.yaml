@@ -1276,9 +1276,6 @@ importers:
       '@tanstack/db':
         specifier: workspace:*
         version: link:../db
-      '@tanstack/store':
-        specifier: ^0.9.2
-        version: 0.9.2
       debug:
         specifier: ^4.4.3
         version: 4.4.3
