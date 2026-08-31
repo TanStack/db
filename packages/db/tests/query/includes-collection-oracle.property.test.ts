@@ -4334,16 +4334,29 @@ describe(`Collection-valued includes oracle`, () => {
     },
   )
 
-  fcTest.prop(
-    [layoutSwapScenarioArbitrary],
-    {
-      ...oraclePropertyOptions(20, `includes-collection.layout-swap`),
-      examples: exhaustiveLayoutSwapScenarios.map(
-        (scenario) => [scenario] as [LayoutSwapScenario],
-      ),
+  fcTest(
+    `publishes every bounded internal order-only swap through root and facade producers`,
+    async () => {
+      const observedCells: Array<string> = []
+      for (let length = 4; length <= 12; length++) {
+        for (let swapIndex = 1; swapIndex <= length - 3; swapIndex++) {
+          await expectRootAndFacadeLayoutSwap({ length, swapIndex })
+          observedCells.push(`${length}:${swapIndex}`)
+        }
+      }
+
+      expect(observedCells).toEqual(
+        exhaustiveLayoutSwapScenarios.map(
+          ({ length, swapIndex }) => `${length}:${swapIndex}`,
+        ),
+      )
     },
-  )(
-    `publishes every internal order-only swap through root and facade producers`,
+  )
+
+  fcTest.prop([layoutSwapScenarioArbitrary], {
+    ...oraclePropertyOptions(20, `includes-collection.layout-swap`),
+  })(
+    `publishes replayable random internal order-only swaps through root and facade producers`,
     expectRootAndFacadeLayoutSwap,
   )
 
