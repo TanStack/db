@@ -1151,7 +1151,10 @@ resumes. Restoring a rejected window is itself a graph-turn origin: its
 callbacks remain inside one publication context, and restoration cannot roll
 back a newer nested window generation. A rejected nested operation restores
 its immediate parent's effective window, not an older public snapshot; rows
-and window metadata therefore describe the same surviving generation.
+and window metadata therefore describe the same surviving generation. It also
+restores the parent's imperative load-operation ownership before rollback
+publication. Loads started by rollback or by the parent callback after it
+catches the nested error must delay and contribute outcomes to the parent.
 If teardown clears the runtime while an accepted window call is unwinding,
 that generation remains the desired window for the next sync session. A call
 that fails synchronously instead restores its previous effective window.

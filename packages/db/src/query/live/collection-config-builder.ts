@@ -334,6 +334,10 @@ export class CollectionConfigBuilder<
         this.currentWindow = options
       }
     } catch (error) {
+      // A rejected nested window returns ownership to its parent before the
+      // rollback publishes. Work caused by that publication must settle with
+      // the restored parent operation, not the canceled child.
+      loadOperation?.cancel()
       if (
         previousWindow &&
         syncSession === this.syncSession &&
@@ -354,7 +358,6 @@ export class CollectionConfigBuilder<
           // window rather than replacing it with a rollback failure.
         }
       }
-      loadOperation?.cancel()
       throw error
     } finally {
       this.activeWindowOperation = previousOperation

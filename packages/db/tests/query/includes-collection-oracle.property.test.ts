@@ -1508,6 +1508,125 @@ describe(`Collection-valued includes oracle`, () => {
   )
 
   fcTest(
+    `a rejected nested window restores its parent operation for follow-up work`,
+    async () => {
+      const parents = createControlledCollection(`parent-window-follow-up`, [
+        { id: 1, rank: 1 },
+        { id: 2, rank: 2 },
+      ])
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ parent: parents.collection })
+          .orderBy(({ parent }) => parent.rank)
+          .limit(1)
+          .select(({ parent }) => ({ id: parent.id })),
+      )
+
+      await live.preload()
+      const builder = live.utils[LIVE_QUERY_INTERNAL].getBuilder()
+      const rollbackOutcome = createDeferred<{
+        collectionId: string
+        demand: { limit: number }
+        generation: number
+        extent: `exhausted`
+      }>()
+      const afterCatchOutcome = createDeferred<{
+        collectionId: string
+        demand: { limit: number }
+        generation: number
+        extent: `exhausted`
+      }>()
+      const originalWindowFn = Reflect.get(builder, `windowFn`) as (options: {
+        limit?: number
+      }) => void
+      let parentWindowCalls = 0
+      Reflect.set(builder, `windowFn`, (options: { limit?: number }) => {
+        originalWindowFn(options)
+        if (options.limit === 2 && ++parentWindowCalls === 2) {
+          builder.trackSubsetLoadOperationPromise(
+            rollbackOutcome.promise,
+            `rollback`,
+          )
+        }
+      })
+      const nestedFailure = new Error(`nested failed`)
+      const runGraph = Reflect.get(builder, `maybeRunGraphFn`) as () => void
+      let failNested = false
+      Reflect.set(builder, `maybeRunGraphFn`, () => {
+        runGraph()
+        if (!failNested) return
+        failNested = false
+        builder.recordSubsetError(nestedFailure)
+      })
+      let nestedError: unknown
+      let acted = false
+      const subscription = live.subscribeChanges(
+        () => {
+          if (acted) return
+          acted = true
+          failNested = true
+          try {
+            live.utils.setWindow({ offset: 1, limit: 1 })
+          } catch (error) {
+            nestedError = error
+          }
+          builder.trackSubsetLoadOperationPromise(
+            afterCatchOutcome.promise,
+            `after-catch`,
+          )
+        },
+        { includeInitialState: false },
+      )
+
+      try {
+        const parentReady = live.utils.setWindow({ offset: 0, limit: 2 })
+        expect(nestedError).toBe(nestedFailure)
+        expect(parentReady).toBeInstanceOf(Promise)
+        rollbackOutcome.resolve({
+          collectionId: `parents`,
+          demand: { limit: 2 },
+          generation: 1,
+          extent: `exhausted`,
+        })
+        afterCatchOutcome.resolve({
+          collectionId: `parents`,
+          demand: { limit: 2 },
+          generation: 1,
+          extent: `exhausted`,
+        })
+        await parentReady
+        expect(live.utils[LIVE_QUERY_INTERNAL].getLastWindowOutcomes()).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              sourceId: `rollback`,
+              demand: { limit: 2 },
+            }),
+            expect.objectContaining({
+              sourceId: `after-catch`,
+              demand: { limit: 2 },
+            }),
+          ]),
+        )
+      } finally {
+        subscription.unsubscribe()
+        rollbackOutcome.resolve({
+          collectionId: `parents`,
+          demand: { limit: 2 },
+          generation: 1,
+          extent: `exhausted`,
+        })
+        afterCatchOutcome.resolve({
+          collectionId: `parents`,
+          demand: { limit: 2 },
+          generation: 1,
+          extent: `exhausted`,
+        })
+        await Promise.all([live.cleanup(), parents.collection.cleanup()])
+      }
+    },
+  )
+
+  fcTest(
     `an older failed window cannot restore over a newer nested window`,
     async () => {
       const parents = createControlledCollection(`stale-window-parents`, [

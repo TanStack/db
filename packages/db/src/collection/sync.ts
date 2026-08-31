@@ -800,6 +800,8 @@ export class CollectionSyncManager<
     cancel: () => void
     getOutcomes: () => ReadonlyArray<AppliedLoadSubsetOutcome>
   } {
+    // A failed nested operation restores this owner before rollback work.
+    const previousOperation = this.activeLoadSubsetOperation
     const operation: LoadSubsetOperation = {
       pending: new Set(),
       outcomes: new Map(),
@@ -818,7 +820,9 @@ export class CollectionSyncManager<
         operation.completed = true
         this.loadSubsetOperations.delete(operation)
         if (this.activeLoadSubsetOperation === operation) {
-          this.activeLoadSubsetOperation = undefined
+          this.activeLoadSubsetOperation = previousOperation?.completed
+            ? undefined
+            : previousOperation
         }
       },
       getOutcomes: () =>
