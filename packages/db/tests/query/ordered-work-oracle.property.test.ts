@@ -943,6 +943,65 @@ describe(`ordered source work oracle`, () => {
     },
   )
 
+  it.each(
+    ([`asc`, `desc`] as const).flatMap((direction) =>
+      [
+        {
+          name: `no common element`,
+          left: [],
+          right: [1],
+          expectedNullReads: 1,
+        },
+        {
+          name: `first-element difference`,
+          left: [1, 9],
+          right: [2, 0],
+          expectedNullReads: 2,
+        },
+        {
+          name: `equal prefix then difference`,
+          left: [1, 2],
+          right: [1, 3],
+          expectedNullReads: 3,
+        },
+        {
+          name: `equal common prefix then length`,
+          left: [1],
+          right: [1, 2],
+          expectedNullReads: 2,
+        },
+        {
+          name: `nested recursion`,
+          left: [[1, 2]],
+          right: [[1, 3]],
+          expectedNullReads: 4,
+        },
+      ].map((scenario) => ({ direction, ...scenario })),
+    ),
+  )(
+    `visits each array comparison once for $name in $direction order`,
+    ({ direction, left, right, expectedNullReads }) => {
+      let nullReads = 0
+      const options = new Proxy(
+        {
+          direction,
+          nulls: `last` as const,
+        } satisfies CompareOptions,
+        {
+          get(target, property, receiver) {
+            if (property === `nulls`) nullReads++
+            return Reflect.get(target, property, receiver) as unknown
+          },
+        },
+      )
+
+      expect(Math.sign(makeComparator(options)(left, right))).toBe(
+        direction === `asc` ? -1 : 1,
+      )
+      expect(nullReads).toBe(expectedNullReads)
+    },
+  )
+
   it.each([
     { indexKind: `basic`, direction: `asc` },
     { indexKind: `basic`, direction: `desc` },
