@@ -984,12 +984,12 @@ describe(`ordered source work oracle`, () => {
       ].map((scenario) => ({ direction, ...scenario })),
     ),
   )(
-    `visits each array comparison once for $name in $direction order`,
+    `does one input-dependent pass for $name in $direction array order`,
     ({ direction, left, right, expectedNullReads, expectedArrayReads }) => {
       let nullReads = 0
       const observeArrayReads = (
         value: Array<unknown>,
-        reads: { lengths: number; elements: number; other: number },
+        reads: { lengths: number; elements: number; structural: number },
       ): Array<unknown> => {
         const nested = value.map((element) =>
           Array.isArray(element) ? observeArrayReads(element, reads) : element,
@@ -1004,14 +1004,26 @@ describe(`ordered source work oracle`, () => {
             ) {
               reads.elements++
             } else {
-              reads.other++
+              reads.structural++
             }
             return Reflect.get(target, property, receiver) as unknown
           },
+          ownKeys(target) {
+            reads.structural++
+            return Reflect.ownKeys(target)
+          },
+          getOwnPropertyDescriptor(target, property) {
+            reads.structural++
+            return Reflect.getOwnPropertyDescriptor(target, property)
+          },
+          has(target, property) {
+            reads.structural++
+            return Reflect.has(target, property)
+          },
         })
       }
-      const leftReads = { lengths: 0, elements: 0, other: 0 }
-      const rightReads = { lengths: 0, elements: 0, other: 0 }
+      const leftReads = { lengths: 0, elements: 0, structural: 0 }
+      const rightReads = { lengths: 0, elements: 0, structural: 0 }
       const observedLeft = observeArrayReads(left, leftReads)
       const observedRight = observeArrayReads(right, rightReads)
       const options = new Proxy(
@@ -1031,8 +1043,8 @@ describe(`ordered source work oracle`, () => {
         Math.sign(makeComparator(options)(observedLeft, observedRight)),
       ).toBe(direction === `asc` ? -1 : 1)
       expect(nullReads).toBe(expectedNullReads)
-      expect(leftReads).toEqual({ ...expectedArrayReads, other: 0 })
-      expect(rightReads).toEqual({ ...expectedArrayReads, other: 0 })
+      expect(leftReads).toEqual({ ...expectedArrayReads, structural: 0 })
+      expect(rightReads).toEqual({ ...expectedArrayReads, structural: 0 })
     },
   )
 
