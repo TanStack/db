@@ -35,6 +35,8 @@ interface PendingSyncedTransaction<
   committed: boolean
   applicationStarted: boolean
   layoutChanged: boolean
+  /** Visible key order before a possible layout change. */
+  layoutSnapshot?: Array<TKey>
   operations: Array<OptimisticChangeMessage<T>>
   truncate?: boolean
   deletedKeys: Set<string | number>
@@ -879,11 +881,15 @@ export class CollectionStateManager<
       hasTruncateSync,
       hasImmediateSync,
       layoutChanged,
+      layoutSnapshots,
     } = this.pendingSyncedTransactions.reduce(
       (acc, t) => {
         if (t.committed) {
           acc.committedSyncedTransactions.push(t)
           acc.layoutChanged ||= t.layoutChanged
+          if (t.layoutSnapshot !== undefined) {
+            acc.layoutSnapshots.push(t.layoutSnapshot)
+          }
           if (t.truncate) {
             acc.hasTruncateSync = true
           }
@@ -905,6 +911,7 @@ export class CollectionStateManager<
         hasTruncateSync: false,
         hasImmediateSync: false,
         layoutChanged: false,
+        layoutSnapshots: [] as Array<Array<TKey>>,
       },
     )
 
@@ -1458,9 +1465,20 @@ export class CollectionStateManager<
       }
 
       // End batching and emit all events (combines any batched events with sync events)
+      const visibleKeysAfterCommit = layoutChanged ? [...this.keys()] : []
+      const visibleLayoutChanged =
+        layoutChanged &&
+        (layoutSnapshots.length === 0 ||
+          layoutSnapshots.some(
+            (before) =>
+              before.length !== visibleKeysAfterCommit.length ||
+              before.some(
+                (key, index) => key !== visibleKeysAfterCommit[index],
+              ),
+          ))
       let publicationError: { error: unknown } | undefined
       try {
-        this.changes.emitEvents(events, true, layoutChanged)
+        this.changes.emitEvents(events, true, visibleLayoutChanged)
       } catch (error) {
         // The state is already committed. Finish this batch and drain any work
         // queued by earlier listeners before surfacing their publication error.

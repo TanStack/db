@@ -222,6 +222,48 @@ describe(`order-only move publication`, () => {
     observer.dispose()
   })
 
+  it(`does not publish a move whose only crossed peer is optimistically deleted`, async () => {
+    const source = makeSource()
+    const persist = createDeferred<void>()
+    const lq = createLiveQueryCollection({
+      getKey: (row) => row.id,
+      query: (q) =>
+        q
+          .from({ p: source })
+          .orderBy(({ p }) => p.age, `asc`)
+          .select(({ p }) => ({ id: p.id, name: p.name })),
+      onDelete: () => persist.promise,
+    })
+    await lq.preload()
+    const publications: Array<Array<unknown>> = []
+    const subscription = lq.subscribeChanges(
+      (changes) => publications.push(changes),
+      { includeInitialState: false },
+    )
+    const mutation = lq.delete(`2`)
+
+    expect(mutation.state).toBe(`persisting`)
+    expect(lq.toArray.map(({ id }) => id)).toEqual([`1`, `3`])
+    publications.length = 0
+    const revisionBeforeSource = lq._layoutRevision
+
+    source.utils.begin()
+    source.utils.write({
+      type: `update`,
+      value: { id: `1`, name: `Alice`, age: 10 },
+    })
+    source.utils.commit()
+
+    expect(lq.toArray.map(({ id }) => id)).toEqual([`1`, `3`])
+    expect(publications).toEqual([])
+    expect(lq._layoutRevision).toBe(revisionBeforeSource)
+
+    persist.resolve()
+    await mutation.isPersisted.promise
+    subscription.unsubscribe()
+    await Promise.all([lq.cleanup(), source.cleanup()])
+  })
+
   it(`does not publish when multiple moves cancel within one transaction`, async () => {
     const source = makeSource()
     const lq = await makeOrderedByAge(source)

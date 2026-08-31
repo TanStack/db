@@ -945,10 +945,22 @@ publication while an optimistic mutation on either Collection persists. The
 normal optimistic overlay still wins for conflicting keys, and the graph
 output remains one coherent publication. The overlay replaces the row value,
 not the graph-owned key order. A source order move publishes a layout change
-when that key remains visible, including beneath an optimistic update. An
+only when the complete visible public-key sequence changes after applying the
+optimistic overlay. This includes a move beneath an optimistic update. It does
+not include a move whose only crossed peers are optimistically deleted. An
 optimistic delete hides the key and its order moves. If the synced base is
 deleted beneath an optimistic update, the still-visible row moves to the
-optimistic-only suffix and that layout change also publishes.
+optimistic-only suffix; that publishes only when the suffix transition changes
+the visible sequence. Re-establishing the base applies the inverse rule. A
+legal absent-to-present source transition must keep the optimistic value
+visible while restoring the graph-owned position in the same publication.
+The graph reports a possible layout change before its sync commit. Collection
+state captures the visible key sequence at that point and compares it with the
+final sequence after the sync writes and active optimistic overlay have both
+been applied. The layout revision advances only when those exact sequences
+differ. This final check is shared by root Collections and child facades; an
+adapter-local order token is evidence to check layout, not proof that public
+layout changed.
 Rejected, canceled, and obsolete acquisitions establish no coverage. Sources
 must honor cancellation before publishing request-scoped rows.
 

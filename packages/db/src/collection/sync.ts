@@ -199,7 +199,9 @@ export class CollectionSyncManager<
 
   /** Mark the active sync transaction as changing collection layout. */
   public markLayoutChange(): void {
-    this.getActivePendingSyncTransaction().layoutChanged = true
+    const transaction = this.getActivePendingSyncTransaction()
+    transaction.layoutChanged = true
+    transaction.layoutSnapshot ??= [...this.state.keys()]
   }
 
   /**

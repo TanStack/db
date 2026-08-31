@@ -130,13 +130,21 @@ export class BucketFacadeAdapter {
           for (const change of changes.values()) {
             this.prepareChange(entry, change)
           }
+          const mayChangeVisibleOrder =
+            compilation.hasOrderBy &&
+            [...changes.values()].some((change) =>
+              this.mayChangeVisibleOrder(entry, change),
+            )
           deferPublication(entry)
           // The graph is already quiescent. Install this complete child
           // publication beneath any pending optimistic facade overlay instead
           // of parking source progress behind that mutation.
           sync.begin({ immediate: true })
           for (const change of changes.values()) {
-            this.applyChange(entry, sync, change, compilation.hasOrderBy)
+            this.applyChange(entry, sync, change)
+          }
+          if (mayChangeVisibleOrder) {
+            sync.collection._markLayoutChange()
           }
           sync.commit()
         }
@@ -419,7 +427,6 @@ export class BucketFacadeAdapter {
     entry: FacadeEntry,
     sync: FacadeSync,
     change: PendingRow,
-    hasOrderBy: boolean,
   ): void {
     const key = change.value.publicKey as string | number
     const previousOrder = entry.currentOrder.get(key)
@@ -462,22 +469,31 @@ export class BucketFacadeAdapter {
     } else if (change.deletes > 0) {
       sync.write({ type: `delete`, key })
       entry.currentOrder.delete(key)
-      // Deleting the synced base moves a still-visible optimistic upsert out
-      // of the base ordering and into the optimistic-only suffix.
-      if (hasOrderBy && entry.collection._state.optimisticUpserts.has(key)) {
-        sync.collection._markLayoutChange()
-      }
       return
     }
 
     entry.currentOrder.set(key, nextOrder)
-    if (
-      hasOrderBy &&
-      orderChanged &&
-      !entry.collection._state.optimisticDeletes.has(key)
-    ) {
-      sync.collection._markLayoutChange()
-    }
+  }
+
+  /** Identify graph changes that can move a visible key. Collection state
+   * validates the final public sequence before publishing the layout signal. */
+  private mayChangeVisibleOrder(
+    entry: FacadeEntry,
+    change: PendingRow,
+  ): boolean {
+    const key = change.value.publicKey as string | number
+    const hasSyncedRow = entry.collection._state.syncedData.has(key)
+    const nextHasSyncedRow =
+      change.inserts > change.deletes ||
+      (change.inserts === change.deletes && hasSyncedRow)
+    const orderChanged =
+      hasSyncedRow &&
+      nextHasSyncedRow &&
+      entry.currentOrder.get(key) !== change.value.order
+    const movesBetweenBaseAndOptimisticSuffix =
+      hasSyncedRow !== nextHasSyncedRow &&
+      entry.collection._state.optimisticUpserts.has(key)
+    return orderChanged || movesBetweenBaseAndOptimisticSuffix
   }
 
   /** Resolve and validate every public key before opening a sync transaction. */
