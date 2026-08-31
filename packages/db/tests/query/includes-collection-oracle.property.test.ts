@@ -43,6 +43,11 @@ type LayoutSwapScenario = {
   swapIndex: number
 }
 
+type FacadeCandidateScanScenario = {
+  candidatePosition: `first` | `last`
+  finalLayout: `moved` | `restored`
+}
+
 const exhaustiveLayoutSwapScenarios: Array<LayoutSwapScenario> = Array.from(
   { length: 9 },
   (_, offset) => offset + 4,
@@ -61,6 +66,14 @@ const layoutSwapScenarioArbitrary: fc.Arbitrary<LayoutSwapScenario> = fc
       swapIndex,
     })),
   )
+
+const facadeCandidateScanScenarios: ReadonlyArray<FacadeCandidateScanScenario> =
+  [
+    { candidatePosition: `first`, finalLayout: `moved` },
+    { candidatePosition: `first`, finalLayout: `restored` },
+    { candidatePosition: `last`, finalLayout: `moved` },
+    { candidatePosition: `last`, finalLayout: `restored` },
+  ]
 
 type ProjectedChildChange = {
   type: `insert` | `update` | `delete`
@@ -253,6 +266,108 @@ async function expectRootAndFacadeLayoutSwap({
     await Promise.all([
       root.cleanup(),
       nested.cleanup(),
+      parents.collection.cleanup(),
+      children.collection.cleanup(),
+    ])
+  }
+}
+
+async function expectFacadeCandidateScan({
+  candidatePosition,
+  finalLayout,
+}: FacadeCandidateScanScenario): Promise<void> {
+  type OrderedChild = ChildRow & { position: number }
+  const parents = createControlledCollection(`candidate-scan-parents`, [
+    { id: 1, group: 1 },
+  ])
+  const initialRows: ReadonlyArray<OrderedChild> = [
+    { id: 10, parentGroup: 1, value: 10, position: 0 },
+    { id: 20, parentGroup: 1, value: 20, position: 1 },
+    { id: 30, parentGroup: 1, value: 30, position: 2 },
+  ]
+  const children = createControlledCollection<OrderedChild>(
+    `candidate-scan-children`,
+    initialRows,
+  )
+  const live = createLiveQueryCollection((q) =>
+    q.from({ parent: parents.collection }).select(({ parent }) => ({
+      id: parent.id,
+      children: q
+        .from({ child: children.collection })
+        .where(({ child }) => eq(child.parentGroup, parent.group))
+        .orderBy(({ child }) => child.position)
+        .select(({ child }) => ({ value: child.value })),
+    })),
+  )
+  let subscription: { unsubscribe: () => void } | undefined
+
+  try {
+    await live.preload()
+    const facade = live.get(1)!.children
+    const keys = () => [...facade.keys()].map(Number)
+    const values = () => facade.toArray.map(({ value }) => value)
+    const publications: Array<Array<ProjectedValueChange>> = []
+    const callbackKeys: Array<Array<number>> = []
+    const callbackValues: Array<Array<number>> = []
+    subscription = facade.subscribeChanges(
+      (batch) => {
+        publications.push(batch.map(projectValueChange))
+        callbackKeys.push(keys())
+        callbackValues.push(values())
+      },
+      { includeInitialState: false },
+    )
+    const revision = facade._layoutRevision
+    const valueUpdate = {
+      type: `update` as const,
+      value: { ...initialRows[0]!, value: 11 },
+    }
+    const orderUpdates = [
+      {
+        type: `update` as const,
+        value: { ...initialRows[1]!, position: 3 },
+      },
+      ...(finalLayout === `restored`
+        ? [
+            {
+              type: `update` as const,
+              value: initialRows[1]!,
+            },
+          ]
+        : []),
+    ]
+
+    children.writeBatch(
+      candidatePosition === `first`
+        ? [...orderUpdates, valueUpdate]
+        : [valueUpdate, ...orderUpdates],
+    )
+
+    const expectedKeys =
+      finalLayout === `moved` ? [10, 30, 20] : [10, 20, 30]
+    const expectedValues =
+      finalLayout === `moved` ? [11, 30, 20] : [11, 20, 30]
+    expect(keys()).toEqual(expectedKeys)
+    expect(values()).toEqual(expectedValues)
+    expect(publications).toEqual([
+      [
+        {
+          type: `update`,
+          key: 10,
+          value: 11,
+          previousValue: 10,
+        },
+      ],
+    ])
+    expect(callbackKeys).toEqual([expectedKeys])
+    expect(callbackValues).toEqual([expectedValues])
+    expect(facade._layoutRevision).toBe(
+      revision + (finalLayout === `moved` ? 1 : 0),
+    )
+  } finally {
+    subscription?.unsubscribe()
+    await Promise.all([
+      live.cleanup(),
       parents.collection.cleanup(),
       children.collection.cleanup(),
     ])
@@ -4358,6 +4473,26 @@ describe(`Collection-valued includes oracle`, () => {
   })(
     `publishes replayable random internal order-only swaps through root and facade producers`,
     expectRootAndFacadeLayoutSwap,
+  )
+
+  fcTest(
+    `scans every changed facade key before deciding whether layout may differ`,
+    async () => {
+      const observedScenarios: Array<string> = []
+      for (const candidatePosition of [`first`, `last`] as const) {
+        for (const finalLayout of [`moved`, `restored`] as const) {
+          await expectFacadeCandidateScan({ candidatePosition, finalLayout })
+          observedScenarios.push(`${candidatePosition}:${finalLayout}`)
+        }
+      }
+
+      expect(observedScenarios).toEqual(
+        facadeCandidateScanScenarios.map(
+          ({ candidatePosition, finalLayout }) =>
+            `${candidatePosition}:${finalLayout}`,
+        ),
+      )
+    },
   )
 
   fcTest(
