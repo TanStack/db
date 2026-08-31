@@ -77,8 +77,17 @@ export function snapshotUint8ArrayBytes(value: Uint8Array): Uint8Array {
  * Handles null/undefined, strings, arrays, dates, objects, and primitives
  * Always sorts null/undefined values first
  */
-export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
-  const { nulls } = opts
+const compareAscending = (
+  a: any,
+  b: any,
+  opts: CompareOptions,
+  invertNulls: boolean,
+): number => {
+  const nulls = invertNulls
+    ? opts.nulls === `first`
+      ? `last`
+      : `first`
+    : opts.nulls
 
   // Handle null/undefined
   if (a == null && b == null) return 0
@@ -106,7 +115,7 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
   // if a and b are both arrays, compare them element by element
   if (Array.isArray(a) && Array.isArray(b)) {
     for (let i = 0; i < Math.min(a.length, b.length); i++) {
-      const result = ascComparator(a[i], b[i], opts)
+      const result = compareAscending(a[i], b[i], opts, invertNulls)
       if (result !== 0) {
         return result
       }
@@ -148,6 +157,9 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
   return 0
 }
 
+export const ascComparator = (a: any, b: any, opts: CompareOptions): number =>
+  compareAscending(a, b, opts, false)
+
 /**
  * Descending comparator function for ordering values
  * Handles null/undefined as largest values (opposite of ascending)
@@ -156,12 +168,7 @@ export const descComparator = (
   a: unknown,
   b: unknown,
   opts: CompareOptions,
-): number => {
-  return ascComparator(b, a, {
-    ...opts,
-    nulls: opts.nulls === `first` ? `last` : `first`,
-  })
-}
+): number => compareAscending(b, a, opts, true)
 
 export function makeComparator(
   opts: CompareOptions,

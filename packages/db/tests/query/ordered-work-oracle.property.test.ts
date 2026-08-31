@@ -813,13 +813,13 @@ describe(`ordered source work oracle`, () => {
       right: 2,
       expected: 1,
       expectedReads: {
-        direction: 2,
-        nulls: 2,
-        stringSort: 1,
-        locale: 1,
-        localeOptions: 1,
-        ownKeys: 1,
-        descriptors: 5,
+        direction: 1,
+        nulls: 1,
+        stringSort: 0,
+        locale: 0,
+        localeOptions: 0,
+        ownKeys: 0,
+        descriptors: 0,
         prototype: 0,
       },
     },
@@ -830,13 +830,13 @@ describe(`ordered source work oracle`, () => {
       right: `b`,
       expected: 1,
       expectedReads: {
-        direction: 2,
-        nulls: 2,
+        direction: 1,
+        nulls: 1,
         stringSort: 1,
         locale: 1,
         localeOptions: 1,
-        ownKeys: 1,
-        descriptors: 5,
+        ownKeys: 0,
+        descriptors: 0,
         prototype: 0,
       },
     },
@@ -904,7 +904,7 @@ describe(`ordered source work oracle`, () => {
   )
 
   it.each([`asc`, `desc`] as const)(
-    `executes the materialized inner comparator once for dates in %s order`,
+    `executes the inner comparator's date work once in %s order`,
     (direction) => {
       const getTime = vi.spyOn(Date.prototype, `getTime`)
       try {
@@ -924,7 +924,7 @@ describe(`ordered source work oracle`, () => {
   )
 
   it.each([`asc`, `desc`] as const)(
-    `executes the materialized inner comparator once for strings in %s order`,
+    `executes the inner comparator's string work once in %s order`,
     (direction) => {
       const localeCompare = vi.spyOn(String.prototype, `localeCompare`)
       try {
@@ -3113,7 +3113,7 @@ it.each([
       secondary: string | number
     }
     const termReads: [number, number] = [0, 0]
-    const termComparisons: [number, number] = [0, 0]
+    const innerComparisons: [number, number] = [0, 0]
     const rows = new Map<string, SourceTieRow>(
       sourceRows.map((spec) => [
         spec.id,
@@ -3141,7 +3141,7 @@ it.each([
         } satisfies CompareOptions,
         {
           get(target, property, receiver) {
-            if (property === `direction`) termComparisons[term]++
+            if (property === `nulls`) innerComparisons[term]++
             return Reflect.get(target, property, receiver) as unknown
           },
         },
@@ -3180,18 +3180,14 @@ it.each([
     try {
       termReads[0] = 0
       termReads[1] = 0
-      termComparisons[0] = 0
-      termComparisons[1] = 0
+      innerComparisons[0] = 0
+      innerComparisons[1] = 0
       expect(window.publicationEntries().map(([key]) => key)).toEqual(
         expectedKeys,
       )
       expect(compareRows).toHaveBeenCalledTimes(2)
       expect(termReads).toEqual([4, orderArity === 2 ? 2 : 0])
-      const optionReadsPerComparison = direction === `asc` ? 1 : 2
-      expect(termComparisons).toEqual([
-        2 * optionReadsPerComparison,
-        orderArity === 2 ? optionReadsPerComparison : 0,
-      ])
+      expect(innerComparisons).toEqual([2, orderArity === 2 ? 1 : 0])
     } finally {
       compareRows.mockRestore()
     }
