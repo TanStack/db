@@ -41,6 +41,8 @@ export class CollectionChangesManager<
     changes: Array<ChangeMessage<TOutput, TKey>>
     layoutChanged: boolean
   }> = []
+  private deferredStateRevisionDelta = 0
+  private deferredLayoutRevisionDelta = 0
   private layoutChangeListeners = new Set<() => void>()
 
   /**
@@ -107,10 +109,15 @@ export class CollectionChangesManager<
     forceEmit = false,
     layoutChanged = false,
   ): void {
-    // The visible state was already committed by the caller, so the revision
-    // advances even when the events below end up batched for later emission.
-    if (changes.length > 0) this.stateRevision++
-    if (layoutChanged) this.layoutRevision++
+    // A coherent multi-Collection publication may still roll back. Hold its
+    // revision clocks with its events so discard leaves no public trace.
+    if (this.publicationDeferralDepth > 0) {
+      if (changes.length > 0) this.deferredStateRevisionDelta++
+      if (layoutChanged) this.deferredLayoutRevisionDelta++
+    } else {
+      if (changes.length > 0) this.stateRevision++
+      if (layoutChanged) this.layoutRevision++
+    }
 
     // Skip batching for user actions (forceEmit=true) to keep UI responsive
     if (this.shouldBatchEvents && !forceEmit) {
@@ -161,10 +168,16 @@ export class CollectionChangesManager<
 
       const publications = this.deferredPublications
       this.deferredPublications = []
+      const stateRevisionDelta = this.deferredStateRevisionDelta
+      const layoutRevisionDelta = this.deferredLayoutRevisionDelta
+      this.deferredStateRevisionDelta = 0
+      this.deferredLayoutRevisionDelta = 0
       if (this.discardDeferredPublications) {
         this.discardDeferredPublications = false
         return
       }
+      this.stateRevision += stateRevisionDelta
+      this.layoutRevision += layoutRevisionDelta
       this.publishEvents(
         publications.flatMap(({ changes }) => changes),
         publications.some(({ layoutChanged }) => layoutChanged),

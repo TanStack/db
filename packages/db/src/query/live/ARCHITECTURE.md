@@ -1128,8 +1128,12 @@ in-place include repair, and forced secondary events are forbidden.
 
 Installed state, synchronous reads, change-event payloads, and downstream
 queries must all observe the same fully materialized commit. The facade adapter
-may defer event delivery across its Collection transactions, but it must not
-defer state or index installation. Routing and identity remain inside D2.
+may defer public revision clocks and event delivery across its Collection
+transactions, but it must not defer state or index installation. A successful
+coherent publication advances those clocks before callbacks run. If a later
+root or containing-facade application fails, rollback restores the installed
+state and discards both the held events and their revision advances. Routing
+and identity remain inside D2.
 
 ## External boundaries
 

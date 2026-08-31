@@ -1,6 +1,7 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
 import { createDeferred } from '../../src/deferred.js'
+import { createLiveQueryObserver } from '../../src/live-query-observer.js'
 import { createOptimisticAction } from '../../src/optimistic-action.js'
 import {
   add,
@@ -791,9 +792,16 @@ describe(`Collection-valued includes oracle`, () => {
         group: 1,
         value: 1,
       }
+      const initialSibling: NodeRow = {
+        id: 20,
+        kind: `child`,
+        group: 1,
+        value: 2,
+      }
       const nodes = createControlledCollection<NodeRow>(`rollback-nodes`, [
         initialParent,
         initialChild,
+        initialSibling,
       ])
       const live = createLiveQueryCollection((q) =>
         q
@@ -805,7 +813,8 @@ describe(`Collection-valued includes oracle`, () => {
             children: q
               .from({ child: nodes.collection })
               .where(({ child }) => eq(child.kind, `child`))
-              .where(({ child }) => eq(child.group, parent.group)),
+              .where(({ child }) => eq(child.group, parent.group))
+              .orderBy(({ child }) => child.value),
           })),
       )
 
@@ -821,6 +830,13 @@ describe(`Collection-valued includes oracle`, () => {
         (batch) => childPublications.push(...batch),
         { includeInitialState: false },
       )
+      const childObserver = createLiveQueryObserver(facade)
+      let observerNotifications = 0
+      childObserver.subscribe(() => observerNotifications++)
+      observerNotifications = 0
+      const observerBeforeFailure = childObserver.getSnapshot()
+      const childStateRevisionBeforeFailure = facade._stateRevision
+      const childLayoutRevisionBeforeFailure = facade._layoutRevision
       const originalGetKey = live.config.getKey
       live.config.getKey = (row) => {
         if (row.value === 2) throw new Error(`root key failed`)
@@ -836,14 +852,25 @@ describe(`Collection-valued includes oracle`, () => {
             },
             {
               type: `update`,
-              value: { ...initialChild, value: 2 },
+              value: { ...initialChild, value: 3 },
+            },
+            {
+              type: `update`,
+              value: { ...initialSibling, value: 0 },
             },
           ]),
         ).toThrow(`root key failed`)
         expect(live.get(1)!.value).toBe(1)
-        expect(facade.get(10)!.value).toBe(1)
+        expect(facade.toArray.map(({ id, value }) => ({ id, value }))).toEqual([
+          { id: 10, value: 1 },
+          { id: 20, value: 2 },
+        ])
         expect(rootPublications).toEqual([])
         expect(childPublications).toEqual([])
+        expect(facade._stateRevision).toBe(childStateRevisionBeforeFailure)
+        expect(facade._layoutRevision).toBe(childLayoutRevisionBeforeFailure)
+        expect(childObserver.getSnapshot()).toBe(observerBeforeFailure)
+        expect(observerNotifications).toBe(0)
 
         live.config.getKey = originalGetKey
         nodes.writeBatch([
@@ -853,15 +880,29 @@ describe(`Collection-valued includes oracle`, () => {
           },
           {
             type: `update`,
-            value: { ...initialChild, value: 3 },
+            value: { ...initialChild, value: 4 },
+          },
+          {
+            type: `update`,
+            value: { ...initialSibling, value: 3 },
           },
         ])
         expect(live.get(1)!.value).toBe(3)
-        expect(facade.get(10)!.value).toBe(3)
+        expect(facade.toArray.map(({ id, value }) => ({ id, value }))).toEqual([
+          { id: 20, value: 3 },
+          { id: 10, value: 4 },
+        ])
         expect(rootPublications).toHaveLength(1)
-        expect(childPublications).toHaveLength(1)
+        expect(childPublications).toHaveLength(2)
+        expect(facade._stateRevision).toBe(childStateRevisionBeforeFailure + 1)
+        expect(facade._layoutRevision).toBe(
+          childLayoutRevisionBeforeFailure + 1,
+        )
+        expect(childObserver.getSnapshot()).not.toBe(observerBeforeFailure)
+        expect(observerNotifications).toBe(1)
       } finally {
         live.config.getKey = originalGetKey
+        childObserver.dispose()
         rootSubscription.unsubscribe()
         childSubscription.unsubscribe()
         await Promise.all([live.cleanup(), nodes.collection.cleanup()])
