@@ -6,6 +6,28 @@ import type { RangeQueryOptions } from './btree-index.js'
 import type { CompareOptions } from '../query/builder/types.js'
 import type { BasicExpression, OrderByDirection } from '../query/ir.js'
 
+function normalizeLocaleOptions(options: object | undefined): object {
+  return Object.fromEntries(
+    Object.entries(options ?? {}).filter(([, value]) => value !== undefined),
+  )
+}
+
+function canonicalizeLocale(locale: string | undefined): string | undefined {
+  return locale === undefined ? undefined : Intl.getCanonicalLocales(locale)[0]
+}
+
+type LocaleCompareOptions = CompareOptions & {
+  stringSort?: `locale`
+  locale?: string
+  localeOptions?: object
+}
+
+function usesLocaleCollation(
+  options: CompareOptions,
+): options is LocaleCompareOptions {
+  return (options.stringSort ?? DEFAULT_COMPARE_OPTIONS.stringSort) === `locale`
+}
+
 /**
  * Operations that indexes can support, imported from available comparison functions
  */
@@ -177,18 +199,28 @@ export abstract class BaseIndex<
    * The direction is ignored because the index can be reversed if the direction is different.
    */
   matchesCompareOptions(compareOptions: CompareOptions): boolean {
-    const thisCompareOptionsWithoutDirection = {
-      ...this.compareOptions,
-      direction: undefined,
-    }
-    const compareOptionsWithoutDirection = {
-      ...compareOptions,
-      direction: undefined,
+    const indexCompareOptions = this.compareOptions
+    const indexUsesLocale = usesLocaleCollation(indexCompareOptions)
+    const requestedUsesLocale = usesLocaleCollation(compareOptions)
+
+    if (
+      indexCompareOptions.nulls !== compareOptions.nulls ||
+      indexUsesLocale !== requestedUsesLocale
+    ) {
+      return false
     }
 
-    return deepEquals(
-      thisCompareOptionsWithoutDirection,
-      compareOptionsWithoutDirection,
+    if (!indexUsesLocale || !requestedUsesLocale) {
+      return true
+    }
+
+    return (
+      canonicalizeLocale(indexCompareOptions.locale) ===
+        canonicalizeLocale(compareOptions.locale) &&
+      deepEquals(
+        normalizeLocaleOptions(indexCompareOptions.localeOptions),
+        normalizeLocaleOptions(compareOptions.localeOptions),
+      )
     )
   }
 
