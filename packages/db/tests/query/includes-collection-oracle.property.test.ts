@@ -1627,6 +1627,153 @@ describe(`Collection-valued includes oracle`, () => {
   )
 
   fcTest(
+    `a rejected nested window restores a waiting parent operation`,
+    async () => {
+      const parents = createControlledCollection(`waiting-window-parent`, [
+        { id: 1, rank: 1, value: 1 },
+        { id: 2, rank: 2, value: 2 },
+      ])
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ parent: parents.collection })
+          .orderBy(({ parent }) => parent.rank)
+          .limit(1)
+          .select(({ parent }) => ({ id: parent.id, value: parent.value })),
+      )
+
+      await live.preload()
+      const builder = live.utils[LIVE_QUERY_INTERNAL].getBuilder()
+      const initialOutcome = createDeferred<{
+        collectionId: string
+        demand: { limit: number }
+        generation: number
+        extent: `exhausted`
+      }>()
+      const rollbackOutcome = createDeferred<{
+        collectionId: string
+        demand: { limit: number }
+        generation: number
+        extent: `exhausted`
+      }>()
+      const afterCatchOutcome = createDeferred<{
+        collectionId: string
+        demand: { limit: number }
+        generation: number
+        extent: `exhausted`
+      }>()
+      const originalWindowFn = Reflect.get(builder, `windowFn`) as (options: {
+        limit?: number
+      }) => void
+      let parentWindowCalls = 0
+      Reflect.set(builder, `windowFn`, (options: { limit?: number }) => {
+        originalWindowFn(options)
+        if (options.limit !== 2) return
+        parentWindowCalls++
+        if (parentWindowCalls === 1) {
+          builder.trackSubsetLoadOperationPromise(
+            initialOutcome.promise,
+            `initial`,
+          )
+        } else if (parentWindowCalls === 2) {
+          builder.trackSubsetLoadOperationPromise(
+            rollbackOutcome.promise,
+            `rollback`,
+          )
+        }
+      })
+
+      const parentReady = live.utils.setWindow({ offset: 0, limit: 2 })
+      expect(parentReady).toBeInstanceOf(Promise)
+
+      const nestedFailure = new Error(`nested failed`)
+      const runGraph = Reflect.get(builder, `maybeRunGraphFn`) as () => void
+      let failNested = false
+      Reflect.set(builder, `maybeRunGraphFn`, () => {
+        runGraph()
+        if (!failNested) return
+        failNested = false
+        builder.recordSubsetError(nestedFailure)
+      })
+      let nestedError: unknown
+      let acted = false
+      const subscription = live.subscribeChanges(
+        () => {
+          if (acted) return
+          acted = true
+          failNested = true
+          try {
+            live.utils.setWindow({ offset: 1, limit: 1 })
+          } catch (error) {
+            nestedError = error
+          }
+          builder.trackSubsetLoadOperationPromise(
+            afterCatchOutcome.promise,
+            `after-catch`,
+          )
+        },
+        { includeInitialState: false },
+      )
+
+      try {
+        parents.write(`update`, { id: 1, rank: 1, value: 3 })
+        expect(nestedError).toBe(nestedFailure)
+        expect(parentWindowCalls).toBe(2)
+        expect(live.toArray.map(({ id, value }) => ({ id, value }))).toEqual([
+          { id: 1, value: 3 },
+          { id: 2, value: 2 },
+        ])
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
+
+        let parentSettled = false
+        void Promise.resolve(parentReady).then(() => {
+          parentSettled = true
+        })
+        initialOutcome.resolve({
+          collectionId: `parents`,
+          demand: { limit: 2 },
+          generation: 1,
+          extent: `exhausted`,
+        })
+        await flushPromises()
+        expect(parentSettled).toBe(false)
+
+        rollbackOutcome.resolve({
+          collectionId: `parents`,
+          demand: { limit: 2 },
+          generation: 1,
+          extent: `exhausted`,
+        })
+        afterCatchOutcome.resolve({
+          collectionId: `parents`,
+          demand: { limit: 2 },
+          generation: 1,
+          extent: `exhausted`,
+        })
+        await parentReady
+        expect(live.utils[LIVE_QUERY_INTERNAL].getLastWindowOutcomes()).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ sourceId: `initial` }),
+            expect.objectContaining({ sourceId: `rollback` }),
+            expect.objectContaining({ sourceId: `after-catch` }),
+          ]),
+        )
+      } finally {
+        subscription.unsubscribe()
+        const outcome = {
+          collectionId: `parents`,
+          demand: { limit: 2 },
+          generation: 1,
+          extent: `exhausted` as const,
+        }
+        initialOutcome.resolve(outcome)
+        rollbackOutcome.resolve(outcome)
+        afterCatchOutcome.resolve(outcome)
+        await Promise.all([live.cleanup(), parents.collection.cleanup()])
+      }
+    },
+  )
+
+  fcTest(
     `an older failed window cannot restore over a newer nested window`,
     async () => {
       const parents = createControlledCollection(`stale-window-parents`, [
