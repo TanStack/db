@@ -324,6 +324,91 @@ describe(`sync publication reentrancy`, () => {
     }
   })
 
+  it(`uses the post-removal public layout before an unmarked prefix drain`, async () => {
+    const updatePersistence = createDeferred<void>()
+    const deletePersistence = createDeferred<void>()
+    let sync!: OrderedSync
+    const collection = createCollection<OrderedRow, number>({
+      id: `layout-prefix-removal-drain`,
+      getKey: (row) => row.id,
+      compare: (left, right) => left.rank - right.rank,
+      startSync: true,
+      sync: {
+        sync: (ops) => {
+          sync = ops
+          installInitialOrderedRows(ops)
+        },
+      },
+      onUpdate: () => updatePersistence.promise,
+      onDelete: () => deletePersistence.promise,
+    })
+    const callbacks: Array<LayoutCallback> = []
+    let parkedReceiptSettled = false
+    const subscription = collection.subscribeChanges(
+      (changes) => {
+        callbacks.push({
+          changes: changes.map(({ key }) => key as number),
+          keys: [...collection.keys()],
+          values: collection.toArray.map(({ value }) => value),
+          markedReceiptSettled: parkedReceiptSettled,
+          revision: collection._layoutRevision,
+        })
+      },
+      { includeInitialState: false },
+    )
+    const update = collection.update(2, (draft) => {
+      draft.value = `optimistic-two`
+    })
+    let deletion: ReturnType<typeof collection.delete> | undefined
+
+    try {
+      sync.begin()
+      sync.write({
+        type: `update`,
+        value: { id: 1, value: `one`, rank: 2 },
+      })
+      sync.collection._markLayoutChange()
+      const parkedReceipt = sync.commit()
+      expect(parkedReceipt).not.toBe(true)
+      if (parkedReceipt !== true) {
+        void parkedReceipt.then(() => {
+          parkedReceiptSettled = true
+        })
+      }
+
+      deletion = collection.delete(1)
+      callbacks.length = 0
+      const revisionBeforeDrain = collection._layoutRevision
+      await Promise.resolve()
+      expect(parkedReceiptSettled).toBe(false)
+      expect([...collection.keys()]).toEqual([2])
+
+      sync.begin({ immediate: true })
+      sync.write({
+        type: `update`,
+        value: { id: 2, value: `server-two`, rank: 1 },
+      })
+      const drainReceipt = sync.commit()
+
+      expect(drainReceipt).toBe(true)
+      expect([...collection.keys()]).toEqual([2])
+      expect(collection.toArray.map(({ value }) => value)).toEqual([
+        `optimistic-two`,
+      ])
+      expect(collection._layoutRevision).toBe(revisionBeforeDrain)
+      expect(callbacks).toEqual([])
+      if (parkedReceipt !== true) await parkedReceipt
+      expect(parkedReceiptSettled).toBe(true)
+    } finally {
+      subscription.unsubscribe()
+      updatePersistence.resolve()
+      deletePersistence.resolve()
+      await update.isPersisted.promise.catch(() => undefined)
+      await deletion?.isPersisted.promise.catch(() => undefined)
+      await collection.cleanup()
+    }
+  })
+
   it(`publishes a parked layout mark when optimistic persistence drains it`, async () => {
     const updatePersistence = createDeferred<void>()
     let sync!: OrderedSync
