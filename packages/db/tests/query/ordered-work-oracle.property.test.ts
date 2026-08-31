@@ -943,106 +943,128 @@ describe(`ordered source work oracle`, () => {
     },
   )
 
+  type ComparatorArrayValue = number | Array<ComparatorArrayValue>
+  type ComparatorArray = Array<ComparatorArrayValue>
+  type ArrayInputReads = { lengths: number; elements: number }
+  type ArrayComparisonModel = {
+    sign: number
+    nullReads: number
+    leftReads: ArrayInputReads
+    rightReads: ArrayInputReads
+  }
+
+  const modelAscendingArrayComparison = (
+    left: ComparatorArrayValue,
+    right: ComparatorArrayValue,
+  ): ArrayComparisonModel => {
+    const leftReads: ArrayInputReads = { lengths: 0, elements: 0 }
+    const rightReads: ArrayInputReads = { lengths: 0, elements: 0 }
+
+    if (Array.isArray(left) && Array.isArray(right)) {
+      leftReads.lengths++
+      rightReads.lengths++
+      const commonLength = Math.min(left.length, right.length)
+      let nullReads = 1
+
+      for (let index = 0; index < commonLength; index++) {
+        leftReads.elements++
+        rightReads.elements++
+        const child = modelAscendingArrayComparison(left[index]!, right[index]!)
+        nullReads += child.nullReads
+        leftReads.lengths += child.leftReads.lengths
+        leftReads.elements += child.leftReads.elements
+        rightReads.lengths += child.rightReads.lengths
+        rightReads.elements += child.rightReads.elements
+        if (child.sign !== 0) {
+          return { sign: child.sign, nullReads, leftReads, rightReads }
+        }
+      }
+
+      return {
+        sign: Math.sign(left.length - right.length),
+        nullReads,
+        leftReads,
+        rightReads,
+      }
+    }
+
+    const sign = Array.isArray(left)
+      ? 1
+      : Array.isArray(right)
+        ? -1
+        : Math.sign(left - right)
+    return { sign, nullReads: 1, leftReads, rightReads }
+  }
+
+  const modelArrayComparison = (
+    left: ComparatorArray,
+    right: ComparatorArray,
+    direction: `asc` | `desc`,
+  ): ArrayComparisonModel => {
+    if (direction === `asc`) {
+      return modelAscendingArrayComparison(left, right)
+    }
+
+    const reversed = modelAscendingArrayComparison(right, left)
+    return {
+      sign: reversed.sign,
+      nullReads: reversed.nullReads,
+      leftReads: reversed.rightReads,
+      rightReads: reversed.leftReads,
+    }
+  }
+
+  const recursiveArrayComparisonScenarios = [
+    { name: `empty equality`, left: [], right: [] },
+    { name: `no common element`, left: [], right: [1] },
+    { name: `primitive equality`, left: [1], right: [1] },
+    { name: `primitive difference`, left: [1], right: [2] },
+    { name: `equal prefix then difference`, left: [1, 2], right: [1, 3] },
+    { name: `equal prefix then length`, left: [1], right: [1, 2] },
+    { name: `array then primitive`, left: [[]], right: [1] },
+    { name: `primitive then array`, left: [1], right: [[]] },
+    {
+      name: `equal nested prefix then outer difference`,
+      left: [[1], 2],
+      right: [[1], 3],
+    },
+    {
+      name: `equal nested prefix then outer length`,
+      left: [[1]],
+      right: [[1], 2],
+    },
+  ].flatMap(({ name, left: initialLeft, right: initialRight }) => {
+    const scenarios: Array<{
+      name: string
+      left: ComparatorArray
+      right: ComparatorArray
+    }> = []
+    let left: ComparatorArray = initialLeft
+    let right: ComparatorArray = initialRight
+
+    for (let depth = 1; depth <= 3; depth++) {
+      scenarios.push({ name: `${name} at depth ${depth}`, left, right })
+      left = [left]
+      right = [right]
+    }
+    return scenarios
+  })
+
   it.each(
     ([`asc`, `desc`] as const).flatMap((direction) =>
-      [
-        {
-          name: `no common element`,
-          left: [],
-          right: [1],
-          expectedNullReads: 1,
-          expectedArrayReads: { lengths: 1, elements: 0 },
-          ascendingSign: -1,
-        },
-        {
-          name: `first-element difference`,
-          left: [1, 9],
-          right: [2, 0],
-          expectedNullReads: 2,
-          expectedArrayReads: { lengths: 1, elements: 1 },
-          ascendingSign: -1,
-        },
-        {
-          name: `equal prefix then difference`,
-          left: [1, 2],
-          right: [1, 3],
-          expectedNullReads: 3,
-          expectedArrayReads: { lengths: 1, elements: 2 },
-          ascendingSign: -1,
-        },
-        {
-          name: `equal common prefix then length`,
-          left: [1],
-          right: [1, 2],
-          expectedNullReads: 2,
-          expectedArrayReads: { lengths: 1, elements: 1 },
-          ascendingSign: -1,
-        },
-        {
-          name: `nested recursion`,
-          left: [[1, 2]],
-          right: [[1, 3]],
-          expectedNullReads: 4,
-          expectedArrayReads: { lengths: 2, elements: 3 },
-          ascendingSign: -1,
-        },
-        {
-          name: `equal empty arrays`,
-          left: [],
-          right: [],
-          expectedNullReads: 1,
-          expectedArrayReads: { lengths: 1, elements: 0 },
-          ascendingSign: 0,
-        },
-        {
-          name: `equal primitive arrays`,
-          left: [1, 2],
-          right: [1, 2],
-          expectedNullReads: 3,
-          expectedArrayReads: { lengths: 1, elements: 2 },
-          ascendingSign: 0,
-        },
-        {
-          name: `equal nested arrays`,
-          left: [[1, 2]],
-          right: [[1, 2]],
-          expectedNullReads: 4,
-          expectedArrayReads: { lengths: 2, elements: 3 },
-          ascendingSign: 0,
-        },
-        {
-          name: `equal nested prefix then outer difference`,
-          left: [[1], 2],
-          right: [[1], 3],
-          expectedNullReads: 4,
-          expectedArrayReads: { lengths: 2, elements: 3 },
-          ascendingSign: -1,
-        },
-        {
-          name: `equal nested prefix then outer length`,
-          left: [[1]],
-          right: [[1], 2],
-          expectedNullReads: 3,
-          expectedArrayReads: { lengths: 2, elements: 2 },
-          ascendingSign: -1,
-        },
-      ].map((scenario) => ({ direction, ...scenario })),
+      recursiveArrayComparisonScenarios.map((scenario) => ({
+        direction,
+        ...scenario,
+      })),
     ),
   )(
     `reads each visited array input once for $name in $direction order`,
-    ({
-      direction,
-      left,
-      right,
-      expectedNullReads,
-      expectedArrayReads,
-      ascendingSign,
-    }) => {
+    ({ direction, left, right }) => {
       let nullReads = 0
       const observeArrayReads = (
-        value: Array<unknown>,
+        value: ComparatorArray,
         reads: { lengths: number; elements: number; structural: number },
-      ): Array<unknown> => {
+      ): ComparatorArray => {
         const nested = value.map((element) =>
           Array.isArray(element) ? observeArrayReads(element, reads) : element,
         )
@@ -1055,10 +1077,16 @@ describe(`ordered source work oracle`, () => {
               /^(0|[1-9]\d*)$/.test(property)
             ) {
               reads.elements++
-            } else {
+            } else if (property !== Symbol.toStringTag) {
+              // Array/scalar comparisons perform constant-time brand checks.
+              // The work law counts input-dependent traversal, not those checks.
               reads.structural++
             }
-            return Reflect.get(target, property, receiver) as unknown
+            return Reflect.get(
+              target,
+              property,
+              receiver,
+            ) as ComparatorArrayValue
           },
           ownKeys(target) {
             reads.structural++
@@ -1078,6 +1106,7 @@ describe(`ordered source work oracle`, () => {
       const rightReads = { lengths: 0, elements: 0, structural: 0 }
       const observedLeft = observeArrayReads(left, leftReads)
       const observedRight = observeArrayReads(right, rightReads)
+      const expected = modelArrayComparison(left, right, direction)
       const options = new Proxy(
         {
           direction,
@@ -1093,16 +1122,10 @@ describe(`ordered source work oracle`, () => {
 
       expect(
         Math.sign(makeComparator(options)(observedLeft, observedRight)),
-      ).toBe(
-        ascendingSign === 0
-          ? 0
-          : direction === `asc`
-            ? ascendingSign
-            : -ascendingSign,
-      )
-      expect(nullReads).toBe(expectedNullReads)
-      expect(leftReads).toEqual({ ...expectedArrayReads, structural: 0 })
-      expect(rightReads).toEqual({ ...expectedArrayReads, structural: 0 })
+      ).toBe(expected.sign)
+      expect(nullReads).toBe(expected.nullReads)
+      expect(leftReads).toEqual({ ...expected.leftReads, structural: 0 })
+      expect(rightReads).toEqual({ ...expected.rightReads, structural: 0 })
     },
   )
 
