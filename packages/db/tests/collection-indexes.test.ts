@@ -16,6 +16,8 @@ import {
 import { PropRef } from '../src/query/ir'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { DEFAULT_COMPARE_OPTIONS } from '../src/utils.js'
+import { findIndexForField } from '../src/utils/index-optimization.js'
+import { makeComparator } from '../src/utils/comparison.js'
 import { expectIndexUsage, stripVirtualProps, withIndexTracking } from './utils'
 import type { Collection } from '../src/collection/index.js'
 import type { MutationFn, PendingMutation } from '../src/types'
@@ -208,6 +210,26 @@ describe(`Collection Indexes`, () => {
           stringSort: `lexical`,
         }),
       ).toBe(false)
+    })
+
+    it(`should reuse an index for equivalent locale identifiers`, () => {
+      const indexCompareOptions = {
+        ...DEFAULT_COMPARE_OPTIONS,
+        locale: `en-us`,
+      }
+      const index = collection.createIndex((row) => row.name, {
+        options: {
+          compareOptions: indexCompareOptions,
+          compareFn: makeComparator(indexCompareOptions),
+        },
+      })
+
+      expect(
+        findIndexForField(collection, [`name`], {
+          ...DEFAULT_COMPARE_OPTIONS,
+          locale: `en-US`,
+        }),
+      ).toBe(index)
     })
 
     it(`should create multiple indexes`, () => {

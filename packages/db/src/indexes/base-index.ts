@@ -12,6 +12,10 @@ function normalizeLocaleOptions(options: object | undefined): object {
   )
 }
 
+function canonicalizeLocale(locale: string | undefined): string | undefined {
+  return locale === undefined ? undefined : Intl.getCanonicalLocales(locale)[0]
+}
+
 type LocaleCompareOptions = CompareOptions & {
   stringSort?: `locale`
   locale?: string
@@ -211,7 +215,8 @@ export abstract class BaseIndex<
     }
 
     return (
-      indexCompareOptions.locale === compareOptions.locale &&
+      canonicalizeLocale(indexCompareOptions.locale) ===
+        canonicalizeLocale(compareOptions.locale) &&
       deepEquals(
         normalizeLocaleOptions(indexCompareOptions.localeOptions),
         normalizeLocaleOptions(compareOptions.localeOptions),
