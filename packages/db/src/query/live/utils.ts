@@ -158,7 +158,9 @@ export function filterDuplicateInserts(
       }
       sentKeys.add(change.key)
     } else if (change.type === `delete`) {
-      sentKeys.delete(change.key)
+      if (!sentKeys.delete(change.key)) {
+        continue
+      }
     }
     filtered.push(change)
   }
