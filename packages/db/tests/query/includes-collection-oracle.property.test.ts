@@ -3,6 +3,7 @@ import { describe, expect } from 'vitest'
 import { createDeferred } from '../../src/deferred.js'
 import { createLiveQueryObserver } from '../../src/live-query-observer.js'
 import { createOptimisticAction } from '../../src/optimistic-action.js'
+import { LIVE_QUERY_INTERNAL } from '../../src/query/live/internal.js'
 import {
   add,
   caseWhen,
@@ -1323,12 +1324,11 @@ describe(`Collection-valued includes oracle`, () => {
             } else if (turnOrigin === `source`) {
               expect(rootLayouts).toEqual([[1], [1, 2]])
               expect(live.toArray.map(({ id }) => id)).toEqual([1, 2])
+              expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
             } else {
-              expect(rootLayouts).toEqual([
-                [1, 2],
-                [2],
-              ])
+              expect(rootLayouts).toEqual([[1, 2], [2]])
               expect(live.toArray.map(({ id }) => id)).toEqual([2])
+              expect(live.utils.getWindow()).toEqual({ offset: 1, limit: 1 })
             }
           } finally {
             rootSubscription.unsubscribe()
@@ -1343,6 +1343,89 @@ describe(`Collection-valued includes oracle`, () => {
       )
     }
   }
+
+  fcTest(
+    `failed window restoration serializes callback-created source work`,
+    async () => {
+      const parents = createControlledCollection(`rollback-window-parents`, [
+        { id: 1, rank: 1, group: 1 },
+        { id: 2, rank: 2, group: 2 },
+      ])
+      const children = createControlledCollection(`rollback-window-children`, [
+        { id: 10, group: 1, value: 1 },
+        { id: 20, group: 2, value: 1 },
+      ])
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ parent: parents.collection })
+          .orderBy(({ parent }) => parent.rank)
+          .limit(1)
+          .select(({ parent }) => ({
+            id: parent.id,
+            children: q
+              .from({ child: children.collection })
+              .where(({ child }) => eq(child.group, parent.group)),
+          })),
+      )
+
+      await live.preload()
+      const failure = new Error(`requested window failed`)
+      const builder = live.utils[LIVE_QUERY_INTERNAL].getBuilder()
+      const runGraph = Reflect.get(builder, `maybeRunGraphFn`) as () => void
+      let failRequestedWindow = true
+      Reflect.set(builder, `maybeRunGraphFn`, () => {
+        runGraph()
+        if (failRequestedWindow) {
+          failRequestedWindow = false
+          builder.recordSubsetError(failure)
+        }
+      })
+
+      const facade = live.get(1)!.children
+      const rootLayouts: Array<Array<number>> = []
+      const childBatches: Array<Array<number>> = []
+      let sawRequestedWindow = false
+      let acted = false
+      const rootSubscription = live.subscribeChanges(
+        () => {
+          const layout = live.toArray.map(({ id }) => id)
+          rootLayouts.push(layout)
+          if (layout.length === 2) sawRequestedWindow = true
+          if (!sawRequestedWindow || acted || layout.length !== 1) return
+          acted = true
+          children.write(`update`, { id: 10, group: 1, value: 3 })
+        },
+        { includeInitialState: false },
+      )
+      const childSubscription = facade.subscribeChanges(
+        (batch) => {
+          childBatches.push(batch.map((change) => change.value.value))
+        },
+        { includeInitialState: false },
+      )
+
+      try {
+        expect(() => live.utils.setWindow({ offset: 0, limit: 2 })).toThrow(
+          failure,
+        )
+
+        expect(rootLayouts).toEqual([[1, 2], [1]])
+        expect(live.toArray.map(({ id }) => id)).toEqual([1])
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
+        expect(live.utils.lastSubsetError).toBe(failure)
+        expect(facade.get(10)!.value).toBe(3)
+        expect(childBatches.at(-1)).toEqual([3])
+      } finally {
+        rootSubscription.unsubscribe()
+        childSubscription.unsubscribe()
+        await Promise.all([
+          live.cleanup(),
+          parents.collection.cleanup(),
+          children.collection.cleanup(),
+        ])
+      }
+    },
+  )
 
   for (const settlement of pendingFacadeSettlements) {
     for (const optimisticOperation of pendingFacadeOptimisticOperations) {

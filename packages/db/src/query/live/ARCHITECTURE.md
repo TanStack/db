@@ -1144,6 +1144,13 @@ joins that context and runs only after the current root and facade callbacks
 finish; it cannot start a second graph turn inside the first one or disappear
 through the graph's reentrancy guard.
 
+Window metadata follows the same causal order as the published rows. If a
+publication callback starts a newer window operation, that newer generation
+owns the final public window and the older caller cannot overwrite it when it
+resumes. Restoring a rejected window is itself a graph-turn origin: its
+callbacks remain inside one publication context, and restoration cannot roll
+back a newer nested window generation.
+
 ## External boundaries
 
 ### Query-db ownership

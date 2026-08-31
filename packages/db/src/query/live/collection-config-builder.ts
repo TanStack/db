@@ -323,7 +323,9 @@ export class CollectionConfigBuilder<
         this.maybeRunGraphFn?.()
       })
       if (operation.failed) throw operation.error
-      this.currentWindow = options
+      if (windowOperationGeneration === this.windowOperationGeneration) {
+        this.currentWindow = options
+      }
     } catch (error) {
       if (
         previousWindow &&
