@@ -1187,7 +1187,7 @@ describe(`Collection-valued includes oracle`, () => {
     },
   )
 
-  fcTest(`cleanup cancels every independently prepared publication`, async () => {
+  fcTest(`cleanup cancels every handle in a prepared publication`, async () => {
     const rows = createControlledCollection(`prepared-publication-cleanup`, [
       { id: 1, value: 1 },
     ])
@@ -1203,10 +1203,9 @@ describe(`Collection-valued includes oracle`, () => {
     try {
       const firstPublication = rows.collection._deferPublication()
       rows.write(`update`, { id: 1, value: 2 })
-      firstPublication.prepare()
-
       const secondPublication = rows.collection._deferPublication()
       rows.write(`update`, { id: 1, value: 3 })
+      firstPublication.prepare()
       secondPublication.prepare()
 
       expect(rows.collection.get(1)!.value).toBe(3)

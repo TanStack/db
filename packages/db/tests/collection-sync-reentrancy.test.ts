@@ -219,6 +219,96 @@ const { multiplier, ...replay } = readOracleRunConfig()
 const generatedRuns = 30 * multiplier
 
 describe(`sync publication reentrancy`, () => {
+  it.each([`open`, `prepared`, `published`] as const)(
+    `starts a second publication cycle with the first cycle %s`,
+    async (firstCycleState) => {
+      const harness = createSyncHarness(
+        `publication-cycle-${firstCycleState}`,
+      )
+      const { collection } = harness
+      const callbacks: Array<{
+        changes: Array<string>
+        visibleValue: string
+        revision: number
+      }> = []
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          callbacks.push({
+            changes: changes.map((change) => change.value.value),
+            visibleValue: collection.get(1)!.value,
+            revision: collection._stateRevision,
+          })
+        },
+        { includeInitialState: false },
+      )
+      const initialRevision = collection._stateRevision
+      const write = (type: `insert` | `update`, value: string) => {
+        harness.sync.begin({ immediate: true })
+        harness.sync.write({ type, value: { id: 1, value } })
+        harness.sync.commit()
+      }
+
+      try {
+        const firstPublication = collection._deferPublication()
+        write(`insert`, `first`)
+
+        if (firstCycleState === `open`) {
+          const secondPublication = collection._deferPublication()
+          write(`update`, `second`)
+          firstPublication.prepare()
+          secondPublication.prepare()
+          firstPublication.publish()
+          secondPublication.publish()
+
+          expect(callbacks).toEqual([
+            {
+              changes: [`first`, `second`],
+              visibleValue: `second`,
+              revision: initialRevision + 2,
+            },
+          ])
+        } else if (firstCycleState === `prepared`) {
+          firstPublication.prepare()
+          expect(() => collection._deferPublication()).toThrow(
+            `Cannot start a publication cycle while another is prepared`,
+          )
+          firstPublication.publish()
+
+          expect(callbacks).toEqual([
+            {
+              changes: [`first`],
+              visibleValue: `first`,
+              revision: initialRevision + 1,
+            },
+          ])
+        } else {
+          firstPublication.prepare()
+          firstPublication.publish()
+          const secondPublication = collection._deferPublication()
+          write(`update`, `second`)
+          secondPublication.prepare()
+          secondPublication.publish()
+
+          expect(callbacks).toEqual([
+            {
+              changes: [`first`],
+              visibleValue: `first`,
+              revision: initialRevision + 1,
+            },
+            {
+              changes: [`second`],
+              visibleValue: `second`,
+              revision: initialRevision + 2,
+            },
+          ])
+        }
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
   it(`compares layout with the public state before an immediate prefix drain`, async () => {
     const updatePersistence = createDeferred<void>()
     const insertPersistence = createDeferred<void>()

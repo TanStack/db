@@ -1142,6 +1142,11 @@ rethrows the first callback failure unchanged, including `null` or `undefined`.
 If a callback cleans up another participant after preparation but before its
 release, cleanup cancels that participant's held delivery. No callback may run
 later against its cleaned-up state.
+Nested deferral handles may join one open Collection publication cycle. Once
+that cycle is prepared, no independent cycle may begin until it is published,
+or canceled by cleanup. An open cycle may instead be discarded. The Collection
+rejects prepared-cycle overlap before the newer cycle can install state;
+otherwise an older event could be delivered against a newer visible snapshot.
 
 Every graph-turn origin that can publish rows owns a scheduler publication
 context through the complete coherent release. This includes direct window

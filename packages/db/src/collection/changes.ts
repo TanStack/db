@@ -63,9 +63,9 @@ export class CollectionChangesManager<
   private publicationDeferral:
     | PublicationDeferralState<TOutput, TKey>
     | undefined
-  private preparedPublicationDeferrals = new Set<
-    PublicationDeferralState<TOutput, TKey>
-  >()
+  private preparedPublicationDeferral:
+    | PublicationDeferralState<TOutput, TKey>
+    | undefined
   private layoutChangeListeners = new Set<() => void>()
 
   /**
@@ -181,6 +181,11 @@ export class CollectionChangesManager<
    * normal transaction boundaries.
    */
   public deferPublication(): PublicationDeferral {
+    if (this.preparedPublicationDeferral) {
+      throw new Error(
+        `Cannot start a publication cycle while another is prepared`,
+      )
+    }
     const publicationDeferral = this.publicationDeferral ?? {
       depth: 0,
       discard: false,
@@ -216,7 +221,7 @@ export class CollectionChangesManager<
           ({ layoutChanged }) => layoutChanged,
         ),
       }
-      this.preparedPublicationDeferrals.add(publicationDeferral)
+      this.preparedPublicationDeferral = publicationDeferral
     }
 
     return {
@@ -232,7 +237,9 @@ export class CollectionChangesManager<
           return
         }
         publicationDeferral.published = true
-        this.preparedPublicationDeferrals.delete(publicationDeferral)
+        if (this.preparedPublicationDeferral === publicationDeferral) {
+          this.preparedPublicationDeferral = undefined
+        }
         const publication = publicationDeferral.prepared
         publicationDeferral.prepared = undefined
         if (publication) {
@@ -419,11 +426,11 @@ export class CollectionChangesManager<
       this.publicationDeferral.prepared = undefined
     }
     this.publicationDeferral = undefined
-    for (const publicationDeferral of this.preparedPublicationDeferrals) {
-      publicationDeferral.discard = true
-      publicationDeferral.publications = []
-      publicationDeferral.prepared = undefined
+    if (this.preparedPublicationDeferral) {
+      this.preparedPublicationDeferral.discard = true
+      this.preparedPublicationDeferral.publications = []
+      this.preparedPublicationDeferral.prepared = undefined
     }
-    this.preparedPublicationDeferrals.clear()
+    this.preparedPublicationDeferral = undefined
   }
 }
