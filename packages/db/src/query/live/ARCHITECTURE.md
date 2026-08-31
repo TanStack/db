@@ -1137,6 +1137,13 @@ revision. If a later root or containing-facade application fails before that
 release, rollback restores the installed state and discards both the held
 events and their revision advances. Routing and identity remain inside D2.
 
+Every graph-turn origin that can publish rows owns a scheduler publication
+context through the complete coherent release. This includes direct window
+changes as well as source transactions. Work created by a publication callback
+joins that context and runs only after the current root and facade callbacks
+finish; it cannot start a second graph turn inside the first one or disappear
+through the graph's reentrancy guard.
+
 ## External boundaries
 
 ### Query-db ownership

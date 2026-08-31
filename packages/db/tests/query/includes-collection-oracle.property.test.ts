@@ -1139,6 +1139,211 @@ describe(`Collection-valued includes oracle`, () => {
     },
   )
 
+  fcTest(
+    `window callback-created source work follows the current facade publication`,
+    async () => {
+      const parents = createControlledCollection(`reentrant-window-parents`, [
+        { id: 1, rank: 1, group: 1 },
+        { id: 2, rank: 2, group: 2 },
+      ])
+      const children = createControlledCollection(`reentrant-window-children`, [
+        { id: 10, group: 1, value: 1 },
+        { id: 20, group: 2, value: 1 },
+      ])
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ parent: parents.collection })
+          .orderBy(({ parent }) => parent.rank)
+          .limit(1)
+          .select(({ parent }) => ({
+            id: parent.id,
+            children: q
+              .from({ child: children.collection })
+              .where(({ child }) => eq(child.group, parent.group)),
+          })),
+      )
+
+      await live.preload()
+      const observations: Array<{
+        eventValues: Array<number>
+        visibleValue: number
+        revision: number
+      }> = []
+      let childSubscription: { unsubscribe: () => void } | undefined
+      let preparedRevision = -1
+      let reentered = false
+      const rootSubscription = live.subscribeChanges(
+        () => {
+          if (reentered) return
+          reentered = true
+          const facade = live.get(2)!.children
+          preparedRevision = facade._stateRevision
+          childSubscription = facade.subscribeChanges(
+            (batch) => {
+              observations.push({
+                eventValues: batch.map((change) => change.value.value),
+                visibleValue: facade.get(20)!.value,
+                revision: facade._stateRevision,
+              })
+            },
+            { includeInitialState: false },
+          )
+          children.write(`update`, { id: 20, group: 2, value: 3 })
+        },
+        { includeInitialState: false },
+      )
+
+      try {
+        const result = live.utils.setWindow({ offset: 0, limit: 2 })
+        if (result instanceof Promise) await result
+        await flushPromises()
+
+        expect(children.collection.get(20)!.value).toBe(3)
+        expect(live.get(2)!.children.get(20)!.value).toBe(3)
+        expect(observations).toEqual([
+          {
+            eventValues: [1],
+            visibleValue: 1,
+            revision: preparedRevision,
+          },
+          {
+            eventValues: [3],
+            visibleValue: 3,
+            revision: preparedRevision + 1,
+          },
+        ])
+      } finally {
+        rootSubscription.unsubscribe()
+        childSubscription?.unsubscribe()
+        await Promise.all([
+          live.cleanup(),
+          parents.collection.cleanup(),
+          children.collection.cleanup(),
+        ])
+      }
+    },
+  )
+
+  for (const turnOrigin of [`source`, `window`] as const) {
+    for (const callbackAction of [`source-write`, `set-window`] as const) {
+      fcTest(
+        `${turnOrigin} graph turns serialize callback ${callbackAction} work`,
+        async () => {
+          const parents = createControlledCollection(
+            `callback-origin-parents`,
+            [
+              { id: 1, rank: 1, group: 1, value: 1 },
+              { id: 2, rank: 2, group: 2, value: 1 },
+            ],
+          )
+          const children = createControlledCollection(
+            `callback-origin-children`,
+            [
+              { id: 10, group: 1, value: 1 },
+              { id: 20, group: 2, value: 1 },
+            ],
+          )
+          const live = createLiveQueryCollection((q) =>
+            q
+              .from({ parent: parents.collection })
+              .orderBy(({ parent }) => parent.rank)
+              .limit(1)
+              .select(({ parent }) => ({
+                id: parent.id,
+                value: parent.value,
+                children: q
+                  .from({ child: children.collection })
+                  .where(({ child }) => eq(child.group, parent.group)),
+              })),
+          )
+
+          await live.preload()
+          const rootLayouts: Array<Array<number>> = []
+          const childBatches: Array<Array<number>> = []
+          let childSubscription: { unsubscribe: () => void } | undefined
+          let childRevision = -1
+          let actionResult: true | Promise<void> | undefined
+          let acted = false
+          const rootSubscription = live.subscribeChanges(
+            () => {
+              rootLayouts.push(live.toArray.map(({ id }) => id))
+              if (acted) return
+              acted = true
+              if (callbackAction === `source-write`) {
+                const parentId = turnOrigin === `window` ? 2 : 1
+                const childId = parentId === 1 ? 10 : 20
+                const facade = live.get(parentId)!.children
+                childRevision = facade._stateRevision
+                childSubscription = facade.subscribeChanges(
+                  (batch) => {
+                    childBatches.push(
+                      batch.map((change) => change.value.value),
+                    )
+                  },
+                  { includeInitialState: false },
+                )
+                children.write(`update`, {
+                  id: childId,
+                  group: parentId,
+                  value: 3,
+                })
+              } else {
+                actionResult = live.utils.setWindow(
+                  turnOrigin === `window`
+                    ? { offset: 1, limit: 1 }
+                    : { offset: 0, limit: 2 },
+                )
+              }
+            },
+            { includeInitialState: false },
+          )
+
+          try {
+            if (turnOrigin === `source`) {
+              parents.write(`update`, {
+                id: 1,
+                rank: 1,
+                group: 1,
+                value: 2,
+              })
+            } else {
+              const result = live.utils.setWindow({ offset: 0, limit: 2 })
+              if (result instanceof Promise) await result
+            }
+            if (actionResult instanceof Promise) await actionResult
+            await flushPromises()
+
+            if (callbackAction === `source-write`) {
+              const parentId = turnOrigin === `window` ? 2 : 1
+              const childId = parentId === 1 ? 10 : 20
+              const facade = live.get(parentId)!.children
+              expect(facade.get(childId)!.value).toBe(3)
+              expect(childBatches.at(-1)).toEqual([3])
+              expect(facade._stateRevision).toBe(childRevision + 1)
+            } else if (turnOrigin === `source`) {
+              expect(rootLayouts).toEqual([[1], [1, 2]])
+              expect(live.toArray.map(({ id }) => id)).toEqual([1, 2])
+            } else {
+              expect(rootLayouts).toEqual([
+                [1, 2],
+                [2],
+              ])
+              expect(live.toArray.map(({ id }) => id)).toEqual([2])
+            }
+          } finally {
+            rootSubscription.unsubscribe()
+            childSubscription?.unsubscribe()
+            await Promise.all([
+              live.cleanup(),
+              parents.collection.cleanup(),
+              children.collection.cleanup(),
+            ])
+          }
+        },
+      )
+    }
+  }
+
   for (const settlement of pendingFacadeSettlements) {
     for (const optimisticOperation of pendingFacadeOptimisticOperations) {
       for (const sourceOperation of pendingFacadeSourceOperations) {

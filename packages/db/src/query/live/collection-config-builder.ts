@@ -7,6 +7,7 @@ import {
 import {
   getActivePublicationContext,
   transactionScopedScheduler,
+  withPublicationContext,
 } from '../../scheduler.js'
 import { getActiveTransaction } from '../../transactions.js'
 import { deepEquals } from '../../utils.js'
@@ -302,7 +303,8 @@ export class CollectionConfigBuilder<
   }
 
   setWindow(options: WindowOptions): true | Promise<void> {
-    if (!this.windowFn) {
+    const windowFn = this.windowFn
+    if (!windowFn) {
       throw new SetWindowRequiresOrderByError()
     }
 
@@ -316,8 +318,10 @@ export class CollectionConfigBuilder<
     const operation: { failed: boolean; error?: unknown } = { failed: false }
     this.activeWindowOperation = operation
     try {
-      this.windowFn(options)
-      this.maybeRunGraphFn?.()
+      withPublicationContext(() => {
+        windowFn(options)
+        this.maybeRunGraphFn?.()
+      })
       if (operation.failed) throw operation.error
       this.currentWindow = options
     } catch (error) {
@@ -328,8 +332,10 @@ export class CollectionConfigBuilder<
         windowOperationGeneration === this.windowOperationGeneration
       ) {
         try {
-          this.windowFn(previousWindow)
-          this.maybeRunGraphFn?.()
+          withPublicationContext(() => {
+            windowFn(previousWindow)
+            this.maybeRunGraphFn?.()
+          })
           if (windowOperationGeneration === this.windowOperationGeneration) {
             this.windowOperationGeneration = previousWindowOperationGeneration
           }
