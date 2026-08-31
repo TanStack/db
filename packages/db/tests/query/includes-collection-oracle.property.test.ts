@@ -4208,6 +4208,73 @@ describe(`Collection-valued includes oracle`, () => {
     },
   )
 
+  fcTest(`publishes an internal facade swap with unchanged endpoints`, async () => {
+    type OrderedChild = ChildRow & { position: number }
+    const parents = createControlledCollection(`middle-swap-parents`, [
+      { id: 1, group: 1 },
+    ])
+    const children = createControlledCollection<OrderedChild>(
+      `middle-swap-children`,
+      [
+        { id: 10, parentGroup: 1, value: 10, position: 1 },
+        { id: 20, parentGroup: 1, value: 20, position: 2 },
+        { id: 30, parentGroup: 1, value: 30, position: 3 },
+        { id: 40, parentGroup: 1, value: 40, position: 4 },
+      ],
+    )
+    const live = createLiveQueryCollection((q) =>
+      q.from({ parent: parents.collection }).select(({ parent }) => ({
+        id: parent.id,
+        children: q
+          .from({ child: children.collection })
+          .where(({ child }) => eq(child.parentGroup, parent.group))
+          .orderBy(({ child }) => child.position)
+          .select(({ child }) => ({ id: child.id, value: child.value })),
+      })),
+    )
+
+    try {
+      await live.preload()
+      const facade = live.get(1)!.children
+      const revisionBeforeSwap = facade._layoutRevision
+      const publicationSizes: Array<number> = []
+      const callbackKeys: Array<Array<number>> = []
+      const subscription = facade.subscribeChanges(
+        (changes) => {
+          publicationSizes.push(changes.length)
+          callbackKeys.push(facade.toArray.map(({ id }) => id))
+        },
+        { includeInitialState: false },
+      )
+
+      try {
+        children.writeBatch([
+          {
+            type: `update`,
+            value: { id: 20, parentGroup: 1, value: 20, position: 3 },
+          },
+          {
+            type: `update`,
+            value: { id: 30, parentGroup: 1, value: 30, position: 2 },
+          },
+        ])
+
+        expect(facade.toArray.map(({ id }) => id)).toEqual([10, 30, 20, 40])
+        expect(facade._layoutRevision).toBe(revisionBeforeSwap + 1)
+        expect(publicationSizes).toEqual([0])
+        expect(callbackKeys).toEqual([[10, 30, 20, 40]])
+      } finally {
+        subscription.unsubscribe()
+      }
+    } finally {
+      await Promise.all([
+        live.cleanup(),
+        parents.collection.cleanup(),
+        children.collection.cleanup(),
+      ])
+    }
+  })
+
   fcTest(
     `reconstructs nested conditional includes through guard transitions`,
     async () => {

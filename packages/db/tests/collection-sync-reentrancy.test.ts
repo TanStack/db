@@ -365,6 +365,73 @@ describe(`sync publication reentrancy`, () => {
     }
   })
 
+  it(`publishes an internal layout swap with unchanged endpoints`, async () => {
+    let sync!: OrderedSync
+    const collection = createCollection<OrderedRow, number>({
+      id: `layout-middle-swap`,
+      getKey: (row) => row.id,
+      compare: (left, right) => left.rank - right.rank,
+      startSync: true,
+      sync: {
+        sync: (ops) => {
+          sync = ops
+          ops.begin({ immediate: true })
+          for (let id = 1; id <= 4; id++) {
+            ops.write({
+              type: `insert`,
+              value: { id, value: `value-${id}`, rank: id },
+            })
+          }
+          ops.commit()
+          ops.markReady()
+        },
+      },
+    })
+    const callbacks: Array<LayoutCallback> = []
+    const subscription = collection.subscribeChanges(
+      (changes) => {
+        callbacks.push({
+          changes: changes.map(({ key }) => key as number),
+          keys: [...collection.keys()],
+          values: collection.toArray.map(({ value }) => value),
+          markedReceiptSettled: false,
+          revision: collection._layoutRevision,
+        })
+      },
+      { includeInitialState: false },
+    )
+
+    try {
+      const revisionBeforeSwap = collection._layoutRevision
+      sync.begin({ immediate: true })
+      sync.write({
+        type: `update`,
+        value: { id: 2, value: `value-2`, rank: 3 },
+      })
+      sync.write({
+        type: `update`,
+        value: { id: 3, value: `value-3`, rank: 2 },
+      })
+      sync.collection._markLayoutChange()
+      expect(sync.commit()).toBe(true)
+
+      expect([...collection.keys()]).toEqual([1, 3, 2, 4])
+      expect(collection._layoutRevision).toBe(revisionBeforeSwap + 1)
+      expect(callbacks).toEqual([
+        {
+          changes: [2, 3],
+          keys: [1, 3, 2, 4],
+          values: [`value-1`, `value-3`, `value-2`, `value-4`],
+          markedReceiptSettled: false,
+          revision: revisionBeforeSwap + 1,
+        },
+      ])
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   it(`compares layout with the public state before an immediate prefix drain`, async () => {
     const updatePersistence = createDeferred<void>()
     const insertPersistence = createDeferred<void>()
