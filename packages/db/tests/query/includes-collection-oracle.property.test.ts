@@ -4220,6 +4220,7 @@ describe(`Collection-valued includes oracle`, () => {
         { id: 20, parentGroup: 1, value: 20, position: 2 },
         { id: 30, parentGroup: 1, value: 30, position: 3 },
         { id: 40, parentGroup: 1, value: 40, position: 4 },
+        { id: 50, parentGroup: 1, value: 50, position: 5 },
       ],
     )
     const live = createLiveQueryCollection((q) =>
@@ -4251,18 +4252,20 @@ describe(`Collection-valued includes oracle`, () => {
         children.writeBatch([
           {
             type: `update`,
-            value: { id: 20, parentGroup: 1, value: 20, position: 3 },
+            value: { id: 30, parentGroup: 1, value: 30, position: 4 },
           },
           {
             type: `update`,
-            value: { id: 30, parentGroup: 1, value: 30, position: 2 },
+            value: { id: 40, parentGroup: 1, value: 40, position: 3 },
           },
         ])
 
-        expect(facade.toArray.map(({ id }) => id)).toEqual([10, 30, 20, 40])
+        expect(facade.toArray.map(({ id }) => id)).toEqual([
+          10, 20, 40, 30, 50,
+        ])
         expect(facade._layoutRevision).toBe(revisionBeforeSwap + 1)
         expect(publicationSizes).toEqual([0])
-        expect(callbackKeys).toEqual([[10, 30, 20, 40]])
+        expect(callbackKeys).toEqual([[10, 20, 40, 30, 50]])
       } finally {
         subscription.unsubscribe()
       }

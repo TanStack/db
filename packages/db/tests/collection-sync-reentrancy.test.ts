@@ -376,7 +376,7 @@ describe(`sync publication reentrancy`, () => {
         sync: (ops) => {
           sync = ops
           ops.begin({ immediate: true })
-          for (let id = 1; id <= 4; id++) {
+          for (let id = 1; id <= 5; id++) {
             ops.write({
               type: `insert`,
               value: { id, value: `value-${id}`, rank: id },
@@ -406,22 +406,22 @@ describe(`sync publication reentrancy`, () => {
       sync.begin({ immediate: true })
       sync.write({
         type: `update`,
-        value: { id: 2, value: `value-2`, rank: 3 },
+        value: { id: 3, value: `value-3`, rank: 4 },
       })
       sync.write({
         type: `update`,
-        value: { id: 3, value: `value-3`, rank: 2 },
+        value: { id: 4, value: `value-4`, rank: 3 },
       })
       sync.collection._markLayoutChange()
       expect(sync.commit()).toBe(true)
 
-      expect([...collection.keys()]).toEqual([1, 3, 2, 4])
+      expect([...collection.keys()]).toEqual([1, 2, 4, 3, 5])
       expect(collection._layoutRevision).toBe(revisionBeforeSwap + 1)
       expect(callbacks).toEqual([
         {
-          changes: [2, 3],
-          keys: [1, 3, 2, 4],
-          values: [`value-1`, `value-3`, `value-2`, `value-4`],
+          changes: [3, 4],
+          keys: [1, 2, 4, 3, 5],
+          values: [`value-1`, `value-2`, `value-4`, `value-3`, `value-5`],
           markedReceiptSettled: false,
           revision: revisionBeforeSwap + 1,
         },
