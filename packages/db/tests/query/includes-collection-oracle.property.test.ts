@@ -1047,6 +1047,9 @@ describe(`Collection-valued includes oracle`, () => {
             () => {
               callbackParentIds.push(parentId)
               if (parentId === throwingParentId) throw callbackError
+              if (position === `first` && parentId === 3) {
+                throw new Error(`later facade callback failed`)
+              }
             },
             { includeInitialState: false },
           ),
