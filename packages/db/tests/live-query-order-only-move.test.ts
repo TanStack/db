@@ -134,9 +134,14 @@ describe(`order-only move publication`, () => {
       { id: string; name: string },
       string
     >(lq as any)
+    const publications: Array<Array<unknown>> = []
+    const subscription = lq.subscribeChanges(
+      (changes) => publications.push(changes),
+      { includeInitialState: false },
+    )
 
     const before = observer.getSnapshot()
-    const collectionLayoutRevisionBefore = lq._layoutRevision
+    const layoutRevisionBeforeMutation = lq._layoutRevision
     expect((before.data as Array<any>).map((row) => row.id)).toEqual([
       `2`,
       `1`,
@@ -149,6 +154,9 @@ describe(`order-only move publication`, () => {
       (draft) => void (draft.name = `Pending`),
     )
     expect(mutation.state).toBe(`persisting`)
+    expect(lq._layoutRevision).toBe(layoutRevisionBeforeMutation)
+    expect(publications).toEqual([])
+    const layoutRevisionBeforeSourceCommit = lq._layoutRevision
 
     source.utils.begin()
     source.utils.write({
@@ -163,7 +171,8 @@ describe(`order-only move publication`, () => {
       `3`,
       `2`,
     ])
-    expect(lq._layoutRevision).toBe(collectionLayoutRevisionBefore + 1)
+    expect(lq._layoutRevision).toBe(layoutRevisionBeforeSourceCommit + 1)
+    expect(publications).toEqual([[]])
     const publishedLayoutRevision = lq._layoutRevision
 
     persist.resolve()
@@ -177,6 +186,8 @@ describe(`order-only move publication`, () => {
       `2`,
     ])
     expect(lq._layoutRevision).toBe(publishedLayoutRevision)
+    expect(publications).toEqual([[]])
+    subscription.unsubscribe()
     observer.dispose()
   })
 
