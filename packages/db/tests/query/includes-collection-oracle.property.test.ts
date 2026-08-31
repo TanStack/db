@@ -1187,6 +1187,44 @@ describe(`Collection-valued includes oracle`, () => {
     },
   )
 
+  fcTest(`cleanup cancels every independently prepared publication`, async () => {
+    const rows = createControlledCollection(`prepared-publication-cleanup`, [
+      { id: 1, value: 1 },
+    ])
+    await rows.collection.preload()
+    const callbackValues: Array<Array<number>> = []
+    const subscription = rows.collection.subscribeChanges(
+      (batch) => {
+        callbackValues.push(batch.map((change) => change.value.value))
+      },
+      { includeInitialState: false },
+    )
+
+    try {
+      const firstPublication = rows.collection._deferPublication()
+      rows.write(`update`, { id: 1, value: 2 })
+      firstPublication.prepare()
+
+      const secondPublication = rows.collection._deferPublication()
+      rows.write(`update`, { id: 1, value: 3 })
+      secondPublication.prepare()
+
+      expect(rows.collection.get(1)!.value).toBe(3)
+      expect(rows.collection.status).toBe(`ready`)
+
+      await rows.collection.cleanup()
+      firstPublication.publish()
+      secondPublication.publish()
+
+      expect(callbackValues).toEqual([])
+      expect(rows.collection.status).toBe(`cleaned-up`)
+      expect(rows.collection.toArray).toEqual([])
+    } finally {
+      subscription.unsubscribe()
+      await rows.collection.cleanup()
+    }
+  })
+
   fcTest(
     `coherent nested publication advances every revision before callbacks`,
     async () => {
