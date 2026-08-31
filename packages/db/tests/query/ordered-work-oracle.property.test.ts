@@ -984,7 +984,7 @@ describe(`ordered source work oracle`, () => {
       ].map((scenario) => ({ direction, ...scenario })),
     ),
   )(
-    `does one input-dependent pass for $name in $direction array order`,
+    `reads each visited array input once for $name in $direction order`,
     ({ direction, left, right, expectedNullReads, expectedArrayReads }) => {
       let nullReads = 0
       const observeArrayReads = (
