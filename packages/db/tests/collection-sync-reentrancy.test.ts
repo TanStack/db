@@ -725,6 +725,99 @@ describe(`sync publication reentrancy`, () => {
     }
   })
 
+  it(`captures a fresh layout boundary for each reentrant causal prefix`, async () => {
+    let sync!: OrderedSync
+    const collection = createCollection<OrderedRow, number>({
+      id: `layout-reentrant-prefixes`,
+      getKey: (row) => row.id,
+      compare: (left, right) => left.rank - right.rank,
+      startSync: true,
+      sync: {
+        sync: (ops) => {
+          sync = ops
+          installInitialOrderedRows(ops)
+        },
+      },
+    })
+    let listenerDepth = 0
+    let maxListenerDepth = 0
+    let queuedRestore = false
+    let innerReceipt: Promise<void> | undefined
+    let innerReceiptSettled = false
+    const callbacks: Array<LayoutCallback> = []
+    const subscription = collection.subscribeChanges(
+      (changes) => {
+        listenerDepth++
+        maxListenerDepth = Math.max(maxListenerDepth, listenerDepth)
+        callbacks.push({
+          changes: changes.map(({ key }) => key as number),
+          keys: [...collection.keys()],
+          values: collection.toArray.map(({ value }) => value),
+          markedReceiptSettled: innerReceiptSettled,
+          revision: collection._layoutRevision,
+        })
+
+        if (!queuedRestore) {
+          queuedRestore = true
+          sync.begin()
+          sync.write({
+            type: `update`,
+            value: { id: 1, value: `one`, rank: 0 },
+          })
+          sync.collection._markLayoutChange()
+          const receipt = sync.commit()
+          if (receipt === true) {
+            throw new Error(`Expected listener-created work to queue`)
+          }
+          innerReceipt = receipt
+          void receipt.then(() => {
+            innerReceiptSettled = true
+          })
+        }
+
+        listenerDepth--
+      },
+      { includeInitialState: false },
+    )
+
+    try {
+      const revisionBeforeDrain = collection._layoutRevision
+      sync.begin({ immediate: true })
+      sync.write({
+        type: `update`,
+        value: { id: 1, value: `one`, rank: 2 },
+      })
+      sync.collection._markLayoutChange()
+      expect(sync.commit()).toBe(true)
+
+      expect([...collection.keys()]).toEqual([1, 2])
+      expect(collection._layoutRevision).toBe(revisionBeforeDrain + 2)
+      expect(callbacks).toEqual([
+        {
+          changes: [1],
+          keys: [2, 1],
+          values: [`two`, `one`],
+          markedReceiptSettled: false,
+          revision: revisionBeforeDrain + 1,
+        },
+        {
+          changes: [1],
+          keys: [1, 2],
+          values: [`one`, `two`],
+          markedReceiptSettled: false,
+          revision: revisionBeforeDrain + 2,
+        },
+      ])
+      expect(maxListenerDepth).toBe(1)
+      expect(innerReceipt).toBeDefined()
+      await innerReceipt
+      expect(innerReceiptSettled).toBe(true)
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   it(`preserves sync work opened by a listener until it is committed`, async () => {
     const harness = createSyncHarness(`listener-opened-sync-work`)
     const { collection } = harness
