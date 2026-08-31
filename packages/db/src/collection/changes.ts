@@ -15,8 +15,33 @@ import type { CollectionStateManager } from './state.js'
 import type { WithVirtualProps } from '../virtual-props.js'
 
 export type PublicationDeferral = {
+  /** Irrevocably advance held revision clocks without invoking callbacks. */
+  prepare: () => void
+  /** Prepare if needed, then release the held callbacks. */
   publish: () => void
+  /** Discard held clocks and callbacks before preparation. */
   discard: () => void
+}
+
+type PublicationDeferralState<
+  TOutput extends object,
+  TKey extends string | number,
+> = {
+  depth: number
+  discard: boolean
+  publications: Array<{
+    changes: Array<ChangeMessage<TOutput, TKey>>
+    layoutChanged: boolean
+  }>
+  stateRevisionDelta: number
+  layoutRevisionDelta: number
+  prepared:
+    | {
+        changes: Array<ChangeMessage<TOutput, TKey>>
+        layoutChanged: boolean
+      }
+    | undefined
+  published: boolean
 }
 
 export class CollectionChangesManager<
@@ -35,14 +60,9 @@ export class CollectionChangesManager<
   public changeSubscriptions = new Set<CollectionSubscription>()
   public batchedEvents: Array<ChangeMessage<TOutput, TKey>> = []
   public shouldBatchEvents = false
-  private publicationDeferralDepth = 0
-  private discardDeferredPublications = false
-  private deferredPublications: Array<{
-    changes: Array<ChangeMessage<TOutput, TKey>>
-    layoutChanged: boolean
-  }> = []
-  private deferredStateRevisionDelta = 0
-  private deferredLayoutRevisionDelta = 0
+  private publicationDeferral:
+    | PublicationDeferralState<TOutput, TKey>
+    | undefined
   private layoutChangeListeners = new Set<() => void>()
 
   /**
@@ -111,9 +131,10 @@ export class CollectionChangesManager<
   ): void {
     // A coherent multi-Collection publication may still roll back. Hold its
     // revision clocks with its events so discard leaves no public trace.
-    if (this.publicationDeferralDepth > 0) {
-      if (changes.length > 0) this.deferredStateRevisionDelta++
-      if (layoutChanged) this.deferredLayoutRevisionDelta++
+    const publicationDeferral = this.publicationDeferral
+    if (publicationDeferral) {
+      if (changes.length > 0) publicationDeferral.stateRevisionDelta++
+      if (layoutChanged) publicationDeferral.layoutRevisionDelta++
     } else {
       if (changes.length > 0) this.stateRevision++
       if (layoutChanged) this.layoutRevision++
@@ -140,8 +161,11 @@ export class CollectionChangesManager<
       this.shouldBatchEvents = false
     }
 
-    if (this.publicationDeferralDepth > 0) {
-      this.deferredPublications.push({ changes: rawEvents, layoutChanged })
+    if (publicationDeferral) {
+      publicationDeferral.publications.push({
+        changes: rawEvents,
+        layoutChanged,
+      })
       return
     }
 
@@ -154,39 +178,63 @@ export class CollectionChangesManager<
    * normal transaction boundaries.
    */
   public deferPublication(): PublicationDeferral {
-    this.publicationDeferralDepth++
-    let closed = false
+    const publicationDeferral = this.publicationDeferral ?? {
+      depth: 0,
+      discard: false,
+      publications: [],
+      stateRevisionDelta: 0,
+      layoutRevisionDelta: 0,
+      prepared: undefined,
+      published: false,
+    }
+    this.publicationDeferral = publicationDeferral
+    publicationDeferral.depth++
+    let handleState: `open` | `prepared` | `discarded` = `open`
 
-    const close = (discard: boolean) => {
-      if (closed) return
-      closed = true
-      if (this.publicationDeferralDepth === 0) return
-      this.discardDeferredPublications ||= discard
+    const prepare = (discard: boolean) => {
+      if (handleState !== `open`) return
+      handleState = discard ? `discarded` : `prepared`
+      publicationDeferral.discard ||= discard
+      publicationDeferral.depth--
+      if (publicationDeferral.depth > 0) return
 
-      this.publicationDeferralDepth--
-      if (this.publicationDeferralDepth > 0) return
-
-      const publications = this.deferredPublications
-      this.deferredPublications = []
-      const stateRevisionDelta = this.deferredStateRevisionDelta
-      const layoutRevisionDelta = this.deferredLayoutRevisionDelta
-      this.deferredStateRevisionDelta = 0
-      this.deferredLayoutRevisionDelta = 0
-      if (this.discardDeferredPublications) {
-        this.discardDeferredPublications = false
-        return
+      if (this.publicationDeferral === publicationDeferral) {
+        this.publicationDeferral = undefined
       }
-      this.stateRevision += stateRevisionDelta
-      this.layoutRevision += layoutRevisionDelta
-      this.publishEvents(
-        publications.flatMap(({ changes }) => changes),
-        publications.some(({ layoutChanged }) => layoutChanged),
-      )
+      if (publicationDeferral.discard) return
+
+      this.stateRevision += publicationDeferral.stateRevisionDelta
+      this.layoutRevision += publicationDeferral.layoutRevisionDelta
+      publicationDeferral.prepared = {
+        changes: publicationDeferral.publications.flatMap(
+          ({ changes }) => changes,
+        ),
+        layoutChanged: publicationDeferral.publications.some(
+          ({ layoutChanged }) => layoutChanged,
+        ),
+      }
     }
 
     return {
-      publish: () => close(false),
-      discard: () => close(true),
+      prepare: () => prepare(false),
+      publish: () => {
+        if (handleState === `discarded`) return
+        prepare(false)
+        if (
+          publicationDeferral.depth > 0 ||
+          publicationDeferral.discard ||
+          publicationDeferral.published
+        ) {
+          return
+        }
+        publicationDeferral.published = true
+        const publication = publicationDeferral.prepared
+        publicationDeferral.prepared = undefined
+        if (publication) {
+          this.publishEvents(publication.changes, publication.layoutChanged)
+        }
+      },
+      discard: () => prepare(true),
     }
   }
 
@@ -360,7 +408,11 @@ export class CollectionChangesManager<
   public cleanup(): void {
     this.batchedEvents = []
     this.shouldBatchEvents = false
-    this.deferredPublications = []
-    this.publicationDeferralDepth = 0
+    if (this.publicationDeferral) {
+      this.publicationDeferral.discard = true
+      this.publicationDeferral.publications = []
+      this.publicationDeferral.prepared = undefined
+    }
+    this.publicationDeferral = undefined
   }
 }

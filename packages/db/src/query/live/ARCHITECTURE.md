@@ -1130,10 +1130,12 @@ Installed state, synchronous reads, change-event payloads, and downstream
 queries must all observe the same fully materialized commit. The facade adapter
 may defer public revision clocks and event delivery across its Collection
 transactions, but it must not defer state or index installation. A successful
-coherent publication advances those clocks before callbacks run. If a later
-root or containing-facade application fails, rollback restores the installed
-state and discards both the held events and their revision advances. Routing
-and identity remain inside D2.
+coherent publication uses a two-phase release: first advance the clocks of the
+root and every changed facade, then deliver any callback. This lets a callback
+read another participating Collection without seeing new rows behind an old
+revision. If a later root or containing-facade application fails before that
+release, rollback restores the installed state and discards both the held
+events and their revision advances. Routing and identity remain inside D2.
 
 ## External boundaries
 

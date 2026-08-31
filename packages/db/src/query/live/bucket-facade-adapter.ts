@@ -44,6 +44,7 @@ type FacadeSnapshot = {
 }
 
 export type FacadePublication = {
+  prepare: () => void
   publish: () => void
   rollback: () => void
 }
@@ -165,10 +166,18 @@ export class BucketFacadeAdapter {
     this.pending.clear()
     this.pendingActivity.clear()
 
+    let prepared = false
     let closed = false
+    const prepare = () => {
+      if (prepared || closed) return
+      prepared = true
+      for (const publication of publications) publication.prepare()
+    }
     return {
+      prepare,
       publish: () => {
         if (closed) return
+        prepare()
         closed = true
         for (const publication of publications) publication.publish()
         // Drop only the adapter's strong reference. External holders keep an
@@ -176,7 +185,7 @@ export class BucketFacadeAdapter {
         this.retiredEntries.clear()
       },
       rollback: () => {
-        if (closed) return
+        if (closed || prepared) return
         closed = true
         this.restore(snapshot, deferredEntries)
         this.retiredEntries.clear()

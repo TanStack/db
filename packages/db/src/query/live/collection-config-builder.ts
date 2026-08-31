@@ -1092,6 +1092,11 @@ export class CollectionConfigBuilder<
       }
       pendingChanges = new Map()
 
+      // Advance every participating Collection's public clocks before the
+      // first callback can inspect another Collection from this graph turn.
+      rootPublication?.prepare()
+      facadePublication.prepare()
+
       let publicationError: unknown
       for (const publish of [
         rootPublication?.publish,

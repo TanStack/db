@@ -822,8 +822,20 @@ describe(`Collection-valued includes oracle`, () => {
       const facade = live.get(1)!.children
       const rootPublications: Array<unknown> = []
       const childPublications: Array<unknown> = []
+      const rootCallbackFacadeSnapshots: Array<{
+        rows: Array<{ id: number; value: number }>
+        stateRevision: number
+        layoutRevision: number
+      }> = []
       const rootSubscription = live.subscribeChanges(
-        (batch) => rootPublications.push(...batch),
+        (batch) => {
+          rootPublications.push(...batch)
+          rootCallbackFacadeSnapshots.push({
+            rows: facade.toArray.map(({ id, value }) => ({ id, value })),
+            stateRevision: facade._stateRevision,
+            layoutRevision: facade._layoutRevision,
+          })
+        },
         { includeInitialState: false },
       )
       const childSubscription = facade.subscribeChanges(
@@ -867,6 +879,7 @@ describe(`Collection-valued includes oracle`, () => {
         ])
         expect(rootPublications).toEqual([])
         expect(childPublications).toEqual([])
+        expect(rootCallbackFacadeSnapshots).toEqual([])
         expect(facade._stateRevision).toBe(childStateRevisionBeforeFailure)
         expect(facade._layoutRevision).toBe(childLayoutRevisionBeforeFailure)
         expect(childObserver.getSnapshot()).toBe(observerBeforeFailure)
@@ -894,6 +907,16 @@ describe(`Collection-valued includes oracle`, () => {
         ])
         expect(rootPublications).toHaveLength(1)
         expect(childPublications).toHaveLength(2)
+        expect(rootCallbackFacadeSnapshots).toEqual([
+          {
+            rows: [
+              { id: 20, value: 3 },
+              { id: 10, value: 4 },
+            ],
+            stateRevision: childStateRevisionBeforeFailure + 1,
+            layoutRevision: childLayoutRevisionBeforeFailure + 1,
+          },
+        ])
         expect(facade._stateRevision).toBe(childStateRevisionBeforeFailure + 1)
         expect(facade._layoutRevision).toBe(
           childLayoutRevisionBeforeFailure + 1,
@@ -966,6 +989,152 @@ describe(`Collection-valued includes oracle`, () => {
           parents.collection.cleanup(),
           children.collection.cleanup(),
         ])
+      }
+    },
+  )
+
+  fcTest(
+    `coherent nested publication advances every revision before callbacks`,
+    async () => {
+      type NodeRow = {
+        id: number
+        kind: `parent` | `child` | `grandchild`
+        parentGroup: number
+        group: number
+        value: number
+      }
+      const initialRows: Array<NodeRow> = [
+        {
+          id: 1,
+          kind: `parent`,
+          parentGroup: 0,
+          group: 1,
+          value: 1,
+        },
+        {
+          id: 10,
+          kind: `child`,
+          parentGroup: 1,
+          group: 10,
+          value: 1,
+        },
+        {
+          id: 20,
+          kind: `child`,
+          parentGroup: 1,
+          group: 20,
+          value: 2,
+        },
+        {
+          id: 100,
+          kind: `grandchild`,
+          parentGroup: 10,
+          group: 100,
+          value: 1,
+        },
+        {
+          id: 200,
+          kind: `grandchild`,
+          parentGroup: 10,
+          group: 200,
+          value: 2,
+        },
+      ]
+      const nodes = createControlledCollection<NodeRow>(
+        `nested-publication-revisions`,
+        initialRows,
+      )
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ parent: nodes.collection })
+          .where(({ parent }) => eq(parent.kind, `parent`))
+          .select(({ parent }) => ({
+            id: parent.id,
+            value: parent.value,
+            children: q
+              .from({ child: nodes.collection })
+              .where(({ child }) => eq(child.kind, `child`))
+              .where(({ child }) => eq(child.parentGroup, parent.group))
+              .orderBy(({ child }) => child.value)
+              .select(({ child }) => ({
+                id: child.id,
+                value: child.value,
+                grandchildren: q
+                  .from({ grandchild: nodes.collection })
+                  .where(({ grandchild }) =>
+                    eq(grandchild.kind, `grandchild`),
+                  )
+                  .where(({ grandchild }) =>
+                    eq(grandchild.parentGroup, child.group),
+                  )
+                  .orderBy(({ grandchild }) => grandchild.value),
+              })),
+          })),
+      )
+
+      await live.preload()
+      const childFacade = live.get(1)!.children
+      const grandchildFacade = childFacade.get(10)!.grandchildren
+      const childStateRevision = childFacade._stateRevision
+      const childLayoutRevision = childFacade._layoutRevision
+      const grandchildStateRevision = grandchildFacade._stateRevision
+      const grandchildLayoutRevision = grandchildFacade._layoutRevision
+      const callbackSnapshots: Array<{
+        childRows: Array<{ id: number; value: number }>
+        childStateRevision: number
+        childLayoutRevision: number
+        grandchildRows: Array<{ id: number; value: number }>
+        grandchildStateRevision: number
+        grandchildLayoutRevision: number
+      }> = []
+      const subscription = live.subscribeChanges(
+        () => {
+          callbackSnapshots.push({
+            childRows: childFacade.toArray.map(({ id, value }) => ({
+              id,
+              value,
+            })),
+            childStateRevision: childFacade._stateRevision,
+            childLayoutRevision: childFacade._layoutRevision,
+            grandchildRows: grandchildFacade.toArray.map(({ id, value }) => ({
+              id,
+              value,
+            })),
+            grandchildStateRevision: grandchildFacade._stateRevision,
+            grandchildLayoutRevision: grandchildFacade._layoutRevision,
+          })
+        },
+        { includeInitialState: false },
+      )
+
+      try {
+        nodes.writeBatch([
+          { type: `update`, value: { ...initialRows[0]!, value: 3 } },
+          { type: `update`, value: { ...initialRows[1]!, value: 4 } },
+          { type: `update`, value: { ...initialRows[2]!, value: 3 } },
+          { type: `update`, value: { ...initialRows[3]!, value: 4 } },
+          { type: `update`, value: { ...initialRows[4]!, value: 3 } },
+        ])
+
+        expect(callbackSnapshots).toEqual([
+          {
+            childRows: [
+              { id: 20, value: 3 },
+              { id: 10, value: 4 },
+            ],
+            childStateRevision: childStateRevision + 1,
+            childLayoutRevision: childLayoutRevision + 1,
+            grandchildRows: [
+              { id: 200, value: 3 },
+              { id: 100, value: 4 },
+            ],
+            grandchildStateRevision: grandchildStateRevision + 1,
+            grandchildLayoutRevision: grandchildLayoutRevision + 1,
+          },
+        ])
+      } finally {
+        subscription.unsubscribe()
+        await Promise.all([live.cleanup(), nodes.collection.cleanup()])
       }
     },
   )
