@@ -12,6 +12,18 @@ function normalizeLocaleOptions(options: object | undefined): object {
   )
 }
 
+type LocaleCompareOptions = CompareOptions & {
+  stringSort?: `locale`
+  locale?: string
+  localeOptions?: object
+}
+
+function usesLocaleCollation(
+  options: CompareOptions,
+): options is LocaleCompareOptions {
+  return (options.stringSort ?? DEFAULT_COMPARE_OPTIONS.stringSort) === `locale`
+}
+
 /**
  * Operations that indexes can support, imported from available comparison functions
  */
@@ -183,26 +195,25 @@ export abstract class BaseIndex<
    * The direction is ignored because the index can be reversed if the direction is different.
    */
   matchesCompareOptions(compareOptions: CompareOptions): boolean {
-    const indexStringSort =
-      this.compareOptions.stringSort ?? DEFAULT_COMPARE_OPTIONS.stringSort
-    const requestedStringSort =
-      compareOptions.stringSort ?? DEFAULT_COMPARE_OPTIONS.stringSort
+    const indexCompareOptions = this.compareOptions
+    const indexUsesLocale = usesLocaleCollation(indexCompareOptions)
+    const requestedUsesLocale = usesLocaleCollation(compareOptions)
 
     if (
-      this.compareOptions.nulls !== compareOptions.nulls ||
-      indexStringSort !== requestedStringSort
+      indexCompareOptions.nulls !== compareOptions.nulls ||
+      indexUsesLocale !== requestedUsesLocale
     ) {
       return false
     }
 
-    if (indexStringSort !== `locale`) {
+    if (!indexUsesLocale || !requestedUsesLocale) {
       return true
     }
 
     return (
-      this.compareOptions.locale === compareOptions.locale &&
+      indexCompareOptions.locale === compareOptions.locale &&
       deepEquals(
-        normalizeLocaleOptions(this.compareOptions.localeOptions),
+        normalizeLocaleOptions(indexCompareOptions.localeOptions),
         normalizeLocaleOptions(compareOptions.localeOptions),
       )
     )
