@@ -1423,6 +1423,91 @@ describe(`Collection-valued includes oracle`, () => {
   )
 
   fcTest(
+    `a rejected nested window preserves its parent operation outcome`,
+    async () => {
+      const parents = createControlledCollection(`parent-window-outcome`, [
+        { id: 1, rank: 1 },
+        { id: 2, rank: 2 },
+      ])
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ parent: parents.collection })
+          .orderBy(({ parent }) => parent.rank)
+          .limit(1)
+          .select(({ parent }) => ({ id: parent.id })),
+      )
+
+      await live.preload()
+      const builder = live.utils[LIVE_QUERY_INTERNAL].getBuilder()
+      const originalWindowFn = Reflect.get(builder, `windowFn`) as (options: {
+        offset?: number
+        limit?: number
+      }) => void
+      const parentOutcome = createDeferred<{
+        collectionId: string
+        demand: { limit: number }
+        generation: number
+        extent: `exhausted`
+      }>()
+      Reflect.set(builder, `windowFn`, (options: { limit?: number }) => {
+        originalWindowFn(options)
+        if (options.limit === 2) {
+          builder.trackSubsetLoadOperationPromise(parentOutcome.promise, `root`)
+        }
+      })
+      const nestedFailure = new Error(`nested failed`)
+      const runGraph = Reflect.get(builder, `maybeRunGraphFn`) as () => void
+      let failNested = false
+      Reflect.set(builder, `maybeRunGraphFn`, () => {
+        runGraph()
+        if (!failNested) return
+        failNested = false
+        builder.recordSubsetError(nestedFailure)
+      })
+      let nestedError: unknown
+      let acted = false
+      const subscription = live.subscribeChanges(
+        () => {
+          if (acted) return
+          acted = true
+          failNested = true
+          try {
+            live.utils.setWindow({ offset: 1, limit: 1 })
+          } catch (error) {
+            nestedError = error
+          }
+        },
+        { includeInitialState: false },
+      )
+
+      try {
+        const parentReady = live.utils.setWindow({ offset: 0, limit: 2 })
+        expect(parentReady).toBeInstanceOf(Promise)
+        expect(nestedError).toBe(nestedFailure)
+        parentOutcome.resolve({
+          collectionId: `parents`,
+          demand: { limit: 2 },
+          generation: 1,
+          extent: `exhausted`,
+        })
+        await parentReady
+        expect(live.utils[LIVE_QUERY_INTERNAL].getLastWindowOutcomes()).toEqual(
+          [expect.objectContaining({ demand: { limit: 2 } })],
+        )
+      } finally {
+        subscription.unsubscribe()
+        parentOutcome.resolve({
+          collectionId: `parents`,
+          demand: { limit: 2 },
+          generation: 1,
+          extent: `exhausted`,
+        })
+        await Promise.all([live.cleanup(), parents.collection.cleanup()])
+      }
+    },
+  )
+
+  fcTest(
     `an older failed window cannot restore over a newer nested window`,
     async () => {
       const parents = createControlledCollection(`stale-window-parents`, [
@@ -1507,6 +1592,8 @@ describe(`Collection-valued includes oracle`, () => {
 
       const facade = live.get(1)!.children
       const rootLayouts: Array<Array<number>> = []
+      const rootWindows: Array<{ offset: number; limit: number } | undefined> =
+        []
       const childBatches: Array<Array<number>> = []
       let sawRequestedWindow = false
       let acted = false
@@ -1514,6 +1601,7 @@ describe(`Collection-valued includes oracle`, () => {
         () => {
           const layout = live.toArray.map(({ id }) => id)
           rootLayouts.push(layout)
+          rootWindows.push(live.utils.getWindow())
           if (layout.length === 2) sawRequestedWindow = true
           if (!sawRequestedWindow || acted || layout.length !== 1) return
           acted = true
@@ -1534,6 +1622,10 @@ describe(`Collection-valued includes oracle`, () => {
         )
 
         expect(rootLayouts).toEqual([[1, 2], [1]])
+        expect(rootWindows).toEqual([
+          { offset: 0, limit: 2 },
+          { offset: 0, limit: 1 },
+        ])
         expect(live.toArray.map(({ id }) => id)).toEqual([1])
         expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
         expect(live.utils.lastSubsetError).toBe(failure)
