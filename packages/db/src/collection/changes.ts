@@ -63,6 +63,9 @@ export class CollectionChangesManager<
   private publicationDeferral:
     | PublicationDeferralState<TOutput, TKey>
     | undefined
+  private preparedPublicationDeferrals = new Set<
+    PublicationDeferralState<TOutput, TKey>
+  >()
   private layoutChangeListeners = new Set<() => void>()
 
   /**
@@ -213,6 +216,7 @@ export class CollectionChangesManager<
           ({ layoutChanged }) => layoutChanged,
         ),
       }
+      this.preparedPublicationDeferrals.add(publicationDeferral)
     }
 
     return {
@@ -228,6 +232,7 @@ export class CollectionChangesManager<
           return
         }
         publicationDeferral.published = true
+        this.preparedPublicationDeferrals.delete(publicationDeferral)
         const publication = publicationDeferral.prepared
         publicationDeferral.prepared = undefined
         if (publication) {
@@ -414,5 +419,11 @@ export class CollectionChangesManager<
       this.publicationDeferral.prepared = undefined
     }
     this.publicationDeferral = undefined
+    for (const publicationDeferral of this.preparedPublicationDeferrals) {
+      publicationDeferral.discard = true
+      publicationDeferral.publications = []
+      publicationDeferral.prepared = undefined
+    }
+    this.preparedPublicationDeferrals.clear()
   }
 }

@@ -1097,6 +1097,97 @@ describe(`Collection-valued includes oracle`, () => {
   }
 
   fcTest(
+    `cleanup during root publication suppresses a prepared facade callback`,
+    async () => {
+      type NodeRow = {
+        id: number
+        kind: `parent` | `child`
+        group: number
+        value: number
+      }
+      const nodes = createControlledCollection<NodeRow>(
+        `prepared-facade-cleanup`,
+        [
+          { id: 1, kind: `parent`, group: 1, value: 1 },
+          { id: 10, kind: `child`, group: 1, value: 1 },
+        ],
+      )
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ parent: nodes.collection })
+          .where(({ parent }) => eq(parent.kind, `parent`))
+          .select(({ parent }) => ({
+            id: parent.id,
+            value: parent.value,
+            children: q
+              .from({ child: nodes.collection })
+              .where(({ child }) => eq(child.kind, `child`))
+              .where(({ child }) => eq(child.group, parent.group)),
+          })),
+      )
+
+      await live.preload()
+      const facade = live.get(1)!.children
+      const rootSnapshots: Array<{
+        status: string
+        rows: Array<{ id: number; value: number }>
+      }> = []
+      const facadeSnapshots: Array<{
+        status: string
+        rows: Array<{ id: number; value: number }>
+      }> = []
+      let cleanupPromise: Promise<void> | undefined
+      const rootSubscription = live.subscribeChanges(
+        () => {
+          rootSnapshots.push({
+            status: facade.status,
+            rows: facade.toArray.map(({ id, value }) => ({ id, value })),
+          })
+          cleanupPromise = facade.cleanup()
+        },
+        { includeInitialState: false },
+      )
+      const facadeSubscription = facade.subscribeChanges(
+        () => {
+          facadeSnapshots.push({
+            status: facade.status,
+            rows: facade.toArray.map(({ id, value }) => ({ id, value })),
+          })
+        },
+        { includeInitialState: false },
+      )
+
+      try {
+        nodes.writeBatch([
+          {
+            type: `update`,
+            value: { id: 1, kind: `parent`, group: 1, value: 2 },
+          },
+          {
+            type: `update`,
+            value: { id: 10, kind: `child`, group: 1, value: 2 },
+          },
+        ])
+        await cleanupPromise
+
+        expect(rootSnapshots).toEqual([
+          {
+            status: `ready`,
+            rows: [{ id: 10, value: 2 }],
+          },
+        ])
+        expect(facadeSnapshots).toEqual([])
+        expect(facade.status).toBe(`cleaned-up`)
+        expect(facade.toArray).toEqual([])
+      } finally {
+        rootSubscription.unsubscribe()
+        facadeSubscription.unsubscribe()
+        await Promise.all([live.cleanup(), nodes.collection.cleanup()])
+      }
+    },
+  )
+
+  fcTest(
     `coherent nested publication advances every revision before callbacks`,
     async () => {
       type NodeRow = {
