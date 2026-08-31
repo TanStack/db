@@ -4,6 +4,7 @@ const staticOracleProperties = [
   `collection-sync.reentrant-drain`,
   `coverage-registry.claim-churn`,
   `coverage-registry.state-machine`,
+  `includes-collection.layout-swap`,
   `includes-collection.optimistic-child-history`,
   `includes-collection.public-key-order`,
   `includes-collection.relationship-history`,

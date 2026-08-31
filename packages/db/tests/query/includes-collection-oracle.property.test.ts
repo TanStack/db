@@ -38,6 +38,30 @@ type ChildRow = {
   value: number
 }
 
+type LayoutSwapScenario = {
+  length: number
+  swapIndex: number
+}
+
+const exhaustiveLayoutSwapScenarios: Array<LayoutSwapScenario> = Array.from(
+  { length: 9 },
+  (_, offset) => offset + 4,
+).flatMap((length) =>
+  Array.from({ length: length - 3 }, (_, offset) => ({
+    length,
+    swapIndex: offset + 1,
+  })),
+)
+
+const layoutSwapScenarioArbitrary: fc.Arbitrary<LayoutSwapScenario> = fc
+  .integer({ min: 4, max: 12 })
+  .chain((length) =>
+    fc.integer({ min: 1, max: length - 3 }).map((swapIndex) => ({
+      length,
+      swapIndex,
+    })),
+  )
+
 type ProjectedChildChange = {
   type: `insert` | `update` | `delete`
   key: number
@@ -130,6 +154,108 @@ function expectedMaterializations<T>(rows: ReadonlyArray<T>) {
     facade: [...rows],
     array: [...rows],
     materialized: [...rows],
+  }
+}
+
+async function expectRootAndFacadeLayoutSwap({
+  length,
+  swapIndex,
+}: LayoutSwapScenario): Promise<void> {
+  type OrderedChild = ChildRow & { position: number }
+  const parents = createControlledCollection(`layout-swap-parents`, [
+    { id: 1, group: 1 },
+  ])
+  const initialRows: Array<OrderedChild> = Array.from(
+    { length },
+    (_, index) => ({
+      id: index + 1,
+      parentGroup: 1,
+      value: index + 1,
+      position: index,
+    }),
+  )
+  const children = createControlledCollection<OrderedChild>(
+    `layout-swap-children`,
+    initialRows,
+  )
+  const root = createLiveQueryCollection((q) =>
+    q
+      .from({ child: children.collection })
+      .orderBy(({ child }) => child.position)
+      .select(({ child }) => ({ id: child.id, value: child.value })),
+  )
+  const nested = createLiveQueryCollection((q) =>
+    q.from({ parent: parents.collection }).select(({ parent }) => ({
+      id: parent.id,
+      children: q
+        .from({ child: children.collection })
+        .where(({ child }) => eq(child.parentGroup, parent.group))
+        .orderBy(({ child }) => child.position)
+        .select(({ child }) => ({ id: child.id, value: child.value })),
+    })),
+  )
+  let rootSubscription: { unsubscribe: () => void } | undefined
+  let facadeSubscription: { unsubscribe: () => void } | undefined
+
+  try {
+    await Promise.all([root.preload(), nested.preload()])
+    const facade = nested.get(1)!.children
+    const rootRevision = root._layoutRevision
+    const facadeRevision = facade._layoutRevision
+    const rootPublicationSizes: Array<number> = []
+    const facadePublicationSizes: Array<number> = []
+    const rootCallbackKeys: Array<Array<number>> = []
+    const facadeCallbackKeys: Array<Array<number>> = []
+    rootSubscription = root.subscribeChanges(
+      (changes) => {
+        rootPublicationSizes.push(changes.length)
+        rootCallbackKeys.push(root.toArray.map(({ id }) => id))
+      },
+      { includeInitialState: false },
+    )
+    facadeSubscription = facade.subscribeChanges(
+      (changes) => {
+        facadePublicationSizes.push(changes.length)
+        facadeCallbackKeys.push(facade.toArray.map(({ id }) => id))
+      },
+      { includeInitialState: false },
+    )
+    const expectedKeys = initialRows.map(({ id }) => id)
+    ;[expectedKeys[swapIndex], expectedKeys[swapIndex + 1]] = [
+      expectedKeys[swapIndex + 1]!,
+      expectedKeys[swapIndex]!,
+    ]
+    const first = initialRows[swapIndex]!
+    const second = initialRows[swapIndex + 1]!
+
+    children.writeBatch([
+      {
+        type: `update`,
+        value: { ...first, position: second.position },
+      },
+      {
+        type: `update`,
+        value: { ...second, position: first.position },
+      },
+    ])
+
+    expect(root.toArray.map(({ id }) => id)).toEqual(expectedKeys)
+    expect(facade.toArray.map(({ id }) => id)).toEqual(expectedKeys)
+    expect(root._layoutRevision).toBe(rootRevision + 1)
+    expect(facade._layoutRevision).toBe(facadeRevision + 1)
+    expect(rootPublicationSizes).toEqual([0])
+    expect(facadePublicationSizes).toEqual([0])
+    expect(rootCallbackKeys).toEqual([expectedKeys])
+    expect(facadeCallbackKeys).toEqual([expectedKeys])
+  } finally {
+    rootSubscription?.unsubscribe()
+    facadeSubscription?.unsubscribe()
+    await Promise.all([
+      root.cleanup(),
+      nested.cleanup(),
+      parents.collection.cleanup(),
+      children.collection.cleanup(),
+    ])
   }
 }
 
@@ -4208,75 +4334,18 @@ describe(`Collection-valued includes oracle`, () => {
     },
   )
 
-  fcTest(`publishes an internal facade swap with unchanged endpoints`, async () => {
-    type OrderedChild = ChildRow & { position: number }
-    const parents = createControlledCollection(`middle-swap-parents`, [
-      { id: 1, group: 1 },
-    ])
-    const children = createControlledCollection<OrderedChild>(
-      `middle-swap-children`,
-      [
-        { id: 10, parentGroup: 1, value: 10, position: 1 },
-        { id: 20, parentGroup: 1, value: 20, position: 2 },
-        { id: 30, parentGroup: 1, value: 30, position: 3 },
-        { id: 40, parentGroup: 1, value: 40, position: 4 },
-        { id: 50, parentGroup: 1, value: 50, position: 5 },
-      ],
-    )
-    const live = createLiveQueryCollection((q) =>
-      q.from({ parent: parents.collection }).select(({ parent }) => ({
-        id: parent.id,
-        children: q
-          .from({ child: children.collection })
-          .where(({ child }) => eq(child.parentGroup, parent.group))
-          .orderBy(({ child }) => child.position)
-          .select(({ child }) => ({ id: child.id, value: child.value })),
-      })),
-    )
-
-    try {
-      await live.preload()
-      const facade = live.get(1)!.children
-      const revisionBeforeSwap = facade._layoutRevision
-      const publicationSizes: Array<number> = []
-      const callbackKeys: Array<Array<number>> = []
-      const subscription = facade.subscribeChanges(
-        (changes) => {
-          publicationSizes.push(changes.length)
-          callbackKeys.push(facade.toArray.map(({ id }) => id))
-        },
-        { includeInitialState: false },
-      )
-
-      try {
-        children.writeBatch([
-          {
-            type: `update`,
-            value: { id: 30, parentGroup: 1, value: 30, position: 4 },
-          },
-          {
-            type: `update`,
-            value: { id: 40, parentGroup: 1, value: 40, position: 3 },
-          },
-        ])
-
-        expect(facade.toArray.map(({ id }) => id)).toEqual([
-          10, 20, 40, 30, 50,
-        ])
-        expect(facade._layoutRevision).toBe(revisionBeforeSwap + 1)
-        expect(publicationSizes).toEqual([0])
-        expect(callbackKeys).toEqual([[10, 20, 40, 30, 50]])
-      } finally {
-        subscription.unsubscribe()
-      }
-    } finally {
-      await Promise.all([
-        live.cleanup(),
-        parents.collection.cleanup(),
-        children.collection.cleanup(),
-      ])
-    }
-  })
+  fcTest.prop(
+    [layoutSwapScenarioArbitrary],
+    {
+      ...oraclePropertyOptions(20, `includes-collection.layout-swap`),
+      examples: exhaustiveLayoutSwapScenarios.map(
+        (scenario) => [scenario] as [LayoutSwapScenario],
+      ),
+    },
+  )(
+    `publishes every internal order-only swap through root and facade producers`,
+    expectRootAndFacadeLayoutSwap,
+  )
 
   fcTest(
     `reconstructs nested conditional includes through guard transitions`,
