@@ -951,37 +951,69 @@ describe(`ordered source work oracle`, () => {
           left: [],
           right: [1],
           expectedNullReads: 1,
+          expectedArrayReads: { lengths: 1, elements: 0 },
         },
         {
           name: `first-element difference`,
           left: [1, 9],
           right: [2, 0],
           expectedNullReads: 2,
+          expectedArrayReads: { lengths: 1, elements: 1 },
         },
         {
           name: `equal prefix then difference`,
           left: [1, 2],
           right: [1, 3],
           expectedNullReads: 3,
+          expectedArrayReads: { lengths: 1, elements: 2 },
         },
         {
           name: `equal common prefix then length`,
           left: [1],
           right: [1, 2],
           expectedNullReads: 2,
+          expectedArrayReads: { lengths: 1, elements: 1 },
         },
         {
           name: `nested recursion`,
           left: [[1, 2]],
           right: [[1, 3]],
           expectedNullReads: 4,
+          expectedArrayReads: { lengths: 2, elements: 3 },
         },
       ].map((scenario) => ({ direction, ...scenario })),
     ),
   )(
     `visits each array comparison once for $name in $direction order`,
-    ({ direction, left, right, expectedNullReads }) => {
+    ({ direction, left, right, expectedNullReads, expectedArrayReads }) => {
       let nullReads = 0
+      const observeArrayReads = (
+        value: Array<unknown>,
+        reads: { lengths: number; elements: number; other: number },
+      ): Array<unknown> => {
+        const nested = value.map((element) =>
+          Array.isArray(element) ? observeArrayReads(element, reads) : element,
+        )
+        return new Proxy(nested, {
+          get(target, property, receiver) {
+            if (property === `length`) {
+              reads.lengths++
+            } else if (
+              typeof property === `string` &&
+              /^(0|[1-9]\d*)$/.test(property)
+            ) {
+              reads.elements++
+            } else {
+              reads.other++
+            }
+            return Reflect.get(target, property, receiver) as unknown
+          },
+        })
+      }
+      const leftReads = { lengths: 0, elements: 0, other: 0 }
+      const rightReads = { lengths: 0, elements: 0, other: 0 }
+      const observedLeft = observeArrayReads(left, leftReads)
+      const observedRight = observeArrayReads(right, rightReads)
       const options = new Proxy(
         {
           direction,
@@ -995,10 +1027,12 @@ describe(`ordered source work oracle`, () => {
         },
       )
 
-      expect(Math.sign(makeComparator(options)(left, right))).toBe(
-        direction === `asc` ? -1 : 1,
-      )
+      expect(
+        Math.sign(makeComparator(options)(observedLeft, observedRight)),
+      ).toBe(direction === `asc` ? -1 : 1)
       expect(nullReads).toBe(expectedNullReads)
+      expect(leftReads).toEqual({ ...expectedArrayReads, other: 0 })
+      expect(rightReads).toEqual({ ...expectedArrayReads, other: 0 })
     },
   )
 

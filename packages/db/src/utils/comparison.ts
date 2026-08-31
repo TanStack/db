@@ -114,14 +114,17 @@ const compareAscending = (
 
   // if a and b are both arrays, compare them element by element
   if (Array.isArray(a) && Array.isArray(b)) {
-    for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    const aLength = a.length
+    const bLength = b.length
+    const commonLength = Math.min(aLength, bLength)
+    for (let i = 0; i < commonLength; i++) {
       const result = compareAscending(a[i], b[i], opts, invertNulls)
       if (result !== 0) {
         return result
       }
     }
     // All elements are equal up to the minimum length
-    return a.length - b.length
+    return aLength - bLength
   }
 
   // If both are dates, compare them
