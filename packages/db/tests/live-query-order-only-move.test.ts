@@ -156,13 +156,14 @@ describe(`order-only move publication`, () => {
       value: { id: `2`, name: `Bob`, age: 99 },
     })
     source.utils.commit()
-    await flush()
 
     const whilePersisting = observer.getSnapshot()
-    expect(
-      (whilePersisting.data as Array<any>).map((row) => row.id),
-    ).toEqual([`1`, `3`, `2`])
-    expect(lq._layoutRevision).toBeGreaterThan(collectionLayoutRevisionBefore)
+    expect((whilePersisting.data as Array<any>).map((row) => row.id)).toEqual([
+      `1`,
+      `3`,
+      `2`,
+    ])
+    expect(lq._layoutRevision).toBe(collectionLayoutRevisionBefore + 1)
     const publishedLayoutRevision = lq._layoutRevision
 
     persist.resolve()
