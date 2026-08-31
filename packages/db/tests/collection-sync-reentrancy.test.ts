@@ -309,6 +309,62 @@ describe(`sync publication reentrancy`, () => {
     },
   )
 
+  it(`lets a publication callback start the next publication cycle`, async () => {
+    const harness = createSyncHarness(`publication-cycle-from-callback`)
+    const { collection } = harness
+    const callbacks: Array<{
+      changes: Array<string>
+      visibleValue: string
+      revision: number
+    }> = []
+    const initialRevision = collection._stateRevision
+    const write = (type: `insert` | `update`, value: string) => {
+      harness.sync.begin({ immediate: true })
+      harness.sync.write({ type, value: { id: 1, value } })
+      harness.sync.commit()
+    }
+    const subscription = collection.subscribeChanges(
+      (changes) => {
+        callbacks.push({
+          changes: changes.map((change) => change.value.value),
+          visibleValue: collection.get(1)!.value,
+          revision: collection._stateRevision,
+        })
+
+        if (changes[0]?.value.value === `first`) {
+          const secondPublication = collection._deferPublication()
+          write(`update`, `second`)
+          secondPublication.prepare()
+          secondPublication.publish()
+        }
+      },
+      { includeInitialState: false },
+    )
+
+    try {
+      const firstPublication = collection._deferPublication()
+      write(`insert`, `first`)
+      firstPublication.prepare()
+      firstPublication.publish()
+
+      expect(callbacks).toEqual([
+        {
+          changes: [`first`],
+          visibleValue: `first`,
+          revision: initialRevision + 1,
+        },
+        {
+          changes: [`second`],
+          visibleValue: `second`,
+          revision: initialRevision + 2,
+        },
+      ])
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   it(`compares layout with the public state before an immediate prefix drain`, async () => {
     const updatePersistence = createDeferred<void>()
     const insertPersistence = createDeferred<void>()
