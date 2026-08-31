@@ -194,6 +194,113 @@ const { multiplier, ...replay } = readOracleRunConfig()
 const generatedRuns = 30 * multiplier
 
 describe(`sync publication reentrancy`, () => {
+  it(`compares layout with the public state before an immediate prefix drain`, async () => {
+    type OrderedRow = Row & { rank: number }
+    type OrderedSync = Parameters<SyncConfig<OrderedRow, number>[`sync`]>[0]
+    const updatePersistence = createDeferred<void>()
+    const insertPersistence = createDeferred<void>()
+    let sync!: OrderedSync
+    const collection = createCollection<OrderedRow, number>({
+      id: `layout-prefix-drain`,
+      getKey: (row) => row.id,
+      compare: (left, right) => left.rank - right.rank,
+      startSync: true,
+      sync: {
+        sync: (ops) => {
+          sync = ops
+          ops.begin({ immediate: true })
+          ops.write({
+            type: `insert`,
+            value: { id: 1, value: `one`, rank: 0 },
+          })
+          ops.write({
+            type: `insert`,
+            value: { id: 2, value: `two`, rank: 1 },
+          })
+          ops.commit()
+          ops.markReady()
+        },
+      },
+      onUpdate: () => updatePersistence.promise,
+      onInsert: () => insertPersistence.promise,
+    })
+    const callbacks: Array<{
+      changes: Array<number>
+      keys: Array<number>
+      values: Array<string>
+    }> = []
+    const subscription = collection.subscribeChanges(
+      (changes) => {
+        callbacks.push({
+          changes: changes.map(({ key }) => key as number),
+          keys: [...collection.keys()],
+          values: collection.toArray.map(({ value }) => value),
+        })
+      },
+      { includeInitialState: false },
+    )
+    const update = collection.update(1, (draft) => {
+      draft.value = `optimistic-one`
+    })
+    let insert: ReturnType<typeof collection.insert> | undefined
+
+    try {
+      sync.begin()
+      sync.write({
+        type: `update`,
+        value: { id: 1, value: `one`, rank: 2 },
+      })
+      sync.collection._markLayoutChange()
+      const firstReceipt = sync.commit()
+      expect(firstReceipt).not.toBe(true)
+
+      insert = collection.insert({
+        id: 3,
+        value: `optimistic-three`,
+        rank: 3,
+      })
+      callbacks.length = 0
+      const revisionBeforeDrain = collection._layoutRevision
+      expect([...collection.keys()]).toEqual([1, 2, 3])
+
+      sync.begin({ immediate: true })
+      sync.write({
+        type: `update`,
+        value: { id: 1, value: `one`, rank: 0 },
+      })
+      sync.collection._markLayoutChange()
+      const secondReceipt = sync.commit()
+
+      expect([...collection.keys()]).toEqual([1, 2, 3])
+      expect(collection.toArray.map(({ value }) => value)).toEqual([
+        `optimistic-one`,
+        `two`,
+        `optimistic-three`,
+      ])
+      expect(callbacks).toEqual([])
+      expect(collection._layoutRevision).toBe(revisionBeforeDrain)
+      await Promise.all(
+        [firstReceipt, secondReceipt]
+          .filter((receipt) => receipt !== true)
+          .map((receipt) => receipt),
+      )
+
+      updatePersistence.resolve()
+      insertPersistence.resolve()
+      await Promise.all([
+        update.isPersisted.promise,
+        insert.isPersisted.promise,
+      ])
+    } finally {
+      updatePersistence.resolve()
+      insertPersistence.resolve()
+      await update.isPersisted.promise.catch(() => undefined)
+      await insert?.isPersisted.promise.catch(() => undefined)
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   it(`preserves sync work opened by a listener until it is committed`, async () => {
     const harness = createSyncHarness(`listener-opened-sync-work`)
     const { collection } = harness

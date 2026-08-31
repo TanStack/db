@@ -955,12 +955,14 @@ the visible sequence. Re-establishing the base applies the inverse rule. A
 legal absent-to-present source transition must keep the optimistic value
 visible while restoring the graph-owned position in the same publication.
 The graph reports a possible layout change before its sync commit. Collection
-state captures the visible key sequence at that point and compares it with the
-final sequence after the sync writes and active optimistic overlay have both
-been applied. The layout revision advances only when those exact sequences
-differ. This final check is shared by root Collections and child facades; an
-adapter-local order token is evidence to check layout, not proof that public
-layout changed.
+state captures the visible key sequence immediately before the whole committed
+causal prefix applies, then compares it with the final sequence after the sync
+writes and active optimistic overlay have both been applied. Queued
+transaction-local snapshots are not public boundaries: an overlay may change
+before a later immediate transaction drains them. The layout revision advances
+only when the exact before/after sequences differ. This final check is shared
+by root Collections and child facades; an adapter-local order token is evidence
+to check layout, not proof that public layout changed.
 Rejected, canceled, and obsolete acquisitions establish no coverage. Sources
 must honor cancellation before publishing request-scoped rows.
 

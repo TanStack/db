@@ -35,8 +35,6 @@ interface PendingSyncedTransaction<
   committed: boolean
   applicationStarted: boolean
   layoutChanged: boolean
-  /** Visible key order before a possible layout change. */
-  layoutSnapshot?: Array<TKey>
   operations: Array<OptimisticChangeMessage<T>>
   truncate?: boolean
   deletedKeys: Set<string | number>
@@ -881,15 +879,11 @@ export class CollectionStateManager<
       hasTruncateSync,
       hasImmediateSync,
       layoutChanged,
-      layoutSnapshots,
     } = this.pendingSyncedTransactions.reduce(
       (acc, t) => {
         if (t.committed) {
           acc.committedSyncedTransactions.push(t)
           acc.layoutChanged ||= t.layoutChanged
-          if (t.layoutSnapshot !== undefined) {
-            acc.layoutSnapshots.push(t.layoutSnapshot)
-          }
           if (t.truncate) {
             acc.hasTruncateSync = true
           }
@@ -911,7 +905,6 @@ export class CollectionStateManager<
         hasTruncateSync: false,
         hasImmediateSync: false,
         layoutChanged: false,
-        layoutSnapshots: [] as Array<Array<TKey>>,
       },
     )
 
@@ -930,6 +923,10 @@ export class CollectionStateManager<
     // non-immediate transactions would be applied later and could overwrite newer state.
     // Processing all committed transactions together preserves causal ordering.
     if (!hasPersistingTransaction || hasTruncateSync || hasImmediateSync) {
+      // Every committed transaction below belongs to one applied causal prefix.
+      // Compare its final layout with the one public state immediately before
+      // application, not with snapshots taken when older work first queued.
+      const visibleKeysBeforeCommit = layoutChanged ? [...this.keys()] : []
       // This queue remains authoritative while user callbacks run. Transactions
       // opened by a callback must not be overwritten by this batch's snapshot.
       this.pendingSyncedTransactions = uncommittedSyncedTransactions
@@ -1468,13 +1465,9 @@ export class CollectionStateManager<
       const visibleKeysAfterCommit = layoutChanged ? [...this.keys()] : []
       const visibleLayoutChanged =
         layoutChanged &&
-        (layoutSnapshots.length === 0 ||
-          layoutSnapshots.some(
-            (before) =>
-              before.length !== visibleKeysAfterCommit.length ||
-              before.some(
-                (key, index) => key !== visibleKeysAfterCommit[index],
-              ),
+        (visibleKeysBeforeCommit.length !== visibleKeysAfterCommit.length ||
+          visibleKeysBeforeCommit.some(
+            (key, index) => key !== visibleKeysAfterCommit[index],
           ))
       let publicationError: { error: unknown } | undefined
       try {
