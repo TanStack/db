@@ -1136,6 +1136,9 @@ read another participating Collection without seeing new rows behind an old
 revision. If a later root or containing-facade application fails before that
 release, rollback restores the installed state and discards both the held
 events and their revision advances. Routing and identity remain inside D2.
+Once release begins, one subscriber callback failure cannot suppress another
+prepared root or facade publication. Release attempts every participant, then
+rethrows the first callback failure unchanged, including `null` or `undefined`.
 
 Every graph-turn origin that can publish rows owns a scheduler publication
 context through the complete coherent release. This includes direct window

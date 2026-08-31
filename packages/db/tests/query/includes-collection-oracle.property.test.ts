@@ -994,6 +994,105 @@ describe(`Collection-valued includes oracle`, () => {
     },
   )
 
+  for (const {
+    throwingParentId,
+    position,
+    failure,
+  } of [
+    { throwingParentId: 1, position: `first`, failure: `error` },
+    { throwingParentId: 2, position: `middle`, failure: `undefined` },
+    { throwingParentId: 3, position: `last`, failure: `null` },
+  ] as const) {
+    fcTest(
+      `a throwing ${position} facade callback does not suppress sibling publications`,
+      async () => {
+        const parents = createControlledCollection(`callback-error-parents`, [
+          { id: 1, group: 1 },
+          { id: 2, group: 2 },
+          { id: 3, group: 3 },
+        ])
+        const children = createControlledCollection(`callback-error-children`, [
+          { id: 10, parentGroup: 1, value: 1 },
+          { id: 20, parentGroup: 2, value: 2 },
+          { id: 30, parentGroup: 3, value: 3 },
+        ])
+        const live = createLiveQueryCollection((q) =>
+          q
+            .from({ parent: parents.collection })
+            .orderBy(({ parent }) => parent.id)
+            .select(({ parent }) => ({
+              id: parent.id,
+              children: q
+                .from({ child: children.collection })
+                .where(({ child }) =>
+                  eq(child.parentGroup, parent.group),
+                ),
+            })),
+        )
+
+        await live.preload()
+        const facades = [1, 2, 3].map((parentId) => ({
+          parentId,
+          collection: live.get(parentId)!.children,
+        }))
+        const callbackParentIds: Array<number> = []
+        const callbackError =
+          failure === `error`
+            ? new Error(`facade ${throwingParentId} callback failed`)
+            : failure === `undefined`
+              ? undefined
+              : null
+        const subscriptions = facades.map(({ parentId, collection }) =>
+          collection.subscribeChanges(
+            () => {
+              callbackParentIds.push(parentId)
+              if (parentId === throwingParentId) throw callbackError
+            },
+            { includeInitialState: false },
+          ),
+        )
+
+        try {
+          let didThrow = false
+          let publicationError: unknown
+          try {
+            children.writeBatch([
+              {
+                type: `update`,
+                value: { id: 10, parentGroup: 1, value: 11 },
+              },
+              {
+                type: `update`,
+                value: { id: 20, parentGroup: 2, value: 12 },
+              },
+              {
+                type: `update`,
+                value: { id: 30, parentGroup: 3, value: 13 },
+              },
+            ])
+          } catch (error) {
+            didThrow = true
+            publicationError = error
+          }
+
+          expect(didThrow).toBe(true)
+          expect(publicationError).toBe(callbackError)
+          expect(callbackParentIds).toEqual([1, 2, 3])
+          expect(
+            facades.map(({ collection }) => collection.toArray[0]!.value),
+          ).toEqual([11, 12, 13])
+        } finally {
+          for (const subscription of subscriptions) subscription.unsubscribe()
+          await Promise.all([
+            live.cleanup(),
+            parents.collection.cleanup(),
+            children.collection.cleanup(),
+          ])
+        }
+      },
+    )
+  }
+
   fcTest(
     `coherent nested publication advances every revision before callbacks`,
     async () => {

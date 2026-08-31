@@ -179,10 +179,22 @@ export class BucketFacadeAdapter {
         if (closed) return
         prepare()
         closed = true
-        for (const publication of publications) publication.publish()
+        let hasPublicationError = false
+        let publicationError: unknown
+        for (const publication of publications) {
+          try {
+            publication.publish()
+          } catch (error) {
+            if (!hasPublicationError) {
+              hasPublicationError = true
+              publicationError = error
+            }
+          }
+        }
         // Drop only the adapter's strong reference. External holders keep an
         // empty, ready facade; a later active interval receives a new one.
         this.retiredEntries.clear()
+        if (hasPublicationError) throw publicationError
       },
       rollback: () => {
         if (closed || prepared) return

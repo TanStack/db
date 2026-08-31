@@ -1116,6 +1116,7 @@ export class CollectionConfigBuilder<
       rootPublication?.prepare()
       facadePublication.prepare()
 
+      let hasPublicationError = false
       let publicationError: unknown
       for (const publish of [
         rootPublication?.publish,
@@ -1125,10 +1126,13 @@ export class CollectionConfigBuilder<
         try {
           publish()
         } catch (error) {
-          publicationError ??= error
+          if (!hasPublicationError) {
+            hasPublicationError = true
+            publicationError = error
+          }
         }
       }
-      if (publicationError !== undefined) throw publicationError
+      if (hasPublicationError) throw publicationError
     }
 
     graph.finalize()
