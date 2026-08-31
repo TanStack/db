@@ -128,7 +128,10 @@ export class BucketFacadeAdapter {
             this.prepareChange(entry, change)
           }
           deferPublication(entry)
-          sync.begin()
+          // The graph is already quiescent. Install this complete child
+          // publication beneath any pending optimistic facade overlay instead
+          // of parking source progress behind that mutation.
+          sync.begin({ immediate: true })
           for (const change of changes.values()) {
             this.applyChange(entry, sync, change, compilation.hasOrderBy)
           }
@@ -337,7 +340,9 @@ export class BucketFacadeAdapter {
     const keys = [...entry.collection.keys()]
     if (sync && keys.length > 0) {
       deferPublication(entry)
-      sync.begin()
+      // Route retirement is part of the same quiescent graph publication as
+      // the root change that removed its final consumer.
+      sync.begin({ immediate: true })
       for (const key of keys) sync.write({ type: `delete`, key })
       sync.commit()
     }

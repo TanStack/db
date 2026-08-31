@@ -928,10 +928,11 @@ priority merely to make a subset load settle.
 Existing immediate bootstrap and persistence-hydration paths, plus truncate,
 retain their queue-bypass contract; if one applies a parked subset transaction
 as part of that prefix, the subset receipt settles only after the writes are
-visible. A quiescent live-query graph output uses the same queue bypass so a
-direct source change can update a derived Collection while an optimistic
-mutation on that Collection persists. The normal optimistic overlay still wins
-for conflicting keys, and the graph output remains one coherent publication.
+visible. A quiescent live-query graph output uses the same queue bypass for both
+the root Collection and Collection-valued child facades. A direct source change
+therefore updates the whole derived publication while an optimistic mutation on
+either Collection persists. The normal optimistic overlay still wins for
+conflicting keys, and the graph output remains one coherent publication.
 Rejected, canceled, and obsolete acquisitions establish no coverage. Sources
 must honor cancellation before publishing request-scoped rows.
 
@@ -1077,10 +1078,10 @@ For each scheduled graph turn:
 1. enqueue all currently committed input deltas into their D2 inputs;
 2. run D2 until it has no pending synchronous work;
 3. consolidate the already canonical final-output deltas;
-4. install child-facade state through normal Collection transactions while
-   deferring their subscriber delivery;
-5. apply direct root insert, update, and delete writes through one normal
-   Collection transaction;
+4. install child-facade state through queue-bypassing Collection transactions
+   while deferring their subscriber delivery;
+5. apply direct root insert, update, and delete writes through one
+   queue-bypassing Collection transaction;
 6. release the deferred child-facade events after every synchronous read can
    see the complete root and facade state;
 7. allow dependent live-query graphs to run through the existing
