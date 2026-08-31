@@ -952,6 +952,7 @@ describe(`ordered source work oracle`, () => {
           right: [1],
           expectedNullReads: 1,
           expectedArrayReads: { lengths: 1, elements: 0 },
+          ascendingSign: -1,
         },
         {
           name: `first-element difference`,
@@ -959,6 +960,7 @@ describe(`ordered source work oracle`, () => {
           right: [2, 0],
           expectedNullReads: 2,
           expectedArrayReads: { lengths: 1, elements: 1 },
+          ascendingSign: -1,
         },
         {
           name: `equal prefix then difference`,
@@ -966,6 +968,7 @@ describe(`ordered source work oracle`, () => {
           right: [1, 3],
           expectedNullReads: 3,
           expectedArrayReads: { lengths: 1, elements: 2 },
+          ascendingSign: -1,
         },
         {
           name: `equal common prefix then length`,
@@ -973,6 +976,7 @@ describe(`ordered source work oracle`, () => {
           right: [1, 2],
           expectedNullReads: 2,
           expectedArrayReads: { lengths: 1, elements: 1 },
+          ascendingSign: -1,
         },
         {
           name: `nested recursion`,
@@ -980,12 +984,52 @@ describe(`ordered source work oracle`, () => {
           right: [[1, 3]],
           expectedNullReads: 4,
           expectedArrayReads: { lengths: 2, elements: 3 },
+          ascendingSign: -1,
+        },
+        {
+          name: `equal empty arrays`,
+          left: [],
+          right: [],
+          expectedNullReads: 1,
+          expectedArrayReads: { lengths: 1, elements: 0 },
+          ascendingSign: 0,
+        },
+        {
+          name: `equal primitive arrays`,
+          left: [1, 2],
+          right: [1, 2],
+          expectedNullReads: 3,
+          expectedArrayReads: { lengths: 1, elements: 2 },
+          ascendingSign: 0,
+        },
+        {
+          name: `equal nested arrays`,
+          left: [[1, 2]],
+          right: [[1, 2]],
+          expectedNullReads: 4,
+          expectedArrayReads: { lengths: 2, elements: 3 },
+          ascendingSign: 0,
+        },
+        {
+          name: `equal nested prefix then outer difference`,
+          left: [[1], 2],
+          right: [[1], 3],
+          expectedNullReads: 4,
+          expectedArrayReads: { lengths: 2, elements: 3 },
+          ascendingSign: -1,
         },
       ].map((scenario) => ({ direction, ...scenario })),
     ),
   )(
     `reads each visited array input once for $name in $direction order`,
-    ({ direction, left, right, expectedNullReads, expectedArrayReads }) => {
+    ({
+      direction,
+      left,
+      right,
+      expectedNullReads,
+      expectedArrayReads,
+      ascendingSign,
+    }) => {
       let nullReads = 0
       const observeArrayReads = (
         value: Array<unknown>,
@@ -1041,7 +1085,13 @@ describe(`ordered source work oracle`, () => {
 
       expect(
         Math.sign(makeComparator(options)(observedLeft, observedRight)),
-      ).toBe(direction === `asc` ? -1 : 1)
+      ).toBe(
+        ascendingSign === 0
+          ? 0
+          : direction === `asc`
+            ? ascendingSign
+            : -ascendingSign,
+      )
       expect(nullReads).toBe(expectedNullReads)
       expect(leftReads).toEqual({ ...expectedArrayReads, structural: 0 })
       expect(rightReads).toEqual({ ...expectedArrayReads, structural: 0 })
