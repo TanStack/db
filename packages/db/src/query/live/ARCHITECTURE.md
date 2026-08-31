@@ -928,11 +928,14 @@ priority merely to make a subset load settle.
 Existing immediate bootstrap and persistence-hydration paths, plus truncate,
 retain their queue-bypass contract; if one applies a parked subset transaction
 as part of that prefix, the subset receipt settles only after the writes are
-visible. A quiescent live-query graph output uses the same queue bypass for both
-the root Collection and Collection-valued child facades. A direct source change
-therefore updates the whole derived publication while an optimistic mutation on
-either Collection persists. The normal optimistic overlay still wins for
-conflicting keys, and the graph output remains one coherent publication.
+visible. A quiescent live-query graph output uses the same queue bypass for the
+root Collection and regular Collection-valued child-facade changes. A facade
+retirement is committed earlier in the same FIFO causal prefix; the immediate
+root or containing-facade transaction that removed its final route drains that
+retirement too. A direct source change therefore updates the whole derived
+publication while an optimistic mutation on either Collection persists. The
+normal optimistic overlay still wins for conflicting keys, and the graph
+output remains one coherent publication.
 Rejected, canceled, and obsolete acquisitions establish no coverage. Sources
 must honor cancellation before publishing request-scoped rows.
 
@@ -1078,8 +1081,10 @@ For each scheduled graph turn:
 1. enqueue all currently committed input deltas into their D2 inputs;
 2. run D2 until it has no pending synchronous work;
 3. consolidate the already canonical final-output deltas;
-4. install child-facade state through queue-bypassing Collection transactions
-   while deferring their subscriber delivery;
+4. install regular child-facade changes through queue-bypassing Collection
+   transactions while deferring their subscriber delivery; put route
+   retirement before the queue-bypassing ancestor that drains its FIFO causal
+   prefix;
 5. apply direct root insert, update, and delete writes through one
    queue-bypassing Collection transaction;
 6. release the deferred child-facade events after every synchronous read can

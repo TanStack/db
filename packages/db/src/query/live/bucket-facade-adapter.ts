@@ -340,9 +340,10 @@ export class BucketFacadeAdapter {
     const keys = [...entry.collection.keys()]
     if (sync && keys.length > 0) {
       deferPublication(entry)
-      // Route retirement is part of the same quiescent graph publication as
-      // the root change that removed its final consumer.
-      sync.begin({ immediate: true })
+      // Route retirement precedes the root or containing-facade change that
+      // removed its final consumer. That later immediate transaction drains
+      // this earlier transaction as part of the same FIFO causal prefix.
+      sync.begin()
       for (const key of keys) sync.write({ type: `delete`, key })
       sync.commit()
     }
@@ -419,10 +420,19 @@ export class BucketFacadeAdapter {
     const key = change.value.publicKey as string | number
     const previousOrder = entry.currentOrder.get(key)
     const nextOrder = change.value.order
-    const orderChanged = sync.collection.has(key) && previousOrder !== nextOrder
+    // Graph deltas update the synced base. The public Collection view may be
+    // hiding that row beneath a pending optimistic delete, so it cannot tell
+    // us whether this delta is an insert, update, or delete of the base row.
+    const hasSyncedRow = entry.collection._state.syncedData.has(key)
+    const previousSyncedRow = entry.collection._state.syncedData.get(key)
+    const orderChanged = hasSyncedRow && previousOrder !== nextOrder
+    const orderChangeIsVisible =
+      orderChanged &&
+      !entry.collection._state.optimisticDeletes.has(key) &&
+      !entry.collection._state.optimisticUpserts.has(key)
     const resolvedRow = this.resolve(change.value.value)
     const row =
-      orderChanged && sync.collection.get(key) === resolvedRow
+      orderChanged && previousSyncedRow === resolvedRow
         ? { ...resolvedRow }
         : resolvedRow
     entry.keys.set(row, key)
@@ -432,10 +442,10 @@ export class BucketFacadeAdapter {
 
     if (change.inserts > change.deletes) {
       sync.write({
-        type: sync.collection.has(key) ? `update` : `insert`,
+        type: hasSyncedRow ? `update` : `insert`,
         value: row,
       })
-    } else if (change.inserts === change.deletes && sync.collection.has(key)) {
+    } else if (change.inserts === change.deletes && hasSyncedRow) {
       sync.write({ type: `update`, value: row })
     } else if (change.deletes > 0) {
       sync.write({ type: `delete`, key })
@@ -444,7 +454,9 @@ export class BucketFacadeAdapter {
     }
 
     entry.currentOrder.set(key, nextOrder)
-    if (hasOrderBy && orderChanged) sync.collection._markLayoutChange()
+    if (hasOrderBy && orderChangeIsVisible) {
+      sync.collection._markLayoutChange()
+    }
   }
 
   /** Resolve and validate every public key before opening a sync transaction. */

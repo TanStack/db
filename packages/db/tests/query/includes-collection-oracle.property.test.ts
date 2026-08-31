@@ -357,10 +357,14 @@ type PendingFacadeOptimisticOperation = Exclude<
   PendingFacadeOperation,
   `insert`
 >
+type PendingFacadeKeyRelation = `disjoint-key` | `same-key`
+type PendingFacadeShape = `unordered` | `ordered`
 
 const pendingFacadeOptimisticOperations = [`update`, `delete`] as const
 const pendingFacadeSourceOperations = [`insert`, `update`, `delete`] as const
 const pendingFacadeSettlements = [`resolve`, `reject`] as const
+const pendingFacadeKeyRelations = [`disjoint-key`, `same-key`] as const
+const pendingFacadeShapes = [`unordered`, `ordered`] as const
 const pendingFacadeInitialRows: ReadonlyArray<ChildRow> = [
   { id: 10, parentGroup: 1, value: 10 },
   { id: 20, parentGroup: 1, value: 20 },
@@ -375,9 +379,19 @@ function pendingOptimisticFacadeRow(
   return { id: 10, parentGroup: 1, value: 10 }
 }
 
-function pendingSourceFacadeRow(operation: PendingFacadeOperation): ChildRow {
+function pendingSourceFacadeRow(
+  operation: PendingFacadeOperation,
+  keyRelation: PendingFacadeKeyRelation,
+): ChildRow {
   if (operation === `insert`) {
     return { id: 40, parentGroup: 1, value: 40 }
+  }
+  if (keyRelation === `same-key`) {
+    return {
+      id: 10,
+      parentGroup: 1,
+      value: operation === `update` ? 21 : 10,
+    }
   }
   if (operation === `update`) {
     return { id: 20, parentGroup: 1, value: 21 }
@@ -396,28 +410,38 @@ function applyPendingFacadeOperation(
 
 function expectedPendingFacadeRows(
   rows: ReadonlyMap<number, ChildRow>,
+  shape: PendingFacadeShape = `unordered`,
 ): Array<ChildRow> {
   return [...rows.values()]
     .map((row) => ({ ...row }))
-    .sort((left, right) => left.id - right.id)
+    .sort((left, right) =>
+      shape === `ordered`
+        ? left.value - right.value || left.id - right.id
+        : left.id - right.id,
+    )
 }
 
 function expectedPendingFacadeChange(
   before: ReadonlyMap<number, ChildRow>,
   after: ReadonlyMap<number, ChildRow>,
   key: number,
-): ProjectedChildChange {
+): ProjectedChildChange | undefined {
   const previousValue = before.get(key)
   const value = after.get(key)
+  if (
+    previousValue?.id === value?.id &&
+    previousValue?.parentGroup === value?.parentGroup &&
+    previousValue?.value === value?.value
+  ) {
+    return undefined
+  }
   if (!previousValue && value) {
     return { type: `insert`, key, value: { ...value } }
   }
   if (previousValue && !value) {
     return { type: `delete`, key, value: { ...previousValue } }
   }
-  if (!previousValue || !value) {
-    throw new Error(`Expected a visible facade change for key ${key}`)
-  }
+  if (!previousValue || !value) return undefined
   return {
     type: `update`,
     key,
@@ -869,299 +893,759 @@ describe(`Collection-valued includes oracle`, () => {
   for (const settlement of pendingFacadeSettlements) {
     for (const optimisticOperation of pendingFacadeOptimisticOperations) {
       for (const sourceOperation of pendingFacadeSourceOperations) {
-        fcTest(
-          `publishes a source ${sourceOperation} while a separate facade ${optimisticOperation} ${settlement}s`,
-          async () => {
-            const parents = createControlledCollection(
-              `pending-facade-parents`,
-              [{ id: 1, group: 1 }],
-            )
-            const children = createControlledCollection(
-              `pending-facade-children`,
-              pendingFacadeInitialRows,
-            )
-            const live = createLiveQueryCollection((q) =>
-              q.from({ parent: parents.collection }).select(({ parent }) => ({
-                id: parent.id,
-                children: q
-                  .from({ child: children.collection })
-                  .where(({ child }) => eq(child.parentGroup, parent.group)),
-              })),
-            )
-            const persistence = createDeferred<void>()
+        for (const keyRelation of pendingFacadeKeyRelations) {
+          if (sourceOperation === `insert` && keyRelation === `same-key`) {
+            continue
+          }
+          for (const shape of pendingFacadeShapes) {
+            fcTest(
+              `publishes an ${shape} ${keyRelation} source ${sourceOperation} while a facade ${optimisticOperation} ${settlement}s`,
+              async () => {
+                const parents = createControlledCollection(
+                  `pending-facade-parents`,
+                  [{ id: 1, group: 1 }],
+                )
+                const children = createControlledCollection(
+                  `pending-facade-children`,
+                  pendingFacadeInitialRows,
+                )
+                const live = createLiveQueryCollection((q) =>
+                  q
+                    .from({ parent: parents.collection })
+                    .select(({ parent }) => {
+                      const childRows = q
+                        .from({ child: children.collection })
+                        .where(({ child }) =>
+                          eq(child.parentGroup, parent.group),
+                        )
+                      return {
+                        id: parent.id,
+                        children:
+                          shape === `ordered`
+                            ? childRows.orderBy(({ child }) => child.value)
+                            : childRows,
+                      }
+                    }),
+                )
+                const persistence = createDeferred<void>()
 
-            await live.preload()
-            const facade = live.get(1)!.children
-            const rootPublications: Array<unknown> = []
-            const childPublications: Array<Array<ProjectedChildChange>> = []
-            const rootSubscription = live.subscribeChanges(
-              (batch) => rootPublications.push(batch),
-              { includeInitialState: false },
-            )
-            const childSubscription = facade.subscribeChanges(
-              (batch) => childPublications.push(batch.map(projectChildChange)),
-              { includeInitialState: false },
-            )
-            const optimisticRow =
-              pendingOptimisticFacadeRow(optimisticOperation)
-            const sourceRow = pendingSourceFacadeRow(sourceOperation)
-            const mutate = createOptimisticAction<void>({
-              onMutate: () => {
-                if (optimisticOperation === `update`) {
-                  facade.update(optimisticRow.id, (draft) => {
-                    draft.value = optimisticRow.value
-                  })
-                } else {
-                  facade.delete(optimisticRow.id)
+                await live.preload()
+                const facade = live.get(1)!.children
+                const childRows = () =>
+                  expectedPendingFacadeRows(
+                    new Map(
+                      facade.toArray.map(({ id, parentGroup, value }) => [
+                        id,
+                        { id, parentGroup, value },
+                      ]),
+                    ),
+                    shape,
+                  )
+                const rootRows = () =>
+                  live.toArray.map(
+                    ({ id: parentId, children: rootFacade }) => ({
+                      id: parentId,
+                      children: expectedPendingFacadeRows(
+                        new Map(
+                          rootFacade.toArray.map(
+                            ({ id: childId, parentGroup, value }) => [
+                              childId,
+                              { id: childId, parentGroup, value },
+                            ],
+                          ),
+                        ),
+                        shape,
+                      ),
+                    }),
+                  )
+                const rootPublications: Array<unknown> = []
+                const childPublications: Array<Array<ProjectedChildChange>> = []
+                const childCallbackSnapshots: Array<{
+                  facade: Array<ChildRow>
+                  root: ReturnType<typeof rootRows>
+                }> = []
+                const rootSubscription = live.subscribeChanges(
+                  (batch) => rootPublications.push(batch),
+                  { includeInitialState: false },
+                )
+                const childSubscription = facade.subscribeChanges(
+                  (batch) => {
+                    childPublications.push(batch.map(projectChildChange))
+                    childCallbackSnapshots.push({
+                      facade: childRows(),
+                      root: rootRows(),
+                    })
+                  },
+                  { includeInitialState: false },
+                )
+                const optimisticRow =
+                  pendingOptimisticFacadeRow(optimisticOperation)
+                const sourceRow = pendingSourceFacadeRow(
+                  sourceOperation,
+                  keyRelation,
+                )
+                const mutate = createOptimisticAction<void>({
+                  onMutate: () => {
+                    if (optimisticOperation === `update`) {
+                      facade.update(optimisticRow.id, (draft) => {
+                        draft.value = optimisticRow.value
+                      })
+                    } else {
+                      facade.delete(optimisticRow.id)
+                    }
+                  },
+                  mutationFn: () => persistence.promise,
+                })
+                const transaction = mutate()
+                const initialRows = new Map(
+                  pendingFacadeInitialRows.map(
+                    (row) => [row.id, { ...row }] as const,
+                  ),
+                )
+                const afterOptimistic = new Map(initialRows)
+                applyPendingFacadeOperation(
+                  afterOptimistic,
+                  optimisticOperation,
+                  optimisticRow,
+                )
+                const afterSource = new Map(initialRows)
+                applyPendingFacadeOperation(
+                  afterSource,
+                  sourceOperation,
+                  sourceRow,
+                )
+                const whilePending = new Map(afterSource)
+                applyPendingFacadeOperation(
+                  whilePending,
+                  optimisticOperation,
+                  optimisticRow,
+                )
+                const expectedOptimisticChange = expectedPendingFacadeChange(
+                  initialRows,
+                  afterOptimistic,
+                  optimisticRow.id,
+                )
+                const expectedSourceChange = expectedPendingFacadeChange(
+                  afterOptimistic,
+                  whilePending,
+                  sourceRow.id,
+                )
+                const expectedSettlementChange = expectedPendingFacadeChange(
+                  whilePending,
+                  afterSource,
+                  optimisticRow.id,
+                )
+                const optimisticRows = expectedPendingFacadeRows(
+                  afterOptimistic,
+                  shape,
+                )
+                const pendingRows = expectedPendingFacadeRows(
+                  whilePending,
+                  shape,
+                )
+                const settledRows = expectedPendingFacadeRows(
+                  afterSource,
+                  shape,
+                )
+                const expectedSourcePublications = [
+                  [expectedOptimisticChange],
+                  ...(expectedSourceChange ? [[expectedSourceChange]] : []),
+                ]
+                const expectedSourceSnapshots = [
+                  {
+                    facade: optimisticRows,
+                    root: [{ id: 1, children: optimisticRows }],
+                  },
+                  ...(expectedSourceChange
+                    ? [
+                        {
+                          facade: pendingRows,
+                          root: [{ id: 1, children: pendingRows }],
+                        },
+                      ]
+                    : []),
+                ]
+                const expectedSettledPublications = [
+                  ...expectedSourcePublications,
+                  ...(expectedSettlementChange
+                    ? [[expectedSettlementChange]]
+                    : []),
+                ]
+                const expectedSettledSnapshots = [
+                  ...expectedSourceSnapshots,
+                  ...(expectedSettlementChange
+                    ? [
+                        {
+                          facade: settledRows,
+                          root: [{ id: 1, children: settledRows }],
+                        },
+                      ]
+                    : []),
+                ]
+
+                try {
+                  expect(transaction.state).toBe(`persisting`)
+                  expect(childRows()).toEqual(optimisticRows)
+                  expect(rootPublications).toEqual([])
+                  expect(childPublications).toEqual([
+                    [expectedOptimisticChange],
+                  ])
+                  expect(childCallbackSnapshots).toEqual(
+                    expectedSourceSnapshots.slice(0, 1),
+                  )
+
+                  children.write(sourceOperation, sourceRow)
+
+                  expect(live.get(1)!.children).toBe(facade)
+                  expect(childRows()).toEqual(pendingRows)
+                  expect(rootPublications).toEqual([])
+                  expect(childCallbackSnapshots).toEqual(
+                    expectedSourceSnapshots,
+                  )
+                  expect(childPublications).toEqual(expectedSourcePublications)
+
+                  const persisted = transaction.isPersisted.promise.catch(
+                    () => undefined,
+                  )
+                  if (settlement === `resolve`) persistence.resolve()
+                  else persistence.reject(new Error(`facade mutation rejected`))
+                  await persisted
+                  await flushPromises()
+
+                  expect(childRows()).toEqual(settledRows)
+                  expect(rootPublications).toEqual([])
+                  expect(childPublications).toEqual(expectedSettledPublications)
+                  expect(childCallbackSnapshots).toEqual(
+                    expectedSettledSnapshots,
+                  )
+                } finally {
+                  persistence.resolve()
+                  await transaction.isPersisted.promise.catch(() => undefined)
+                  rootSubscription.unsubscribe()
+                  childSubscription.unsubscribe()
+                  await Promise.all([
+                    live.cleanup(),
+                    parents.collection.cleanup(),
+                    children.collection.cleanup(),
+                  ])
                 }
               },
-              mutationFn: () => persistence.promise,
-            })
-            const transaction = mutate()
-            const initialRows = new Map(
-              pendingFacadeInitialRows.map(
-                (row) => [row.id, { ...row }] as const,
-              ),
             )
-            const afterOptimistic = new Map(initialRows)
-            applyPendingFacadeOperation(
-              afterOptimistic,
-              optimisticOperation,
-              optimisticRow,
-            )
-            const afterSource = new Map(initialRows)
-            applyPendingFacadeOperation(afterSource, sourceOperation, sourceRow)
-            const whilePending = new Map(afterSource)
-            applyPendingFacadeOperation(
-              whilePending,
-              optimisticOperation,
-              optimisticRow,
-            )
-            const expectedOptimisticChange = expectedPendingFacadeChange(
-              initialRows,
-              afterOptimistic,
-              optimisticRow.id,
-            )
-            const expectedSourceChange = expectedPendingFacadeChange(
-              afterOptimistic,
-              whilePending,
-              sourceRow.id,
-            )
-            const expectedSettlementChange = expectedPendingFacadeChange(
-              whilePending,
-              afterSource,
-              optimisticRow.id,
-            )
-            const childRows = () =>
-              expectedPendingFacadeRows(
-                new Map(
-                  facade.toArray.map(({ id, parentGroup, value }) => [
-                    id,
-                    { id, parentGroup, value },
-                  ]),
-                ),
-              )
-
-            try {
-              expect(transaction.state).toBe(`persisting`)
-              expect(childRows()).toEqual(
-                expectedPendingFacadeRows(afterOptimistic),
-              )
-              expect(rootPublications).toEqual([])
-              expect(childPublications).toEqual([[expectedOptimisticChange]])
-
-              children.write(sourceOperation, sourceRow)
-
-              expect(live.get(1)!.children).toBe(facade)
-              expect(childRows()).toEqual(
-                expectedPendingFacadeRows(whilePending),
-              )
-              expect(rootPublications).toEqual([])
-              expect(childPublications).toEqual([
-                [expectedOptimisticChange],
-                [expectedSourceChange],
-              ])
-
-              const persisted = transaction.isPersisted.promise.catch(
-                () => undefined,
-              )
-              if (settlement === `resolve`) persistence.resolve()
-              else persistence.reject(new Error(`facade mutation rejected`))
-              await persisted
-              await flushPromises()
-
-              expect(childRows()).toEqual(
-                expectedPendingFacadeRows(afterSource),
-              )
-              expect(rootPublications).toEqual([])
-              expect(childPublications).toEqual([
-                [expectedOptimisticChange],
-                [expectedSourceChange],
-                [expectedSettlementChange],
-              ])
-            } finally {
-              persistence.resolve()
-              await transaction.isPersisted.promise.catch(() => undefined)
-              rootSubscription.unsubscribe()
-              childSubscription.unsubscribe()
-              await Promise.all([
-                live.cleanup(),
-                parents.collection.cleanup(),
-                children.collection.cleanup(),
-              ])
-            }
-          },
-        )
+          }
+        }
       }
     }
   }
 
   for (const settlement of pendingFacadeSettlements) {
+    for (const optimisticOperation of pendingFacadeOptimisticOperations) {
+      fcTest(
+        `retires unrelated facade rows while a facade ${optimisticOperation} ${settlement}s`,
+        async () => {
+          const parents = createControlledCollection(
+            `retiring-facade-parents`,
+            [{ id: 1, group: 1 }],
+          )
+          const children = createControlledCollection(
+            `retiring-facade-children`,
+            pendingFacadeInitialRows,
+          )
+          const live = createLiveQueryCollection((q) =>
+            q.from({ parent: parents.collection }).select(({ parent }) => ({
+              id: parent.id,
+              children: q
+                .from({ child: children.collection })
+                .where(({ child }) => eq(child.parentGroup, parent.group)),
+            })),
+          )
+          const persistence = createDeferred<void>()
+
+          await live.preload()
+          const facade = live.get(1)!.children
+          const facadeRows = () =>
+            facade.toArray
+              .map(({ id, parentGroup, value }) => ({ id, parentGroup, value }))
+              .sort((left, right) => left.id - right.id)
+          const rootPublications: Array<
+            Array<{ type: `insert` | `update` | `delete`; key: number }>
+          > = []
+          const rootCallbackFacades: Array<Array<ChildRow>> = []
+          const childPublications: Array<Array<ProjectedChildChange>> = []
+          const childCallbackFacades: Array<Array<ChildRow>> = []
+          const publicationTimeline: Array<`root` | `facade`> = []
+          const rootSubscription = live.subscribeChanges(
+            (batch) => {
+              publicationTimeline.push(`root`)
+              rootPublications.push(
+                batch.map(({ type, key }) => ({ type, key: Number(key) })),
+              )
+              rootCallbackFacades.push(facadeRows())
+            },
+            { includeInitialState: false },
+          )
+          const childSubscription = facade.subscribeChanges(
+            (batch) => {
+              publicationTimeline.push(`facade`)
+              childPublications.push(batch.map(projectChildChange))
+              childCallbackFacades.push(facadeRows())
+            },
+            { includeInitialState: false },
+          )
+          const mutate = createOptimisticAction<void>({
+            onMutate: () => {
+              if (optimisticOperation === `update`) {
+                facade.update(10, (draft) => {
+                  draft.value = 11
+                })
+              } else {
+                facade.delete(10)
+              }
+            },
+            mutationFn: () => persistence.promise,
+          })
+          const transaction = mutate()
+          const initialRows = new Map(
+            pendingFacadeInitialRows.map(
+              (row) => [row.id, { ...row }] as const,
+            ),
+          )
+          const optimisticRow = pendingOptimisticFacadeRow(optimisticOperation)
+          const afterOptimistic = new Map(initialRows)
+          applyPendingFacadeOperation(
+            afterOptimistic,
+            optimisticOperation,
+            optimisticRow,
+          )
+          const emptyBase = new Map<number, ChildRow>()
+          const whilePending = new Map(emptyBase)
+          applyPendingFacadeOperation(
+            whilePending,
+            optimisticOperation,
+            optimisticRow,
+          )
+          const optimisticRows = expectedPendingFacadeRows(afterOptimistic)
+          const pendingRows = expectedPendingFacadeRows(whilePending)
+          const expectedOptimisticChange = expectedPendingFacadeChange(
+            initialRows,
+            afterOptimistic,
+            optimisticRow.id,
+          )!
+          const expectedRetirementChange = expectedPendingFacadeChange(
+            afterOptimistic,
+            whilePending,
+            20,
+          )!
+          const expectedSettlementChange = expectedPendingFacadeChange(
+            whilePending,
+            emptyBase,
+            optimisticRow.id,
+          )
+
+          try {
+            expect(facadeRows()).toEqual(optimisticRows)
+            expect(childPublications).toEqual([[expectedOptimisticChange]])
+            expect(childCallbackFacades).toEqual([optimisticRows])
+            expect(publicationTimeline).toEqual([`facade`])
+            publicationTimeline.length = 0
+
+            parents.write(`delete`, { id: 1, group: 1 })
+
+            expect(live.has(1)).toBe(false)
+            expect(facadeRows()).toEqual(pendingRows)
+            expect(rootPublications).toEqual([[{ type: `delete`, key: 1 }]])
+            expect(rootCallbackFacades).toEqual([pendingRows])
+            expect(childPublications).toEqual([
+              [expectedOptimisticChange],
+              [expectedRetirementChange],
+            ])
+            expect(childCallbackFacades).toEqual([optimisticRows, pendingRows])
+            expect(publicationTimeline).toEqual([`root`, `facade`])
+
+            const persisted = transaction.isPersisted.promise.catch(
+              () => undefined,
+            )
+            if (settlement === `resolve`) persistence.resolve()
+            else persistence.reject(new Error(`facade mutation rejected`))
+            await persisted
+            await flushPromises()
+
+            expect(facadeRows()).toEqual([])
+            expect(rootPublications).toEqual([[{ type: `delete`, key: 1 }]])
+            expect(childPublications).toEqual([
+              [expectedOptimisticChange],
+              [expectedRetirementChange],
+              ...(expectedSettlementChange ? [[expectedSettlementChange]] : []),
+            ])
+            expect(childCallbackFacades.at(-1)).toEqual([])
+          } finally {
+            persistence.resolve()
+            await transaction.isPersisted.promise.catch(() => undefined)
+            rootSubscription.unsubscribe()
+            childSubscription.unsubscribe()
+            await Promise.all([
+              live.cleanup(),
+              parents.collection.cleanup(),
+              children.collection.cleanup(),
+            ])
+          }
+        },
+      )
+    }
+  }
+
+  for (const settlement of pendingFacadeSettlements) {
     fcTest(
-      `retires unrelated facade rows while a facade update ${settlement}s`,
+      `publishes a nested facade source update while a same-key delete ${settlement}s`,
       async () => {
-        const parents = createControlledCollection(`retiring-facade-parents`, [
+        const parents = createControlledCollection(`nested-facade-parents`, [
           { id: 1, group: 1 },
         ])
-        const children = createControlledCollection(
-          `retiring-facade-children`,
-          pendingFacadeInitialRows,
+        const children = createControlledCollection(`nested-facade-children`, [
+          { id: 100, parentGroup: 1, group: 7 },
+        ])
+        const grandchildren = createControlledCollection(
+          `nested-facade-grandchildren`,
+          [
+            { id: 10, parentGroup: 7, value: 10 },
+            { id: 20, parentGroup: 7, value: 20 },
+          ],
         )
         const live = createLiveQueryCollection((q) =>
           q.from({ parent: parents.collection }).select(({ parent }) => ({
             id: parent.id,
             children: q
               .from({ child: children.collection })
-              .where(({ child }) => eq(child.parentGroup, parent.group)),
+              .where(({ child }) => eq(child.parentGroup, parent.group))
+              .select(({ child }) => ({
+                id: child.id,
+                group: child.group,
+                grandchildren: q
+                  .from({ grandchild: grandchildren.collection })
+                  .where(({ grandchild }) =>
+                    eq(grandchild.parentGroup, child.group),
+                  ),
+              })),
           })),
         )
         const persistence = createDeferred<void>()
 
         await live.preload()
-        const facade = live.get(1)!.children
-        const facadeRows = () =>
-          facade.toArray
+        const childFacade = live.get(1)!.children
+        const grandchildFacade = childFacade.get(100)!.grandchildren
+        const grandchildRows = () =>
+          grandchildFacade.toArray
             .map(({ id, parentGroup, value }) => ({ id, parentGroup, value }))
             .sort((left, right) => left.id - right.id)
-        const rootPublications: Array<
-          Array<{ type: `insert` | `update` | `delete`; key: number }>
-        > = []
-        const rootCallbackFacades: Array<Array<ChildRow>> = []
-        const childPublications: Array<Array<ProjectedChildChange>> = []
-        const childCallbackFacades: Array<Array<ChildRow>> = []
+        const rootPublications: Array<unknown> = []
+        const childPublications: Array<unknown> = []
+        const grandchildPublications: Array<Array<ProjectedChildChange>> = []
+        const callbackRows: Array<Array<ChildRow>> = []
         const rootSubscription = live.subscribeChanges(
-          (batch) => {
-            rootPublications.push(
-              batch.map(({ type, key }) => ({ type, key: Number(key) })),
-            )
-            rootCallbackFacades.push(facadeRows())
-          },
+          (batch) => rootPublications.push(batch),
           { includeInitialState: false },
         )
-        const childSubscription = facade.subscribeChanges(
+        const childSubscription = childFacade.subscribeChanges(
+          (batch) => childPublications.push(batch),
+          { includeInitialState: false },
+        )
+        const grandchildSubscription = grandchildFacade.subscribeChanges(
           (batch) => {
-            childPublications.push(batch.map(projectChildChange))
-            childCallbackFacades.push(facadeRows())
+            grandchildPublications.push(batch.map(projectChildChange))
+            callbackRows.push(grandchildRows())
           },
           { includeInitialState: false },
         )
         const mutate = createOptimisticAction<void>({
-          onMutate: () => {
-            facade.update(10, (draft) => {
-              draft.value = 11
-            })
-          },
+          onMutate: () => grandchildFacade.delete(10),
           mutationFn: () => persistence.promise,
         })
         const transaction = mutate()
 
         try {
-          expect(facadeRows()).toEqual([
-            { id: 10, parentGroup: 1, value: 11 },
-            { id: 20, parentGroup: 1, value: 20 },
+          expect(grandchildRows()).toEqual([
+            { id: 20, parentGroup: 7, value: 20 },
           ])
-
-          parents.write(`delete`, { id: 1, group: 1 })
-
-          expect(live.has(1)).toBe(false)
-          expect(facadeRows()).toEqual([{ id: 10, parentGroup: 1, value: 11 }])
-          expect(rootPublications).toEqual([[{ type: `delete`, key: 1 }]])
-          expect(rootCallbackFacades).toEqual([
-            [{ id: 10, parentGroup: 1, value: 11 }],
-          ])
-          expect(childPublications).toEqual([
-            [
-              {
-                type: `update`,
-                key: 10,
-                value: { id: 10, parentGroup: 1, value: 11 },
-                previousValue: { id: 10, parentGroup: 1, value: 10 },
-              },
-            ],
+          expect(grandchildPublications).toEqual([
             [
               {
                 type: `delete`,
-                key: 20,
-                value: { id: 20, parentGroup: 1, value: 20 },
+                key: 10,
+                value: { id: 10, parentGroup: 7, value: 10 },
               },
             ],
           ])
-          expect(childCallbackFacades).toEqual([
-            [
-              { id: 10, parentGroup: 1, value: 11 },
-              { id: 20, parentGroup: 1, value: 20 },
-            ],
-            [{ id: 10, parentGroup: 1, value: 11 }],
+
+          grandchildren.write(`update`, {
+            id: 10,
+            parentGroup: 7,
+            value: 21,
+          })
+
+          expect(grandchildRows()).toEqual([
+            { id: 20, parentGroup: 7, value: 20 },
+          ])
+          expect(rootPublications).toEqual([])
+          expect(childPublications).toEqual([])
+          expect(grandchildPublications).toHaveLength(1)
+          expect(callbackRows).toEqual([
+            [{ id: 20, parentGroup: 7, value: 20 }],
           ])
 
           const persisted = transaction.isPersisted.promise.catch(
             () => undefined,
           )
           if (settlement === `resolve`) persistence.resolve()
-          else persistence.reject(new Error(`facade mutation rejected`))
+          else persistence.reject(new Error(`nested facade mutation rejected`))
           await persisted
           await flushPromises()
 
-          expect(facadeRows()).toEqual([])
-          expect(rootPublications).toEqual([[{ type: `delete`, key: 1 }]])
-          expect(childPublications).toEqual([
-            [
-              {
-                type: `update`,
-                key: 10,
-                value: { id: 10, parentGroup: 1, value: 11 },
-                previousValue: { id: 10, parentGroup: 1, value: 10 },
-              },
-            ],
-            [
-              {
-                type: `delete`,
-                key: 20,
-                value: { id: 20, parentGroup: 1, value: 20 },
-              },
-            ],
+          expect(grandchildRows()).toEqual([
+            { id: 10, parentGroup: 7, value: 21 },
+            { id: 20, parentGroup: 7, value: 20 },
+          ])
+          expect(rootPublications).toEqual([])
+          expect(childPublications).toEqual([])
+          expect(grandchildPublications).toEqual([
             [
               {
                 type: `delete`,
                 key: 10,
-                value: { id: 10, parentGroup: 1, value: 11 },
+                value: { id: 10, parentGroup: 7, value: 10 },
+              },
+            ],
+            [
+              {
+                type: `insert`,
+                key: 10,
+                value: { id: 10, parentGroup: 7, value: 21 },
               },
             ],
           ])
-          expect(childCallbackFacades.at(-1)).toEqual([])
+          expect(callbackRows.at(-1)).toEqual([
+            { id: 10, parentGroup: 7, value: 21 },
+            { id: 20, parentGroup: 7, value: 20 },
+          ])
         } finally {
           persistence.resolve()
           await transaction.isPersisted.promise.catch(() => undefined)
           rootSubscription.unsubscribe()
           childSubscription.unsubscribe()
+          grandchildSubscription.unsubscribe()
           await Promise.all([
             live.cleanup(),
             parents.collection.cleanup(),
             children.collection.cleanup(),
+            grandchildren.collection.cleanup(),
           ])
         }
       },
     )
+  }
+
+  for (const settlement of pendingFacadeSettlements) {
+    for (const optimisticOperation of pendingFacadeOptimisticOperations) {
+      fcTest(
+        `retires a nested facade while its ${optimisticOperation} ${settlement}s`,
+        async () => {
+          const parents = createControlledCollection(`nested-retire-parents`, [
+            { id: 1, group: 1 },
+          ])
+          const children = createControlledCollection(
+            `nested-retire-children`,
+            [{ id: 100, parentGroup: 1, group: 7 }],
+          )
+          const grandchildren = createControlledCollection(
+            `nested-retire-grandchildren`,
+            [
+              { id: 10, parentGroup: 7, value: 10 },
+              { id: 20, parentGroup: 7, value: 20 },
+            ],
+          )
+          const live = createLiveQueryCollection((q) =>
+            q.from({ parent: parents.collection }).select(({ parent }) => ({
+              id: parent.id,
+              children: q
+                .from({ child: children.collection })
+                .where(({ child }) => eq(child.parentGroup, parent.group))
+                .select(({ child }) => ({
+                  id: child.id,
+                  group: child.group,
+                  grandchildren: q
+                    .from({ grandchild: grandchildren.collection })
+                    .where(({ grandchild }) =>
+                      eq(grandchild.parentGroup, child.group),
+                    ),
+                })),
+            })),
+          )
+          const persistence = createDeferred<void>()
+
+          await live.preload()
+          const childFacade = live.get(1)!.children
+          const grandchildFacade = childFacade.get(100)!.grandchildren
+          const grandchildRows = () =>
+            grandchildFacade.toArray
+              .map(({ id, parentGroup, value }) => ({ id, parentGroup, value }))
+              .sort((left, right) => left.id - right.id)
+          const rootPublications: Array<unknown> = []
+          const childPublications: Array<{
+            type: `insert` | `update` | `delete`
+            key: number
+            id: number
+            group: number
+            grandchildren: boolean
+          }> = []
+          const childCallbackSnapshots: Array<{
+            childIds: Array<number>
+            grandchildRows: Array<ChildRow>
+          }> = []
+          const grandchildPublications: Array<Array<ProjectedChildChange>> = []
+          const grandchildCallbackRows: Array<Array<ChildRow>> = []
+          const rootSubscription = live.subscribeChanges(
+            (batch) => rootPublications.push(batch),
+            { includeInitialState: false },
+          )
+          const childSubscription = childFacade.subscribeChanges(
+            (batch) => {
+              childPublications.push(
+                ...batch.map(({ type, key, value }) => ({
+                  type,
+                  key: Number(key),
+                  id: value.id,
+                  group: value.group,
+                  grandchildren: value.grandchildren === grandchildFacade,
+                })),
+              )
+              childCallbackSnapshots.push({
+                childIds: childFacade.toArray.map(({ id }) => id),
+                grandchildRows: grandchildRows(),
+              })
+            },
+            { includeInitialState: false },
+          )
+          const grandchildSubscription = grandchildFacade.subscribeChanges(
+            (batch) => {
+              grandchildPublications.push(batch.map(projectChildChange))
+              grandchildCallbackRows.push(grandchildRows())
+            },
+            { includeInitialState: false },
+          )
+          const optimisticRow = pendingOptimisticFacadeRow(optimisticOperation)
+          const mutate = createOptimisticAction<void>({
+            onMutate: () => {
+              if (optimisticOperation === `update`) {
+                grandchildFacade.update(10, (draft) => {
+                  draft.value = optimisticRow.value
+                })
+              } else {
+                grandchildFacade.delete(10)
+              }
+            },
+            mutationFn: () => persistence.promise,
+          })
+          const transaction = mutate()
+          const initialRows = new Map<number, ChildRow>([
+            [10, { id: 10, parentGroup: 7, value: 10 }],
+            [20, { id: 20, parentGroup: 7, value: 20 }],
+          ])
+          const afterOptimistic = new Map(initialRows)
+          const nestedOptimisticRow = { ...optimisticRow, parentGroup: 7 }
+          applyPendingFacadeOperation(
+            afterOptimistic,
+            optimisticOperation,
+            nestedOptimisticRow,
+          )
+          const emptyBase = new Map<number, ChildRow>()
+          const whilePending = new Map(emptyBase)
+          applyPendingFacadeOperation(
+            whilePending,
+            optimisticOperation,
+            nestedOptimisticRow,
+          )
+          const optimisticRows = expectedPendingFacadeRows(afterOptimistic)
+          const pendingRows = expectedPendingFacadeRows(whilePending)
+          const optimisticChange = expectedPendingFacadeChange(
+            initialRows,
+            afterOptimistic,
+            10,
+          )!
+          const retirementChange = expectedPendingFacadeChange(
+            afterOptimistic,
+            whilePending,
+            20,
+          )!
+          const settlementChange = expectedPendingFacadeChange(
+            whilePending,
+            emptyBase,
+            10,
+          )
+
+          try {
+            expect(grandchildRows()).toEqual(optimisticRows)
+
+            children.write(`delete`, {
+              id: 100,
+              parentGroup: 1,
+              group: 7,
+            })
+
+            expect(live.has(1)).toBe(true)
+            expect(childFacade.toArray).toEqual([])
+            expect(grandchildRows()).toEqual(pendingRows)
+            expect(rootPublications).toEqual([])
+            expect(childPublications).toEqual([
+              {
+                type: `delete`,
+                key: 100,
+                id: 100,
+                group: 7,
+                grandchildren: true,
+              },
+            ])
+            expect(childCallbackSnapshots).toEqual([
+              { childIds: [], grandchildRows: pendingRows },
+            ])
+            expect(grandchildPublications).toEqual([
+              [optimisticChange],
+              [retirementChange],
+            ])
+            expect(grandchildCallbackRows).toEqual([
+              optimisticRows,
+              pendingRows,
+            ])
+
+            const persisted = transaction.isPersisted.promise.catch(
+              () => undefined,
+            )
+            if (settlement === `resolve`) persistence.resolve()
+            else persistence.reject(new Error(`nested retirement rejected`))
+            await persisted
+            await flushPromises()
+
+            expect(childFacade.toArray).toEqual([])
+            expect(grandchildRows()).toEqual([])
+            expect(rootPublications).toEqual([])
+            expect(grandchildPublications).toEqual([
+              [optimisticChange],
+              [retirementChange],
+              ...(settlementChange ? [[settlementChange]] : []),
+            ])
+          } finally {
+            persistence.resolve()
+            await transaction.isPersisted.promise.catch(() => undefined)
+            rootSubscription.unsubscribe()
+            childSubscription.unsubscribe()
+            grandchildSubscription.unsubscribe()
+            await Promise.all([
+              live.cleanup(),
+              parents.collection.cleanup(),
+              children.collection.cleanup(),
+              grandchildren.collection.cleanup(),
+            ])
+          }
+        },
+      )
+    }
   }
 
   fcTest(
