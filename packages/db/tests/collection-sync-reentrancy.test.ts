@@ -13,6 +13,17 @@ type Row = {
 
 type SyncOps = Parameters<SyncConfig<Row, number>[`sync`]>[0]
 
+type OrderedRow = Row & { rank: number }
+type OrderedSync = Parameters<SyncConfig<OrderedRow, number>[`sync`]>[0]
+
+type LayoutCallback = {
+  changes: Array<number>
+  keys: Array<number>
+  values: Array<string>
+  markedReceiptSettled: boolean
+  revision: number
+}
+
 type ListenerAction = `commit` | `abort`
 
 type ListenerScenario = {
@@ -90,6 +101,20 @@ function stageInsert(
 ): void {
   sync.begin(options)
   sync.write({ type: `insert`, value: row })
+}
+
+function installInitialOrderedRows(sync: OrderedSync): void {
+  sync.begin({ immediate: true })
+  sync.write({
+    type: `insert`,
+    value: { id: 1, value: `one`, rank: 0 },
+  })
+  sync.write({
+    type: `insert`,
+    value: { id: 2, value: `two`, rank: 1 },
+  })
+  sync.commit()
+  sync.markReady()
 }
 
 async function runListenerScenario(scenario: ListenerScenario): Promise<void> {
@@ -195,8 +220,6 @@ const generatedRuns = 30 * multiplier
 
 describe(`sync publication reentrancy`, () => {
   it(`compares layout with the public state before an immediate prefix drain`, async () => {
-    type OrderedRow = Row & { rank: number }
-    type OrderedSync = Parameters<SyncConfig<OrderedRow, number>[`sync`]>[0]
     const updatePersistence = createDeferred<void>()
     const insertPersistence = createDeferred<void>()
     let sync!: OrderedSync
@@ -297,6 +320,318 @@ describe(`sync publication reentrancy`, () => {
       await update.isPersisted.promise.catch(() => undefined)
       await insert?.isPersisted.promise.catch(() => undefined)
       subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`publishes a parked layout mark when optimistic persistence drains it`, async () => {
+    const updatePersistence = createDeferred<void>()
+    let sync!: OrderedSync
+    const collection = createCollection<OrderedRow, number>({
+      id: `layout-prefix-normal-drain`,
+      getKey: (row) => row.id,
+      compare: (left, right) => left.rank - right.rank,
+      startSync: true,
+      sync: {
+        sync: (ops) => {
+          sync = ops
+          installInitialOrderedRows(ops)
+        },
+      },
+      onUpdate: () => updatePersistence.promise,
+    })
+    let markedReceiptSettled = false
+    const callbacks: Array<LayoutCallback> = []
+    const subscription = collection.subscribeChanges(
+      (changes) => {
+        callbacks.push({
+          changes: changes.map(({ key }) => key as number),
+          keys: [...collection.keys()],
+          values: collection.toArray.map(({ value }) => value),
+          markedReceiptSettled,
+          revision: collection._layoutRevision,
+        })
+      },
+      { includeInitialState: false },
+    )
+    const update = collection.update(2, (draft) => {
+      draft.value = `optimistic-two`
+    })
+
+    try {
+      sync.begin()
+      sync.write({
+        type: `update`,
+        value: { id: 1, value: `one`, rank: 2 },
+      })
+      sync.collection._markLayoutChange()
+      const receipt = sync.commit()
+      expect(receipt).not.toBe(true)
+      if (receipt !== true) {
+        void receipt.then(() => {
+          markedReceiptSettled = true
+        })
+      }
+
+      callbacks.length = 0
+      const revisionBeforeDrain = collection._layoutRevision
+      await Promise.resolve()
+      expect(markedReceiptSettled).toBe(false)
+      expect([...collection.keys()]).toEqual([1, 2])
+
+      updatePersistence.resolve()
+      await update.isPersisted.promise
+      if (receipt !== true) await receipt
+
+      expect([...collection.keys()]).toEqual([2, 1])
+      expect(collection.toArray.map(({ value }) => value)).toEqual([
+        `two`,
+        `one`,
+      ])
+      expect(collection._layoutRevision).toBe(revisionBeforeDrain + 1)
+      expect(callbacks).toEqual([
+        {
+          changes: [1, 2],
+          keys: [2, 1],
+          values: [`two`, `one`],
+          markedReceiptSettled: false,
+          revision: revisionBeforeDrain + 1,
+        },
+      ])
+      expect(markedReceiptSettled).toBe(true)
+    } finally {
+      updatePersistence.resolve()
+      await update.isPersisted.promise.catch(() => undefined)
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it.each([`first`, `middle`, `last`] as const)(
+    `honors a %s-position layout mark in an immediate causal prefix`,
+    async (markPosition) => {
+      const updatePersistence = createDeferred<void>()
+      const insertPersistence = createDeferred<void>()
+      let sync!: OrderedSync
+      const collection = createCollection<OrderedRow, number>({
+        id: `layout-prefix-immediate-${markPosition}`,
+        getKey: (row) => row.id,
+        compare: (left, right) => left.rank - right.rank,
+        startSync: true,
+        sync: {
+          sync: (ops) => {
+            sync = ops
+            installInitialOrderedRows(ops)
+          },
+        },
+        onUpdate: () => updatePersistence.promise,
+        onInsert: () => insertPersistence.promise,
+      })
+      let firstReceiptSettled = false
+      const callbacks: Array<LayoutCallback> = []
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          callbacks.push({
+            changes: changes.map(({ key }) => key as number),
+            keys: [...collection.keys()],
+            values: collection.toArray.map(({ value }) => value),
+            markedReceiptSettled: firstReceiptSettled,
+            revision: collection._layoutRevision,
+          })
+        },
+        { includeInitialState: false },
+      )
+      const update = collection.update(2, (draft) => {
+        draft.value = `optimistic-two`
+      })
+      let insert: ReturnType<typeof collection.insert> | undefined
+
+      try {
+        sync.begin()
+        sync.write({
+          type: `update`,
+          value:
+            markPosition === `first`
+              ? { id: 1, value: `one`, rank: 2 }
+              : { id: 2, value: `server-two-a`, rank: 1 },
+        })
+        if (markPosition === `first`) sync.collection._markLayoutChange()
+        const firstReceipt = sync.commit()
+        expect(firstReceipt).not.toBe(true)
+        if (firstReceipt !== true) {
+          void firstReceipt.then(() => {
+            firstReceiptSettled = true
+          })
+        }
+        await Promise.resolve()
+        expect(firstReceiptSettled).toBe(false)
+
+        insert = collection.insert({
+          id: 3,
+          value: `optimistic-three`,
+          rank: 3,
+        })
+
+        sync.begin()
+        sync.write({
+          type: `update`,
+          value:
+            markPosition === `middle`
+              ? { id: 1, value: `one`, rank: 2 }
+              : { id: 2, value: `server-two-b`, rank: 1 },
+        })
+        if (markPosition === `middle`) sync.collection._markLayoutChange()
+        const middleReceipt = sync.commit()
+        expect(middleReceipt).not.toBe(true)
+
+        callbacks.length = 0
+        const revisionBeforeDrain = collection._layoutRevision
+        expect([...collection.keys()]).toEqual([1, 2, 3])
+
+        sync.begin({ immediate: true })
+        sync.write({
+          type: `update`,
+          value:
+            markPosition === `last`
+              ? { id: 1, value: `one`, rank: 2 }
+              : { id: 2, value: `server-two-c`, rank: 1 },
+        })
+        if (markPosition === `last`) sync.collection._markLayoutChange()
+        const lastReceipt = sync.commit()
+
+        expect(lastReceipt).toBe(true)
+        expect([...collection.keys()]).toEqual([2, 1, 3])
+        expect(collection.toArray.map(({ value }) => value)).toEqual([
+          `optimistic-two`,
+          `one`,
+          `optimistic-three`,
+        ])
+        expect(collection._layoutRevision).toBe(revisionBeforeDrain + 1)
+        expect(callbacks).toEqual([
+          {
+            changes: [1],
+            keys: [2, 1, 3],
+            values: [`optimistic-two`, `one`, `optimistic-three`],
+            markedReceiptSettled: false,
+            revision: revisionBeforeDrain + 1,
+          },
+        ])
+
+        await Promise.all(
+          [firstReceipt, middleReceipt]
+            .filter((receipt) => receipt !== true)
+            .map((receipt) => receipt),
+        )
+        expect(firstReceiptSettled).toBe(true)
+      } finally {
+        subscription.unsubscribe()
+        updatePersistence.resolve()
+        insertPersistence.resolve()
+        await update.isPersisted.promise.catch(() => undefined)
+        await insert?.isPersisted.promise.catch(() => undefined)
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it(`honors a parked layout mark when truncate drains its causal prefix`, async () => {
+    const updatePersistence = createDeferred<void>()
+    const insertPersistence = createDeferred<void>()
+    let sync!: OrderedSync
+    const collection = createCollection<OrderedRow, number>({
+      id: `layout-prefix-truncate-drain`,
+      getKey: (row) => row.id,
+      compare: (left, right) => left.rank - right.rank,
+      startSync: true,
+      sync: {
+        sync: (ops) => {
+          sync = ops
+          installInitialOrderedRows(ops)
+        },
+      },
+      onUpdate: () => updatePersistence.promise,
+      onInsert: () => insertPersistence.promise,
+    })
+    let markedReceiptSettled = false
+    const callbacks: Array<LayoutCallback> = []
+    const subscription = collection.subscribeChanges(
+      (changes) => {
+        callbacks.push({
+          changes: changes.map(({ key }) => key as number),
+          keys: [...collection.keys()],
+          values: collection.toArray.map(({ value }) => value),
+          markedReceiptSettled,
+          revision: collection._layoutRevision,
+        })
+      },
+      { includeInitialState: false },
+    )
+    const update = collection.update(1, (draft) => {
+      draft.value = `optimistic-one`
+    })
+    let insert: ReturnType<typeof collection.insert> | undefined
+
+    try {
+      sync.begin()
+      sync.write({
+        type: `update`,
+        value: { id: 1, value: `one`, rank: 2 },
+      })
+      sync.collection._markLayoutChange()
+      const firstReceipt = sync.commit()
+      expect(firstReceipt).not.toBe(true)
+      if (firstReceipt !== true) {
+        void firstReceipt.then(() => {
+          markedReceiptSettled = true
+        })
+      }
+
+      insert = collection.insert({
+        id: 3,
+        value: `optimistic-three`,
+        rank: 3,
+      })
+      callbacks.length = 0
+      const revisionBeforeDrain = collection._layoutRevision
+      expect([...collection.keys()]).toEqual([1, 2, 3])
+
+      sync.begin()
+      sync.truncate()
+      sync.write({
+        type: `insert`,
+        value: { id: 1, value: `one`, rank: 2 },
+      })
+      sync.write({
+        type: `insert`,
+        value: { id: 2, value: `two`, rank: 1 },
+      })
+      const truncateReceipt = sync.commit()
+
+      expect(truncateReceipt).toBe(true)
+      expect([...collection.keys()]).toEqual([2, 1, 3])
+      expect(collection.toArray.map(({ value }) => value)).toEqual([
+        `two`,
+        `optimistic-one`,
+        `optimistic-three`,
+      ])
+      expect(collection._layoutRevision).toBe(revisionBeforeDrain + 1)
+      expect(callbacks).toEqual([
+        {
+          changes: [2, 1, 3, 1, 3, 1, 2],
+          keys: [2, 1, 3],
+          values: [`two`, `optimistic-one`, `optimistic-three`],
+          markedReceiptSettled: false,
+          revision: revisionBeforeDrain + 1,
+        },
+      ])
+      if (firstReceipt !== true) await firstReceipt
+      expect(markedReceiptSettled).toBe(true)
+    } finally {
+      subscription.unsubscribe()
+      updatePersistence.resolve()
+      insertPersistence.resolve()
+      await update.isPersisted.promise.catch(() => undefined)
+      await insert?.isPersisted.promise.catch(() => undefined)
       await collection.cleanup()
     }
   })
