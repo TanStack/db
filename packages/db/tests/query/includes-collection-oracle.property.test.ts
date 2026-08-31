@@ -1260,6 +1260,9 @@ describe(`Collection-valued includes oracle`, () => {
 
           await live.preload()
           const rootLayouts: Array<Array<number>> = []
+          const rootWindows: Array<
+            { offset: number; limit: number } | undefined
+          > = []
           const childBatches: Array<Array<number>> = []
           let childSubscription: { unsubscribe: () => void } | undefined
           let childRevision = -1
@@ -1268,6 +1271,7 @@ describe(`Collection-valued includes oracle`, () => {
           const rootSubscription = live.subscribeChanges(
             () => {
               rootLayouts.push(live.toArray.map(({ id }) => id))
+              rootWindows.push(live.utils.getWindow())
               if (acted) return
               acted = true
               if (callbackAction === `source-write`) {
@@ -1321,12 +1325,25 @@ describe(`Collection-valued includes oracle`, () => {
               expect(facade.get(childId)!.value).toBe(3)
               expect(childBatches.at(-1)).toEqual([3])
               expect(facade._stateRevision).toBe(childRevision + 1)
+              expect(rootWindows).toEqual([
+                turnOrigin === `window`
+                  ? { offset: 0, limit: 2 }
+                  : { offset: 0, limit: 1 },
+              ])
             } else if (turnOrigin === `source`) {
               expect(rootLayouts).toEqual([[1], [1, 2]])
+              expect(rootWindows).toEqual([
+                { offset: 0, limit: 1 },
+                { offset: 0, limit: 2 },
+              ])
               expect(live.toArray.map(({ id }) => id)).toEqual([1, 2])
               expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
             } else {
               expect(rootLayouts).toEqual([[1, 2], [2]])
+              expect(rootWindows).toEqual([
+                { offset: 0, limit: 2 },
+                { offset: 1, limit: 1 },
+              ])
               expect(live.toArray.map(({ id }) => id)).toEqual([2])
               expect(live.utils.getWindow()).toEqual({ offset: 1, limit: 1 })
             }
@@ -1343,6 +1360,113 @@ describe(`Collection-valued includes oracle`, () => {
       )
     }
   }
+
+  fcTest(
+    `a rejected nested window restores its parent operation's window`,
+    async () => {
+      const parents = createControlledCollection(`nested-window-parents`, [
+        { id: 1, rank: 1 },
+        { id: 2, rank: 2 },
+      ])
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ parent: parents.collection })
+          .orderBy(({ parent }) => parent.rank)
+          .limit(1)
+          .select(({ parent }) => ({ id: parent.id })),
+      )
+
+      await live.preload()
+      const nestedFailure = new Error(`nested window failed`)
+      const builder = live.utils[LIVE_QUERY_INTERNAL].getBuilder()
+      const runGraph = Reflect.get(builder, `maybeRunGraphFn`) as () => void
+      let failNextGraph = false
+      Reflect.set(builder, `maybeRunGraphFn`, () => {
+        runGraph()
+        if (failNextGraph) {
+          failNextGraph = false
+          builder.recordSubsetError(nestedFailure)
+        }
+      })
+
+      const rootLayouts: Array<Array<number>> = []
+      let nestedError: unknown
+      let acted = false
+      const rootSubscription = live.subscribeChanges(
+        () => {
+          rootLayouts.push(live.toArray.map(({ id }) => id))
+          if (acted) return
+          acted = true
+          failNextGraph = true
+          try {
+            live.utils.setWindow({ offset: 1, limit: 1 })
+          } catch (error) {
+            nestedError = error
+          }
+        },
+        { includeInitialState: false },
+      )
+
+      try {
+        live.utils.setWindow({ offset: 0, limit: 2 })
+
+        expect(nestedError).toBe(nestedFailure)
+        expect(rootLayouts[0]).toEqual([1, 2])
+        expect(rootLayouts.at(-1)).toEqual([1, 2])
+        expect(live.toArray.map(({ id }) => id)).toEqual([1, 2])
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
+      } finally {
+        rootSubscription.unsubscribe()
+        await Promise.all([live.cleanup(), parents.collection.cleanup()])
+      }
+    },
+  )
+
+  fcTest(
+    `an older failed window cannot restore over a newer nested window`,
+    async () => {
+      const parents = createControlledCollection(`stale-window-parents`, [
+        { id: 1, rank: 1 },
+        { id: 2, rank: 2 },
+      ])
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ parent: parents.collection })
+          .orderBy(({ parent }) => parent.rank)
+          .limit(1)
+          .select(({ parent }) => ({ id: parent.id })),
+      )
+
+      await live.preload()
+      const outerFailure = new Error(`outer window failed`)
+      const builder = live.utils[LIVE_QUERY_INTERNAL].getBuilder()
+      const rootLayouts: Array<Array<number>> = []
+      let acted = false
+      const rootSubscription = live.subscribeChanges(
+        () => {
+          rootLayouts.push(live.toArray.map(({ id }) => id))
+          if (acted) return
+          acted = true
+          live.utils.setWindow({ offset: 1, limit: 1 })
+          builder.recordSubsetError(outerFailure)
+        },
+        { includeInitialState: false },
+      )
+
+      try {
+        expect(() => live.utils.setWindow({ offset: 0, limit: 2 })).toThrow(
+          outerFailure,
+        )
+
+        expect(rootLayouts).toEqual([[1, 2], [2]])
+        expect(live.toArray.map(({ id }) => id)).toEqual([2])
+        expect(live.utils.getWindow()).toEqual({ offset: 1, limit: 1 })
+      } finally {
+        rootSubscription.unsubscribe()
+        await Promise.all([live.cleanup(), parents.collection.cleanup()])
+      }
+    },
+  )
 
   fcTest(
     `failed window restoration serializes callback-created source work`,

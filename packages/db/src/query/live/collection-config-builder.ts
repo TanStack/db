@@ -318,12 +318,19 @@ export class CollectionConfigBuilder<
     const operation: { failed: boolean; error?: unknown } = { failed: false }
     this.activeWindowOperation = operation
     try {
+      // Window metadata is part of the synchronous publication. This also
+      // gives a nested operation the effective window of its immediate parent
+      // to restore if the nested operation fails.
+      this.currentWindow = options
       withPublicationContext(() => {
         windowFn(options)
         this.maybeRunGraphFn?.()
       })
       if (operation.failed) throw operation.error
       if (windowOperationGeneration === this.windowOperationGeneration) {
+        // Teardown may clear the runtime while an accepted request is still
+        // unwinding. Preserve that request as the desired window for the next
+        // sync session, but never overwrite a newer nested operation.
         this.currentWindow = options
       }
     } catch (error) {
@@ -334,6 +341,7 @@ export class CollectionConfigBuilder<
         windowOperationGeneration === this.windowOperationGeneration
       ) {
         try {
+          this.currentWindow = previousWindow
           withPublicationContext(() => {
             windowFn(previousWindow)
             this.maybeRunGraphFn?.()

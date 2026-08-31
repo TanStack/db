@@ -1149,7 +1149,12 @@ publication callback starts a newer window operation, that newer generation
 owns the final public window and the older caller cannot overwrite it when it
 resumes. Restoring a rejected window is itself a graph-turn origin: its
 callbacks remain inside one publication context, and restoration cannot roll
-back a newer nested window generation.
+back a newer nested window generation. A rejected nested operation restores
+its immediate parent's effective window, not an older public snapshot; rows
+and window metadata therefore describe the same surviving generation.
+If teardown clears the runtime while an accepted window call is unwinding,
+that generation remains the desired window for the next sync session. A call
+that fails synchronously instead restores its previous effective window.
 
 ## External boundaries
 
