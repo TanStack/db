@@ -1643,24 +1643,16 @@ describe(`Collection-valued includes oracle`, () => {
 
       await live.preload()
       const builder = live.utils[LIVE_QUERY_INTERNAL].getBuilder()
-      const initialOutcome = createDeferred<{
+      type Outcome = {
         collectionId: string
         demand: { limit: number }
         generation: number
         extent: `exhausted`
-      }>()
-      const rollbackOutcome = createDeferred<{
-        collectionId: string
-        demand: { limit: number }
-        generation: number
-        extent: `exhausted`
-      }>()
-      const afterCatchOutcome = createDeferred<{
-        collectionId: string
-        demand: { limit: number }
-        generation: number
-        extent: `exhausted`
-      }>()
+      }
+      const initialOutcome = createDeferred<Outcome>()
+      const beforeNestedOutcome = createDeferred<Outcome>()
+      const rollbackOutcome = createDeferred<Outcome>()
+      const afterCatchOutcome = createDeferred<Outcome>()
       const originalWindowFn = Reflect.get(builder, `windowFn`) as (options: {
         limit?: number
       }) => void
@@ -1700,6 +1692,10 @@ describe(`Collection-valued includes oracle`, () => {
         () => {
           if (acted) return
           acted = true
+          builder.trackSubsetLoadOperationPromise(
+            beforeNestedOutcome.promise,
+            `before-nested`,
+          )
           failNested = true
           try {
             live.utils.setWindow({ offset: 1, limit: 1 })
@@ -1737,12 +1733,24 @@ describe(`Collection-valued includes oracle`, () => {
         await flushPromises()
         expect(parentSettled).toBe(false)
 
+        beforeNestedOutcome.resolve({
+          collectionId: `parents`,
+          demand: { limit: 2 },
+          generation: 1,
+          extent: `exhausted`,
+        })
+        await flushPromises()
+        expect(parentSettled).toBe(false)
+
         rollbackOutcome.resolve({
           collectionId: `parents`,
           demand: { limit: 2 },
           generation: 1,
           extent: `exhausted`,
         })
+        await flushPromises()
+        expect(parentSettled).toBe(false)
+
         afterCatchOutcome.resolve({
           collectionId: `parents`,
           demand: { limit: 2 },
@@ -1750,13 +1758,11 @@ describe(`Collection-valued includes oracle`, () => {
           extent: `exhausted`,
         })
         await parentReady
-        expect(live.utils[LIVE_QUERY_INTERNAL].getLastWindowOutcomes()).toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({ sourceId: `initial` }),
-            expect.objectContaining({ sourceId: `rollback` }),
-            expect.objectContaining({ sourceId: `after-catch` }),
-          ]),
-        )
+        expect(
+          live.utils[LIVE_QUERY_INTERNAL]
+            .getLastWindowOutcomes()
+            .map(({ sourceId }) => sourceId),
+        ).toEqual([`initial`, `before-nested`, `rollback`, `after-catch`])
       } finally {
         subscription.unsubscribe()
         const outcome = {
@@ -1766,6 +1772,7 @@ describe(`Collection-valued includes oracle`, () => {
           extent: `exhausted` as const,
         }
         initialOutcome.resolve(outcome)
+        beforeNestedOutcome.resolve(outcome)
         rollbackOutcome.resolve(outcome)
         afterCatchOutcome.resolve(outcome)
         await Promise.all([live.cleanup(), parents.collection.cleanup()])
