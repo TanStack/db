@@ -14,6 +14,7 @@ import type {
   ChangeMessage,
   CollectionConfig,
   OptimisticChangeMessage,
+  PendingMutation,
 } from '../types'
 import type { CollectionImpl } from './index.js'
 import type { CollectionLifecycleManager } from './lifecycle'
@@ -111,6 +112,11 @@ export class CollectionStateManager<
    */
   public pendingLocalChanges = new Set<TKey>()
   public pendingLocalOrigins = new Set<TKey>()
+
+  private composedUpserts = new WeakMap<
+    object,
+    { base: TOutput; composed: TOutput }
+  >()
 
   private virtualPropsCache = new WeakMap<
     object,
@@ -632,7 +638,7 @@ export class CollectionStateManager<
             case `update`:
               this.optimisticUpserts.set(
                 mutation.key,
-                mutation.modified as TOutput,
+                this.resolveOptimisticUpsert(mutation),
               )
               this.optimisticDeletes.delete(mutation.key)
               break
@@ -805,6 +811,36 @@ export class CollectionStateManager<
         })
       }
     }
+  }
+
+  /**
+   * Resolve the value an optimistic upsert contributes to the overlay. Updates
+   * compose `changes` over the value they were layered on so a mutation only
+   * owns the top-level fields it changed; inserts keep `modified` because their
+   * `changes` omit schema defaults. Composed rows are cached per `changes`
+   * object so an unchanged overlay keeps its reference and no-op events stay
+   * suppressed.
+   */
+  private resolveOptimisticUpsert(mutation: PendingMutation<any>): TOutput {
+    if (mutation.type !== `update`) {
+      return mutation.modified as TOutput
+    }
+
+    const key = mutation.key as TKey
+    const base = this.optimisticUpserts.get(key) ?? this.syncedData.get(key)
+    if (base === undefined) {
+      return mutation.modified as TOutput
+    }
+
+    const changes = mutation.changes as object
+    const cached = this.composedUpserts.get(changes)
+    if (cached !== undefined && cached.base === base) {
+      return cached.composed
+    }
+
+    const composed = { ...base, ...mutation.changes } as TOutput
+    this.composedUpserts.set(changes, { base, composed })
+    return composed
   }
 
   /**
@@ -1199,7 +1235,7 @@ export class CollectionStateManager<
                 case `update`:
                   this.optimisticUpserts.set(
                     mutation.key,
-                    mutation.modified as TOutput,
+                    this.resolveOptimisticUpsert(mutation),
                   )
                   this.optimisticDeletes.delete(mutation.key)
                   break
