@@ -166,21 +166,57 @@ export function filterDuplicateInserts(
 }
 
 /**
+ * Prevents duplicate source inserts and makes update/delete retractions use
+ * the exact row previously contributed to D2 for the key.
+ */
+export function prepareChangesForD2(
+  changes: Array<ChangeMessage<Record<string, unknown>, string | number>>,
+  sentRows: Map<string | number, Record<string, unknown>>,
+): Array<ChangeMessage<Record<string, unknown>, string | number>> {
+  return changes.flatMap((change) => {
+    if (change.type === `insert`) {
+      if (sentRows.has(change.key)) return []
+      sentRows.set(change.key, change.value)
+      return [change]
+    }
+
+    const previousValue = sentRows.get(change.key)
+    if (change.type === `delete`) {
+      sentRows.delete(change.key)
+      return [
+        previousValue === undefined
+          ? change
+          : { ...change, value: previousValue },
+      ]
+    }
+
+    sentRows.set(change.key, change.value)
+    return [
+      previousValue === undefined ? change : { ...change, previousValue },
+    ]
+  })
+}
+
+/**
  * Track the biggest value seen in a stream of changes, used for cursor-based
  * pagination in ordered subscriptions. Returns whether the load request key
  * should be reset (allowing another load).
  *
  * @param changes   - changes to process (deletes are skipped)
  * @param current   - the current biggest value (or undefined if none)
- * @param sentKeys  - set of keys already sent to D2 (for new-key detection)
+ * @param sentKeys  - lookup of keys already sent to D2 (for new-key detection)
  * @param comparator - orderBy comparator
  * @returns `{ biggest, shouldResetLoadKey }` — the new biggest value and
  *          whether the caller should clear its last-load-request-key
  */
+interface SentKeyLookup {
+  has: (key: string | number) => boolean
+}
+
 export function trackBiggestSentValue(
   changes: Array<ChangeMessage<any, string | number>>,
   current: unknown | undefined,
-  sentKeys: Set<string | number>,
+  sentKeys: SentKeyLookup,
   comparator: (a: any, b: any) => number,
 ): { biggest: unknown; shouldResetLoadKey: boolean } {
   let biggest = current

@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { createLiveQueryCollection, eq } from '../src/query/index.js'
+import { prepareChangesForD2 } from '../src/query/live/utils.js'
 import { mockSyncCollectionOptions } from './utils.js'
-import type { ChangeMessage } from '../src/types.js'
+import type { ChangeMessage, SyncConfig } from '../src/types.js'
 
 /**
  * Tests for duplicate insert prevention in the D2 pipeline.
@@ -40,6 +41,87 @@ type Order = {
 }
 
 describe(`CollectionSubscriber duplicate insert prevention`, () => {
+  it(`retracts the exact source row previously contributed for a key`, () => {
+    const sentRows = new Map<string | number, Record<string, unknown>>()
+    const inserted = { id: `1`, status: `draft` }
+    const changed = { id: `1`, status: `published` }
+
+    prepareChangesForD2(
+      [{ type: `insert`, key: `1`, value: inserted }],
+      sentRows,
+    )
+    const reconciled = prepareChangesForD2(
+      [
+        {
+          type: `update`,
+          key: `1`,
+          value: changed,
+          previousValue: changed,
+        },
+      ],
+      sentRows,
+    )
+
+    expect(reconciled).toEqual([
+      {
+        type: `update`,
+        key: `1`,
+        value: changed,
+        previousValue: inserted,
+      },
+    ])
+  })
+
+  it(`does not throw when updating an optimistically inserted row confirmed by sync and observed by a live query`, async () => {
+    type Row = { id: string; title: string }
+    let sync: Parameters<SyncConfig<Row>[`sync`]>[0] | undefined
+
+    const collection = createCollection<Row>({
+      getKey: (row) => row.id,
+      sync: {
+        sync: (config) => {
+          sync = config
+          config.markReady()
+        },
+      },
+      // eslint-disable-next-line @typescript-eslint/require-await -- onInsert must return a Promise
+      onInsert: async ({ transaction }) => {
+        if (!sync) throw new Error(`Sync config was not initialized`)
+        sync.begin()
+        sync.write({
+          type: `insert`,
+          value: transaction.mutations[0].modified,
+        })
+        sync.commit()
+      },
+      onUpdate: async () => {},
+    })
+
+    const query = createLiveQueryCollection((q) =>
+      q.from({ row: collection }).select(({ row }) => ({
+        id: row.id,
+        title: row.title,
+      })),
+    )
+
+    const subscription = query.subscribeChanges(() => {})
+
+    await collection.insert({ id: `1`, title: `one` }).isPersisted.promise
+
+    expect(() => {
+      collection.update(`1`, (draft) => {
+        draft.title = `two`
+      })
+    }).not.toThrow()
+
+    expect(collection.size).toBe(1)
+    expect(collection.get(`1`)).toMatchObject({ id: `1`, title: `two` })
+    expect(query.size).toBe(1)
+    expect(query.get(`1`)).toMatchObject({ id: `1`, title: `two` })
+
+    subscription.unsubscribe()
+  })
+
   it(`should properly delete items from live query with orderBy + limit`, async () => {
     // This test verifies that items can be properly deleted from a live query
     // with orderBy + limit. If duplicate inserts reach D2, the delete won't work.
