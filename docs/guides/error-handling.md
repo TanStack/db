@@ -141,14 +141,17 @@ console.log(subscription.lastError)
 ```
 
 For ordered live queries, `utils.setWindow()` rejects with the same error. The
-last failure is also available as `utils.lastSubsetError`, while the last
-successful snapshot remains readable:
+last failure is also available as `utils.lastSubsetError`, while
+`utils.hasSubsetError` distinguishes a thrown `undefined` from no observed
+failure. The last successful snapshot remains readable:
 
 ```ts
 try {
   await liveTodos.utils.setWindow({ offset: 0, limit: 100 })
 } catch (error) {
-  console.error(liveTodos.utils.lastSubsetError)
+  if (liveTodos.utils.hasSubsetError) {
+    console.error(liveTodos.utils.lastSubsetError)
+  }
 }
 ```
 

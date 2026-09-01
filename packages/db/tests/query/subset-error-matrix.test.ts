@@ -446,6 +446,7 @@ describe(`loadSubset failure matrix`, () => {
           expect(sourceErrors).toEqual([])
         }
         if (live) {
+          expect(live.utils.hasSubsetError).toBe(true)
           expect(Object.is(live.utils.lastSubsetError, failure)).toBe(true)
           expect(live.status).toBe(`ready`)
         }

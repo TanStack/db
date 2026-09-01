@@ -877,7 +877,10 @@ incarnation. The demand controller therefore returns the release failure with
 the completed logical transition. A live query records that failure and
 retires an empty demand without entering a fatal query state; an Effect reports
 the same failure through its source-error policy and disposes. Reactivating the
-route starts a fresh acquisition.
+route starts a fresh acquisition. Live-query diagnostics track failure presence
+separately from its value so a thrown `undefined` remains observable. Effect
+disposal retains failed unsubscribe callbacks and lets a later `dispose()`
+retry them instead of caching a terminal rejected cleanup attempt.
 
 Result callbacks are also arbitrary reentrancy boundaries. After invoking one,
 the request checks the same exact owner again before it tracks status, applies

@@ -52,6 +52,14 @@ Gets the current window (offset and limit) for an ordered query.
 
 The current window settings, or `undefined` if the query is not windowed
 
+### hasSubsetError
+
+```ts
+readonly hasSubsetError: boolean;
+```
+
+Whether this live query has observed a subset-load failure.
+
 ### lastSubsetError
 
 ```ts

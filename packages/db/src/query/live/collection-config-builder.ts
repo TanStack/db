@@ -54,6 +54,8 @@ import type { AllCollectionEvents } from '../../collection/events.js'
 
 export type LiveQueryCollectionUtils = UtilsRecord & {
   getRunCount: () => number
+  /** Whether this live query has observed a subset-load failure. */
+  readonly hasSubsetError: boolean
   /** Most recent subset-load failure observed by this live query. */
   readonly lastSubsetError: unknown | undefined
   /**
@@ -121,6 +123,7 @@ export class CollectionConfigBuilder<
   private isInErrorState = false
   private fatalQueryError = false
   private readonly erroredSourceIds = new Set<string>()
+  private hasSubsetError = false
   private lastSubsetError: unknown | undefined
 
   // Reference to the live query collection for error state transitions
@@ -284,6 +287,9 @@ export class CollectionConfigBuilder<
       singleResult: this.query.singleResult,
       utils: {
         getRunCount: this.getRunCount.bind(this),
+        get hasSubsetError() {
+          return builder.hasSubsetError
+        },
         get lastSubsetError() {
           return builder.lastSubsetError
         },
@@ -487,6 +493,7 @@ export class CollectionConfigBuilder<
   }
 
   recordSubsetError(error: unknown, fatalBeforeReady = false): void {
+    this.hasSubsetError = true
     this.lastSubsetError = error
     if (this.activeWindowOperation) {
       this.activeWindowOperation.failed = true
@@ -840,6 +847,7 @@ export class CollectionConfigBuilder<
     this.isInErrorState = false
     this.fatalQueryError = false
     this.erroredSourceIds.clear()
+    this.hasSubsetError = false
     this.lastSubsetError = undefined
     this.latestSubsetOutcomes.clear()
     this.lastWindowOutcomes = []

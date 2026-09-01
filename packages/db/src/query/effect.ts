@@ -264,13 +264,13 @@ export function createEffect<
     // Abort signal for in-flight handlers
     abortController.abort()
 
-    disposalPromise = (async () => {
+    const attempt = (async () => {
       // Tear down the pipeline (unsubscribe from sources, etc.)
-      let cleanupError: unknown
+      let cleanupFailure: { error: unknown } | undefined
       try {
         runner.dispose()
       } catch (error) {
-        cleanupError = error
+        cleanupFailure = { error }
       }
 
       // Wait for any in-flight async handlers to settle
@@ -278,9 +278,13 @@ export function createEffect<
         await Promise.allSettled([...inFlightHandlers])
       }
 
-      if (cleanupError !== undefined) throw cleanupError
+      if (cleanupFailure) throw cleanupFailure.error
     })()
-    return disposalPromise
+    disposalPromise = attempt
+    void attempt.catch(() => {
+      if (disposalPromise === attempt) disposalPromise = undefined
+    })
+    return attempt
   }
 
   // Create and start the pipeline
@@ -1142,20 +1146,20 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   /** Tear down subscriptions and clear state */
   dispose(): void {
-    if (this.disposed) return
+    if (this.disposed && this.unsubscribeCallbacks.size === 0) return
     this.disposed = true
     this.subscribedToAllCollections = false
 
     // Immediately unsubscribe from every source, even if one release fails.
-    let firstCleanupError: unknown
+    let firstCleanupFailure: { error: unknown } | undefined
     for (const unsubscribe of this.unsubscribeCallbacks) {
       try {
         unsubscribe()
+        this.unsubscribeCallbacks.delete(unsubscribe)
       } catch (error) {
-        firstCleanupError ??= error
+        firstCleanupFailure ??= { error }
       }
     }
-    this.unsubscribeCallbacks.clear()
     this.sentToD2KeysBySource.clear()
     this.pendingChanges.clear()
     this.lazySources.clear()
@@ -1184,7 +1188,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       this.finalCleanup()
     }
 
-    if (firstCleanupError !== undefined) throw firstCleanupError
+    if (firstCleanupFailure) throw firstCleanupFailure.error
   }
 
   /** Clear graph references — called after graph run completes or immediately from dispose */

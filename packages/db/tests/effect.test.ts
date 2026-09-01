@@ -2078,6 +2078,7 @@ describe(`createEffect`, () => {
       )
       let loadCount = 0
       let unloadCount = 0
+      const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
       const issues = createCollection<Issue>({
         id: `effect-obsolete-release-issues`,
         getKey: (issue) => issue.id,
@@ -2094,7 +2095,7 @@ describe(`createEffect`, () => {
               },
               unloadSubset: () => {
                 unloadCount++
-                if (unloadCount === 1) throw failure
+                if (unloadCount <= 2) throw failure
               },
             }
           },
@@ -2134,9 +2135,13 @@ describe(`createEffect`, () => {
         expect(sourceErrors).toEqual([failure])
         expect(effect.disposed).toBe(true)
         expect(unloadCount).toBe(2)
+
+        await effect.dispose()
+        expect(unloadCount).toBe(3)
       } finally {
         await effect.dispose()
         await Promise.all([users.cleanup(), issues.cleanup()])
+        consoleError.mockRestore()
       }
     })
 
@@ -2232,7 +2237,7 @@ describe(`createEffect`, () => {
               },
               unloadSubset: () => {
                 unloadCount++
-                throw cleanupFailure
+                if (unloadCount <= 2) throw cleanupFailure
               },
             }
           },
@@ -2268,7 +2273,8 @@ describe(`createEffect`, () => {
           cleanupFailure,
           cleanupFailure,
         ])
-        await expect(effect.dispose()).rejects.toBe(cleanupError)
+        await effect.dispose()
+        expect(unloadCount).toBe(4)
       } finally {
         consoleErrorSpy.mockRestore()
         await users.cleanup()
