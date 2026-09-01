@@ -140,32 +140,6 @@ export function* splitUpdates<
 }
 
 /**
- * Filter changes to prevent duplicate inserts to a D2 pipeline.
- * Maintains D2 multiplicity at 1 for visible items so that deletes
- * properly reduce multiplicity to 0.
- *
- * Mutates `sentKeys` in place: adds keys on insert, removes on delete.
- */
-export function filterDuplicateInserts(
-  changes: Array<ChangeMessage<any, string | number>>,
-  sentKeys: Set<string | number>,
-): Array<ChangeMessage<any, string | number>> {
-  const filtered: Array<ChangeMessage<any, string | number>> = []
-  for (const change of changes) {
-    if (change.type === `insert`) {
-      if (sentKeys.has(change.key)) {
-        continue // Skip duplicate
-      }
-      sentKeys.add(change.key)
-    } else if (change.type === `delete`) {
-      sentKeys.delete(change.key)
-    }
-    filtered.push(change)
-  }
-  return filtered
-}
-
-/**
  * Prevents duplicate source inserts and makes update/delete retractions use
  * the exact row previously contributed to D2 for the key.
  */
