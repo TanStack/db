@@ -1,6 +1,7 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
+import { createDeferred } from '../src/deferred.js'
 import { SyncTransactionAbortedError } from '../src/errors.js'
 import { createLiveQueryCollection } from '../src/query/index.js'
 import { createTransaction } from '../src/transactions.js'
@@ -66,6 +67,17 @@ const publicationRoundArbitrary: fc.Arbitrary<PublicationRound> = fc
     outcome,
     metadata: [{ key, type: primaryMetadataType }, ...extraMetadata],
   }))
+
+const metadataCancellationArbitrary = fc.record({
+  canceledKeys: fc.uniqueArray(fc.integer({ min: 0, max: 2 }), {
+    minLength: 1,
+    maxLength: 3,
+  }),
+  retainedKeys: fc.uniqueArray(fc.integer({ min: 0, max: 2 }), {
+    minLength: 1,
+    maxLength: 3,
+  }),
+})
 
 async function createPublicationHarness(): Promise<PublicationHarness> {
   let sync!: SyncActions
@@ -288,6 +300,72 @@ async function runPublicationHistory(
   }
 }
 
+async function expectMetadataCancellationOwnership(
+  canceledKeys: ReadonlyArray<number>,
+  retainedKeys: ReadonlyArray<number>,
+): Promise<void> {
+  const harness = await createPublicationHarness()
+  const persistence = createDeferred<void>()
+  const heldTransaction = createTransaction({
+    mutationFn: () => persistence.promise,
+  })
+  heldTransaction.mutate(() => {
+    harness.rows.insert({ id: 99, position: 99 })
+  })
+  expect(heldTransaction.state).toBe(`persisting`)
+
+  const stageMetadata = (keys: ReadonlyArray<number>, owner: string) => {
+    const sync = harness.getSync()
+    sync.begin()
+    for (const key of keys) {
+      sync.metadata!.row.set(key, { owner })
+    }
+    const receipt = sync.commit()
+    if (receipt === true) {
+      throw new Error(`Persisting optimistic work did not hold metadata sync`)
+    }
+    const transaction = harness.rows._state.pendingSyncedTransactions.at(-1)!
+    void receipt.catch(() => undefined)
+    return { receipt, transaction }
+  }
+
+  const canceled = stageMetadata(canceledKeys, `canceled`)
+  const retained = stageMetadata(retainedKeys, `retained`)
+
+  try {
+    harness.rows._state.capturePreSyncVisibleState()
+    const expectedBefore = new Set([...canceledKeys, ...retainedKeys])
+    expect(harness.rows._state.recentlySyncedKeys).toEqual(expectedBefore)
+    expect(new Set(harness.rows._state.preSyncVisibleState.keys())).toEqual(
+      expectedBefore,
+    )
+    const batchCountBefore = harness.batches.length
+
+    harness.rows._state.cancelPendingSyncedTransaction(canceled.transaction)
+
+    const expectedAfter = new Set(retainedKeys)
+    expect(harness.rows._state.pendingSyncedTransactions).toEqual([
+      retained.transaction,
+    ])
+    expect(harness.rows._state.recentlySyncedKeys).toEqual(expectedAfter)
+    expect(new Set(harness.rows._state.preSyncVisibleState.keys())).toEqual(
+      expectedAfter,
+    )
+    expect(harness.batches).toHaveLength(batchCountBefore)
+    expect(harness.rows._state.syncedMetadata.size).toBe(0)
+    await expect(canceled.receipt).rejects.toBeInstanceOf(
+      SyncTransactionAbortedError,
+    )
+  } finally {
+    harness.rows._state.cancelPendingSyncedTransaction(retained.transaction)
+    await retained.receipt.catch(() => undefined)
+    persistence.resolve()
+    await heldTransaction.isPersisted.promise.catch(() => undefined)
+    harness.unsubscribe()
+    await Promise.all([harness.liveRows.cleanup(), harness.rows.cleanup()])
+  }
+}
+
 it(`publishes one event per key when metadata-only sync retires optimistic work`, async () => {
   await runPublicationHistory([
     {
@@ -305,10 +383,23 @@ it(`publishes one event per key when metadata-only sync retires optimistic work`
   ])
 })
 
+it(`releases only canceled metadata keys while another sync remains pending`, async () => {
+  await expectMetadataCancellationOwnership([0, 1], [1, 2])
+})
+
 fcTest.prop(
   [fc.array(publicationRoundArbitrary, { minLength: 1, maxLength: 8 })],
   oraclePropertyOptions(50, `collection-publication.metadata-only`),
 )(
   `keeps metadata-only optimistic settlement a valid keyed diff across histories`,
   runPublicationHistory,
+)
+
+fcTest.prop(
+  [metadataCancellationArbitrary],
+  oraclePropertyOptions(50, `collection-publication.metadata-cancellation`),
+)(
+  `keeps metadata suppression owned by the remaining pending transactions`,
+  ({ canceledKeys, retainedKeys }) =>
+    expectMetadataCancellationOwnership(canceledKeys, retainedKeys),
 )

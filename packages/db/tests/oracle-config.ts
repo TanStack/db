@@ -3,6 +3,7 @@ type OracleEnvironment = Record<string, string | undefined>
 const staticOracleProperties = [
   `collection-sync.reentrant-drain`,
   `collection-state.retention`,
+  `collection-publication.metadata-cancellation`,
   `collection-publication.metadata-only`,
   `coverage-registry.claim-churn`,
   `coverage-registry.state-machine`,
