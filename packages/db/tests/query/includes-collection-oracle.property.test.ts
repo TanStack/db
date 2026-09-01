@@ -50,21 +50,35 @@ type FacadeCandidateScanScenario = {
 }
 
 class ThrowingUpdateIndex extends BasicIndex<number> {
-  throwAfterUpdate = false
-  throwBeforeBuild = false
-  throwAfterBuild = false
+  updateFailure: { error: unknown } | undefined
+  buildFailure:
+    | { error: unknown; stage: `before` | `after` }
+    | undefined
   buildCalls = 0
 
   override update(key: number, oldItem: unknown, newItem: unknown): void {
     super.update(key, oldItem, newItem)
-    if (this.throwAfterUpdate) throw new Error(`root index failed`)
+    if (this.updateFailure) throw this.updateFailure.error
   }
 
   override build(entries: Iterable<[number, unknown]>): void {
     this.buildCalls += 1
-    if (this.throwBeforeBuild) throw new Error(`root index rebuild failed`)
+    if (this.buildFailure?.stage === `before`) {
+      throw this.buildFailure.error
+    }
     super.build(entries)
-    if (this.throwAfterBuild) throw new Error(`root index rebuild failed`)
+    if (this.buildFailure?.stage === `after`) {
+      throw this.buildFailure.error
+    }
+  }
+}
+
+function captureFailure(callback: () => void): { error: unknown } | undefined {
+  try {
+    callback()
+    return undefined
+  } catch (error) {
+    return { error }
   }
 }
 
@@ -1149,7 +1163,7 @@ describe(`Collection-valued includes oracle`, () => {
       const rootLayoutRevisionBeforeFailure = live._layoutRevision
       const childStateRevisionBeforeFailure = facade._stateRevision
       const childLayoutRevisionBeforeFailure = facade._layoutRevision
-      rootIndex.throwAfterUpdate = true
+      rootIndex.updateFailure = { error: new Error(`root index failed`) }
 
       try {
         expect(() =>
@@ -1185,7 +1199,7 @@ describe(`Collection-valued includes oracle`, () => {
         expect(childObserver.getSnapshot()).toBe(observerBeforeFailure)
         expect(observerNotifications).toBe(0)
 
-        rootIndex.throwAfterUpdate = false
+        rootIndex.updateFailure = undefined
         // Only the root changes on retry. The child deltas consumed by the
         // failed graph turn must remain staged until the whole publication
         // commits; the source will not emit them again.
@@ -1216,7 +1230,7 @@ describe(`Collection-valued includes oracle`, () => {
         expect(childObserver.getSnapshot()).not.toBe(observerBeforeFailure)
         expect(observerNotifications).toBe(1)
       } finally {
-        rootIndex.throwAfterUpdate = false
+        rootIndex.updateFailure = undefined
         childObserver.dispose()
         rootSubscription.unsubscribe()
         childSubscription.unsubscribe()
@@ -1296,14 +1310,22 @@ describe(`Collection-valued includes oracle`, () => {
           ].includes(10),
         })
       })
+      const readinessOrder: Array<`facade` | `root`> = []
+      const unsubscribeRootReady = live.on(`status:ready`, () => {
+        readinessOrder.push(`root`)
+      })
+      const unsubscribeFacadeReady = facade.on(`status:ready`, () => {
+        readinessOrder.push(`facade`)
+      })
       const rootRevision = live._stateRevision
       const childRevision = facade._stateRevision
-      rootIndex.throwAfterUpdate = true
-      rootIndex.throwBeforeBuild = true
-      facadeIndex.throwBeforeBuild = true
+      const installFailure = new Error(`root index failed`)
+      rootIndex.updateFailure = { error: installFailure }
+      rootIndex.buildFailure = { error: false, stage: `before` }
+      facadeIndex.buildFailure = { error: undefined, stage: `before` }
 
       try {
-        expect(() =>
+        const failedInstall = captureFailure(() =>
           nodes.writeBatch([
             {
               type: `update`,
@@ -1314,7 +1336,8 @@ describe(`Collection-valued includes oracle`, () => {
               value: { ...initialChild, value: 2 },
             },
           ]),
-        ).toThrow(`root index failed`)
+        )
+        expect(failedInstall?.error).toBe(installFailure)
         expect(live.status).toBe(`error`)
         expect(live.get(1)!.value).toBe(1)
         expect(facade.toArray.map(({ id, value }) => ({ id, value }))).toEqual([
@@ -1328,13 +1351,13 @@ describe(`Collection-valued includes oracle`, () => {
           { root: 1, child: 1, facadeHasFailedValue: true },
         ])
 
-        rootIndex.throwAfterUpdate = false
-        facadeIndex.throwBeforeBuild = false
+        rootIndex.updateFailure = undefined
         const rootBuildCalls = rootIndex.buildCalls
         const facadeBuildCalls = facadeIndex.buildCalls
-        expect(() =>
+        const simultaneousRecoveryFailure = captureFailure(() =>
           nodes.write(`update`, { ...initialParent, value: 3 }),
-        ).toThrow(`root index rebuild failed`)
+        )
+        expect(simultaneousRecoveryFailure).toEqual({ error: false })
         expect(rootIndex.buildCalls).toBe(rootBuildCalls + 1)
         expect(facadeIndex.buildCalls).toBe(facadeBuildCalls + 1)
         expect(live.status).toBe(`error`)
@@ -1344,16 +1367,31 @@ describe(`Collection-valued includes oracle`, () => {
         expect(childPublications).toEqual([])
         expect(errorSnapshots).toEqual([
           { root: 1, child: 1, facadeHasFailedValue: true },
+          { root: 1, child: 1, facadeHasFailedValue: true },
+        ])
+
+        facadeIndex.buildFailure = undefined
+        const facadeRecoveryFailure = captureFailure(() =>
+          nodes.write(`update`, { ...initialParent, value: 4 }),
+        )
+        expect(facadeRecoveryFailure).toEqual({ error: false })
+        expect(rootIndex.buildCalls).toBe(rootBuildCalls + 2)
+        expect(facadeIndex.buildCalls).toBe(facadeBuildCalls + 2)
+        expect(errorSnapshots).toEqual([
+          { root: 1, child: 1, facadeHasFailedValue: true },
+          { root: 1, child: 1, facadeHasFailedValue: true },
           { root: 1, child: 1, facadeHasFailedValue: false },
         ])
         expect([...facadeIndex.equalityLookup(1)]).toEqual([10])
         expect([...facadeIndex.equalityLookup(2)]).toEqual([])
 
-        rootIndex.throwBeforeBuild = false
-        nodes.write(`update`, { ...initialParent, value: 4 })
+        rootIndex.buildFailure = undefined
+        nodes.write(`update`, { ...initialParent, value: 5 })
 
         expect(live.status).toBe(`ready`)
-        expect(live.get(1)!.value).toBe(4)
+        expect(facade.status).toBe(`ready`)
+        expect(readinessOrder).toEqual([`facade`, `root`])
+        expect(live.get(1)!.value).toBe(5)
         expect(facade.toArray.map(({ id, value }) => ({ id, value }))).toEqual([
           { id: 10, value: 2 },
         ])
@@ -1363,12 +1401,23 @@ describe(`Collection-valued includes oracle`, () => {
         expect(facade._stateRevision).toBe(childRevision + 1)
         expect([...rootIndex.equalityLookup(2)]).toEqual([])
         expect([...rootIndex.equalityLookup(3)]).toEqual([])
-        expect([...rootIndex.equalityLookup(4)]).toEqual([1])
+        expect([...rootIndex.equalityLookup(4)]).toEqual([])
+        expect([...rootIndex.equalityLookup(5)]).toEqual([1])
+
+        const facadeRevisionAfterRecovery = facade._stateRevision
+        nodes.write(`update`, { ...initialParent, value: 6 })
+        expect(live.get(1)!.value).toBe(6)
+        expect(rootPublications).toHaveLength(2)
+        expect(childPublications).toHaveLength(1)
+        expect(facade._stateRevision).toBe(facadeRevisionAfterRecovery)
+        expect(readinessOrder).toEqual([`facade`, `root`])
       } finally {
-        rootIndex.throwAfterUpdate = false
-        rootIndex.throwBeforeBuild = false
-        facadeIndex.throwBeforeBuild = false
+        rootIndex.updateFailure = undefined
+        rootIndex.buildFailure = undefined
+        facadeIndex.buildFailure = undefined
         unsubscribeError()
+        unsubscribeRootReady()
+        unsubscribeFacadeReady()
         rootSubscription.unsubscribe()
         childSubscription.unsubscribe()
         await Promise.all([live.cleanup(), nodes.collection.cleanup()])
