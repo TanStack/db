@@ -63,11 +63,8 @@ export type FacadePublication = {
  * graph's canonical bucket-row deltas to those facades.
  */
 export class BucketFacadeAdapter {
-  private readonly pending = new Map<
-    string,
-    Map<string, Map<string, PendingRow>>
-  >()
-  private readonly pendingActivity = new Map<string, Map<string, number>>()
+  private pending = new Map<string, Map<string, Map<string, PendingRow>>>()
+  private pendingActivity = new Map<string, Map<string, number>>()
   private readonly activeBuckets = new Map<string, Set<string>>()
   private readonly entries = new Map<string, Map<string, FacadeEntry>>()
   private readonly retiredEntries = new Map<string, Map<string, FacadeEntry>>()
@@ -106,6 +103,8 @@ export class BucketFacadeAdapter {
 
   flush(): FacadePublication {
     const snapshot = this.snapshot()
+    const installedPending = this.pending
+    const installedActivity = this.pendingActivity
     const deferredEntries = new Set<FacadeEntry>()
     const publications: Array<PublicationDeferral> = []
     const readyEntries = new Set<FacadeEntry>()
@@ -119,7 +118,7 @@ export class BucketFacadeAdapter {
     // their containing rows are written to the next facade.
     try {
       for (const compilation of this.compilations) {
-        const activity = this.pendingActivity.get(compilation.edgeId)
+        const activity = installedActivity.get(compilation.edgeId)
         const active = this.getActiveBuckets(compilation.edgeId)
         const newBaselines: Array<FacadeEntry> = []
         for (const [bucketKey, multiplicity] of activity ?? []) {
@@ -129,7 +128,7 @@ export class BucketFacadeAdapter {
           }
         }
 
-        const buckets = this.pending.get(compilation.edgeId)
+        const buckets = installedPending.get(compilation.edgeId)
         for (const [bucketKey, changes] of buckets ?? []) {
           const existing = this.entries.get(compilation.edgeId)?.get(bucketKey)
           if (!active.has(bucketKey) && !existing) continue
@@ -177,8 +176,11 @@ export class BucketFacadeAdapter {
       }
       throw error
     }
-    this.pending.clear()
-    this.pendingActivity.clear()
+    // Detach, rather than clear, the deltas installed by this attempt. The
+    // containing root publication decides whether they commit or must be
+    // replayed with the next graph turn.
+    this.pending = new Map()
+    this.pendingActivity = new Map()
 
     let prepared = false
     let closed = false
@@ -216,7 +218,17 @@ export class BucketFacadeAdapter {
       rollback: () => {
         if (closed || prepared) return
         closed = true
-        this.rollbackInstallation(snapshot, deferredEntries, publications)
+        runAllCallbacks([
+          () => {
+            this.pending = mergePendingRows(installedPending, this.pending)
+            this.pendingActivity = mergePendingActivity(
+              installedActivity,
+              this.pendingActivity,
+            )
+          },
+          () =>
+            this.rollbackInstallation(snapshot, deferredEntries, publications),
+        ])
       },
     }
   }
@@ -621,4 +633,76 @@ function isPlainObject(value: unknown): value is Record<PropertyKey, unknown> {
   if (value === null || typeof value !== `object`) return false
   const prototype = Object.getPrototypeOf(value)
   return prototype === Object.prototype || prototype === null
+}
+
+function mergePendingRows(
+  earlier: Map<string, Map<string, Map<string, PendingRow>>>,
+  later: Map<string, Map<string, Map<string, PendingRow>>>,
+): Map<string, Map<string, Map<string, PendingRow>>> {
+  const merged = new Map<string, Map<string, Map<string, PendingRow>>>()
+
+  for (const [edgeId, buckets] of earlier) {
+    const mergedBuckets = new Map<string, Map<string, PendingRow>>()
+    merged.set(edgeId, mergedBuckets)
+    for (const [bucketKey, rows] of buckets) {
+      mergedBuckets.set(
+        bucketKey,
+        new Map(
+          [...rows].map(([key, change]) => [key, { ...change }] as const),
+        ),
+      )
+    }
+  }
+
+  for (const [edgeId, buckets] of later) {
+    let mergedBuckets = merged.get(edgeId)
+    if (!mergedBuckets) {
+      mergedBuckets = new Map()
+      merged.set(edgeId, mergedBuckets)
+    }
+    for (const [bucketKey, rows] of buckets) {
+      let mergedRows = mergedBuckets.get(bucketKey)
+      if (!mergedRows) {
+        mergedRows = new Map()
+        mergedBuckets.set(bucketKey, mergedRows)
+      }
+      for (const [key, laterChange] of rows) {
+        const earlierChange = mergedRows.get(key)
+        if (!earlierChange) {
+          mergedRows.set(key, { ...laterChange })
+          continue
+        }
+        earlierChange.deletes += laterChange.deletes
+        earlierChange.inserts += laterChange.inserts
+        if (laterChange.inserts > 0) earlierChange.value = laterChange.value
+      }
+    }
+  }
+
+  return merged
+}
+
+function mergePendingActivity(
+  earlier: Map<string, Map<string, number>>,
+  later: Map<string, Map<string, number>>,
+): Map<string, Map<string, number>> {
+  const merged = new Map(
+    [...earlier].map(
+      ([edgeId, buckets]) => [edgeId, new Map(buckets)] as const,
+    ),
+  )
+  for (const [edgeId, buckets] of later) {
+    let mergedBuckets = merged.get(edgeId)
+    if (!mergedBuckets) {
+      mergedBuckets = new Map()
+      merged.set(edgeId, mergedBuckets)
+    }
+    for (const [bucketKey, multiplicity] of buckets) {
+      mergedBuckets.set(
+        bucketKey,
+        (mergedBuckets.get(bucketKey) ?? 0) + multiplicity,
+      )
+    }
+  }
+  return merged
 }

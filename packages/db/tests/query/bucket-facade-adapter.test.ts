@@ -427,7 +427,7 @@ describe(`BucketFacadeAdapter`, () => {
     await adapter.cleanup()
   })
 
-  it(`drops pending parent changes when facade flushing fails`, async () => {
+  it(`retries pending parent changes when facade flushing fails`, async () => {
     type Parent = { id: number; groupId: number }
     type Child = { id: number; groupId: number }
     const parents = createCollection(
@@ -486,7 +486,7 @@ describe(`BucketFacadeAdapter`, () => {
         throw new Error(`Missing live query sync state`)
       }
       syncState.flushPendingChanges()
-      expect(live.has(2)).toBe(false)
+      expect(live.has(2)).toBe(true)
     } finally {
       CollectionConfigBuilder.prototype.getConfig = originalGetConfig
       vi.restoreAllMocks()

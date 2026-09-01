@@ -1045,6 +1045,7 @@ export class CollectionConfigBuilder<
     // transaction, avoiding duplicate key errors when joins produce multiple outputs
     // for the same key (e.g., first output with null, then output with joined data).
     let pendingChanges: Map<unknown, Changes<TResult>> = new Map()
+    let rootNeedsReady = false
 
     pipeline.pipe(
       output((data) => {
@@ -1120,12 +1121,36 @@ export class CollectionConfigBuilder<
           commit()
         }
       } catch (error) {
-        pendingChanges = new Map()
-        rootPublication?.discard()
-        if (rootStateSnapshot) {
-          config.collection._restorePublicationState(rootStateSnapshot)
+        const failedRootState = rootStateSnapshot
+        try {
+          runAllCallbacks([
+            ...(rootPublication ? [rootPublication.discard] : []),
+            ...(failedRootState
+              ? [
+                  () => {
+                    try {
+                      config.collection._restorePublicationState(
+                        failedRootState,
+                      )
+                    } catch (restoreError) {
+                      rootNeedsReady = true
+                      try {
+                        config.markError(restoreError)
+                      } catch {
+                        // The install failure remains authoritative. Recovery
+                        // still continues through every facade participant.
+                      }
+                      throw restoreError
+                    }
+                  },
+                ]
+              : []),
+            ...(facadePublication ? [facadePublication.rollback] : []),
+          ])
+        } catch {
+          // Preserve the graph-install failure after attempting every recovery
+          // step. A failed root restore remains retryable from staged deltas.
         }
-        facadePublication?.rollback()
         throw error
       }
       pendingChanges = new Map()
@@ -1136,6 +1161,14 @@ export class CollectionConfigBuilder<
       runAllCallbacks([
         ...(rootPublication ? [rootPublication.prepare] : []),
         facadePublication.prepare,
+        ...(rootNeedsReady
+          ? [
+              () => {
+                rootNeedsReady = false
+                config.markReady()
+              },
+            ]
+          : []),
         ...(rootPublication ? [rootPublication.publish] : []),
         facadePublication.publish,
       ])

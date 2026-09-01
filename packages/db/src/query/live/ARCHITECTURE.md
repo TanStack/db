@@ -1154,14 +1154,19 @@ read another participating Collection without seeing new rows behind an old
 revision. If a later root or containing-facade application fails before that
 release, rollback restores the installed state and discards both the held
 events and their revision advances. Routing and identity remain inside D2.
+The root and facade adapters retain the graph deltas consumed by that failed
+attempt. A later graph turn retries the whole uncommitted relation even when
+the source emits only an unrelated root delta; D2 does not replay a delta that
+an adapter has already consumed.
 Facade rollback restores the Collection's internal publication snapshot. It
 must not use a public sync transaction or emit change, layout, readiness, or
 truncate lifecycle events for state that never committed.
 Fresh-facade readiness joins the prepared publication release only after every
 facade and root install has succeeded, and it precedes root callbacks. A
 recovery failure attempts every remaining restore and publication discard,
-preserves the original graph-install error, and marks the affected facade as
-errored so a later successful publication can recover it.
+preserves the original graph-install error, and marks the affected root or
+facade as errored so a later successful publication can recover it and restore
+readiness.
 Once release begins, one subscriber callback failure cannot suppress another
 prepared root or facade publication. Release attempts every participant, then
 rethrows the first callback failure unchanged, including `null` or `undefined`.

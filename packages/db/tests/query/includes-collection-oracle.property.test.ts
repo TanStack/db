@@ -51,10 +51,16 @@ type FacadeCandidateScanScenario = {
 
 class ThrowingUpdateIndex extends BasicIndex<number> {
   throwAfterUpdate = false
+  throwAfterBuild = false
 
   override update(key: number, oldItem: unknown, newItem: unknown): void {
     super.update(key, oldItem, newItem)
     if (this.throwAfterUpdate) throw new Error(`root index failed`)
+  }
+
+  override build(entries: Iterable<[number, unknown]>): void {
+    super.build(entries)
+    if (this.throwAfterBuild) throw new Error(`root index rebuild failed`)
   }
 }
 
@@ -383,9 +389,9 @@ async function expectFacadeCandidateScan({
     )
     if (finalLayout === `moved`) {
       expect(changedKeyOrder).toEqual([10, 20])
-      expect(
-        changedKeyOrder[candidatePosition === `first` ? 0 : 1],
-      ).toBe(candidateRow.id)
+      expect(changedKeyOrder[candidatePosition === `first` ? 0 : 1]).toBe(
+        candidateRow.id,
+      )
     } else {
       expect(changedKeyOrder).toEqual([valueRow.id])
     }
@@ -1176,34 +1182,24 @@ describe(`Collection-valued includes oracle`, () => {
         expect(observerNotifications).toBe(0)
 
         rootIndex.throwAfterUpdate = false
-        nodes.writeBatch([
-          {
-            type: `update`,
-            value: { ...initialParent, value: 3 },
-          },
-          {
-            type: `update`,
-            value: { ...initialChild, value: 4 },
-          },
-          {
-            type: `update`,
-            value: { ...initialSibling, value: 3 },
-          },
-        ])
+        // Only the root changes on retry. The child deltas consumed by the
+        // failed graph turn must remain staged until the whole publication
+        // commits; the source will not emit them again.
+        nodes.write(`update`, { ...initialParent, value: 3 })
         expect(live.get(1)!.value).toBe(3)
         expect([...rootIndex.equalityLookup(1)]).toEqual([])
         expect([...rootIndex.equalityLookup(3)]).toEqual([1])
         expect(facade.toArray.map(({ id, value }) => ({ id, value }))).toEqual([
-          { id: 20, value: 3 },
-          { id: 10, value: 4 },
+          { id: 20, value: 0 },
+          { id: 10, value: 3 },
         ])
         expect(rootPublications).toHaveLength(1)
         expect(childPublications).toHaveLength(2)
         expect(rootCallbackFacadeSnapshots).toEqual([
           {
             rows: [
-              { id: 20, value: 3 },
-              { id: 10, value: 4 },
+              { id: 20, value: 0 },
+              { id: 10, value: 3 },
             ],
             stateRevision: childStateRevisionBeforeFailure + 1,
             layoutRevision: childLayoutRevisionBeforeFailure + 1,
@@ -1218,6 +1214,111 @@ describe(`Collection-valued includes oracle`, () => {
       } finally {
         rootIndex.throwAfterUpdate = false
         childObserver.dispose()
+        rootSubscription.unsubscribe()
+        childSubscription.unsubscribe()
+        await Promise.all([live.cleanup(), nodes.collection.cleanup()])
+      }
+    },
+  )
+
+  fcTest(
+    `root restore failure preserves the install error and releases facade rollback`,
+    async () => {
+      type NodeRow = {
+        id: number
+        kind: `parent` | `child`
+        group: number
+        value: number
+      }
+      const initialParent: NodeRow = {
+        id: 1,
+        kind: `parent`,
+        group: 1,
+        value: 1,
+      }
+      const initialChild: NodeRow = {
+        id: 10,
+        kind: `child`,
+        group: 1,
+        value: 1,
+      }
+      const nodes = createControlledCollection<NodeRow>(
+        `root-restore-failure-nodes`,
+        [initialParent, initialChild],
+      )
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ parent: nodes.collection })
+          .where(({ parent }) => eq(parent.kind, `parent`))
+          .select(({ parent }) => ({
+            id: parent.id,
+            value: parent.value,
+            children: q
+              .from({ child: nodes.collection })
+              .where(({ child }) => eq(child.kind, `child`))
+              .where(({ child }) => eq(child.group, parent.group)),
+          })),
+      )
+
+      await live.preload()
+      const facade = live.get(1)!.children
+      const rootIndex = live.createIndex((row) => row.value, {
+        indexType: ThrowingUpdateIndex,
+      }) as ThrowingUpdateIndex
+      const rootPublications: Array<unknown> = []
+      const childPublications: Array<unknown> = []
+      const rootSubscription = live.subscribeChanges(
+        (batch) => rootPublications.push(...batch),
+        { includeInitialState: false },
+      )
+      const childSubscription = facade.subscribeChanges(
+        (batch) => childPublications.push(...batch),
+        { includeInitialState: false },
+      )
+      const rootRevision = live._stateRevision
+      const childRevision = facade._stateRevision
+      rootIndex.throwAfterUpdate = true
+      rootIndex.throwAfterBuild = true
+
+      try {
+        expect(() =>
+          nodes.writeBatch([
+            {
+              type: `update`,
+              value: { ...initialParent, value: 2 },
+            },
+            {
+              type: `update`,
+              value: { ...initialChild, value: 2 },
+            },
+          ]),
+        ).toThrow(`root index failed`)
+        expect(live.status).toBe(`error`)
+        expect(live.get(1)!.value).toBe(1)
+        expect(facade.toArray.map(({ id, value }) => ({ id, value }))).toEqual([
+          { id: 10, value: 1 },
+        ])
+        expect(rootPublications).toEqual([])
+        expect(childPublications).toEqual([])
+        expect(live._stateRevision).toBe(rootRevision)
+        expect(facade._stateRevision).toBe(childRevision)
+
+        rootIndex.throwAfterUpdate = false
+        rootIndex.throwAfterBuild = false
+        nodes.write(`update`, { ...initialParent, value: 3 })
+
+        expect(live.status).toBe(`ready`)
+        expect(live.get(1)!.value).toBe(3)
+        expect(facade.toArray.map(({ id, value }) => ({ id, value }))).toEqual([
+          { id: 10, value: 2 },
+        ])
+        expect(rootPublications).toHaveLength(1)
+        expect(childPublications).toHaveLength(1)
+        expect(live._stateRevision).toBe(rootRevision + 1)
+        expect(facade._stateRevision).toBe(childRevision + 1)
+      } finally {
+        rootIndex.throwAfterUpdate = false
+        rootIndex.throwAfterBuild = false
         rootSubscription.unsubscribe()
         childSubscription.unsubscribe()
         await Promise.all([live.cleanup(), nodes.collection.cleanup()])
@@ -1285,11 +1386,7 @@ describe(`Collection-valued includes oracle`, () => {
     },
   )
 
-  for (const {
-    throwingParentId,
-    position,
-    failure,
-  } of [
+  for (const { throwingParentId, position, failure } of [
     { throwingParentId: 1, position: `first`, failure: `error` },
     { throwingParentId: 2, position: `middle`, failure: `undefined` },
     { throwingParentId: 3, position: `last`, failure: `null` },
@@ -1315,9 +1412,7 @@ describe(`Collection-valued includes oracle`, () => {
               id: parent.id,
               children: q
                 .from({ child: children.collection })
-                .where(({ child }) =>
-                  eq(child.parentGroup, parent.group),
-                ),
+                .where(({ child }) => eq(child.parentGroup, parent.group)),
             })),
         )
 
@@ -1583,9 +1678,7 @@ describe(`Collection-valued includes oracle`, () => {
                 value: child.value,
                 grandchildren: q
                   .from({ grandchild: nodes.collection })
-                  .where(({ grandchild }) =>
-                    eq(grandchild.kind, `grandchild`),
-                  )
+                  .where(({ grandchild }) => eq(grandchild.kind, `grandchild`))
                   .where(({ grandchild }) =>
                     eq(grandchild.parentGroup, child.group),
                   )
@@ -1802,9 +1895,7 @@ describe(`Collection-valued includes oracle`, () => {
                 childRevision = facade._stateRevision
                 childSubscription = facade.subscribeChanges(
                   (batch) => {
-                    childBatches.push(
-                      batch.map((change) => change.value.value),
-                    )
+                    childBatches.push(batch.map((change) => change.value.value))
                   },
                   { includeInitialState: false },
                 )
@@ -2280,9 +2371,9 @@ describe(`Collection-valued includes oracle`, () => {
         })
         await parentReady
         expect(
-          live.utils[LIVE_QUERY_INTERNAL]
-            .getLastWindowOutcomes()
-            .map(({ sourceId }) => sourceId),
+          live.utils[LIVE_QUERY_INTERNAL].getLastWindowOutcomes().map(
+            ({ sourceId }) => sourceId,
+          ),
         ).toEqual([`initial`, `before-nested`, `rollback`, `after-catch`])
       } finally {
         subscription.unsubscribe()
