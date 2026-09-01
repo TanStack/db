@@ -64,13 +64,13 @@ describe(`BucketFacadeAdapter`, () => {
     await adapter.cleanup()
   })
 
-  it(`restores facade state when a flush fails after writing`, async () => {
+  it(`restores facade state without public effects when a flush fails`, async () => {
     const graph = new D2()
     const rows = graph.newInput<[string, BucketRow]>()
     const activeBuckets = graph.newInput<[string, true]>()
     const adapter = new BucketFacadeAdapter(
       `facade-rollback-parent`,
-      [{ edgeId: `children`, rows, activeBuckets, hasOrderBy: false }],
+      [{ edgeId: `children`, rows, activeBuckets, hasOrderBy: true }],
       () => {},
     )
     graph.finalize()
@@ -81,10 +81,7 @@ describe(`BucketFacadeAdapter`, () => {
     rows.sendData(
       new MultiSet([
         [
-          [
-            bucketKey,
-            { publicKey: original.id, value: original, order: undefined },
-          ],
+          [bucketKey, { publicKey: original.id, value: original, order: `0` }],
           1,
         ],
       ]),
@@ -104,6 +101,20 @@ describe(`BucketFacadeAdapter`, () => {
     const subscription = facade.subscribeChanges((changes) => {
       publications.push(changes)
     })
+    let layoutPublications = 0
+    const unsubscribeLayout = facade._subscribeLayoutChanges(() => {
+      layoutPublications++
+    })
+    let statusChanges = 0
+    const unsubscribeStatus = facade.on(`status:change`, () => {
+      statusChanges++
+    })
+    let truncates = 0
+    const unsubscribeTruncate = facade.on(`truncate`, () => {
+      truncates++
+    })
+    const stateRevision = facade._stateRevision
+    const layoutRevision = facade._layoutRevision
 
     const entries = (
       adapter as unknown as {
@@ -124,13 +135,11 @@ describe(`BucketFacadeAdapter`, () => {
     }
 
     const replacement = { id: 1, value: `replacement` }
+    const added = { id: 2, value: `added` }
     rows.sendData(
       new MultiSet([
         [
-          [
-            bucketKey,
-            { publicKey: original.id, value: original, order: undefined },
-          ],
+          [bucketKey, { publicKey: original.id, value: original, order: `0` }],
           -1,
         ],
         [
@@ -139,11 +148,12 @@ describe(`BucketFacadeAdapter`, () => {
             {
               publicKey: replacement.id,
               value: replacement,
-              order: undefined,
+              order: `2`,
             },
           ],
           1,
         ],
+        [[bucketKey, { publicKey: added.id, value: added, order: `1` }], 1],
       ]),
     )
     graph.run()
@@ -151,7 +161,16 @@ describe(`BucketFacadeAdapter`, () => {
     expect(() => adapter.flush()).toThrow(`facade flush failed`)
     expect(facade.toArray.map(stripVirtualProps)).toEqual([original])
     expect(publications).toEqual([])
+    expect(layoutPublications).toBe(0)
+    expect(statusChanges).toBe(0)
+    expect(truncates).toBe(0)
+    expect(facade._stateRevision).toBe(stateRevision)
+    expect(facade._layoutRevision).toBe(layoutRevision)
+    expect(facade.status).toBe(`ready`)
 
+    unsubscribeTruncate()
+    unsubscribeStatus()
+    unsubscribeLayout()
     subscription.unsubscribe()
     await adapter.cleanup()
   })

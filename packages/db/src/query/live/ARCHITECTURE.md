@@ -1154,6 +1154,9 @@ read another participating Collection without seeing new rows behind an old
 revision. If a later root or containing-facade application fails before that
 release, rollback restores the installed state and discards both the held
 events and their revision advances. Routing and identity remain inside D2.
+Facade rollback restores the Collection's internal publication snapshot. It
+must not use a public sync transaction or emit change, layout, readiness, or
+truncate lifecycle events for state that never committed.
 Once release begins, one subscriber callback failure cannot suppress another
 prepared root or facade publication. Release attempts every participant, then
 rethrows the first callback failure unchanged, including `null` or `undefined`.

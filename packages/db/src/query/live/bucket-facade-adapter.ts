@@ -5,6 +5,7 @@ import { BUCKET_FACADE_REF } from './materialized-pipeline.js'
 import type { Collection } from '../../collection/index.js'
 import type { SyncConfig } from '../../types.js'
 import type { PublicationDeferral } from '../../collection/changes.js'
+import type { CollectionPublicationStateSnapshot } from '../../collection/state.js'
 import type {
   BucketFacadeCompilation,
   BucketFacadeRef,
@@ -30,17 +31,23 @@ type FacadeEntry = {
   currentOrder: Map<string | number, string | undefined>
 }
 
+type FacadeEntrySnapshot = {
+  publicationState: CollectionPublicationStateSnapshot<
+    Record<PropertyKey, unknown>,
+    string | number
+  >
+  currentOrder: Map<string | number, string | undefined>
+  rows: Array<{
+    key: string | number
+    value: object
+    order: string | undefined
+  }>
+}
+
 type FacadeSnapshot = {
   activeBuckets: Map<string, Set<string>>
   entries: Map<string, Map<string, FacadeEntry>>
-  rows: Map<
-    FacadeEntry,
-    Array<{
-      key: string | number
-      value: object
-      order: string | undefined
-    }>
-  >
+  entryStates: Map<FacadeEntry, FacadeEntrySnapshot>
 }
 
 export type FacadePublication = {
@@ -256,24 +263,29 @@ export class BucketFacadeAdapter {
   }
 
   private snapshot(): FacadeSnapshot {
-    const rows = new Map<
-      FacadeEntry,
-      Array<{
-        key: string | number
-        value: object
-        order: string | undefined
-      }>
-    >()
-    for (const byBucket of this.entries.values()) {
-      for (const entry of byBucket.values()) {
-        rows.set(
-          entry,
-          [...entry.collection._state.syncedData].map(([key, value]) => ({
+    const entryStates = new Map<FacadeEntry, FacadeEntrySnapshot>()
+    for (const [edgeId, byBucket] of this.entries) {
+      for (const [bucketKey, entry] of byBucket) {
+        const affectedKeys = new Set(entry.collection._state.syncedData.keys())
+        for (const change of this.pending
+          .get(edgeId)
+          ?.get(bucketKey)
+          ?.values() ?? []) {
+          const key = change.value.publicKey
+          if (typeof key === `string` || typeof key === `number`) {
+            affectedKeys.add(key)
+          }
+        }
+        entryStates.set(entry, {
+          publicationState:
+            entry.collection._snapshotPublicationState(affectedKeys),
+          currentOrder: new Map(entry.currentOrder),
+          rows: [...entry.collection._state.syncedData].map(([key, value]) => ({
             key,
             value,
             order: entry.currentOrder.get(key),
           })),
-        )
+        })
       }
     }
     return {
@@ -289,7 +301,7 @@ export class BucketFacadeAdapter {
           new Map(byBucket),
         ]),
       ),
-      rows,
+      entryStates,
     }
   }
 
@@ -308,18 +320,17 @@ export class BucketFacadeAdapter {
 
     for (const entry of changedEntries) {
       if (!previousEntries.has(entry)) continue
-      const sync = entry.sync
-      if (!sync) continue
-      sync.begin()
-      sync.truncate()
+      const entryState = snapshot.entryStates.get(entry)
+      if (!entryState) continue
+      entry.collection._restorePublicationState(entryState.publicationState)
       entry.currentOrder.clear()
-      for (const row of snapshot.rows.get(entry) ?? []) {
+      for (const [key, order] of entryState.currentOrder) {
+        entry.currentOrder.set(key, order)
+      }
+      for (const row of entryState.rows) {
         entry.keys.set(row.value, row.key)
         if (row.order !== undefined) entry.order.set(row.value, row.order)
-        entry.currentOrder.set(row.key, row.order)
-        sync.write({ type: `insert`, value: row.value })
       }
-      sync.commit()
     }
 
     this.entries.clear()
