@@ -161,6 +161,68 @@ it(`releases retained keys after long unique-key churn`, async () => {
   await runRetentionHistory(actions)
 })
 
+it(`starts a new sync session without retained publication state`, async () => {
+  let sync!: SyncActions
+  const collection = createCollection<RetainedRow, number>({
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      rowUpdateMode: `full`,
+      sync: (actions) => {
+        sync = actions
+        actions.markReady()
+      },
+    },
+  })
+  const events: Array<{ type: string; key: number }> = []
+  let subscription: ReturnType<typeof collection.subscribeChanges> | undefined
+
+  try {
+    sync.begin()
+    sync.write({ type: `insert`, value: { id: 1, value: 1 } })
+    expect(sync.commit()).toBe(true)
+
+    subscription = collection.subscribeChanges(
+      (changes) => {
+        events.push(
+          ...changes.map((change) => ({
+            type: change.type,
+            key: change.key,
+          })),
+        )
+      },
+      { includeInitialState: false },
+    )
+
+    sync.begin()
+    sync.write({ type: `update`, value: { id: 1, value: 2 } })
+    collection._state.capturePreSyncVisibleState()
+    expect(collection._state.preSyncVisibleState.size).toBe(1)
+    expect(collection._state.recentlySyncedKeys).toEqual(new Set([1]))
+
+    const cleanup = collection.cleanup()
+    const retainedAfterCleanup = {
+      visibleRows: collection._state.preSyncVisibleState.size,
+      recentKeys: collection._state.recentlySyncedKeys.size,
+    }
+    await cleanup
+
+    events.length = 0
+    collection.startSyncImmediate()
+    sync.begin()
+    sync.write({ type: `insert`, value: { id: 1, value: 3 } })
+    expect(sync.commit()).toBe(true)
+
+    expect({ retainedAfterCleanup, events }).toEqual({
+      retainedAfterCleanup: { visibleRows: 0, recentKeys: 0 },
+      events: [{ type: `insert`, key: 1 }],
+    })
+  } finally {
+    subscription?.unsubscribe()
+    await collection.cleanup()
+  }
+})
+
 fcTest.prop(
   [fc.array(retentionActionArbitrary, { minLength: 1, maxLength: 20 })],
   oraclePropertyOptions(100, `collection-state.retention`),

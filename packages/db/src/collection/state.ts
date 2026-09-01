@@ -1884,6 +1884,8 @@ export class CollectionStateManager<
     this.size = 0
     this.pendingSyncedTransactions = []
     this.syncedKeys.clear()
+    this.preSyncVisibleState.clear()
+    this.recentlySyncedKeys.clear()
     this.hasReceivedFirstCommit = false
   }
 }

@@ -1388,6 +1388,11 @@ window progress; only a complete publication snapshot reaches readers.
 Release, truncate, replacement, restart, and cleanup change the relevant
 identity or generation without changing this sequence.
 
+Cleanup also ends the current publication history. It must discard both the
+pre-sync visible snapshot and the recently-synced suppression set before a new
+sync session starts. Otherwise stale rows can classify a fresh insert as an
+update, or stale keys can suppress the new session's first event.
+
 An imperative load operation is a separate caller boundary around this flow.
 It owns the future requests caused while it is current, retains the promises it
 already acquired after a newer operation supersedes it, and settles only after
