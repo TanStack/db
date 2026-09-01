@@ -1366,7 +1366,7 @@ create recursive Collection machinery.
 | Demand, cancellation, and progressive timing                                 | `packages/db/tests/query/includes-temporal-oracle.test.ts`                  |
 | Optimistic confirmation, rollback, and later reactivity                      | `packages/db/tests/query/includes-optimistic-oracle.property.test.ts`       |
 | Coherent layered publication                                                 | `packages/db/tests/query/includes-publication-oracle.test.ts`               |
-| Keyed Collection diffs across row-metadata settlement and cancellation       | `packages/db/tests/collection-metadata-publication-oracle.property.test.ts` |
+| Exact row-metadata settlement publication and keyed Collection diffs         | `packages/db/tests/collection-metadata-publication-oracle.property.test.ts` |
 | Collection facades, event coherence, and route activation                    | `packages/db/tests/query/includes-collection-oracle.property.test.ts`       |
 | Correlated physical work                                                     | `packages/db/tests/query/includes-work-counter-oracle.test.ts`              |
 | Route-context discovery and transport across recursive and join boundaries   | `packages/db/tests/query/includes-context-transport-oracle.test.ts`         |

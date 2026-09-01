@@ -40,6 +40,13 @@ type PublicationHarness = {
   getSync: () => SyncActions
 }
 
+type PublishedPublicationRow = PublicationRow & {
+  $collectionId: string
+  $key: number
+  $origin: `local` | `remote`
+  $synced: boolean
+}
+
 const metadataWriteArbitrary = fc.record({
   key: fc.integer({ min: 0, max: 2 }),
   type: fc.constantFrom(`set` as const, `delete` as const),
@@ -83,9 +90,8 @@ async function createPublicationHarness(): Promise<PublicationHarness> {
   )
   await liveRows.preload()
 
-  const batches: Array<
-    Array<ChangeMessage<PublicationRow, string | number>>
-  > = []
+  const batches: Array<Array<ChangeMessage<PublicationRow, string | number>>> =
+    []
   const subscription = rows.subscribeChanges((changes) => {
     batches.push(changes)
   })
@@ -106,6 +112,32 @@ function expectUniqueBatchKeys(
   for (const batch of batches) {
     const keys = batch.map((change) => change.key)
     expect(keys).toEqual([...new Set(keys)])
+  }
+}
+
+function selectPublishedRow(
+  row: PublicationRow | undefined,
+): PublishedPublicationRow | undefined {
+  if (row === undefined) return undefined
+  const published = row as PublishedPublicationRow
+  return {
+    id: published.id,
+    position: published.position,
+    $collectionId: published.$collectionId,
+    $key: published.$key,
+    $origin: published.$origin,
+    $synced: published.$synced,
+  }
+}
+
+function selectPublishedChange(
+  change: ChangeMessage<PublicationRow, string | number>,
+) {
+  return {
+    type: change.type,
+    key: change.key,
+    value: selectPublishedRow(change.value),
+    previousValue: selectPublishedRow(change.previousValue),
   }
 }
 
@@ -132,6 +164,10 @@ async function applyRound(
 ): Promise<void> {
   const previous = model.get(round.key)!
   const next = { ...previous, position: previous.position + round.delta }
+  const batchCountBefore = harness.batches.length
+  const keyWasPreviouslyPublished = harness.batches.some((batch) =>
+    batch.some((change) => change.key === round.key),
+  )
   const sync = harness.getSync()
   const transaction = createTransaction({
     mutationFn: async () => {
@@ -183,6 +219,44 @@ async function applyRound(
     }
   }
   await Promise.resolve()
+  const virtualRow = (
+    row: PublicationRow,
+    synced: boolean,
+  ): PublishedPublicationRow => ({
+    ...row,
+    $collectionId: harness.rows.id,
+    $key: row.id,
+    $origin: `local`,
+    $synced: synced,
+  })
+  const expectedOptimisticChange = keyWasPreviouslyPublished
+    ? {
+        type: `update`,
+        key: round.key,
+        value: virtualRow(next, false),
+        previousValue: virtualRow(previous, true),
+      }
+    : {
+        type: `insert`,
+        key: round.key,
+        value: virtualRow(next, false),
+        previousValue: undefined,
+      }
+  expect(
+    harness.batches
+      .slice(batchCountBefore)
+      .map((batch) => batch.map(selectPublishedChange)),
+  ).toEqual([
+    [expectedOptimisticChange],
+    [
+      {
+        type: `update`,
+        key: round.key,
+        value: virtualRow(next, true),
+        previousValue: virtualRow(next, false),
+      },
+    ],
+  ])
   expectUniqueBatchKeys(harness.batches)
   expectPublishedRows(harness, model)
   const byKey = (
