@@ -634,7 +634,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         const truncateUnsubscribe = collection.on(`truncate`, () => {
           this.lastLoadRequestKey.delete(sourceId)
           this.biggestSentValue.delete(sourceId)
-          this.sentToD2RowsBySource.get(sourceId)?.clear()
           this.pendingOrderedLoadPromise = undefined
         })
         this.unsubscribeCallbacks.add(truncateUnsubscribe)

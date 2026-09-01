@@ -221,9 +221,11 @@ Each lexical source boundary retains the exact row last contributed for every
 source key. A replayed insert for an existing key adds no second contribution.
 An update or delete retracts the retained row, rather than trusting event
 metadata that may describe a newer value, then replaces or removes that entry.
-Truncate and graph teardown clear this boundary state. Thus every source key
-has multiplicity zero or one and every negative weight cancels the exact
-positive row that entered D2.
+An update for an unknown key becomes an insert, while a delete for an unknown
+key contributes nothing. Truncate keeps this boundary state until its later
+source batch retracts or replaces the retained rows. Graph teardown clears the
+tracker and graph together. Thus every source key has multiplicity zero or one
+and every negative weight cancels the exact positive row that entered D2.
 
 Internal contribution identity is independent of the user-visible Collection
 key. When several internal rows collapse to one public key, a keyed D2
@@ -1360,6 +1362,7 @@ create recursive Collection machinery.
 | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | State equivalence, route lifecycle, transition history, and batch partition  | `packages/db/tests/query/includes-oracle.property.test.ts`                  |
 | Joined multiplicity, alias identity, and null-key normalization              | `packages/db/tests/query/includes-query-shape-oracle.test.ts`               |
+| Exact D2 source retractions, replay suppression, and boundary lifecycle      | `packages/db/tests/d2-source-reconciliation-oracle.property.test.ts`        |
 | Demand, cancellation, and progressive timing                                 | `packages/db/tests/query/includes-temporal-oracle.test.ts`                  |
 | Optimistic confirmation, rollback, and later reactivity                      | `packages/db/tests/query/includes-optimistic-oracle.property.test.ts`       |
 | Coherent layered publication                                                 | `packages/db/tests/query/includes-publication-oracle.test.ts`               |

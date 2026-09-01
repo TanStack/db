@@ -162,9 +162,10 @@ export function reconcileChangesForD2<
 
     const previousValue = sentRows.get(change.key)
     if (change.type === `delete`) {
+      if (previousValue === undefined) continue
       sentRows.delete(change.key)
       reconciled.push(
-        previousValue === undefined || previousValue === change.value
+        previousValue === change.value
           ? change
           : { ...change, value: previousValue },
       )
@@ -172,8 +173,12 @@ export function reconcileChangesForD2<
     }
 
     sentRows.set(change.key, change.value)
+    if (previousValue === undefined) {
+      reconciled.push({ type: `insert`, key: change.key, value: change.value })
+      continue
+    }
     reconciled.push(
-      previousValue === undefined || previousValue === change.previousValue
+      previousValue === change.previousValue
         ? change
         : { ...change, previousValue },
     )

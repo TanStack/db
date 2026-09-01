@@ -218,6 +218,7 @@ export class CollectionSubscriber<
         this.sourceId,
         subscription,
       )
+      this.sentToD2Rows.clear()
     }
     // currentSyncState is always defined when subscribe() is called
     // (called during sync session setup)
@@ -423,14 +424,12 @@ export class CollectionSubscriber<
     subscriptionHolder.current = subscription
     this.registerSubscriptionCleanup(subscription)
 
-    // Listen for truncate events to reset cursor and D2 source tracking state.
-    // This ensures that after a must-refetch/truncate, we don't use stale cursor data
-    // and allow re-inserts of previously sent keys
+    // Reset ordered-load state on truncate. Keep exact D2 source rows until
+    // their later delete/replacement batch retracts them from the live graph.
     const truncateUnsubscribe = this.collection.on(`truncate`, () => {
       this.lastLoadRequestKey = undefined
       this.lastNoProgressRequestKey = undefined
       this.pendingOrderedLoadPromise = undefined
-      this.sentToD2Rows.clear()
     })
 
     // Clean up truncate listener when subscription is unsubscribed
