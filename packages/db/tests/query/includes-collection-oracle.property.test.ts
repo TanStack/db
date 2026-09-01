@@ -1299,12 +1299,16 @@ describe(`Collection-valued includes oracle`, () => {
       const errorSnapshots: Array<{
         root: number
         child: number
+        facadeHasRestoredValue: boolean
         facadeHasFailedValue: boolean
       }> = []
       const unsubscribeError = live.on(`status:error`, () => {
         errorSnapshots.push({
           root: live.get(1)!.value,
           child: facade.get(10)!.value,
+          facadeHasRestoredValue: [
+            ...facadeIndex.equalityLookup(1),
+          ].includes(10),
           facadeHasFailedValue: [
             ...facadeIndex.equalityLookup(2),
           ].includes(10),
@@ -1348,7 +1352,12 @@ describe(`Collection-valued includes oracle`, () => {
         expect(live._stateRevision).toBe(rootRevision)
         expect(facade._stateRevision).toBe(childRevision)
         expect(errorSnapshots).toEqual([
-          { root: 1, child: 1, facadeHasFailedValue: true },
+          {
+            root: 1,
+            child: 1,
+            facadeHasRestoredValue: false,
+            facadeHasFailedValue: true,
+          },
         ])
 
         rootIndex.updateFailure = undefined
@@ -1366,8 +1375,18 @@ describe(`Collection-valued includes oracle`, () => {
         expect(rootPublications).toEqual([])
         expect(childPublications).toEqual([])
         expect(errorSnapshots).toEqual([
-          { root: 1, child: 1, facadeHasFailedValue: true },
-          { root: 1, child: 1, facadeHasFailedValue: true },
+          {
+            root: 1,
+            child: 1,
+            facadeHasRestoredValue: false,
+            facadeHasFailedValue: true,
+          },
+          {
+            root: 1,
+            child: 1,
+            facadeHasRestoredValue: false,
+            facadeHasFailedValue: true,
+          },
         ])
 
         facadeIndex.buildFailure = undefined
@@ -1378,9 +1397,24 @@ describe(`Collection-valued includes oracle`, () => {
         expect(rootIndex.buildCalls).toBe(rootBuildCalls + 2)
         expect(facadeIndex.buildCalls).toBe(facadeBuildCalls + 2)
         expect(errorSnapshots).toEqual([
-          { root: 1, child: 1, facadeHasFailedValue: true },
-          { root: 1, child: 1, facadeHasFailedValue: true },
-          { root: 1, child: 1, facadeHasFailedValue: false },
+          {
+            root: 1,
+            child: 1,
+            facadeHasRestoredValue: false,
+            facadeHasFailedValue: true,
+          },
+          {
+            root: 1,
+            child: 1,
+            facadeHasRestoredValue: false,
+            facadeHasFailedValue: true,
+          },
+          {
+            root: 1,
+            child: 1,
+            facadeHasRestoredValue: true,
+            facadeHasFailedValue: false,
+          },
         ])
         expect([...facadeIndex.equalityLookup(1)]).toEqual([10])
         expect([...facadeIndex.equalityLookup(2)]).toEqual([])
@@ -1405,7 +1439,14 @@ describe(`Collection-valued includes oracle`, () => {
         expect([...rootIndex.equalityLookup(5)]).toEqual([1])
 
         const facadeRevisionAfterRecovery = facade._stateRevision
-        nodes.write(`update`, { ...initialParent, value: 6 })
+        facadeIndex.updateFailure = {
+          error: new Error(`retained facade delta replayed`),
+        }
+        const postRecoveryFailure = captureFailure(() => {
+          nodes.write(`update`, { ...initialParent, value: 6 })
+        })
+        expect(postRecoveryFailure).toBeUndefined()
+        facadeIndex.updateFailure = undefined
         expect(live.get(1)!.value).toBe(6)
         expect(rootPublications).toHaveLength(2)
         expect(childPublications).toHaveLength(1)
@@ -1414,6 +1455,7 @@ describe(`Collection-valued includes oracle`, () => {
       } finally {
         rootIndex.updateFailure = undefined
         rootIndex.buildFailure = undefined
+        facadeIndex.updateFailure = undefined
         facadeIndex.buildFailure = undefined
         unsubscribeError()
         unsubscribeRootReady()
