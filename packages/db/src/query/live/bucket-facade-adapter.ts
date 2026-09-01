@@ -102,8 +102,12 @@ export class BucketFacadeAdapter {
     return this.pending.size > 0 || this.pendingActivity.size > 0
   }
 
-  flush(): FacadePublication {
+  recover(): void {
     this.recoverEntries()
+  }
+
+  flush(): FacadePublication {
+    this.recover()
     const snapshot = this.snapshot()
     const installedPending = this.pending
     const installedActivity = this.pendingActivity

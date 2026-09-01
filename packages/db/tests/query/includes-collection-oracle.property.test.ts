@@ -53,6 +53,7 @@ class ThrowingUpdateIndex extends BasicIndex<number> {
   throwAfterUpdate = false
   throwBeforeBuild = false
   throwAfterBuild = false
+  buildCalls = 0
 
   override update(key: number, oldItem: unknown, newItem: unknown): void {
     super.update(key, oldItem, newItem)
@@ -60,6 +61,7 @@ class ThrowingUpdateIndex extends BasicIndex<number> {
   }
 
   override build(entries: Iterable<[number, unknown]>): void {
+    this.buildCalls += 1
     if (this.throwBeforeBuild) throw new Error(`root index rebuild failed`)
     super.build(entries)
     if (this.throwAfterBuild) throw new Error(`root index rebuild failed`)
@@ -1224,7 +1226,7 @@ describe(`Collection-valued includes oracle`, () => {
   )
 
   fcTest(
-    `root restore failure preserves the install error and releases facade rollback`,
+    `root and facade recovery retry together after a failed graph install`,
     async () => {
       type NodeRow = {
         id: number
@@ -1267,6 +1269,9 @@ describe(`Collection-valued includes oracle`, () => {
       const rootIndex = live.createIndex((row) => row.value, {
         indexType: ThrowingUpdateIndex,
       }) as ThrowingUpdateIndex
+      const facadeIndex = facade.createIndex((row) => row.value, {
+        indexType: ThrowingUpdateIndex,
+      }) as ThrowingUpdateIndex
       const rootPublications: Array<unknown> = []
       const childPublications: Array<unknown> = []
       const rootSubscription = live.subscribeChanges(
@@ -1277,17 +1282,25 @@ describe(`Collection-valued includes oracle`, () => {
         (batch) => childPublications.push(...batch),
         { includeInitialState: false },
       )
-      const errorSnapshots: Array<{ root: number; child: number }> = []
+      const errorSnapshots: Array<{
+        root: number
+        child: number
+        facadeHasFailedValue: boolean
+      }> = []
       const unsubscribeError = live.on(`status:error`, () => {
         errorSnapshots.push({
           root: live.get(1)!.value,
           child: facade.get(10)!.value,
+          facadeHasFailedValue: [
+            ...facadeIndex.equalityLookup(2),
+          ].includes(10),
         })
       })
       const rootRevision = live._stateRevision
       const childRevision = facade._stateRevision
       rootIndex.throwAfterUpdate = true
       rootIndex.throwBeforeBuild = true
+      facadeIndex.throwBeforeBuild = true
 
       try {
         expect(() =>
@@ -1311,21 +1324,30 @@ describe(`Collection-valued includes oracle`, () => {
         expect(childPublications).toEqual([])
         expect(live._stateRevision).toBe(rootRevision)
         expect(facade._stateRevision).toBe(childRevision)
-        expect(errorSnapshots).toEqual([{ root: 1, child: 1 }])
+        expect(errorSnapshots).toEqual([
+          { root: 1, child: 1, facadeHasFailedValue: true },
+        ])
 
         rootIndex.throwAfterUpdate = false
+        facadeIndex.throwBeforeBuild = false
+        const rootBuildCalls = rootIndex.buildCalls
+        const facadeBuildCalls = facadeIndex.buildCalls
         expect(() =>
           nodes.write(`update`, { ...initialParent, value: 3 }),
         ).toThrow(`root index rebuild failed`)
+        expect(rootIndex.buildCalls).toBe(rootBuildCalls + 1)
+        expect(facadeIndex.buildCalls).toBe(facadeBuildCalls + 1)
         expect(live.status).toBe(`error`)
         expect(live.get(1)!.value).toBe(1)
         expect(facade.get(10)!.value).toBe(1)
         expect(rootPublications).toEqual([])
         expect(childPublications).toEqual([])
         expect(errorSnapshots).toEqual([
-          { root: 1, child: 1 },
-          { root: 1, child: 1 },
+          { root: 1, child: 1, facadeHasFailedValue: true },
+          { root: 1, child: 1, facadeHasFailedValue: false },
         ])
+        expect([...facadeIndex.equalityLookup(1)]).toEqual([10])
+        expect([...facadeIndex.equalityLookup(2)]).toEqual([])
 
         rootIndex.throwBeforeBuild = false
         nodes.write(`update`, { ...initialParent, value: 4 })
@@ -1345,6 +1367,7 @@ describe(`Collection-valued includes oracle`, () => {
       } finally {
         rootIndex.throwAfterUpdate = false
         rootIndex.throwBeforeBuild = false
+        facadeIndex.throwBeforeBuild = false
         unsubscribeError()
         rootSubscription.unsubscribe()
         childSubscription.unsubscribe()

@@ -1168,11 +1168,12 @@ preserves the original graph-install error, and marks the affected root or
 facade as errored so a later successful publication can recover it and restore
 readiness.
 An index-rebuild failure remains explicit recovery debt. The next graph turn
-must finish that restore before applying retained deltas or marking the
-Collection ready; an ordinary row update cannot repair an unknown partial
-index rebuild. Error status is published only after every root and facade has
-restored its reader-visible state and closed its held publication, so a
-synchronous status observer cannot see a mixed graph snapshot.
+must attempt every root and facade restore as one recovery preflight, then
+finish them all before applying retained deltas or marking any Collection
+ready; an ordinary row update cannot repair an unknown partial index rebuild.
+Error status is published only after every root and facade recovery attempt and
+after each held publication has closed, so a synchronous status observer cannot
+see avoidable stale sibling state from a skipped restore.
 Once release begins, one subscriber callback failure cannot suppress another
 prepared root or facade publication. Release attempts every participant, then
 rethrows the first callback failure unchanged, including `null` or `undefined`.

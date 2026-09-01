@@ -1080,19 +1080,31 @@ export class CollectionConfigBuilder<
         return
       }
 
-      if (rootRecoveryState) {
-        const stateToRecover = rootRecoveryState
-        try {
-          config.collection._restorePublicationState(stateToRecover)
-          rootRecoveryState = undefined
-        } catch (error) {
+      let rootRecoveryFailure: { error: unknown } | undefined
+      try {
+        runAllCallbacks([
+          () => {
+            if (!rootRecoveryState) return
+            const stateToRecover = rootRecoveryState
+            try {
+              config.collection._restorePublicationState(stateToRecover)
+              rootRecoveryState = undefined
+            } catch (error) {
+              rootRecoveryFailure = { error }
+              throw error
+            }
+          },
+          () => bucketFacades.recover(),
+        ])
+      } catch (error) {
+        if (rootRecoveryFailure) {
           try {
-            config.markError(error)
+            config.markError(rootRecoveryFailure.error)
           } catch {
-            // Keep the restore failure authoritative and its state retryable.
+            // Keep the first recovery failure authoritative and retryable.
           }
-          throw error
         }
+        throw error
       }
 
       let facadePublication:
