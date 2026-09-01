@@ -387,8 +387,7 @@ export class CollectionSyncManager<
           markReady: () => {
             if (!isCurrentSync()) return
             if (syncEntryActive) {
-              readyEffectFailure ??=
-                this.lifecycle.markReadyDuringSyncStart()
+              readyEffectFailure ??= this.lifecycle.markReadyDuringSyncStart()
             } else {
               this.lifecycle.markReady()
             }
@@ -729,10 +728,14 @@ export class CollectionSyncManager<
       }
 
       let settled = false
-      let startingSync = false
+      const syncStartState = { active: false, ready: false }
       let unsubscribeError = () => {}
       let unsubscribeReady = () => {}
       const resolveReady = () => {
+        if (syncStartState.active) {
+          syncStartState.ready = true
+          return
+        }
         if (settled) return
         settled = true
         unsubscribeError()
@@ -750,7 +753,7 @@ export class CollectionSyncManager<
       // Register callback BEFORE starting sync to avoid race condition
       unsubscribeReady = this.lifecycle.onFirstReady(resolveReady)
       unsubscribeError = this.collection.on(`status:error`, () => {
-        if (startingSync) {
+        if (syncStartState.active) {
           return
         }
         rejectError(this.getPreloadError())
@@ -761,17 +764,24 @@ export class CollectionSyncManager<
         this.lifecycle.status === `idle` ||
         this.lifecycle.status === `cleaned-up`
       ) {
-        startingSync = true
+        syncStartState.active = true
+        let startFailure: { error: unknown } | undefined
         try {
           this.startSync()
         } catch (error) {
-          rejectError(error)
-          return
+          startFailure = { error }
         } finally {
-          startingSync = false
+          syncStartState.active = false
         }
         if (this.collection.status === `error`) {
           rejectError(this.getPreloadError())
+        } else if (syncStartState.ready) {
+          // A first-ready listener can throw after readiness is established.
+          // That failure still escapes direct startSync(), but preload follows
+          // the final collection state after synchronous adapter entry.
+          resolveReady()
+        } else if (startFailure) {
+          rejectError(startFailure.error)
         }
       }
     })

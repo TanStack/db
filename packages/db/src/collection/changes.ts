@@ -108,13 +108,27 @@ export class CollectionChangesManager<
    * This bypasses the normal empty array check in emitEvents
    */
   public emitEmptyReadyEvent(): void {
-    withPublicationContext(() => {
-      runAllCallbacks(
-        [...this.changeSubscriptions].map(
-          (subscription) => () => subscription.emitEvents([]),
-        ),
-      )
-    })
+    let deliveryFailure: { error: unknown } | undefined
+    let graphFailure: { error: unknown } | undefined
+    try {
+      withPublicationContext(() => {
+        try {
+          runAllCallbacks(
+            [...this.changeSubscriptions].map(
+              (subscription) => () => subscription.emitEvents([]),
+            ),
+          )
+        } catch (error) {
+          // The ready snapshot is already public. Keep the callback failure,
+          // but let work queued by earlier dependents reach the graph flush.
+          deliveryFailure = { error }
+        }
+      })
+    } catch (error) {
+      graphFailure = { error }
+    }
+    if (deliveryFailure) throw deliveryFailure.error
+    if (graphFailure) throw graphFailure.error
   }
 
   /**

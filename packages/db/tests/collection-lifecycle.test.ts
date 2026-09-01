@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { CleanupQueue } from '../src/collection/cleanup-queue.js'
+import {
+  getActivePublicationContext,
+  transactionScopedScheduler,
+} from '../src/scheduler.js'
 
 // Mock setTimeout and clearTimeout for testing GC behavior
 const originalSetTimeout = global.setTimeout
@@ -626,6 +630,68 @@ describe(`Collection Lifecycle Management`, () => {
       }
     })
 
+    it(`rejects a pending preload when the adapter fails after marking ready`, async () => {
+      const adapterFailure = new Error(`adapter failed after ready`)
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `ready-then-adapter-failure-test`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            throw adapterFailure
+          },
+        },
+      })
+      collection.onFirstReady(() => {
+        throw undefined
+      })
+
+      try {
+        await expect(collection.preload()).rejects.toBe(adapterFailure)
+        expect(collection.status).toBe(`error`)
+      } finally {
+        await collection.cleanup()
+      }
+    })
+
+    it(`ends the synchronous sync-entry boundary after an adapter failure`, async () => {
+      const adapterFailure = new Error(`adapter entry failed`)
+      let markReadyCallback: (() => void) | undefined
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `failed-sync-entry-boundary-test`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReadyCallback = markReady
+            throw adapterFailure
+          },
+        },
+      })
+      collection.onFirstReady(() => {
+        throw undefined
+      })
+
+      try {
+        expect(() => collection._sync.startSync()).toThrow(adapterFailure)
+        expect(collection.status).toBe(`error`)
+
+        let didThrow = false
+        let thrown: unknown
+        try {
+          markReadyCallback!()
+        } catch (error) {
+          didThrow = true
+          thrown = error
+        }
+
+        expect(didThrow).toBe(true)
+        expect(thrown).toBeUndefined()
+        expect(collection.status).toBe(`ready`)
+      } finally {
+        await collection.cleanup()
+      }
+    })
+
     it(`attempts every dependent ready listener before rethrowing`, async () => {
       let markReadyCallback: (() => void) | undefined
       const firstFailure = new Error(`first dependent failed`)
@@ -660,6 +726,73 @@ describe(`Collection Lifecycle Management`, () => {
         expect(firstBatches).toEqual([[]])
         expect(secondBatches).toEqual([[]])
         expect(collection.status).toBe(`ready`)
+      } finally {
+        first.unsubscribe()
+        second.unsubscribe()
+        await collection.cleanup()
+      }
+    })
+
+    it(`flushes work queued by a ready listener when a sibling throws`, async () => {
+      let markReadyCallback: (() => void) | undefined
+      const firstFailure = new Error(`dependent failed after sibling queued`)
+      const scheduledJob = vi.fn()
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `dependent-ready-scheduler-test`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReadyCallback = markReady
+          },
+        },
+      })
+      const first = collection.subscribeChanges(() => {
+        const contextId = getActivePublicationContext()
+        expect(contextId).toBeDefined()
+        transactionScopedScheduler.schedule({
+          contextId,
+          jobId: scheduledJob,
+          run: scheduledJob,
+        })
+      })
+      const second = collection.subscribeChanges(() => {
+        throw firstFailure
+      })
+
+      try {
+        expect(() => markReadyCallback!()).toThrow(firstFailure)
+        expect(scheduledJob).toHaveBeenCalledOnce()
+        expect(collection.status).toBe(`ready`)
+      } finally {
+        first.unsubscribe()
+        second.unsubscribe()
+        await collection.cleanup()
+      }
+    })
+
+    it(`delivers ready to the subscription snapshot when one listener unsubscribes another`, async () => {
+      let markReadyCallback: (() => void) | undefined
+      const calls: Array<string> = []
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `dependent-ready-membership-test`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReadyCallback = markReady
+          },
+        },
+      })
+      const first = collection.subscribeChanges(() => {
+        calls.push(`first`)
+        second.unsubscribe()
+      })
+      const second = collection.subscribeChanges(() => {
+        calls.push(`second`)
+      })
+
+      try {
+        markReadyCallback!()
+        expect(calls).toEqual([`first`, `second`])
       } finally {
         first.unsubscribe()
         second.unsubscribe()
