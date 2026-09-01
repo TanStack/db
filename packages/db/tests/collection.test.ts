@@ -253,6 +253,48 @@ describe(`Collection`, () => {
     }).toThrow(KeyUpdateNotAllowedError)
   })
 
+  it(`should preserve untouched custom class instances during updates`, async () => {
+    class Money {
+      constructor(public cents: number) {}
+    }
+
+    type Product = {
+      id: string
+      details: { name: string; price: Money }
+    }
+
+    const price = new Money(500)
+    const collection = createCollection<Product>({
+      id: `custom-class-update-test`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({
+            type: `insert`,
+            value: {
+              id: `product-1`,
+              details: { name: `Widget`, price },
+            },
+          })
+          commit()
+          markReady()
+        },
+      },
+      onUpdate: async () => {},
+    })
+
+    await collection.stateWhenReady()
+
+    collection.update(`product-1`, (draft) => {
+      draft.details.name = `Gadget`
+    })
+
+    const updated = collection.get(`product-1`)
+    expect(updated?.details.price).toBe(price)
+    expect(updated?.details.price).toBeInstanceOf(Money)
+  })
+
   it(`It shouldn't expose any state until the initial sync is finished`, () => {
     // Create a collection with a mock sync plugin
     createCollection<{ name: string }>({
