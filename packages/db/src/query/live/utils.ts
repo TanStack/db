@@ -140,29 +140,40 @@ export function* splitUpdates<
 }
 
 /**
- * Filter changes to prevent duplicate inserts to a D2 pipeline.
- * Maintains D2 multiplicity at 1 for visible items so that deletes
- * properly reduce multiplicity to 0.
+ * Prepare changes for a D2 pipeline by preventing duplicate inserts and
+ * reconciling update/delete retractions with previously sent rows.
+ * Maintains D2 multiplicity at 1 for visible items and ensures retractions
+ * exactly match the row previously contributed for each key.
  *
- * Mutates `sentKeys` in place: adds keys on insert, removes on delete.
+ * Mutates `sentRows` in place: records rows on insert/update, removes them
+ * on delete.
  */
-export function filterDuplicateInserts(
-  changes: Array<ChangeMessage<any, string | number>>,
-  sentKeys: Set<string | number>,
-): Array<ChangeMessage<any, string | number>> {
-  const filtered: Array<ChangeMessage<any, string | number>> = []
-  for (const change of changes) {
+export function prepareChangesForD2(
+  changes: Array<ChangeMessage<Record<string, unknown>, string | number>>,
+  sentRows: Map<string | number, Record<string, unknown>>,
+): Array<ChangeMessage<Record<string, unknown>, string | number>> {
+  return changes.flatMap((change) => {
     if (change.type === `insert`) {
-      if (sentKeys.has(change.key)) {
-        continue // Skip duplicate
-      }
-      sentKeys.add(change.key)
-    } else if (change.type === `delete`) {
-      sentKeys.delete(change.key)
+      if (sentRows.has(change.key)) return []
+      sentRows.set(change.key, change.value)
+      return [change]
     }
-    filtered.push(change)
-  }
-  return filtered
+
+    const previousValue = sentRows.get(change.key)
+    if (change.type === `delete`) {
+      sentRows.delete(change.key)
+      return [
+        previousValue === undefined
+          ? change
+          : { ...change, value: previousValue },
+      ]
+    }
+
+    sentRows.set(change.key, change.value)
+    return [
+      previousValue === undefined ? change : { ...change, previousValue },
+    ]
+  })
 }
 
 /**
@@ -172,15 +183,19 @@ export function filterDuplicateInserts(
  *
  * @param changes   - changes to process (deletes are skipped)
  * @param current   - the current biggest value (or undefined if none)
- * @param sentKeys  - set of keys already sent to D2 (for new-key detection)
+ * @param sentKeys  - lookup of keys already sent to D2 (for new-key detection)
  * @param comparator - orderBy comparator
  * @returns `{ biggest, shouldResetLoadKey }` — the new biggest value and
  *          whether the caller should clear its last-load-request-key
  */
+interface SentKeyLookup {
+  has: (key: string | number) => boolean
+}
+
 export function trackBiggestSentValue(
   changes: Array<ChangeMessage<any, string | number>>,
   current: unknown | undefined,
-  sentKeys: Set<string | number>,
+  sentKeys: SentKeyLookup,
   comparator: (a: any, b: any) => number,
 ): { biggest: unknown; shouldResetLoadKey: boolean } {
   let biggest = current
