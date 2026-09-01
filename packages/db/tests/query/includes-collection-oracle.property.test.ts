@@ -1,9 +1,10 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect } from 'vitest'
+import { describe, expect, vi } from 'vitest'
 import { createDeferred } from '../../src/deferred.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { createLiveQueryObserver } from '../../src/live-query-observer.js'
 import { createOptimisticAction } from '../../src/optimistic-action.js'
+import { BucketFacadeAdapter } from '../../src/query/live/bucket-facade-adapter.js'
 import { LIVE_QUERY_INTERNAL } from '../../src/query/live/internal.js'
 import {
   add,
@@ -1260,9 +1261,15 @@ describe(`Collection-valued includes oracle`, () => {
         group: 1,
         value: 1,
       }
+      const initialSibling: NodeRow = {
+        id: 11,
+        kind: `child`,
+        group: 1,
+        value: 10,
+      }
       const nodes = createControlledCollection<NodeRow>(
         `root-restore-failure-nodes`,
-        [initialParent, initialChild],
+        [initialParent, initialChild, initialSibling],
       )
       const live = createLiveQueryCollection((q) =>
         q
@@ -1298,20 +1305,24 @@ describe(`Collection-valued includes oracle`, () => {
       )
       const errorSnapshots: Array<{
         root: number
-        child: number
-        facadeHasRestoredValue: boolean
-        facadeHasFailedValue: boolean
+        children: Array<{ id: number; value: number }>
+        indexKeys: {
+          one: Array<number>
+          two: Array<number>
+          ten: Array<number>
+          twenty: Array<number>
+        }
       }> = []
       const unsubscribeError = live.on(`status:error`, () => {
         errorSnapshots.push({
           root: live.get(1)!.value,
-          child: facade.get(10)!.value,
-          facadeHasRestoredValue: [
-            ...facadeIndex.equalityLookup(1),
-          ].includes(10),
-          facadeHasFailedValue: [
-            ...facadeIndex.equalityLookup(2),
-          ].includes(10),
+          children: facade.toArray.map(({ id, value }) => ({ id, value })),
+          indexKeys: {
+            one: [...facadeIndex.equalityLookup(1)],
+            two: [...facadeIndex.equalityLookup(2)],
+            ten: [...facadeIndex.equalityLookup(10)],
+            twenty: [...facadeIndex.equalityLookup(20)],
+          },
         })
       })
       const readinessOrder: Array<`facade` | `root`> = []
@@ -1339,6 +1350,10 @@ describe(`Collection-valued includes oracle`, () => {
               type: `update`,
               value: { ...initialChild, value: 2 },
             },
+            {
+              type: `update`,
+              value: { ...initialSibling, value: 20 },
+            },
           ]),
         )
         expect(failedInstall?.error).toBe(installFailure)
@@ -1346,6 +1361,7 @@ describe(`Collection-valued includes oracle`, () => {
         expect(live.get(1)!.value).toBe(1)
         expect(facade.toArray.map(({ id, value }) => ({ id, value }))).toEqual([
           { id: 10, value: 1 },
+          { id: 11, value: 10 },
         ])
         expect(rootPublications).toEqual([])
         expect(childPublications).toEqual([])
@@ -1354,9 +1370,11 @@ describe(`Collection-valued includes oracle`, () => {
         expect(errorSnapshots).toEqual([
           {
             root: 1,
-            child: 1,
-            facadeHasRestoredValue: false,
-            facadeHasFailedValue: true,
+            children: [
+              { id: 10, value: 1 },
+              { id: 11, value: 10 },
+            ],
+            indexKeys: { one: [], two: [10], ten: [], twenty: [11] },
           },
         ])
 
@@ -1371,21 +1389,28 @@ describe(`Collection-valued includes oracle`, () => {
         expect(facadeIndex.buildCalls).toBe(facadeBuildCalls + 1)
         expect(live.status).toBe(`error`)
         expect(live.get(1)!.value).toBe(1)
-        expect(facade.get(10)!.value).toBe(1)
+        expect(facade.toArray.map(({ id, value }) => ({ id, value }))).toEqual([
+          { id: 10, value: 1 },
+          { id: 11, value: 10 },
+        ])
         expect(rootPublications).toEqual([])
         expect(childPublications).toEqual([])
         expect(errorSnapshots).toEqual([
           {
             root: 1,
-            child: 1,
-            facadeHasRestoredValue: false,
-            facadeHasFailedValue: true,
+            children: [
+              { id: 10, value: 1 },
+              { id: 11, value: 10 },
+            ],
+            indexKeys: { one: [], two: [10], ten: [], twenty: [11] },
           },
           {
             root: 1,
-            child: 1,
-            facadeHasRestoredValue: false,
-            facadeHasFailedValue: true,
+            children: [
+              { id: 10, value: 1 },
+              { id: 11, value: 10 },
+            ],
+            indexKeys: { one: [], two: [10], ten: [], twenty: [11] },
           },
         ])
 
@@ -1399,25 +1424,33 @@ describe(`Collection-valued includes oracle`, () => {
         expect(errorSnapshots).toEqual([
           {
             root: 1,
-            child: 1,
-            facadeHasRestoredValue: false,
-            facadeHasFailedValue: true,
+            children: [
+              { id: 10, value: 1 },
+              { id: 11, value: 10 },
+            ],
+            indexKeys: { one: [], two: [10], ten: [], twenty: [11] },
           },
           {
             root: 1,
-            child: 1,
-            facadeHasRestoredValue: false,
-            facadeHasFailedValue: true,
+            children: [
+              { id: 10, value: 1 },
+              { id: 11, value: 10 },
+            ],
+            indexKeys: { one: [], two: [10], ten: [], twenty: [11] },
           },
           {
             root: 1,
-            child: 1,
-            facadeHasRestoredValue: true,
-            facadeHasFailedValue: false,
+            children: [
+              { id: 10, value: 1 },
+              { id: 11, value: 10 },
+            ],
+            indexKeys: { one: [10], two: [], ten: [11], twenty: [] },
           },
         ])
         expect([...facadeIndex.equalityLookup(1)]).toEqual([10])
         expect([...facadeIndex.equalityLookup(2)]).toEqual([])
+        expect([...facadeIndex.equalityLookup(10)]).toEqual([11])
+        expect([...facadeIndex.equalityLookup(20)]).toEqual([])
 
         rootIndex.buildFailure = undefined
         nodes.write(`update`, { ...initialParent, value: 5 })
@@ -1428,9 +1461,10 @@ describe(`Collection-valued includes oracle`, () => {
         expect(live.get(1)!.value).toBe(5)
         expect(facade.toArray.map(({ id, value }) => ({ id, value }))).toEqual([
           { id: 10, value: 2 },
+          { id: 11, value: 20 },
         ])
         expect(rootPublications).toHaveLength(1)
-        expect(childPublications).toHaveLength(1)
+        expect(childPublications).toHaveLength(2)
         expect(live._stateRevision).toBe(rootRevision + 1)
         expect(facade._stateRevision).toBe(childRevision + 1)
         expect([...rootIndex.equalityLookup(2)]).toEqual([])
@@ -1439,17 +1473,25 @@ describe(`Collection-valued includes oracle`, () => {
         expect([...rootIndex.equalityLookup(5)]).toEqual([1])
 
         const facadeRevisionAfterRecovery = facade._stateRevision
-        facadeIndex.updateFailure = {
-          error: new Error(`retained facade delta replayed`),
-        }
-        const postRecoveryFailure = captureFailure(() => {
+        const pendingChecks: Array<boolean> = []
+        const hasPendingChanges =
+          BucketFacadeAdapter.prototype.hasPendingChanges
+        const pendingSpy = vi
+          .spyOn(BucketFacadeAdapter.prototype, `hasPendingChanges`)
+          .mockImplementation(function (this: BucketFacadeAdapter) {
+            const result = hasPendingChanges.call(this)
+            pendingChecks.push(result)
+            return result
+          })
+        try {
           nodes.write(`update`, { ...initialParent, value: 6 })
-        })
-        expect(postRecoveryFailure).toBeUndefined()
-        facadeIndex.updateFailure = undefined
+        } finally {
+          pendingSpy.mockRestore()
+        }
+        expect(pendingChecks).toEqual([false])
         expect(live.get(1)!.value).toBe(6)
         expect(rootPublications).toHaveLength(2)
-        expect(childPublications).toHaveLength(1)
+        expect(childPublications).toHaveLength(2)
         expect(facade._stateRevision).toBe(facadeRevisionAfterRecovery)
         expect(readinessOrder).toEqual([`facade`, `root`])
       } finally {
