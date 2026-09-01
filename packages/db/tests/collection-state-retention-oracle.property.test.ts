@@ -174,7 +174,7 @@ it(`starts a new sync session without retained publication state`, async () => {
       },
     },
   })
-  const events: Array<{ type: string; key: number }> = []
+  const events: Array<{ type: string; key: string | number }> = []
   let subscription: ReturnType<typeof collection.subscribeChanges> | undefined
 
   try {
