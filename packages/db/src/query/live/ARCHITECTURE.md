@@ -1219,6 +1219,14 @@ joins that context and runs only after the current root and facade callbacks
 finish; it cannot start a second graph turn inside the first one or disappear
 through the graph's reentrancy guard.
 
+Each ordinary Collection publication freezes its layout listeners and public
+subscribers, then attempts every callback in registration order. Adding or
+removing a listener during delivery does not change that batch. The first exact
+callback failure stays on the shared publication context, including when it
+came from a nested readiness transition. Later callback failures cannot replace
+it. Core runs the dependent graph work queued by the batch before rethrowing the
+retained failure.
+
 Window metadata follows the same causal order as the published rows. If a
 publication callback starts a newer window operation, that newer generation
 owns the final public window and the older caller cannot overwrite it when it

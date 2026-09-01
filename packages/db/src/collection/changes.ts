@@ -280,15 +280,24 @@ export class CollectionChangesManager<
     // Every subscriber sees one committed source batch before dependent query
     // graphs run. This keeps repeated aliases and sibling subqueries coherent.
     withPublicationContext(() => {
-      // Notify both internal layout consumers and the public subscription API.
-      // Public subscribers historically receive an empty batch for order-only
-      // moves because there is no row-value ChangeMessage to publish.
-      if (rawEvents.length === 0) {
-        for (const listener of this.layoutChangeListeners) listener()
-      }
-
-      for (const subscription of this.changeSubscriptions) {
-        subscription.emitEvents(enrichedEvents)
+      const callbacks = [
+        // Notify both internal layout consumers and the public subscription API.
+        // Public subscribers historically receive an empty batch for order-only
+        // moves because there is no row-value ChangeMessage to publish.
+        ...(rawEvents.length === 0
+          ? [...this.layoutChangeListeners].map((listener) => () => listener())
+          : []),
+        ...[...this.changeSubscriptions].map(
+          (subscription) => () => subscription.emitEvents(enrichedEvents),
+        ),
+      ]
+      try {
+        runAllCallbacks(callbacks)
+      } catch (error) {
+        // The committed batch is already public. Keep the first callback
+        // failure on the publication while later subscribers and graph work
+        // finish observing the same snapshot.
+        deferPublicationFailure(error)
       }
     })
   }

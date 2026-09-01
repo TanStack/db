@@ -145,6 +145,166 @@ describe(`Collection publication scheduler context`, () => {
 })
 
 describe(`live query scheduler`, () => {
+  it(`delivers an ordinary source batch to its frozen listener snapshot`, async () => {
+    let begin!: () => void
+    let write!: (message: { type: `insert`; value: User }) => void
+    let commit!: () => void
+    const calls: Array<string> = []
+    const source = createCollection<User>({
+      id: `ordinary-listener-membership-source`,
+      getKey: (user) => user.id,
+      startSync: true,
+      sync: {
+        sync: (actions) => {
+          begin = actions.begin
+          write = actions.write
+          commit = () => {
+            actions.commit()
+          }
+          actions.markReady()
+        },
+      },
+    })
+    let added: { unsubscribe: () => void } | undefined
+    const first = source.subscribeChanges(() => {
+      calls.push(`first`)
+      second.unsubscribe()
+      added ??= source.subscribeChanges(() => calls.push(`added`), {
+        includeInitialState: false,
+      })
+    })
+    const second = source.subscribeChanges(() => calls.push(`second`))
+
+    try {
+      begin()
+      write({ type: `insert`, value: { id: 1, name: `Ada` } })
+      commit()
+      expect(calls).toEqual([`first`, `second`])
+
+      begin()
+      write({ type: `insert`, value: { id: 2, name: `Grace` } })
+      commit()
+      expect(calls).toEqual([`first`, `second`, `first`, `added`])
+    } finally {
+      first.unsubscribe()
+      second.unsubscribe()
+      added?.unsubscribe()
+      await source.cleanup()
+    }
+  })
+
+  it(`settles a dependent live query when an earlier source listener throws`, async () => {
+    let begin!: () => void
+    let write!: (message: { type: `insert`; value: User }) => void
+    let commit!: () => void
+    const listenerFailure = new Error(`source listener failed`)
+    const source = createCollection<User>({
+      id: `throwing-listener-live-source`,
+      getKey: (user) => user.id,
+      startSync: true,
+      sync: {
+        sync: (actions) => {
+          begin = actions.begin
+          write = actions.write
+          commit = () => {
+            actions.commit()
+          }
+          actions.markReady()
+        },
+      },
+    })
+    const throwingSubscription = source.subscribeChanges(
+      () => {
+        throw listenerFailure
+      },
+      { includeInitialState: false },
+    )
+    const live = createLiveQueryCollection({
+      id: `throwing-listener-live-dependent`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ user: source })
+          .select(({ user }) => ({ id: user.id, name: user.name })),
+    })
+
+    try {
+      await live.preload()
+      begin()
+      write({ type: `insert`, value: { id: 1, name: `Ada` } })
+      expect(() => commit()).toThrow(listenerFailure)
+      expect(live.get(1)).toEqual(expect.objectContaining({ name: `Ada` }))
+    } finally {
+      throwingSubscription.unsubscribe()
+      await live.cleanup()
+      await source.cleanup()
+    }
+  })
+
+  it(`keeps a nested ready failure when a later outer listener throws`, async () => {
+    let markInnerReady!: () => void
+    const readyFailure = new Error(`nested ready listener failed`)
+    const laterFailure = new Error(`later outer listener failed`)
+    const scheduledJob = vi.fn()
+    const inner = createCollection<User>({
+      id: `nested-ready-collision-inner`,
+      getKey: (user) => user.id,
+      sync: {
+        sync: ({ markReady }) => {
+          markInnerReady = markReady
+        },
+      },
+    })
+    const innerFirst = inner.subscribeChanges(() => {
+      const contextId = getActivePublicationContext()
+      transactionScopedScheduler.schedule({
+        contextId,
+        jobId: scheduledJob,
+        run: scheduledJob,
+      })
+    })
+    const innerSecond = inner.subscribeChanges(() => {
+      throw readyFailure
+    })
+
+    let beginOuter!: () => void
+    let writeOuter!: (message: { type: `insert`; value: User }) => void
+    let commitOuter!: () => void
+    const outer = createCollection<User>({
+      id: `nested-ready-collision-outer`,
+      getKey: (user) => user.id,
+      startSync: true,
+      sync: {
+        sync: (actions) => {
+          beginOuter = actions.begin
+          writeOuter = actions.write
+          commitOuter = () => {
+            actions.commit()
+          }
+          actions.markReady()
+        },
+      },
+    })
+    const outerFirst = outer.subscribeChanges(() => markInnerReady())
+    const outerSecond = outer.subscribeChanges(() => {
+      throw laterFailure
+    })
+
+    try {
+      beginOuter()
+      writeOuter({ type: `insert`, value: { id: 1, name: `Ada` } })
+      expect(() => commitOuter()).toThrow(readyFailure)
+      expect(scheduledJob).toHaveBeenCalledOnce()
+    } finally {
+      outerFirst.unsubscribe()
+      outerSecond.unsubscribe()
+      innerFirst.unsubscribe()
+      innerSecond.unsubscribe()
+      await outer.cleanup()
+      await inner.cleanup()
+    }
+  })
+
   it(`settles a dependent live query before a nested ready failure escapes`, async () => {
     let markSourceReady: (() => void) | undefined
     const listenerFailure = new Error(`source ready listener failed`)
