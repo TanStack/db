@@ -171,6 +171,7 @@ async function runRetentionHistory(
         model.clear()
       } else if (action.type === `reentrantRestart`) {
         const oldSync = harness.sync
+        const triggerType = model.has(action.row.id) ? `update` : `insert`
         const triggerRow = {
           id: action.row.id,
           value: (model.get(action.row.id)?.value ?? action.row.value) + 1,
@@ -179,18 +180,33 @@ async function runRetentionHistory(
           id: (action.row.id + 1) % 4,
           value: action.row.value + 1,
         }
+        const retainedMarker = { id: -1, value: action.row.value }
         let cleanup: Promise<void> | undefined
         let restarted = false
+        let restartedSync: SyncActions | undefined
+        const events: Array<{
+          type: string
+          key: string | number
+          row: RetainedRow
+        }> = []
         const subscription = collection.subscribeChanges(
-          () => {
+          (changes) => {
+            events.push(
+              ...changes.map(({ type, key, value }) => ({
+                type,
+                key,
+                row: { id: value.id, value: value.value },
+              })),
+            )
             if (restarted) return
             restarted = true
             cleanup = collection.cleanup()
             collection.startSyncImmediate()
-            harness.sync.begin()
-            harness.sync.write({ type: `insert`, value: restartedRow })
+            restartedSync = harness.sync
+            restartedSync.begin()
+            restartedSync.write({ type: `insert`, value: restartedRow })
+            collection._state.preSyncVisibleState.set(-1, retainedMarker)
             collection._state.recentlySyncedKeys.add(restartedRow.id)
-            harness.sync.commit()
           },
           { includeInitialState: false },
         )
@@ -198,9 +214,39 @@ async function runRetentionHistory(
         oldSync.begin()
         oldSync.write({ type: `update`, value: triggerRow })
         expect(oldSync.commit()).toBe(true)
-        subscription.unsubscribe()
         expect(restarted).toBe(true)
+        expect(restartedSync).toBeDefined()
+        if (restartedSync === undefined) {
+          throw new Error(`restarted sync session was not captured`)
+        }
+        expect(collection._state.preSyncVisibleState).toEqual(
+          new Map([[-1, retainedMarker]]),
+        )
+        expect(collection._state.recentlySyncedKeys).toEqual(
+          new Set([restartedRow.id]),
+        )
+        expect(collection._state.hasReceivedFirstCommit).toBe(false)
+
         await Promise.resolve()
+        expect(collection._state.preSyncVisibleState).toEqual(
+          new Map([[-1, retainedMarker]]),
+        )
+        expect(collection._state.recentlySyncedKeys).toEqual(
+          new Set([restartedRow.id]),
+        )
+        expect(collection._state.hasReceivedFirstCommit).toBe(false)
+
+        expect(restartedSync.commit()).toBe(true)
+        expect(collection._state.preSyncVisibleState.size).toBe(0)
+        expect(collection._state.hasReceivedFirstCommit).toBe(true)
+        await Promise.resolve()
+        expect(collection._state.recentlySyncedKeys.size).toBe(0)
+        expect(events).toEqual([
+          { type: triggerType, key: triggerRow.id, row: triggerRow },
+          { type: `insert`, key: restartedRow.id, row: restartedRow },
+        ])
+        subscription.unsubscribe()
+
         await cleanup
         model.clear()
         model.set(restartedRow.id, restartedRow)
