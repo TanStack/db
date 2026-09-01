@@ -19,9 +19,13 @@ import type { Context } from '../../src/query/builder/types.js'
 type FacadeSync = Parameters<SyncConfig<Record<string, unknown>>[`sync`]>[0]
 
 class ThrowingBuildIndex extends BasicIndex<number> {
+  throwBeforeBuild = false
   throwOnBuild = false
 
   override build(entries: Iterable<[number, unknown]>): void {
+    if (this.throwBeforeBuild) {
+      throw new Error(`facade index rebuild failed`)
+    }
     super.build(entries)
     if (this.throwOnBuild) {
       throw new Error(`facade index rebuild failed`)
@@ -382,7 +386,7 @@ describe(`BucketFacadeAdapter`, () => {
     }
 
     const replacement = { id: 1, value: `replacement` }
-    index.throwOnBuild = true
+    index.throwBeforeBuild = true
     rows.sendData(
       new MultiSet([
         [
@@ -413,15 +417,43 @@ describe(`BucketFacadeAdapter`, () => {
     expect(publications).toEqual([])
     expect(facade._stateRevision).toBe(revision)
 
-    index.throwOnBuild = false
+    const final = { id: 1, value: `final` }
+    rows.sendData(
+      new MultiSet([
+        [
+          [
+            bucketKey,
+            {
+              publicKey: replacement.id,
+              value: replacement,
+              order: undefined,
+            },
+          ],
+          -1,
+        ],
+        [
+          [bucketKey, { publicKey: final.id, value: final, order: undefined }],
+          1,
+        ],
+      ]),
+    )
+    graph.run()
+    expect(() => adapter.flush()).toThrow(`facade index rebuild failed`)
+    expect(facade.status).toBe(`error`)
+    expect(facade._state.syncedData.get(original.id)).toMatchObject(original)
+    expect(publications).toEqual([])
+
+    index.throwBeforeBuild = false
     adapter.flush().publish()
     expect(facade.status).toBe(`ready`)
-    expect(facade.toArray.map(stripVirtualProps)).toEqual([replacement])
+    expect(facade.toArray.map(stripVirtualProps)).toEqual([final])
     expect(publications).toHaveLength(2)
     expect(publications[0]).toEqual([])
     expect(publications[1]).toHaveLength(1)
     expect(facade._stateRevision).toBe(revision + 1)
-    expect(index.lookup(`eq`, `replacement`)).toEqual(new Set([original.id]))
+    expect(index.lookup(`eq`, `original`)).toEqual(new Set())
+    expect(index.lookup(`eq`, `replacement`)).toEqual(new Set())
+    expect(index.lookup(`eq`, `final`)).toEqual(new Set([original.id]))
 
     subscription.unsubscribe()
     await adapter.cleanup()

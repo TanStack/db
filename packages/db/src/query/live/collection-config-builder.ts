@@ -1046,6 +1046,9 @@ export class CollectionConfigBuilder<
     // for the same key (e.g., first output with null, then output with joined data).
     let pendingChanges: Map<unknown, Changes<TResult>> = new Map()
     let rootNeedsReady = false
+    let rootRecoveryState:
+      | CollectionPublicationStateSnapshot<TResult, string | number>
+      | undefined
 
     pipeline.pipe(
       output((data) => {
@@ -1075,6 +1078,21 @@ export class CollectionConfigBuilder<
 
       if (!hasParentChanges && !hasChildChanges) {
         return
+      }
+
+      if (rootRecoveryState) {
+        const stateToRecover = rootRecoveryState
+        try {
+          config.collection._restorePublicationState(stateToRecover)
+          rootRecoveryState = undefined
+        } catch (error) {
+          try {
+            config.markError(error)
+          } catch {
+            // Keep the restore failure authoritative and its state retryable.
+          }
+          throw error
+        }
       }
 
       let facadePublication:
@@ -1122,6 +1140,7 @@ export class CollectionConfigBuilder<
         }
       } catch (error) {
         const failedRootState = rootStateSnapshot
+        let rootRestoreFailure: { error: unknown } | undefined
         try {
           runAllCallbacks([
             ...(rootPublication ? [rootPublication.discard] : []),
@@ -1134,12 +1153,8 @@ export class CollectionConfigBuilder<
                       )
                     } catch (restoreError) {
                       rootNeedsReady = true
-                      try {
-                        config.markError(restoreError)
-                      } catch {
-                        // The install failure remains authoritative. Recovery
-                        // still continues through every facade participant.
-                      }
+                      rootRecoveryState = failedRootState
+                      rootRestoreFailure = { error: restoreError }
                       throw restoreError
                     }
                   },
@@ -1150,6 +1165,14 @@ export class CollectionConfigBuilder<
         } catch {
           // Preserve the graph-install failure after attempting every recovery
           // step. A failed root restore remains retryable from staged deltas.
+        }
+        if (rootRestoreFailure) {
+          try {
+            config.markError(rootRestoreFailure.error)
+          } catch {
+            // The install failure remains authoritative after every graph
+            // participant has restored its public state.
+          }
         }
         throw error
       }

@@ -68,6 +68,7 @@ export class BucketFacadeAdapter {
   private readonly activeBuckets = new Map<string, Set<string>>()
   private readonly entries = new Map<string, Map<string, FacadeEntry>>()
   private readonly retiredEntries = new Map<string, Map<string, FacadeEntry>>()
+  private readonly recoveryStates = new Map<FacadeEntry, FacadeEntrySnapshot>()
   private resolvedValues = new WeakMap<object, unknown>()
 
   constructor(
@@ -102,6 +103,7 @@ export class BucketFacadeAdapter {
   }
 
   flush(): FacadePublication {
+    this.recoverEntries()
     const snapshot = this.snapshot()
     const installedPending = this.pending
     const installedActivity = this.pendingActivity
@@ -248,6 +250,7 @@ export class BucketFacadeAdapter {
     this.pending.clear()
     this.pendingActivity.clear()
     this.activeBuckets.clear()
+    this.recoveryStates.clear()
   }
 
   private accumulate(
@@ -328,6 +331,7 @@ export class BucketFacadeAdapter {
   private restore(
     snapshot: FacadeSnapshot,
     changedEntries: Set<FacadeEntry>,
+    failedEntries: Map<FacadeEntry, unknown>,
   ): void {
     let firstFailure: { error: unknown } | undefined
     const previousEntries = new Set(
@@ -344,25 +348,12 @@ export class BucketFacadeAdapter {
       const entryState = snapshot.entryStates.get(entry)
       if (!entryState) continue
       try {
-        entry.collection._restorePublicationState(entryState.publicationState)
+        this.restoreEntryState(entry, entryState)
+        this.recoveryStates.delete(entry)
       } catch (error) {
         firstFailure ??= { error }
-        if (entry.collection.status !== `error`) {
-          try {
-            entry.sync?.markError(error)
-          } catch (markError) {
-            firstFailure ??= { error: markError }
-          }
-        }
-      } finally {
-        entry.currentOrder.clear()
-        for (const [key, order] of entryState.currentOrder) {
-          entry.currentOrder.set(key, order)
-        }
-        for (const row of entryState.rows) {
-          entry.keys.set(row.value, row.key)
-          if (row.order !== undefined) entry.order.set(row.value, row.order)
-        }
+        failedEntries.set(entry, error)
+        this.recoveryStates.set(entry, entryState)
       }
     }
 
@@ -382,15 +373,68 @@ export class BucketFacadeAdapter {
     if (firstFailure) throw firstFailure.error
   }
 
+  private restoreEntryState(
+    entry: FacadeEntry,
+    entryState: FacadeEntrySnapshot,
+  ): void {
+    try {
+      entry.collection._restorePublicationState(entryState.publicationState)
+    } finally {
+      entry.currentOrder.clear()
+      for (const [key, order] of entryState.currentOrder) {
+        entry.currentOrder.set(key, order)
+      }
+      for (const row of entryState.rows) {
+        entry.keys.set(row.value, row.key)
+        if (row.order !== undefined) entry.order.set(row.value, row.order)
+      }
+    }
+  }
+
+  private recoverEntries(): void {
+    let firstFailure: { error: unknown } | undefined
+    const failedEntries = new Map<FacadeEntry, unknown>()
+    for (const [entry, entryState] of this.recoveryStates) {
+      try {
+        this.restoreEntryState(entry, entryState)
+        this.recoveryStates.delete(entry)
+      } catch (error) {
+        firstFailure ??= { error }
+        failedEntries.set(entry, error)
+      }
+    }
+    if (!firstFailure) return
+
+    try {
+      runAllCallbacks(
+        [...failedEntries].map(([entry, error]) => () => {
+          if (entry.collection.status !== `error`) entry.sync?.markError(error)
+        }),
+      )
+    } catch {
+      // The index recovery failure remains authoritative and retryable.
+    }
+    throw firstFailure.error
+  }
+
   private rollbackInstallation(
     snapshot: FacadeSnapshot,
     changedEntries: Set<FacadeEntry>,
     publications: Array<PublicationDeferral>,
   ): void {
+    const failedEntries = new Map<FacadeEntry, unknown>()
     runAllCallbacks([
-      () => this.restore(snapshot, changedEntries),
+      () => this.restore(snapshot, changedEntries, failedEntries),
       () => this.retiredEntries.clear(),
       ...publications.map((publication) => publication.discard),
+      () =>
+        runAllCallbacks(
+          [...failedEntries].map(([entry, error]) => () => {
+            if (entry.collection.status !== `error`) {
+              entry.sync?.markError(error)
+            }
+          }),
+        ),
     ])
   }
 

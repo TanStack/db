@@ -51,6 +51,7 @@ type FacadeCandidateScanScenario = {
 
 class ThrowingUpdateIndex extends BasicIndex<number> {
   throwAfterUpdate = false
+  throwBeforeBuild = false
   throwAfterBuild = false
 
   override update(key: number, oldItem: unknown, newItem: unknown): void {
@@ -59,6 +60,7 @@ class ThrowingUpdateIndex extends BasicIndex<number> {
   }
 
   override build(entries: Iterable<[number, unknown]>): void {
+    if (this.throwBeforeBuild) throw new Error(`root index rebuild failed`)
     super.build(entries)
     if (this.throwAfterBuild) throw new Error(`root index rebuild failed`)
   }
@@ -1275,10 +1277,17 @@ describe(`Collection-valued includes oracle`, () => {
         (batch) => childPublications.push(...batch),
         { includeInitialState: false },
       )
+      const errorSnapshots: Array<{ root: number; child: number }> = []
+      const unsubscribeError = live.on(`status:error`, () => {
+        errorSnapshots.push({
+          root: live.get(1)!.value,
+          child: facade.get(10)!.value,
+        })
+      })
       const rootRevision = live._stateRevision
       const childRevision = facade._stateRevision
       rootIndex.throwAfterUpdate = true
-      rootIndex.throwAfterBuild = true
+      rootIndex.throwBeforeBuild = true
 
       try {
         expect(() =>
@@ -1302,13 +1311,27 @@ describe(`Collection-valued includes oracle`, () => {
         expect(childPublications).toEqual([])
         expect(live._stateRevision).toBe(rootRevision)
         expect(facade._stateRevision).toBe(childRevision)
+        expect(errorSnapshots).toEqual([{ root: 1, child: 1 }])
 
         rootIndex.throwAfterUpdate = false
-        rootIndex.throwAfterBuild = false
-        nodes.write(`update`, { ...initialParent, value: 3 })
+        expect(() =>
+          nodes.write(`update`, { ...initialParent, value: 3 }),
+        ).toThrow(`root index rebuild failed`)
+        expect(live.status).toBe(`error`)
+        expect(live.get(1)!.value).toBe(1)
+        expect(facade.get(10)!.value).toBe(1)
+        expect(rootPublications).toEqual([])
+        expect(childPublications).toEqual([])
+        expect(errorSnapshots).toEqual([
+          { root: 1, child: 1 },
+          { root: 1, child: 1 },
+        ])
+
+        rootIndex.throwBeforeBuild = false
+        nodes.write(`update`, { ...initialParent, value: 4 })
 
         expect(live.status).toBe(`ready`)
-        expect(live.get(1)!.value).toBe(3)
+        expect(live.get(1)!.value).toBe(4)
         expect(facade.toArray.map(({ id, value }) => ({ id, value }))).toEqual([
           { id: 10, value: 2 },
         ])
@@ -1316,9 +1339,13 @@ describe(`Collection-valued includes oracle`, () => {
         expect(childPublications).toHaveLength(1)
         expect(live._stateRevision).toBe(rootRevision + 1)
         expect(facade._stateRevision).toBe(childRevision + 1)
+        expect([...rootIndex.equalityLookup(2)]).toEqual([])
+        expect([...rootIndex.equalityLookup(3)]).toEqual([])
+        expect([...rootIndex.equalityLookup(4)]).toEqual([1])
       } finally {
         rootIndex.throwAfterUpdate = false
-        rootIndex.throwAfterBuild = false
+        rootIndex.throwBeforeBuild = false
+        unsubscribeError()
         rootSubscription.unsubscribe()
         childSubscription.unsubscribe()
         await Promise.all([live.cleanup(), nodes.collection.cleanup()])
