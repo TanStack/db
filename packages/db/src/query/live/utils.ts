@@ -140,8 +140,13 @@ export function* splitUpdates<
 }
 
 /**
- * Prevents duplicate source inserts and makes update/delete retractions use
- * the exact row previously contributed to D2 for the key.
+ * Prepare changes for a D2 pipeline by preventing duplicate inserts and
+ * reconciling update/delete retractions with previously sent rows.
+ * Maintains D2 multiplicity at 1 for visible items and ensures retractions
+ * exactly match the row previously contributed for each key.
+ *
+ * Mutates `sentRows` in place: records rows on insert/update, removes them
+ * on delete.
  */
 export function prepareChangesForD2(
   changes: Array<ChangeMessage<Record<string, unknown>, string | number>>,
