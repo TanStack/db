@@ -201,6 +201,7 @@ export class CollectionStateManager<
   public hasReceivedFirstCommit = false
   public isCommittingSyncTransactions = false
   private isDrainingSyncTransactions = false
+  private syncSessionGeneration = 0
   public isLocalOnly = false
 
   /**
@@ -1042,6 +1043,8 @@ export class CollectionStateManager<
     processed: boolean
     publicationError?: { error: unknown }
   } {
+    const syncSessionGeneration = this.syncSessionGeneration
+
     // Check if there are any persisting transaction
     let hasPersistingTransaction = false
     for (const transaction of this.transactions.values()) {
@@ -1695,17 +1698,21 @@ export class CollectionStateManager<
         publicationError = { error }
       }
 
-      // Clear the pre-sync state since sync operations are complete
-      this.preSyncVisibleState.clear()
+      if (this.syncSessionGeneration === syncSessionGeneration) {
+        // Clear the pre-sync state since sync operations are complete
+        this.preSyncVisibleState.clear()
 
-      // Clear recently synced keys after a microtask to allow recomputeOptimisticState to see them
-      Promise.resolve().then(() => {
-        this.recentlySyncedKeys.clear()
-      })
+        // Clear recently synced keys after a microtask to allow recomputeOptimisticState to see them
+        Promise.resolve().then(() => {
+          if (this.syncSessionGeneration === syncSessionGeneration) {
+            this.recentlySyncedKeys.clear()
+          }
+        })
 
-      // Mark that we've received the first commit (for tracking purposes)
-      if (!this.hasReceivedFirstCommit) {
-        this.hasReceivedFirstCommit = true
+        // Mark that we've received the first commit (for tracking purposes)
+        if (!this.hasReceivedFirstCommit) {
+          this.hasReceivedFirstCommit = true
+        }
       }
 
       for (const transaction of committedSyncedTransactions) {
@@ -1865,6 +1872,7 @@ export class CollectionStateManager<
    * This can be called manually or automatically by garbage collection
    */
   public cleanup(): void {
+    this.syncSessionGeneration++
     for (const transaction of this.pendingSyncedTransactions) {
       transaction.applied.reject(new SyncTransactionAbortedError())
     }

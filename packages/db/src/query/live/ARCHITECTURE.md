@@ -1401,8 +1401,10 @@ identity or generation without changing this sequence.
 
 Cleanup also ends the current publication history. It must discard both the
 pre-sync visible snapshot and the recently-synced suppression set before a new
-sync session starts. Otherwise stale rows can classify a fresh insert as an
-update, or stale keys can suppress the new session's first event.
+sync session starts. Synchronous publication tails and queued microtasks remain
+scoped to the session that created them; after cleanup they cannot clear or mark
+state owned by a restarted session. Otherwise stale rows can classify a fresh
+insert as an update, or stale keys can suppress the new session's first event.
 
 An imperative load operation is a separate caller boundary around this flow.
 It owns the future requests caused while it is current, retains the promises it

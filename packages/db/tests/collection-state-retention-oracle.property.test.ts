@@ -223,6 +223,86 @@ it(`starts a new sync session without retained publication state`, async () => {
   }
 })
 
+it(`keeps a restarted session's publication state after the old listener returns`, async () => {
+  let sync!: SyncActions
+  const collection = createCollection<RetainedRow, number>({
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      rowUpdateMode: `full`,
+      sync: (actions) => {
+        sync = actions
+        actions.markReady()
+      },
+    },
+  })
+  let cleanup: Promise<void> | undefined
+  let restarted = false
+  const subscription = collection.subscribeChanges(
+    () => {
+      if (restarted) return
+      restarted = true
+      cleanup = collection.cleanup()
+      collection.startSyncImmediate()
+      collection._state.preSyncVisibleState.set(2, { id: 2, value: 2 })
+      collection._state.recentlySyncedKeys.add(2)
+    },
+    { includeInitialState: false },
+  )
+
+  try {
+    sync.begin()
+    sync.write({ type: `insert`, value: { id: 1, value: 1 } })
+    expect(sync.commit()).toBe(true)
+
+    expect(restarted).toBe(true)
+    expect(collection._state.preSyncVisibleState).toEqual(
+      new Map([[2, { id: 2, value: 2 }]]),
+    )
+    expect(collection._state.recentlySyncedKeys).toEqual(new Set([2]))
+    expect(collection._state.hasReceivedFirstCommit).toBe(false)
+    await cleanup
+  } finally {
+    subscription.unsubscribe()
+    await collection.cleanup()
+  }
+})
+
+it(`does not let an old publication microtask clear restarted sync state`, async () => {
+  let sync!: SyncActions
+  const collection = createCollection<RetainedRow, number>({
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      rowUpdateMode: `full`,
+      sync: (actions) => {
+        sync = actions
+        actions.markReady()
+      },
+    },
+  })
+
+  try {
+    sync.begin()
+    sync.write({ type: `insert`, value: { id: 1, value: 1 } })
+    expect(sync.commit()).toBe(true)
+
+    const cleanup = collection.cleanup()
+    collection.startSyncImmediate()
+    sync.begin()
+    sync.write({ type: `insert`, value: { id: 2, value: 2 } })
+    collection._state.capturePreSyncVisibleState()
+    expect(collection._state.recentlySyncedKeys).toEqual(new Set([2]))
+
+    await Promise.resolve()
+
+    expect(collection._state.recentlySyncedKeys).toEqual(new Set([2]))
+    await cleanup
+  } finally {
+    await collection.cleanup()
+  }
+})
+
 fcTest.prop(
   [fc.array(retentionActionArbitrary, { minLength: 1, maxLength: 20 })],
   oraclePropertyOptions(100, `collection-state.retention`),
