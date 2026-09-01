@@ -222,6 +222,8 @@ export class CollectionSyncManager<
     const syncEpoch = ++this.syncEpoch
     const isCurrentSync = () => syncEpoch === this.syncEpoch
     this.lifecycle.setStatus(`loading`)
+    let syncEntryActive = true
+    let readyEffectFailure: { error: unknown } | undefined
 
     try {
       const syncRes = normalizeSyncFnResult(
@@ -383,7 +385,13 @@ export class CollectionSyncManager<
             return receipt
           },
           markReady: () => {
-            if (isCurrentSync()) this.lifecycle.markReady()
+            if (!isCurrentSync()) return
+            if (syncEntryActive) {
+              readyEffectFailure ??=
+                this.lifecycle.markReadyDuringSyncStart()
+            } else {
+              this.lifecycle.markReady()
+            }
           },
           markError: (error?: unknown) => {
             if (isCurrentSync()) this.lifecycle.markError(error)
@@ -427,6 +435,7 @@ export class CollectionSyncManager<
           metadata: this.createSyncMetadataApi(isCurrentSync),
         }),
       )
+      syncEntryActive = false
 
       // Store cleanup function if provided
       this.syncCleanupFn = syncRes?.cleanup ?? null
@@ -445,9 +454,11 @@ export class CollectionSyncManager<
         )
       }
     } catch (error) {
+      syncEntryActive = false
       this.lifecycle.markError(error)
       throw error
     }
+    if (readyEffectFailure) throw readyEffectFailure.error
   }
 
   public deferStart(): boolean {

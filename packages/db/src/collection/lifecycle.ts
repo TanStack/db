@@ -134,6 +134,16 @@ export class CollectionLifecycleManager<
    * @private - Should only be called by sync implementations
    */
   public markReady(): void {
+    const failure = this.applyReadyTransition()
+    if (failure) throw failure.error
+  }
+
+  /** @internal Capture ready-effect failures while the sync entry completes. */
+  public markReadyDuringSyncStart(): { error: unknown } | undefined {
+    return this.applyReadyTransition()
+  }
+
+  private applyReadyTransition(): { error: unknown } | undefined {
     this.validateStatusTransition(this.status, `ready`)
     // A successful initial sync or recovery establishes a ready snapshot.
     if (this.status === `loading` || this.status === `error`) {
@@ -155,11 +165,14 @@ export class CollectionLifecycleManager<
       }
       // Notify dependents when markReady is called, after status is set
       // This ensures live queries get notified when their dependencies become ready
-      if (this.changes.changeSubscriptions.size > 0) {
-        readyEffects.push(() => this.changes.emitEmptyReadyEvent())
+      readyEffects.push(() => this.changes.emitEmptyReadyEvent())
+      try {
+        runAllCallbacks(readyEffects)
+      } catch (error) {
+        return { error }
       }
-      runAllCallbacks(readyEffects)
     }
+    return undefined
   }
 
   /** Mark an asynchronous sync failure after sync has started. */

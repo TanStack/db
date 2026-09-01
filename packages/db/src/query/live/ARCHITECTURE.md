@@ -1110,7 +1110,16 @@ another public behavior.
 The first-ready transition is an attempt-all fan-out. One callback failure
 cannot suppress later first-ready callbacks, preload settlement, or the empty
 ready event that wakes dependent Collections. Core completes every effect, then
-rethrows the first failure unchanged, including a falsy value.
+rethrows the first failure unchanged, including a falsy value. Status is ready
+before these effects run; first-ready callbacks keep registration order, and
+the dependent-ready event runs after them. That event snapshots the dependents
+present at delivery and attempts every one even if an earlier listener fails.
+
+When `markReady()` runs during the synchronous adapter-entry call, core retains
+any ready-effect failure until the adapter finishes its own setup. It then
+propagates the exact failure without reclassifying it as a sync failure or
+moving the Collection to `error`. A later asynchronous `markReady()` call keeps
+the ordinary synchronous throw boundary.
 
 Pending demand does not hide the parent row. An active empty bucket gives it
 the current canonical bucket value, and available partial source rows produce

@@ -1,5 +1,6 @@
 import { NegativeActiveSubscribersError } from '../errors'
 import { withPublicationContext } from '../scheduler.js'
+import { runAllCallbacks } from '../utils/callbacks.js'
 import {
   createSingleRowRefProxy,
   toExpression,
@@ -108,9 +109,11 @@ export class CollectionChangesManager<
    */
   public emitEmptyReadyEvent(): void {
     withPublicationContext(() => {
-      for (const subscription of this.changeSubscriptions) {
-        subscription.emitEvents([])
-      }
+      runAllCallbacks(
+        [...this.changeSubscriptions].map(
+          (subscription) => () => subscription.emitEvents([]),
+        ),
+      )
     })
   }
 
