@@ -809,6 +809,50 @@ describe(`Collection Lifecycle Management`, () => {
       }
     })
 
+    it(`preserves a falsy ready failure through a nested publication`, async () => {
+      let markReadyCallback: (() => void) | undefined
+      const scheduledJob = vi.fn()
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `nested-falsy-ready-failure-test`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReadyCallback = markReady
+          },
+        },
+      })
+      const first = collection.subscribeChanges(() => {
+        const contextId = getActivePublicationContext()
+        transactionScopedScheduler.schedule({
+          contextId,
+          jobId: scheduledJob,
+          run: scheduledJob,
+        })
+      })
+      const second = collection.subscribeChanges(() => {
+        throw undefined
+      })
+
+      try {
+        let didThrow = false
+        let thrown: unknown
+        try {
+          withPublicationContext(() => markReadyCallback!())
+        } catch (error) {
+          didThrow = true
+          thrown = error
+        }
+
+        expect(didThrow).toBe(true)
+        expect(thrown).toBeUndefined()
+        expect(scheduledJob).toHaveBeenCalledOnce()
+      } finally {
+        first.unsubscribe()
+        second.unsubscribe()
+        await collection.cleanup()
+      }
+    })
+
     it(`surfaces a ready graph failure after running its job`, async () => {
       let markReadyCallback: (() => void) | undefined
       const graphFailure = new Error(`ready graph failed`)

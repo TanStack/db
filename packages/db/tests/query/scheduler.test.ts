@@ -142,6 +142,30 @@ describe(`Collection publication scheduler context`, () => {
     expect(getActivePublicationContext()).toBeUndefined()
     expect(transactionScopedScheduler.hasPendingJobs(contextId!)).toBe(false)
   })
+
+  it(`preserves a falsy graph failure through a publication boundary`, () => {
+    let didThrow = false
+    let thrown: unknown
+
+    try {
+      withPublicationContext(() => {
+        const contextId = getActivePublicationContext()
+        transactionScopedScheduler.schedule({
+          contextId,
+          jobId: `failing`,
+          run: () => {
+            throw undefined
+          },
+        })
+      })
+    } catch (error) {
+      didThrow = true
+      thrown = error
+    }
+
+    expect(didThrow).toBe(true)
+    expect(thrown).toBeUndefined()
+  })
 })
 
 describe(`live query scheduler`, () => {

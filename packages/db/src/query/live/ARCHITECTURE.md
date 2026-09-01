@@ -1121,8 +1121,9 @@ discard graph work queued by an earlier listener. Core flushes that work before
 it rethrows the first listener failure. If readiness is nested inside an
 existing publication, core retains the exact listener failure on that shared
 context and the outer boundary rethrows it only after the queued graph work
-drains. When both the listener and that queued graph work fail, the first ready
-listener failure remains the reported error.
+finishes or the first graph failure stops that turn. When both the listener and
+queued graph work fail, the first ready listener failure remains the reported
+error and the scheduler clears the turn's remaining work.
 
 When `markReady()` runs during the synchronous adapter-entry call, core retains
 any ready-effect failure until the adapter finishes its own setup. It then
@@ -1224,8 +1225,10 @@ subscribers, then attempts every callback in registration order. Adding or
 removing a listener during delivery does not change that batch. The first exact
 callback failure stays on the shared publication context, including when it
 came from a nested readiness transition. Later callback failures cannot replace
-it. Core runs the dependent graph work queued by the batch before rethrowing the
-retained failure.
+it. Core runs the dependent graph turn queued by the batch before rethrowing the
+retained failure. A graph failure stops that turn and clears its remaining
+work; scheduler dependencies are not a complete proof that two jobs can commit
+or roll back independently.
 
 Window metadata follows the same causal order as the published rows. If a
 publication callback starts a newer window operation, that newer generation
