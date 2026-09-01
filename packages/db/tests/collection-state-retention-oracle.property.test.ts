@@ -2,6 +2,7 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { DuplicateKeySyncError } from '../src/errors.js'
+import { createTransaction } from '../src/transactions.js'
 import { oraclePropertyOptions } from './oracle-config.js'
 import type { Collection } from '../src/collection/index.js'
 import type { SyncConfig } from '../src/types.js'
@@ -18,6 +19,8 @@ type RetentionAction =
   | { type: `update`; row: RetainedRow }
   | { type: `delete`; key: number }
   | { type: `replace`; rows: ReadonlyArray<RetainedRow> }
+  | { type: `restart` }
+  | { type: `reentrantRestart`; row: RetainedRow }
 
 type RetentionHarness = {
   collection: Collection<RetainedRow, number>
@@ -30,17 +33,43 @@ const retainedRowArbitrary = fc.record({
 })
 
 const retentionActionArbitrary: fc.Arbitrary<RetentionAction> = fc.oneof(
-  retainedRowArbitrary.map((row) => ({ type: `insert` as const, row })),
-  retainedRowArbitrary.map((row) => ({ type: `update` as const, row })),
-  fc
-    .integer({ min: 0, max: 3 })
-    .map((key) => ({ type: `delete` as const, key })),
-  fc
-    .uniqueArray(retainedRowArbitrary, {
-      selector: (row) => row.id,
-      maxLength: 4,
-    })
-    .map((rows) => ({ type: `replace` as const, rows })),
+  {
+    weight: 4,
+    arbitrary: retainedRowArbitrary.map((row) => ({
+      type: `insert` as const,
+      row,
+    })),
+  },
+  {
+    weight: 4,
+    arbitrary: retainedRowArbitrary.map((row) => ({
+      type: `update` as const,
+      row,
+    })),
+  },
+  {
+    weight: 4,
+    arbitrary: fc
+      .integer({ min: 0, max: 3 })
+      .map((key) => ({ type: `delete` as const, key })),
+  },
+  {
+    weight: 2,
+    arbitrary: fc
+      .uniqueArray(retainedRowArbitrary, {
+        selector: (row) => row.id,
+        maxLength: 4,
+      })
+      .map((rows) => ({ type: `replace` as const, rows })),
+  },
+  { weight: 1, arbitrary: fc.constant({ type: `restart` as const }) },
+  {
+    weight: 1,
+    arbitrary: retainedRowArbitrary.map((row) => ({
+      type: `reentrantRestart` as const,
+      row,
+    })),
+  },
 )
 
 function createRetentionHarness(): RetentionHarness {
@@ -56,7 +85,12 @@ function createRetentionHarness(): RetentionHarness {
       },
     },
   })
-  return { collection, sync }
+  return {
+    collection,
+    get sync() {
+      return sync
+    },
+  }
 }
 
 function applyAction(
@@ -95,6 +129,9 @@ function applyAction(
         model.set(row.id, row)
       }
       break
+    case `restart`:
+    case `reentrantRestart`:
+      throw new Error(`Restart actions require the lifecycle driver`)
   }
   expect(sync.commit()).toBe(true)
 }
@@ -122,12 +159,54 @@ function expectRetainedState(
 async function runRetentionHistory(
   actions: ReadonlyArray<RetentionAction>,
 ): Promise<void> {
-  const { collection, sync } = createRetentionHarness()
+  const harness = createRetentionHarness()
+  const { collection } = harness
   const model = new Map<number, RetainedRow>()
   try {
     expectRetainedState(collection, model)
     for (const action of actions) {
-      applyAction(action, model, sync)
+      if (action.type === `restart`) {
+        await collection.cleanup()
+        collection.startSyncImmediate()
+        model.clear()
+      } else if (action.type === `reentrantRestart`) {
+        const oldSync = harness.sync
+        const triggerRow = {
+          id: action.row.id,
+          value: (model.get(action.row.id)?.value ?? action.row.value) + 1,
+        }
+        const restartedRow = {
+          id: (action.row.id + 1) % 4,
+          value: action.row.value + 1,
+        }
+        let cleanup: Promise<void> | undefined
+        let restarted = false
+        const subscription = collection.subscribeChanges(
+          () => {
+            if (restarted) return
+            restarted = true
+            cleanup = collection.cleanup()
+            collection.startSyncImmediate()
+            harness.sync.begin()
+            harness.sync.write({ type: `insert`, value: restartedRow })
+            collection._state.recentlySyncedKeys.add(restartedRow.id)
+            harness.sync.commit()
+          },
+          { includeInitialState: false },
+        )
+
+        oldSync.begin()
+        oldSync.write({ type: `update`, value: triggerRow })
+        expect(oldSync.commit()).toBe(true)
+        subscription.unsubscribe()
+        expect(restarted).toBe(true)
+        await Promise.resolve()
+        await cleanup
+        model.clear()
+        model.set(restartedRow.id, restartedRow)
+      } else {
+        applyAction(action, model, harness.sync)
+      }
       expectRetainedState(collection, model)
     }
   } finally {
@@ -261,6 +340,14 @@ it(`keeps a restarted session's publication state after the old listener returns
     )
     expect(collection._state.recentlySyncedKeys).toEqual(new Set([2]))
     expect(collection._state.hasReceivedFirstCommit).toBe(false)
+
+    sync.begin()
+    sync.write({ type: `insert`, value: { id: 3, value: 3 } })
+    expect(sync.commit()).toBe(true)
+    expect(collection._state.preSyncVisibleState.size).toBe(0)
+    expect(collection._state.hasReceivedFirstCommit).toBe(true)
+    await Promise.resolve()
+    expect(collection._state.recentlySyncedKeys.size).toBe(0)
     await cleanup
   } finally {
     subscription.unsubscribe()
@@ -297,8 +384,87 @@ it(`does not let an old publication microtask clear restarted sync state`, async
     await Promise.resolve()
 
     expect(collection._state.recentlySyncedKeys).toEqual(new Set([2]))
+
+    expect(sync.commit()).toBe(true)
+    expect(collection._state.hasReceivedFirstCommit).toBe(true)
+    await Promise.resolve()
+    expect(collection._state.preSyncVisibleState.size).toBe(0)
+    expect(collection._state.recentlySyncedKeys.size).toBe(0)
     await cleanup
   } finally {
+    await collection.cleanup()
+  }
+})
+
+it(`publishes one insert when a restarted optimistic row is confirmed and rolled back`, async () => {
+  let sync!: SyncActions
+  let syncSession = 0
+  let releaseMutation!: () => void
+  const mutationHold = new Promise<void>((resolve) => {
+    releaseMutation = resolve
+  })
+  const collection = createCollection<RetainedRow, number>({
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      rowUpdateMode: `full`,
+      sync: (actions) => {
+        sync = actions
+        syncSession++
+        if (syncSession === 1) actions.markReady()
+      },
+    },
+  })
+  const events: Array<{ type: string; key: string | number }> = []
+  const restartStatuses: Array<string> = []
+  let restarted = false
+  let mutationCommit: Promise<unknown> | undefined
+  const subscription = collection.subscribeChanges(
+    (changes) => {
+      events.push(...changes.map(({ type, key }) => ({ type, key })))
+      if (restarted || !changes.some(({ key }) => key === 1)) return
+
+      restarted = true
+      restartStatuses.push(collection.status)
+      void collection.cleanup()
+      restartStatuses.push(collection.status)
+      collection.startSyncImmediate()
+      restartStatuses.push(collection.status)
+      sync.markReady()
+      restartStatuses.push(collection.status)
+
+      const transaction = createTransaction({
+        autoCommit: false,
+        mutationFn: () => mutationHold,
+      })
+      void transaction.isPersisted.promise.catch(() => undefined)
+      transaction.mutate(() => collection.insert({ id: 2, value: 2 }))
+      mutationCommit = transaction.commit().catch(() => undefined)
+
+      sync.begin()
+      sync.write({ type: `insert`, value: { id: 2, value: 2 } })
+      sync.commit()
+      transaction.rollback()
+    },
+    { includeInitialState: false },
+  )
+
+  try {
+    sync.begin()
+    sync.write({ type: `insert`, value: { id: 1, value: 1 } })
+    expect(sync.commit()).toBe(true)
+
+    expect(events).toEqual([
+      { type: `insert`, key: 1 },
+      { type: `insert`, key: 2 },
+    ])
+    expect([...collection.state.keys()]).toEqual([2])
+    expect(restartStatuses).toEqual([`ready`, `cleaned-up`, `loading`, `ready`])
+    expect(collection.status).toBe(`ready`)
+  } finally {
+    releaseMutation()
+    await mutationCommit
+    subscription.unsubscribe()
     await collection.cleanup()
   }
 })
