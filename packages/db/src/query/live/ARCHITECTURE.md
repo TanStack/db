@@ -732,7 +732,9 @@ window change reaches the pass with no graph work, core calls the loader first.
 It then drains every graph step created by a synchronous adapter commit before
 publishing. Async settlement schedules another pass under the same rule. A
 successful retry therefore cannot commit source rows while leaving the live
-result stale until an unrelated later window change.
+result stale until an unrelated later window change. When one pass has several
+load callbacks, it attempts all of them and then rethrows the first failure
+unchanged, including falsy values such as `undefined`, `false`, `0`, or `NaN`.
 
 Live Collections and Effects keep separate consumer-local continuation state,
 but obey the same identity and reset law. A settled request remains the

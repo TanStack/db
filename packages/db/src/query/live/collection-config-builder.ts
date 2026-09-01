@@ -796,17 +796,17 @@ export class CollectionConfigBuilder<
 
     const combinedLoader = () => {
       let allDone = true
-      let firstError: unknown
+      let firstFailure: { error: unknown } | undefined
       pending.loadCallbacks.forEach((loader) => {
         try {
           allDone = loader() && allDone
         } catch (error) {
           allDone = false
-          firstError ??= error
+          firstFailure ??= { error }
         }
       })
-      if (firstError) {
-        throw firstError
+      if (firstFailure) {
+        throw firstFailure.error
       }
       // Returning false signals that callers should schedule another pass.
       return allDone

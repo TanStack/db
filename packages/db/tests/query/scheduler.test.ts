@@ -596,6 +596,74 @@ describe(`live query scheduler`, () => {
     maybeRunGraphSpy.mockRestore()
   })
 
+  it.each([
+    { name: `undefined`, failure: undefined },
+    { name: `null`, failure: null },
+    { name: `false`, failure: false },
+    { name: `zero`, failure: 0 },
+    { name: `empty string`, failure: `` },
+    { name: `NaN`, failure: Number.NaN },
+  ])(`preserves the first falsy graph-loader failure: $name`, ({ failure }) => {
+    const baseCollection = createCollection<User>({
+      id: `falsy-loader-users-${String(failure)}`,
+      getKey: (user) => user.id,
+      sync: {
+        sync: () => () => {},
+      },
+    })
+    const builder = new CollectionConfigBuilder({
+      id: `falsy-loader-builder-${String(failure)}`,
+      query: (q) => q.from({ user: baseCollection }),
+    })
+    const contextId = Symbol(`falsy-loader-context`)
+    const laterLoader = vi.fn(() => true)
+    const config = {
+      begin: vi.fn(),
+      write: vi.fn(),
+      commit: vi.fn(),
+      markReady: vi.fn(),
+      truncate: vi.fn(),
+    } as unknown as Parameters<SyncConfig<UserWithVirtual>[`sync`]>[0]
+    const syncState = {
+      messagesCount: 0,
+      subscribedToAllCollections: true,
+      unsubscribeCallbacks: new Set<() => void>(),
+      graph: {
+        pendingWork: () => false,
+        run: vi.fn(),
+      },
+      inputs: {},
+      pipeline: {},
+    } as unknown as FullSyncState
+    const maybeRunGraphSpy = vi
+      .spyOn(builder, `maybeRunGraph`)
+      .mockImplementation((combinedLoader) => {
+        combinedLoader?.()
+      })
+
+    builder.currentSyncConfig = config
+    builder.currentSyncState = syncState
+    builder.scheduleGraphRun(() => {
+      throw failure
+    }, { contextId })
+    builder.scheduleGraphRun(laterLoader, { contextId })
+
+    let didThrow = false
+    let thrown: unknown
+    try {
+      transactionScopedScheduler.flush(contextId)
+    } catch (error) {
+      didThrow = true
+      thrown = error
+    } finally {
+      maybeRunGraphSpy.mockRestore()
+    }
+
+    expect(didThrow).toBe(true)
+    expect(Object.is(thrown, failure)).toBe(true)
+    expect(laterLoader).toHaveBeenCalledOnce()
+  })
+
   it(`should handle optimistic mutations with nested left joins without scheduler errors`, async () => {
     // This test verifies that optimistic mutations on collections with nested live query
     // collections using left joins complete successfully without scheduler errors.

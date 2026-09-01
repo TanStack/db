@@ -1585,6 +1585,7 @@ it(`fences an unindexed fallback settlement from a cleaned query session`, async
     await flushPromises()
     expect(live.status).toBe(`ready`)
     expect(live.isLoadingSubset).toBe(false)
+    expect(live.utils.hasSubsetError).toBe(true)
     expect(live.utils.lastSubsetError).toBe(visibleFailure)
 
     firstWindow = live.utils.setWindow({ offset: 0, limit: 1 })
@@ -1596,6 +1597,7 @@ it(`fences an unindexed fallback settlement from a cleaned query session`, async
     await live.preload()
     expect(live.status).toBe(`ready`)
     expect(live.isLoadingSubset).toBe(false)
+    expect(live.utils.hasSubsetError).toBe(false)
     expect(live.utils.lastSubsetError).toBeUndefined()
     secondWindow = live.utils.setWindow({ offset: 0, limit: 1 })
     expect(pending).toHaveLength(3)

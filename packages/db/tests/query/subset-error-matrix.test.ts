@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
+import { SyncCleanupError } from '../../src/errors.js'
 import { createEffect, createLiveQueryCollection, eq } from '../../src/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 
@@ -510,13 +511,14 @@ describe(`loadSubset failure matrix`, () => {
       expect(unloadCount).toBe(2)
       expect(queuedMicrotasks).toHaveLength(1)
 
-      let cleanupSurfaced = false
+      let cleanupError: unknown
       try {
         queuedMicrotasks[0]!()
-      } catch {
-        cleanupSurfaced = true
+      } catch (error) {
+        cleanupError = error
       }
-      expect(cleanupSurfaced).toBe(true)
+      expect(cleanupError).toBeInstanceOf(SyncCleanupError)
+      expect((cleanupError as Error).message).toContain(`error: undefined`)
 
       await live.cleanup()
       expect(unloadCount).toBe(3)

@@ -728,6 +728,59 @@ describe(`createEffect`, () => {
       expect(unloadCount).toBe(2)
       await source.cleanup()
     })
+
+    it.each([
+      { name: `undefined`, failure: undefined },
+      { name: `null`, failure: null },
+      { name: `false`, failure: false },
+      { name: `zero`, failure: 0 },
+      { name: `empty string`, failure: `` },
+      { name: `NaN`, failure: Number.NaN },
+    ])(`retries a falsy cleanup failure: $name`, async ({ name, failure }) => {
+      let unloadCount = 0
+      const source = createCollection<{ id: number }>({
+        id: `effect-falsy-cleanup-${name}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => true,
+              unloadSubset: () => {
+                unloadCount++
+                if (unloadCount === 1) throw failure
+              },
+            }
+          },
+        },
+      })
+      const effect = createEffect({
+        query: (q) => q.from({ source }),
+        onBatch: () => {},
+      })
+
+      try {
+        await flushPromises()
+        let didReject = false
+        let rejection: unknown
+        try {
+          await effect.dispose()
+        } catch (error) {
+          didReject = true
+          rejection = error
+        }
+        expect(didReject).toBe(true)
+        expect(Object.is(rejection, failure)).toBe(true)
+        expect(unloadCount).toBe(1)
+
+        await effect.dispose()
+        expect(unloadCount).toBe(2)
+      } finally {
+        await effect.dispose()
+        await source.cleanup()
+      }
+    })
   })
 
   describe(`auto-generated IDs`, () => {
