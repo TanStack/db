@@ -1293,14 +1293,69 @@ describe(`Collection-valued includes oracle`, () => {
       const facadeIndex = facade.createIndex((row) => row.value, {
         indexType: ThrowingUpdateIndex,
       }) as ThrowingUpdateIndex
-      const rootPublications: Array<unknown> = []
-      const childPublications: Array<unknown> = []
+      type ProjectedNodeChange = {
+        type: `insert` | `update` | `delete`
+        key: number
+        value: Pick<NodeRow, `id` | `kind` | `group` | `value`>
+        previousValue?: Pick<NodeRow, `id` | `kind` | `group` | `value`>
+      }
+      const projectNodeRow = ({ id, kind, group, value }: NodeRow) => ({
+        id,
+        kind,
+        group,
+        value,
+      })
+      const projectNodeChange = (
+        change: ChangeMessage<NodeRow, string | number>,
+      ): ProjectedNodeChange => ({
+        type: change.type,
+        key: Number(change.key),
+        value: projectNodeRow(change.value),
+        ...(change.previousValue
+          ? { previousValue: projectNodeRow(change.previousValue) }
+          : {}),
+      })
+      type ProjectedRootChange = {
+        type: `insert` | `update` | `delete`
+        key: number
+        value: { id: number; value: number; preservesFacade: boolean }
+        previousValue?: {
+          id: number
+          value: number
+          preservesFacade: boolean
+        }
+      }
+      const projectRootChange = (
+        change: ChangeMessage<
+          { id: number; value: number; children: typeof facade },
+          string | number
+        >,
+      ): ProjectedRootChange => ({
+        type: change.type,
+        key: Number(change.key),
+        value: {
+          id: change.value.id,
+          value: change.value.value,
+          preservesFacade: change.value.children === facade,
+        },
+        ...(change.previousValue
+          ? {
+              previousValue: {
+                id: change.previousValue.id,
+                value: change.previousValue.value,
+                preservesFacade: change.previousValue.children === facade,
+              },
+            }
+          : {}),
+      })
+      const rootPublications: Array<Array<ProjectedRootChange>> = []
+      const childPublications: Array<Array<ProjectedNodeChange>> = []
       const rootSubscription = live.subscribeChanges(
-        (batch) => rootPublications.push(...batch),
+        (batch) => rootPublications.push(batch.map(projectRootChange)),
         { includeInitialState: false },
       )
       const childSubscription = facade.subscribeChanges(
-        (batch) => childPublications.push(...batch),
+        (batch) => childPublications.push(batch.map(projectNodeChange)),
         { includeInitialState: false },
       )
       const errorSnapshots: Array<{
@@ -1463,8 +1518,40 @@ describe(`Collection-valued includes oracle`, () => {
           { id: 10, value: 2 },
           { id: 11, value: 20 },
         ])
-        expect(rootPublications).toHaveLength(1)
-        expect(childPublications).toHaveLength(2)
+        const rootPublicationsAfterRecovery: Array<
+          Array<ProjectedRootChange>
+        > = [
+          [],
+          [
+            {
+              type: `update`,
+              key: 1,
+              value: { id: 1, value: 5, preservesFacade: true },
+              previousValue: { id: 1, value: 1, preservesFacade: true },
+            },
+          ],
+        ]
+        const childPublicationsAfterRecovery: Array<
+          Array<ProjectedNodeChange>
+        > = [
+          [],
+          [
+            {
+              type: `update`,
+              key: 10,
+              value: { ...initialChild, value: 2 },
+              previousValue: initialChild,
+            },
+            {
+              type: `update`,
+              key: 11,
+              value: { ...initialSibling, value: 20 },
+              previousValue: initialSibling,
+            },
+          ],
+        ]
+        expect(rootPublications).toEqual(rootPublicationsAfterRecovery)
+        expect(childPublications).toEqual(childPublicationsAfterRecovery)
         expect(live._stateRevision).toBe(rootRevision + 1)
         expect(facade._stateRevision).toBe(childRevision + 1)
         expect([...rootIndex.equalityLookup(2)]).toEqual([])
@@ -1473,6 +1560,7 @@ describe(`Collection-valued includes oracle`, () => {
         expect([...rootIndex.equalityLookup(5)]).toEqual([1])
 
         const facadeRevisionAfterRecovery = facade._stateRevision
+        const facadeBuildCallsAfterRecovery = facadeIndex.buildCalls
         const pendingChecks: Array<boolean> = []
         const hasPendingChanges =
           BucketFacadeAdapter.prototype.hasPendingChanges
@@ -1489,9 +1577,26 @@ describe(`Collection-valued includes oracle`, () => {
           pendingSpy.mockRestore()
         }
         expect(pendingChecks).toEqual([false])
+        expect(facadeIndex.buildCalls).toBe(facadeBuildCallsAfterRecovery)
         expect(live.get(1)!.value).toBe(6)
-        expect(rootPublications).toHaveLength(2)
-        expect(childPublications).toHaveLength(2)
+        expect(facade.toArray.map(({ id, value }) => ({ id, value }))).toEqual([
+          { id: 10, value: 2 },
+          { id: 11, value: 20 },
+        ])
+        expect([...facadeIndex.equalityLookup(2)]).toEqual([10])
+        expect([...facadeIndex.equalityLookup(20)]).toEqual([11])
+        expect(rootPublications).toEqual([
+          ...rootPublicationsAfterRecovery,
+          [
+            {
+              type: `update`,
+              key: 1,
+              value: { id: 1, value: 6, preservesFacade: true },
+              previousValue: { id: 1, value: 5, preservesFacade: true },
+            },
+          ],
+        ])
+        expect(childPublications).toEqual(childPublicationsAfterRecovery)
         expect(facade._stateRevision).toBe(facadeRevisionAfterRecovery)
         expect(readinessOrder).toEqual([`facade`, `root`])
       } finally {
