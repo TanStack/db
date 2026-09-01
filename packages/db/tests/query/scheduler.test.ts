@@ -665,7 +665,7 @@ describe(`live query scheduler`, () => {
     expect(laterLoader).toHaveBeenCalledOnce()
   })
 
-  it(`attempts every lexical source loader and preserves the first failure`, async () => {
+  it(`attempts every repeated-alias source loader and preserves the first failure`, async () => {
     const createSource = (name: string) =>
       createCollection<User>({
         id: `source-loader-${name}`,
@@ -684,16 +684,15 @@ describe(`live query scheduler`, () => {
     const builder = new CollectionConfigBuilder({
       id: `source-loader-builder`,
       query: (q) =>
-        q
-          .from({ first: firstSource })
-          .join(
-            { second: secondSource },
-            ({ first, second }) => eq(first.id, second.id),
-          )
-          .join(
-            { third: thirdSource },
-            ({ first, third }) => eq(first.id, third.id),
-          ),
+        q.from({ root: firstSource }).select(({ root }) => ({
+          id: root.id,
+          second: q
+            .from({ item: secondSource })
+            .where(({ item }) => eq(item.id, root.id)),
+          third: q
+            .from({ item: thirdSource })
+            .where(({ item }) => eq(item.id, root.id)),
+        })),
     })
     type BuilderSyncConfig = Parameters<
       ReturnType<typeof builder.getConfig>[`sync`][`sync`]
@@ -709,6 +708,11 @@ describe(`live query scheduler`, () => {
       graphCache: FullSyncState[`graph`]
       inputsCache: FullSyncState[`inputs`]
       pipelineCache: FullSyncState[`pipeline`]
+      collectionSources: Array<{
+        sourceId: string
+        alias: string
+        collection: object
+      }>
       subscribeToAllCollections: (
         syncConfig: typeof config,
         state: FullSyncState,
@@ -722,19 +726,36 @@ describe(`live query scheduler`, () => {
       inputs: builderInternals.inputsCache,
       pipeline: builderInternals.pipelineCache,
     } as unknown as FullSyncState
+    const sourceIdFor = (collection: object): string => {
+      const source = builderInternals.collectionSources.find(
+        (candidate) => candidate.collection === collection,
+      )
+      if (!source) throw new Error(`Expected a lexical source`)
+      return source.sourceId
+    }
+    const firstSourceId = sourceIdFor(firstSource)
+    const secondSourceId = sourceIdFor(secondSource)
+    const thirdSourceId = sourceIdFor(thirdSource)
+    expect(
+      builderInternals.collectionSources.map(({ alias }) => alias),
+    ).toEqual([`root`, `item`, `item`])
+    expect(new Set([firstSourceId, secondSourceId, thirdSourceId]).size).toBe(3)
     const laterFailure = new Error(`later source failed`)
     const loaderCalls: Array<string> = []
     const loaderCallCounts = new Map<string, number>()
     const loadMoreSpy = vi
       .spyOn(CollectionSubscriber.prototype, `loadMoreIfNeeded`)
       .mockImplementation(function (this: unknown) {
-        const { alias } = this as { alias: string }
-        loaderCalls.push(alias)
-        loaderCallCounts.set(alias, (loaderCallCounts.get(alias) ?? 0) + 1)
-        if (alias === `first`) throw undefined
-        if (alias === `second`) throw laterFailure
-        if (alias === `third`) return true
-        throw new Error(`Unexpected source alias: ${alias}`)
+        const { sourceId } = this as { sourceId: string }
+        loaderCalls.push(sourceId)
+        loaderCallCounts.set(
+          sourceId,
+          (loaderCallCounts.get(sourceId) ?? 0) + 1,
+        )
+        if (sourceId === firstSourceId) throw undefined
+        if (sourceId === secondSourceId) throw laterFailure
+        if (sourceId === thirdSourceId) return true
+        throw new Error(`Unexpected source: ${sourceId}`)
       })
 
     try {
@@ -756,12 +777,18 @@ describe(`live query scheduler`, () => {
 
       expect(didThrow).toBe(true)
       expect(Object.is(thrown, undefined)).toBe(true)
-      expect(loaderCalls).toEqual([`first`, `second`, `third`])
-      expect(Object.fromEntries(loaderCallCounts)).toEqual({
-        first: 1,
-        second: 1,
-        third: 1,
-      })
+      expect(loaderCalls).toEqual([
+        firstSourceId,
+        secondSourceId,
+        thirdSourceId,
+      ])
+      expect(loaderCallCounts).toEqual(
+        new Map([
+          [firstSourceId, 1],
+          [secondSourceId, 1],
+          [thirdSourceId, 1],
+        ]),
+      )
       expect(loadMoreSpy).toHaveBeenCalledTimes(3)
     } finally {
       for (const unsubscribe of syncState.unsubscribeCallbacks) unsubscribe()
