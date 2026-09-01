@@ -825,6 +825,32 @@ export class CollectionStateManager<
   }
 
   /**
+   * Collects every key the given sync transactions can publish a change event
+   * for.
+   *
+   * Row metadata writes count even when the transaction carries no row
+   * operation: committing one still retires a completed optimistic mutation for
+   * that key, which flips virtual props such as `$synced`. Every site that asks
+   * "which keys does this sync commit touch" must agree on this set. When they
+   * disagree, `recomputeOptimisticState` and `commitPendingTransactions` each
+   * emit the same transition and the published batch names one key twice.
+   */
+  private collectAffectedKeys(
+    transactions: Iterable<PendingSyncedTransaction<TOutput, TKey>>,
+  ): Set<TKey> {
+    const keys = new Set<TKey>()
+    for (const transaction of transactions) {
+      for (const operation of transaction.operations) {
+        keys.add(operation.key as TKey)
+      }
+      for (const key of transaction.rowMetadataWrites.keys()) {
+        keys.add(key)
+      }
+    }
+    return keys
+  }
+
+  /**
    * Attempts to commit pending synced transactions if there are no active transactions
    * This method processes operations from pending transactions and applies them to the synced data
    */
@@ -905,15 +931,7 @@ export class CollectionStateManager<
       let truncatePendingLocalOrigins: Set<TKey> | undefined
 
       // First collect all keys that will be affected by sync operations
-      const changedKeys = new Set<TKey>()
-      for (const transaction of committedSyncedTransactions) {
-        for (const operation of transaction.operations) {
-          changedKeys.add(operation.key as TKey)
-        }
-        for (const [key] of transaction.rowMetadataWrites) {
-          changedKeys.add(key)
-        }
-      }
+      const changedKeys = this.collectAffectedKeys(committedSyncedTransactions)
 
       const virtualSnapshotKeys = new Set(changedKeys)
       for (const key of this.pendingOptimisticDirectUpserts) {
@@ -1391,14 +1409,10 @@ export class CollectionStateManager<
     this.pendingSyncedTransactions.splice(index, 1)
     transaction.applied.reject(new SyncTransactionAbortedError())
 
-    const remainingPendingKeys = new Set<TKey>()
-    for (const pending of this.pendingSyncedTransactions) {
-      for (const operation of pending.operations) {
-        remainingPendingKeys.add(operation.key as TKey)
-      }
-    }
-    for (const operation of transaction.operations) {
-      const key = operation.key as TKey
+    const remainingPendingKeys = this.collectAffectedKeys(
+      this.pendingSyncedTransactions,
+    )
+    for (const key of this.collectAffectedKeys([transaction])) {
       if (!remainingPendingKeys.has(key)) {
         this.recentlySyncedKeys.delete(key)
         this.preSyncVisibleState.delete(key)
@@ -1447,12 +1461,7 @@ export class CollectionStateManager<
     if (this.pendingSyncedTransactions.length === 0) return
 
     // Get all keys that will be affected by sync operations
-    const syncedKeys = new Set<TKey>()
-    for (const transaction of this.pendingSyncedTransactions) {
-      for (const operation of transaction.operations) {
-        syncedKeys.add(operation.key as TKey)
-      }
-    }
+    const syncedKeys = this.collectAffectedKeys(this.pendingSyncedTransactions)
 
     // Mark keys as about to be synced to suppress intermediate events from recomputeOptimisticState
     for (const key of syncedKeys) {
