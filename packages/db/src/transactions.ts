@@ -636,6 +636,14 @@ class Transaction<T extends object = Record<string, unknown>> {
         transaction: this as unknown as TransactionWithMutations<T>,
       })
 
+      // Rollback can win while mutationFn is in flight. Its failed state and
+      // rejected persistence receipt are terminal for this commit attempt.
+      // TypeScript keeps the entry-state narrowing across the await, although
+      // rollback may reenter and change it while mutationFn is pending.
+      if ((this.state as TransactionState) !== `persisting`) {
+        return this
+      }
+
       this.setState(`completed`)
       this.touchCollection()
 

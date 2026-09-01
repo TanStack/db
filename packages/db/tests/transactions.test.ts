@@ -216,6 +216,38 @@ describe(`Transactions`, () => {
     transaction.isPersisted.promise.catch(() => {})
     expect(transaction.state).toBe(`failed`)
   })
+  it(`keeps a persisting transaction failed when rollback wins`, async () => {
+    let releasePersistence!: () => void
+    const persistence = new Promise<void>((resolve) => {
+      releasePersistence = resolve
+    })
+    const collection = createCollection<{ id: number }>({
+      id: `persisting-rollback-wins`,
+      getKey: (item) => item.id,
+      sync: { sync: () => {} },
+    })
+    const transaction = createTransaction({
+      autoCommit: false,
+      mutationFn: () => persistence,
+    })
+
+    try {
+      transaction.mutate(() => collection.insert({ id: 1 }))
+      void transaction.isPersisted.promise.catch(() => undefined)
+      const commit = transaction.commit()
+      expect(transaction.state).toBe(`persisting`)
+
+      transaction.rollback()
+      expect(transaction.state).toBe(`failed`)
+
+      releasePersistence()
+      await commit
+      expect(transaction.state).toBe(`failed`)
+    } finally {
+      releasePersistence()
+      await collection.cleanup()
+    }
+  })
   it(`should rollback if the mutationFn throws an error`, async () => {
     const transaction = createTransaction({
       mutationFn: async () => {

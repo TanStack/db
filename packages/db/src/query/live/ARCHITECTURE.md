@@ -959,6 +959,9 @@ events are emitted, so an abort raised by a publication observer is already
 late. A successful `loadSubset` implementation must await or return every
 receipt for the transactions that establish its result. A source must not add
 priority merely to make a subset load settle.
+A rollback that wins while an optimistic transaction's `mutationFn` is still
+in flight is terminal. A later successful return from that function cannot
+change the transaction from `failed` to `completed` or republish its overlay.
 Existing immediate bootstrap and persistence-hydration paths, plus truncate,
 retain their queue-bypass contract; if one applies a parked subset transaction
 as part of that prefix, the subset receipt settles only after the writes are

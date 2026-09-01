@@ -5,7 +5,7 @@ import { DuplicateKeySyncError } from '../src/errors.js'
 import { createTransaction } from '../src/transactions.js'
 import { oraclePropertyOptions } from './oracle-config.js'
 import type { Collection } from '../src/collection/index.js'
-import type { SyncConfig } from '../src/types.js'
+import type { SyncConfig, TransactionState } from '../src/types.js'
 
 type RetainedRow = {
   id: number
@@ -464,7 +464,10 @@ it(`publishes one insert when a restarted optimistic row is confirmed and rolled
   const events: Array<{ type: string; key: string | number }> = []
   const restartStatuses: Array<string> = []
   let restarted = false
+  let readMutationState: (() => TransactionState) | undefined
   let mutationCommit: Promise<unknown> | undefined
+  let syncReceipt: ReturnType<SyncActions[`commit`]> | undefined
+  let syncReceiptSettled = false
   const subscription = collection.subscribeChanges(
     (changes) => {
       events.push(...changes.map(({ type, key }) => ({ type, key })))
@@ -483,13 +486,19 @@ it(`publishes one insert when a restarted optimistic row is confirmed and rolled
         autoCommit: false,
         mutationFn: () => mutationHold,
       })
+      readMutationState = () => transaction.state
       void transaction.isPersisted.promise.catch(() => undefined)
       transaction.mutate(() => collection.insert({ id: 2, value: 2 }))
-      mutationCommit = transaction.commit().catch(() => undefined)
+      mutationCommit = transaction.commit()
 
       sync.begin()
       sync.write({ type: `insert`, value: { id: 2, value: 2 } })
-      sync.commit()
+      syncReceipt = sync.commit()
+      if (syncReceipt !== true) {
+        void syncReceipt.then(() => {
+          syncReceiptSettled = true
+        })
+      }
       transaction.rollback()
     },
     { includeInitialState: false },
@@ -507,6 +516,29 @@ it(`publishes one insert when a restarted optimistic row is confirmed and rolled
     expect([...collection.state.keys()]).toEqual([2])
     expect(restartStatuses).toEqual([`ready`, `cleaned-up`, `loading`, `ready`])
     expect(collection.status).toBe(`ready`)
+
+    expect(syncReceipt).toBeDefined()
+    expect(syncReceipt).not.toBe(true)
+    expect(syncReceiptSettled).toBe(false)
+    if (syncReceipt === undefined || syncReceipt === true) {
+      throw new Error(`restarted sync receipt was not parked`)
+    }
+    await syncReceipt
+    expect(syncReceiptSettled).toBe(true)
+    expect(events).toEqual([
+      { type: `insert`, key: 1 },
+      { type: `insert`, key: 2 },
+    ])
+    expect([...collection.state.keys()]).toEqual([2])
+
+    releaseMutation()
+    await mutationCommit
+    expect(readMutationState?.()).toBe(`failed`)
+    expect(events).toEqual([
+      { type: `insert`, key: 1 },
+      { type: `insert`, key: 2 },
+    ])
+    expect([...collection.state.keys()]).toEqual([2])
   } finally {
     releaseMutation()
     await mutationCommit
