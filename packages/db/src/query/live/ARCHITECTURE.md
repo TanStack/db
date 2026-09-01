@@ -1114,9 +1114,15 @@ rethrows the first failure unchanged, including a falsy value. Status is ready
 before these effects run; first-ready callbacks keep registration order, and
 the dependent-ready event runs after them. That event snapshots the dependents
 present at delivery and attempts every one even if an earlier listener fails.
+Removing or adding a dependent during delivery does not change that frozen
+batch; an added dependent starts with the next publication.
 Because the ready snapshot is already public, a listener failure also cannot
 discard graph work queued by an earlier listener. Core flushes that work before
-it rethrows the first listener failure.
+it rethrows the first listener failure. If readiness is nested inside an
+existing publication, core retains the exact listener failure on that shared
+context and the outer boundary rethrows it only after the queued graph work
+drains. When both the listener and that queued graph work fail, the first ready
+listener failure remains the reported error.
 
 When `markReady()` runs during the synchronous adapter-entry call, core retains
 any ready-effect failure until the adapter finishes its own setup. It then

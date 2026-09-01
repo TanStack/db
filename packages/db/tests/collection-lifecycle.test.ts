@@ -4,6 +4,7 @@ import { CleanupQueue } from '../src/collection/cleanup-queue.js'
 import {
   getActivePublicationContext,
   transactionScopedScheduler,
+  withPublicationContext,
 } from '../src/scheduler.js'
 
 // Mock setTimeout and clearTimeout for testing GC behavior
@@ -770,6 +771,142 @@ describe(`Collection Lifecycle Management`, () => {
       }
     })
 
+    it(`flushes ready work before rethrowing at an outer publication boundary`, async () => {
+      let markReadyCallback: (() => void) | undefined
+      const listenerFailure = new Error(`nested dependent failed`)
+      const scheduledJob = vi.fn()
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `nested-dependent-ready-scheduler-test`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReadyCallback = markReady
+          },
+        },
+      })
+      const first = collection.subscribeChanges(() => {
+        const contextId = getActivePublicationContext()
+        transactionScopedScheduler.schedule({
+          contextId,
+          jobId: scheduledJob,
+          run: scheduledJob,
+        })
+      })
+      const second = collection.subscribeChanges(() => {
+        throw listenerFailure
+      })
+
+      try {
+        expect(() =>
+          withPublicationContext(() => markReadyCallback!()),
+        ).toThrow(listenerFailure)
+        expect(scheduledJob).toHaveBeenCalledOnce()
+        expect(collection.status).toBe(`ready`)
+      } finally {
+        first.unsubscribe()
+        second.unsubscribe()
+        await collection.cleanup()
+      }
+    })
+
+    it(`surfaces a ready graph failure after running its job`, async () => {
+      let markReadyCallback: (() => void) | undefined
+      const graphFailure = new Error(`ready graph failed`)
+      const scheduledJob = vi.fn(() => {
+        throw graphFailure
+      })
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `dependent-ready-graph-failure-test`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReadyCallback = markReady
+          },
+        },
+      })
+      const subscription = collection.subscribeChanges(() => {
+        const contextId = getActivePublicationContext()
+        transactionScopedScheduler.schedule({
+          contextId,
+          jobId: scheduledJob,
+          run: scheduledJob,
+        })
+      })
+
+      try {
+        expect(() => markReadyCallback!()).toThrow(graphFailure)
+        expect(scheduledJob).toHaveBeenCalledOnce()
+        expect(collection.status).toBe(`ready`)
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    })
+
+    it(`keeps the ready listener failure when its queued graph job also fails`, async () => {
+      let markReadyCallback: (() => void) | undefined
+      const listenerFailure = new Error(`ready listener failed first`)
+      const graphFailure = new Error(`ready graph also failed`)
+      const scheduledJob = vi.fn(() => {
+        throw graphFailure
+      })
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `dependent-ready-failure-priority-test`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReadyCallback = markReady
+          },
+        },
+      })
+      const first = collection.subscribeChanges(() => {
+        const contextId = getActivePublicationContext()
+        transactionScopedScheduler.schedule({
+          contextId,
+          jobId: scheduledJob,
+          run: scheduledJob,
+        })
+      })
+      const second = collection.subscribeChanges(() => {
+        throw listenerFailure
+      })
+
+      try {
+        expect(() => markReadyCallback!()).toThrow(listenerFailure)
+        expect(scheduledJob).toHaveBeenCalledOnce()
+        expect(collection.status).toBe(`ready`)
+      } finally {
+        first.unsubscribe()
+        second.unsubscribe()
+        await collection.cleanup()
+      }
+    })
+
+    it(`resolves a pending preload after a ready callback failure alone`, async () => {
+      let syncContinued = false
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `ready-callback-preload-test`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            syncContinued = true
+          },
+        },
+      })
+      collection.onFirstReady(() => {
+        throw undefined
+      })
+
+      try {
+        await expect(collection.preload()).resolves.toBeUndefined()
+        expect(syncContinued).toBe(true)
+        expect(collection.status).toBe(`ready`)
+      } finally {
+        await collection.cleanup()
+      }
+    })
+
     it(`delivers ready to the subscription snapshot when one listener unsubscribes another`, async () => {
       let markReadyCallback: (() => void) | undefined
       const calls: Array<string> = []
@@ -796,6 +933,57 @@ describe(`Collection Lifecycle Management`, () => {
       } finally {
         first.unsubscribe()
         second.unsubscribe()
+        await collection.cleanup()
+      }
+    })
+
+    it(`excludes a dependent added during ready delivery until the next batch`, async () => {
+      let beginCallback: (() => void) | undefined
+      let writeCallback:
+        | ((message: {
+            type: `insert`
+            value: { id: string; name: string }
+          }) => void)
+        | undefined
+      let commitCallback: (() => void) | undefined
+      let markReadyCallback: (() => void) | undefined
+      let added: { unsubscribe: () => void } | undefined
+      const calls: Array<string> = []
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `dependent-ready-addition-test`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            beginCallback = begin
+            writeCallback = write
+            commitCallback = () => {
+              commit()
+            }
+            markReadyCallback = markReady
+          },
+        },
+      })
+      const first = collection.subscribeChanges(() => {
+        calls.push(`first`)
+        added ??= collection.subscribeChanges(() => calls.push(`added`))
+      })
+      const second = collection.subscribeChanges(() => calls.push(`second`))
+
+      try {
+        markReadyCallback!()
+        expect(calls).toEqual([`first`, `second`])
+
+        beginCallback!()
+        writeCallback!({
+          type: `insert`,
+          value: { id: `one`, name: `One` },
+        })
+        commitCallback!()
+        expect(calls).toEqual([`first`, `second`, `first`, `second`, `added`])
+      } finally {
+        first.unsubscribe()
+        second.unsubscribe()
+        added?.unsubscribe()
         await collection.cleanup()
       }
     })

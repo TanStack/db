@@ -145,6 +145,49 @@ describe(`Collection publication scheduler context`, () => {
 })
 
 describe(`live query scheduler`, () => {
+  it(`settles a dependent live query before a nested ready failure escapes`, async () => {
+    let markSourceReady: (() => void) | undefined
+    const listenerFailure = new Error(`source ready listener failed`)
+    const source = createCollection<User>({
+      id: `nested-ready-live-source`,
+      getKey: (user) => user.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit, markReady }) => {
+          begin()
+          commit()
+          markSourceReady = markReady
+        },
+      },
+    })
+    const live = createLiveQueryCollection({
+      id: `nested-ready-live-dependent`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ user: source })
+          .select(({ user }) => ({ id: user.id, name: user.name })),
+    })
+    const preload = live.preload()
+    const throwingSubscription = source.subscribeChanges(() => {
+      throw listenerFailure
+    })
+
+    try {
+      expect(live.status).toBe(`loading`)
+      expect(() => withPublicationContext(() => markSourceReady!())).toThrow(
+        listenerFailure,
+      )
+      await expect(preload).resolves.toBeUndefined()
+      expect(source.status).toBe(`ready`)
+      expect(live.status).toBe(`ready`)
+    } finally {
+      throwingSubscription.unsubscribe()
+      await live.cleanup()
+      await source.cleanup()
+    }
+  })
+
   it(`runs the live query graph once per transaction that touches multiple collections`, async () => {
     const { users, tasks, assignments } =
       setupLiveQueryCollections(`single-batch`)
@@ -644,9 +687,12 @@ describe(`live query scheduler`, () => {
 
     builder.currentSyncConfig = config
     builder.currentSyncState = syncState
-    builder.scheduleGraphRun(() => {
-      throw failure
-    }, { contextId })
+    builder.scheduleGraphRun(
+      () => {
+        throw failure
+      },
+      { contextId },
+    )
     builder.scheduleGraphRun(laterLoader, { contextId })
 
     let didThrow = false

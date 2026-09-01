@@ -221,7 +221,12 @@ export class Scheduler {
 
 export const transactionScopedScheduler = new Scheduler()
 
-let activePublicationContext: SchedulerContextId | undefined
+type ActivePublication = {
+  contextId: SchedulerContextId
+  failure?: { error: unknown }
+}
+
+let activePublication: ActivePublication | undefined
 
 /**
  * Returns the Collection publication that currently owns synchronous change
@@ -229,7 +234,19 @@ let activePublicationContext: SchedulerContextId | undefined
  * observe one committed batch.
  */
 export function getActivePublicationContext(): SchedulerContextId | undefined {
-  return activePublicationContext
+  return activePublication?.contextId
+}
+
+/**
+ * Retains the first failure produced by a nested publication effect. The
+ * outer publication surfaces it only after all work already queued in the
+ * shared context has run.
+ */
+export function deferPublicationFailure(error: unknown): void {
+  if (!activePublication) {
+    throw new Error(`Cannot defer a failure outside a publication context`)
+  }
+  activePublication.failure ??= { error }
 }
 
 /**
@@ -238,18 +255,28 @@ export function getActivePublicationContext(): SchedulerContextId | undefined {
  * only after every subscriber to the original committed batch has observed it.
  */
 export function withPublicationContext<T>(publish: () => T): T {
-  if (activePublicationContext !== undefined) return publish()
+  if (activePublication) return publish()
 
   const contextId = Symbol(`collection-publication`)
-  activePublicationContext = contextId
+  const publication: ActivePublication = { contextId }
+  activePublication = publication
   try {
     const result = publish()
-    transactionScopedScheduler.flush(contextId)
+    let graphFailure: { error: unknown } | undefined
+    try {
+      transactionScopedScheduler.flush(contextId)
+    } catch (error) {
+      graphFailure = { error }
+    }
+    if (publication.failure) {
+      throw publication.failure.error
+    }
+    if (graphFailure) throw graphFailure.error
     return result
   } catch (error) {
     transactionScopedScheduler.clear(contextId)
     throw error
   } finally {
-    activePublicationContext = undefined
+    activePublication = undefined
   }
 }

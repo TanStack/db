@@ -1,5 +1,8 @@
 import { NegativeActiveSubscribersError } from '../errors'
-import { withPublicationContext } from '../scheduler.js'
+import {
+  deferPublicationFailure,
+  withPublicationContext,
+} from '../scheduler.js'
 import { runAllCallbacks } from '../utils/callbacks.js'
 import {
   createSingleRowRefProxy,
@@ -108,27 +111,20 @@ export class CollectionChangesManager<
    * This bypasses the normal empty array check in emitEvents
    */
   public emitEmptyReadyEvent(): void {
-    let deliveryFailure: { error: unknown } | undefined
-    let graphFailure: { error: unknown } | undefined
-    try {
-      withPublicationContext(() => {
-        try {
-          runAllCallbacks(
-            [...this.changeSubscriptions].map(
-              (subscription) => () => subscription.emitEvents([]),
-            ),
-          )
-        } catch (error) {
-          // The ready snapshot is already public. Keep the callback failure,
-          // but let work queued by earlier dependents reach the graph flush.
-          deliveryFailure = { error }
-        }
-      })
-    } catch (error) {
-      graphFailure = { error }
-    }
-    if (deliveryFailure) throw deliveryFailure.error
-    if (graphFailure) throw graphFailure.error
+    withPublicationContext(() => {
+      try {
+        runAllCallbacks(
+          [...this.changeSubscriptions].map(
+            (subscription) => () => subscription.emitEvents([]),
+          ),
+        )
+      } catch (error) {
+        // The ready snapshot is already public. Keep the callback failure on
+        // the shared publication so nested graph work can drain before the
+        // outer boundary rethrows it.
+        deferPublicationFailure(error)
+      }
+    })
   }
 
   /**
