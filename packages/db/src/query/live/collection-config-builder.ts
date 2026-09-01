@@ -78,6 +78,21 @@ type PendingGraphRun = {
   loadCallbacks: Set<() => boolean>
 }
 
+function runLoadCallbacks(callbacks: Iterable<() => boolean>): boolean {
+  let allDone = true
+  let firstFailure: { error: unknown } | undefined
+  for (const callback of callbacks) {
+    try {
+      allDone = callback() && allDone
+    } catch (error) {
+      allDone = false
+      firstFailure ??= { error }
+    }
+  }
+  if (firstFailure) throw firstFailure.error
+  return allDone
+}
+
 // Global counter for auto-generated collection IDs
 let liveQueryCollectionCounter = 0
 
@@ -794,23 +809,8 @@ export class CollectionConfigBuilder<
 
     this.incrementRunCount()
 
-    const combinedLoader = () => {
-      let allDone = true
-      let firstFailure: { error: unknown } | undefined
-      pending.loadCallbacks.forEach((loader) => {
-        try {
-          allDone = loader() && allDone
-        } catch (error) {
-          allDone = false
-          firstFailure ??= { error }
-        }
-      })
-      if (firstFailure) {
-        throw firstFailure.error
-      }
-      // Returning false signals that callers should schedule another pass.
-      return allDone
-    }
+    // Returning false signals that callers should schedule another pass.
+    const combinedLoader = () => runLoadCallbacks(pending.loadCallbacks)
 
     this.maybeRunGraph(combinedLoader)
   }
@@ -1399,10 +1399,7 @@ export class CollectionConfigBuilder<
     // Combine all loaders into a single callback that initiates loading more data
     // from any source that needs it. Returns true once all loaders have been called,
     // but the actual async loading may still be in progress.
-    const loadSubsetDataCallbacks = () => {
-      loaders.map((loader) => loader())
-      return true
-    }
+    const loadSubsetDataCallbacks = () => runLoadCallbacks(loaders)
 
     // Mark as subscribed so the graph can start running
     // (graph only runs when all collections are subscribed)

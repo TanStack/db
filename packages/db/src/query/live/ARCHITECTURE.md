@@ -735,6 +735,8 @@ successful retry therefore cannot commit source rows while leaving the live
 result stale until an unrelated later window change. When one pass has several
 load callbacks, it attempts all of them and then rethrows the first failure
 unchanged, including falsy values such as `undefined`, `false`, `0`, or `NaN`.
+This rule applies both to lexical source loaders nested in one graph callback
+and to graph callbacks coalesced by the scheduler.
 
 Live Collections and Effects keep separate consumer-local continuation state,
 but obey the same identity and reset law. A settled request remains the
