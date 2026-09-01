@@ -678,6 +678,8 @@ describe(`createEffect`, () => {
 
     it(`reports one in-progress cleanup failure to every disposer`, async () => {
       const failure = new Error(`source release failed`)
+      let unloadCount = 0
+      let shouldFail = true
       let resolveHandler!: () => void
       const handlerPending = new Promise<void>((resolve) => {
         resolveHandler = resolve
@@ -697,7 +699,8 @@ describe(`createEffect`, () => {
                 return true
               },
               unloadSubset: () => {
-                throw failure
+                unloadCount++
+                if (shouldFail) throw failure
               },
             }
           },
@@ -711,10 +714,18 @@ describe(`createEffect`, () => {
       await flushPromises()
       const firstDispose = effect.dispose()
       const secondDispose = effect.dispose()
+      expect(secondDispose).toBe(firstDispose)
       resolveHandler()
 
       await expect(firstDispose).rejects.toBe(failure)
       await expect(secondDispose).rejects.toBe(failure)
+      expect(unloadCount).toBe(1)
+
+      shouldFail = false
+      const retry = effect.dispose()
+      expect(retry).not.toBe(firstDispose)
+      await retry
+      expect(unloadCount).toBe(2)
       await source.cleanup()
     })
   })
@@ -1795,25 +1806,36 @@ describe(`createEffect`, () => {
 
     it(`releases every source when one unsubscriber throws`, async () => {
       const failure = new Error(`first source unload failed`)
+      let leftShouldFail = true
+      let leftUnloadCount = 0
+      let rightUnloadCount = 0
       const createSource = (id: string, unloadSubset: () => void) =>
         createCollection<{ id: number }>({
           id,
           getKey: (row) => row.id,
           syncMode: `on-demand`,
           sync: {
-            sync: ({ markReady }) => {
+            sync: ({ begin, write, commit, markReady }) => {
               markReady()
               return {
-                loadSubset: () => true,
+                loadSubset: () => {
+                  begin()
+                  write({ type: `insert`, value: { id: 1 } })
+                  commit()
+                  return true
+                },
                 unloadSubset,
               }
             },
           },
         })
       const left = createSource(`effect-cleanup-left`, () => {
-        throw failure
+        leftUnloadCount++
+        if (leftShouldFail) throw failure
       })
-      const right = createSource(`effect-cleanup-right`, () => {})
+      const right = createSource(`effect-cleanup-right`, () => {
+        rightUnloadCount++
+      })
       const effect = createEffect({
         query: (q) =>
           q
@@ -1830,6 +1852,13 @@ describe(`createEffect`, () => {
       await expect(effect.dispose()).rejects.toBe(failure)
       expect(left.subscriberCount).toBe(0)
       expect(right.subscriberCount).toBe(0)
+      expect(leftUnloadCount).toBe(1)
+      expect(rightUnloadCount).toBe(1)
+
+      leftShouldFail = false
+      await effect.dispose()
+      expect(leftUnloadCount).toBe(2)
+      expect(rightUnloadCount).toBe(1)
 
       await Promise.all([left.cleanup(), right.cleanup()])
     })

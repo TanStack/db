@@ -58,7 +58,8 @@ The current window settings, or `undefined` if the query is not windowed
 readonly hasSubsetError: boolean;
 ```
 
-Whether this live query has observed a subset-load failure.
+Whether this live query has observed a subset-load failure in its current sync
+session.
 
 ### lastSubsetError
 

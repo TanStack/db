@@ -155,6 +155,9 @@ try {
 }
 ```
 
+Both diagnostic values reset together when the live query starts a new sync
+session.
+
 Effects report subset failures through `onSourceError` and dispose because
 their incremental result can no longer be kept complete.
 

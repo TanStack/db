@@ -458,4 +458,71 @@ describe(`loadSubset failure matrix`, () => {
       }
     },
   )
+
+  it(`retries live cleanup after an undefined failure survives demand retirement`, async () => {
+    const parent = createStaticSource(`undefined-cleanup-retry-parent`, [row])
+    let unloadCount = 0
+    const child = createCollection<Row>({
+      id: `undefined-cleanup-retry-child`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => true,
+            unloadSubset: () => {
+              unloadCount++
+              if (unloadCount <= 2) throw undefined
+            },
+          }
+        },
+      },
+    })
+    const live = createLiveQueryCollection((q) =>
+      q
+        .from({ item: parent })
+        .leftJoin({ child }, ({ item, child: childRow }) =>
+          eq(item.id, childRow.parentId),
+        ),
+    )
+    const originalQueueMicrotask = globalThis.queueMicrotask
+    const queuedMicrotasks: Array<() => void> = []
+
+    try {
+      await live.preload()
+
+      parent.utils.begin()
+      parent.utils.write({ type: `delete`, value: row })
+      parent.utils.commit()
+      await flushFailures()
+
+      expect(unloadCount).toBe(1)
+      expect(live.utils.hasSubsetError).toBe(true)
+      expect(live.utils.lastSubsetError).toBeUndefined()
+
+      globalThis.queueMicrotask = (callback) => {
+        queuedMicrotasks.push(callback)
+      }
+      await live.cleanup()
+      expect(unloadCount).toBe(2)
+      expect(queuedMicrotasks).toHaveLength(1)
+
+      let cleanupSurfaced = false
+      try {
+        queuedMicrotasks[0]!()
+      } catch {
+        cleanupSurfaced = true
+      }
+      expect(cleanupSurfaced).toBe(true)
+
+      await live.cleanup()
+      expect(unloadCount).toBe(3)
+    } finally {
+      globalThis.queueMicrotask = originalQueueMicrotask
+      await Promise.all([live.cleanup(), parent.cleanup(), child.cleanup()])
+    }
+  })
 })

@@ -54,7 +54,7 @@ import type { AllCollectionEvents } from '../../collection/events.js'
 
 export type LiveQueryCollectionUtils = UtilsRecord & {
   getRunCount: () => number
-  /** Whether this live query has observed a subset-load failure. */
+  /** Whether this live query has observed a subset-load failure in its current sync session. */
   readonly hasSubsetError: boolean
   /** Most recent subset-load failure observed by this live query. */
   readonly lastSubsetError: unknown | undefined
@@ -870,13 +870,13 @@ export class CollectionConfigBuilder<
         if (this.syncSession === syncSession) this.syncSession++
       }
 
-      let firstCleanupError: unknown
+      let firstCleanupFailure: { error: unknown } | undefined
       for (const unsubscribe of syncState.unsubscribeCallbacks) {
         try {
           unsubscribe()
           syncState.unsubscribeCallbacks.delete(unsubscribe)
         } catch (error) {
-          firstCleanupError ??= error
+          firstCleanupFailure ??= { error }
         }
       }
 
@@ -908,7 +908,7 @@ export class CollectionConfigBuilder<
         this.compiledAliasToCollectionId = {}
       }
 
-      if (firstCleanupError !== undefined) throw firstCleanupError
+      if (firstCleanupFailure) throw firstCleanupFailure.error
       tornDown = true
     }
 
