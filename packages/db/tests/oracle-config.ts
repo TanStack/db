@@ -5,6 +5,7 @@ const staticOracleProperties = [
   `collection-state.retention`,
   `collection-publication.metadata-cancellation`,
   `collection-publication.metadata-only`,
+  `collection-publication.metadata-rollback`,
   `coverage-registry.claim-churn`,
   `coverage-registry.state-machine`,
   `d2-source.exact-retractions`,

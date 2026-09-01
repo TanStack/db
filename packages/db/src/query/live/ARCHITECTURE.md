@@ -1248,7 +1248,8 @@ most once. Row operations and row-metadata writes use one shared affected-key
 derivation for pre-sync capture, commit, cancellation, and rollback snapshots.
 A metadata-only transaction can retire optimistic state and change virtual row
 properties, so omitting its key from any of those phases can publish the same
-transition twice or leave stale suppression state after cancellation.
+transition twice, leave stale suppression state after cancellation, or retain
+applied metadata after a failed coherent publication rolls back.
 
 Window metadata follows the same causal order as the published rows. If a
 publication callback starts a newer window operation, that newer generation
@@ -1366,7 +1367,7 @@ create recursive Collection machinery.
 | Demand, cancellation, and progressive timing                                 | `packages/db/tests/query/includes-temporal-oracle.test.ts`                  |
 | Optimistic confirmation, rollback, and later reactivity                      | `packages/db/tests/query/includes-optimistic-oracle.property.test.ts`       |
 | Coherent layered publication                                                 | `packages/db/tests/query/includes-publication-oracle.test.ts`               |
-| Exact metadata settlement, keyed diffs, and per-key cancellation ownership   | `packages/db/tests/collection-metadata-publication-oracle.property.test.ts` |
+| Exact metadata settlement, cancellation ownership, and rollback recovery     | `packages/db/tests/collection-metadata-publication-oracle.property.test.ts` |
 | Collection facades, event coherence, and route activation                    | `packages/db/tests/query/includes-collection-oracle.property.test.ts`       |
 | Correlated physical work                                                     | `packages/db/tests/query/includes-work-counter-oracle.test.ts`              |
 | Route-context discovery and transport across recursive and join boundaries   | `packages/db/tests/query/includes-context-transport-oracle.test.ts`         |

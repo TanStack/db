@@ -79,6 +79,22 @@ const metadataCancellationArbitrary = fc.record({
   }),
 })
 
+const metadataRollbackArbitrary = fc
+  .record({
+    sourceKey: fc.integer({ min: 0, max: 2 }),
+    metadataKeyOffset: fc.constantFrom(1, 2),
+    sourceDelta: fc.integer({ min: 1, max: 10 }),
+    oldMetadataOwner: fc.integer(),
+    pendingMetadataOwner: fc.integer(),
+  })
+  .map(({ sourceKey, metadataKeyOffset, ...scenario }) => ({
+    ...scenario,
+    sourceKey,
+    metadataKey: (sourceKey + metadataKeyOffset) % 3,
+  }))
+
+let nextMetadataRollbackHarnessId = 0
+
 async function createPublicationHarness(): Promise<PublicationHarness> {
   let sync!: SyncActions
   const rows = createCollection<PublicationRow, number>({
@@ -366,6 +382,133 @@ async function expectMetadataCancellationOwnership(
   }
 }
 
+async function expectMetadataRollbackRecovery({
+  sourceKey,
+  metadataKey,
+  sourceDelta,
+  oldMetadataOwner,
+  pendingMetadataOwner,
+}: {
+  sourceKey: number
+  metadataKey: number
+  sourceDelta: number
+  oldMetadataOwner: number
+  pendingMetadataOwner: number
+}): Promise<void> {
+  const harnessId = nextMetadataRollbackHarnessId++
+  const source = await createPublicationHarness()
+  const { rows, getSync } = source
+  const derived = createLiveQueryCollection({
+    id: `metadata-rollback-derived-${harnessId}`,
+    query: (query) =>
+      query.from({ row: rows }).select(({ row }) => ({
+        id: row.id,
+        position: row.position,
+      })),
+    getKey: (row) => row.id,
+  })
+  await derived.preload()
+
+  const stageMetadata = (key: number, value: unknown) => {
+    const applied = createDeferred<void>()
+    void applied.promise.catch(() => undefined)
+    const transaction = {
+      committed: true,
+      applicationStarted: false,
+      layoutChanged: false,
+      operations: [],
+      deletedKeys: new Set<string | number>(),
+      rowMetadataWrites: new Map([[key, { type: `set` as const, value }]]),
+      collectionMetadataWrites: new Map(),
+      applied,
+    }
+    derived._state.pendingSyncedTransactions.push(transaction)
+    return transaction
+  }
+
+  const oldMetadata = { owner: oldMetadataOwner }
+  const pendingMetadata = { owner: pendingMetadataOwner }
+  stageMetadata(metadataKey, oldMetadata)
+  derived._state.commitPendingTransactions()
+
+  const pending = stageMetadata(metadataKey, pendingMetadata)
+  const sourceRowsBefore = [...rows.values()].map((row) => ({ ...row }))
+  const rowsBefore = [...derived.values()].map((row) => ({ ...row }))
+  const originBefore = new Map(derived._state.rowOrigins)
+  const hydrationSeedsBefore = new Set(derived._state.hydrationSeedKeys)
+  const hydratedBefore = new Set(derived._state.hydratedKeys)
+  const syncedBefore = new Set(derived._state.syncedKeys)
+  const preSyncBefore = new Map(derived._state.preSyncVisibleState)
+  const recentlySyncedBefore = new Set(derived._state.recentlySyncedKeys)
+  const published: Array<
+    ReadonlyArray<ChangeMessage<PublicationRow, string | number>>
+  > = []
+  const subscription = derived.subscribeChanges((changes) => {
+    published.push(changes)
+  })
+
+  const publicationFailure = new Error(`metadata rollback publication failed`)
+  const commitPendingTransactions = derived._state.commitPendingTransactions
+  let shouldFail = true
+  derived._state.commitPendingTransactions = () => {
+    commitPendingTransactions()
+    if (shouldFail) {
+      shouldFail = false
+      throw publicationFailure
+    }
+  }
+
+  try {
+    const previousSourceRow = rows.get(sourceKey)!
+    expect(() => {
+      getSync().begin()
+      getSync().write({
+        type: `update`,
+        value: {
+          ...previousSourceRow,
+          position: previousSourceRow.position + sourceDelta,
+        },
+      })
+      getSync().commit()
+    }).toThrow(publicationFailure)
+
+    expect(rows.get(sourceKey)?.position).toBe(
+      previousSourceRow.position + sourceDelta,
+    )
+    expect([...rows.values()].map((row) => ({ ...row }))).toEqual(
+      sourceRowsBefore.map((row) =>
+        row.id === sourceKey
+          ? { ...row, position: row.position + sourceDelta }
+          : row,
+      ),
+    )
+    expect([...derived.values()].map((row) => ({ ...row }))).toEqual(rowsBefore)
+    expect(derived._state.syncedMetadata).toEqual(
+      new Map([[metadataKey, oldMetadata]]),
+    )
+    expect(derived._state.pendingSyncedTransactions).toHaveLength(1)
+    expect(derived._state.pendingSyncedTransactions[0]).toBe(pending)
+    expect(pending.applicationStarted).toBe(false)
+    expect(derived._state.rowOrigins).toEqual(originBefore)
+    expect(derived._state.hydrationSeedKeys).toEqual(hydrationSeedsBefore)
+    expect(derived._state.hydratedKeys).toEqual(hydratedBefore)
+    expect(derived._state.syncedKeys).toEqual(syncedBefore)
+    expect(derived._state.preSyncVisibleState).toEqual(preSyncBefore)
+    expect(derived._state.recentlySyncedKeys).toEqual(recentlySyncedBefore)
+    expect(published).toEqual([])
+  } finally {
+    derived._state.commitPendingTransactions = commitPendingTransactions
+    derived._state.cancelPendingSyncedTransaction(pending)
+    subscription.unsubscribe()
+    source.unsubscribe()
+    await Promise.all([
+      derived.cleanup(),
+      source.liveRows.cleanup(),
+      rows.cleanup(),
+    ])
+  }
+}
+
 it(`publishes one event per key when metadata-only sync retires optimistic work`, async () => {
   await runPublicationHistory([
     {
@@ -387,6 +530,16 @@ it(`releases only canceled metadata keys while another sync remains pending`, as
   await expectMetadataCancellationOwnership([0, 1], [1, 2])
 })
 
+it(`restores pending metadata when a derived publication fails`, async () => {
+  await expectMetadataRollbackRecovery({
+    sourceKey: 0,
+    metadataKey: 1,
+    sourceDelta: 1,
+    oldMetadataOwner: 1,
+    pendingMetadataOwner: 2,
+  })
+})
+
 fcTest.prop(
   [fc.array(publicationRoundArbitrary, { minLength: 1, maxLength: 8 })],
   oraclePropertyOptions(50, `collection-publication.metadata-only`),
@@ -402,4 +555,11 @@ fcTest.prop(
   `keeps metadata suppression owned by the remaining pending transactions`,
   ({ canceledKeys, retainedKeys }) =>
     expectMetadataCancellationOwnership(canceledKeys, retainedKeys),
+)
+fcTest.prop(
+  [metadataRollbackArbitrary],
+  oraclePropertyOptions(30, `collection-publication.metadata-rollback`),
+)(
+  `restores metadata-only state after failed derived publications`,
+  expectMetadataRollbackRecovery,
 )
