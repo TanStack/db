@@ -2,6 +2,7 @@ import { output, serializeValue } from '@tanstack/db-ivm'
 import { createCollection } from '../../collection/index.js'
 import { FN_SELECT_STATE, INCLUDES_ROUTING } from '../compiler/index.js'
 import { BUCKET_FACADE_REF } from './materialized-pipeline.js'
+import { runAllCallbacks } from './utils.js'
 import type { Collection } from '../../collection/index.js'
 import type { SyncConfig } from '../../types.js'
 import type { PublicationDeferral } from '../../collection/changes.js'
@@ -107,6 +108,7 @@ export class BucketFacadeAdapter {
     const snapshot = this.snapshot()
     const deferredEntries = new Set<FacadeEntry>()
     const publications: Array<PublicationDeferral> = []
+    const readyEntries = new Set<FacadeEntry>()
     const deferPublication = (entry: FacadeEntry) => {
       if (deferredEntries.has(entry)) return
       deferredEntries.add(entry)
@@ -155,8 +157,9 @@ export class BucketFacadeAdapter {
             sync.collection._markLayoutChange()
           }
           sync.commit()
+          if (entry.collection.status !== `ready`) readyEntries.add(entry)
         }
-        for (const entry of newBaselines) entry.sync?.markReady()
+        for (const entry of newBaselines) readyEntries.add(entry)
 
         for (const [bucketKey, multiplicity] of activity ?? []) {
           if (multiplicity >= 0) continue
@@ -165,9 +168,13 @@ export class BucketFacadeAdapter {
         }
       }
     } catch (error) {
-      this.restore(snapshot, deferredEntries)
-      this.retiredEntries.clear()
-      for (const publication of publications) publication.discard()
+      try {
+        this.rollbackInstallation(snapshot, deferredEntries, publications)
+      } catch {
+        // Preserve the graph-install failure. A failed state restore marks its
+        // facade as recoverably errored before this rollback closes every
+        // publication handle.
+      }
       throw error
     }
     this.pending.clear()
@@ -178,37 +185,38 @@ export class BucketFacadeAdapter {
     const prepare = () => {
       if (prepared || closed) return
       prepared = true
-      for (const publication of publications) publication.prepare()
+      runAllCallbacks([
+        ...publications.map((publication) => publication.prepare),
+        ...[...readyEntries].map((entry) => () => entry.sync?.markReady()),
+      ])
     }
     return {
       prepare,
       publish: () => {
         if (closed) return
-        prepare()
+        let firstFailure: { error: unknown } | undefined
+        try {
+          prepare()
+        } catch (error) {
+          firstFailure = { error }
+        }
         closed = true
-        let hasPublicationError = false
-        let publicationError: unknown
-        for (const publication of publications) {
-          try {
-            publication.publish()
-          } catch (error) {
-            if (!hasPublicationError) {
-              hasPublicationError = true
-              publicationError = error
-            }
-          }
+        try {
+          runAllCallbacks(
+            publications.map((publication) => publication.publish),
+          )
+        } catch (error) {
+          firstFailure ??= { error }
         }
         // Drop only the adapter's strong reference. External holders keep an
         // empty, ready facade; a later active interval receives a new one.
         this.retiredEntries.clear()
-        if (hasPublicationError) throw publicationError
+        if (firstFailure) throw firstFailure.error
       },
       rollback: () => {
         if (closed || prepared) return
         closed = true
-        this.restore(snapshot, deferredEntries)
-        this.retiredEntries.clear()
-        for (const publication of publications) publication.discard()
+        this.rollbackInstallation(snapshot, deferredEntries, publications)
       },
     }
   }
@@ -309,6 +317,7 @@ export class BucketFacadeAdapter {
     snapshot: FacadeSnapshot,
     changedEntries: Set<FacadeEntry>,
   ): void {
+    let firstFailure: { error: unknown } | undefined
     const previousEntries = new Set(
       [...snapshot.entries.values()].flatMap((byBucket) => [
         ...byBucket.values(),
@@ -322,14 +331,26 @@ export class BucketFacadeAdapter {
       if (!previousEntries.has(entry)) continue
       const entryState = snapshot.entryStates.get(entry)
       if (!entryState) continue
-      entry.collection._restorePublicationState(entryState.publicationState)
-      entry.currentOrder.clear()
-      for (const [key, order] of entryState.currentOrder) {
-        entry.currentOrder.set(key, order)
-      }
-      for (const row of entryState.rows) {
-        entry.keys.set(row.value, row.key)
-        if (row.order !== undefined) entry.order.set(row.value, row.order)
+      try {
+        entry.collection._restorePublicationState(entryState.publicationState)
+      } catch (error) {
+        firstFailure ??= { error }
+        if (entry.collection.status !== `error`) {
+          try {
+            entry.sync?.markError(error)
+          } catch (markError) {
+            firstFailure ??= { error: markError }
+          }
+        }
+      } finally {
+        entry.currentOrder.clear()
+        for (const [key, order] of entryState.currentOrder) {
+          entry.currentOrder.set(key, order)
+        }
+        for (const row of entryState.rows) {
+          entry.keys.set(row.value, row.key)
+          if (row.order !== undefined) entry.order.set(row.value, row.order)
+        }
       }
     }
 
@@ -346,6 +367,19 @@ export class BucketFacadeAdapter {
     for (const entry of currentEntries) {
       if (!previousEntries.has(entry)) void entry.collection.cleanup()
     }
+    if (firstFailure) throw firstFailure.error
+  }
+
+  private rollbackInstallation(
+    snapshot: FacadeSnapshot,
+    changedEntries: Set<FacadeEntry>,
+    publications: Array<PublicationDeferral>,
+  ): void {
+    runAllCallbacks([
+      () => this.restore(snapshot, changedEntries),
+      () => this.retiredEntries.clear(),
+      ...publications.map((publication) => publication.discard),
+    ])
   }
 
   private accumulateActivity(

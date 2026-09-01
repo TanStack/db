@@ -23,6 +23,7 @@ import {
   extractCollectionFromSource,
   extractCollectionSources,
   extractCollectionsFromQuery,
+  runAllCallbacks,
 } from './utils.js'
 import type { LiveQueryInternalUtils } from './internal.js'
 import type { WindowOptions } from '../compiler/index.js'
@@ -1129,28 +1130,15 @@ export class CollectionConfigBuilder<
       }
       pendingChanges = new Map()
 
-      // Advance every participating Collection's public clocks before the
-      // first callback can inspect another Collection from this graph turn.
-      rootPublication?.prepare()
-      facadePublication.prepare()
-
-      let hasPublicationError = false
-      let publicationError: unknown
-      for (const publish of [
-        rootPublication?.publish,
+      // Advance every participating Collection's public clocks and facade
+      // readiness before the first root callback. A callback failure cannot
+      // suppress another prepared participant's release.
+      runAllCallbacks([
+        ...(rootPublication ? [rootPublication.prepare] : []),
+        facadePublication.prepare,
+        ...(rootPublication ? [rootPublication.publish] : []),
         facadePublication.publish,
-      ]) {
-        if (!publish) continue
-        try {
-          publish()
-        } catch (error) {
-          if (!hasPublicationError) {
-            hasPublicationError = true
-            publicationError = error
-          }
-        }
-      }
-      if (hasPublicationError) throw publicationError
+      ])
     }
 
     graph.finalize()

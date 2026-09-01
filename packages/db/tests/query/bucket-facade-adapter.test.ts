@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import { eq } from '../../src/query/builder/functions.js'
+import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { BucketFacadeAdapter } from '../../src/query/live/bucket-facade-adapter.js'
 import { CollectionConfigBuilder } from '../../src/query/live/collection-config-builder.js'
 import { BUCKET_FACADE_REF } from '../../src/query/live/materialized-pipeline.js'
@@ -16,6 +17,17 @@ import type {
 import type { Context } from '../../src/query/builder/types.js'
 
 type FacadeSync = Parameters<SyncConfig<Record<string, unknown>>[`sync`]>[0]
+
+class ThrowingBuildIndex extends BasicIndex<number> {
+  throwOnBuild = false
+
+  override build(entries: Iterable<[number, unknown]>): void {
+    super.build(entries)
+    if (this.throwOnBuild) {
+      throw new Error(`facade index rebuild failed`)
+    }
+  }
+}
 
 describe(`BucketFacadeAdapter`, () => {
   it(`moves a row when the graph reuses its object for a new order`, async () => {
@@ -77,6 +89,7 @@ describe(`BucketFacadeAdapter`, () => {
 
     const bucketKey = `group-1`
     const original = { id: 1, value: `original` }
+    const fixed = { id: 3, value: `fixed` }
     activeBuckets.sendData(new MultiSet([[[bucketKey, true], 1]]))
     rows.sendData(
       new MultiSet([
@@ -84,6 +97,7 @@ describe(`BucketFacadeAdapter`, () => {
           [bucketKey, { publicKey: original.id, value: original, order: `0` }],
           1,
         ],
+        [[bucketKey, { publicKey: fixed.id, value: fixed, order: `1` }], 1],
       ]),
     )
     graph.run()
@@ -96,7 +110,7 @@ describe(`BucketFacadeAdapter`, () => {
       typeof original,
       number
     >
-    expect(facade.toArray.map(stripVirtualProps)).toEqual([original])
+    expect(facade.toArray.map(stripVirtualProps)).toEqual([original, fixed])
     const publications: Array<unknown> = []
     const subscription = facade.subscribeChanges((changes) => {
       publications.push(changes)
@@ -159,7 +173,17 @@ describe(`BucketFacadeAdapter`, () => {
     graph.run()
 
     expect(() => adapter.flush()).toThrow(`facade flush failed`)
-    expect(facade.toArray.map(stripVirtualProps)).toEqual([original])
+    expect(facade.toArray.map(stripVirtualProps)).toEqual([original, fixed])
+    expect([
+      ...(
+        entries.get(`children`)?.get(bucketKey) as unknown as {
+          currentOrder: Map<number, string | undefined>
+        }
+      ).currentOrder,
+    ]).toEqual([
+      [original.id, `0`],
+      [fixed.id, `1`],
+    ])
     expect(publications).toEqual([])
     expect(layoutPublications).toBe(0)
     expect(statusChanges).toBe(0)
@@ -171,6 +195,234 @@ describe(`BucketFacadeAdapter`, () => {
     unsubscribeTruncate()
     unsubscribeStatus()
     unsubscribeLayout()
+    subscription.unsubscribe()
+    await adapter.cleanup()
+  })
+
+  it(`publishes fresh facade readiness only after every install succeeds`, async () => {
+    const graph = new D2()
+    const firstRows = graph.newInput<[string, BucketRow]>()
+    const firstActiveBuckets = graph.newInput<[string, true]>()
+    const secondRows = graph.newInput<[string, BucketRow]>()
+    const secondActiveBuckets = graph.newInput<[string, true]>()
+    const adapter = new BucketFacadeAdapter(
+      `facade-ready-parent`,
+      [
+        {
+          edgeId: `first`,
+          rows: firstRows,
+          activeBuckets: firstActiveBuckets,
+          hasOrderBy: false,
+        },
+        {
+          edgeId: `second`,
+          rows: secondRows,
+          activeBuckets: secondActiveBuckets,
+          hasOrderBy: false,
+        },
+      ],
+      () => {},
+    )
+    graph.finalize()
+
+    const bucketKey = `group-1`
+    const firstFacade = adapter.resolve({
+      [BUCKET_FACADE_REF]: { edgeId: `first`, bucketKey },
+    } satisfies BucketFacadeRef) as unknown as Collection<
+      { id: number; value: string },
+      number
+    >
+    const secondFacade = adapter.resolve({
+      [BUCKET_FACADE_REF]: { edgeId: `second`, bucketKey },
+    } satisfies BucketFacadeRef) as unknown as Collection<
+      { id: number; value: string },
+      number
+    >
+    const firstStatuses: Array<string> = []
+    const secondStatuses: Array<string> = []
+    const unsubscribeFirst = firstFacade.on(`status:change`, ({ status }) => {
+      firstStatuses.push(status)
+    })
+    const unsubscribeSecond = secondFacade.on(`status:change`, ({ status }) => {
+      secondStatuses.push(status)
+    })
+
+    const first = { id: 1, value: `first` }
+    const second = { id: 2, value: `second` }
+    firstActiveBuckets.sendData(new MultiSet([[[bucketKey, true], 1]]))
+    secondActiveBuckets.sendData(new MultiSet([[[bucketKey, true], 1]]))
+    firstRows.sendData(
+      new MultiSet([
+        [
+          [bucketKey, { publicKey: first.id, value: first, order: undefined }],
+          1,
+        ],
+      ]),
+    )
+    secondRows.sendData(
+      new MultiSet([
+        [
+          [
+            bucketKey,
+            { publicKey: second.id, value: second, order: undefined },
+          ],
+          1,
+        ],
+      ]),
+    )
+    graph.run()
+
+    const entries = (
+      adapter as unknown as {
+        entries: Map<string, Map<string, { sync: FacadeSync | undefined }>>
+      }
+    ).entries
+    const secondSync = entries.get(`second`)?.get(bucketKey)?.sync
+    if (!secondSync) throw new Error(`Missing second facade sync`)
+    const commit = secondSync.commit
+    let shouldThrow = true
+    secondSync.commit = () => {
+      const applied = commit()
+      if (shouldThrow) {
+        shouldThrow = false
+        throw new Error(`second facade failed`)
+      }
+      return applied
+    }
+
+    expect(() => adapter.flush()).toThrow(`second facade failed`)
+    expect(firstFacade.status).toBe(`loading`)
+    expect(secondFacade.status).toBe(`loading`)
+    expect(firstStatuses).toEqual([])
+    expect(secondStatuses).toEqual([])
+    expect(firstFacade.toArray).toEqual([])
+    expect(secondFacade.toArray).toEqual([])
+
+    const retry = adapter.flush()
+    expect(firstFacade.status).toBe(`loading`)
+    expect(secondFacade.status).toBe(`loading`)
+    retry.prepare()
+    expect(firstFacade.status).toBe(`ready`)
+    expect(secondFacade.status).toBe(`ready`)
+    retry.publish()
+    expect(firstFacade.toArray.map(stripVirtualProps)).toEqual([first])
+    expect(secondFacade.toArray.map(stripVirtualProps)).toEqual([second])
+    expect(firstStatuses).toEqual([`ready`])
+    expect(secondStatuses).toEqual([`ready`])
+
+    unsubscribeFirst()
+    unsubscribeSecond()
+    await adapter.cleanup()
+  })
+
+  it(`closes publication state when facade index restore fails`, async () => {
+    const graph = new D2()
+    const rows = graph.newInput<[string, BucketRow]>()
+    const activeBuckets = graph.newInput<[string, true]>()
+    const adapter = new BucketFacadeAdapter(
+      `facade-index-rollback-parent`,
+      [{ edgeId: `children`, rows, activeBuckets, hasOrderBy: false }],
+      () => {},
+    )
+    graph.finalize()
+
+    const bucketKey = `group-1`
+    const original = { id: 1, value: `original` }
+    activeBuckets.sendData(new MultiSet([[[bucketKey, true], 1]]))
+    rows.sendData(
+      new MultiSet([
+        [
+          [
+            bucketKey,
+            { publicKey: original.id, value: original, order: undefined },
+          ],
+          1,
+        ],
+      ]),
+    )
+    graph.run()
+    adapter.flush().publish()
+
+    const facade = adapter.resolve({
+      [BUCKET_FACADE_REF]: { edgeId: `children`, bucketKey },
+    } satisfies BucketFacadeRef) as unknown as Collection<
+      typeof original,
+      number
+    >
+    const index = facade.createIndex((row) => row.value, {
+      indexType: ThrowingBuildIndex,
+    }) as ThrowingBuildIndex
+    const publications: Array<unknown> = []
+    const subscription = facade.subscribeChanges(
+      (changes) => {
+        publications.push(changes)
+      },
+      { includeInitialState: false },
+    )
+    const revision = facade._stateRevision
+
+    const entry = (
+      adapter as unknown as {
+        entries: Map<string, Map<string, { sync: FacadeSync | undefined }>>
+      }
+    ).entries
+      .get(`children`)
+      ?.get(bucketKey)
+    const sync = entry?.sync
+    if (!sync) throw new Error(`Missing facade sync`)
+    const commit = sync.commit
+    let shouldThrow = true
+    sync.commit = () => {
+      const applied = commit()
+      if (shouldThrow) {
+        shouldThrow = false
+        throw new Error(`facade flush failed`)
+      }
+      return applied
+    }
+
+    const replacement = { id: 1, value: `replacement` }
+    index.throwOnBuild = true
+    rows.sendData(
+      new MultiSet([
+        [
+          [
+            bucketKey,
+            { publicKey: original.id, value: original, order: undefined },
+          ],
+          -1,
+        ],
+        [
+          [
+            bucketKey,
+            {
+              publicKey: replacement.id,
+              value: replacement,
+              order: undefined,
+            },
+          ],
+          1,
+        ],
+      ]),
+    )
+    graph.run()
+
+    expect(() => adapter.flush()).toThrow(`facade flush failed`)
+    expect(facade.status).toBe(`error`)
+    expect(facade._state.syncedData.get(original.id)).toMatchObject(original)
+    expect(publications).toEqual([])
+    expect(facade._stateRevision).toBe(revision)
+
+    index.throwOnBuild = false
+    adapter.flush().publish()
+    expect(facade.status).toBe(`ready`)
+    expect(facade.toArray.map(stripVirtualProps)).toEqual([replacement])
+    expect(publications).toHaveLength(2)
+    expect(publications[0]).toEqual([])
+    expect(publications[1]).toHaveLength(1)
+    expect(facade._stateRevision).toBe(revision + 1)
+    expect(index.lookup(`eq`, `replacement`)).toEqual(new Set([original.id]))
+
     subscription.unsubscribe()
     await adapter.cleanup()
   })

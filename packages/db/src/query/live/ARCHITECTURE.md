@@ -1157,6 +1157,11 @@ events and their revision advances. Routing and identity remain inside D2.
 Facade rollback restores the Collection's internal publication snapshot. It
 must not use a public sync transaction or emit change, layout, readiness, or
 truncate lifecycle events for state that never committed.
+Fresh-facade readiness joins the prepared publication release only after every
+facade and root install has succeeded, and it precedes root callbacks. A
+recovery failure attempts every remaining restore and publication discard,
+preserves the original graph-install error, and marks the affected facade as
+errored so a later successful publication can recover it.
 Once release begins, one subscriber callback failure cannot suppress another
 prepared root or facade publication. Release attempts every participant, then
 rethrows the first callback failure unchanged, including `null` or `undefined`.
