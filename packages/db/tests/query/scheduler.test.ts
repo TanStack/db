@@ -723,20 +723,18 @@ describe(`live query scheduler`, () => {
       pipeline: builderInternals.pipelineCache,
     } as unknown as FullSyncState
     const laterFailure = new Error(`later source failed`)
-    const loaderCalls: Array<number> = []
+    const loaderCalls: Array<string> = []
+    const loaderCallCounts = new Map<string, number>()
     const loadMoreSpy = vi
       .spyOn(CollectionSubscriber.prototype, `loadMoreIfNeeded`)
-      .mockImplementationOnce(() => {
-        loaderCalls.push(1)
-        throw undefined
-      })
-      .mockImplementationOnce(() => {
-        loaderCalls.push(2)
-        throw laterFailure
-      })
-      .mockImplementationOnce(() => {
-        loaderCalls.push(3)
-        return true
+      .mockImplementation(function (this: unknown) {
+        const { alias } = this as { alias: string }
+        loaderCalls.push(alias)
+        loaderCallCounts.set(alias, (loaderCallCounts.get(alias) ?? 0) + 1)
+        if (alias === `first`) throw undefined
+        if (alias === `second`) throw laterFailure
+        if (alias === `third`) return true
+        throw new Error(`Unexpected source alias: ${alias}`)
       })
 
     try {
@@ -758,7 +756,12 @@ describe(`live query scheduler`, () => {
 
       expect(didThrow).toBe(true)
       expect(Object.is(thrown, undefined)).toBe(true)
-      expect(loaderCalls).toEqual([1, 2, 3])
+      expect(loaderCalls).toEqual([`first`, `second`, `third`])
+      expect(Object.fromEntries(loaderCallCounts)).toEqual({
+        first: 1,
+        second: 1,
+        third: 1,
+      })
       expect(loadMoreSpy).toHaveBeenCalledTimes(3)
     } finally {
       for (const unsubscribe of syncState.unsubscribeCallbacks) unsubscribe()
