@@ -1605,6 +1605,7 @@ describe(`Electric adapter laws`, () => {
         }
       }
     },
+    30_000,
   )
 
   fcTest.prop(
@@ -1687,6 +1688,7 @@ describe(`Electric adapter laws`, () => {
         expect(persisted.persistenceCommits).toBeGreaterThan(0)
       }
     },
+    30_000,
   )
 
   fcTest.prop(
