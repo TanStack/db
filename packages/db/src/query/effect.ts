@@ -753,6 +753,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       if (this.starting) throw error
       return
     }
+    if (update.releaseFailure) {
+      this.onSourceError(normaliseError(update.releaseFailure.error))
+      return
+    }
     if (update.ready instanceof Promise) {
       // Each segment reports its own failure through the subscription. Consume
       // the aggregate rejection so Promise.all does not create a second,

@@ -869,6 +869,16 @@ logical owner's evaluator across source changes and truncate acquisition
 replacement. A released owner cannot supply a predicate, and a later logical
 demand compiles its own evaluator even when it reuses the same expression
 object.
+
+Logical demand state advances even when physical release fails. The failed
+acquisition remains retryable cleanup debt in the Collection subscription, but
+an aborted segment cannot remain the current demand or suppress a later
+incarnation. The demand controller therefore returns the release failure with
+the completed logical transition. A live query records that failure and
+retires an empty demand without entering a fatal query state; an Effect reports
+the same failure through its source-error policy and disposes. Reactivating the
+route starts a fresh acquisition.
+
 Result callbacks are also arbitrary reentrancy boundaries. After invoking one,
 the request checks the same exact owner again before it tracks status, applies
 coverage, or scans local rows. A callback may release or unsubscribe; obsolete

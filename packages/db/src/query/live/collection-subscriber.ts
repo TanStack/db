@@ -254,6 +254,11 @@ export class CollectionSubscriber<
       if (isInitialSync) throw error
       return
     }
+    if (update.releaseFailure) {
+      this.collectionConfigBuilder.recordSubsetError(
+        update.releaseFailure.error,
+      )
+    }
     if (!update.changed) return
 
     if (update.empty) {

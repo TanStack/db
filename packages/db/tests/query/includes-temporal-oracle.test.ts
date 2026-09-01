@@ -882,9 +882,9 @@ async function expectDemandReactivationRetriesAfterReleaseFailure(
     )
     expect(loadCount).toBe(1)
 
-    expect(() => controller.setDemand(subscription, plan, new Set())).toThrow(
-      releaseError,
-    )
+    const retired = controller.setDemand(subscription, plan, new Set())
+    expect(retired).toMatchObject({ changed: true, empty: true })
+    expect(retired.releaseFailure?.error).toBe(releaseError)
 
     const reactivated = controller.setDemand(
       subscription,
@@ -898,6 +898,57 @@ async function expectDemandReactivationRetriesAfterReleaseFailure(
     controller.clear()
     subscription.unsubscribe()
     await comments.cleanup()
+  }
+}
+
+async function expectRetiredDemandStaysNonfatalAfterReleaseFailure(): Promise<void> {
+  const post = { id: 1, authorId: `selected`, title: `one` }
+  const posts = createMutablePosts([post])
+  let loadCount = 0
+  let allowUnload = false
+  const releaseError = new Error(`child release failed`)
+  const comments = createCollection<Comment>({
+    id: nextCollectionId(`temporal-retired-release-comments`),
+    getKey: (comment) => comment.id,
+    syncMode: `on-demand`,
+    autoIndex: `eager`,
+    defaultIndexType: BasicIndex,
+    sync: {
+      sync: ({ markReady }) => ({
+        loadSubset: () => {
+          loadCount += 1
+          markReady()
+          return true
+        },
+        unloadSubset: () => {
+          if (!allowUnload) throw releaseError
+        },
+      }),
+    },
+  })
+  const live = createPostsWithCommentsLive(posts.collection, comments)
+  const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+
+  try {
+    await live.preload()
+    expect(loadCount).toBe(1)
+    expect(live.status).toBe(`ready`)
+
+    posts.write(`delete`, post)
+    await flushPromises()
+    expect(live.size).toBe(0)
+    expect(live.status).toBe(`ready`)
+    expect(live.utils.lastSubsetError).toBe(releaseError)
+
+    posts.write(`insert`, post)
+    await flushPromises()
+    expect(loadCount).toBe(2)
+    expect(live.status).toBe(`ready`)
+  } finally {
+    allowUnload = true
+    await live.cleanup()
+    await Promise.all([posts.collection.cleanup(), comments.cleanup()])
+    consoleError.mockRestore()
   }
 }
 
@@ -1299,6 +1350,11 @@ describe(`includes temporal oracle`, () => {
   )(
     `failed release never suppresses a later demand incarnation`,
     expectDemandReactivationRetriesAfterReleaseFailure,
+  )
+
+  it(
+    `failed release retires an empty live-query demand without poisoning reentry`,
+    expectRetiredDemandStaysNonfatalAfterReleaseFailure,
   )
 
   it(

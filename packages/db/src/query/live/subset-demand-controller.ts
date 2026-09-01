@@ -26,6 +26,7 @@ export type DemandUpdate = {
   changed: boolean
   empty: boolean
   ready: Promise<Array<AppliedLoadSubsetOutcome>> | true
+  releaseFailure?: { error: unknown }
 }
 
 /**
@@ -109,11 +110,11 @@ export class SubsetDemandController {
       changed: true,
       empty: nextKeys.size === 0,
       ready: pending.length > 0 ? Promise.all(pending) : true,
+      ...(releaseFailure && { releaseFailure }),
     }
     // A failed physical release remains cleanup debt, but it cannot leave an
     // aborted segment representing current logical demand. Commit the demand
     // transition first so a later incarnation acquires fresh coverage.
-    if (releaseFailure) throw releaseFailure.error
     return update
   }
 

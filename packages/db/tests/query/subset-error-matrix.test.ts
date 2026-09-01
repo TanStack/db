@@ -362,7 +362,7 @@ describe(`loadSubset failure matrix`, () => {
   )
 
   it.each(cleanupFailureCases)(
-    `does not mistake an unreported cleanup failure for a source error: $name`,
+    `reports obsolete-demand cleanup failure without failing the source commit: $name`,
     async ({ consumer, failure }) => {
       const suffix = `${consumer}-${
         failure === undefined
@@ -394,7 +394,7 @@ describe(`loadSubset failure matrix`, () => {
           },
         },
       })
-      const sourceErrors: Array<unknown> = []
+      const sourceErrors: Array<Error> = []
       const effect =
         consumer === `effect`
           ? createEffect({
@@ -434,10 +434,21 @@ describe(`loadSubset failure matrix`, () => {
           thrown = error
         }
 
-        expect(didThrow).toBe(true)
-        expect(Object.is(thrown, failure)).toBe(true)
-        expect(sourceErrors).toEqual([])
-        if (live) expect(live.utils.lastSubsetError).toBeUndefined()
+        await flushFailures()
+
+        expect(didThrow).toBe(false)
+        expect(thrown).toBeUndefined()
+        if (effect) {
+          expect(sourceErrors).toHaveLength(1)
+          expect(sourceErrors[0]?.message).toBe(String(failure))
+          expect(effect.disposed).toBe(true)
+        } else {
+          expect(sourceErrors).toEqual([])
+        }
+        if (live) {
+          expect(Object.is(live.utils.lastSubsetError, failure)).toBe(true)
+          expect(live.status).toBe(`ready`)
+        }
       } finally {
         if (effect) await effect.dispose()
         if (live) await live.cleanup()

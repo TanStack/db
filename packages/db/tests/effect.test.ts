@@ -2067,6 +2067,79 @@ describe(`createEffect`, () => {
       }
     })
 
+    it(`reports failed obsolete-demand release without failing the source commit`, async () => {
+      const failure = new Error(`obsolete effect demand release failed`)
+      const users = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `effect-obsolete-release-users`,
+          getKey: (user) => user.id,
+          initialData: [sampleUsers[0]!],
+        }),
+      )
+      let loadCount = 0
+      let unloadCount = 0
+      const issues = createCollection<Issue>({
+        id: `effect-obsolete-release-issues`,
+        getKey: (issue) => issue.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                loadCount++
+                return true
+              },
+              unloadSubset: () => {
+                unloadCount++
+                if (unloadCount === 1) throw failure
+              },
+            }
+          },
+        },
+      })
+      const sourceErrors: Array<Error> = []
+      const effect = createEffect({
+        query: (q) =>
+          q
+            .from({ user: users })
+            .leftJoin({ issue: issues }, ({ user, issue }) =>
+              eq(user.id, issue.userId),
+            )
+            .select(({ user, issue }) => ({
+              id: user.id,
+              issueId: issue.id,
+            })),
+        onBatch: () => {},
+        onSourceError: (error) => sourceErrors.push(error),
+      })
+
+      try {
+        await flushPromises()
+        expect(loadCount).toBe(1)
+
+        let commitError: unknown
+        try {
+          users.utils.begin()
+          users.utils.write({ type: `delete`, value: sampleUsers[0]! })
+          users.utils.commit()
+        } catch (error) {
+          commitError = error
+        }
+        await flushPromises()
+
+        expect(commitError).toBeUndefined()
+        expect(sourceErrors).toEqual([failure])
+        expect(effect.disposed).toBe(true)
+        expect(unloadCount).toBe(2)
+      } finally {
+        await effect.dispose()
+        await Promise.all([users.cleanup(), issues.cleanup()])
+      }
+    })
+
     it(`reports a rejected ordered subset load and disposes the effect`, async () => {
       const failure = new Error(`ordered subset failed`)
       let loadCount = 0
