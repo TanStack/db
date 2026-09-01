@@ -16,10 +16,9 @@ type PublicationRow = {
 
 type SyncActions = Parameters<SyncConfig<PublicationRow, number>[`sync`]>[0]
 
-type MetadataWrite = {
-  key: number
-  type: `set` | `delete`
-}
+type MetadataOperation = { type: `set`; value: unknown } | { type: `delete` }
+
+type MetadataWrite = { key: number } & MetadataOperation
 
 type PublicationRound = {
   key: number
@@ -48,10 +47,27 @@ type PublishedPublicationRow = PublicationRow & {
   $synced: boolean
 }
 
-const metadataWriteArbitrary = fc.record({
-  key: fc.integer({ min: 0, max: 2 }),
-  type: fc.constantFrom(`set` as const, `delete` as const),
-})
+const metadataValueArbitrary = fc.oneof(
+  fc.constant(undefined),
+  fc.constant(null),
+  fc.constant(false),
+  fc.constant(true),
+  fc.constant(0),
+  fc.constant(Number.NaN),
+  fc.constant(``),
+  fc.integer(),
+  fc.string(),
+  fc.record({ nested: fc.integer() }),
+)
+
+const metadataOperationArbitrary: fc.Arbitrary<MetadataOperation> = fc.oneof(
+  metadataValueArbitrary.map((value) => ({ type: `set` as const, value })),
+  fc.constant({ type: `delete` as const }),
+)
+
+const metadataWriteArbitrary = fc
+  .tuple(fc.integer({ min: 0, max: 2 }), metadataOperationArbitrary)
+  .map(([key, operation]) => ({ key, ...operation }))
 
 const publicationRoundArbitrary: fc.Arbitrary<PublicationRound> = fc
   .record({
@@ -59,13 +75,13 @@ const publicationRoundArbitrary: fc.Arbitrary<PublicationRound> = fc
     delta: fc.constantFrom(-2, -1, 1, 2),
     extraMetadata: fc.array(metadataWriteArbitrary, { maxLength: 2 }),
     outcome: fc.constantFrom(`commit` as const, `abort` as const),
-    primaryMetadataType: fc.constantFrom(`set` as const, `delete` as const),
+    primaryMetadata: metadataOperationArbitrary,
   })
-  .map(({ key, delta, extraMetadata, outcome, primaryMetadataType }) => ({
+  .map(({ key, delta, extraMetadata, outcome, primaryMetadata }) => ({
     key,
     delta,
     outcome,
-    metadata: [{ key, type: primaryMetadataType }, ...extraMetadata],
+    metadata: [{ key, ...primaryMetadata }, ...extraMetadata],
   }))
 
 const metadataCancellationArbitrary = fc.record({
@@ -77,20 +93,33 @@ const metadataCancellationArbitrary = fc.record({
     minLength: 1,
     maxLength: 3,
   }),
+  canceledOperation: metadataOperationArbitrary,
+  retainedOperation: metadataOperationArbitrary,
 })
+
+const metadataRollbackCaseArbitrary = fc.oneof(
+  metadataValueArbitrary.map((value) => ({
+    initialMetadata: { present: false as const },
+    pendingOperation: { type: `set` as const, value },
+  })),
+  metadataValueArbitrary.map((value) => ({
+    initialMetadata: { present: true as const, value },
+    pendingOperation: { type: `delete` as const },
+  })),
+)
 
 const metadataRollbackArbitrary = fc
   .record({
     sourceKey: fc.integer({ min: 0, max: 2 }),
     metadataKeyOffset: fc.constantFrom(1, 2),
     sourceDelta: fc.integer({ min: 1, max: 10 }),
-    oldMetadataOwner: fc.integer(),
-    pendingMetadataOwner: fc.integer(),
+    metadataCase: metadataRollbackCaseArbitrary,
   })
-  .map(({ sourceKey, metadataKeyOffset, ...scenario }) => ({
-    ...scenario,
+  .map(({ sourceKey, metadataKeyOffset, sourceDelta, metadataCase }) => ({
+    ...metadataCase,
     sourceKey,
     metadataKey: (sourceKey + metadataKeyOffset) % 3,
+    sourceDelta,
   }))
 
 let nextMetadataRollbackHarnessId = 0
@@ -186,7 +215,6 @@ function expectPublishedRows(
 async function applyRound(
   harness: PublicationHarness,
   round: PublicationRound,
-  roundIndex: number,
   model: Map<number, PublicationRow>,
   metadataModel: Map<number, unknown>,
 ): Promise<void> {
@@ -206,8 +234,7 @@ async function applyRound(
       sync.begin()
       for (const write of round.metadata) {
         if (write.type === `set`) {
-          const metadata = { round: roundIndex, owner: round.key }
-          sync.metadata!.row.set(write.key, metadata)
+          sync.metadata!.row.set(write.key, write.value)
         } else {
           sync.metadata!.row.delete(write.key)
         }
@@ -237,10 +264,7 @@ async function applyRound(
   if (round.outcome === `commit`) {
     for (const write of round.metadata) {
       if (write.type === `set`) {
-        metadataModel.set(write.key, {
-          round: roundIndex,
-          owner: round.key,
-        })
+        metadataModel.set(write.key, write.value)
       } else {
         metadataModel.delete(write.key)
       }
@@ -307,8 +331,8 @@ async function runPublicationHistory(
   )
   const metadataModel = new Map<number, unknown>()
   try {
-    for (const [index, round] of rounds.entries()) {
-      await applyRound(harness, round, index, model, metadataModel)
+    for (const round of rounds) {
+      await applyRound(harness, round, model, metadataModel)
     }
   } finally {
     harness.unsubscribe()
@@ -319,8 +343,23 @@ async function runPublicationHistory(
 async function expectMetadataCancellationOwnership(
   canceledKeys: ReadonlyArray<number>,
   retainedKeys: ReadonlyArray<number>,
+  canceledOperation: MetadataOperation,
+  retainedOperation: MetadataOperation,
 ): Promise<void> {
   const harness = await createPublicationHarness()
+  const initialMetadata = new Map<number, unknown>([
+    [0, undefined],
+    [1, false],
+    [2, null],
+  ])
+  const initialSync = harness.getSync()
+  initialSync.begin()
+  for (const [key, value] of initialMetadata) {
+    initialSync.metadata!.row.set(key, value)
+  }
+  initialSync.commit()
+  await Promise.resolve()
+
   const persistence = createDeferred<void>()
   const heldTransaction = createTransaction({
     mutationFn: () => persistence.promise,
@@ -330,11 +369,18 @@ async function expectMetadataCancellationOwnership(
   })
   expect(heldTransaction.state).toBe(`persisting`)
 
-  const stageMetadata = (keys: ReadonlyArray<number>, owner: string) => {
+  const stageMetadata = (
+    keys: ReadonlyArray<number>,
+    operation: MetadataOperation,
+  ) => {
     const sync = harness.getSync()
     sync.begin()
     for (const key of keys) {
-      sync.metadata!.row.set(key, { owner })
+      if (operation.type === `set`) {
+        sync.metadata!.row.set(key, operation.value)
+      } else {
+        sync.metadata!.row.delete(key)
+      }
     }
     const receipt = sync.commit()
     if (receipt === true) {
@@ -345,8 +391,8 @@ async function expectMetadataCancellationOwnership(
     return { receipt, transaction }
   }
 
-  const canceled = stageMetadata(canceledKeys, `canceled`)
-  const retained = stageMetadata(retainedKeys, `retained`)
+  const canceled = stageMetadata(canceledKeys, canceledOperation)
+  const retained = stageMetadata(retainedKeys, retainedOperation)
 
   try {
     harness.rows._state.capturePreSyncVisibleState()
@@ -368,7 +414,7 @@ async function expectMetadataCancellationOwnership(
       expectedAfter,
     )
     expect(harness.batches).toHaveLength(batchCountBefore)
-    expect(harness.rows._state.syncedMetadata.size).toBe(0)
+    expect(harness.rows._state.syncedMetadata).toEqual(initialMetadata)
     await expect(canceled.receipt).rejects.toBeInstanceOf(
       SyncTransactionAbortedError,
     )
@@ -386,14 +432,14 @@ async function expectMetadataRollbackRecovery({
   sourceKey,
   metadataKey,
   sourceDelta,
-  oldMetadataOwner,
-  pendingMetadataOwner,
+  initialMetadata,
+  pendingOperation,
 }: {
   sourceKey: number
   metadataKey: number
   sourceDelta: number
-  oldMetadataOwner: number
-  pendingMetadataOwner: number
+  initialMetadata: { present: false } | { present: true; value: unknown }
+  pendingOperation: MetadataOperation
 }): Promise<void> {
   const harnessId = nextMetadataRollbackHarnessId++
   const source = await createPublicationHarness()
@@ -409,7 +455,7 @@ async function expectMetadataRollbackRecovery({
   })
   await derived.preload()
 
-  const stageMetadata = (key: number, value: unknown) => {
+  const stageMetadata = (key: number, operation: MetadataOperation) => {
     const applied = createDeferred<void>()
     void applied.promise.catch(() => undefined)
     const transaction = {
@@ -418,7 +464,7 @@ async function expectMetadataRollbackRecovery({
       layoutChanged: false,
       operations: [],
       deletedKeys: new Set<string | number>(),
-      rowMetadataWrites: new Map([[key, { type: `set` as const, value }]]),
+      rowMetadataWrites: new Map([[key, operation]]),
       collectionMetadataWrites: new Map(),
       applied,
     }
@@ -426,12 +472,15 @@ async function expectMetadataRollbackRecovery({
     return transaction
   }
 
-  const oldMetadata = { owner: oldMetadataOwner }
-  const pendingMetadata = { owner: pendingMetadataOwner }
-  stageMetadata(metadataKey, oldMetadata)
-  derived._state.commitPendingTransactions()
+  if (initialMetadata.present) {
+    stageMetadata(metadataKey, {
+      type: `set`,
+      value: initialMetadata.value,
+    })
+    derived._state.commitPendingTransactions()
+  }
 
-  const pending = stageMetadata(metadataKey, pendingMetadata)
+  const pending = stageMetadata(metadataKey, pendingOperation)
   const sourceRowsBefore = [...rows.values()].map((row) => ({ ...row }))
   const rowsBefore = [...derived.values()].map((row) => ({ ...row }))
   const originBefore = new Map(derived._state.rowOrigins)
@@ -484,7 +533,9 @@ async function expectMetadataRollbackRecovery({
     )
     expect([...derived.values()].map((row) => ({ ...row }))).toEqual(rowsBefore)
     expect(derived._state.syncedMetadata).toEqual(
-      new Map([[metadataKey, oldMetadata]]),
+      initialMetadata.present
+        ? new Map([[metadataKey, initialMetadata.value]])
+        : new Map(),
     )
     expect(derived._state.pendingSyncedTransactions).toHaveLength(1)
     expect(derived._state.pendingSyncedTransactions[0]).toBe(pending)
@@ -514,7 +565,7 @@ it(`publishes one event per key when metadata-only sync retires optimistic work`
     {
       key: 1,
       delta: 1,
-      metadata: [{ key: 1, type: `set` }],
+      metadata: [{ key: 1, type: `set`, value: false }],
       outcome: `commit`,
     },
     {
@@ -527,7 +578,12 @@ it(`publishes one event per key when metadata-only sync retires optimistic work`
 })
 
 it(`releases only canceled metadata keys while another sync remains pending`, async () => {
-  await expectMetadataCancellationOwnership([0, 1], [1, 2])
+  await expectMetadataCancellationOwnership(
+    [0, 1],
+    [1, 2],
+    { type: `delete` },
+    { type: `set`, value: false },
+  )
 })
 
 it(`restores pending metadata when a derived publication fails`, async () => {
@@ -535,8 +591,8 @@ it(`restores pending metadata when a derived publication fails`, async () => {
     sourceKey: 0,
     metadataKey: 1,
     sourceDelta: 1,
-    oldMetadataOwner: 1,
-    pendingMetadataOwner: 2,
+    initialMetadata: { present: true, value: false },
+    pendingOperation: { type: `delete` },
   })
 })
 
@@ -553,8 +609,13 @@ fcTest.prop(
   oraclePropertyOptions(50, `collection-publication.metadata-cancellation`),
 )(
   `keeps metadata suppression owned by the remaining pending transactions`,
-  ({ canceledKeys, retainedKeys }) =>
-    expectMetadataCancellationOwnership(canceledKeys, retainedKeys),
+  ({ canceledKeys, retainedKeys, canceledOperation, retainedOperation }) =>
+    expectMetadataCancellationOwnership(
+      canceledKeys,
+      retainedKeys,
+      canceledOperation,
+      retainedOperation,
+    ),
 )
 fcTest.prop(
   [metadataRollbackArbitrary],

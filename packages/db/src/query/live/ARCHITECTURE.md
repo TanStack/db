@@ -1250,6 +1250,8 @@ A metadata-only transaction can retire optimistic state and change virtual row
 properties, so omitting its key from any of those phases can publish the same
 transition twice, leave stale suppression state after cancellation, or retain
 applied metadata after a failed coherent publication rolls back.
+Affectedness depends on key presence, not metadata value truthiness. In
+particular, setting a key to `undefined` is distinct from deleting that key.
 
 Window metadata follows the same causal order as the published rows. If a
 publication callback starts a newer window operation, that newer generation
