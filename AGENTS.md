@@ -389,6 +389,29 @@ classifier, fixture, or assertion that let it pass. Use that analysis to suggest
 the smallest test or oracle improvement that would catch the same class of bug,
 not only the reported example.
 
+### Keep Oracles Independent
+
+An oracle is useful only when its expected result comes from a source independent
+of the implementation under test. Do not translate production branches, state
+machines, classifiers, or helper functions into a second implementation and call
+that an oracle. Both copies can encode the same wrong assumption.
+
+- Derive expected behavior from public contracts, documented prior behavior,
+  mathematical laws, or a separately specified reference model.
+- Keep the reference model structurally different from production. Do not import
+  the production helper or reuse its classifications to compute expected results.
+- Preserve existing contract tests unless a product or design decision explicitly
+  changes the contract. Rewriting a passing expectation to match new production
+  behavior is a design review, not routine test maintenance.
+- When production work suggests an oracle change, compare the old and new
+  semantics with counterexamples before editing the oracle.
+- Use hostile mutants to prove the oracle rejects plausible wrong designs,
+  including the mistake production currently makes. A green oracle without a
+  demonstrated kill is weak evidence.
+- Use process grammar to explore lifecycle paths, and design grammar to challenge
+  the oracle's reference semantics. More generated traces cannot repair a wrong
+  reference model.
+
 ### Name Tests After Behavior
 
 Test names should state the behavior they prove. Do not put issue or pull

@@ -21,6 +21,7 @@
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
     "test": "vitest run",
+    "test:oracles": "vitest run tests/electric-oracle.property.test.ts",
     "test:e2e": "vitest run --config vitest.e2e.config.ts"
   },
   "type": "module",
@@ -49,10 +50,10 @@
     "@electric-sql/client": "^1.5.15",
     "@standard-schema/spec": "^1.1.0",
     "@tanstack/db": "workspace:*",
-    "@tanstack/store": "^0.9.2",
     "debug": "^4.4.3"
   },
   "devDependencies": {
+    "@tanstack/query-core": "^5.90.20",
     "@types/debug": "^4.1.12",
     "@types/pg": "^8.16.0",
     "@vitest/coverage-istanbul": "^3.2.4",

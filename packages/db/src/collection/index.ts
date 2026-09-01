@@ -47,6 +47,64 @@ import type { TransactionScope } from '../transactions.js'
 
 export type { CollectionIndexMetadata } from './events.js'
 
+const collectionSyncConfigFactory: unique symbol = Symbol.for(
+  `@tanstack/db.collectionSyncConfig.factory`,
+) as never
+const collectionSyncConfigCleanup: unique symbol = Symbol.for(
+  `@tanstack/db.collectionSyncConfig.cleanup`,
+) as never
+
+type CollectionSyncConfigWithFactory<TSync extends object> = TSync & {
+  readonly [collectionSyncConfigFactory]: (
+    this: TSync,
+    utilities: object,
+  ) => TSync
+}
+
+/** @internal Lets adapters bind a sync config to each collection instance. */
+export function withCollectionSyncConfigFactory<TSync extends object>(
+  sync: TSync,
+  factory: (source: TSync, utilities: object) => TSync,
+): CollectionSyncConfigWithFactory<TSync> {
+  Object.defineProperty(sync, collectionSyncConfigFactory, {
+    value(this: TSync, utilities: object) {
+      return factory(this, utilities)
+    },
+    // Preserve the hook when callers wrap a sync config with object spread.
+    enumerable: true,
+  })
+  return sync as CollectionSyncConfigWithFactory<TSync>
+}
+
+/** @internal Registers work owned before an adapter sync starts. */
+export function withCollectionSyncConfigCleanup<TSync extends object>(
+  sync: TSync,
+  cleanup: () => void,
+): TSync {
+  Object.defineProperty(sync, collectionSyncConfigCleanup, {
+    value: cleanup,
+    enumerable: false,
+  })
+  return sync
+}
+
+function materializeCollectionSyncConfig<TSync extends object>(
+  sync: TSync,
+  utilities: object,
+): TSync {
+  const factory = (
+    sync as unknown as Partial<CollectionSyncConfigWithFactory<TSync>>
+  )[collectionSyncConfigFactory]
+  return factory ? factory.call(sync, utilities) : sync
+}
+
+function cleanupCollectionSyncConfig(sync: object): void {
+  const cleanup = (
+    sync as unknown as { [collectionSyncConfigCleanup]?: () => void }
+  )[collectionSyncConfigCleanup]
+  cleanup?.()
+}
+
 /**
  * Enhanced Collection interface that includes both data type T and utilities TUtils
  * @template T - The type of items in the collection
@@ -261,14 +319,6 @@ export function createCollection(
   const collection = new CollectionImpl<any, string | number, any, any, any>(
     options,
   )
-
-  // Attach utils to collection
-  if (options.utils) {
-    collection.utils = options.utils
-  } else {
-    collection.utils = {}
-  }
-
   return collection
 }
 
@@ -336,10 +386,20 @@ export class CollectionImpl<
     }
 
     // Set default values for optional config properties
+    const collectionUtils = config.utils ?? {}
+    const collectionSync = materializeCollectionSyncConfig(
+      config.sync,
+      collectionUtils,
+    )
     this.config = {
       ...config,
+      sync: collectionSync,
       autoIndex: config.autoIndex ?? `off`,
+      utils: collectionUtils,
     }
+    // Attach utilities before eager sync starts so adapters can bind helpers
+    // during sync setup. Preserve the adapter's object identity by default.
+    this.utils = collectionUtils
 
     if (this.config.autoIndex === `eager` && !config.defaultIndexType) {
       throw new CollectionConfigurationError(
@@ -353,10 +413,12 @@ export class CollectionImpl<
     this._changes = new CollectionChangesManager()
     this._events = new CollectionEventsManager()
     this._indexes = new CollectionIndexesManager()
-    this._lifecycle = new CollectionLifecycleManager(config, this.id)
-    this._mutations = new CollectionMutationsManager(config, this.id)
-    this._state = new CollectionStateManager(config)
-    this._sync = new CollectionSyncManager(config, this.id)
+    this._lifecycle = new CollectionLifecycleManager(this.config, this.id, () =>
+      cleanupCollectionSyncConfig(this.config.sync),
+    )
+    this._mutations = new CollectionMutationsManager(this.config, this.id)
+    this._state = new CollectionStateManager(this.config)
+    this._sync = new CollectionSyncManager(this.config, this.id)
 
     this.comparisonOpts = buildCompareOptionsFromConfig(config)
 

@@ -615,6 +615,7 @@ create recursive Collection machinery.
 | Coherent layered publication                                                | `packages/db/tests/query/includes-publication-oracle.test.ts`             |
 | Collection facades, event coherence, and route activation                   | `packages/db/tests/query/includes-collection-oracle.property.test.ts`     |
 | Correlated physical work                                                    | `packages/db/tests/query/includes-work-counter-oracle.test.ts`            |
+| Constructed and retained Collection facades                                 | `packages/db/tests/query/includes-space-oracle.test.ts`                   |
 | Route-context discovery and transport across recursive and join boundaries  | `packages/db/tests/query/includes-context-transport-oracle.test.ts`       |
 | Query-db ownership                                                          | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`   |
 | Reachable nested shape                                                      | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts` |
@@ -632,6 +633,11 @@ seeds so each run covers the same named cells. Increase both corpora with
 reported seed and shrink path while reducing a failure. Replay a broad
 campaign with `TANSTACK_DB_ORACLE_SEED=<seed> pnpm test:oracles`, then add the
 smallest case as a deterministic regression trace.
+
+Run the reported 20-by-2-by-5-by-10 nested-Collection benchmark with
+`pnpm bench:nested-includes` from `packages/db`. The space oracle is the stable
+CI contract; benchmark timings are diagnostic and must not become a fixed
+wall-clock threshold.
 
 The broad relationship history changes correlation keys rather than freezing
 them. Set `TANSTACK_DB_ORACLE_STATISTICS=1` to print its generated depth,

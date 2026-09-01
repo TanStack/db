@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   BasicIndex,
   DbClient,
@@ -1744,6 +1744,161 @@ describe(`persistedCollectionOptions`, () => {
     expect(collection.get(`2`)).toBeUndefined()
   })
 
+  it(`does not let a stale invalidation reload overwrite a restarted lifecycle`, async () => {
+    const adapter = createRecordingAdapter([{ id: `1`, title: `Initial` }])
+    const coordinator = createCoordinatorHarness()
+    const originalLoadSubset = adapter.loadSubset.bind(adapter)
+    let loadCalls = 0
+    let releaseStaleReload!: () => void
+    let releaseFreshReload!: () => void
+    const staleReloadGate = new Promise<void>((resolve) => {
+      releaseStaleReload = resolve
+    })
+    const freshReloadGate = new Promise<void>((resolve) => {
+      releaseFreshReload = resolve
+    })
+    adapter.loadSubset = async (...args) => {
+      loadCalls++
+      if (loadCalls === 2) {
+        await staleReloadGate
+        return [
+          {
+            key: `1`,
+            value: { id: `1`, title: `Stale reload` },
+          },
+        ]
+      }
+      if (loadCalls === 3) await freshReloadGate
+      return originalLoadSubset(...args)
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+
+    await collection.preload()
+    await flushAsyncWork()
+    coordinator.emit({
+      type: `tx:committed`,
+      term: 1,
+      seq: 1,
+      txId: `tx-stale-reload`,
+      latestRowVersion: 1,
+      requiresFullReload: true,
+    })
+    for (let attempt = 0; attempt < 20 && loadCalls < 2; attempt++) {
+      await flushAsyncWork()
+    }
+    expect(loadCalls).toBe(2)
+
+    await collection.cleanup()
+    adapter.rows.set(`1`, { id: `1`, title: `Restarted` })
+    collection.startSyncImmediate()
+    releaseStaleReload()
+    for (let attempt = 0; attempt < 20 && loadCalls < 3; attempt++) {
+      await flushAsyncWork()
+    }
+    expect(loadCalls).toBe(3)
+    expect(collection.get(`1`)?.title).not.toBe(`Stale reload`)
+
+    releaseFreshReload()
+    for (
+      let attempt = 0;
+      attempt < 20 && collection.get(`1`)?.title !== `Restarted`;
+      attempt++
+    ) {
+      await flushAsyncWork()
+    }
+    expect(stripVirtualProps(collection.get(`1`))).toEqual({
+      id: `1`,
+      title: `Restarted`,
+    })
+    await collection.cleanup()
+  })
+
+  it(`does not let stale reload metadata start row loading after restart`, async () => {
+    const adapter = createRecordingAdapter([{ id: `1`, title: `Initial` }])
+    const coordinator = createCoordinatorHarness()
+    const originalLoadCollectionMetadata =
+      adapter.loadCollectionMetadata!.bind(adapter)
+    const originalLoadSubset = adapter.loadSubset.bind(adapter)
+    let metadataCalls = 0
+    let subsetCalls = 0
+    let releaseStaleMetadata!: () => void
+    const staleMetadataGate = new Promise<void>((resolve) => {
+      releaseStaleMetadata = resolve
+    })
+    adapter.loadCollectionMetadata = async (...args) => {
+      metadataCalls++
+      if (metadataCalls === 2) await staleMetadataGate
+      return originalLoadCollectionMetadata(...args)
+    }
+    adapter.loadSubset = async (...args) => {
+      subsetCalls++
+      return originalLoadSubset(...args)
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+
+    await collection.preload()
+    await flushAsyncWork()
+    expect(metadataCalls).toBe(1)
+    expect(subsetCalls).toBe(1)
+
+    coordinator.emit({
+      type: `tx:committed`,
+      term: 1,
+      seq: 1,
+      txId: `tx-stale-metadata`,
+      latestRowVersion: 1,
+      requiresFullReload: true,
+    })
+    for (let attempt = 0; attempt < 20 && metadataCalls < 2; attempt++) {
+      await flushAsyncWork()
+    }
+    expect(metadataCalls).toBe(2)
+
+    await collection.cleanup()
+    adapter.rows.set(`1`, { id: `1`, title: `Restarted` })
+    collection.startSyncImmediate()
+    releaseStaleMetadata()
+    for (
+      let attempt = 0;
+      attempt < 20 && (metadataCalls < 3 || subsetCalls < 2);
+      attempt++
+    ) {
+      await flushAsyncWork()
+    }
+
+    expect(metadataCalls).toBe(3)
+    expect(subsetCalls).toBe(2)
+    expect(stripVirtualProps(collection.get(`1`))).toEqual({
+      id: `1`,
+      title: `Restarted`,
+    })
+    await collection.cleanup()
+  })
+
   it(`retries queued remote subset ensure after transient failures`, async () => {
     const adapter = createRecordingAdapter()
     let ensureCalls = 0
@@ -1996,6 +2151,89 @@ describe(`persistedCollectionOptions`, () => {
       id: `1`,
       title: `Updated`,
     })
+  })
+
+  it(`keeps a hydrated resume baseline across narrow full reloads`, async () => {
+    const adapter = createRecordingAdapter([
+      { id: `1`, title: `Narrow` },
+      { id: `2`, title: `Baseline only` },
+    ])
+    const loadSubset = adapter.loadSubset.bind(adapter)
+    adapter.loadSubset = async (...args) => {
+      const rows = await loadSubset(...args)
+      return args[1].where ? rows.filter((row) => row.key === `1`) : rows
+    }
+    const coordinator = createCoordinatorHarness()
+    let hydrateBaseline: (() => Promise<void>) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        syncMode: `on-demand`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady, metadata }) => {
+            hydrateBaseline = (
+              metadata?.row as
+                | { whenHydrated?: () => Promise<void> }
+                | undefined
+            )?.whenHydrated
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+
+    collection.startSyncImmediate()
+    await vi.waitFor(() => expect(hydrateBaseline).toBeTypeOf(`function`))
+    await hydrateBaseline!()
+    expect(collection.has(`2`)).toBe(true)
+
+    await collection._sync.loadSubset({
+      where: new IR.Func(`eq`, [new IR.PropRef([`id`]), new IR.Value(`1`)]),
+    })
+    coordinator.emit({
+      type: `tx:committed`,
+      term: 1,
+      seq: 1,
+      txId: `full-reload`,
+      latestRowVersion: 1,
+      requiresFullReload: true,
+    })
+    await flushAsyncWork()
+    await flushAsyncWork()
+
+    expect(collection.has(`2`)).toBe(true)
+    await collection.cleanup()
+  })
+
+  it(`ignores late wrapped sync writes after cleanup`, async () => {
+    let lateWrite!: (message: { type: `insert`; value: Todo }) => void
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `late-write-after-cleanup`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ write, markReady }) => {
+            lateWrite = (message) => write(message)
+            markReady()
+          },
+        },
+        persistence: { adapter: createNoopAdapter() },
+      }),
+    )
+
+    await collection.preload()
+    await collection.cleanup()
+
+    expect(() =>
+      lateWrite({
+        type: `insert`,
+        value: { id: `late`, title: `Late` },
+      }),
+    ).not.toThrow()
+    expect(collection.has(`late`)).toBe(false)
   })
 })
 

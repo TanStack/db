@@ -45,6 +45,12 @@ export type FacadePublication = {
   rollback: () => void
 }
 
+export type BucketFacadeMetrics = {
+  created: number
+  active: number
+  retired: number
+}
+
 /**
  * The only stateful boundary outside the materialization graph. It turns inert
  * bucket references into stable public Collection facades and applies the
@@ -60,6 +66,7 @@ export class BucketFacadeAdapter {
   private readonly entries = new Map<string, Map<string, FacadeEntry>>()
   private readonly retiredEntries = new Map<string, Map<string, FacadeEntry>>()
   private resolvedValues = new WeakMap<object, unknown>()
+  private createdEntries = 0
 
   constructor(
     private readonly parentId: string,
@@ -90,6 +97,20 @@ export class BucketFacadeAdapter {
 
   hasPendingChanges(): boolean {
     return this.pending.size > 0 || this.pendingActivity.size > 0
+  }
+
+  getMetrics(): BucketFacadeMetrics {
+    const count = (entries: Map<string, Map<string, FacadeEntry>>) =>
+      [...entries.values()].reduce(
+        (total, byBucket) => total + byBucket.size,
+        0,
+      )
+
+    return {
+      created: this.createdEntries,
+      active: count(this.entries),
+      retired: count(this.retiredEntries),
+    }
   }
 
   flush(): FacadePublication {
@@ -401,6 +422,7 @@ export class BucketFacadeAdapter {
       order,
       currentOrder: new Map(),
     }
+    this.createdEntries++
     byBucket.set(bucketKey, entry)
     return entry
   }

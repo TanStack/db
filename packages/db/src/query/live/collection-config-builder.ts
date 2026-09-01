@@ -161,6 +161,7 @@ export class CollectionConfigBuilder<
   private bucketFacadesCache:
     | ReturnType<typeof materializeCompilation>[`facades`]
     | undefined
+  private bucketFacadeAdapter: BucketFacadeAdapter | undefined
 
   // Map of opaque source ID to subscription
   readonly subscriptions: Record<string, CollectionSubscription> = {}
@@ -276,6 +277,12 @@ export class CollectionConfigBuilder<
         getWindow: this.getWindow.bind(this),
         [LIVE_QUERY_INTERNAL]: {
           getBuilder: () => this,
+          getBucketFacadeMetrics: () =>
+            this.bucketFacadeAdapter?.getMetrics() ?? {
+              created: 0,
+              active: 0,
+              retired: 0,
+            },
           hasCustomGetKey: !!this.config.getKey,
           hasJoins: this.hasJoins(this.query),
           hasDistinct: !!this.query.distinct,
@@ -891,7 +898,13 @@ export class CollectionConfigBuilder<
         syncState.messagesCount += count
       },
     )
-    syncState.unsubscribeCallbacks.add(() => bucketFacades.cleanup())
+    this.bucketFacadeAdapter = bucketFacades
+    syncState.unsubscribeCallbacks.add(() => {
+      bucketFacades.cleanup()
+      if (this.bucketFacadeAdapter === bucketFacades) {
+        this.bucketFacadeAdapter = undefined
+      }
+    })
 
     // Flush pending changes and reset the accumulator.
     // Called at the end of each graph run to commit all accumulated changes.
