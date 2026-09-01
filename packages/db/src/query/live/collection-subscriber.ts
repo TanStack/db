@@ -6,7 +6,7 @@ import {
 import {
   computeOrderedLoadCursor,
   computeSubscriptionOrderByHints,
-  filterDuplicateInserts,
+  reconcileChangesForD2,
   sendChangesToInput,
   splitUpdates,
 } from './utils.js'
@@ -47,10 +47,9 @@ export class CollectionSubscriber<
     { resolve: () => void }
   >()
 
-  // Track keys that have been sent to the D2 pipeline to prevent duplicate inserts
-  // This is necessary because different code paths (initial load, change events)
-  // can potentially send the same item to D2 multiple times.
-  private sentToD2Keys = new Set<string | number>()
+  // Track the exact row contributed for each source key. D2 retractions must
+  // use that row, even when the incoming event reports a changed previous row.
+  private sentToD2Rows = new Map<string | number, Record<string, unknown>>()
 
   // Direct load tracking callback for ordered path (set during subscribeToOrderedChanges,
   // used by loadNextItems for subsequent requestLimitedSnapshot calls)
@@ -298,16 +297,16 @@ export class CollectionSubscriber<
     callback?: () => boolean,
   ) {
     const changesArray = Array.isArray(changes) ? changes : [...changes]
-    const filteredChanges = filterDuplicateInserts(
+    const reconciledChanges = reconcileChangesForD2(
       changesArray,
-      this.sentToD2Keys,
+      this.sentToD2Rows,
     )
 
     // currentSyncState and input are always defined when this method is called
     // (only called from active subscriptions during a sync session)
     const input =
       this.collectionConfigBuilder.currentSyncState!.inputs[this.sourceId]!
-    const sentChanges = sendChangesToInput(input, filteredChanges)
+    const sentChanges = sendChangesToInput(input, reconciledChanges)
 
     // Do not provide the callback that loads more data
     // if there's no more data to load
@@ -424,14 +423,14 @@ export class CollectionSubscriber<
     subscriptionHolder.current = subscription
     this.registerSubscriptionCleanup(subscription)
 
-    // Listen for truncate events to reset cursor tracking state and sentToD2Keys
+    // Listen for truncate events to reset cursor and D2 source tracking state.
     // This ensures that after a must-refetch/truncate, we don't use stale cursor data
     // and allow re-inserts of previously sent keys
     const truncateUnsubscribe = this.collection.on(`truncate`, () => {
       this.lastLoadRequestKey = undefined
       this.lastNoProgressRequestKey = undefined
       this.pendingOrderedLoadPromise = undefined
-      this.sentToD2Keys.clear()
+      this.sentToD2Rows.clear()
     })
 
     // Clean up truncate listener when subscription is unsubscribed

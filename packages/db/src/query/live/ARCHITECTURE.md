@@ -217,6 +217,14 @@ inside D2 do not need their own lifecycle objects or generations.
 D2 multisets are the source of truth. A row with positive weight contributes;
 a row with negative weight retracts the same contribution.
 
+Each lexical source boundary retains the exact row last contributed for every
+source key. A replayed insert for an existing key adds no second contribution.
+An update or delete retracts the retained row, rather than trusting event
+metadata that may describe a newer value, then replaces or removes that entry.
+Truncate and graph teardown clear this boundary state. Thus every source key
+has multiplicity zero or one and every negative weight cancels the exact
+positive row that entered D2.
+
 Internal contribution identity is independent of the user-visible Collection
 key. When several internal rows collapse to one public key, a keyed D2
 reduction retains all contributors and derives at most one canonical row:

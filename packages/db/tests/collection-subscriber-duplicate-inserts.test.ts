@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { createLiveQueryCollection, eq } from '../src/query/index.js'
+import { reconcileChangesForD2 } from '../src/query/live/utils.js'
 import { mockSyncCollectionOptions } from './utils.js'
 import type { ChangeMessage } from '../src/types.js'
 
@@ -15,8 +16,8 @@ import type { ChangeMessage } from '../src/types.js'
  * If duplicate inserts reach D2, multiplicity becomes > 1, and deletes won't
  * properly remove items (multiplicity goes from 2 to 1, not triggering removal).
  *
- * The fix: CollectionSubscriber tracks keys sent to D2 (sentToD2Keys) and
- * filters out duplicate inserts before they reach the pipeline.
+ * The source boundary tracks the exact row sent for each key. It filters
+ * duplicate inserts and uses the stored row for later D2 retractions.
  *
  * Additionally, for JOIN queries with lazy sources:
  * - The includeInitialState fix ensures internal lazy-loading subscriptions
@@ -40,6 +41,37 @@ type Order = {
 }
 
 describe(`CollectionSubscriber duplicate insert prevention`, () => {
+  it(`retracts the exact row previously contributed for a source key`, () => {
+    const sentRows = new Map<string | number, Record<string, unknown>>()
+    const inserted = { id: `1`, status: `draft` }
+    const changed = { id: `1`, status: `published` }
+
+    reconcileChangesForD2(
+      [{ type: `insert`, key: `1`, value: inserted }],
+      sentRows,
+    )
+    const reconciled = reconcileChangesForD2(
+      [
+        {
+          type: `update`,
+          key: `1`,
+          value: changed,
+          previousValue: changed,
+        },
+      ],
+      sentRows,
+    )
+
+    expect(reconciled).toEqual([
+      {
+        type: `update`,
+        key: `1`,
+        value: changed,
+        previousValue: inserted,
+      },
+    ])
+  })
+
   it(`should properly delete items from live query with orderBy + limit`, async () => {
     // This test verifies that items can be properly deleted from a live query
     // with orderBy + limit. If duplicate inserts reach D2, the delete won't work.

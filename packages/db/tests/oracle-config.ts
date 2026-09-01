@@ -5,6 +5,7 @@ const staticOracleProperties = [
   `collection-state.retention`,
   `coverage-registry.claim-churn`,
   `coverage-registry.state-machine`,
+  `d2-source.exact-retractions`,
   `includes-collection.layout-swap`,
   `includes-collection.optimistic-child-history`,
   `includes-collection.public-key-order`,
