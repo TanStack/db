@@ -1107,6 +1107,11 @@ child demand, but its root demand must still settle. Later readiness transitions
 follow the existing Collection contract until an executable test defines
 another public behavior.
 
+The first-ready transition is an attempt-all fan-out. One callback failure
+cannot suppress later first-ready callbacks, preload settlement, or the empty
+ready event that wakes dependent Collections. Core completes every effect, then
+rethrows the first failure unchanged, including a falsy value.
+
 Pending demand does not hide the parent row. An active empty bucket gives it
 the current canonical bucket value, and available partial source rows produce
 the current partial materialization when the source supports progressive

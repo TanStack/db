@@ -11,19 +11,6 @@ import type { Context } from '../builder/types.js'
 import type { OrderBy, QueryIR } from '../ir.js'
 import type { OrderByOptimizationInfo } from '../compiler/order-by.js'
 
-/** Attempt every callback, then rethrow the first exact failure value. */
-export function runAllCallbacks(callbacks: Iterable<() => void>): void {
-  let firstFailure: { error: unknown } | undefined
-  for (const callback of callbacks) {
-    try {
-      callback()
-    } catch (error) {
-      firstFailure ??= { error }
-    }
-  }
-  if (firstFailure) throw firstFailure.error
-}
-
 /**
  * Helper function to extract collections from a compiled query.
  * Traverses the query IR to find all collection references.

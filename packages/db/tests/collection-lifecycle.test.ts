@@ -511,6 +511,58 @@ describe(`Collection Lifecycle Management`, () => {
       subscription.unsubscribe()
     })
 
+    it(`attempts every first-ready effect before rethrowing the first failure`, async () => {
+      let markReadyCallback: (() => void) | undefined
+      const readyBatches: Array<Array<unknown>> = []
+      const laterFailure = new Error(`later first-ready failure`)
+      const laterCallback = vi.fn(() => {
+        throw laterFailure
+      })
+      let preloadSettled = false
+
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `first-ready-failure-test`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReadyCallback = markReady as () => void
+          },
+        },
+      })
+      const subscription = collection.subscribeChanges((batch) => {
+        readyBatches.push(batch)
+      })
+      collection.onFirstReady(() => {
+        throw undefined
+      })
+      collection.onFirstReady(laterCallback)
+      void collection.preload().then(() => {
+        preloadSettled = true
+      })
+
+      try {
+        let didThrow = false
+        let thrown: unknown
+        try {
+          markReadyCallback!()
+        } catch (error) {
+          didThrow = true
+          thrown = error
+        }
+        await Promise.resolve()
+
+        expect(didThrow).toBe(true)
+        expect(thrown).toBeUndefined()
+        expect(laterCallback).toHaveBeenCalledOnce()
+        expect(preloadSettled).toBe(true)
+        expect(readyBatches).toEqual([[]])
+        expect(collection.status).toBe(`ready`)
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    })
+
     it(`should fire status:change event with 'cleaned-up' status before clearing event handlers`, () => {
       const collection = createCollection<{ id: string; name: string }>({
         id: `cleanup-event-test`,

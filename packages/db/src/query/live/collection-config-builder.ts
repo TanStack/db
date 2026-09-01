@@ -11,6 +11,7 @@ import {
 } from '../../scheduler.js'
 import { getActiveTransaction } from '../../transactions.js'
 import { deepEquals } from '../../utils.js'
+import { runAllCallbacks } from '../../utils/callbacks.js'
 import { getLoadSubsetDemandKey } from '../ir-stable-identity.js'
 import { isAppliedLoadSubsetOutcome } from '../load-subset-outcome.js'
 import { CollectionSubscriber } from './collection-subscriber.js'
@@ -23,7 +24,6 @@ import {
   extractCollectionFromSource,
   extractCollectionSources,
   extractCollectionsFromQuery,
-  runAllCallbacks,
 } from './utils.js'
 import type { LiveQueryInternalUtils } from './internal.js'
 import type { WindowOptions } from '../compiler/index.js'

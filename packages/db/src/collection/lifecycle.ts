@@ -7,6 +7,7 @@ import {
   safeCancelIdleCallback,
   safeRequestIdleCallback,
 } from '../utils/browser-polyfills'
+import { runAllCallbacks } from '../utils/callbacks'
 import { CleanupQueue } from './cleanup-queue'
 import type { IdleCallbackDeadline } from '../utils/browser-polyfills'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
@@ -138,6 +139,7 @@ export class CollectionLifecycleManager<
     if (this.status === `loading` || this.status === `error`) {
       this.syncError = undefined
       this.setStatus(`ready`, true)
+      const readyEffects: Array<() => void> = []
 
       // Call any registered first ready callbacks (only on first time becoming ready)
       if (!this.hasBeenReady) {
@@ -148,15 +150,15 @@ export class CollectionLifecycleManager<
           this.hasReceivedFirstCommit = true
         }
 
-        const callbacks = [...this.onFirstReadyCallbacks]
+        readyEffects.push(...this.onFirstReadyCallbacks)
         this.onFirstReadyCallbacks = []
-        callbacks.forEach((callback) => callback())
       }
       // Notify dependents when markReady is called, after status is set
       // This ensures live queries get notified when their dependencies become ready
       if (this.changes.changeSubscriptions.size > 0) {
-        this.changes.emitEmptyReadyEvent()
+        readyEffects.push(() => this.changes.emitEmptyReadyEvent())
       }
+      runAllCallbacks(readyEffects)
     }
   }
 
