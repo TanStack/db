@@ -233,10 +233,7 @@ export class CollectionStateManager<
 
   public snapshotPublicationState(
     keys: Iterable<TKey>,
-  ): CollectionPublicationStateSnapshot<
-    TOutput,
-    TKey
-  > {
+  ): CollectionPublicationStateSnapshot<TOutput, TKey> {
     const affectedKeys = new Set(keys)
     for (const transaction of this.pendingSyncedTransactions) {
       for (const operation of transaction.operations) {
@@ -277,9 +274,7 @@ export class CollectionStateManager<
           },
         ]),
       ),
-      syncedCollectionMetadata: [
-        ...this.syncedCollectionMetadata.entries(),
-      ],
+      syncedCollectionMetadata: [...this.syncedCollectionMetadata.entries()],
       optimisticUpserts: new Map(this.optimisticUpserts),
       optimisticDeletes: new Set(this.optimisticDeletes),
       pendingOptimisticUpserts: new Map(this.pendingOptimisticUpserts),
@@ -304,7 +299,10 @@ export class CollectionStateManager<
     snapshot: CollectionPublicationStateSnapshot<TOutput, TKey>,
   ): void {
     this.pendingSyncedTransactions = [...snapshot.pendingSyncedTransactions]
-    for (const [transaction, applicationStarted] of snapshot.applicationStarted) {
+    for (const [
+      transaction,
+      applicationStarted,
+    ] of snapshot.applicationStarted) {
       transaction.applicationStarted = applicationStarted
     }
     for (const [key, state] of snapshot.keys) {
@@ -315,20 +313,11 @@ export class CollectionStateManager<
       restoreSetEntry(this.hydratedKeys, key, state.hydrated)
       restoreSetEntry(this.syncedKeys, key, state.synced)
     }
-    replaceMap(
-      this.syncedCollectionMetadata,
-      snapshot.syncedCollectionMetadata,
-    )
+    replaceMap(this.syncedCollectionMetadata, snapshot.syncedCollectionMetadata)
     replaceMap(this.optimisticUpserts, snapshot.optimisticUpserts)
     replaceSet(this.optimisticDeletes, snapshot.optimisticDeletes)
-    replaceMap(
-      this.pendingOptimisticUpserts,
-      snapshot.pendingOptimisticUpserts,
-    )
-    replaceSet(
-      this.pendingOptimisticDeletes,
-      snapshot.pendingOptimisticDeletes,
-    )
+    replaceMap(this.pendingOptimisticUpserts, snapshot.pendingOptimisticUpserts)
+    replaceSet(this.pendingOptimisticDeletes, snapshot.pendingOptimisticDeletes)
     replaceSet(
       this.pendingOptimisticDirectUpserts,
       snapshot.pendingOptimisticDirectUpserts,
@@ -1355,6 +1344,7 @@ export class CollectionStateManager<
             }
             case `delete`:
               this.syncedData.delete(key)
+              this.syncedKeys.delete(key)
               this.syncedMetadata.delete(key)
               this.rowOrigins.delete(key)
               if (!transaction.truncate) {

@@ -2,6 +2,7 @@ type OracleEnvironment = Record<string, string | undefined>
 
 const staticOracleProperties = [
   `collection-sync.reentrant-drain`,
+  `collection-state.retention`,
   `coverage-registry.claim-churn`,
   `coverage-registry.state-machine`,
   `includes-collection.layout-swap`,
