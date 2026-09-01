@@ -839,6 +839,68 @@ async function expectFailedDemandRetriesSameCoverage(): Promise<void> {
   }
 }
 
+async function expectDemandReactivationRetriesAfterReleaseFailure(
+  keys: ReadonlyArray<number>,
+): Promise<void> {
+  let loadCount = 0
+  let allowUnload = false
+  const releaseError = new Error(`child release failed`)
+  const comments = createCollection<Comment>({
+    id: nextCollectionId(`temporal-release-retry-comments`),
+    getKey: (comment) => comment.id,
+    syncMode: `on-demand`,
+    autoIndex: `eager`,
+    defaultIndexType: BasicIndex,
+    sync: {
+      sync: ({ markReady }) => ({
+        loadSubset: () => {
+          loadCount += 1
+          markReady()
+          return true
+        },
+        unloadSubset: () => {
+          if (!allowUnload) throw releaseError
+        },
+      }),
+    },
+  })
+  comments.createIndex((comment) => comment.postId)
+  const subscription = comments.subscribeChanges(() => {}, {
+    includeInitialState: false,
+  })
+  const controller = new SubsetDemandController()
+  const plan: LazyDemandPlan = {
+    id: `release-failure-retry`,
+    path: [`postId`],
+    collectionId: comments.id,
+    initialKeys: new Set(),
+  }
+
+  try {
+    expect(controller.setDemand(subscription, plan, new Set(keys))).toMatchObject(
+      { changed: true, empty: false },
+    )
+    expect(loadCount).toBe(1)
+
+    expect(() => controller.setDemand(subscription, plan, new Set())).toThrow(
+      releaseError,
+    )
+
+    const reactivated = controller.setDemand(
+      subscription,
+      plan,
+      new Set(keys),
+    )
+    expect(reactivated).toMatchObject({ changed: true, empty: false })
+    expect(loadCount).toBe(2)
+  } finally {
+    allowUnload = true
+    controller.clear()
+    subscription.unsubscribe()
+    await comments.cleanup()
+  }
+}
+
 async function expectSynchronousEmptyDemandIsReady(): Promise<void> {
   const posts = createMutablePosts([
     { id: 1, authorId: `selected`, title: `one` },
@@ -1219,6 +1281,24 @@ describe(`includes temporal oracle`, () => {
   it(
     `failed demand retries the same coverage`,
     expectFailedDemandRetriesSameCoverage,
+  )
+
+  it(
+    `reactivated demand retries after its prior release fails`,
+    () => expectDemandReactivationRetriesAfterReleaseFailure([1]),
+  )
+
+  fcTest.prop(
+    [
+      fc.uniqueArray(fc.integer({ min: -3, max: 3 }), {
+        minLength: 1,
+        maxLength: 5,
+      }),
+    ],
+    oraclePropertyOptions(20, `includes-temporal.release-reentry`),
+  )(
+    `failed release never suppresses a later demand incarnation`,
+    expectDemandReactivationRetriesAfterReleaseFailure,
   )
 
   it(

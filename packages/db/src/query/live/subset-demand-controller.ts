@@ -57,6 +57,7 @@ export class SubsetDemandController {
     }
 
     const segments: Array<DemandSegment> = []
+    let releaseFailure: { error: unknown } | undefined
 
     for (const segment of previous?.segments ?? []) {
       if (segment.state !== `failed` && intersects(segment.keys, nextKeys)) {
@@ -65,10 +66,14 @@ export class SubsetDemandController {
       }
 
       segment.abortController.abort()
-      subscription.releaseSnapshot(
-        segment.where,
-        segment.abortController.signal,
-      )
+      try {
+        subscription.releaseSnapshot(
+          segment.where,
+          segment.abortController.signal,
+        )
+      } catch (error) {
+        releaseFailure ??= { error }
+      }
     }
 
     const coveredKeys = new Set(
@@ -100,11 +105,16 @@ export class SubsetDemandController {
         (ready): ready is Promise<AppliedLoadSubsetOutcome> =>
           ready instanceof Promise,
       )
-    return {
+    const update: DemandUpdate = {
       changed: true,
       empty: nextKeys.size === 0,
       ready: pending.length > 0 ? Promise.all(pending) : true,
     }
+    // A failed physical release remains cleanup debt, but it cannot leave an
+    // aborted segment representing current logical demand. Commit the demand
+    // transition first so a later incarnation acquires fresh coverage.
+    if (releaseFailure) throw releaseFailure.error
+    return update
   }
 
   clear(): void {

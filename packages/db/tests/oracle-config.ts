@@ -22,6 +22,7 @@ const staticOracleProperties = [
   `includes-publication.child-scalar`,
   `includes-publication.optimistic-rollback`,
   `includes-publication.parent-route`,
+  `includes-temporal.release-reentry`,
   `includes-temporal.demand-scheduling`,
   `includes.alpha-renaming`,
   `includes.incremental-history`,
