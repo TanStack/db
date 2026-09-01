@@ -3,17 +3,86 @@ import type {
   SerializedError,
   SerializedMutation,
   SerializedOfflineTransaction,
+  TemporalConstructorName,
+  TemporalConstructors,
 } from '../types'
 import type { Collection, PendingMutation } from '@tanstack/db'
+
+const temporalConstructors = {
+  'Temporal.Duration': `Duration`,
+  'Temporal.Instant': `Instant`,
+  'Temporal.PlainDate': `PlainDate`,
+  'Temporal.PlainDateTime': `PlainDateTime`,
+  'Temporal.PlainMonthDay': `PlainMonthDay`,
+  'Temporal.PlainTime': `PlainTime`,
+  'Temporal.PlainYearMonth': `PlainYearMonth`,
+  'Temporal.ZonedDateTime': `ZonedDateTime`,
+} as const
+
+type TemporalType = keyof typeof temporalConstructors
+
+interface TemporalLike {
+  readonly [Symbol.toStringTag]: TemporalType
+  toString: () => string
+}
+
+interface SerializedTemporalValue {
+  __type: `Temporal`
+  type: TemporalType
+  value: string
+}
+
+function isTemporalType(type: string): type is TemporalType {
+  return Object.prototype.hasOwnProperty.call(temporalConstructors, type)
+}
+
+function isTemporalValue(value: unknown): value is TemporalLike {
+  if (value === null || typeof value !== `object`) {
+    return false
+  }
+
+  const tag = (value as Record<symbol, unknown>)[Symbol.toStringTag]
+  return typeof tag === `string` && isTemporalType(tag)
+}
+
+export class MissingTemporalConstructorError extends Error {
+  constructor(constructorName: TemporalConstructorName) {
+    super(
+      `Failed to deserialize Temporal marker: Temporal.${constructorName} is not available. Pass a Temporal namespace to startOfflineExecutor({ temporal }) or polyfill globalThis.Temporal.`,
+    )
+    this.name = `MissingTemporalConstructorError`
+  }
+}
+
+function getDefaultTemporalConstructors(): TemporalConstructors | undefined {
+  return (globalThis as { Temporal?: TemporalConstructors }).Temporal
+}
+
+function getTemporalConstructor(
+  constructors: TemporalConstructors | undefined,
+  type: TemporalType,
+) {
+  const constructorName = temporalConstructors[type]
+  const constructor = constructors?.[constructorName]
+
+  if (!constructor) {
+    throw new MissingTemporalConstructorError(constructorName)
+  }
+
+  return constructor
+}
 
 export class TransactionSerializer {
   private collections: Record<string, Collection<any, any, any, any, any>>
   private collectionIdToKey: Map<string, string>
+  private temporal: TemporalConstructors | undefined
 
   constructor(
     collections: Record<string, Collection<any, any, any, any, any>>,
+    temporal?: TemporalConstructors,
   ) {
     this.collections = collections
+    this.temporal = temporal ?? getDefaultTemporalConstructors()
     // Create reverse lookup from collection.id to registry key
     this.collectionIdToKey = new Map()
     for (const [key, collection] of Object.entries(collections)) {
@@ -25,6 +94,9 @@ export class TransactionSerializer {
     const serialized: SerializedOfflineTransaction = {
       ...transaction,
       createdAt: transaction.createdAt.toISOString(),
+      metadata: this.serializeValue(transaction.metadata) as
+        | Record<string, any>
+        | undefined,
       mutations: transaction.mutations.map((mutation) =>
         this.serializeMutation(mutation),
       ),
@@ -47,6 +119,9 @@ export class TransactionSerializer {
     return {
       ...parsed,
       createdAt,
+      metadata: this.deserializeValue(parsed.metadata) as
+        | Record<string, any>
+        | undefined,
       mutations: parsed.mutations.map((mutationData) =>
         this.deserializeMutation(mutationData),
       ),
@@ -112,6 +187,14 @@ export class TransactionSerializer {
       return { __type: `Date`, value: value.toISOString() }
     }
 
+    if (isTemporalValue(value)) {
+      return {
+        __type: `Temporal`,
+        type: value[Symbol.toStringTag],
+        value: value.toString(),
+      } satisfies SerializedTemporalValue
+    }
+
     if (typeof value === `object`) {
       const result: any = Array.isArray(value) ? [] : {}
       for (const key in value) {
@@ -141,6 +224,18 @@ export class TransactionSerializer {
         )
       }
       return date
+    }
+
+    if (typeof value === `object` && value.__type === `Temporal`) {
+      if (typeof value.type !== `string` || !isTemporalType(value.type)) {
+        throw new Error(`Corrupted Temporal marker: invalid type field`)
+      }
+
+      if (typeof value.value !== `string`) {
+        throw new Error(`Corrupted Temporal marker: missing value field`)
+      }
+
+      return getTemporalConstructor(this.temporal, value.type).from(value.value)
     }
 
     if (typeof value === `object`) {
