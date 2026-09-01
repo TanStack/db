@@ -1,6 +1,7 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
+import { DuplicateKeySyncError } from '../src/errors.js'
 import { oraclePropertyOptions } from './oracle-config.js'
 import type { Collection } from '../src/collection/index.js'
 import type { SyncConfig } from '../src/types.js'
@@ -13,7 +14,8 @@ type RetainedRow = {
 type SyncActions = Parameters<SyncConfig<RetainedRow, number>[`sync`]>[0]
 
 type RetentionAction =
-  | { type: `put`; row: RetainedRow }
+  | { type: `insert`; row: RetainedRow }
+  | { type: `update`; row: RetainedRow }
   | { type: `delete`; key: number }
   | { type: `replace`; rows: ReadonlyArray<RetainedRow> }
 
@@ -28,7 +30,8 @@ const retainedRowArbitrary = fc.record({
 })
 
 const retentionActionArbitrary: fc.Arbitrary<RetentionAction> = fc.oneof(
-  retainedRowArbitrary.map((row) => ({ type: `put` as const, row })),
+  retainedRowArbitrary.map((row) => ({ type: `insert` as const, row })),
+  retainedRowArbitrary.map((row) => ({ type: `update` as const, row })),
   fc
     .integer({ min: 0, max: 3 })
     .map((key) => ({ type: `delete` as const, key })),
@@ -63,11 +66,20 @@ function applyAction(
 ): void {
   sync.begin()
   switch (action.type) {
-    case `put`: {
-      sync.write({
-        type: model.has(action.row.id) ? `update` : `insert`,
-        value: action.row,
-      })
+    case `insert`: {
+      const previous = model.get(action.row.id)
+      if (previous !== undefined && previous.value !== action.row.value) {
+        expect(() => sync.write({ type: `insert`, value: action.row })).toThrow(
+          DuplicateKeySyncError,
+        )
+        break
+      }
+      sync.write({ type: `insert`, value: action.row })
+      model.set(action.row.id, action.row)
+      break
+    }
+    case `update`: {
+      sync.write({ type: action.type, value: action.row })
       model.set(action.row.id, action.row)
       break
     }
@@ -125,20 +137,35 @@ async function runRetentionHistory(
 
 it(`retains only keys in the authoritative synced state`, async () => {
   await runRetentionHistory([
-    { type: `put`, row: { id: 1, value: 1 } },
-    { type: `put`, row: { id: 2, value: 2 } },
+    { type: `insert`, row: { id: 1, value: 1 } },
+    { type: `insert`, row: { id: 2, value: 2 } },
     { type: `delete`, key: 1 },
-    { type: `put`, row: { id: 1, value: -1 } },
+    { type: `update`, row: { id: 1, value: -1 } },
     { type: `replace`, rows: [{ id: 3, value: 0 }] },
     { type: `delete`, key: 3 },
   ])
+})
+
+it(`retains a missing row introduced by a sync update`, async () => {
+  await runRetentionHistory([{ type: `update`, row: { id: 1, value: 1 } }])
+})
+
+it(`releases retained keys after long unique-key churn`, async () => {
+  const keyCount = 1_000
+  const actions: Array<RetentionAction> = []
+  for (let key = 0; key < keyCount; key++) {
+    actions.push({ type: `insert`, row: { id: key, value: key } })
+    actions.push({ type: `delete`, key })
+  }
+
+  await runRetentionHistory(actions)
 })
 
 fcTest.prop(
   [fc.array(retentionActionArbitrary, { minLength: 1, maxLength: 20 })],
   oraclePropertyOptions(100, `collection-state.retention`),
 )(
-  `matches retained authoritative state after every committed sync history`,
+  `matches retained authoritative state without optimistic overlays after every committed sync history`,
   async (actions) => {
     await runRetentionHistory(actions)
   },
