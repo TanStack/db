@@ -42,6 +42,39 @@ callbacks scoped to their lifecycle`.
    Killed by: `denotational reference, Electric, persisted Electric, and query
 adapters converge across controls and publication epochs`.
 
+5. Late match evidence
+
+   Clear committed match messages when the next change-bearing batch starts.
+
+   Killed by: `keeps committed match evidence across newer writer batches`.
+   The paired `clears committed match evidence when the stream must refetch`
+   test prevents the opposite error of retaining evidence across a reset.
+
+6. Persisted on-demand presence
+
+   Remove the `onLoadSubset` presence refresh before an Electric subset starts.
+
+   Killed by: `applies on-demand catch-up updates to hydrated persisted rows`.
+   The expected row comes from the persisted adapter and the public merge
+   contract, not Electric's `knownKeys` state machine.
+
+7. Resume capability fencing
+
+   Accept a persisted offset when `scanPersisted` exists but `whenHydrated`
+   does not.
+
+   Killed by: `restarts a persisted resume when hydration completion is
+unavailable`.
+
+8. Complete-row discrimination
+
+   Treat every resumed `update` as a partial row, including updates from a
+   `replica: 'full'` stream.
+
+   Killed by: `accepts complete replica updates from an explicit eager resume`.
+   The paired `rejects an unseen partial update from an explicit eager resume`
+   test proves that the exception does not admit partial rows.
+
 Use this focused form while iterating:
 
 ```sh

@@ -139,8 +139,8 @@ type ElectricPendingMatch<T extends Row<unknown>> = {
 }
 
 type ElectricMatchBuffer<T extends Row<unknown>> = {
-  messages: Array<Message<T>>
-  committed: boolean
+  committedMessages: Array<Message<T>>
+  pendingMessages: Array<Message<T>>
 }
 
 function exportElectricSyncMeta(
@@ -638,6 +638,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   commit,
   getCommitCursor,
   waitForCommitsAfter,
+  onLoadSubset,
   collectionId,
   encodeColumnName,
   signal,
@@ -654,6 +655,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   commit: (signal?: AbortSignal) => SyncAppliedReceipt
   getCommitCursor: () => number
   waitForCommitsAfter: (cursor: number) => Promise<void>
+  onLoadSubset?: () => void
   collectionId?: string
   /**
    * Optional function to encode column names (e.g., camelCase to snake_case).
@@ -687,6 +689,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   }
 
   const loadSubset = async (opts: LoadSubsetOptions) => {
+    onLoadSubset?.()
     const commitCursor = getCommitCursor()
     if (opts.signal?.aborted) return
 
@@ -853,8 +856,8 @@ class ElectricLifecycle<T extends Row<unknown>> {
     }
   >()
   private matchBuffer: ElectricMatchBuffer<T> = {
-    messages: [],
-    committed: false,
+    committedMessages: [],
+    pendingMessages: [],
   }
   private nextWaiterId = 0
   private epoch = 0
@@ -871,7 +874,7 @@ class ElectricLifecycle<T extends Row<unknown>> {
     if (this.active) this.retire()
     this.active = true
     this.epoch++
-    this.matchBuffer = { messages: [], committed: false }
+    this.matchBuffer = { committedMessages: [], pendingMessages: [] }
     return this.epoch
   }
 
@@ -895,7 +898,7 @@ class ElectricLifecycle<T extends Row<unknown>> {
       waiter.reject(new StreamAbortedError(this.collectionId))
     }
     this.pendingTxidWaits.clear()
-    this.matchBuffer = { messages: [], committed: false }
+    this.matchBuffer = { committedMessages: [], pendingMessages: [] }
     this.evidence.hydratedResumeState = undefined
   }
 
@@ -979,10 +982,12 @@ class ElectricLifecycle<T extends Row<unknown>> {
       `${this.collectionId ? `[${this.collectionId}] ` : ``}awaitMatch called with custom function`,
     )
 
-    for (const message of this.matchBuffer.messages) {
+    for (const message of this.matchBuffer.committedMessages) {
       if (!matchFn(message)) continue
-      if (this.matchBuffer.committed) return true
-      return this.registerMatch(matchFn, timeout, true)
+      return true
+    }
+    for (const message of this.matchBuffer.pendingMessages) {
+      if (matchFn(message)) return this.registerMatch(matchFn, timeout, true)
     }
     return this.registerMatch(matchFn, timeout, false)
   }
@@ -1009,16 +1014,9 @@ class ElectricLifecycle<T extends Row<unknown>> {
   }
 
   beginMatchGeneration(messages: ReadonlyArray<Message<T>>): void {
-    const startsNewGeneration = messages.some(
-      (message) =>
-        isChangeMessage(message) ||
-        isMoveOutMessage(message) ||
-        isMoveInMessage(message) ||
-        isMustRefetchMessage(message),
-    )
-    if (!startsNewGeneration) return
-    if (this.matchBuffer.committed) this.matchBuffer.messages = []
-    this.matchBuffer.committed = false
+    if (!messages.some(isMustRefetchMessage)) return
+    this.matchBuffer = { committedMessages: [], pendingMessages: [] }
+    for (const match of this.pendingMatches.values()) match.matched = false
   }
 
   observeMatchMessage(message: Message<T>): void {
@@ -1027,12 +1025,21 @@ class ElectricLifecycle<T extends Row<unknown>> {
       isMoveOutMessage(message) ||
       isMoveInMessage(message)
     ) {
-      this.matchBuffer.messages.push(message)
-      if (this.matchBuffer.messages.length > 1000) {
-        this.matchBuffer.messages.splice(
-          0,
-          this.matchBuffer.messages.length - 1000,
+      this.matchBuffer.pendingMessages.push(message)
+      let overflow =
+        this.matchBuffer.committedMessages.length +
+        this.matchBuffer.pendingMessages.length -
+        1000
+      if (overflow > 0) {
+        const committedOverflow = Math.min(
+          overflow,
+          this.matchBuffer.committedMessages.length,
         )
+        this.matchBuffer.committedMessages.splice(0, committedOverflow)
+        overflow -= committedOverflow
+        if (overflow > 0) {
+          this.matchBuffer.pendingMessages.splice(0, overflow)
+        }
       }
     }
 
@@ -1049,7 +1056,14 @@ class ElectricLifecycle<T extends Row<unknown>> {
   }
 
   commitMatches(): void {
-    this.matchBuffer.committed = true
+    this.matchBuffer.committedMessages.push(...this.matchBuffer.pendingMessages)
+    this.matchBuffer.pendingMessages = []
+    if (this.matchBuffer.committedMessages.length > 1000) {
+      this.matchBuffer.committedMessages.splice(
+        0,
+        this.matchBuffer.committedMessages.length - 1000,
+      )
+    }
     for (const [matchId, match] of this.pendingMatches) {
       if (!match.matched) continue
       clearTimeout(match.timeoutId)
@@ -1654,6 +1668,12 @@ function createElectricSync<T extends Row<unknown>>(
         return parseElectricResumeState(persistedResumeState)
       }
 
+      const persistedMetadata = metadata as
+        | ElectricSyncMetadataWithPersistedScan
+        | undefined
+      const scanPersisted = persistedMetadata?.row.scanPersisted
+      const whenHydrated = persistedMetadata?.row.whenHydrated
+
       const persistedResumeState = getNewestElectricResumeState(
         readPersistedResumeState(),
         lifecycle.resumeState,
@@ -1665,18 +1685,27 @@ function createElectricSync<T extends Row<unknown>>(
       const hasIncompatiblePersistedResume =
         persistedResumeState?.kind === `resume` &&
         persistedResumeState.shapeId !== shapeIdentity
+      const hasUnverifiablePersistedResume =
+        shapeOptions.offset === undefined &&
+        shapeOptions.handle === undefined &&
+        persistedResumeState?.kind === `resume` &&
+        scanPersisted !== undefined &&
+        whenHydrated === undefined
       const canUsePersistedResume =
         shapeOptions.offset === undefined &&
         shapeOptions.handle === undefined &&
         persistedResumeState?.kind === `resume` &&
-        !hasIncompatiblePersistedResume
+        !hasIncompatiblePersistedResume &&
+        !hasUnverifiablePersistedResume
       const hasExplicitResumeOffset =
         shapeOptions.offset !== undefined && shapeOptions.offset !== `-1`
+      const receivesCompleteRows = shapeOptions.params?.replica === `full`
       // Eager and progressive streams that start after the initial offset can
       // only apply partial updates when the local materialization is complete.
       const requiresCompleteResume =
         syncMode !== `on-demand` &&
-        (canUsePersistedResume || hasExplicitResumeOffset)
+        (canUsePersistedResume ||
+          (hasExplicitResumeOffset && !receivesCompleteRows))
 
       // Wrap markReady to wait for test hook in progressive mode
       let progressiveReadyGate: Promise<void> | null = null
@@ -1841,7 +1870,7 @@ function createElectricSync<T extends Row<unknown>>(
         }
       }
 
-      if (hasIncompatiblePersistedResume) {
+      if (hasIncompatiblePersistedResume || hasUnverifiablePersistedResume) {
         commitResetResumeMetadataImmediately()
       }
 
@@ -1913,6 +1942,11 @@ function createElectricSync<T extends Row<unknown>>(
         commit,
         getCommitCursor: () => commitSequence,
         waitForCommitsAfter,
+        onLoadSubset: () => {
+          for (const rowId of collection._state.syncedData.keys()) {
+            knownKeys.add(rowId)
+          }
+        },
         collectionId,
         // Pass the columnMapper's encode function to transform column names
         // (e.g., camelCase to snake_case) when compiling SQL for subset queries
@@ -1921,19 +1955,11 @@ function createElectricSync<T extends Row<unknown>>(
         signal: abortController.signal,
       })
 
-      const scanPersisted = (
-        metadata as ElectricSyncMetadataWithPersistedScan | undefined
-      )?.row.scanPersisted
-      const whenHydrated = (
-        metadata as ElectricSyncMetadataWithPersistedScan | undefined
-      )?.row.whenHydrated
       const resumeKeysPromise = !requiresCompleteResume
         ? undefined
         : whenHydrated
           ? whenHydrated().then(() => [] as Array<{ key: string | number }>)
-          : scanPersisted
-            ? scanPersisted({ metadataOnly: true })
-            : undefined
+          : undefined
       let areResumeKeysReady = !requiresCompleteResume || !resumeKeysPromise
       const pendingResumeBatches: Array<Array<Message<T>>> = []
       let unsubscribeStream: () => void = () => {}
@@ -2002,7 +2028,11 @@ function createElectricSync<T extends Row<unknown>>(
           if (isChangeMessage(message)) {
             const rowId = messageKeys.get(message)!
             const operation = message.headers.operation
-            if (operation === `update` && !knownKeys.has(rowId)) {
+            if (
+              operation === `update` &&
+              !receivesCompleteRows &&
+              !knownKeys.has(rowId)
+            ) {
               continue
             }
             if (operation === `delete`) {

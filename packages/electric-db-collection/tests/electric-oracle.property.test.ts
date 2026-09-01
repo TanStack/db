@@ -2341,7 +2341,7 @@ describe(`Electric adapter laws`, () => {
     }
   })
 
-  it(`does not let a committed message satisfy awaitMatch after a newer batch`, async () => {
+  it(`keeps committed match evidence across newer writer batches`, async () => {
     const metadata = createMetadata(new Map())
     const trace = createOracleCollection(
       `await-match-batch-generation`,
@@ -2357,7 +2357,7 @@ describe(`Electric adapter laws`, () => {
         (message) => `value` in message && message.value.name === `old batch`,
         20,
       ),
-    ).rejects.toThrow(/Timeout waiting for custom match function/)
+    ).resolves.toBe(true)
     await trace.collection.cleanup()
   })
 
@@ -2387,6 +2387,26 @@ describe(`Electric adapter laws`, () => {
         20,
       ),
     ).resolves.toBe(true)
+    await trace.collection.cleanup()
+  })
+
+  it(`clears committed match evidence when the stream must refetch`, async () => {
+    const trace = createOracleCollection(
+      `await-match-reset-generation`,
+      `eager`,
+      createMetadata(new Map()).api,
+    )
+
+    trace.subscriber([change(`insert`, 1, `old generation`), upToDate])
+    trace.subscriber([mustRefetch, upToDate])
+
+    await expect(
+      trace.collection.utils.awaitMatch(
+        (message) =>
+          `value` in message && message.value.name === `old generation`,
+        20,
+      ),
+    ).rejects.toThrow(/Timeout waiting for custom match function/)
     await trace.collection.cleanup()
   })
 
@@ -2873,6 +2893,54 @@ describe(`Electric adapter laws`, () => {
     await collection.cleanup()
   })
 
+  it(`applies on-demand catch-up updates to hydrated persisted rows`, async () => {
+    let subscriber!: (messages: Array<Message<OracleRow>>) => void
+    mockSubscribe.mockImplementationOnce((callback) => {
+      subscriber = callback
+      return vi.fn()
+    })
+    const collectionMetadata = new Map(resumeState())
+    const persistedRows = new Map<string | number, OracleRow>([
+      [1, { id: 1, name: `persisted`, stable: `stable-1` }],
+    ])
+    const collection = createCollection(
+      persistedCollectionOptions<
+        OracleRow,
+        string | number,
+        never,
+        ElectricCollectionUtils<OracleRow>
+      >({
+        ...electricCollectionOptions<OracleRow>({
+          id: `on-demand-persisted-catch-up`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+          },
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          startSync: true,
+        }),
+        persistence: {
+          adapter: createPersistedAdapter(collectionMetadata, persistedRows),
+        },
+      }),
+    )
+
+    collection.startSyncImmediate()
+    await vi.waitFor(() => expect(subscriber).toBeTypeOf(`function`))
+    await collection._sync.loadSubset({})
+    subscriber([change(`update`, 1, `caught up`), upToDate])
+    await vi.waitFor(() => expect(collection.status).toBe(`ready`))
+
+    expect(collection.get(1)).toEqual(
+      expect.objectContaining({ name: `caught up`, stable: `stable-1` }),
+    )
+    expect(collectionMetadata.get(`electric:resume`)).toEqual(
+      expect.objectContaining({ kind: `resume`, offset: `20_0` }),
+    )
+    await collection.cleanup()
+  })
+
   it.each([
     {
       name: `malformed`,
@@ -3101,6 +3169,70 @@ describe(`Electric adapter laws`, () => {
     expect(trace.collection.has(1)).toBe(false)
     expect(metadata.state.get(`electric:resume`)).toEqual(
       expect.objectContaining({ kind: `reset` }),
+    )
+    await trace.collection.cleanup()
+  })
+
+  it(`accepts complete replica updates from an explicit eager resume`, async () => {
+    let subscriber!: (messages: Array<Message<OracleRow>>) => void
+    mockSubscribe.mockImplementationOnce((callback) => {
+      subscriber = callback
+      return vi.fn()
+    })
+    const collection = createCollection(
+      electricCollectionOptions<OracleRow>({
+        id: `explicit-full-replica-resume`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table`, replica: `full` },
+          offset: `10_0` as Offset,
+          handle: `explicit-handle`,
+        },
+        syncMode: `eager`,
+        getKey: (row) => row.id,
+        startSync: true,
+      }),
+    )
+
+    subscriber([
+      {
+        key: `1`,
+        value: { id: 1, name: `complete update`, stable: `stable-1` },
+        headers: { operation: `update` },
+      },
+      upToDate,
+    ])
+
+    expect(collection.status).toBe(`ready`)
+    expect(collection.get(1)).toEqual(
+      expect.objectContaining({
+        name: `complete update`,
+        stable: `stable-1`,
+      }),
+    )
+    await collection.cleanup()
+  })
+
+  it(`restarts a persisted resume when hydration completion is unavailable`, async () => {
+    const metadata = createMetadata(resumeState())
+    Object.assign(metadata.api.row, {
+      scanPersisted: () => Promise.resolve([{ key: 1 }]),
+    })
+    const trace = createOracleCollection(
+      `unverifiable-persisted-resume`,
+      `eager`,
+      metadata.api,
+    )
+
+    expect(vi.mocked(ShapeStream).mock.calls.at(-1)?.[0]).toMatchObject({
+      offset: undefined,
+      handle: undefined,
+    })
+    trace.subscriber([change(`insert`, 1, `full snapshot`), upToDate])
+
+    expect(trace.collection.status).toBe(`ready`)
+    expect(trace.collection.get(1)).toEqual(
+      expect.objectContaining({ stable: `stable-1` }),
     )
     await trace.collection.cleanup()
   })

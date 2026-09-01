@@ -930,18 +930,26 @@ class PersistedCollectionRuntime<
       if (lifecycleGeneration !== this.lifecycleGeneration) return
       if (this.syncMode !== `on-demand`) return
 
-      const appliedCursor = this.appliedReceiptSequence
-      await this.applyMutex.run(async () => {
-        if (lifecycleGeneration !== this.lifecycleGeneration) return
-        await this.hydrateSubsetUnsafe(
-          {},
-          { requestRemoteEnsure: false, lifecycleGeneration },
-        )
-      })
-      if (lifecycleGeneration !== this.lifecycleGeneration) return
-      await this.waitForAppliedReceiptsAfter(appliedCursor)
+      await this.hydrateBaseline(lifecycleGeneration)
     })()
     return this.resumeBaselinePromise
+  }
+
+  private async hydrateBaseline(lifecycleGeneration: number): Promise<void> {
+    if (lifecycleGeneration !== this.lifecycleGeneration) return
+
+    const baseline = {}
+    this.activeSubsets.set(this.getSubsetKey(baseline), baseline)
+    const appliedCursor = this.appliedReceiptSequence
+    await this.applyMutex.run(async () => {
+      if (lifecycleGeneration !== this.lifecycleGeneration) return
+      await this.hydrateSubsetUnsafe(baseline, {
+        requestRemoteEnsure: false,
+        lifecycleGeneration,
+      })
+    })
+    if (lifecycleGeneration !== this.lifecycleGeneration) return
+    await this.waitForAppliedReceiptsAfter(appliedCursor)
   }
 
   async ensureStartupMetadataLoaded(): Promise<void> {
@@ -971,17 +979,7 @@ class PersistedCollectionRuntime<
     if (lifecycleGeneration !== this.lifecycleGeneration) return
 
     if (this.syncMode !== `on-demand`) {
-      this.activeSubsets.set(this.getSubsetKey({}), {})
-      const appliedCursor = this.appliedReceiptSequence
-      await this.applyMutex.run(async () => {
-        if (lifecycleGeneration !== this.lifecycleGeneration) return
-        await this.hydrateSubsetUnsafe(
-          {},
-          { requestRemoteEnsure: false, lifecycleGeneration },
-        )
-      })
-      if (lifecycleGeneration !== this.lifecycleGeneration) return
-      await this.waitForAppliedReceiptsAfter(appliedCursor)
+      await this.hydrateBaseline(lifecycleGeneration)
     }
   }
 
@@ -2342,6 +2340,7 @@ function createWrappedSyncConfig<
       const getOpenTransaction = () =>
         transactionStack[transactionStack.length - 1]
       let fullStartPromise: Promise<void> | null = null
+      const startupState = { cleanedUp: false }
       const cancelledLoadKeys = new Set<string>()
       const loadSubscriptionIds = new WeakMap<object, string>()
       let nextLoadSubscriptionId = 0
@@ -2374,11 +2373,14 @@ function createWrappedSyncConfig<
       const wrappedParams = {
         ...params,
         markReady: () => {
+          if (startupState.cleanedUp) return
           void (fullStartPromise ?? runtime.ensureStarted())
             .then(() => {
+              if (startupState.cleanedUp) return
               params.markReady()
             })
             .catch((error) => {
+              if (startupState.cleanedUp) return
               console.warn(
                 `Failed persisted sync startup before markReady:`,
                 error,
@@ -2387,6 +2389,7 @@ function createWrappedSyncConfig<
             })
         },
         begin: (options?: { immediate?: boolean }) => {
+          if (startupState.cleanedUp) return
           const transaction: OpenSyncTransaction<T, TKey> = {
             operations: [],
             rowMetadataWrites: new Map(),
@@ -2403,6 +2406,7 @@ function createWrappedSyncConfig<
           }
         },
         write: (message: ChangeMessageOrDeleteKeyMessage<T, TKey>) => {
+          if (startupState.cleanedUp) return
           const normalization = runtime.normalizeSyncWriteMessage(message)
           const openTransaction = getOpenTransaction()
 
@@ -2448,8 +2452,12 @@ function createWrappedSyncConfig<
         metadata: params.metadata
           ? {
               row: {
-                whenHydrated: () => runtime.ensureResumeBaselineHydrated(),
+                whenHydrated: () =>
+                  startupState.cleanedUp
+                    ? Promise.resolve()
+                    : runtime.ensureResumeBaselineHydrated(),
                 get: (key: TKey) => {
+                  if (startupState.cleanedUp) return undefined
                   const openTransaction = getOpenTransaction()
                   const pendingWrite =
                     openTransaction?.rowMetadataWrites.get(key)
@@ -2464,8 +2472,11 @@ function createWrappedSyncConfig<
                   return params.metadata!.row.get(key)
                 },
                 scanPersisted: (options?: PersistedRowScanOptions) =>
-                  runtime.scanPersistedRows(options),
+                  startupState.cleanedUp
+                    ? Promise.resolve([])
+                    : runtime.scanPersistedRows(options),
                 set: (key: TKey, value: unknown) => {
+                  if (startupState.cleanedUp) return
                   const openTransaction = getOpenTransaction()
                   if (!openTransaction) {
                     throw new InvalidPersistedCollectionConfigError(
@@ -2481,6 +2492,7 @@ function createWrappedSyncConfig<
                   }
                 },
                 delete: (key: TKey) => {
+                  if (startupState.cleanedUp) return
                   const openTransaction = getOpenTransaction()
                   if (!openTransaction) {
                     throw new InvalidPersistedCollectionConfigError(
@@ -2497,6 +2509,7 @@ function createWrappedSyncConfig<
               },
               collection: {
                 get: (key: string) => {
+                  if (startupState.cleanedUp) return undefined
                   const openTransaction = getOpenTransaction()
                   const pendingWrite =
                     openTransaction?.collectionMetadataWrites.get(key)
@@ -2508,6 +2521,7 @@ function createWrappedSyncConfig<
                   return params.metadata!.collection.get(key)
                 },
                 set: (key: string, value: unknown) => {
+                  if (startupState.cleanedUp) return
                   const openTransaction = getOpenTransaction()
                   if (!openTransaction) {
                     throw new InvalidPersistedCollectionConfigError(
@@ -2523,6 +2537,7 @@ function createWrappedSyncConfig<
                   }
                 },
                 delete: (key: string) => {
+                  if (startupState.cleanedUp) return
                   const openTransaction = getOpenTransaction()
                   if (!openTransaction) {
                     throw new InvalidPersistedCollectionConfigError(
@@ -2537,6 +2552,7 @@ function createWrappedSyncConfig<
                   }
                 },
                 list: (prefix?: string) => {
+                  if (startupState.cleanedUp) return []
                   const merged = new Map(
                     params
                       .metadata!.collection.list()
@@ -2567,6 +2583,7 @@ function createWrappedSyncConfig<
             }
           : undefined,
         truncate: () => {
+          if (startupState.cleanedUp) return
           const openTransaction = getOpenTransaction()
           if (!openTransaction) {
             params.truncate()
@@ -2585,6 +2602,7 @@ function createWrappedSyncConfig<
           }
         },
         commit: (signal?: AbortSignal) => {
+          if (startupState.cleanedUp) return true
           const openTransaction = transactionStack.pop()
           if (!openTransaction) {
             return params.commit(signal)
@@ -2639,7 +2657,6 @@ function createWrappedSyncConfig<
       }
 
       let sourceResult: SyncConfigRes = {}
-      const startupState = { cleanedUp: false }
       fullStartPromise = runtime.ensureStarted()
       const sourceResultPromise = (async () => {
         await runtime.ensureStartupMetadataLoaded()
@@ -2672,6 +2689,7 @@ function createWrappedSyncConfig<
           await runtime.loadSubset(options, resolvedSourceResult.loadSubset)
         },
         unloadSubset: (options: LoadSubsetOptions) => {
+          if (startupState.cleanedUp) return
           cancelledLoadKeys.add(getLoadKey(options))
           runtime.unloadSubset(options, sourceResult.unloadSubset)
         },
