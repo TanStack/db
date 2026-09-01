@@ -3122,4 +3122,30 @@ describe(`Electric adapter laws`, () => {
     )
     await trace.collection.cleanup()
   })
+
+  it(`records match and txid evidence for an ignored on-demand update`, async () => {
+    const trace = createOracleCollection(
+      `on-demand-ignored-update-evidence`,
+      `on-demand`,
+      createMetadata(resumeState()).api,
+    )
+    trace.subscriber([upToDate])
+
+    const pendingMatch = trace.collection.utils.awaitMatch(
+      (message) => `value` in message && message.value.id === 808,
+      100,
+    )
+    const pendingTxid = trace.collection.utils.awaitTxId(808, 100)
+    const update = change(`update`, 808, `ignored`) as ChangeMessage<OracleRow>
+    update.headers.txids = [808]
+
+    trace.subscriber([update, upToDate])
+
+    await Promise.all([
+      expect(pendingMatch).resolves.toBe(true),
+      expect(pendingTxid).resolves.toBe(true),
+    ])
+    expect(trace.collection.has(808)).toBe(false)
+    await trace.collection.cleanup()
+  })
 })

@@ -1986,19 +1986,6 @@ function createElectricSync<T extends Row<unknown>>(
         lifecycle.beginMatchGeneration(messages)
 
         for (const message of messages) {
-          if (isChangeMessage(message)) {
-            const rowId = messageKeys.get(message)!
-            const operation = message.headers.operation
-            if (operation === `update` && !knownKeys.has(rowId)) {
-              continue
-            }
-            if (operation === `delete`) {
-              knownKeys.delete(rowId)
-            } else {
-              knownKeys.add(rowId)
-            }
-          }
-
           lifecycle.observeMatchMessage(message)
 
           // Check for txids in the message and add them to our store
@@ -2010,6 +1997,19 @@ function createElectricSync<T extends Row<unknown>>(
             (!isBufferingInitialSync() || transactionStarted)
           ) {
             message.headers.txids?.forEach((txid) => newTxids.add(txid))
+          }
+
+          if (isChangeMessage(message)) {
+            const rowId = messageKeys.get(message)!
+            const operation = message.headers.operation
+            if (operation === `update` && !knownKeys.has(rowId)) {
+              continue
+            }
+            if (operation === `delete`) {
+              knownKeys.delete(rowId)
+            } else {
+              knownKeys.add(rowId)
+            }
           }
 
           if (isChangeMessage(message)) {
