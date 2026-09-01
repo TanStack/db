@@ -1,5 +1,6 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
+import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { createOptimisticAction } from '../../src/optimistic-action.js'
@@ -13,6 +14,7 @@ import { oraclePropertyOptions } from '../oracle-config.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
+import type { SyncConfig } from '../../src/types.js'
 
 type ParentRow = {
   id: number
@@ -41,6 +43,7 @@ type Q2Shape = `passThrough` | `where` | `orderBy` | `select`
 type Q1Shape = `direct` | `joined`
 type PendingPublicationOperation = `insert` | `update` | `delete`
 type PendingPublicationDepth = `direct` | `layered`
+type SourceConfirmationOperation = `insert` | `update` | `delete`
 
 type PendingPublicationRow = {
   id: number
@@ -744,6 +747,141 @@ describe(`layered-query publication oracle`, () => {
 })
 
 describe(`source publication across pending derived mutations`, () => {
+  async function expectSourceConfirmationPreservesGraphIntegrity(
+    operation: SourceConfirmationOperation,
+    depth: PendingPublicationDepth,
+  ) {
+    type Row = { id: number; value: number }
+    let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
+
+    const commitSync = async () => {
+      const receipt = sync.commit()
+      if (receipt !== true) await receipt
+    }
+
+    const source = createCollection<Row, number>({
+      id: `same-key-source-confirmation-${nextCollectionId++}`,
+      getKey: (row) => row.id,
+      sync: {
+        sync: (config) => {
+          sync = config
+          config.markReady()
+        },
+      },
+      onInsert: async ({ transaction }) => {
+        sync.begin()
+        sync.write({
+          type: `insert`,
+          value: transaction.mutations[0].modified,
+        })
+        await commitSync()
+      },
+      onUpdate: async ({ transaction }) => {
+        sync.begin()
+        sync.write({
+          type: `update`,
+          value: transaction.mutations[0].modified,
+        })
+        await commitSync()
+      },
+      onDelete: async ({ transaction }) => {
+        sync.begin()
+        sync.write({
+          type: `delete`,
+          key: transaction.mutations[0].key,
+        })
+        await commitSync()
+      },
+    })
+    await source.preload()
+
+    if (operation !== `insert`) {
+      sync.begin()
+      sync.write({ type: `insert`, value: { id: 1, value: 0 } })
+      await commitSync()
+    }
+
+    const q1 = createLiveQueryCollection({
+      id: `same-key-source-confirmation-query-${nextCollectionId++}`,
+      query: (q) =>
+        q.from({ row: source }).select(({ row }) => ({
+          id: row.id,
+          value: row.value,
+        })),
+      getKey: (row) => row.id,
+    })
+    const q2 =
+      depth === `layered`
+        ? createLiveQueryCollection({
+            id: `same-key-source-confirmation-layer-${nextCollectionId++}`,
+            query: (q) =>
+              q.from({ row: q1 }).select(({ row }) => ({
+                id: row.id,
+                value: row.value,
+              })),
+            getKey: (row) => row.id,
+          })
+        : undefined
+    const query = q2 ?? q1
+    const subscription = query.subscribeChanges(() => {})
+
+    try {
+      await query.preload()
+
+      const firstTransaction = (() => {
+        switch (operation) {
+          case `insert`:
+            return source.insert({ id: 1, value: 1 })
+          case `update`:
+            return source.update(1, (draft) => {
+              draft.value = 1
+            })
+          case `delete`:
+            return source.delete(1)
+        }
+      })()
+      await firstTransaction.isPersisted.promise
+
+      if (operation === `delete`) {
+        expect(source.get(1)).toBeUndefined()
+        expect(query.get(1)).toBeUndefined()
+      } else {
+        expect(source.get(1)?.value).toBe(1)
+        expect(source.get(1)?.$synced).toBe(true)
+        expect(query.get(1)?.value).toBe(1)
+      }
+
+      const probeTransaction =
+        operation === `delete`
+          ? source.insert({ id: 1, value: 2 })
+          : source.update(1, (draft) => {
+              draft.value = 2
+            })
+      await probeTransaction.isPersisted.promise
+
+      expect(source.get(1)?.value).toBe(2)
+      expect(source.get(1)?.$synced).toBe(true)
+      expect(query.get(1)?.value).toBe(2)
+    } finally {
+      subscription.unsubscribe()
+      if (q2) await q2.cleanup()
+      await q1.cleanup()
+      await source.cleanup()
+    }
+  }
+
+  for (const depth of pendingPublicationDepths) {
+    for (const operation of [
+      `insert`,
+      `update`,
+      `delete`,
+    ] as const satisfies ReadonlyArray<SourceConfirmationOperation>) {
+      it(`preserves ${depth} graph integrity after sync confirms a same-key optimistic ${operation}`, async () => {
+        await expectSourceConfirmationPreservesGraphIntegrity(operation, depth)
+      })
+    }
+  }
+
   for (const depth of pendingPublicationDepths) {
     for (const optimisticOperation of pendingPublicationOperations) {
       for (const sourceOperation of pendingPublicationOperations) {

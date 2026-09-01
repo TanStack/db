@@ -527,6 +527,21 @@ export class CollectionStateManager<
           if (!this.isThisCollection(mutation.collection)) {
             continue
           }
+
+          // Direct mutation handlers may publish their authoritative echo
+          // before the transaction completes. That sync commit consumes the
+          // pending-origin marker. Do not recreate optimistic state after the
+          // same mutation has already been confirmed.
+          const wasConfirmedDuringDirectMutation =
+            isDirectTransaction && !this.pendingLocalOrigins.has(mutation.key)
+          if (wasConfirmedDuringDirectMutation) {
+            this.pendingOptimisticUpserts.delete(mutation.key)
+            this.pendingOptimisticDeletes.delete(mutation.key)
+            this.pendingOptimisticDirectUpserts.delete(mutation.key)
+            this.pendingOptimisticDirectDeletes.delete(mutation.key)
+            continue
+          }
+
           this.pendingLocalOrigins.add(mutation.key)
           if (!mutation.optimistic) {
             continue
