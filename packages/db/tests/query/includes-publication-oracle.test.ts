@@ -860,7 +860,26 @@ describe(`source publication across pending derived mutations`, () => {
           })
         : undefined
     const query = q2 ?? q1
-    const subscription = query.subscribeChanges(() => {})
+    const sourceEvents: Array<{ type: string; key: number; value?: number }> = []
+    const queryEvents: Array<{ type: string; key: number; value?: number }> = []
+    const sourceSubscription = source.subscribeChanges((changes) => {
+      sourceEvents.push(
+        ...changes.map((change) => ({
+          type: change.type,
+          key: change.key,
+          value: change.value.value,
+        })),
+      )
+    })
+    const subscription = query.subscribeChanges((changes) => {
+      queryEvents.push(
+        ...changes.map((change) => ({
+          type: change.type,
+          key: change.key,
+          value: change.value.value,
+        })),
+      )
+    })
 
     try {
       await query.preload()
@@ -877,6 +896,8 @@ describe(`source publication across pending derived mutations`, () => {
             return source.delete(1)
         }
       })()
+      sourceEvents.length = 0
+      queryEvents.length = 0
 
       if (interleaving === `replacementWhilePending`) {
         sync.begin()
@@ -892,6 +913,15 @@ describe(`source publication across pending derived mutations`, () => {
           expect(source.get(1)?.$synced).toBe(false)
           expect(query.get(1)?.value).toBe(1)
         }
+        expect(sourceEvents).toEqual(
+          operation === `delete`
+            ? []
+            : [
+                { type: `delete`, key: 1, value: 1 },
+                { type: `insert`, key: 1, value: 1 },
+              ],
+        )
+        expect(queryEvents).toEqual([])
 
         handlerCanFinish.resolve()
       }
@@ -973,6 +1003,7 @@ describe(`source publication across pending derived mutations`, () => {
       expect(query.get(1)?.value).toBe(2)
     } finally {
       subscription.unsubscribe()
+      sourceSubscription.unsubscribe()
       if (q2) await q2.cleanup()
       await q1.cleanup()
       await source.cleanup()
