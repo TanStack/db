@@ -860,8 +860,16 @@ describe(`source publication across pending derived mutations`, () => {
           })
         : undefined
     const query = q2 ?? q1
-    const sourceEvents: Array<{ type: string; key: number; value?: number }> = []
-    const queryEvents: Array<{ type: string; key: number; value?: number }> = []
+    const sourceEvents: Array<{
+      type: string
+      key: string | number
+      value?: number
+    }> = []
+    const queryEvents: Array<{
+      type: string
+      key: string | number
+      value?: number
+    }> = []
     const sourceSubscription = source.subscribeChanges((changes) => {
       sourceEvents.push(
         ...changes.map((change) => ({

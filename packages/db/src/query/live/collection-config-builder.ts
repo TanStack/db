@@ -28,6 +28,7 @@ import type { LiveQueryInternalUtils } from './internal.js'
 import type { WindowOptions } from '../compiler/index.js'
 import type { SchedulerContextId } from '../../scheduler.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
+import type { CollectionPublicationStateSnapshot } from '../../collection/state.js'
 import type { RootStreamBuilder } from '@tanstack/db-ivm'
 import type { OrderByOptimizationInfo } from '../compiler/order-by.js'
 import type { Collection } from '../../collection/index.js'
@@ -1072,6 +1073,9 @@ export class CollectionConfigBuilder<
       let rootPublication:
         | ReturnType<Collection[`_deferPublication`]>
         | undefined
+      let rootStateSnapshot:
+        | CollectionPublicationStateSnapshot<TResult, string | number>
+        | undefined
       try {
         facadePublication = bucketFacades.flush()
         rootPublication = hasParentChanges
@@ -1093,6 +1097,9 @@ export class CollectionConfigBuilder<
         )
 
         if (hasParentChanges) {
+          rootStateSnapshot = config.collection._snapshotPublicationState(
+            changesToApply.keys() as Iterable<string | number>,
+          )
           // The graph has already reached quiescence, so this is one complete
           // derived publication. Apply it beneath any pending optimistic
           // overlay instead of parking source progress behind that mutation.
@@ -1106,6 +1113,9 @@ export class CollectionConfigBuilder<
       } catch (error) {
         pendingChanges = new Map()
         rootPublication?.discard()
+        if (rootStateSnapshot) {
+          config.collection._restorePublicationState(rootStateSnapshot)
+        }
         facadePublication?.rollback()
         throw error
       }

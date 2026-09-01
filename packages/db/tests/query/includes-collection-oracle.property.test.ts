@@ -1,6 +1,7 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
 import { createDeferred } from '../../src/deferred.js'
+import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { createLiveQueryObserver } from '../../src/live-query-observer.js'
 import { createOptimisticAction } from '../../src/optimistic-action.js'
 import { LIVE_QUERY_INTERNAL } from '../../src/query/live/internal.js'
@@ -46,6 +47,15 @@ type LayoutSwapScenario = {
 type FacadeCandidateScanScenario = {
   candidatePosition: `first` | `last`
   finalLayout: `moved` | `restored`
+}
+
+class ThrowingUpdateIndex extends BasicIndex<number> {
+  throwAfterUpdate = false
+
+  override update(key: number, oldItem: unknown, newItem: unknown): void {
+    super.update(key, oldItem, newItem)
+    if (this.throwAfterUpdate) throw new Error(`root index failed`)
+  }
 }
 
 const exhaustiveLayoutSwapScenarios: Array<LayoutSwapScenario> = Array.from(
@@ -1095,6 +1105,9 @@ describe(`Collection-valued includes oracle`, () => {
 
       await live.preload()
       const facade = live.get(1)!.children
+      const rootIndex = live.createIndex((row) => row.value, {
+        indexType: ThrowingUpdateIndex,
+      }) as ThrowingUpdateIndex
       const rootPublications: Array<unknown> = []
       const childPublications: Array<unknown> = []
       const rootCallbackFacadeSnapshots: Array<{
@@ -1122,13 +1135,11 @@ describe(`Collection-valued includes oracle`, () => {
       childObserver.subscribe(() => observerNotifications++)
       observerNotifications = 0
       const observerBeforeFailure = childObserver.getSnapshot()
+      const rootStateRevisionBeforeFailure = live._stateRevision
+      const rootLayoutRevisionBeforeFailure = live._layoutRevision
       const childStateRevisionBeforeFailure = facade._stateRevision
       const childLayoutRevisionBeforeFailure = facade._layoutRevision
-      const originalGetKey = live.config.getKey
-      live.config.getKey = (row) => {
-        if (row.value === 2) throw new Error(`root key failed`)
-        return originalGetKey(row)
-      }
+      rootIndex.throwAfterUpdate = true
 
       try {
         expect(() =>
@@ -1146,8 +1157,10 @@ describe(`Collection-valued includes oracle`, () => {
               value: { ...initialSibling, value: 0 },
             },
           ]),
-        ).toThrow(`root key failed`)
+        ).toThrow(`root index failed`)
         expect(live.get(1)!.value).toBe(1)
+        expect([...rootIndex.equalityLookup(1)]).toEqual([1])
+        expect([...rootIndex.equalityLookup(2)]).toEqual([])
         expect(facade.toArray.map(({ id, value }) => ({ id, value }))).toEqual([
           { id: 10, value: 1 },
           { id: 20, value: 2 },
@@ -1155,12 +1168,14 @@ describe(`Collection-valued includes oracle`, () => {
         expect(rootPublications).toEqual([])
         expect(childPublications).toEqual([])
         expect(rootCallbackFacadeSnapshots).toEqual([])
+        expect(live._stateRevision).toBe(rootStateRevisionBeforeFailure)
+        expect(live._layoutRevision).toBe(rootLayoutRevisionBeforeFailure)
         expect(facade._stateRevision).toBe(childStateRevisionBeforeFailure)
         expect(facade._layoutRevision).toBe(childLayoutRevisionBeforeFailure)
         expect(childObserver.getSnapshot()).toBe(observerBeforeFailure)
         expect(observerNotifications).toBe(0)
 
-        live.config.getKey = originalGetKey
+        rootIndex.throwAfterUpdate = false
         nodes.writeBatch([
           {
             type: `update`,
@@ -1176,6 +1191,8 @@ describe(`Collection-valued includes oracle`, () => {
           },
         ])
         expect(live.get(1)!.value).toBe(3)
+        expect([...rootIndex.equalityLookup(1)]).toEqual([])
+        expect([...rootIndex.equalityLookup(3)]).toEqual([1])
         expect(facade.toArray.map(({ id, value }) => ({ id, value }))).toEqual([
           { id: 20, value: 3 },
           { id: 10, value: 4 },
@@ -1199,7 +1216,7 @@ describe(`Collection-valued includes oracle`, () => {
         expect(childObserver.getSnapshot()).not.toBe(observerBeforeFailure)
         expect(observerNotifications).toBe(1)
       } finally {
-        live.config.getKey = originalGetKey
+        rootIndex.throwAfterUpdate = false
         childObserver.dispose()
         rootSubscription.unsubscribe()
         childSubscription.unsubscribe()

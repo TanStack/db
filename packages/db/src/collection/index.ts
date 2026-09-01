@@ -14,6 +14,7 @@ import { CollectionIndexesManager } from './indexes'
 import { CollectionMutationsManager } from './mutations'
 import { CollectionEventsManager } from './events.js'
 import type { PublicationDeferral } from './changes'
+import type { CollectionPublicationStateSnapshot } from './state'
 import type { CollectionSubscription } from './subscription'
 import type {
   AllCollectionEvents,
@@ -452,6 +453,24 @@ export class CollectionImpl<
   /** Defer subscriber events until a coherent multi-Collection commit ends. */
   public _deferPublication(): PublicationDeferral {
     return this._changes.deferPublication()
+  }
+
+  /** Capture mutable state before a coherent graph publication is installed. */
+  public _snapshotPublicationState(
+    keys: Iterable<TKey>,
+  ): CollectionPublicationStateSnapshot<
+    TOutput,
+    TKey
+  > {
+    return this._state.snapshotPublicationState(keys)
+  }
+
+  /** Restore a failed coherent graph publication and rebuild its indexes. */
+  public _restorePublicationState(
+    snapshot: CollectionPublicationStateSnapshot<TOutput, TKey>,
+  ): void {
+    this._state.restorePublicationState(snapshot)
+    this._indexes.rebuildIndexes()
   }
 
   /**

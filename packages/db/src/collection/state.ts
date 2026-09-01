@@ -28,6 +28,33 @@ import type { CollectionIndexesManager } from './indexes'
 import type { CollectionEventsManager } from './events'
 import type { Deferred } from '../deferred'
 
+function replaceMap<K, V>(
+  target: { clear: () => void; set: (key: K, value: V) => unknown },
+  entries: Iterable<readonly [K, V]>,
+): void {
+  target.clear()
+  for (const [key, value] of entries) target.set(key, value)
+}
+
+function replaceSet<T>(target: Set<T>, values: Iterable<T>): void {
+  target.clear()
+  for (const value of values) target.add(value)
+}
+
+function restoreMapEntry<K, V>(
+  target: { set: (key: K, value: V) => unknown; delete: (key: K) => unknown },
+  key: K,
+  entry: { present: boolean; value: V | undefined },
+): void {
+  if (entry.present) target.set(key, entry.value as V)
+  else target.delete(key)
+}
+
+function restoreSetEntry<T>(target: Set<T>, value: T, present: boolean): void {
+  if (present) target.add(value)
+  else target.delete(value)
+}
+
 interface PendingSyncedTransaction<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -55,6 +82,39 @@ interface PendingSyncedTransaction<
    * writeUpdate, writeDelete, writeUpsert) which need synchronous updates to syncedData.
    */
   immediate?: boolean
+}
+
+export type CollectionPublicationStateSnapshot<
+  TOutput extends object,
+  TKey extends string | number,
+> = {
+  pendingSyncedTransactions: Array<PendingSyncedTransaction<TOutput, TKey>>
+  applicationStarted: Map<PendingSyncedTransaction<TOutput, TKey>, boolean>
+  keys: Map<
+    TKey,
+    {
+      syncedData: { present: boolean; value: TOutput | undefined }
+      syncedMetadata: { present: boolean; value: unknown }
+      rowOrigin: { present: boolean; value: VirtualOrigin | undefined }
+      hydrationSeed: boolean
+      hydrated: boolean
+      synced: boolean
+    }
+  >
+  syncedCollectionMetadata: Array<[string, unknown]>
+  optimisticUpserts: Map<TKey, TOutput>
+  optimisticDeletes: Set<TKey>
+  pendingOptimisticUpserts: Map<TKey, TOutput>
+  pendingOptimisticDeletes: Set<TKey>
+  pendingOptimisticDirectUpserts: Set<TKey>
+  pendingOptimisticDirectDeletes: Set<TKey>
+  pendingLocalChanges: Set<TKey>
+  pendingLocalOrigins: Set<TKey>
+  size: number
+  preSyncVisibleState: Map<TKey, TOutput>
+  recentlySyncedKeys: Set<TKey>
+  hasReceivedFirstCommit: boolean
+  isCommittingSyncTransactions: boolean
 }
 
 type PendingMetadataWrite = { type: `set`; value: unknown } | { type: `delete` }
@@ -169,6 +229,122 @@ export class CollectionStateManager<
     this.changes = deps.changes
     this.indexes = deps.indexes
     this._events = deps.events
+  }
+
+  public snapshotPublicationState(
+    keys: Iterable<TKey>,
+  ): CollectionPublicationStateSnapshot<
+    TOutput,
+    TKey
+  > {
+    const affectedKeys = new Set(keys)
+    for (const transaction of this.pendingSyncedTransactions) {
+      for (const operation of transaction.operations) {
+        affectedKeys.add(operation.key as TKey)
+      }
+      for (const key of transaction.rowMetadataWrites.keys()) {
+        affectedKeys.add(key)
+      }
+    }
+
+    return {
+      pendingSyncedTransactions: [...this.pendingSyncedTransactions],
+      applicationStarted: new Map(
+        this.pendingSyncedTransactions.map((transaction) => [
+          transaction,
+          transaction.applicationStarted,
+        ]),
+      ),
+      keys: new Map(
+        [...affectedKeys].map((key) => [
+          key,
+          {
+            syncedData: {
+              present: this.syncedData.has(key),
+              value: this.syncedData.get(key),
+            },
+            syncedMetadata: {
+              present: this.syncedMetadata.has(key),
+              value: this.syncedMetadata.get(key),
+            },
+            rowOrigin: {
+              present: this.rowOrigins.has(key),
+              value: this.rowOrigins.get(key),
+            },
+            hydrationSeed: this.hydrationSeedKeys.has(key),
+            hydrated: this.hydratedKeys.has(key),
+            synced: this.syncedKeys.has(key),
+          },
+        ]),
+      ),
+      syncedCollectionMetadata: [
+        ...this.syncedCollectionMetadata.entries(),
+      ],
+      optimisticUpserts: new Map(this.optimisticUpserts),
+      optimisticDeletes: new Set(this.optimisticDeletes),
+      pendingOptimisticUpserts: new Map(this.pendingOptimisticUpserts),
+      pendingOptimisticDeletes: new Set(this.pendingOptimisticDeletes),
+      pendingOptimisticDirectUpserts: new Set(
+        this.pendingOptimisticDirectUpserts,
+      ),
+      pendingOptimisticDirectDeletes: new Set(
+        this.pendingOptimisticDirectDeletes,
+      ),
+      pendingLocalChanges: new Set(this.pendingLocalChanges),
+      pendingLocalOrigins: new Set(this.pendingLocalOrigins),
+      size: this.size,
+      preSyncVisibleState: new Map(this.preSyncVisibleState),
+      recentlySyncedKeys: new Set(this.recentlySyncedKeys),
+      hasReceivedFirstCommit: this.hasReceivedFirstCommit,
+      isCommittingSyncTransactions: this.isCommittingSyncTransactions,
+    }
+  }
+
+  public restorePublicationState(
+    snapshot: CollectionPublicationStateSnapshot<TOutput, TKey>,
+  ): void {
+    this.pendingSyncedTransactions = [...snapshot.pendingSyncedTransactions]
+    for (const [transaction, applicationStarted] of snapshot.applicationStarted) {
+      transaction.applicationStarted = applicationStarted
+    }
+    for (const [key, state] of snapshot.keys) {
+      restoreMapEntry(this.syncedData, key, state.syncedData)
+      restoreMapEntry(this.syncedMetadata, key, state.syncedMetadata)
+      restoreMapEntry(this.rowOrigins, key, state.rowOrigin)
+      restoreSetEntry(this.hydrationSeedKeys, key, state.hydrationSeed)
+      restoreSetEntry(this.hydratedKeys, key, state.hydrated)
+      restoreSetEntry(this.syncedKeys, key, state.synced)
+    }
+    replaceMap(
+      this.syncedCollectionMetadata,
+      snapshot.syncedCollectionMetadata,
+    )
+    replaceMap(this.optimisticUpserts, snapshot.optimisticUpserts)
+    replaceSet(this.optimisticDeletes, snapshot.optimisticDeletes)
+    replaceMap(
+      this.pendingOptimisticUpserts,
+      snapshot.pendingOptimisticUpserts,
+    )
+    replaceSet(
+      this.pendingOptimisticDeletes,
+      snapshot.pendingOptimisticDeletes,
+    )
+    replaceSet(
+      this.pendingOptimisticDirectUpserts,
+      snapshot.pendingOptimisticDirectUpserts,
+    )
+    replaceSet(
+      this.pendingOptimisticDirectDeletes,
+      snapshot.pendingOptimisticDirectDeletes,
+    )
+    replaceSet(this.pendingLocalChanges, snapshot.pendingLocalChanges)
+    replaceSet(this.pendingLocalOrigins, snapshot.pendingLocalOrigins)
+    this.size = snapshot.size
+    replaceMap(this.preSyncVisibleState, snapshot.preSyncVisibleState)
+    replaceSet(this.recentlySyncedKeys, snapshot.recentlySyncedKeys)
+    this.hasReceivedFirstCommit = snapshot.hasReceivedFirstCommit
+    this.isCommittingSyncTransactions = snapshot.isCommittingSyncTransactions
+    this.virtualPropsCache = new WeakMap()
   }
 
   /**
