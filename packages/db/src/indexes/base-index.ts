@@ -6,6 +6,28 @@ import type { RangeQueryOptions } from './btree-index.js'
 import type { CompareOptions } from '../query/builder/types.js'
 import type { BasicExpression, OrderByDirection } from '../query/ir.js'
 
+function normalizeLocaleOptions(options: object | undefined): object {
+  return Object.fromEntries(
+    Object.entries(options ?? {}).filter(([, value]) => value !== undefined),
+  )
+}
+
+function canonicalizeLocale(locale: string | undefined): string | undefined {
+  return locale === undefined ? undefined : Intl.getCanonicalLocales(locale)[0]
+}
+
+type LocaleCompareOptions = CompareOptions & {
+  stringSort?: `locale`
+  locale?: string
+  localeOptions?: object
+}
+
+function usesLocaleCollation(
+  options: CompareOptions,
+): options is LocaleCompareOptions {
+  return (options.stringSort ?? DEFAULT_COMPARE_OPTIONS.stringSort) === `locale`
+}
+
 /**
  * Operations that indexes can support, imported from available comparison functions
  */
@@ -175,28 +197,38 @@ export abstract class BaseIndex<
   /**
    * Checks if the compare options match the index's compare options.
    * Reversing an index also reverses null placement, so opposite directions
-   * are compatible only when their requested null placement is opposite too.
-   */
+  * are compatible only when their requested null placement is opposite too.
+  */
   matchesCompareOptions(compareOptions: CompareOptions): boolean {
+    const indexCompareOptions = this.compareOptions
+    const indexUsesLocale = usesLocaleCollation(indexCompareOptions)
+    const requestedUsesLocale = usesLocaleCollation(compareOptions)
     const reversesDirection =
-      this.compareOptions.direction !== compareOptions.direction
-    const thisCompareOptionsWithoutDirection = {
-      ...this.compareOptions,
-      direction: undefined,
-      nulls: reversesDirection
-        ? this.compareOptions.nulls === `first`
-          ? `last`
-          : `first`
-        : this.compareOptions.nulls,
-    }
-    const compareOptionsWithoutDirection = {
-      ...compareOptions,
-      direction: undefined,
+      indexCompareOptions.direction !== compareOptions.direction
+    const effectiveIndexNulls = reversesDirection
+      ? indexCompareOptions.nulls === `first`
+        ? `last`
+        : `first`
+      : indexCompareOptions.nulls
+
+    if (
+      effectiveIndexNulls !== compareOptions.nulls ||
+      indexUsesLocale !== requestedUsesLocale
+    ) {
+      return false
     }
 
-    return deepEquals(
-      thisCompareOptionsWithoutDirection,
-      compareOptionsWithoutDirection,
+    if (!indexUsesLocale || !requestedUsesLocale) {
+      return true
+    }
+
+    return (
+      canonicalizeLocale(indexCompareOptions.locale) ===
+        canonicalizeLocale(compareOptions.locale) &&
+      deepEquals(
+        normalizeLocaleOptions(indexCompareOptions.localeOptions),
+        normalizeLocaleOptions(compareOptions.localeOptions),
+      )
     )
   }
 
