@@ -44,6 +44,11 @@ type Q1Shape = `direct` | `joined`
 type PendingPublicationOperation = `insert` | `update` | `delete`
 type PendingPublicationDepth = `direct` | `layered`
 type SourceConfirmationOperation = `insert` | `update` | `delete`
+type SourceConfirmationInterleaving =
+  | `handlerEcho`
+  | `replacementWhilePending`
+  | `replacementAfterSuccess`
+type SourceConfirmationSettlement = `succeeds` | `rejects`
 
 type PendingPublicationRow = {
   id: number
@@ -750,9 +755,17 @@ describe(`source publication across pending derived mutations`, () => {
   async function expectSourceConfirmationPreservesGraphIntegrity(
     operation: SourceConfirmationOperation,
     depth: PendingPublicationDepth,
+    interleaving: SourceConfirmationInterleaving,
+    settlement: SourceConfirmationSettlement,
   ) {
     type Row = { id: number; value: number }
     let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
+    const handlerCanFinish = createDeferred<void>()
+    let echoFromHandler = interleaving === `handlerEcho`
+    let handlerFailure =
+      settlement === `rejects`
+        ? new Error(`source confirmation handler rejection`)
+        : undefined
 
     const commitSync = async () => {
       const receipt = sync.commit()
@@ -769,28 +782,52 @@ describe(`source publication across pending derived mutations`, () => {
         },
       },
       onInsert: async ({ transaction }) => {
+        if (!echoFromHandler) {
+          if (interleaving === `replacementWhilePending`) {
+            await handlerCanFinish.promise
+          }
+          if (handlerFailure) throw handlerFailure
+          return
+        }
         sync.begin()
         sync.write({
           type: `insert`,
           value: transaction.mutations[0].modified,
         })
         await commitSync()
+        if (handlerFailure) throw handlerFailure
       },
       onUpdate: async ({ transaction }) => {
+        if (!echoFromHandler) {
+          if (interleaving === `replacementWhilePending`) {
+            await handlerCanFinish.promise
+          }
+          if (handlerFailure) throw handlerFailure
+          return
+        }
         sync.begin()
         sync.write({
           type: `update`,
           value: transaction.mutations[0].modified,
         })
         await commitSync()
+        if (handlerFailure) throw handlerFailure
       },
       onDelete: async ({ transaction }) => {
+        if (!echoFromHandler) {
+          if (interleaving === `replacementWhilePending`) {
+            await handlerCanFinish.promise
+          }
+          if (handlerFailure) throw handlerFailure
+          return
+        }
         sync.begin()
         sync.write({
           type: `delete`,
           key: transaction.mutations[0].key,
         })
         await commitSync()
+        if (handlerFailure) throw handlerFailure
       },
     })
     await source.preload()
@@ -840,9 +877,78 @@ describe(`source publication across pending derived mutations`, () => {
             return source.delete(1)
         }
       })()
-      await firstTransaction.isPersisted.promise
 
-      if (operation === `delete`) {
+      if (interleaving === `replacementWhilePending`) {
+        sync.begin()
+        sync.truncate()
+        sync.write({ type: `insert`, value: { id: 1, value: 99 } })
+        await commitSync()
+
+        if (operation === `delete`) {
+          expect(source.get(1)).toBeUndefined()
+          expect(query.get(1)).toBeUndefined()
+        } else {
+          expect(source.get(1)?.value).toBe(1)
+          expect(source.get(1)?.$synced).toBe(false)
+          expect(query.get(1)?.value).toBe(1)
+        }
+
+        handlerCanFinish.resolve()
+      }
+      if (handlerFailure) {
+        await expect(firstTransaction.isPersisted.promise).rejects.toBe(
+          handlerFailure,
+        )
+        handlerFailure = undefined
+      } else {
+        await firstTransaction.isPersisted.promise
+      }
+
+      if (interleaving === `replacementAfterSuccess`) {
+        sync.begin()
+        sync.truncate()
+        sync.write({ type: `insert`, value: { id: 1, value: 99 } })
+        await commitSync()
+      }
+
+      if (interleaving !== `handlerEcho` && settlement === `succeeds`) {
+        if (operation === `delete`) {
+          expect(source.get(1)).toBeUndefined()
+          expect(query.get(1)).toBeUndefined()
+        } else {
+          expect(source.get(1)?.value).toBe(1)
+          expect(source.get(1)?.$synced).toBe(false)
+          expect(query.get(1)?.value).toBe(1)
+        }
+
+        echoFromHandler = true
+        await source.insert({ id: 2, value: 2 }).isPersisted.promise
+
+        // A replacement is not confirmation, so the optimistic value survives
+        // it. Once persistence has succeeded, however, the next ordinary sync
+        // drain retires an unconfirmed direct overlay and reveals the base.
+        expect(source.get(1)?.value).toBe(99)
+        expect(source.get(1)?.$synced).toBe(true)
+        expect(query.get(1)?.value).toBe(99)
+
+        sync.begin()
+        if (operation === `delete`) {
+          sync.write({ type: `delete`, key: 1 })
+        } else {
+          sync.write({ type: `update`, value: { id: 1, value: 1 } })
+        }
+        await commitSync()
+      }
+
+      if (
+        interleaving === `replacementWhilePending` &&
+        settlement === `rejects`
+      ) {
+        expect(source.get(1)?.value).toBe(99)
+        expect(source.get(1)?.$synced).toBe(true)
+        expect(query.get(1)?.value).toBe(99)
+        echoFromHandler = true
+      } else if (operation === `delete`) {
         expect(source.get(1)).toBeUndefined()
         expect(query.get(1)).toBeUndefined()
       } else {
@@ -852,7 +958,10 @@ describe(`source publication across pending derived mutations`, () => {
       }
 
       const probeTransaction =
-        operation === `delete`
+        operation === `delete` &&
+        !(
+          interleaving === `replacementWhilePending` && settlement === `rejects`
+        )
           ? source.insert({ id: 1, value: 2 })
           : source.update(1, (draft) => {
               draft.value = 2
@@ -871,14 +980,36 @@ describe(`source publication across pending derived mutations`, () => {
   }
 
   for (const depth of pendingPublicationDepths) {
-    for (const operation of [
-      `insert`,
-      `update`,
-      `delete`,
-    ] as const satisfies ReadonlyArray<SourceConfirmationOperation>) {
-      it(`preserves ${depth} graph integrity after sync confirms a same-key optimistic ${operation}`, async () => {
-        await expectSourceConfirmationPreservesGraphIntegrity(operation, depth)
-      })
+    for (const interleaving of [
+      `handlerEcho`,
+      `replacementWhilePending`,
+      `replacementAfterSuccess`,
+    ] as const satisfies ReadonlyArray<SourceConfirmationInterleaving>) {
+      for (const settlement of [
+        `succeeds`,
+        `rejects`,
+      ] as const satisfies ReadonlyArray<SourceConfirmationSettlement>) {
+        if (
+          interleaving === `replacementAfterSuccess` &&
+          settlement === `rejects`
+        ) {
+          continue
+        }
+        for (const operation of [
+          `insert`,
+          `update`,
+          `delete`,
+        ] as const satisfies ReadonlyArray<SourceConfirmationOperation>) {
+          it(`preserves ${depth} graph integrity after a same-key optimistic ${operation} with ${interleaving} that ${settlement}`, async () => {
+            await expectSourceConfirmationPreservesGraphIntegrity(
+              operation,
+              depth,
+              interleaving,
+              settlement,
+            )
+          })
+        }
+      }
     }
   }
 

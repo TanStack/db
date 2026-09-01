@@ -1103,6 +1103,12 @@ export class CollectionStateManager<
           this.hydrationSeedKeys.clear()
           this.hydratedKeys.clear()
           this.clearOriginTrackingState()
+          for (const key of truncatePendingLocalChanges) {
+            this.pendingLocalChanges.add(key)
+          }
+          for (const key of truncatePendingLocalOrigins) {
+            this.pendingLocalOrigins.add(key)
+          }
 
           // 3) Clear currentVisibleState for truncated keys to ensure subsequent operations
           //    are compared against the post-truncate state (undefined) rather than pre-truncate state
@@ -1137,13 +1143,17 @@ export class CollectionStateManager<
             case `insert`:
               this.syncedData.set(key, operation.value)
               this.rowOrigins.set(key, origin)
-              // Clear pending local changes now that sync has confirmed
-              this.pendingLocalChanges.delete(key)
-              this.pendingLocalOrigins.delete(key)
-              this.pendingOptimisticUpserts.delete(key)
-              this.pendingOptimisticDeletes.delete(key)
-              this.pendingOptimisticDirectUpserts.delete(key)
-              this.pendingOptimisticDirectDeletes.delete(key)
+              if (!transaction.truncate) {
+                // Ordinary same-key sync confirms pending local work. A full
+                // replacement has no causal link to that mutation and must
+                // preserve its optimistic overlay until a later echo arrives.
+                this.pendingLocalChanges.delete(key)
+                this.pendingLocalOrigins.delete(key)
+                this.pendingOptimisticUpserts.delete(key)
+                this.pendingOptimisticDeletes.delete(key)
+                this.pendingOptimisticDirectUpserts.delete(key)
+                this.pendingOptimisticDirectDeletes.delete(key)
+              }
               break
             case `update`: {
               if (rowUpdateMode === `partial`) {
@@ -1157,26 +1167,28 @@ export class CollectionStateManager<
                 this.syncedData.set(key, operation.value)
               }
               this.rowOrigins.set(key, origin)
-              // Clear pending local changes now that sync has confirmed
-              this.pendingLocalChanges.delete(key)
-              this.pendingLocalOrigins.delete(key)
-              this.pendingOptimisticUpserts.delete(key)
-              this.pendingOptimisticDeletes.delete(key)
-              this.pendingOptimisticDirectUpserts.delete(key)
-              this.pendingOptimisticDirectDeletes.delete(key)
+              if (!transaction.truncate) {
+                this.pendingLocalChanges.delete(key)
+                this.pendingLocalOrigins.delete(key)
+                this.pendingOptimisticUpserts.delete(key)
+                this.pendingOptimisticDeletes.delete(key)
+                this.pendingOptimisticDirectUpserts.delete(key)
+                this.pendingOptimisticDirectDeletes.delete(key)
+              }
               break
             }
             case `delete`:
               this.syncedData.delete(key)
               this.syncedMetadata.delete(key)
-              // Clean up origin and pending tracking for deleted rows
               this.rowOrigins.delete(key)
-              this.pendingLocalChanges.delete(key)
-              this.pendingLocalOrigins.delete(key)
-              this.pendingOptimisticUpserts.delete(key)
-              this.pendingOptimisticDeletes.delete(key)
-              this.pendingOptimisticDirectUpserts.delete(key)
-              this.pendingOptimisticDirectDeletes.delete(key)
+              if (!transaction.truncate) {
+                this.pendingLocalChanges.delete(key)
+                this.pendingLocalOrigins.delete(key)
+                this.pendingOptimisticUpserts.delete(key)
+                this.pendingOptimisticDeletes.delete(key)
+                this.pendingOptimisticDirectUpserts.delete(key)
+                this.pendingOptimisticDirectDeletes.delete(key)
+              }
               break
           }
           recordRequestProvenance(key, transaction.requestSignal)
@@ -1292,6 +1304,23 @@ export class CollectionStateManager<
         }
       }
 
+      // An ordinary sync for another key must not create a hidden interval
+      // where a completed direct mutation disappears. Same-key confirmation
+      // removed these pending entries above; everything left is still an
+      // authoritative optimistic overlay for this publication turn.
+      for (const [key, value] of this.pendingOptimisticUpserts) {
+        if (this.pendingOptimisticDirectUpserts.has(key)) {
+          this.optimisticUpserts.set(key, value)
+          this.optimisticDeletes.delete(key)
+        }
+      }
+      for (const key of this.pendingOptimisticDeletes) {
+        if (this.pendingOptimisticDirectDeletes.has(key)) {
+          this.optimisticUpserts.delete(key)
+          this.optimisticDeletes.add(key)
+        }
+      }
+
       // Always overlay any still-active optimistic transactions so mutations that started
       // after the truncate snapshot are preserved.
       for (const transaction of this.transactions.values()) {
@@ -1321,34 +1350,41 @@ export class CollectionStateManager<
         }
       }
 
-      // A completed optimistic insert may have used a temporary client key while
-      // the sync confirmation used a different server-generated key. Once a
-      // sync commit has been applied, stop retaining completed optimistic keys
-      // that were not confirmed by this commit so the temporary row is removed.
-      for (const key of this.pendingOptimisticDirectUpserts) {
-        if (!changedKeys.has(key)) {
-          changedKeys.add(key)
-          if (!currentVisibleState.has(key)) {
-            const previousValue = previousOptimisticUpserts.get(key)
-            if (previousValue !== undefined) {
-              currentVisibleState.set(key, previousValue)
+      if (
+        committedSyncedTransactions.some((transaction) => !transaction.truncate)
+      ) {
+        // A completed optimistic insert may have used a temporary client key while
+        // the sync confirmation used a different server-generated key. Once an
+        // ordinary sync commit has been applied, stop retaining completed
+        // optimistic keys that were not confirmed by this commit so the temporary
+        // row is removed. Truncate replacement is not confirmation.
+        for (const key of this.pendingOptimisticDirectUpserts) {
+          if (!changedKeys.has(key)) {
+            changedKeys.add(key)
+            if (!currentVisibleState.has(key)) {
+              const previousValue = previousOptimisticUpserts.get(key)
+              if (previousValue !== undefined) {
+                currentVisibleState.set(key, previousValue)
+              }
             }
+            this.pendingOptimisticUpserts.delete(key)
+            this.pendingLocalOrigins.delete(key)
+            this.optimisticUpserts.delete(key)
           }
-          this.pendingOptimisticUpserts.delete(key)
+          requestProvenanceByKey.delete(key)
+          this.pendingOptimisticDirectUpserts.delete(key)
+        }
+        for (const key of this.pendingOptimisticDirectDeletes) {
+          if (!changedKeys.has(key)) {
+            changedKeys.add(key)
+          }
+          this.pendingOptimisticDeletes.delete(key)
           this.pendingLocalOrigins.delete(key)
+          this.optimisticDeletes.delete(key)
+          requestProvenanceByKey.delete(key)
+          this.pendingOptimisticDirectDeletes.delete(key)
         }
-        requestProvenanceByKey.delete(key)
       }
-      for (const key of this.pendingOptimisticDirectDeletes) {
-        if (!changedKeys.has(key)) {
-          changedKeys.add(key)
-        }
-        this.pendingOptimisticDeletes.delete(key)
-        this.pendingLocalOrigins.delete(key)
-        requestProvenanceByKey.delete(key)
-      }
-      this.pendingOptimisticDirectUpserts.clear()
-      this.pendingOptimisticDirectDeletes.clear()
 
       // Now check what actually changed in the final visible state
       for (const key of changedKeys) {
