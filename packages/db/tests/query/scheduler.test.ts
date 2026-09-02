@@ -214,10 +214,16 @@ describe(`Collection publication scheduler context`, () => {
     removeAdded?.()
   })
 
-  it.each([`publication`, `graph`] as const)(
-    `does not replace a $source failure with a clear-listener failure`,
-    (source) => {
-      const primaryFailure = new Error(`${source} failed`)
+  it.each([
+    { source: `publication`, failureKind: `Error` },
+    { source: `publication`, failureKind: `undefined` },
+    { source: `graph`, failureKind: `Error` },
+    { source: `graph`, failureKind: `undefined` },
+  ] as const)(
+    `does not replace a $failureKind $source failure with a clear-listener failure`,
+    ({ source, failureKind }) => {
+      const primaryFailure =
+        failureKind === `Error` ? new Error(`${source} failed`) : undefined
       const clearFailure = new Error(`clear listener failed`)
       const laterClear = vi.fn()
       const removeThrowingClear = transactionScopedScheduler.onClear(() => {
@@ -226,6 +232,7 @@ describe(`Collection publication scheduler context`, () => {
       const removeLaterClear = transactionScopedScheduler.onClear(laterClear)
 
       try {
+        let didThrow = false
         let thrown: unknown
         try {
           withPublicationContext(() => {
@@ -240,10 +247,12 @@ describe(`Collection publication scheduler context`, () => {
             })
           })
         } catch (error) {
+          didThrow = true
           thrown = error
         }
 
-        expect(thrown).toBe(primaryFailure)
+        expect(didThrow).toBe(true)
+        expect(Object.is(thrown, primaryFailure)).toBe(true)
         expect(laterClear).toHaveBeenCalledOnce()
       } finally {
         removeThrowingClear()
