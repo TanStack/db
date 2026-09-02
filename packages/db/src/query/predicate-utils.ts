@@ -404,21 +404,25 @@ export function minusWherePredicates(
   )
   if (commonConditions.length > 0) {
     // Extract predicates without common conditions
-    const fromWithoutCommon = removeConditions(fromPredicate, commonConditions)
-    const subtractWithoutCommon = removeConditions(
+    const fromRemoval = removeConditions(fromPredicate, commonConditions)
+    const subtractRemoval = removeConditions(
       subtractPredicate,
       commonConditions,
     )
 
-    // Recursively compute difference on simplified predicates
-    const simplifiedDifference = minusWherePredicates(
-      fromWithoutCommon,
-      subtractWithoutCommon,
-    )
+    // Recurse only when both operands lost at least one flattened AND term.
+    // This strict decrease is the termination measure for common-condition
+    // simplification.
+    if (fromRemoval.removed && subtractRemoval.removed) {
+      const simplifiedDifference = minusWherePredicates(
+        fromRemoval.predicate,
+        subtractRemoval.predicate,
+      )
 
-    if (simplifiedDifference !== null) {
-      // Combine the simplified difference with common conditions
-      return combineConditions([...commonConditions, simplifiedDifference])
+      if (simplifiedDifference !== null) {
+        // Combine the simplified difference with common conditions
+        return combineConditions([...commonConditions, simplifiedDifference])
+      }
     }
   }
 
@@ -1037,35 +1041,35 @@ function extractAllConditions(
 
 /**
  * Remove specified conditions from a predicate.
- * Returns the predicate with the specified conditions removed, or undefined if all conditions are removed.
+ * Reports whether removal made progress and returns the remaining predicate,
+ * or undefined when all conditions were removed.
  */
 function removeConditions(
   predicate: BasicExpression<boolean>,
   conditionsToRemove: Array<BasicExpression<boolean>>,
-): BasicExpression<boolean> | undefined {
-  if (predicate.type === `func` && predicate.name === `and`) {
-    const remainingArgs = predicate.args.filter(
-      (arg) =>
-        !conditionsToRemove.some((cond) =>
-          areExpressionsEqual(arg as BasicExpression<boolean>, cond),
-        ),
-    )
+): {
+  predicate: BasicExpression<boolean> | undefined
+  removed: boolean
+} {
+  const conditions = extractAllConditions(predicate)
+  const remainingConditions = conditions.filter(
+    (condition) =>
+      !conditionsToRemove.some((conditionToRemove) =>
+        areExpressionsEqual(condition, conditionToRemove),
+      ),
+  )
 
-    if (remainingArgs.length === 0) {
-      return undefined
-    } else if (remainingArgs.length === 1) {
-      return remainingArgs[0]!
-    } else {
-      return {
-        type: `func`,
-        name: `and`,
-        args: remainingArgs,
-      } as BasicExpression<boolean>
-    }
+  if (remainingConditions.length === conditions.length) {
+    return { predicate, removed: false }
   }
 
-  // For non-AND predicates, don't remove anything
-  return predicate
+  return {
+    predicate:
+      remainingConditions.length === 0
+        ? undefined
+        : combineConditions(remainingConditions),
+    removed: true,
+  }
 }
 
 /**
