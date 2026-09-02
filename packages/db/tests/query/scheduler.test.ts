@@ -217,6 +217,127 @@ describe(`live query scheduler`, () => {
     }
   })
 
+  it(`delivers a layout-only batch to its frozen listener snapshot`, async () => {
+    type RankedUser = User & { rank: number }
+    const calls: Array<string> = []
+    const firstFailure = new Error(`first layout listener failed`)
+    const laterFailure = new Error(`later public listener failed`)
+    const graphJob = vi.fn(() => calls.push(`graph`))
+    const source = createCollection(
+      mockSyncCollectionOptions<RankedUser>({
+        id: `layout-listener-membership-source`,
+        getKey: (user) => user.id,
+        initialData: [
+          { id: 1, name: `Ada`, rank: 1 },
+          { id: 2, name: `Grace`, rank: 2 },
+        ],
+      }),
+    )
+    const ordered = createLiveQueryCollection({
+      id: `layout-listener-membership-ordered`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ user: source })
+          .orderBy(({ user }) => user.rank, `asc`)
+          .select(({ user }) => ({ id: user.id, name: user.name })),
+    })
+    await ordered.preload()
+    expect(ordered.toArray.map(({ id }) => id)).toEqual([1, 2])
+    let firstPublication = true
+    let addedLayout: (() => void) | undefined
+    let addedPublic: { unsubscribe: () => void } | undefined
+    const unsubscribeFirstLayout = ordered._subscribeLayoutChanges(() => {
+      calls.push(`layout:first`)
+      if (!firstPublication) return
+      unsubscribeSecondLayout()
+      secondPublic.unsubscribe()
+      addedLayout ??= ordered._subscribeLayoutChanges(() =>
+        calls.push(`layout:added`),
+      )
+      addedPublic ??= ordered.subscribeChanges(
+        () => calls.push(`public:added`),
+        { includeInitialState: false },
+      )
+      throw firstFailure
+    })
+    const unsubscribeSecondLayout = ordered._subscribeLayoutChanges(() => {
+      calls.push(`layout:second`)
+      const contextId = getActivePublicationContext()
+      transactionScopedScheduler.schedule({
+        contextId,
+        jobId: graphJob,
+        run: graphJob,
+      })
+    })
+    const firstPublic = ordered.subscribeChanges(
+      () => {
+        calls.push(`public:first`)
+        if (firstPublication) throw laterFailure
+      },
+      { includeInitialState: false },
+    )
+    const secondPublic = ordered.subscribeChanges(
+      () => calls.push(`public:second`),
+      {
+        includeInitialState: false,
+      },
+    )
+
+    try {
+      let thrown: unknown
+      try {
+        source.utils.begin()
+        source.utils.write({
+          type: `update`,
+          value: { id: 1, name: `Ada`, rank: 3 },
+        })
+        source.utils.commit()
+      } catch (error) {
+        thrown = error
+      }
+
+      expect(thrown).toBe(firstFailure)
+      expect(calls).toEqual([
+        `layout:first`,
+        `layout:second`,
+        `public:first`,
+        `public:second`,
+        `graph`,
+      ])
+      expect(graphJob).toHaveBeenCalledOnce()
+      expect(ordered.toArray.map(({ id }) => id)).toEqual([2, 1])
+
+      firstPublication = false
+      source.utils.begin()
+      source.utils.write({
+        type: `update`,
+        value: { id: 1, name: `Ada`, rank: 0 },
+      })
+      expect(() => source.utils.commit()).not.toThrow()
+      expect(calls).toEqual([
+        `layout:first`,
+        `layout:second`,
+        `public:first`,
+        `public:second`,
+        `graph`,
+        `layout:first`,
+        `layout:added`,
+        `public:first`,
+        `public:added`,
+      ])
+    } finally {
+      unsubscribeFirstLayout()
+      unsubscribeSecondLayout()
+      addedLayout?.()
+      firstPublic.unsubscribe()
+      secondPublic.unsubscribe()
+      addedPublic?.unsubscribe()
+      await ordered.cleanup()
+      await source.cleanup()
+    }
+  })
+
   it(`settles a dependent live query when an earlier source listener throws`, async () => {
     let begin!: () => void
     let write!: (message: { type: `insert`; value: User }) => void
