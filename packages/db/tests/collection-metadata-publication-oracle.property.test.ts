@@ -476,6 +476,7 @@ async function expectMetadataRollbackRecovery({
   initialMetadata,
   pendingOperation,
   additionalMetadata = [],
+  separatePendingTransactions = false,
 }: {
   sourceKey: number
   metadataKey: number
@@ -487,6 +488,7 @@ async function expectMetadataRollbackRecovery({
     initialMetadata: MetadataEntryState
     pendingOperation: MetadataOperation
   }>
+  separatePendingTransactions?: boolean
 }): Promise<void> {
   const harnessId = nextMetadataRollbackHarnessId++
   const source = await createPublicationHarness()
@@ -546,12 +548,12 @@ async function expectMetadataRollbackRecovery({
     derived._state.commitPendingTransactions()
   }
 
-  const pending = stageMetadata(
-    metadataCases.map(({ key, pendingOperation: operation }) => ({
-      key,
-      operation,
-    })),
+  const pendingWrites = metadataCases.map(
+    ({ key, pendingOperation: operation }) => ({ key, operation }),
   )
+  const pendingTransactions = separatePendingTransactions
+    ? pendingWrites.map((write) => stageMetadata([write]))
+    : [stageMetadata(pendingWrites)]
   const sourceRowsBefore = [...rows.values()].map((row) => ({ ...row }))
   const rowsBefore = [...derived.values()].map((row) => ({ ...row }))
   const originBefore = new Map(derived._state.rowOrigins)
@@ -615,9 +617,13 @@ async function expectMetadataRollbackRecovery({
         ),
       ),
     )
-    expect(derived._state.pendingSyncedTransactions).toHaveLength(1)
-    expect(derived._state.pendingSyncedTransactions[0]).toBe(pending)
-    expect(pending.applicationStarted).toBe(false)
+    expect(derived._state.pendingSyncedTransactions).toEqual(
+      pendingTransactions,
+    )
+    for (const pending of pendingTransactions) {
+      expect(pending.applicationStarted).toBe(false)
+      expect(pending.applied.isPending()).toBe(true)
+    }
     expect(derived._state.rowOrigins).toEqual(originBefore)
     expect(derived._state.hydrationSeedKeys).toEqual(hydrationSeedsBefore)
     expect(derived._state.hydratedKeys).toEqual(hydratedBefore)
@@ -628,7 +634,9 @@ async function expectMetadataRollbackRecovery({
     expect(published).toEqual([])
   } finally {
     derived._state.commitPendingTransactions = commitPendingTransactions
-    derived._state.cancelPendingSyncedTransaction(pending)
+    for (const pending of pendingTransactions) {
+      derived._state.cancelPendingSyncedTransaction(pending)
+    }
     subscription.unsubscribe()
     source.unsubscribe()
     await Promise.all([
@@ -755,6 +763,7 @@ it(`restores every metadata key after one failed publication`, async () => {
     sourceDelta: 1,
     initialMetadata: { present: true, value: `before` },
     pendingOperation: { type: `set`, value: `after` },
+    separatePendingTransactions: true,
     additionalMetadata: [
       {
         key: 2,
