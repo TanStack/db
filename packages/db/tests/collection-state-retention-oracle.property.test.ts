@@ -580,10 +580,13 @@ it(`publishes a virtual-state update when a restarted optimistic row is confirme
     rows: Array<ObservedRow>
   }> = []
   const restartStatuses: Array<string> = []
+  const settlementTimeline: Array<`publication` | `receipt`> = []
   let restarted = false
   let readMutationState: (() => TransactionState) | undefined
+  let rollbackMutation: (() => void) | undefined
   let mutationCommit: Promise<unknown> | undefined
   let syncReceipt: ReturnType<SyncActions[`commit`]> | undefined
+  let syncReceiptOutcome: Promise<void> | undefined
   let syncReceiptSettled = false
   const subscription = collection.subscribeChanges(
     (changes) => {
@@ -598,6 +601,9 @@ it(`publishes a virtual-state update when a restarted optimistic row is confirme
         })),
         rows: [...collection.state.values()].map(snapshotRow),
       })
+      if (changes.some(({ type, key }) => type === `update` && key === 2)) {
+        queueMicrotask(() => settlementTimeline.push(`publication`))
+      }
       if (restarted || !changes.some(({ key }) => key === 1)) return
 
       restarted = true
@@ -614,6 +620,7 @@ it(`publishes a virtual-state update when a restarted optimistic row is confirme
         mutationFn: () => mutationHold,
       })
       readMutationState = () => transaction.state
+      rollbackMutation = () => transaction.rollback()
       void transaction.isPersisted.promise.catch(() => undefined)
       transaction.mutate(() => collection.insert({ id: 2, value: 2 }))
       mutationCommit = transaction.commit()
@@ -622,11 +629,12 @@ it(`publishes a virtual-state update when a restarted optimistic row is confirme
       sync.write({ type: `insert`, value: { id: 2, value: 2 } })
       syncReceipt = sync.commit()
       if (syncReceipt !== true) {
-        void syncReceipt.then(() => {
+        syncReceiptOutcome = syncReceipt.then((value) => {
+          settlementTimeline.push(`receipt`)
           syncReceiptSettled = true
+          return value
         })
       }
-      transaction.rollback()
     },
     { includeInitialState: false },
   )
@@ -674,7 +682,7 @@ it(`publishes a virtual-state update when a restarted optimistic row is confirme
         rows: [remoteRow(2)],
       },
     ]
-    expect(publications).toEqual(expectedPublications)
+    expect(publications).toEqual(expectedPublications.slice(0, 3))
     expect([...collection.state.keys()]).toEqual([2])
     expect(restartStatuses).toEqual([`ready`, `cleaned-up`, `loading`, `ready`])
     expect(collection.status).toBe(`ready`)
@@ -685,8 +693,18 @@ it(`publishes a virtual-state update when a restarted optimistic row is confirme
     if (syncReceipt === undefined || syncReceipt === true) {
       throw new Error(`restarted sync receipt was not parked`)
     }
-    await syncReceipt
+    expect(syncReceiptOutcome).toBeDefined()
+    expect(rollbackMutation).toBeDefined()
+    await Promise.resolve()
+    expect(syncReceiptSettled).toBe(false)
+    expect(settlementTimeline).toEqual([])
+
+    rollbackMutation?.()
+    expect(publications).toEqual(expectedPublications)
+    expect(syncReceiptSettled).toBe(false)
+    await expect(syncReceiptOutcome).resolves.toBeUndefined()
     expect(syncReceiptSettled).toBe(true)
+    expect(settlementTimeline).toEqual([`publication`, `receipt`])
     expect(publications).toEqual(expectedPublications)
     expect([...collection.state.keys()]).toEqual([2])
 
