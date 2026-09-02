@@ -3,10 +3,8 @@ import type {
   ExpoSQLiteTestDatabase,
   ExpoSQLiteTestDatabaseFactory,
 } from './expo-sqlite-test-db'
-import type {
-  ExpoSQLiteBindParams,
-  ExpoSQLiteTransaction,
-} from '../../src/expo-sqlite-driver'
+import type { SQLiteBindParams } from 'expo-sqlite'
+import type { ExpoSQLiteTransaction } from '../../src/expo-sqlite-driver'
 
 function resolvePlatform(): `ios` | `android` {
   const platform = process.env.TANSTACK_DB_EXPO_RUNTIME_PLATFORM?.trim()
@@ -46,13 +44,17 @@ export function createMobileSQLiteTestDatabaseFactory(): ExpoSQLiteTestDatabaseF
       execAsync: async (sql: string) => {
         await (await getDatabase()).execAsync(sql)
       },
-      getAllAsync: async <T>(sql: string, params?: ExpoSQLiteBindParams) =>
-        (await getDatabase()).getAllAsync<T>(sql, params),
-      runAsync: async (sql: string, params?: ExpoSQLiteBindParams) =>
-        (await getDatabase()).runAsync(sql, params),
-      withExclusiveTransactionAsync: async <T>(
-        task: (transaction: ExpoSQLiteTransaction) => Promise<T>,
-      ): Promise<T> =>
+      getAllAsync: async <T>(sql: string, params?: SQLiteBindParams) =>
+        params !== undefined
+          ? (await getDatabase()).getAllAsync<T>(sql, params)
+          : (await getDatabase()).getAllAsync<T>(sql),
+      runAsync: async (sql: string, params?: SQLiteBindParams) =>
+        params !== undefined
+          ? (await getDatabase()).runAsync(sql, params)
+          : (await getDatabase()).runAsync(sql),
+      withExclusiveTransactionAsync: async (
+        task: (transaction: ExpoSQLiteTransaction) => Promise<void>,
+      ): Promise<void> =>
         (await getDatabase()).withExclusiveTransactionAsync(task),
       closeAsync: async () => {
         if (!databasePromise) {
