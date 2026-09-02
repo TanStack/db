@@ -1330,6 +1330,7 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
         type: `requestDemand`,
         ownerId: `owner-1`,
         sessionId: `session-1`,
+        sourceId: `electric-users`,
         demandId: `active-users`,
         attemptId: `attempt-1`,
         alreadyAborted: false,
@@ -1362,6 +1363,7 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
       history.push({
         type: `applyAuthoritativeRows`,
         ownerId: `owner-1`,
+        sourceId: `electric-users`,
         demandId: `active-users`,
         attemptId: `attempt-1`,
         rowKeys: [String(row.id)],
@@ -1375,11 +1377,9 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
         {
           type: `releaseDemand`,
           ownerId: `owner-1`,
+          sourceId: `electric-users`,
           demandId: `active-users`,
           attemptId: `attempt-1`,
-          rowKeys: [String(row.id)],
-          finalRowOwner: true,
-          invalidatesAdapterEvidence: true,
         },
         {
           type: `restartSession`,
@@ -1390,6 +1390,7 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
           type: `requestDemand`,
           ownerId: `owner-2`,
           sessionId: `session-2`,
+          sourceId: `electric-users`,
           demandId: `active-users`,
           attemptId: `attempt-2`,
           alreadyAborted: false,
@@ -1401,6 +1402,7 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
       history.push({
         type: `applyAuthoritativeRows`,
         ownerId: `owner-2`,
+        sourceId: `electric-users`,
         demandId: `active-users`,
         attemptId: `attempt-2`,
         rowKeys: [String(row.id)],

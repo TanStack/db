@@ -926,6 +926,30 @@ describe(`createDeduplicatedLoadSubset`, () => {
     await retry
   })
 
+  it(`does not reuse an aborted in-flight lease while its work is still settling`, async () => {
+    const releases: Array<() => void> = []
+    const loadSubset = vi.fn(
+      () => new Promise<void>((resolve) => releases.push(resolve)),
+    )
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const owner = new AbortController()
+    const where = gt(ref(`age`), val(10))
+
+    const canceled = deduplicated.loadSubset({
+      where,
+      signal: owner.signal,
+    })
+    owner.abort()
+
+    const retry = deduplicated.loadSubset({ where })
+
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+    expect(retry).not.toBe(canceled)
+
+    for (const release of releases) release()
+    await Promise.all([canceled, retry])
+  })
+
   it(`keeps shared work active for a signal-less owner`, async () => {
     let resolveLoad: (() => void) | undefined
     let sharedSignal: AbortSignal | undefined
@@ -954,6 +978,86 @@ describe(`createDeduplicatedLoadSubset`, () => {
     resolveLoad?.()
     await Promise.all([abortable, persistent])
     expect(deduplicated.loadSubset({ where })).toBe(true)
+  })
+
+  it(`releases every owner from every in-flight lease when reset`, async () => {
+    const releases: Array<() => void> = []
+    const sharedSignals: Array<AbortSignal | undefined> = []
+    const loadSubset = vi.fn(
+      (options: LoadSubsetOptions) =>
+        new Promise<void>((resolve) => {
+          sharedSignals.push(options.signal)
+          releases.push(resolve)
+        }),
+    )
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const owners = Array.from({ length: 4 }, () => new AbortController())
+    const addSpies = owners.map((owner) =>
+      vi.spyOn(owner.signal, `addEventListener`),
+    )
+    const removeSpies = owners.map((owner) =>
+      vi.spyOn(owner.signal, `removeEventListener`),
+    )
+
+    const loads = [
+      deduplicated.loadSubset({
+        where: gt(ref(`age`), val(10)),
+        signal: owners[0]!.signal,
+      }),
+      deduplicated.loadSubset({
+        where: gt(ref(`age`), val(10)),
+        signal: owners[1]!.signal,
+      }),
+      deduplicated.loadSubset({
+        where: lt(ref(`age`), val(0)),
+        signal: owners[2]!.signal,
+      }),
+      deduplicated.loadSubset({
+        where: lt(ref(`age`), val(0)),
+        signal: owners[3]!.signal,
+      }),
+    ]
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+    for (const addSpy of addSpies) expect(addSpy).toHaveBeenCalledOnce()
+
+    deduplicated.reset()
+
+    for (const removeSpy of removeSpies)
+      expect(removeSpy).toHaveBeenCalledOnce()
+    for (const signal of sharedSignals) expect(signal?.aborted).toBe(false)
+    for (const owner of owners) owner.abort()
+    for (const signal of sharedSignals) expect(signal?.aborted).toBe(false)
+
+    for (const release of releases) release()
+    await Promise.all(loads)
+    for (const removeSpy of removeSpies)
+      expect(removeSpy).toHaveBeenCalledOnce()
+  })
+
+  it(`starts new work immediately after reset and protects it from old completion`, async () => {
+    const releases: Array<() => void> = []
+    const loadSubset = vi.fn(
+      () => new Promise<void>((resolve) => releases.push(resolve)),
+    )
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const where = gt(ref(`age`), val(10))
+
+    const oldLoad = deduplicated.loadSubset({ where })
+    deduplicated.reset()
+    const currentLoad = deduplicated.loadSubset({ where })
+
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+    expect(currentLoad).not.toBe(oldLoad)
+
+    releases[0]?.()
+    await oldLoad
+
+    const joinedLoad = deduplicated.loadSubset({ where })
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+    expect(joinedLoad).toBe(currentLoad)
+
+    releases[1]?.()
+    await Promise.all([currentLoad, joinedLoad])
   })
 
   it(`should call underlying loadSubset on first call`, async () => {

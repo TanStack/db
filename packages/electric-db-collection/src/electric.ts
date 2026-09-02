@@ -8,6 +8,7 @@ import { Store } from '@tanstack/store'
 import DebugModule from 'debug'
 import {
   DeduplicatedLoadSubset,
+  SyncTransactionAbortedError,
   and,
   withCollectionConfigFactory,
 } from '@tanstack/db'
@@ -17,6 +18,7 @@ import {
   TimeoutWaitingForMatchError,
   TimeoutWaitingForTxIdError,
 } from './errors'
+import { createAppliedCommitCaptureRegistry } from './applied-commit-capture'
 import { compileSQL } from './sql-compiler'
 import {
   addTagToIndex,
@@ -85,6 +87,8 @@ export interface ElectricTestHooks {
    * Allows tests to pause and validate snapshot phase before atomic swap completes
    */
   beforeMarkingReady?: () => Promise<void>
+  /** Reports the number of active on-demand applied-receipt captures. */
+  onActiveCommitCapturesChange?: (activeCount: number) => void
 }
 
 /**
@@ -527,8 +531,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   begin,
   write,
   commit,
-  getCommitCursor,
-  waitForCommitsAfter,
+  captureCommits,
   collectionId,
   encodeColumnName,
   signal,
@@ -543,8 +546,10 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
     metadata: Record<string, unknown>
   }) => void
   commit: (signal?: AbortSignal) => SyncAppliedReceipt
-  getCommitCursor: () => number
-  waitForCommitsAfter: (cursor: number) => Promise<void>
+  captureCommits: (signal?: AbortSignal) => {
+    wait: () => Promise<void>
+    dispose: () => void
+  }
   collectionId?: string
   /**
    * Optional function to encode column names (e.g., camelCase to snake_case).
@@ -553,12 +558,44 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   encodeColumnName?: ColumnEncoder
   /**
    * Abort signal to check if the stream has been aborted during cleanup.
-   * When aborted, errors from requestSnapshot are silently ignored.
    */
   signal: AbortSignal
 }): DeduplicatedLoadSubset | null {
   if (syncMode === `eager`) {
     return null
+  }
+
+  const combineAbortSignals = (
+    ...signals: Array<AbortSignal | undefined>
+  ): { signal: AbortSignal; cleanup: () => void } => {
+    const uniqueSignals = Array.from(
+      new Set(
+        signals.filter(
+          (candidate): candidate is AbortSignal => candidate !== undefined,
+        ),
+      ),
+    )
+    if (uniqueSignals.length === 1) {
+      return { signal: uniqueSignals[0]!, cleanup: () => {} }
+    }
+
+    const controller = new AbortController()
+    const abort = () => controller.abort()
+    for (const candidate of uniqueSignals) {
+      if (candidate.aborted) {
+        abort()
+      } else {
+        candidate.addEventListener(`abort`, abort, { once: true })
+      }
+    }
+    return {
+      signal: controller.signal,
+      cleanup: () => {
+        for (const candidate of uniqueSignals) {
+          candidate.removeEventListener(`abort`, abort)
+        }
+      },
+    }
   }
 
   const compileOptions = encodeColumnName ? { encodeColumnName } : undefined
@@ -578,14 +615,26 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   }
 
   const loadSubset = async (opts: LoadSubsetOptions) => {
-    const commitCursor = getCommitCursor()
-    if (opts.signal?.aborted) return
+    const isAborted = (): boolean =>
+      signal.aborted || opts.signal?.aborted === true
+    const throwIfCollectionAborted = () => {
+      if (signal.aborted) {
+        throw new SyncTransactionAbortedError()
+      }
+    }
+    const throwIfAborted = () => {
+      if (isAborted()) {
+        throw new SyncTransactionAbortedError()
+      }
+    }
+    throwIfAborted()
 
     if (isBufferingInitialSync()) {
       const snapshotParams = compileSQL<T>(opts, compileOptions)
       try {
         const { data: rows } = await stream.fetchSnapshot(snapshotParams)
-        if (opts.signal?.aborted || !isBufferingInitialSync()) {
+        throwIfAborted()
+        if (!isBufferingInitialSync()) {
           debug(`${logPrefix}Ignoring snapshot - sync completed while fetching`)
           return
         }
@@ -599,11 +648,16 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
               metadata: { ...row.headers },
             })
           }
-          await commit(opts.signal)
+          const commitSignal = combineAbortSignals(signal, opts.signal)
+          try {
+            await commit(commitSignal.signal)
+          } finally {
+            commitSignal.cleanup()
+          }
           debug(`${logPrefix}Applied snapshot with ${rows.length} rows`)
         }
       } catch (error) {
-        if (opts.signal?.aborted) return
+        throwIfAborted()
         if (handleSnapshotError(error, `fetchSnapshot`)) {
           return
         }
@@ -625,10 +679,34 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
     // long-poll requests promptly. Bound the wait so on-demand live queries don't
     // remain loading until the long-poll naturally times out.
     // If the refresh fails or times out, we fall through to requestSnapshot which
-    // still works.
+    // still works. Cleanup or request cancellation ends the wait without starting
+    // a snapshot that no current demand can use.
     if (stream.isUpToDate) {
       let timeoutId: ReturnType<typeof setTimeout> | undefined
+      let removeAbortListeners = () => {}
       try {
+        const abortSignals = new Set(
+          [signal, opts.signal].filter(
+            (candidate): candidate is AbortSignal => candidate !== undefined,
+          ),
+        )
+        const aborted = new Promise<void>((resolve) => {
+          const onAbort = () => resolve()
+          if (Array.from(abortSignals).some((candidate) => candidate.aborted)) {
+            resolve()
+            return
+          }
+
+          abortSignals.forEach((candidate) =>
+            candidate.addEventListener(`abort`, onAbort, { once: true }),
+          )
+          removeAbortListeners = () => {
+            abortSignals.forEach((candidate) =>
+              candidate.removeEventListener(`abort`, onAbort),
+            )
+          }
+        })
+
         await Promise.race([
           stream.forceDisconnectAndRefresh(),
           new Promise<void>((resolve) => {
@@ -637,8 +715,10 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
               FORCE_DISCONNECT_AND_REFRESH_TIMEOUT_MS,
             )
           }),
+          aborted,
         ])
       } catch (error) {
+        throwIfAborted()
         if (handleSnapshotError(error, `forceDisconnectAndRefresh`)) {
           return
         }
@@ -647,11 +727,12 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
           error,
         )
       } finally {
+        removeAbortListeners()
         clearTimeout(timeoutId)
       }
     }
 
-    if (opts.signal?.aborted) return
+    throwIfAborted()
 
     // Upstream limitation: ShapeStream.requestSnapshot() publishes its rows
     // through the stream callback before its Promise resolves. It accepts no
@@ -659,45 +740,62 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
     // aborted request can already have installed rows before the check below.
     // Full request-scoped cancellation requires support in the Electric client;
     // matching snapshots by parameters is unsafe for overlapping equal requests.
+    const commitCapture = captureCommits(signal)
     try {
-      if (cursor) {
-        const whereCurrentOpts: LoadSubsetOptions = {
-          where: where ? and(where, cursor.whereCurrent) : cursor.whereCurrent,
-          orderBy,
+      try {
+        if (cursor) {
+          const whereCurrentOpts: LoadSubsetOptions = {
+            where: where
+              ? and(where, cursor.whereCurrent)
+              : cursor.whereCurrent,
+            orderBy,
+          }
+          const whereCurrentParams = compileSQL<T>(
+            whereCurrentOpts,
+            compileOptions,
+          )
+
+          const whereFromOpts: LoadSubsetOptions = {
+            where: where ? and(where, cursor.whereFrom) : cursor.whereFrom,
+            orderBy,
+            limit,
+          }
+          const whereFromParams = compileSQL<T>(whereFromOpts, compileOptions)
+
+          debug(
+            `${logPrefix}Requesting cursor.whereCurrent snapshot (all ties)`,
+          )
+          debug(
+            `${logPrefix}Requesting cursor.whereFrom snapshot (with limit ${limit})`,
+          )
+
+          const requestResults = await Promise.allSettled([
+            stream.requestSnapshot(whereCurrentParams),
+            stream.requestSnapshot(whereFromParams),
+          ])
+          const failedRequest = requestResults.find(
+            (result) => result.status === `rejected`,
+          )
+          if (failedRequest) throw failedRequest.reason
+        } else {
+          const snapshotParams = compileSQL<T>(opts, compileOptions)
+          await stream.requestSnapshot(snapshotParams)
         }
-        const whereCurrentParams = compileSQL<T>(
-          whereCurrentOpts,
-          compileOptions,
-        )
-
-        const whereFromOpts: LoadSubsetOptions = {
-          where: where ? and(where, cursor.whereFrom) : cursor.whereFrom,
-          orderBy,
-          limit,
+      } catch (error) {
+        if (signal.aborted) {
+          throw new SyncTransactionAbortedError()
         }
-        const whereFromParams = compileSQL<T>(whereFromOpts, compileOptions)
-
-        debug(`${logPrefix}Requesting cursor.whereCurrent snapshot (all ties)`)
-        debug(
-          `${logPrefix}Requesting cursor.whereFrom snapshot (with limit ${limit})`,
-        )
-
-        await Promise.all([
-          stream.requestSnapshot(whereCurrentParams),
-          stream.requestSnapshot(whereFromParams),
-        ])
-      } else {
-        const snapshotParams = compileSQL<T>(opts, compileOptions)
-        await stream.requestSnapshot(snapshotParams)
+        if (handleSnapshotError(error, `requestSnapshot`)) {
+          return
+        }
+        throw error
       }
-    } catch (error) {
-      if (opts.signal?.aborted) return
-      if (handleSnapshotError(error, `requestSnapshot`)) {
-        return
-      }
-      throw error
+      throwIfCollectionAborted()
+      await commitCapture.wait()
+      throwIfCollectionAborted()
+    } finally {
+      commitCapture.dispose()
     }
-    await waitForCommitsAfter(commitCursor)
   }
 
   return new DeduplicatedLoadSubset({ loadSubset })
@@ -1501,25 +1599,13 @@ function createElectricSync<T extends Row<unknown>>(
         collection,
         metadata,
       } = params
-      let commitSequence = 0
-      const pendingAppliedReceipts = new Map<number, Promise<void>>()
+      const commitCaptures = createAppliedCommitCaptureRegistry(
+        testHooks?.onActiveCommitCapturesChange,
+      )
       const commit = (signal?: AbortSignal): SyncAppliedReceipt => {
-        const sequence = ++commitSequence
         const applied = commitSyncTransaction(signal)
-        if (applied === true) {
-          return true
-        }
-        pendingAppliedReceipts.set(sequence, applied)
-        const removeReceipt = () => pendingAppliedReceipts.delete(sequence)
-        void applied.then(removeReceipt, removeReceipt)
+        commitCaptures.record(applied)
         return applied
-      }
-      const waitForCommitsAfter = async (cursor: number): Promise<void> => {
-        await Promise.all(
-          Array.from(pendingAppliedReceipts, ([sequence, applied]) =>
-            sequence > cursor ? applied : undefined,
-          ),
-        )
       }
       const readPersistedResumeState = (): ElectricResumeState | undefined => {
         const persistedResumeState = metadata?.collection.get(`electric:resume`)
@@ -1573,19 +1659,21 @@ function createElectricSync<T extends Row<unknown>>(
 
       // Abort controller for the stream - wraps the signal if provided
       const abortController = new AbortController()
+      let removeShapeAbortListener = () => {}
 
       if (shapeOptions.signal) {
-        shapeOptions.signal.addEventListener(
-          `abort`,
-          () => {
-            abortController.abort()
-          },
-          {
-            once: true,
-          },
-        )
+        const abortFromShapeSignal = () => abortController.abort()
         if (shapeOptions.signal.aborted) {
           abortController.abort()
+        } else {
+          shapeOptions.signal.addEventListener(`abort`, abortFromShapeSignal, {
+            once: true,
+          })
+          removeShapeAbortListener = () =>
+            shapeOptions.signal?.removeEventListener(
+              `abort`,
+              abortFromShapeSignal,
+            )
         }
       }
 
@@ -1766,8 +1854,7 @@ function createElectricSync<T extends Row<unknown>>(
         begin,
         write,
         commit,
-        getCommitCursor: () => commitSequence,
-        waitForCommitsAfter,
+        captureCommits: commitCaptures.capture,
         collectionId,
         // Pass the columnMapper's encode function to transform column names
         // (e.g., camelCase to snake_case) when compiling SQL for subset queries
@@ -1986,7 +2073,7 @@ function createElectricSync<T extends Row<unknown>>(
 
             // Commit the atomic swap
             stageResumeMetadata()
-            applied = commit()
+            applied = commit(abortController.signal)
 
             // Exit buffering phase by marking that we've received up-to-date
             // isBufferingInitialSync() will now return false
@@ -2000,12 +2087,12 @@ function createElectricSync<T extends Row<unknown>>(
             // Both up-to-date and subset-end trigger a commit
             if (transactionStarted) {
               stageResumeMetadata()
-              applied = commit()
+              applied = commit(abortController.signal)
               transactionStarted = false
             } else if (commitPoint === `up-to-date` && metadata) {
               begin()
               stageResumeMetadata()
-              applied = commit()
+              applied = commit(abortController.signal)
             }
           }
           const readyErrorVersion = streamErrorVersion
@@ -2068,6 +2155,7 @@ function createElectricSync<T extends Row<unknown>>(
         cleanup: () => {
           // Unsubscribe from the stream
           unsubscribeStream()
+          removeShapeAbortListener()
           // Abort the abort controller to stop the stream
           abortController.abort()
           // Reset deduplication tracking so collection can load fresh data if restarted

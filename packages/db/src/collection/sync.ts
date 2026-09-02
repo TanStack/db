@@ -5,6 +5,7 @@ import {
   NoPendingSyncTransactionCommitError,
   NoPendingSyncTransactionWriteError,
   SyncCleanupError,
+  SyncTransactionAbortedError,
   SyncTransactionAlreadyCommittedError,
   SyncTransactionAlreadyCommittedWriteError,
 } from '../errors'
@@ -1011,7 +1012,7 @@ export class CollectionSyncManager<
    */
   public loadSubset(options: LoadSubsetOptions): LoadSubsetRequestResult {
     if (options.signal?.aborted) {
-      return true
+      return Promise.reject(new SyncTransactionAbortedError())
     }
 
     // Bypass loadSubset when syncMode is 'eager'
