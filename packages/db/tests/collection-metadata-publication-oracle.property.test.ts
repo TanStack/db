@@ -410,6 +410,18 @@ async function expectMetadataCancellationOwnership(
     : stageMetadata(canceledKeys, canceledOperation)
   const canceled = canceledFirst ? first : second
   const retained = canceledFirst ? second : first
+  const expectedVirtualSnapshots = (keys: ReadonlyArray<number>) =>
+    new Map(
+      [...new Set(keys)].map((key) => [
+        key,
+        {
+          $collectionId: harness.rows.id,
+          $key: key,
+          $origin: `remote`,
+          $synced: true,
+        },
+      ]),
+    )
 
   try {
     harness.rows._state.capturePreSyncVisibleState()
@@ -418,8 +430,8 @@ async function expectMetadataCancellationOwnership(
     expect(new Set(harness.rows._state.preSyncVisibleState.keys())).toEqual(
       expectedBefore,
     )
-    expect(new Set(harness.rows._state.preSyncVirtualState.keys())).toEqual(
-      expectedBefore,
+    expect(harness.rows._state.preSyncVirtualState).toEqual(
+      expectedVirtualSnapshots([...canceledKeys, ...retainedKeys]),
     )
     const batchCountBefore = harness.batches.length
 
@@ -436,8 +448,8 @@ async function expectMetadataCancellationOwnership(
     expect(new Set(harness.rows._state.preSyncVisibleState.keys())).toEqual(
       expectedAfter,
     )
-    expect(new Set(harness.rows._state.preSyncVirtualState.keys())).toEqual(
-      expectedAfter,
+    expect(harness.rows._state.preSyncVirtualState).toEqual(
+      expectedVirtualSnapshots(retainedKeys),
     )
     expect(harness.batches).toHaveLength(batchCountBefore)
     expect(harness.rows._state.syncedMetadata).toEqual(initialMetadata)
@@ -448,6 +460,9 @@ async function expectMetadataCancellationOwnership(
     persistence.resolve()
     await heldTransaction.isPersisted.promise
     await expect(retained.receipt).resolves.toBeUndefined()
+    expect(harness.rows._state.preSyncVisibleState.size).toBe(0)
+    expect(harness.rows._state.preSyncVirtualState.size).toBe(0)
+    expect(harness.rows._state.recentlySyncedKeys.size).toBe(0)
     const expectedMetadata = new Map(initialMetadata)
     for (const key of retainedKeys) {
       if (retainedOperation.type === `set`) {
