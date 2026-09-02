@@ -222,9 +222,7 @@ describe(`sync publication reentrancy`, () => {
   it.each([`open`, `prepared`, `published`] as const)(
     `starts a second publication cycle with the first cycle %s`,
     async (firstCycleState) => {
-      const harness = createSyncHarness(
-        `publication-cycle-${firstCycleState}`,
-      )
+      const harness = createSyncHarness(`publication-cycle-${firstCycleState}`)
       const { collection } = harness
       const callbacks: Array<{
         changes: Array<string>

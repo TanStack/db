@@ -52,9 +52,7 @@ type FacadeCandidateScanScenario = {
 
 class ThrowingUpdateIndex extends BasicIndex<number> {
   updateFailure: { error: unknown } | undefined
-  buildFailure:
-    | { error: unknown; stage: `before` | `after` }
-    | undefined
+  buildFailure: { error: unknown; stage: `before` | `after` } | undefined
   buildCalls = 0
 
   override update(key: number, oldItem: unknown, newItem: unknown): void {
@@ -1574,19 +1572,18 @@ describe(`Collection-valued includes oracle`, () => {
           { id: 10, value: 2 },
           { id: 11, value: 20 },
         ])
-        const rootPublicationsAfterRecovery: Array<
-          Array<ProjectedRootChange>
-        > = [
-          [],
+        const rootPublicationsAfterRecovery: Array<Array<ProjectedRootChange>> =
           [
-            {
-              type: `update`,
-              key: 1,
-              value: { id: 1, value: 5, preservesFacade: true },
-              previousValue: { id: 1, value: 1, preservesFacade: true },
-            },
-          ],
-        ]
+            [],
+            [
+              {
+                type: `update`,
+                key: 1,
+                value: { id: 1, value: 5, preservesFacade: true },
+                previousValue: { id: 1, value: 1, preservesFacade: true },
+              },
+            ],
+          ]
         const childPublicationsAfterRecovery: Array<
           Array<ProjectedNodeChange>
         > = [

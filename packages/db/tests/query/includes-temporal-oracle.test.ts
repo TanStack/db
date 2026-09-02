@@ -877,20 +877,16 @@ async function expectDemandReactivationRetriesAfterReleaseFailure(
   }
 
   try {
-    expect(controller.setDemand(subscription, plan, new Set(keys))).toMatchObject(
-      { changed: true, empty: false },
-    )
+    expect(
+      controller.setDemand(subscription, plan, new Set(keys)),
+    ).toMatchObject({ changed: true, empty: false })
     expect(loadCount).toBe(1)
 
     const retired = controller.setDemand(subscription, plan, new Set())
     expect(retired).toMatchObject({ changed: true, empty: true })
     expect(retired.releaseFailure?.error).toBe(releaseError)
 
-    const reactivated = controller.setDemand(
-      subscription,
-      plan,
-      new Set(keys),
-    )
+    const reactivated = controller.setDemand(subscription, plan, new Set(keys))
     expect(reactivated).toMatchObject({ changed: true, empty: false })
     expect(loadCount).toBe(2)
   } finally {
@@ -1334,10 +1330,8 @@ describe(`includes temporal oracle`, () => {
     expectFailedDemandRetriesSameCoverage,
   )
 
-  it(
-    `reactivated demand retries after its prior release fails`,
-    () => expectDemandReactivationRetriesAfterReleaseFailure([1]),
-  )
+  it(`reactivated demand retries after its prior release fails`, () =>
+    expectDemandReactivationRetriesAfterReleaseFailure([1]))
 
   fcTest.prop(
     [

@@ -458,10 +458,7 @@ export class CollectionImpl<
   /** Capture mutable state before a coherent graph publication is installed. */
   public _snapshotPublicationState(
     keys: Iterable<TKey>,
-  ): CollectionPublicationStateSnapshot<
-    TOutput,
-    TKey
-  > {
+  ): CollectionPublicationStateSnapshot<TOutput, TKey> {
     return this._state.snapshotPublicationState(keys)
   }
 

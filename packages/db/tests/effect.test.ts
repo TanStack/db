@@ -2160,7 +2160,9 @@ describe(`createEffect`, () => {
       )
       let loadCount = 0
       let unloadCount = 0
-      const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+      const consoleError = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
       const issues = createCollection<Issue>({
         id: `effect-obsolete-release-issues`,
         getKey: (issue) => issue.id,

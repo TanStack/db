@@ -197,8 +197,8 @@ export abstract class BaseIndex<
   /**
    * Checks if the compare options match the index's compare options.
    * Reversing an index also reverses null placement, so opposite directions
-  * are compatible only when their requested null placement is opposite too.
-  */
+   * are compatible only when their requested null placement is opposite too.
+   */
   matchesCompareOptions(compareOptions: CompareOptions): boolean {
     const indexCompareOptions = this.compareOptions
     const indexUsesLocale = usesLocaleCollation(indexCompareOptions)
