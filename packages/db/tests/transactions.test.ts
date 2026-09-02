@@ -256,88 +256,98 @@ describe(`Transactions`, () => {
       await collection.cleanup()
     }
   })
-  it(`ignores a late persistence rejection after rollback wins`, async () => {
-    type Row = { id: number; owner: string }
-    let rejectPersistence!: (reason: unknown) => void
-    const persistence = new Promise<void>((_resolve, reject) => {
-      rejectPersistence = reject
-    })
-    const collection = createCollection<Row, number>({
-      id: `late-persistence-rejection`,
-      getKey: (item) => item.id,
-      sync: { sync: () => {} },
-    })
-    const batches: Array<Array<{ type: string; key: string | number }>> = []
-    const subscription = collection.subscribeChanges(
-      (changes) => {
-        batches.push(
-          changes.map(({ type, key }) => ({
-            type,
-            key,
-          })),
+  it.each([
+    [`Error`, () => new Error(`late persistence rejection`)],
+    [`undefined`, () => undefined],
+    [`false`, () => false],
+    [`zero`, () => 0],
+    [`NaN`, () => Number.NaN],
+    [`string`, () => `late persistence rejection`],
+    [`object`, () => ({ late: true })],
+  ] as const)(
+    `ignores a late %s persistence rejection after rollback wins`,
+    async (reasonName, createReason) => {
+      type Row = { id: number; owner: string }
+      let rejectPersistence!: (reason: unknown) => void
+      const persistence = new Promise<void>((_resolve, reject) => {
+        rejectPersistence = reject
+      })
+      const collection = createCollection<Row, number>({
+        id: `late-persistence-rejection-${reasonName}`,
+        getKey: (item) => item.id,
+        sync: { sync: () => {} },
+      })
+      const batches: Array<Array<{ type: string; key: string | number }>> = []
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          batches.push(
+            changes.map(({ type, key }) => ({
+              type,
+              key,
+            })),
+          )
+        },
+        { includeInitialState: false },
+      )
+      const first = createTransaction({
+        autoCommit: false,
+        mutationFn: () => persistence,
+      })
+      const second = createTransaction({
+        autoCommit: false,
+        mutationFn: async () => {},
+      })
+
+      try {
+        const persisted = first.isPersisted.promise.then(
+          (value) => ({ status: `fulfilled` as const, value }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
         )
-      },
-      { includeInitialState: false },
-    )
-    const first = createTransaction({
-      autoCommit: false,
-      mutationFn: () => persistence,
-    })
-    const second = createTransaction({
-      autoCommit: false,
-      mutationFn: async () => {},
-    })
+        first.mutate(() => collection.insert({ id: 1, owner: `first` }))
+        const commit = first.commit().then(
+          (value) => ({ status: `fulfilled` as const, value }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        )
 
-    try {
-      const persisted = first.isPersisted.promise.then(
-        (value) => ({ status: `fulfilled` as const, value }),
-        (reason: unknown) => ({ status: `rejected` as const, reason }),
-      )
-      first.mutate(() => collection.insert({ id: 1, owner: `first` }))
-      const commit = first.commit().then(
-        (value) => ({ status: `fulfilled` as const, value }),
-        (reason: unknown) => ({ status: `rejected` as const, reason }),
-      )
+        first.rollback()
+        second.mutate(() => collection.insert({ id: 1, owner: `second` }))
+        rejectPersistence(createReason())
 
-      first.rollback()
-      second.mutate(() => collection.insert({ id: 1, owner: `second` }))
-      const lateError = new Error(`late persistence rejection`)
-      rejectPersistence(lateError)
-
-      const commitOutcome = await commit
-      expect(commitOutcome.status).toBe(`fulfilled`)
-      if (commitOutcome.status === `fulfilled`) {
-        expect(commitOutcome.value).toBe(first)
+        const commitOutcome = await commit
+        expect(commitOutcome.status).toBe(`fulfilled`)
+        if (commitOutcome.status === `fulfilled`) {
+          expect(commitOutcome.value).toBe(first)
+        }
+        expect(await persisted).toEqual({
+          status: `rejected`,
+          reason: undefined,
+        })
+        expect(first.state).toBe(`failed`)
+        expect(first.error).toBeUndefined()
+        expect(second.state).toBe(`pending`)
+        expect(collection.get(1)).toEqual({
+          id: 1,
+          owner: `second`,
+          $collectionId: collection.id,
+          $key: 1,
+          $origin: `local`,
+          $synced: false,
+        })
+        expect(batches).toEqual([
+          [{ type: `insert`, key: 1 }],
+          [{ type: `delete`, key: 1 }],
+          [{ type: `insert`, key: 1 }],
+        ])
+      } finally {
+        rejectPersistence(new Error(`test cleanup`))
+        if (second.state === `pending`) {
+          second.rollback({ isSecondaryRollback: true })
+        }
+        subscription.unsubscribe()
+        await collection.cleanup()
       }
-      expect(await persisted).toEqual({
-        status: `rejected`,
-        reason: undefined,
-      })
-      expect(first.state).toBe(`failed`)
-      expect(first.error).toBeUndefined()
-      expect(second.state).toBe(`pending`)
-      expect(collection.get(1)).toEqual({
-        id: 1,
-        owner: `second`,
-        $collectionId: collection.id,
-        $key: 1,
-        $origin: `local`,
-        $synced: false,
-      })
-      expect(batches).toEqual([
-        [{ type: `insert`, key: 1 }],
-        [{ type: `delete`, key: 1 }],
-        [{ type: `insert`, key: 1 }],
-      ])
-    } finally {
-      rejectPersistence(new Error(`test cleanup`))
-      if (second.state === `pending`) {
-        second.rollback({ isSecondaryRollback: true })
-      }
-      subscription.unsubscribe()
-      await collection.cleanup()
-    }
-  })
+    },
+  )
   it(`keeps repeated rollback from affecting newer transactions`, async () => {
     type Row = { id: number; owner: string }
     const collection = createCollection<Row, number>({
