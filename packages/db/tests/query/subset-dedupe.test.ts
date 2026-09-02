@@ -1034,6 +1034,25 @@ describe(`createDeduplicatedLoadSubset`, () => {
       expect(removeSpy).toHaveBeenCalledOnce()
   })
 
+  it(`releases settled exact acquisition evidence when reset`, () => {
+    const deduplicated = new DeduplicatedLoadSubset({
+      loadSubset: () => true,
+    })
+    const retainedAcquisitions = () =>
+      (
+        deduplicated as unknown as {
+          exactAcquisitions: ReadonlyArray<unknown>
+        }
+      ).exactAcquisitions.length
+
+    expect(deduplicated.loadSubset({ limit: 2 })).toBe(true)
+    expect(retainedAcquisitions()).toBe(1)
+
+    deduplicated.reset()
+
+    expect(retainedAcquisitions()).toBe(0)
+  })
+
   it(`starts new work immediately after reset and protects it from old completion`, async () => {
     const releases: Array<() => void> = []
     const loadSubset = vi.fn(
