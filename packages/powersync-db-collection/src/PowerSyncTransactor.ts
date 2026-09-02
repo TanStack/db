@@ -322,7 +322,7 @@ export class PowerSyncTransactor {
       if (typeof mutation.metadata != `undefined`) {
         // Log a warning if metadata is provided but not tracked.
         this.database.logger.log({
-          level: LogLevels.info,
+          level: LogLevels.warn,
           message: `Metadata provided for collection ${mutation.collection.id} but the PowerSync table does not track metadata. The PowerSync table should be configured with trackMetadata: true.`,
         })
       }

@@ -200,7 +200,7 @@ describePowerSync(`PowerSync Integration`, () => {
       await collection.delete(id).isPersisted.promise
 
       // There should be a crud entries for this
-      const crudEntries = await db.getAll<{ op: 'string' }>(`
+      const crudEntries = await db.getAll<{ op: string }>(`
         SELECT data ->> 'op' AS op FROM ps_crud ORDER BY id`)
 
       expect(crudEntries.length).toBe(6)
