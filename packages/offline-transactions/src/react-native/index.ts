@@ -3,6 +3,7 @@ export {
   // Types
   type OfflineTransaction,
   type OfflineConfig,
+  type ConfirmWriteContext,
   type OfflineMode,
   type StorageAdapter,
   type StorageDiagnostic,

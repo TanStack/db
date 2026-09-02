@@ -23,7 +23,7 @@ export class OfflineTransaction {
     persistTransaction: (tx: OfflineTransactionType) => Promise<void>,
     executor: any,
   ) {
-    this.offlineId = safeRandomUUID()
+    this.offlineId = options.id ?? safeRandomUUID()
     this.mutationFnName = options.mutationFnName
     this.autoCommit = options.autoCommit ?? true
     this.idempotencyKey = options.idempotencyKey ?? safeRandomUUID()
