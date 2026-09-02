@@ -149,6 +149,12 @@ export class CollectionLifecycleManager<
     if (this.status === `loading` || this.status === `error`) {
       this.syncError = undefined
       this.setStatus(`ready`, true)
+
+      // A status listener can synchronously supersede this transition, for
+      // example by cleaning up the Collection. Do not publish ready effects
+      // for a snapshot that is no longer ready.
+      if ((this.status as CollectionStatus) !== `ready`) return undefined
+
       const readyEffects: Array<() => void> = []
 
       // Call any registered first ready callbacks (only on first time becoming ready)

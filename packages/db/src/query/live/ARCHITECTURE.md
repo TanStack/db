@@ -1139,6 +1139,11 @@ sync error and emits a dependent-ready event, but does not start a second
 first-ready cycle. `idle` and `cleaned-up` cannot transition directly to
 `ready`; sync must establish `loading` first.
 
+The `status:ready` event precedes first-ready effects. If one of its listeners
+synchronously moves the Collection away from `ready`, that newer lifecycle
+transition supersedes the current one. Core does not resume first-ready effects
+or emit a dependent-ready event for the superseded snapshot.
+
 Because the ready snapshot is already public, a listener failure also cannot
 discard graph work queued by an earlier listener. Core flushes that work before
 it rethrows the first listener failure. If readiness is nested inside an

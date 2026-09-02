@@ -637,6 +637,36 @@ describe(`Collection Lifecycle Management`, () => {
       },
     )
 
+    it(`does not resume ready effects after a status listener cleans up`, () => {
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `ready-listener-cleanup-test`,
+        getKey: (item) => item.id,
+        startSync: false,
+        sync: { sync: () => {} },
+      })
+      const readyEvent = vi.spyOn(collection._changes, `emitEmptyReadyEvent`)
+      const firstReadyStatuses: Array<string> = []
+      collection.onFirstReady(() => {
+        firstReadyStatuses.push(collection.status)
+      })
+      collection.on(`status:ready`, () => {
+        void collection.cleanup()
+      })
+      collection._lifecycle.setStatus(`loading`)
+
+      collection._lifecycle.markReady()
+
+      expect(collection.status).toBe(`cleaned-up`)
+      expect(collection._lifecycle.hasBeenReady).toBe(false)
+      expect(firstReadyStatuses).toEqual([`ready`])
+      expect(readyEvent).not.toHaveBeenCalled()
+
+      const laterFirstReady = vi.fn()
+      const removeLater = collection.onFirstReady(laterFirstReady)
+      expect(laterFirstReady).not.toHaveBeenCalled()
+      removeLater()
+    })
+
     it(`attempts every first-ready effect before rethrowing the first failure`, async () => {
       let markReadyCallback: (() => void) | undefined
       const readyBatches: Array<Array<unknown>> = []
