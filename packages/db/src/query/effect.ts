@@ -1013,7 +1013,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       const missingResultRows = orderByInfo.dataNeeded()
       if (
         (!orderByInfo.refillFromResultDeficit || missingResultRows === 0) &&
-        subscription.hasOrderedCoverageForActiveWindow
+        subscription.hasOrderedResultForActiveWindow
       ) {
         continue
       }
@@ -1028,7 +1028,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
           subscription.orderedRetainedWindowSize + missingResultRows,
         )
       }
-      if (subscription.hasOrderedCoverageForActiveWindow) {
+      if (subscription.hasOrderedResultForActiveWindow) {
         continue
       }
 
@@ -1089,7 +1089,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       subscription.orderedRetainedWindowSize,
       subscription.orderedBoundaryKey,
     )
-    if (!cursor) return // Duplicate request — skip
+    if (!cursor) {
+      subscription.settleOrderedResultAfterNoProgress()
+      return
+    }
 
     this.lastLoadRequestKey.set(sourceId, cursor.loadRequestKey)
 

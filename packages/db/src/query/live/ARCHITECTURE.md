@@ -772,11 +772,14 @@ continuation after all replacement acquisitions have settled.
 
 An outcome-free completion (`true` or `Promise<void>`) supplies no reusable row
 provenance, source extent, or CoverageFact. Its exact request has still settled,
-so the owning subscription may admit only the current local prefix. A short
-page remains uncovered and triggers another pass. The admitted local boundary
-may distinguish those immediate passes, but it is scheduling state, not a
-transport cursor. If the window later grows, core refreshes the required prefix
-from the start instead of continuing from those rows as a cursor boundary.
+so the owning subscription may admit and publish only the current local prefix,
+even when that prefix is short. Core keeps loading while the local boundary
+advances, then treats a repeated request with no new progress as caller-locally
+satisfied. This stops work only for that exact active window. It is not
+coverage: it cannot establish source extent, satisfy a replacement epoch, or
+become a transport cursor. If the window later grows, core refreshes the
+required prefix from the start. An explicit continuing outcome is not
+outcome-free and cannot use this fallback.
 
 A bare child query is a Collection-valued include. It exposes one stable public
 Collection facade per active bucket in that edge:
@@ -1422,6 +1425,7 @@ create recursive Collection machinery.
 | Applied coverage publication through the Collection sync boundary            | `packages/db/tests/load-subset-outcome.test.ts`                             |
 | Scheduled acquisition, release retry, and stale settlement                   | `packages/db/tests/query/load-subset-lifecycle-oracle.property.test.ts`     |
 | End-to-end demand, multi-source ordered continuation, and outcome boundaries | `packages/db/tests/query/load-subset-full-flow-oracle.property.test.ts`     |
+| Framework paging, final partial pages, and peek-ahead compatibility          | `packages/db/tests/conformance/infinite-suite.ts`                           |
 | Shared subset acquisition, readiness, receipt, and replay interpreter        | `packages/db/tests/query/load-subset-refinement-model.property.test.ts`     |
 | Production-boundary refinement drivers                                       | `packages/db/tests/query/load-subset-*-refinement-oracle.test.ts`           |
 | Adapter final-owner release and remount transport                            | Electric `electric-live-query.test.ts`; PowerSync `on-demand-sync.test.ts`  |

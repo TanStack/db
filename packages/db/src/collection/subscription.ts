@@ -1305,6 +1305,18 @@ export class CollectionSubscription
     )
   }
 
+  get hasOrderedResultForActiveWindow(): boolean {
+    if (!this.hasActiveOrderedDemand() || !this.orderedWindow) return false
+    return this.retainedOrderedPublication
+      ? this.orderedWindow.coversActiveWindow
+      : this.orderedWindow.satisfiesActiveWindow
+  }
+
+  settleOrderedResultAfterNoProgress(): boolean {
+    if (this.retainedOrderedPublication || !this.orderedWindow) return false
+    return this.orderedWindow.settleLocalRequestAfterNoProgress()
+  }
+
   get orderedBoundaryRow(): object | undefined {
     if (!this.hasActiveOrderedDemand()) return undefined
     const boundary = this.retainedOrderedPublication
@@ -2492,7 +2504,7 @@ export class CollectionSubscription
 
     if (changes.length > 0) this.callback(changes)
 
-    if (!retainedPublication && this.orderedWindow.coversActiveWindow) {
+    if (!retainedPublication && this.orderedWindow.satisfiesActiveWindow) {
       // No adapter request was made. Use an impossible zero-window demand so
       // direct tracking can finish without claiming another demand's outcome.
       onLoadSubsetResult?.(true, {
@@ -2645,7 +2657,11 @@ export class CollectionSubscription
       const rowKeys = outcome?.appliedRowKeys
       const exhausted = outcome?.extent === `exhausted`
 
-      if (outcome !== undefined && rowKeys === undefined && !exhausted) {
+      if (
+        outcome?.extent === `unknown` &&
+        rowKeys === undefined &&
+        !exhausted
+      ) {
         window.recordLocalRequestSatisfaction(ordered.requestedPrefix)
       } else if (!ordered.hadBoundary && !ordered.requiresUnboundedRefinement) {
         window.recordInitialCoverage(rowKeys, exhausted)

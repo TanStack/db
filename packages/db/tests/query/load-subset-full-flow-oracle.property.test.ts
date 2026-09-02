@@ -39,7 +39,11 @@ import {
   readOracleRunConfig,
 } from '../oracle-config.js'
 import type { InitialQueryBuilder } from '../../src/query/builder/index.js'
-import type { LoadSubsetOptions, WritableDeep } from '../../src/types.js'
+import type {
+  LoadSubsetOptions,
+  LoadSubsetResult,
+  WritableDeep,
+} from '../../src/types.js'
 import type {
   LoadSubsetFullFlowEvent,
   OrderedSourceStep,
@@ -4392,12 +4396,99 @@ it.each([`sync`, `async`] as const)(
       expect(demands).toHaveLength(2)
       expect(demands[1]).toMatchObject({ limit: 2, offset: 0 })
       expect(demands[1]?.cursor).toBeUndefined()
+
+      await live.utils.setWindow({ offset: 0, limit: 4 })
+
+      expect(live.toArray.map(({ id }) => id)).toEqual([1, 2, 3])
+      expect(live.status).toBe(`ready`)
+      expect(demands).toHaveLength(4)
+      expect(demands[2]).toMatchObject({ limit: 4, offset: 0 })
+      expect(demands[2]?.cursor).toBeUndefined()
+      expect(demands[3]).toMatchObject({ limit: 4, offset: 0 })
+      expect(demands[3]?.cursor).toBeUndefined()
+      expect(source._sync.getLoadSubsetCoverage()).toEqual([])
+
+      await live.utils.setWindow({ offset: 0, limit: 5 })
+
+      expect(live.toArray.map(({ id }) => id)).toEqual([1, 2, 3])
+      expect(live.status).toBe(`ready`)
+      expect(demands).toHaveLength(5)
+      expect(demands[4]).toMatchObject({ limit: 5, offset: 0 })
+      expect(demands[4]?.cursor).toBeUndefined()
+      expect(source._sync.getLoadSubsetCoverage()).toEqual([])
     } finally {
       await live.cleanup()
       await source.cleanup()
     }
   },
 )
+
+it(`does not treat explicit continuation as outcome-free satisfaction`, async () => {
+  type Row = { id: number; rank: number }
+  const pending: Array<ReturnType<typeof createDeferred<LoadSubsetResult>>> = []
+  const calls: Array<LoadSubsetOptions> = []
+  const source = createCollection<Row>({
+    id: `full-flow-explicit-continuation-source`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        markReady()
+        return {
+          loadSubset: (options) => {
+            calls.push(options)
+            if (calls.length === 1) {
+              begin()
+              write({ type: `insert`, value: { id: 1, rank: 1 } })
+              commit()
+            }
+            const deferred = createDeferred<LoadSubsetResult>()
+            pending.push(deferred)
+            return deferred.promise
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection({
+    id: `full-flow-explicit-continuation-live`,
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(2),
+    startSync: true,
+  })
+  const preload = live.preload()
+
+  try {
+    expect(pending).toHaveLength(1)
+    pending[0]!.resolve({ hasMore: true })
+    await flushPromises()
+
+    expect(pending).toHaveLength(2)
+    expect(calls[1]?.limit).toBeUndefined()
+    const [subscription] = Object.values(
+      live.utils[LIVE_QUERY_INTERNAL].getBuilder().subscriptions,
+    )
+    expect(subscription?.hasOrderedResultForActiveWindow).toBe(false)
+    expect(source._sync.getLoadSubsetCoverage()).toEqual([])
+
+    pending[1]!.resolve({ hasMore: false, appliedRowKeys: [] })
+    await preload
+    expect(live.toArray.map(({ id }) => id)).toEqual([1])
+  } finally {
+    for (const request of pending) {
+      request.resolve({ hasMore: false, appliedRowKeys: [] })
+    }
+    await Promise.all([preload.catch(() => undefined), live.cleanup()])
+    await source.cleanup()
+  }
+})
 
 it.each([
   {

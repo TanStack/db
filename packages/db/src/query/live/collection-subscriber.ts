@@ -514,7 +514,7 @@ export class CollectionSubscriber<
     const missingResultRows = refillFromResultDeficit ? dataNeeded() : 0
     if (
       missingResultRows === 0 &&
-      subscription.hasOrderedCoverageForActiveWindow
+      subscription.hasOrderedResultForActiveWindow
     ) {
       return true
     }
@@ -542,7 +542,7 @@ export class CollectionSubscriber<
         subscription.orderedRetainedWindowSize + missingResultRows,
       )
     }
-    if (subscription.hasOrderedCoverageForActiveWindow) {
+    if (subscription.hasOrderedResultForActiveWindow) {
       return true
     }
 
@@ -657,6 +657,7 @@ export class CollectionSubscriber<
       subscription.orderedBoundaryKey,
     )
     if (!cursor) {
+      if (subscription.settleOrderedResultAfterNoProgress()) return
       if (this.lastNoProgressRequestKey !== this.lastLoadRequestKey) {
         this.lastNoProgressRequestKey = this.lastLoadRequestKey
         this.collectionConfigBuilder.recordSubsetError(

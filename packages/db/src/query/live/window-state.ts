@@ -45,6 +45,8 @@ export class WindowState<
   private hasFullCoverage = false
   private needsFullRefinement = false
   private needsPrefixRefresh = false
+  private locallySettledSize = 0
+  private hasOutcomeFreeSettlement = false
   private hasInitialCoverage = false
   private hasUnsettledInitialMutation = false
   private revision = 0
@@ -101,6 +103,11 @@ export class WindowState<
     return this.hasFullCoverage || this.coveredSize >= this.activeSize
   }
 
+  /** Whether this caller may stop loading its exact active window. */
+  get satisfiesActiveWindow(): boolean {
+    return this.coversActiveWindow || this.locallySettledSize >= this.activeSize
+  }
+
   get coveredPrefixSize(): number {
     return this.coveredSize
   }
@@ -133,6 +140,8 @@ export class WindowState<
     this.hasFullCoverage = false
     this.needsFullRefinement = false
     this.needsPrefixRefresh = false
+    this.locallySettledSize = 0
+    this.hasOutcomeFreeSettlement = false
     this.hasInitialCoverage = false
     this.hasUnsettledInitialMutation = false
     this.candidateKeys.clear()
@@ -144,6 +153,8 @@ export class WindowState<
     rowKeys: ReadonlyArray<TKey> | undefined,
     exhausted: boolean,
   ): void {
+    this.locallySettledSize = 0
+    this.hasOutcomeFreeSettlement = false
     this.hasInitialCoverage = true
     if (exhausted) {
       this.hasUnsettledInitialMutation = false
@@ -176,6 +187,8 @@ export class WindowState<
     requestedPrefix: number,
     requestRevision: number,
   ): void {
+    this.locallySettledSize = 0
+    this.hasOutcomeFreeSettlement = false
     this.hasInitialCoverage = true
     if (exhausted) {
       this.establishFullCoverage()
@@ -222,6 +235,7 @@ export class WindowState<
    * proof.
    */
   recordLocalRequestSatisfaction(requestedPrefix: number): void {
+    this.hasOutcomeFreeSettlement = true
     this.candidateKeys.clear()
     this.provenanceKeys.clear()
     this.admittedKeys.clear()
@@ -229,11 +243,21 @@ export class WindowState<
       this.admittedKeys.add(change.key)
     }
     // Outcome-free completions (`true` and Promise<void>) do not prove
-    // exhaustion. Only count rows that are now present, so a short synchronous
-    // page can request another pass until the active prefix is actually filled.
+    // exhaustion. Keep their exact settled request separate from the applied
+    // row count so this caller can publish without creating reusable evidence.
     this.coveredSize = Math.min(requestedPrefix, this.admittedKeys.size)
+    if (this.admittedKeys.size >= requestedPrefix) {
+      this.locallySettledSize = requestedPrefix
+    }
     this.needsFullRefinement = false
     this.needsPrefixRefresh = true
+  }
+
+  /** Stop a legacy outcome-free request only after its boundary stops moving. */
+  settleLocalRequestAfterNoProgress(): boolean {
+    if (!this.hasOutcomeFreeSettlement) return false
+    this.locallySettledSize = this.activeSize
+    return true
   }
 
   admitChanges(changes: ReadonlyArray<ChangeMessage<TRow, TKey>>): void {
@@ -242,7 +266,7 @@ export class WindowState<
     // Initial applied rows remain candidates until their boundary equivalence
     // class is refined. Live source changes during that request still belong
     // to the same ordered prefix and must survive its later settlement.
-    if (this.admittedKeys.size === 0) {
+    if (this.admittedKeys.size === 0 && this.locallySettledSize === 0) {
       if (this.hasInitialCoverage) {
         if (this.updateKnownPrefix(this.candidateKeys, changes)) {
           this.revision++
@@ -281,6 +305,8 @@ export class WindowState<
       this.provenanceKeys.clear()
       this.needsFullRefinement = false
       this.needsPrefixRefresh = true
+      this.locallySettledSize = 0
+      this.hasOutcomeFreeSettlement = false
     }
   }
 
@@ -397,6 +423,8 @@ export class WindowState<
     this.hasFullCoverage = true
     this.needsFullRefinement = false
     this.needsPrefixRefresh = false
+    this.locallySettledSize = 0
+    this.hasOutcomeFreeSettlement = false
     this.coveredSize = Number.POSITIVE_INFINITY
     this.candidateKeys.clear()
     this.provenanceKeys.clear()
