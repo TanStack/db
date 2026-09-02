@@ -549,6 +549,7 @@ describe(`Collection Lifecycle Management`, () => {
       } finally {
         subscription.unsubscribe()
         await collection.cleanup()
+        expect(calls).toEqual([`first`, `nested`, `later`, `after`])
       }
     })
 
