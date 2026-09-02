@@ -479,16 +479,27 @@ describe(`live query scheduler`, () => {
         changes: Array<{
           type: string
           key: string | number
-          value: User
-          previousValue: User | undefined
+          value: UserWithVirtual
+          previousValue: UserWithVirtual | undefined
         }>
-        rows: Array<User>
+        rows: Array<UserWithVirtual>
       }
       const sourceObservations: Array<UserObservation> = []
       const dependentObservations: Array<UserObservation> = []
-      const snapshotUser = ({ id, name: userName }: User): User => ({
+      const snapshotUser = ({
         id,
         name: userName,
+        $collectionId,
+        $key,
+        $origin,
+        $synced,
+      }: UserWithVirtual): UserWithVirtual => ({
+        id,
+        name: userName,
+        $collectionId,
+        $key,
+        $origin,
+        $synced,
       })
       const source = createCollection<User>({
         id: `falsy-row-listener-${name.replaceAll(` `, `-`)}`,
@@ -572,19 +583,33 @@ describe(`live query scheduler`, () => {
 
         expect(didThrow).toBe(true)
         expect(Object.is(thrown, failure)).toBe(true)
-        const expectedObservation: UserObservation = {
-          changes: [
-            {
-              type: `insert`,
-              key: 1,
-              value: { id: 1, name: `Ada` },
-              previousValue: undefined,
-            },
-          ],
-          rows: [{ id: 1, name: `Ada` }],
+        const expectedObservation = (collectionId: string): UserObservation => {
+          const row: UserWithVirtual = {
+            id: 1,
+            name: `Ada`,
+            $collectionId: collectionId,
+            $key: 1,
+            $origin: `remote`,
+            $synced: true,
+          }
+          return {
+            changes: [
+              {
+                type: `insert`,
+                key: 1,
+                value: row,
+                previousValue: undefined,
+              },
+            ],
+            rows: [row],
+          }
         }
-        expect(sourceObservations).toEqual([expectedObservation])
-        expect(dependentObservations).toEqual([expectedObservation])
+        const expectedDependent = expectedObservation(live.id)
+        expect(sourceObservations).toEqual([expectedObservation(source.id)])
+        expect(dependentObservations).toEqual([expectedDependent])
+        expect([...live.state.values()].map(snapshotUser)).toEqual(
+          expectedDependent.rows,
+        )
       } finally {
         throwingSubscription.unsubscribe()
         laterSubscription.unsubscribe()
