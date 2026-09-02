@@ -1144,6 +1144,11 @@ synchronously moves the Collection away from `ready`, that newer lifecycle
 transition supersedes the current one. Core does not resume first-ready effects
 or emit a dependent-ready event for the superseded snapshot.
 
+A ready-effect failure does not undo effects already attempted in that cycle.
+After cleanup, the next sync is a new first-ready cycle with a fresh preload
+promise. It runs only callbacks registered for that new cycle; completed
+callbacks from the prior cycle are not replayed.
+
 Because the ready snapshot is already public, a listener failure also cannot
 discard graph work queued by an earlier listener. Core flushes that work before
 it rethrows the first listener failure. If readiness is nested inside an

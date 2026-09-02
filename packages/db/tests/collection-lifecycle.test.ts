@@ -667,6 +667,66 @@ describe(`Collection Lifecycle Management`, () => {
       removeLater()
     })
 
+    it(`starts a fresh first-ready cycle after cleanup of a failed ready effect`, async () => {
+      const readyCallbacks: Array<() => void> = []
+      const firstFailure = new Error(`first ready cycle failed exactly`)
+      const trace: Array<string> = []
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `ready-effect-restart-test`,
+        getKey: (item) => item.id,
+        startSync: false,
+        sync: {
+          sync: ({ markReady }) => {
+            readyCallbacks.push(markReady)
+          },
+        },
+      })
+      const readyEvent = vi.spyOn(collection._changes, `emitEmptyReadyEvent`)
+      collection.onFirstReady(() => {
+        trace.push(`first failure:${collection.status}`)
+        throw firstFailure
+      })
+      collection.onFirstReady(() => {
+        trace.push(`first later:${collection.status}`)
+      })
+      const firstPreload = collection.preload()
+
+      let thrown: unknown
+      try {
+        readyCallbacks[0]!()
+      } catch (error) {
+        thrown = error
+      }
+      expect(thrown).toBe(firstFailure)
+      await expect(firstPreload).resolves.toBeUndefined()
+      expect(trace).toEqual([`first failure:ready`, `first later:ready`])
+      expect(readyEvent).toHaveBeenCalledOnce()
+
+      await collection.cleanup()
+      expect(collection.status).toBe(`cleaned-up`)
+      expect(collection._lifecycle.hasBeenReady).toBe(false)
+
+      collection.onFirstReady(() => {
+        trace.push(`second:${collection.status}`)
+      })
+      expect(trace).toEqual([`first failure:ready`, `first later:ready`])
+
+      const secondPreload = collection.preload()
+      expect(secondPreload).not.toBe(firstPreload)
+      expect(readyCallbacks).toHaveLength(2)
+      readyCallbacks[1]!()
+      await expect(secondPreload).resolves.toBeUndefined()
+
+      expect(trace).toEqual([
+        `first failure:ready`,
+        `first later:ready`,
+        `second:ready`,
+      ])
+      expect(readyEvent).toHaveBeenCalledTimes(2)
+
+      await collection.cleanup()
+    })
+
     it(`attempts every first-ready effect before rethrowing the first failure`, async () => {
       let markReadyCallback: (() => void) | undefined
       const readyBatches: Array<Array<unknown>> = []
