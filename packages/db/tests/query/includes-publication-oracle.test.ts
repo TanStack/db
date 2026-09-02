@@ -13,6 +13,7 @@ import { runTrace } from '../trace-runner.js'
 import { oraclePropertyOptions } from '../oracle-config.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
+import type { Collection } from '../../src/collection/index.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
 import type { SyncConfig } from '../../src/types.js'
 
@@ -43,6 +44,7 @@ type Q2Shape = `passThrough` | `where` | `orderBy` | `select`
 type Q1Shape = `direct` | `joined`
 type PendingPublicationOperation = `insert` | `update` | `delete`
 type PendingPublicationDepth = `direct` | `layered`
+type PendingPublicationShape = `passThrough` | `orderBy` | `select`
 type SourceConfirmationOperation = `insert` | `update` | `delete`
 type SourceConfirmationInterleaving =
   | `handlerEcho`
@@ -420,11 +422,12 @@ const q1Shapes = [`direct`, `joined`] as const
 
 const pendingPublicationOperations = [`insert`, `update`, `delete`] as const
 const pendingPublicationDepths = [`direct`, `layered`] as const
+const pendingPublicationShapes = [`passThrough`, `orderBy`, `select`] as const
 
 const optimisticExistingRow: PendingPublicationRow = { id: 1, value: 10 }
 const sourceExistingRow: PendingPublicationRow = { id: 2, value: 20 }
 const optimisticInsertedRow: PendingPublicationRow = { id: 3, value: 30 }
-const sourceInsertedRow: PendingPublicationRow = { id: 4, value: 40 }
+const sourceInsertedRow: PendingPublicationRow = { id: 4, value: 15 }
 
 function pendingOperationRow(
   operation: PendingPublicationOperation,
@@ -437,7 +440,7 @@ function pendingOperationRow(
   }
 
   if (operation === `insert`) return { ...sourceInsertedRow }
-  if (operation === `update`) return { ...sourceExistingRow, value: 21 }
+  if (operation === `update`) return { ...sourceExistingRow, value: 5 }
   return { ...sourceExistingRow }
 }
 
@@ -452,10 +455,63 @@ function applyPendingOperation(
 
 function expectedPendingRows(
   rows: ReadonlyMap<number, PendingPublicationRow>,
+  shape: PendingPublicationShape,
 ): Array<PendingPublicationRow> {
   return [...rows.values()]
     .map((row) => ({ ...row }))
-    .sort((left, right) => left.id - right.id)
+    .sort((left, right) =>
+      shape === `orderBy`
+        ? left.value - right.value || left.id - right.id
+        : left.id - right.id,
+    )
+}
+
+function createPendingPublicationQuery(
+  source: Collection<PendingPublicationRow, number>,
+  shape: PendingPublicationShape,
+) {
+  return createLiveQueryCollection({
+    id: `pending-publication-${shape}-${nextCollectionId++}`,
+    query: (query) => {
+      const rows = query.from({ row: source })
+      if (shape === `orderBy`) {
+        return rows.orderBy(({ row }) => row.value)
+      }
+      if (shape === `select`) {
+        return rows.select(({ row }) => ({ id: row.id, value: row.value }))
+      }
+      return rows
+    },
+    getKey: (row) => row.id,
+  })
+}
+
+function observePendingPublication(
+  collection: Collection<PendingPublicationRow, number>,
+  shape: PendingPublicationShape,
+) {
+  const batches: Array<
+    Array<{ type: `insert` | `update` | `delete`; key: number }>
+  > = []
+  const callbackSnapshots: Array<Array<PendingPublicationRow>> = []
+  const currentRows = () => {
+    const rows = collection.toArray.map((row) => ({
+      id: row.id,
+      value: row.value,
+    }))
+    return shape === `orderBy`
+      ? rows
+      : rows.sort((left, right) => left.id - right.id)
+  }
+  const subscription = collection.subscribeChanges(
+    (changes) => {
+      batches.push(changes.map(({ type, key }) => ({ type, key: Number(key) })))
+      callbackSnapshots.push(currentRows())
+    },
+    { includeInitialState: false },
+  )
+
+  return { batches, callbackSnapshots, currentRows, subscription }
 }
 
 function inversePendingOperation(
@@ -470,6 +526,7 @@ async function expectSourcePublicationDuringPendingMutation(
   optimisticOperation: PendingPublicationOperation,
   sourceOperation: PendingPublicationOperation,
   depth: PendingPublicationDepth,
+  shape: PendingPublicationShape,
   sameKey = false,
 ): Promise<void> {
   const initialRows = [optimisticExistingRow, sourceExistingRow]
@@ -477,45 +534,15 @@ async function expectSourcePublicationDuringPendingMutation(
     `pending-publication-source`,
     initialRows,
   )
-  const q1 = createLiveQueryCollection({
-    id: `pending-publication-q1-${nextCollectionId++}`,
-    query: (q) =>
-      q.from({ row: source.collection }).select(({ row }) => ({
-        id: row.id,
-        value: row.value,
-      })),
-    getKey: (row) => row.id,
-  })
-  const q2 = createLiveQueryCollection({
-    id: `pending-publication-q2-${nextCollectionId++}`,
-    query: (q) =>
-      q.from({ row: q1 }).select(({ row }) => ({
-        id: row.id,
-        value: row.value,
-      })),
-    getKey: (row) => row.id,
-  })
+  const q1 = createPendingPublicationQuery(source.collection, shape)
+  const q2 = createPendingPublicationQuery(q1, shape)
   const target = depth === `direct` ? q1 : q2
   const persistence = createDeferred<void>()
-  const observedBatches: Array<
-    Array<{ type: `insert` | `update` | `delete`; key: number }>
-  > = []
-  const callbackSnapshots: Array<Array<PendingPublicationRow>> = []
-  const currentRows = () =>
-    target.toArray
-      .map((row) => ({ id: row.id, value: row.value }))
-      .sort((left, right) => left.id - right.id)
 
   await target.preload()
-  const subscription = target.subscribeChanges(
-    (changes) => {
-      observedBatches.push(
-        changes.map(({ type, key }) => ({ type, key: Number(key) })),
-      )
-      callbackSnapshots.push(currentRows())
-    },
-    { includeInitialState: false },
-  )
+  const terminal = observePendingPublication(target, shape)
+  const intermediate =
+    depth === `layered` ? observePendingPublication(q1, shape) : undefined
 
   const optimisticRow = pendingOperationRow(optimisticOperation, `optimistic`)
   const sourceRow = sameKey
@@ -546,11 +573,25 @@ async function expectSourcePublicationDuringPendingMutation(
   applyPendingOperation(afterOptimistic, optimisticOperation, optimisticRow)
 
   try {
-    expect(observedBatches).toEqual([
+    expect(terminal.batches).toEqual([
       [{ type: optimisticOperation, key: optimisticRow.id }],
     ])
-    expect(callbackSnapshots).toEqual([expectedPendingRows(afterOptimistic)])
-    expect(currentRows()).toEqual(expectedPendingRows(afterOptimistic))
+    expect(terminal.callbackSnapshots).toEqual([
+      expectedPendingRows(afterOptimistic, shape),
+    ])
+    expect(terminal.currentRows()).toEqual(
+      expectedPendingRows(afterOptimistic, shape),
+    )
+    if (intermediate) {
+      expect(intermediate.batches).toEqual([])
+      expect(intermediate.callbackSnapshots).toEqual([])
+      expect(intermediate.currentRows()).toEqual(
+        expectedPendingRows(
+          new Map(initialRows.map((row) => [row.id, row] as const)),
+          shape,
+        ),
+      )
+    }
 
     source.write(sourceOperation, sourceRow)
     const afterSource = new Map(
@@ -560,22 +601,38 @@ async function expectSourcePublicationDuringPendingMutation(
     const whilePending = new Map(afterSource)
     applyPendingOperation(whilePending, optimisticOperation, optimisticRow)
 
+    if (intermediate) {
+      expect(intermediate.batches).toEqual([
+        [{ type: sourceOperation, key: sourceRow.id }],
+      ])
+      expect(intermediate.callbackSnapshots).toEqual([
+        expectedPendingRows(afterSource, shape),
+      ])
+      expect(intermediate.currentRows()).toEqual(
+        expectedPendingRows(afterSource, shape),
+      )
+    }
+
     if (sameKey) {
-      expect(observedBatches).toEqual([
+      expect(terminal.batches).toEqual([
         [{ type: optimisticOperation, key: optimisticRow.id }],
       ])
-      expect(callbackSnapshots).toEqual([expectedPendingRows(whilePending)])
+      expect(terminal.callbackSnapshots).toEqual([
+        expectedPendingRows(whilePending, shape),
+      ])
     } else {
-      expect(observedBatches).toEqual([
+      expect(terminal.batches).toEqual([
         [{ type: optimisticOperation, key: optimisticRow.id }],
         [{ type: sourceOperation, key: sourceRow.id }],
       ])
-      expect(callbackSnapshots).toEqual([
-        expectedPendingRows(afterOptimistic),
-        expectedPendingRows(whilePending),
+      expect(terminal.callbackSnapshots).toEqual([
+        expectedPendingRows(afterOptimistic, shape),
+        expectedPendingRows(whilePending, shape),
       ])
     }
-    expect(currentRows()).toEqual(expectedPendingRows(whilePending))
+    expect(terminal.currentRows()).toEqual(
+      expectedPendingRows(whilePending, shape),
+    )
 
     persistence.resolve()
     await transaction.isPersisted.promise
@@ -586,16 +643,18 @@ async function expectSourcePublicationDuringPendingMutation(
         optimisticOperation === `delete`
           ? []
           : [[{ type: `update` as const, key: optimisticRow.id }]]
-      expect(observedBatches).toEqual([
+      expect(terminal.batches).toEqual([
         [{ type: optimisticOperation, key: optimisticRow.id }],
         ...confirmationBatches,
       ])
-      expect(callbackSnapshots).toEqual([
-        expectedPendingRows(afterSource),
-        ...confirmationBatches.map(() => expectedPendingRows(afterSource)),
+      expect(terminal.callbackSnapshots).toEqual([
+        expectedPendingRows(afterSource, shape),
+        ...confirmationBatches.map(() =>
+          expectedPendingRows(afterSource, shape),
+        ),
       ])
     } else {
-      expect(observedBatches).toEqual([
+      expect(terminal.batches).toEqual([
         [{ type: optimisticOperation, key: optimisticRow.id }],
         [{ type: sourceOperation, key: sourceRow.id }],
         [
@@ -605,17 +664,31 @@ async function expectSourcePublicationDuringPendingMutation(
           },
         ],
       ])
-      expect(callbackSnapshots).toEqual([
-        expectedPendingRows(afterOptimistic),
-        expectedPendingRows(whilePending),
-        expectedPendingRows(afterSource),
+      expect(terminal.callbackSnapshots).toEqual([
+        expectedPendingRows(afterOptimistic, shape),
+        expectedPendingRows(whilePending, shape),
+        expectedPendingRows(afterSource, shape),
       ])
     }
-    expect(currentRows()).toEqual(expectedPendingRows(afterSource))
+    expect(terminal.currentRows()).toEqual(
+      expectedPendingRows(afterSource, shape),
+    )
+    if (intermediate) {
+      expect(intermediate.batches).toEqual([
+        [{ type: sourceOperation, key: sourceRow.id }],
+      ])
+      expect(intermediate.callbackSnapshots).toEqual([
+        expectedPendingRows(afterSource, shape),
+      ])
+      expect(intermediate.currentRows()).toEqual(
+        expectedPendingRows(afterSource, shape),
+      )
+    }
   } finally {
     persistence.resolve()
     await transaction.isPersisted.promise.catch(() => undefined)
-    subscription.unsubscribe()
+    intermediate?.subscription.unsubscribe()
+    terminal.subscription.unsubscribe()
     await q2.cleanup()
     await q1.cleanup()
     await source.collection.cleanup()
@@ -1053,25 +1126,29 @@ describe(`source publication across pending derived mutations`, () => {
   }
 
   for (const depth of pendingPublicationDepths) {
-    for (const optimisticOperation of pendingPublicationOperations) {
-      for (const sourceOperation of pendingPublicationOperations) {
-        it(`publishes a disjoint source ${sourceOperation} through a ${depth} query while an optimistic ${optimisticOperation} persists`, async () => {
+    for (const shape of pendingPublicationShapes) {
+      for (const optimisticOperation of pendingPublicationOperations) {
+        for (const sourceOperation of pendingPublicationOperations) {
+          it(`publishes a disjoint source ${sourceOperation} through a ${depth} ${shape} query while an optimistic ${optimisticOperation} persists`, async () => {
+            await expectSourcePublicationDuringPendingMutation(
+              optimisticOperation,
+              sourceOperation,
+              depth,
+              shape,
+            )
+          })
+        }
+
+        it(`retains a same-key source ${optimisticOperation} through a ${depth} ${shape} query while its optimistic confirmation persists`, async () => {
           await expectSourcePublicationDuringPendingMutation(
             optimisticOperation,
-            sourceOperation,
+            optimisticOperation,
             depth,
+            shape,
+            true,
           )
         })
       }
-
-      it(`retains a same-key source ${optimisticOperation} through a ${depth} query while its optimistic confirmation persists`, async () => {
-        await expectSourcePublicationDuringPendingMutation(
-          optimisticOperation,
-          optimisticOperation,
-          depth,
-          true,
-        )
-      })
     }
   }
 })
