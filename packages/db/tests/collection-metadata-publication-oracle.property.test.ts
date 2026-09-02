@@ -475,12 +475,18 @@ async function expectMetadataRollbackRecovery({
   sourceDelta,
   initialMetadata,
   pendingOperation,
+  additionalMetadata = [],
 }: {
   sourceKey: number
   metadataKey: number
   sourceDelta: number
-  initialMetadata: { present: false } | { present: true; value: unknown }
+  initialMetadata: MetadataEntryState
   pendingOperation: MetadataOperation
+  additionalMetadata?: ReadonlyArray<{
+    key: number
+    initialMetadata: MetadataEntryState
+    pendingOperation: MetadataOperation
+  }>
 }): Promise<void> {
   const harnessId = nextMetadataRollbackHarnessId++
   const source = await createPublicationHarness()
@@ -496,7 +502,13 @@ async function expectMetadataRollbackRecovery({
   })
   await derived.preload()
 
-  const stageMetadata = (key: number, operation: MetadataOperation) => {
+  const metadataCases = [
+    { key: metadataKey, initialMetadata, pendingOperation },
+    ...additionalMetadata,
+  ]
+  const stageMetadata = (
+    writes: ReadonlyArray<{ key: number; operation: MetadataOperation }>,
+  ) => {
     const applied = createDeferred<void>()
     void applied.promise.catch(() => undefined)
     const transaction = {
@@ -505,7 +517,9 @@ async function expectMetadataRollbackRecovery({
       layoutChanged: false,
       operations: [],
       deletedKeys: new Set<string | number>(),
-      rowMetadataWrites: new Map([[key, operation]]),
+      rowMetadataWrites: new Map(
+        writes.map(({ key, operation }) => [key, operation]),
+      ),
       collectionMetadataWrites: new Map(),
       applied,
     }
@@ -513,15 +527,31 @@ async function expectMetadataRollbackRecovery({
     return transaction
   }
 
-  if (initialMetadata.present) {
-    stageMetadata(metadataKey, {
-      type: `set`,
-      value: initialMetadata.value,
-    })
+  const initialWrites = metadataCases.flatMap(
+    ({ key, initialMetadata: state }) =>
+      state.present
+        ? [
+            {
+              key,
+              operation: {
+                type: `set` as const,
+                value: state.value,
+              },
+            },
+          ]
+        : [],
+  )
+  if (initialWrites.length > 0) {
+    stageMetadata(initialWrites)
     derived._state.commitPendingTransactions()
   }
 
-  const pending = stageMetadata(metadataKey, pendingOperation)
+  const pending = stageMetadata(
+    metadataCases.map(({ key, pendingOperation: operation }) => ({
+      key,
+      operation,
+    })),
+  )
   const sourceRowsBefore = [...rows.values()].map((row) => ({ ...row }))
   const rowsBefore = [...derived.values()].map((row) => ({ ...row }))
   const originBefore = new Map(derived._state.rowOrigins)
@@ -551,7 +581,8 @@ async function expectMetadataRollbackRecovery({
 
   try {
     const previousSourceRow = rows.get(sourceKey)!
-    expect(() => {
+    let thrown: unknown
+    try {
       getSync().begin()
       getSync().write({
         type: `update`,
@@ -561,7 +592,10 @@ async function expectMetadataRollbackRecovery({
         },
       })
       getSync().commit()
-    }).toThrow(publicationFailure)
+    } catch (error) {
+      thrown = error
+    }
+    expect(thrown).toBe(publicationFailure)
 
     expect(rows.get(sourceKey)?.position).toBe(
       previousSourceRow.position + sourceDelta,
@@ -575,9 +609,11 @@ async function expectMetadataRollbackRecovery({
     )
     expect([...derived.values()].map((row) => ({ ...row }))).toEqual(rowsBefore)
     expect(derived._state.syncedMetadata).toEqual(
-      initialMetadata.present
-        ? new Map([[metadataKey, initialMetadata.value]])
-        : new Map(),
+      new Map(
+        metadataCases.flatMap(({ key, initialMetadata: state }) =>
+          state.present ? [[key, state.value]] : [],
+        ),
+      ),
     )
     expect(derived._state.pendingSyncedTransactions).toHaveLength(1)
     expect(derived._state.pendingSyncedTransactions[0]).toBe(pending)
@@ -678,6 +714,23 @@ it(`restores an existing metadata value after a failed replacement`, async () =>
     sourceDelta: 1,
     initialMetadata: { present: true, value: `before` },
     pendingOperation: { type: `set`, value: `after` },
+  })
+})
+
+it(`restores every metadata key after one failed publication`, async () => {
+  await expectMetadataRollbackRecovery({
+    sourceKey: 0,
+    metadataKey: 1,
+    sourceDelta: 1,
+    initialMetadata: { present: true, value: `before` },
+    pendingOperation: { type: `set`, value: `after` },
+    additionalMetadata: [
+      {
+        key: 2,
+        initialMetadata: { present: true, value: false },
+        pendingOperation: { type: `delete` },
+      },
+    ],
   })
 })
 
