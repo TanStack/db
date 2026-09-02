@@ -5,6 +5,7 @@ import { PendingOperationStore } from './PendingOperationStore'
 import { PowerSyncTransactor } from './PowerSyncTransactor'
 import { DEFAULT_BATCH_SIZE } from './definitions'
 import { asPowerSyncRecord, mapOperation } from './helpers'
+import { POWERSYNC_TEST_HOOKS } from './internal'
 import { convertTableToSchema } from './schema'
 import { serializeForSQLite } from './serialization'
 import type {
@@ -883,6 +884,9 @@ function createPowerSyncCollectionConfig<
         markReady()
 
         return {
+          [POWERSYNC_TEST_HOOKS]: {
+            getDemandCount: () => demands.size,
+          },
           cleanup: () => {
             stopped = true
             lifecycleGeneration++

@@ -17,10 +17,12 @@ import {
 import pDefer from 'p-defer'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { powerSyncCollectionOptions } from '../src'
+import { POWERSYNC_TEST_HOOKS  } from '../src/internal'
 import {
   projectRetainedRowKeys,
   projectTransportLoads,
 } from '../../db/tests/load-subset-full-flow-model'
+import type {PowerSyncTestHooks} from '../src/internal';
 import type { LoadSubsetFullFlowEvent } from '../../db/tests/load-subset-full-flow-model'
 import type { Scheduler } from 'fast-check'
 
@@ -3378,6 +3380,8 @@ describe(`On-Demand Sync Mode`, () => {
       const onLoadSubset = vi
         .fn()
         .mockRejectedValueOnce(hookFailure)
+        .mockRejectedValueOnce(hookFailure)
+        .mockRejectedValueOnce(hookFailure)
         .mockResolvedValueOnce(undefined)
       const createDiffTrigger = vi
         .spyOn(db.triggers, `createDiffTrigger`)
@@ -3400,11 +3404,19 @@ describe(`On-Demand Sync Mode`, () => {
       if (!sync || typeof sync === `function` || !sync.loadSubset) {
         throw new Error(`Expected on-demand sync controls`)
       }
+      const { getDemandCount } = (
+        sync as typeof sync & {
+          [POWERSYNC_TEST_HOOKS]: PowerSyncTestHooks
+        }
+      )[POWERSYNC_TEST_HOOKS]
 
       try {
-        await expect(
-          sync.loadSubset({ where: eq(`category`, `electronics`) }),
-        ).rejects.toBe(hookFailure)
+        for (const category of [`electronics`, `clothing`, `outdoors`]) {
+          await expect(
+            sync.loadSubset({ where: eq(`category`, category) }),
+          ).rejects.toBe(hookFailure)
+          expect(getDemandCount()).toBe(0)
+        }
         await sync.loadSubset({ where: eq(`category`, `clothing`) })
 
         const when = createDiffTrigger.mock.calls.at(-1)?.[0].when
