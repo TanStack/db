@@ -656,6 +656,37 @@ it(`publishes one event per key when metadata-only sync retires optimistic work`
   ])
 })
 
+it(`includes metadata-only keys in a publication snapshot`, async () => {
+  const harness = await createPublicationHarness()
+  const applied = createDeferred<void>()
+  void applied.promise.catch(() => undefined)
+  const transaction = {
+    committed: true,
+    applicationStarted: false,
+    layoutChanged: false,
+    operations: [],
+    deletedKeys: new Set<string | number>(),
+    rowMetadataWrites: new Map([[1, { type: `set` as const, value: false }]]),
+    collectionMetadataWrites: new Map(),
+    applied,
+  }
+  harness.rows._state.pendingSyncedTransactions.push(transaction)
+
+  try {
+    const snapshot = harness.rows._state.snapshotPublicationState([])
+    expect([...snapshot.keys.keys()]).toEqual([1])
+    expect(snapshot.keys.get(1)?.syncedMetadata).toEqual({
+      present: false,
+      value: undefined,
+    })
+    expect(snapshot.pendingSyncedTransactions).toEqual([transaction])
+  } finally {
+    harness.rows._state.cancelPendingSyncedTransaction(transaction)
+    harness.unsubscribe()
+    await Promise.all([harness.liveRows.cleanup(), harness.rows.cleanup()])
+  }
+})
+
 it(`releases only canceled metadata keys while another sync remains pending`, async () => {
   await expectMetadataCancellationOwnership(
     [0, 1],
