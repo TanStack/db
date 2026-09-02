@@ -723,6 +723,7 @@ it(`publishes a virtual-state update when a restarted optimistic row is confirme
     if (syncReceipt === undefined || syncReceipt === true) {
       throw new Error(`restarted sync receipt was not parked`)
     }
+    expect(syncReceipt).toBeInstanceOf(Promise)
     expect(syncReceiptOutcome).toBeDefined()
     expect(rollbackMutation).toBeDefined()
     await Promise.resolve()
@@ -736,13 +737,17 @@ it(`publishes a virtual-state update when a restarted optimistic row is confirme
     expect(syncReceiptSettled).toBe(true)
     expect(settlementTimeline).toEqual([`publication`, `receipt`])
     expect(publications).toEqual(expectedPublications)
-    expect([...collection.state.keys()]).toEqual([2])
+    expect([...collection.state.values()].map(snapshotRow)).toEqual([
+      remoteRow(2),
+    ])
 
     releaseMutation()
     await mutationCommit
     expect(readMutationState?.()).toBe(`failed`)
     expect(publications).toEqual(expectedPublications)
-    expect([...collection.state.keys()]).toEqual([2])
+    expect([...collection.state.values()].map(snapshotRow)).toEqual([
+      remoteRow(2),
+    ])
   } finally {
     releaseMutation()
     await mutationCommit
