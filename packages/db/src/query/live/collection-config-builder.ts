@@ -1235,6 +1235,11 @@ export class CollectionConfigBuilder<
     // Store the key of the result so that we can retrieve it in the
     // getKey function
     this.resultKeys.set(value, key)
+    const resultKey = collection.getKeyFromItem(value)
+    // Graph deltas update the synced base. A pending optimistic delete can
+    // hide that base row from the public Collection view, so collection.has()
+    // cannot distinguish a base update from a delete.
+    const hasSyncedRow = collection._state.syncedData.has(resultKey)
 
     // Store the orderBy index if it exists
     if (orderByIndex !== undefined) {
@@ -1252,7 +1257,7 @@ export class CollectionConfigBuilder<
       inserts > deletes ||
       // Just update(s) but the item is already in the collection (so
       // was inserted previously).
-      (inserts === deletes && collection.has(collection.getKeyFromItem(value)))
+      (inserts === deletes && hasSyncedRow)
     ) {
       write({
         value,
