@@ -535,6 +535,7 @@ class Transaction<T extends object = Record<string, unknown>> {
     if (this.state === `completed`) {
       throw new TransactionAlreadyCompletedRollbackError()
     }
+    if (this.state === `failed`) return this
 
     this.setState(`failed`)
 

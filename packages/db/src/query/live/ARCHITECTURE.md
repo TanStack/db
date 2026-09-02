@@ -969,7 +969,8 @@ priority merely to make a subset load settle.
 A rollback that wins while an optimistic transaction's `mutationFn` is still
 in flight is terminal. A later resolve or rejection from that function cannot
 change its outcome, run rollback again, affect newer transactions, or republish
-its overlay.
+its overlay. Repeating rollback on that failed transaction is inert and cannot
+cascade into transactions created after the first rollback.
 Existing immediate bootstrap and persistence-hydration paths, plus truncate,
 retain their queue-bypass contract; if one applies a parked subset transaction
 as part of that prefix, the subset receipt settles only after the writes are

@@ -338,6 +338,41 @@ describe(`Transactions`, () => {
       await collection.cleanup()
     }
   })
+  it(`keeps repeated rollback from affecting newer transactions`, async () => {
+    type Row = { id: number; owner: string }
+    const collection = createCollection<Row, number>({
+      id: `repeated-rollback-is-terminal`,
+      getKey: (item) => item.id,
+      sync: { sync: () => {} },
+    })
+    const first = createTransaction({
+      autoCommit: false,
+      mutationFn: async () => {},
+    })
+    const second = createTransaction({
+      autoCommit: false,
+      mutationFn: async () => {},
+    })
+
+    try {
+      void first.isPersisted.promise.catch(() => undefined)
+      first.mutate(() => collection.insert({ id: 1, owner: `first` }))
+      first.rollback()
+
+      second.mutate(() => collection.insert({ id: 1, owner: `second` }))
+      expect(second.state).toBe(`pending`)
+
+      expect(first.rollback()).toBe(first)
+      expect(first.state).toBe(`failed`)
+      expect(second.state).toBe(`pending`)
+      expect(collection.get(1)).toMatchObject({ id: 1, owner: `second` })
+    } finally {
+      if (second.state === `pending`) {
+        second.rollback({ isSecondaryRollback: true })
+      }
+      await collection.cleanup()
+    }
+  })
   it(`should rollback if the mutationFn throws an error`, async () => {
     const transaction = createTransaction({
       mutationFn: async () => {
