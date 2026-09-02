@@ -223,9 +223,12 @@ An update or delete retracts the retained row, rather than trusting event
 metadata that may describe a newer value, then replaces or removes that entry.
 An update for an unknown key becomes an insert, while a delete for an unknown
 key contributes nothing. Truncate keeps this boundary state until its later
-source batch retracts or replaces the retained rows. Graph teardown clears the
-tracker and graph together. Thus every source key has multiplicity zero or one
-and every negative weight cancels the exact positive row that entered D2.
+source batch retracts or replaces the retained rows. A replacement's exact
+retraction and new contribution enter the same graph turn, so the public
+boundary observes one update rather than an intermediate removal. Graph
+teardown clears the tracker and graph together. Thus every source key has
+multiplicity zero or one and every negative weight cancels the exact positive
+row that entered D2.
 
 Internal contribution identity is independent of the user-visible Collection
 key. When several internal rows collapse to one public key, a keyed D2

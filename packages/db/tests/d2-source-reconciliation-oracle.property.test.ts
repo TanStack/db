@@ -196,6 +196,7 @@ function createOrderedSourceHarness(id: string) {
   let loadSubsetCalls = 0
   const contributed = { id: 1, revision: 1, value: 1 }
   const staleDelete = { id: 1, revision: 2, value: 1 }
+  const replacement = { id: 1, revision: 3, value: 2 }
   const source = createCollection<SourceRow, number>({
     id,
     getKey: (row) => row.id,
@@ -236,6 +237,7 @@ function createOrderedSourceHarness(id: string) {
 
   return {
     contributed,
+    replacement,
     source,
     staleDelete,
     suppressSourceChanges: () => {
@@ -360,6 +362,122 @@ it(`retracts the exact live-query source row after an ordered truncate`, async (
     harness.publish([{ type: `delete`, key: 1, value: staleDelete }])
     await flushPromises()
     expect(live.get(contributed.id)).toBeUndefined()
+  } finally {
+    await live.cleanup()
+    await source.cleanup()
+  }
+})
+
+it(`replaces the retained Effect source row after an ordered truncate`, async () => {
+  const harness = createOrderedSourceHarness(`d2-effect-truncate-replacement`)
+  const { contributed, replacement, source, staleDelete } = harness
+  const batches: Array<
+    Array<{
+      type: string
+      value: SourceRow
+      previousValue?: SourceRow
+    }>
+  > = []
+  const effect = createEffect<SourceRow, number>({
+    query: (query) =>
+      query
+        .from({ row: source })
+        .orderBy(({ row }) => row.value)
+        .limit(1),
+    onBatch: (batch) => {
+      batches.push(batch)
+    },
+  })
+
+  try {
+    await flushPromises()
+    expect(batches).toHaveLength(1)
+    expect(batches[0]).toHaveLength(1)
+    expect(batches[0]![0]).toMatchObject({
+      type: `enter`,
+      key: 1,
+      value: contributed,
+    })
+    const publishedValue = batches[0]![0]!.value
+
+    harness.suppressSourceChanges()
+    harness.truncate()
+    await flushPromises()
+    expect(batches).toHaveLength(1)
+
+    harness.publish([
+      {
+        type: `update`,
+        key: 1,
+        previousValue: staleDelete,
+        value: replacement,
+      },
+    ])
+    await flushPromises()
+    expect(batches).toHaveLength(2)
+    expect(batches[1]).toHaveLength(1)
+    expect(batches[1]![0]).toMatchObject({
+      type: `update`,
+      key: 1,
+      value: replacement,
+    })
+    expect(batches[1]![0]!.previousValue).toBe(publishedValue)
+  } finally {
+    await effect.dispose()
+    await source.cleanup()
+  }
+})
+
+it(`replaces the retained live-query source row after an ordered truncate`, async () => {
+  const harness = createOrderedSourceHarness(
+    `d2-live-query-truncate-replacement`,
+  )
+  const { contributed, replacement, source, staleDelete } = harness
+  const live = createLiveQueryCollection({
+    id: `d2-live-query-truncate-replacement-result`,
+    query: (query) =>
+      query
+        .from({ row: source })
+        .orderBy(({ row }) => row.value)
+        .limit(1),
+    startSync: true,
+  })
+  const batches: Array<Array<ChangeMessage<SourceRow, number>>> = []
+
+  try {
+    await live.preload()
+    expect(live.get(contributed.id)).toMatchObject(contributed)
+    const publishedValue = live.get(contributed.id)
+    const subscription = live.subscribeChanges(
+      (changes) => batches.push(changes),
+      { includeInitialState: false },
+    )
+
+    harness.suppressSourceChanges()
+    harness.truncate()
+    await flushPromises()
+    expect(batches).toEqual([])
+    expect(live.get(contributed.id)).toBe(publishedValue)
+
+    harness.publish([
+      {
+        type: `update`,
+        key: 1,
+        previousValue: staleDelete,
+        value: replacement,
+      },
+    ])
+    await flushPromises()
+    expect(batches).toHaveLength(1)
+    expect(batches[0]).toHaveLength(1)
+    expect(batches[0]![0]).toMatchObject({
+      type: `update`,
+      key: 1,
+      value: replacement,
+    })
+    expect(batches[0]![0]!.previousValue).toEqual(publishedValue)
+    expect(live.get(replacement.id)).toMatchObject(replacement)
+    subscription.unsubscribe()
   } finally {
     await live.cleanup()
     await source.cleanup()
