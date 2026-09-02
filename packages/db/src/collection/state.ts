@@ -1061,6 +1061,7 @@ export class CollectionStateManager<
               break
             }
             case `delete`:
+              this.syncedKeys.delete(key)
               this.syncedData.delete(key)
               this.syncedMetadata.delete(key)
               // Clean up origin and pending tracking for deleted rows
