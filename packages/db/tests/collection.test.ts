@@ -1656,6 +1656,40 @@ describe(`Collection`, () => {
     })
   })
 
+  it(`should remove deleted keys from synced key tracking`, async () => {
+    const collection = createCollection(
+      mockSyncCollectionOptionsNoInitialState<{
+        id: number
+        value: string
+      }>({
+        id: `sync-key-delete-test`,
+        getKey: (item) => item.id,
+        startSync: true,
+      }),
+    )
+
+    collection.utils.begin()
+    collection.utils.write({
+      type: `insert`,
+      value: { id: 1, value: `one` },
+    })
+    collection.utils.write({
+      type: `insert`,
+      value: { id: 2, value: `two` },
+    })
+    collection.utils.commit()
+    collection.utils.markReady()
+
+    await collection.stateWhenReady()
+    expect(collection._state.syncedKeys).toEqual(new Set([1, 2]))
+
+    collection.utils.begin()
+    collection.utils.write({ type: `delete`, key: 1 })
+    collection.utils.commit()
+
+    expect(collection._state.syncedKeys).toEqual(new Set([2]))
+  })
+
   it(`should delete row metadata when sync deletes the row`, async () => {
     let testSyncFunctions: any = null
 
