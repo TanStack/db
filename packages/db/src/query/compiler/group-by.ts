@@ -15,9 +15,11 @@ import {
 import {
   AggregateFunctionNotInSelectError,
   NonAggregateExpressionNotInGroupByError,
+  NonConstantAggregateArgumentError,
   UnknownHavingExpressionTypeError,
   UnsupportedAggregateFunctionError,
 } from '../../errors.js'
+import { getCustomAggregate, getRegisteredAggregates } from '../aggregates.js'
 import {
   compileExpression,
   isCaseWhenConditionTrue,
@@ -593,6 +595,15 @@ function getAggregateFunction(aggExpr: Aggregate) {
     return compiledExpr(namespacedRow)
   }
 
+  // Custom registrations take precedence so that built-ins can be overridden
+  const custom = getCustomAggregate(aggExpr.name)
+  if (custom) {
+    return custom(
+      { value: rawValueExtractor, key: ([key]) => key },
+      compileAdditionalAggregateArgs(aggExpr),
+    )
+  }
+
   // Return the appropriate aggregate function
   switch (aggExpr.name.toLowerCase()) {
     case `sum`:
@@ -606,8 +617,38 @@ function getAggregateFunction(aggExpr: Aggregate) {
     case `max`:
       return max(valueExtractorForMinMax)
     default:
-      throw new UnsupportedAggregateFunctionError(aggExpr.name)
+      throw new UnsupportedAggregateFunctionError(
+        aggExpr.name,
+        getRegisteredAggregates(),
+      )
   }
+}
+
+/**
+ * Evaluates the arguments after the first one of an aggregate expression into
+ * static values passed to a custom aggregate factory. They must be constant,
+ * since they are evaluated once at compile time against an empty row.
+ */
+function compileAdditionalAggregateArgs(aggExpr: Aggregate): Array<unknown> {
+  return aggExpr.args.slice(1).map((arg, index) => {
+    if (containsRef(arg)) {
+      throw new NonConstantAggregateArgumentError(aggExpr.name, index + 1)
+    }
+    return compileExpression(arg)({})
+  })
+}
+
+/**
+ * Whether an expression references a column, making it non-constant.
+ */
+function containsRef(expr: BasicExpression): boolean {
+  if (expr.type === `ref`) {
+    return true
+  }
+  if (expr.type === `func`) {
+    return expr.args.some((arg) => containsRef(arg))
+  }
+  return false
 }
 
 /**
