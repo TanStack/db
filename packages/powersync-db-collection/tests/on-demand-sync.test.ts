@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
-import { PowerSyncDatabase, Schema, Table, column } from '@powersync/node'
+import {
+  LogLevels,
+  PowerSyncDatabase,
+  Schema,
+  Table,
+  column,
+} from '@powersync/node'
 import {
   and,
   createCollection,
@@ -14,6 +20,7 @@ import {
 } from '@tanstack/db'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { powerSyncCollectionOptions } from '../src'
+import type { PowerSyncLogger } from '@powersync/node'
 
 const APP_SCHEMA = new Schema({
   products: new Table({
@@ -24,7 +31,7 @@ const APP_SCHEMA = new Schema({
 })
 
 describe(`On-Demand Sync Mode`, () => {
-  async function createDatabase() {
+  async function createDatabase(logger?: PowerSyncLogger) {
     const db = new PowerSyncDatabase({
       database: {
         dbFilename: `test-on-demand-${randomUUID()}.sqlite`,
@@ -32,6 +39,7 @@ describe(`On-Demand Sync Mode`, () => {
         implementation: { type: `node:sqlite` },
       },
       schema: APP_SCHEMA,
+      logger,
     })
     onTestFinished(async () => {
       // Wait a moment for any pending cleanup operations to complete
@@ -2193,12 +2201,18 @@ describe(`On-Demand Sync Mode`, () => {
   describe(`Tracking lifecycle`, () => {
     // The sync handler catches its own errors and surfaces them only through the
     // logger, so captured errors are how these tests assert it stayed healthy.
-    function captureSyncErrors(db: PowerSyncDatabase) {
+    function errorCapturingLogger(): [Array<string>, PowerSyncLogger] {
       const errors: Array<string> = []
-      vi.spyOn(db.logger, `error`).mockImplementation((...args: Array<any>) => {
-        errors.push(args.map(String).join(` `))
-      })
-      return () => errors
+      return [
+        errors,
+        {
+          log({ level, message }) {
+            if (level >= LogLevels.error) {
+              errors.push(message)
+            }
+          },
+        },
+      ]
     }
 
     function makeCollection(db: PowerSyncDatabase) {
@@ -2230,9 +2244,9 @@ describe(`On-Demand Sync Mode`, () => {
     }
 
     it(`should start tracking again when a subset is loaded after every subset was unloaded`, async () => {
-      const db = await createDatabase()
+      const [syncErrors, logger] = errorCapturingLogger()
+      const db = await createDatabase(logger)
       await createTestProducts(db)
-      const syncErrors = captureSyncErrors(db)
 
       const collection = makeCollection(db)
       onTestFinished(() => collection.cleanup())
@@ -2269,13 +2283,13 @@ describe(`On-Demand Sync Mode`, () => {
         { timeout: 2000 },
       )
 
-      expect(syncErrors()).toEqual([])
+      expect(syncErrors).toEqual([])
     })
 
     it(`should stop tracking cleanly when every subset is unloaded and the collection is cleaned up`, async () => {
-      const db = await createDatabase()
+      const [syncErrors, logger] = errorCapturingLogger()
+      const db = await createDatabase(logger)
       await createTestProducts(db)
-      const syncErrors = captureSyncErrors(db)
 
       const collection = makeCollection(db)
       await collection.stateWhenReady()
@@ -2308,7 +2322,7 @@ describe(`On-Demand Sync Mode`, () => {
       collection.cleanup()
       await new Promise((resolve) => setTimeout(resolve, 200))
 
-      expect(syncErrors()).toEqual([])
+      expect(syncErrors).toEqual([])
     })
 
     it(`should dispose each diff trigger exactly once`, async () => {
