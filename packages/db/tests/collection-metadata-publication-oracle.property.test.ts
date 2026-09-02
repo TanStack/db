@@ -18,6 +18,8 @@ type SyncActions = Parameters<SyncConfig<PublicationRow, number>[`sync`]>[0]
 
 type MetadataOperation = { type: `set`; value: unknown } | { type: `delete` }
 
+type MetadataEntryState = { present: false } | { present: true; value: unknown }
+
 type MetadataWrite = { key: number } & MetadataOperation
 
 type PublicationRound = {
@@ -65,6 +67,14 @@ const metadataOperationArbitrary: fc.Arbitrary<MetadataOperation> = fc.oneof(
   fc.constant({ type: `delete` as const }),
 )
 
+const metadataEntryStateArbitrary: fc.Arbitrary<MetadataEntryState> = fc.oneof(
+  fc.constant({ present: false as const }),
+  metadataValueArbitrary.map((value) => ({
+    present: true as const,
+    value,
+  })),
+)
+
 const metadataWriteArbitrary = fc
   .tuple(fc.integer({ min: 0, max: 2 }), metadataOperationArbitrary)
   .map(([key, operation]) => ({ key, ...operation }))
@@ -95,18 +105,16 @@ const metadataCancellationArbitrary = fc.record({
   }),
   canceledOperation: metadataOperationArbitrary,
   retainedOperation: metadataOperationArbitrary,
+  initialMetadata: fc.array(metadataEntryStateArbitrary, {
+    minLength: 3,
+    maxLength: 3,
+  }),
 })
 
-const metadataRollbackCaseArbitrary = fc.oneof(
-  metadataValueArbitrary.map((value) => ({
-    initialMetadata: { present: false as const },
-    pendingOperation: { type: `set` as const, value },
-  })),
-  metadataValueArbitrary.map((value) => ({
-    initialMetadata: { present: true as const, value },
-    pendingOperation: { type: `delete` as const },
-  })),
-)
+const metadataRollbackCaseArbitrary = fc.record({
+  initialMetadata: metadataEntryStateArbitrary,
+  pendingOperation: metadataOperationArbitrary,
+})
 
 const metadataRollbackArbitrary = fc
   .record({
@@ -346,13 +354,13 @@ async function expectMetadataCancellationOwnership(
   retainedKeys: ReadonlyArray<number>,
   canceledOperation: MetadataOperation,
   retainedOperation: MetadataOperation,
+  initialMetadataState: ReadonlyArray<MetadataEntryState>,
 ): Promise<void> {
   const harness = await createPublicationHarness()
-  const initialMetadata = new Map<number, unknown>([
-    [0, undefined],
-    [1, false],
-    [2, null],
-  ])
+  const initialMetadata = new Map<number, unknown>()
+  for (const [key, state] of initialMetadataState.entries()) {
+    if (state.present) initialMetadata.set(key, state.value)
+  }
   const initialSync = harness.getSync()
   initialSync.begin()
   for (const [key, value] of initialMetadata) {
@@ -592,6 +600,21 @@ it(`releases only canceled metadata keys while another sync remains pending`, as
     [1, 2],
     { type: `delete` },
     { type: `set`, value: false },
+    [
+      { present: true, value: undefined },
+      { present: true, value: false },
+      { present: true, value: null },
+    ],
+  )
+})
+
+it(`does not apply canceled metadata to an absent base key`, async () => {
+  await expectMetadataCancellationOwnership(
+    [0, 1],
+    [1, 2],
+    { type: `set`, value: `canceled` },
+    { type: `set`, value: `retained` },
+    [{ present: false }, { present: false }, { present: false }],
   )
 })
 
@@ -602,6 +625,16 @@ it(`restores pending metadata when a derived publication fails`, async () => {
     sourceDelta: 1,
     initialMetadata: { present: true, value: false },
     pendingOperation: { type: `delete` },
+  })
+})
+
+it(`restores an existing metadata value after a failed replacement`, async () => {
+  await expectMetadataRollbackRecovery({
+    sourceKey: 0,
+    metadataKey: 1,
+    sourceDelta: 1,
+    initialMetadata: { present: true, value: `before` },
+    pendingOperation: { type: `set`, value: `after` },
   })
 })
 
@@ -618,12 +651,19 @@ fcTest.prop(
   oraclePropertyOptions(50, `collection-publication.metadata-cancellation`),
 )(
   `keeps metadata suppression owned by the remaining pending transactions`,
-  ({ canceledKeys, retainedKeys, canceledOperation, retainedOperation }) =>
+  ({
+    canceledKeys,
+    retainedKeys,
+    canceledOperation,
+    retainedOperation,
+    initialMetadata,
+  }) =>
     expectMetadataCancellationOwnership(
       canceledKeys,
       retainedKeys,
       canceledOperation,
       retainedOperation,
+      initialMetadata,
     ),
 )
 fcTest.prop(
