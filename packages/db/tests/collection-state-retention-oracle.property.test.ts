@@ -171,6 +171,11 @@ function expectRetainedState(
     expectedRows.map(([key]) => key),
   )
   expect(
+    [...collection._state.rowOrigins.keys()]
+      .filter((key) => !model.has(key))
+      .sort((a, b) => a - b),
+  ).toEqual([])
+  expect(
     [...collection.state.entries()]
       .map(([key, row]) => [key, { id: row.id, value: row.value }] as const)
       .sort(([a], [b]) => a - b),
