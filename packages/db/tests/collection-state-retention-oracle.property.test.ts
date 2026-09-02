@@ -68,7 +68,8 @@ const retentionActionArbitrary: fc.Arbitrary<RetentionAction> = fc.oneof(
   },
   { weight: 1, arbitrary: fc.constant({ type: `restart` as const }) },
   {
-    weight: 1,
+    // Keep each phase at least as likely as the original unsplit restart arm.
+    weight: 3,
     arbitrary: fc
       .tuple(
         retainedRowArbitrary,
@@ -195,7 +196,11 @@ async function runRetentionHistory(
         let restarted = false
         let restartedSync: SyncActions | undefined
         let restartedReceipt: true | Promise<void> | undefined
+        let restartedReceiptOutcome: Promise<void> | undefined
         let restartedReceiptSettled = false
+        const settlementTimeline: Array<
+          `checkpoint` | `publication` | `receipt`
+        > = []
         const batches: Array<{
           changes: Array<{
             type: string
@@ -224,6 +229,9 @@ async function runRetentionHistory(
                 .map(({ id, value }) => ({ id, value }))
                 .sort((left, right) => left.id - right.id),
             })
+            if (changes.some(({ key }) => key === restartedRow.id)) {
+              queueMicrotask(() => settlementTimeline.push(`publication`))
+            }
             if (restarted) return
             restarted = true
             cleanup = collection.cleanup()
@@ -234,10 +242,13 @@ async function runRetentionHistory(
             if (action.commitPhase === `insideListener`) {
               restartedReceipt = restartedSync.commit()
               if (restartedReceipt !== true) {
-                void restartedReceipt.then(() => {
+                restartedReceiptOutcome = restartedReceipt.then((value) => {
+                  settlementTimeline.push(`receipt`)
                   restartedReceiptSettled = true
+                  return value
                 })
               }
+              queueMicrotask(() => settlementTimeline.push(`checkpoint`))
             } else {
               collection._state.preSyncVisibleState.set(-1, retainedMarker)
               collection._state.recentlySyncedKeys.add(restartedRow.id)
@@ -257,12 +268,20 @@ async function runRetentionHistory(
         if (action.commitPhase === `insideListener`) {
           expect(restartedReceipt).toBeDefined()
           expect(restartedReceipt).not.toBe(true)
+          expect(restartedReceipt).toBeInstanceOf(Promise)
           expect(restartedReceiptSettled).toBe(false)
+          expect(settlementTimeline).toEqual([])
           if (restartedReceipt === undefined || restartedReceipt === true) {
             throw new Error(`restarted sync receipt was not parked`)
           }
-          await restartedReceipt
+          expect(restartedReceiptOutcome).toBeDefined()
+          await expect(restartedReceiptOutcome).resolves.toBeUndefined()
           expect(restartedReceiptSettled).toBe(true)
+          expect(settlementTimeline).toEqual([
+            `checkpoint`,
+            `publication`,
+            `receipt`,
+          ])
         } else {
           expect(collection._state.preSyncVisibleState).toEqual(
             new Map([[-1, retainedMarker]]),
