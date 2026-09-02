@@ -356,6 +356,7 @@ describe(`WindowState`, () => {
 
       expect(window.coversActiveWindow).toBe(expectedCoverage)
       expect(window.satisfiesActiveWindow).toBe(expectedSatisfaction)
+      expect(window.settleLocalRequestAfterNoProgress()).toBe(false)
     },
   )
 })
