@@ -20,7 +20,11 @@ type RetentionAction =
   | { type: `delete`; key: number }
   | { type: `replace`; rows: ReadonlyArray<RetainedRow> }
   | { type: `restart` }
-  | { type: `reentrantRestart`; row: RetainedRow }
+  | {
+      type: `reentrantRestart`
+      row: RetainedRow
+      commitPhase: `insideListener` | `afterOldReturn`
+    }
 
 type RetentionHarness = {
   collection: Collection<RetainedRow, number>
@@ -65,10 +69,16 @@ const retentionActionArbitrary: fc.Arbitrary<RetentionAction> = fc.oneof(
   { weight: 1, arbitrary: fc.constant({ type: `restart` as const }) },
   {
     weight: 1,
-    arbitrary: retainedRowArbitrary.map((row) => ({
-      type: `reentrantRestart` as const,
-      row,
-    })),
+    arbitrary: fc
+      .tuple(
+        retainedRowArbitrary,
+        fc.constantFrom(`insideListener` as const, `afterOldReturn` as const),
+      )
+      .map(([row, commitPhase]) => ({
+        type: `reentrantRestart` as const,
+        row,
+        commitPhase,
+      })),
   },
 )
 
@@ -184,6 +194,8 @@ async function runRetentionHistory(
         let cleanup: Promise<void> | undefined
         let restarted = false
         let restartedSync: SyncActions | undefined
+        let restartedReceipt: true | Promise<void> | undefined
+        let restartedReceiptSettled = false
         const events: Array<{
           type: string
           key: string | number
@@ -205,8 +217,17 @@ async function runRetentionHistory(
             restartedSync = harness.sync
             restartedSync.begin()
             restartedSync.write({ type: `insert`, value: restartedRow })
-            collection._state.preSyncVisibleState.set(-1, retainedMarker)
-            collection._state.recentlySyncedKeys.add(restartedRow.id)
+            if (action.commitPhase === `insideListener`) {
+              restartedReceipt = restartedSync.commit()
+              if (restartedReceipt !== true) {
+                void restartedReceipt.then(() => {
+                  restartedReceiptSettled = true
+                })
+              }
+            } else {
+              collection._state.preSyncVisibleState.set(-1, retainedMarker)
+              collection._state.recentlySyncedKeys.add(restartedRow.id)
+            }
           },
           { includeInitialState: false },
         )
@@ -219,28 +240,39 @@ async function runRetentionHistory(
         if (restartedSync === undefined) {
           throw new Error(`restarted sync session was not captured`)
         }
-        expect(collection._state.preSyncVisibleState).toEqual(
-          new Map([[-1, retainedMarker]]),
-        )
-        expect(collection._state.recentlySyncedKeys).toEqual(
-          new Set([restartedRow.id]),
-        )
-        expect(collection._state.hasReceivedFirstCommit).toBe(false)
+        if (action.commitPhase === `insideListener`) {
+          expect(restartedReceipt).toBeDefined()
+          expect(restartedReceipt).not.toBe(true)
+          expect(restartedReceiptSettled).toBe(false)
+          if (restartedReceipt === undefined || restartedReceipt === true) {
+            throw new Error(`restarted sync receipt was not parked`)
+          }
+          await restartedReceipt
+          expect(restartedReceiptSettled).toBe(true)
+        } else {
+          expect(collection._state.preSyncVisibleState).toEqual(
+            new Map([[-1, retainedMarker]]),
+          )
+          expect(collection._state.recentlySyncedKeys).toEqual(
+            new Set([restartedRow.id]),
+          )
+          expect(collection._state.hasReceivedFirstCommit).toBe(false)
 
-        await Promise.resolve()
-        expect(collection._state.preSyncVisibleState).toEqual(
-          new Map([[-1, retainedMarker]]),
-        )
-        expect(collection._state.recentlySyncedKeys).toEqual(
-          new Set([restartedRow.id]),
-        )
-        expect(collection._state.hasReceivedFirstCommit).toBe(false)
+          await Promise.resolve()
+          expect(collection._state.preSyncVisibleState).toEqual(
+            new Map([[-1, retainedMarker]]),
+          )
+          expect(collection._state.recentlySyncedKeys).toEqual(
+            new Set([restartedRow.id]),
+          )
+          expect(collection._state.hasReceivedFirstCommit).toBe(false)
 
-        expect(restartedSync.commit()).toBe(true)
-        expect(collection._state.preSyncVisibleState.size).toBe(0)
-        expect(collection._state.hasReceivedFirstCommit).toBe(true)
-        await Promise.resolve()
-        expect(collection._state.recentlySyncedKeys.size).toBe(0)
+          expect(restartedSync.commit()).toBe(true)
+          expect(collection._state.preSyncVisibleState.size).toBe(0)
+          expect(collection._state.hasReceivedFirstCommit).toBe(true)
+          await Promise.resolve()
+          expect(collection._state.recentlySyncedKeys.size).toBe(0)
+        }
         expect(events).toEqual([
           { type: triggerType, key: triggerRow.id, row: triggerRow },
           { type: `insert`, key: restartedRow.id, row: restartedRow },
@@ -274,6 +306,19 @@ it(`retains only keys in the authoritative synced state`, async () => {
 it(`retains a missing row introduced by a sync update`, async () => {
   await runRetentionHistory([{ type: `update`, row: { id: 1, value: 1 } }])
 })
+
+it.each([`insideListener`, `afterOldReturn`] as const)(
+  `retains a restarted row committed %s`,
+  async (commitPhase) => {
+    await runRetentionHistory([
+      {
+        type: `reentrantRestart`,
+        row: { id: 1, value: 1 },
+        commitPhase,
+      },
+    ])
+  },
+)
 
 it(`releases retained keys after long unique-key churn`, async () => {
   const keyCount = 1_000

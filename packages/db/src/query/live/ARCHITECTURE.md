@@ -1366,6 +1366,7 @@ create recursive Collection machinery.
 | State equivalence, route lifecycle, transition history, and batch partition  | `packages/db/tests/query/includes-oracle.property.test.ts`                  |
 | Joined multiplicity, alias identity, and null-key normalization              | `packages/db/tests/query/includes-query-shape-oracle.test.ts`               |
 | Exact D2 source retractions, replay suppression, and boundary lifecycle      | `packages/db/tests/d2-source-reconciliation-oracle.property.test.ts`        |
+| Sync-session retention, cleanup, reentrant restart, and applied receipts     | `packages/db/tests/collection-state-retention-oracle.property.test.ts`      |
 | Demand, cancellation, and progressive timing                                 | `packages/db/tests/query/includes-temporal-oracle.test.ts`                  |
 | Optimistic confirmation, rollback, and later reactivity                      | `packages/db/tests/query/includes-optimistic-oracle.property.test.ts`       |
 | Coherent layered publication                                                 | `packages/db/tests/query/includes-publication-oracle.test.ts`               |
@@ -1430,6 +1431,9 @@ sync session starts. Synchronous publication tails and queued microtasks remain
 scoped to the session that created them; after cleanup they cannot clear or mark
 state owned by a restarted session. Otherwise stale rows can classify a fresh
 insert as an update, or stale keys can suppress the new session's first event.
+A new-session transaction committed inside the old session's publication
+callback remains in the causal queue. Its receipt stays pending until that new
+row and its event are visible; the old drain cannot discard it.
 
 An imperative load operation is a separate caller boundary around this flow.
 It owns the future requests caused while it is current, retains the promises it
