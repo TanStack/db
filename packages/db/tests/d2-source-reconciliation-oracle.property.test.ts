@@ -587,6 +587,51 @@ it(`keeps revision and value in weighted row identity`, () => {
   )
 })
 
+it(`keeps numeric and string source keys distinct across restart`, () => {
+  const model = createReconciliationModel()
+  const row = { id: 1, revision: 1, value: 1 }
+  const keys = [0, `0`] as const
+
+  applyReconciliationStep(model, {
+    type: `batch`,
+    operations: keys.map((key) => ({
+      type: `upsert` as const,
+      key,
+      row,
+      reportedPreviousValue: row,
+    })),
+  })
+  expect(model.sourceRows).toEqual(
+    new Map<SourceKey, SourceRow>([
+      [0, row],
+      [`0`, row],
+    ]),
+  )
+  expect(model.sentRows).toEqual(model.sourceRows)
+  expect(model.relation).toEqual(
+    new Map([
+      [expectedWeightedRowIdentity(0, row), 1],
+      [expectedWeightedRowIdentity(`0`, row), 1],
+    ]),
+  )
+
+  applyReconciliationStep(model, { type: `teardown` })
+  applyReconciliationStep(model, { type: `restart` })
+  expect(model.sourceRows).toEqual(
+    new Map<SourceKey, SourceRow>([
+      [0, row],
+      [`0`, row],
+    ]),
+  )
+  expect(model.sentRows).toEqual(model.sourceRows)
+  expect(model.relation).toEqual(
+    new Map([
+      [expectedWeightedRowIdentity(0, row), 1],
+      [expectedWeightedRowIdentity(`0`, row), 1],
+    ]),
+  )
+})
+
 it(`preserves external source rows across graph teardown and restart`, () => {
   const model = createReconciliationModel()
   const row = { id: 1, revision: 1, value: 1 }
