@@ -27,9 +27,9 @@ type PendingRow = {
 type FacadeEntry = {
   collection: Collection<any, any, any>
   sync: FacadeSync | undefined
-  keys: WeakMap<object, string | number>
-  order: WeakMap<object, string>
-  currentOrder: Map<string | number, string | undefined>
+  readonly keys: WeakMap<object, string | number>
+  readonly order: WeakMap<object, string>
+  readonly currentOrder: Map<string | number, string | undefined>
 }
 
 type FacadeEntrySnapshot = {
@@ -38,11 +38,6 @@ type FacadeEntrySnapshot = {
     string | number
   >
   currentOrder: Map<string | number, string | undefined>
-  rows: Array<{
-    key: string | number
-    value: object
-    order: string | undefined
-  }>
 }
 
 type FacadeSnapshot = {
@@ -307,11 +302,6 @@ export class BucketFacadeAdapter {
           publicationState:
             entry.collection._snapshotPublicationState(affectedKeys),
           currentOrder: new Map(entry.currentOrder),
-          rows: [...entry.collection._state.syncedData].map(([key, value]) => ({
-            key,
-            value,
-            order: entry.currentOrder.get(key),
-          })),
         })
       }
     }
@@ -387,10 +377,6 @@ export class BucketFacadeAdapter {
       entry.currentOrder.clear()
       for (const [key, order] of entryState.currentOrder) {
         entry.currentOrder.set(key, order)
-      }
-      for (const row of entryState.rows) {
-        entry.keys.set(row.value, row.key)
-        if (row.order !== undefined) entry.order.set(row.value, row.order)
       }
     }
   }

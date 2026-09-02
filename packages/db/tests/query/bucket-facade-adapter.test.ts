@@ -171,7 +171,7 @@ describe(`BucketFacadeAdapter`, () => {
           ],
           1,
         ],
-        [[bucketKey, { publicKey: added.id, value: added, order: `1` }], 1],
+        [[bucketKey, { publicKey: added.id, value: added, order: `3` }], 1],
       ]),
     )
     graph.run()
@@ -195,6 +195,85 @@ describe(`BucketFacadeAdapter`, () => {
     expect(facade._stateRevision).toBe(stateRevision)
     expect(facade._layoutRevision).toBe(layoutRevision)
     expect(facade.status).toBe(`ready`)
+
+    const restoredOriginal = facade.get(original.id)
+    const restoredFixed = facade.get(fixed.id)
+    if (!restoredOriginal || !restoredFixed) {
+      throw new Error(`Missing restored facade rows`)
+    }
+    expect(facade.getKeyFromItem(restoredOriginal)).toBe(original.id)
+    expect(facade.getKeyFromItem(restoredFixed)).toBe(fixed.id)
+
+    adapter.flush().publish()
+
+    expect(facade.toArray.map(stripVirtualProps)).toEqual([
+      fixed,
+      replacement,
+      added,
+    ])
+    expect(layoutPublications).toBe(0)
+    expect(publications).toHaveLength(1)
+    expect(publications[0]).toHaveLength(2)
+    expect(statusChanges).toBe(0)
+    expect(truncates).toBe(0)
+    expect(facade._stateRevision).toBe(stateRevision + 1)
+    expect(facade._layoutRevision).toBe(layoutRevision + 1)
+    expect(facade.toArray.map((row) => facade.getKeyFromItem(row))).toEqual([
+      fixed.id,
+      replacement.id,
+      added.id,
+    ])
+    expect([
+      ...(
+        entries.get(`children`)?.get(bucketKey) as unknown as {
+          currentOrder: Map<number, string | undefined>
+        }
+      ).currentOrder,
+    ]).toEqual([
+      [original.id, `2`],
+      [fixed.id, `1`],
+      [added.id, `3`],
+    ])
+
+    rows.sendData(
+      new MultiSet([
+        [
+          [
+            bucketKey,
+            {
+              publicKey: replacement.id,
+              value: replacement,
+              order: `2`,
+            },
+          ],
+          -1,
+        ],
+        [
+          [
+            bucketKey,
+            {
+              publicKey: replacement.id,
+              value: replacement,
+              order: `0`,
+            },
+          ],
+          1,
+        ],
+      ]),
+    )
+    graph.run()
+    adapter.flush().publish()
+
+    expect(facade.toArray.map(stripVirtualProps)).toEqual([
+      replacement,
+      fixed,
+      added,
+    ])
+    expect(layoutPublications).toBe(1)
+    expect(publications).toHaveLength(2)
+    expect(publications[1]).toEqual([])
+    expect(facade._stateRevision).toBe(stateRevision + 1)
+    expect(facade._layoutRevision).toBe(layoutRevision + 2)
 
     unsubscribeTruncate()
     unsubscribeStatus()

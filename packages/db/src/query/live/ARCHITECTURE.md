@@ -1221,6 +1221,10 @@ an adapter has already consumed.
 Facade rollback restores the Collection's internal publication snapshot. It
 must not use a public sync transaction or emit change, layout, readiness, or
 truncate lifecycle events for state that never committed.
+It also restores the mutable key-to-order map used to classify later layout
+changes. Per-object public-key and order WeakMaps are monotonic metadata written
+before installation; failed installs do not clear them, so they are retained
+rather than copied into rollback state.
 Fresh-facade readiness joins the prepared publication release only after every
 facade and root install has succeeded, and it precedes root callbacks. A
 recovery failure attempts every remaining restore and publication discard,
