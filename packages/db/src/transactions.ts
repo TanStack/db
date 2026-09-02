@@ -649,6 +649,13 @@ class Transaction<T extends object = Record<string, unknown>> {
 
       this.isPersisted.resolve(this)
     } catch (error) {
+      // A manual or cascading rollback can also win while mutationFn is in
+      // flight. Its terminal outcome owns this commit attempt, so a late
+      // rejection cannot run rollback again or affect newer transactions.
+      if ((this.state as TransactionState) !== `persisting`) {
+        return this
+      }
+
       // Preserve the original error for rethrowing
       const originalError =
         error instanceof Error ? error : new Error(String(error))
