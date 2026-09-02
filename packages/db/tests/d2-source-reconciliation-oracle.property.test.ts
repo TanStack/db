@@ -107,6 +107,14 @@ function rowIdentity(row: SourceRow): string {
   return `${row.id}:${row.revision}:${row.value}`
 }
 
+function expectedWeightedRowIdentity(key: SourceKey, row: SourceRow): string {
+  const sourceIdentity = [typeof key, String(key)].join(`:`)
+  const payloadIdentity = [row.id, row.revision, row.value]
+    .map(String)
+    .join(`:`)
+  return `${sourceIdentity}|${payloadIdentity}`
+}
+
 function addWeight(
   relation: Map<string, number>,
   key: SourceKey,
@@ -179,10 +187,9 @@ function sourceChangesFor(
   return changes
 }
 
-function expectExactSourceRelation(
+function expectTrackerMatchesSource(
   sourceRows: ReadonlyMap<SourceKey, SourceRow>,
   sentRows: ReadonlyMap<SourceKey, SourceRow>,
-  relation: ReadonlyMap<string, number>,
 ): void {
   const compareEntries = (
     [a]: readonly [SourceKey, SourceRow],
@@ -191,14 +198,17 @@ function expectExactSourceRelation(
   expect([...sentRows.entries()].sort(compareEntries)).toEqual(
     [...sourceRows.entries()].sort(compareEntries),
   )
+}
+
+function expectWeightedRelationMatchesSource(
+  sourceRows: ReadonlyMap<SourceKey, SourceRow>,
+  relation: ReadonlyMap<string, number>,
+): void {
   expect(
     [...relation.entries()].sort(([a], [b]) => a.localeCompare(b)),
   ).toEqual(
     [...sourceRows.entries()]
-      .map(
-        ([key, row]) =>
-          [`${typeof key}:${String(key)}|${rowIdentity(row)}`, 1] as const,
-      )
+      .map(([key, row]) => [expectedWeightedRowIdentity(key, row), 1] as const)
       .sort(([a], [b]) => a.localeCompare(b)),
   )
 }
@@ -245,7 +255,8 @@ function applyReconciliationStep(
   }
 
   if (model.graphActive) {
-    expectExactSourceRelation(model.sourceRows, model.sentRows, model.relation)
+    expectTrackerMatchesSource(model.sourceRows, model.sentRows)
+    expectWeightedRelationMatchesSource(model.sourceRows, model.relation)
   } else {
     expect(model.sentRows.size).toBe(0)
     expect(model.relation.size).toBe(0)
@@ -556,6 +567,26 @@ it(`replaces the retained live-query source row after an ordered truncate`, asyn
   }
 })
 
+it(`keeps revision and value in weighted row identity`, () => {
+  const key = `row`
+  const base = { id: 1, revision: 1, value: 1 }
+  const differentRevision = { id: 1, revision: 2, value: 1 }
+  const differentValue = { id: 1, revision: 1, value: 2 }
+  const relation = new Map<string, number>()
+
+  addWeight(relation, key, base, 1)
+  addWeight(relation, key, differentRevision, 1)
+  addWeight(relation, key, differentValue, 1)
+
+  expect(relation).toEqual(
+    new Map([
+      [expectedWeightedRowIdentity(key, base), 1],
+      [expectedWeightedRowIdentity(key, differentRevision), 1],
+      [expectedWeightedRowIdentity(key, differentValue), 1],
+    ]),
+  )
+})
+
 it(`preserves external source rows across graph teardown and restart`, () => {
   const model = createReconciliationModel()
   const row = { id: 1, revision: 1, value: 1 }
@@ -572,7 +603,7 @@ it(`preserves external source rows across graph teardown and restart`, () => {
   expect(model.sourceRows).toEqual(new Map([[`row`, row]]))
   expect(model.sentRows).toEqual(new Map([[`row`, row]]))
   expect(model.relation).toEqual(
-    new Map([[`string:row|${rowIdentity(row)}`, 1]]),
+    new Map([[expectedWeightedRowIdentity(`row`, row), 1]]),
   )
 })
 
@@ -592,7 +623,7 @@ it(`replays external source changes made while the graph is down`, () => {
   expect(model.sourceRows).toEqual(new Map([[`row`, replacement]]))
   expect(model.sentRows).toEqual(new Map([[`row`, replacement]]))
   expect(model.relation).toEqual(
-    new Map([[`string:row|${rowIdentity(replacement)}`, 1]]),
+    new Map([[expectedWeightedRowIdentity(`row`, replacement), 1]]),
   )
 })
 
