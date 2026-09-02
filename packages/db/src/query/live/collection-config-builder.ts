@@ -10,8 +10,6 @@ import {
 } from '../../scheduler.js'
 import { getActiveTransaction } from '../../transactions.js'
 import { deepEquals } from '../../utils.js'
-import { getLoadSubsetDemandKey } from '../ir-stable-identity.js'
-import { isAppliedLoadSubsetOutcome } from '../load-subset-outcome.js'
 import { CollectionSubscriber } from './collection-subscriber.js'
 import { getCollectionBuilder } from './collection-registry.js'
 import { LIVE_QUERY_INTERNAL } from './internal.js'
@@ -31,7 +29,6 @@ import type { RootStreamBuilder } from '@tanstack/db-ivm'
 import type { OrderByOptimizationInfo } from '../compiler/order-by.js'
 import type { Collection } from '../../collection/index.js'
 import type {
-  AppliedLoadSubsetOutcome,
   CollectionConfigSingleRowOption,
   KeyedStream,
   ResultStream,
@@ -71,6 +68,7 @@ export type LiveQueryCollectionUtils = UtilsRecord & {
 }
 
 type PendingGraphRun = {
+  syncSession: number
   loadCallbacks: Set<() => boolean>
 }
 
@@ -132,6 +130,7 @@ export class CollectionConfigBuilder<
     | undefined
 
   private maybeRunGraphFn: (() => void) | undefined
+  private recoveringSources: Set<string> | undefined
 
   private readonly sourceDependencies: Record<
     string,
@@ -179,13 +178,8 @@ export class CollectionConfigBuilder<
     }
   >()
   private readonly demandGenerations = new Map<string, number>()
-  private readonly latestSubsetOutcomes = new Map<
-    string,
-    AppliedLoadSubsetOutcome
-  >()
   private syncSession = 0
   private windowOperationGeneration = 0
-  private lastWindowOutcomes: ReadonlyArray<AppliedLoadSubsetOutcome> = []
   // Map of lexical source IDs to optimizable ORDER BY state
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo> = {}
 
@@ -292,10 +286,6 @@ export class CollectionConfigBuilder<
           hasCustomGetKey: !!this.config.getKey,
           hasJoins: this.hasJoins(this.query),
           hasDistinct: !!this.query.distinct,
-          getLatestSubsetOutcomes: () => [
-            ...this.latestSubsetOutcomes.values(),
-          ],
-          getLastWindowOutcomes: () => this.lastWindowOutcomes,
         },
       },
     }
@@ -306,7 +296,6 @@ export class CollectionConfigBuilder<
       throw new SetWindowRequiresOrderByError()
     }
 
-    const syncSession = this.syncSession
     const previousWindowOperationGeneration = this.windowOperationGeneration
     const windowOperationGeneration = ++this.windowOperationGeneration
     const loadOperation =
@@ -343,32 +332,6 @@ export class CollectionConfigBuilder<
     }
 
     const ready = loadOperation?.wait() ?? true
-    if (ready === true) {
-      if (
-        syncSession === this.syncSession &&
-        windowOperationGeneration === this.windowOperationGeneration &&
-        this.currentSyncConfig !== undefined
-      ) {
-        this.lastWindowOutcomes = loadOperation?.getOutcomes() ?? []
-      }
-      return true
-    }
-    void ready.then(
-      () => {
-        if (
-          syncSession !== this.syncSession ||
-          windowOperationGeneration !== this.windowOperationGeneration ||
-          this.currentSyncConfig === undefined
-        ) {
-          return
-        }
-        this.lastWindowOutcomes = loadOperation!.getOutcomes()
-      },
-      () => {
-        // The original promise carries the failure to the caller. This
-        // observer only publishes successful operation outcomes.
-      },
-    )
     return ready
   }
 
@@ -421,19 +384,10 @@ export class CollectionConfigBuilder<
     return generation
   }
 
-  settleDemand(
-    planId: string,
-    generation: number,
-    outcomes: ReadonlyArray<AppliedLoadSubsetOutcome> = [],
-    sourceId?: string,
-  ): void {
+  settleDemand(planId: string, generation: number): void {
     const demand = this.activeDemands.get(planId)
     if (!demand || demand.generation !== generation || demand.settled) return
     demand.settled = true
-    const sourcedOutcomes = outcomes.map((outcome) =>
-      sourceId === undefined ? outcome : { ...outcome, sourceId },
-    )
-    for (const outcome of sourcedOutcomes) this.recordSubsetOutcome(outcome)
     this.maybeRunGraphFn?.()
   }
 
@@ -464,52 +418,39 @@ export class CollectionConfigBuilder<
     }
   }
 
-  trackSubsetLoadPromise(promise: Promise<unknown>, sourceId?: string): void {
-    const syncSession = this.syncSession
-    const tracked = promise.then((result) => {
-      const scoped = scopeLoadSubsetOutcomes(result, sourceId)
-      if (
-        syncSession !== this.syncSession ||
-        this.currentSyncConfig === undefined
-      ) {
-        return scoped
-      }
-      const outcomes = Array.isArray(scoped) ? scoped : [scoped]
-      for (const outcome of outcomes) {
-        if (isAppliedLoadSubsetOutcome(outcome)) {
-          this.recordSubsetOutcome(outcome)
-        }
-      }
-      return scoped
-    })
-    this.liveQueryCollection!._sync.trackLoadPromise(tracked)
+  trackSubsetLoadPromise(promise: Promise<unknown>): void {
+    this.liveQueryCollection!._sync.trackLoadPromise(promise)
   }
 
-  trackSubsetLoadOperationPromise(
-    promise: Promise<unknown>,
-    sourceId?: string,
-  ): void {
-    const tracked = promise.then((result) =>
-      scopeLoadSubsetOutcomes(result, sourceId),
-    )
-    // This observer may be offered when no imperative window operation is
-    // active. The original promise owns lifecycle error delivery; do not leave
-    // this source-scoping derivative as an unhandled rejection in that case.
-    void tracked.catch(() => {})
-    this.liveQueryCollection!._sync.trackLoadSubsetOperationPromise(tracked)
-  }
-
-  private recordSubsetOutcome(outcome: AppliedLoadSubsetOutcome): void {
-    const demandKey = getLoadSubsetDemandKey(outcome.demand)
-    const outcomeKey = `${outcome.sourceId ?? ``}\u0000${outcome.collectionId}\u0000${demandKey ?? ``}`
-    const previous = this.latestSubsetOutcomes.get(outcomeKey)
-    if (!previous || previous.generation < outcome.generation) {
-      this.latestSubsetOutcomes.set(outcomeKey, outcome)
-    }
+  trackSubsetLoadOperationPromise(promise: Promise<unknown>): void {
+    this.liveQueryCollection!._sync.trackLoadSubsetOperationPromise(promise)
   }
 
   retireDemand(planId: string): void {
     this.activeDemands.delete(planId)
+  }
+
+  beginSourceRecovery(sourceId: string): void {
+    ;(this.recoveringSources ??= new Set()).add(sourceId)
+  }
+
+  completeSourceRecovery(sourceId: string): void {
+    this.recoveringSources?.delete(sourceId)
+    queueMicrotask(() => this.maybeRunGraphFn?.())
+  }
+
+  isSourceRecoveryPending(sourceId: string): boolean {
+    return this.recoveringSources?.has(sourceId) ?? false
+  }
+
+  private canPublishRecovery(): boolean {
+    return (
+      !this.isInErrorState &&
+      this.allRequiredSourcesReady() &&
+      this.recoveringSources?.size === 0 &&
+      [...this.activeDemands.values()].every((demand) => demand.settled) &&
+      !this.liveQueryCollection?.isLoadingSubset
+    )
   }
 
   // The callback function is called after the graph has run.
@@ -538,8 +479,14 @@ export class CollectionConfigBuilder<
     this.isGraphRunning = true
 
     try {
-      const { begin, commit } = this.currentSyncConfig
+      const syncSession = this.syncSession
+      const config = this.currentSyncConfig
+      const { begin, commit } = config
       const syncState = this.currentSyncState
+      const isCurrentSession = () =>
+        syncSession === this.syncSession &&
+        this.currentSyncConfig === config &&
+        this.currentSyncState === syncState
 
       // Don't run if the live query is in an error state
       if (this.isInErrorState) {
@@ -549,23 +496,37 @@ export class CollectionConfigBuilder<
       // Always run the graph if subscribed (eager execution)
       if (syncState.subscribedToAllCollections) {
         let callbackCalled = false
-        while (syncState.graph.pendingWork()) {
-          syncState.graph.run()
-          callback?.()
-          callbackCalled = true
+        const drainGraph = () => {
+          while (syncState.graph.pendingWork()) {
+            syncState.graph.run()
+            if (!isCurrentSession()) return false
+            callback?.()
+            if (!isCurrentSession()) return false
+            callbackCalled = true
+          }
+          return true
         }
 
-        // Publish only after every operator has reached quiescence. A source
-        // change can reach sibling materializations in different graph steps;
-        // flushing between those steps would expose a mixed root snapshot.
-        syncState.flushPendingChanges?.()
+        if (!drainGraph()) return
 
         // Ensure the callback runs at least once even when the graph has no pending work.
         // This handles lazy loading scenarios where setWindow() increases the limit or
         // an async loadSubset completes and we need to re-check if more data is needed.
         if (!callbackCalled) {
           callback?.()
+          if (!isCurrentSession()) return
         }
+
+        // A synchronous loader can write while this graph run is active. Its
+        // nested schedule is intentionally coalesced, so drain that new input
+        // here before publishing the transaction.
+        if (!drainGraph()) return
+
+        // Publish only after every operator has reached quiescence. A source
+        // change can reach sibling materializations in different graph steps;
+        // flushing between those steps would expose a mixed root snapshot.
+        syncState.flushPendingChanges?.()
+        if (!isCurrentSession()) return
 
         // On the initial run, we may need to do an empty commit to ensure that
         // the collection is initialized
@@ -579,7 +540,7 @@ export class CollectionConfigBuilder<
         // 1. All data has been processed through the graph
         // 2. All source collections have had a chance to send their initial data
         // This prevents marking ready before data is processed (fixes isReady=true with empty data)
-        this.updateLiveQueryStatus(this.currentSyncConfig)
+        this.updateLiveQueryStatus(config)
       }
     } finally {
       this.isGraphRunning = false
@@ -662,8 +623,9 @@ export class CollectionConfigBuilder<
 
     // Manage our own state - get or create pending callbacks for this context
     let pending = contextId ? this.pendingGraphRuns.get(contextId) : undefined
-    if (!pending) {
+    if (!pending || pending.syncSession !== this.syncSession) {
       pending = {
+        syncSession: this.syncSession,
         loadCallbacks: new Set(),
       }
       if (contextId) {
@@ -731,7 +693,11 @@ export class CollectionConfigBuilder<
     }
 
     // If sync session has ended, don't execute (graph is finalized, subscriptions cleared)
-    if (!this.currentSyncConfig || !this.currentSyncState) {
+    if (
+      pending.syncSession !== this.syncSession ||
+      !this.currentSyncConfig ||
+      !this.currentSyncState
+    ) {
       return
     }
 
@@ -782,8 +748,6 @@ export class CollectionConfigBuilder<
     this.fatalQueryError = false
     this.erroredSourceIds.clear()
     this.lastSubsetError = undefined
-    this.latestSubsetOutcomes.clear()
-    this.lastWindowOutcomes = []
     // Store config and syncState as instance properties for the duration of this sync session
     this.currentSyncConfig = config
 
@@ -834,8 +798,7 @@ export class CollectionConfigBuilder<
       this.lazySources.clear()
       this.demandGenerations.clear()
       this.activeDemands.clear()
-      this.latestSubsetOutcomes.clear()
-      this.lastWindowOutcomes = []
+      this.recoveringSources = undefined
       this.optimizableOrderByCollections = {}
       this.lazySourcesCallbacks = {}
 
@@ -880,6 +843,7 @@ export class CollectionConfigBuilder<
           if (!event.isLoadingSubset) {
             // Subset loading finished, check if we can now mark ready
             this.updateLiveQueryStatus(config)
+            if (this.recoveringSources) this.maybeRunGraphFn?.()
           }
         },
       )
@@ -1007,8 +971,14 @@ export class CollectionConfigBuilder<
       const hasChildChanges = bucketFacades.hasPendingChanges()
 
       if (!hasParentChanges && !hasChildChanges) {
+        if (this.recoveringSources && this.canPublishRecovery()) {
+          this.recoveringSources = undefined
+        }
         return
       }
+
+      const publishesRecovery = this.canPublishRecovery()
+      if (this.recoveringSources && !publishesRecovery) return
 
       let facadePublication:
         | ReturnType<BucketFacadeAdapter[`flush`]>
@@ -1065,6 +1035,7 @@ export class CollectionConfigBuilder<
         }
       }
       if (publicationError !== undefined) throw publicationError
+      if (publishesRecovery) this.recoveringSources = undefined
     }
 
     graph.finalize()
@@ -1418,15 +1389,4 @@ function hasOrderOnlyMove<T>(
 /** Mark the collection's next commit as layout-changing. */
 function markLayoutChange(collection: { _markLayoutChange: () => void }): void {
   collection._markLayoutChange()
-}
-
-function scopeLoadSubsetOutcomes(result: unknown, sourceId?: string): unknown {
-  if (sourceId === undefined) return result
-  if (isAppliedLoadSubsetOutcome(result)) return { ...result, sourceId }
-  if (Array.isArray(result)) {
-    return result.map((item) =>
-      isAppliedLoadSubsetOutcome(item) ? { ...item, sourceId } : item,
-    )
-  }
-  return result
 }

@@ -954,7 +954,68 @@ describe(`Lazy join: subquery whose join key resolves to an indexed collection`,
   })
 })
 
-describe(`Lazy join without a usable index`, () => {
+describe(`Lazy join index availability`, () => {
+  test(`uses an auto-index with omitted locale options`, async () => {
+    type Team = { id: string }
+    type Member = { id: string; teamId: string }
+    const teams = createCollection(
+      mockSyncCollectionOptions<Team>({
+        id: `lazy-default-collation-teams`,
+        getKey: (team) => team.id,
+        initialData: [{ id: `t1` }],
+      }),
+    )
+    const members = createCollection(
+      mockSyncCollectionOptions<Member>({
+        id: `lazy-default-collation-members`,
+        getKey: (member) => member.id,
+        initialData: [{ id: `m1`, teamId: `t1` }],
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        defaultStringCollation: {
+          stringSort: `locale`,
+          localeOptions: { sensitivity: undefined },
+        },
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `m1`, teamId: `t1` } })
+            commit()
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+      }),
+    )
+    const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const live = createLiveQueryCollection((q) =>
+      q
+        .from({ team: teams })
+        .leftJoin({ member: members }, ({ team, member }) =>
+          eq(team.id, member.teamId),
+        )
+        .select(({ team, member }) => ({
+          id: team.id,
+          memberId: member.id,
+        })),
+    )
+
+    try {
+      await live.preload()
+      expect(live.toArray.map(stripVirtualProps)).toEqual([
+        { id: `t1`, memberId: `m1` },
+      ])
+      expect(members.indexes.size).toBe(1)
+      expect(warnSpy).not.toHaveBeenCalledWith(
+        expect.stringContaining(`Join requires an index`),
+      )
+    } finally {
+      warnSpy.mockRestore()
+      await Promise.all([live.cleanup(), teams.cleanup(), members.cleanup()])
+    }
+  })
+
   test(`warns when demand falls back to a full local scan`, async () => {
     type Team = { id: string }
     type Member = { id: string; teamId: string }

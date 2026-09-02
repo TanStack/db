@@ -9,15 +9,13 @@ import {
 } from './live-query-adapter.js'
 import { createLiveQueryObserver } from './live-query-observer.js'
 import { BaseQueryBuilder } from './query/builder/index.js'
-import { LIVE_QUERY_INTERNAL } from './query/live/internal.js'
 import { deepEquals } from './utils.js'
 import type {
   LiveQueryObserver,
   LiveQuerySnapshot,
 } from './live-query-observer.js'
 import type { Collection } from './collection/index.js'
-import type { AppliedLoadSubsetOutcome, CollectionStatus } from './types.js'
-import type { LiveQueryInternalUtils } from './query/live/internal.js'
+import type { CollectionStatus } from './types.js'
 import type {
   Context,
   InitialQueryBuilder,
@@ -119,10 +117,6 @@ type WindowTarget = object & {
   utils?: {
     setWindow?: (options: { offset: number; limit: number }) => WindowResult
     getWindow?: () => { offset: number; limit: number } | undefined
-    [LIVE_QUERY_INTERNAL]?: Pick<
-      LiveQueryInternalUtils,
-      `getLastWindowOutcomes`
-    >
   }
 }
 
@@ -142,7 +136,6 @@ class WindowCoordinator {
   private pending: PendingWindow | undefined
   private generation = 0
   private leaseVersion = 0
-  private latestAppliedOutcomes: ReadonlyArray<AppliedLoadSubsetOutcome> = []
 
   constructor(private readonly target: WindowTarget) {}
 
@@ -209,10 +202,6 @@ class WindowCoordinator {
 
   hasLeases(): boolean {
     return this.leases.size > 0
-  }
-
-  getLatestAppliedOutcomes(): ReadonlyArray<AppliedLoadSubsetOutcome> {
-    return this.latestAppliedOutcomes
   }
 
   release(lease: symbol, restoreWhenEmpty: boolean): void {
@@ -338,7 +327,6 @@ class WindowCoordinator {
     if (result === true) {
       if (generation === this.generation && this.getDesiredLimit() === limit) {
         this.appliedLimit = limit
-        this.captureLatestAppliedOutcomes()
       }
       return true
     }
@@ -350,7 +338,6 @@ class WindowCoordinator {
           this.getDesiredLimit() === limit
         ) {
           this.appliedLimit = limit
-          this.captureLatestAppliedOutcomes()
         }
         if (this.pending?.generation === generation) {
           this.pending = undefined
@@ -367,10 +354,6 @@ class WindowCoordinator {
     return promise
   }
 
-  private captureLatestAppliedOutcomes(): void {
-    const internal = this.target.utils?.[LIVE_QUERY_INTERNAL]
-    this.latestAppliedOutcomes = internal?.getLastWindowOutcomes() ?? []
-  }
 }
 
 const windowCoordinators = new WeakMap<object, WindowCoordinator>()
@@ -536,10 +519,6 @@ export interface LiveQueryWindowController<
   fetchNextPage: () => Promise<void>
   /** Reset to the first page, resolving after the smaller window is accepted. */
   reset: () => Promise<void>
-  /** @internal Exact applied outcomes for the accepted physical window. */
-  [LIVE_QUERY_INTERNAL]: {
-    getLatestAppliedOutcomes: () => ReadonlyArray<AppliedLoadSubsetOutcome>
-  }
   preload: () => Promise<void>
   dispose: () => void
 }
@@ -582,11 +561,6 @@ class LiveQueryWindowControllerImpl<
   T extends object,
   TKey extends string | number,
 > implements LiveQueryWindowController<T, TKey> {
-  readonly [LIVE_QUERY_INTERNAL] = {
-    getLatestAppliedOutcomes: () =>
-      this.coordinator?.getLatestAppliedOutcomes() ?? [],
-  }
-
   private readonly observer: LiveQueryObserver<T, TKey>
   private readonly collection: Collection<T, TKey, any> | null
   private readonly coordinator: WindowCoordinator | null

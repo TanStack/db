@@ -1,11 +1,13 @@
-import { MultiSet, serializeValue } from '@tanstack/db-ivm'
+import { MultiSet } from '@tanstack/db-ivm'
 import { UnsupportedRootScalarSelectError } from '../../errors.js'
+import { canExpressCursorOrder } from '../../utils/cursor.js'
 import { normalizeOrderByPaths } from '../compiler/expressions.js'
 import { buildQuery, getQueryIR } from '../builder/index.js'
 import { collectCollectionSources, isExpressionLike } from '../ir.js'
 import type { MultiSetArray, RootStreamBuilder } from '@tanstack/db-ivm'
 import type { Collection } from '../../collection/index.js'
-import type { ChangeMessage } from '../../types.js'
+import type { CollectionSubscription } from '../../collection/subscription.js'
+import type { ChangeMessage, LoadSubsetRequestResult } from '../../types.js'
 import type { InitialQueryBuilder, QueryBuilder } from '../builder/index.js'
 import type { Context } from '../builder/types.js'
 import type { OrderBy, QueryIR } from '../ir.js'
@@ -240,57 +242,141 @@ export function computeSubscriptionOrderByHints(
   }
 }
 
-/**
- * Compute the cursor for loading the next batch of ordered data.
- * Extracts values from the biggest sent row and builds the `minValues`
- * array and a deduplication key.
- *
- * @returns `undefined` if the load should be skipped (duplicate request),
- *          otherwise `{ minValues, normalizedOrderBy, loadRequestKey }`.
- */
-export function computeOrderedLoadCursor(
-  orderByInfo: Pick<
-    OrderByOptimizationInfo,
-    'orderBy' | 'valueExtractorForRawRow' | 'offset'
-  >,
-  biggestSentRow: unknown | undefined,
-  lastLoadRequestKey: string | undefined,
-  alias: string,
-  limit: number,
-):
-  | {
-      minValues: Array<unknown> | undefined
-      normalizedOrderBy: OrderBy
-      loadRequestKey: string
+/** Owns the conservative provider-loading policy for one ordered source. */
+export class OrderedSourceLoader {
+  private pending: Promise<unknown> | undefined
+  private fullSource = false
+  private failed = false
+  private active = true
+  private generation = 0
+
+  constructor(
+    private readonly info: OrderByOptimizationInfo,
+    private readonly subscription: CollectionSubscription,
+    private readonly alias: string,
+    private readonly getBiggest: () => unknown,
+    private readonly onResult: (
+      result: LoadSubsetRequestResult,
+    ) => void = () => {},
+  ) {}
+
+  get pendingPromise(): Promise<unknown> | undefined {
+    return this.pending
+  }
+
+  start(): void {
+    const { index, limit, offset, orderBy, requiresFullSource } = this.info
+    if (limit === 0) return
+    if (!index || orderBy.length !== 1 || requiresFullSource) {
+      this.loadFullSource()
+      return
     }
-  | undefined {
-  const { orderBy, valueExtractorForRawRow, offset } = orderByInfo
-
-  // Extract all orderBy column values from the biggest sent row
-  // For single-column: returns single value, for multi-column: returns array
-  const extractedValues = biggestSentRow
-    ? valueExtractorForRawRow(biggestSentRow as Record<string, unknown>)
-    : undefined
-
-  // Normalize to array format for minValues
-  let minValues: Array<unknown> | undefined
-  if (extractedValues !== undefined) {
-    minValues = Array.isArray(extractedValues)
-      ? extractedValues
-      : [extractedValues]
+    this.subscription.setOrderByIndex(index)
+    this.loadPage(offset + limit, true)
   }
 
-  // Deduplicate: skip if we already issued an identical load request
-  const loadRequestKey = serializeValue({
-    minValues: minValues ?? null,
-    offset,
-    limit,
-  })
-  if (lastLoadRequestKey === loadRequestKey) {
-    return undefined
+  loadMore(): Promise<unknown> | undefined {
+    if (!this.active || this.info.limit === 0) return
+    if (
+      !this.info.index ||
+      this.info.orderBy.length !== 1 ||
+      this.info.requiresFullSource
+    ) {
+      this.loadFullSource()
+      return this.pending
+    }
+    if (this.pending || !this.info.dataNeeded) return this.pending
+    const count = Math.max(
+      this.info.dataNeeded(),
+      this.failed ? this.info.offset + this.info.limit : 0,
+    )
+    if (count > 0) this.loadPage(count, true)
+    return this.pending
   }
 
-  const normalizedOrderBy = normalizeOrderByPaths(orderBy, alias)
+  loadFullSource(): void {
+    if (!this.active || this.fullSource) return
+    this.fullSource = true
+    try {
+      this.subscription.requestSnapshot({
+        trackLoadSubsetPromise: false,
+        onLoadSubsetResult: (result) => {
+          this.observe(result, false)
+          if (result instanceof Promise) {
+            void result.catch(() => {
+              this.fullSource = false
+            })
+          }
+        },
+      })
+    } catch (error) {
+      this.fullSource = false
+      throw error
+    }
+  }
 
-  return { minValues, normalizedOrderBy, loadRequestKey }
+  resetCursor(): void {
+    this.generation++
+    this.pending = undefined
+    this.failed = false
+  }
+
+  dispose(): void {
+    this.active = false
+    this.resetCursor()
+  }
+
+  private loadPage(count: number, refine: boolean): void {
+    const biggest = this.getBiggest()
+    let minValues: Array<unknown> | undefined
+    if (biggest !== undefined) {
+      const value = this.info.valueExtractorForRawRow(
+        biggest as Record<string, unknown>,
+      )
+      if (!canExpressCursorOrder(this.info.orderBy, [value])) {
+        this.loadFullSource()
+        return
+      }
+      minValues = [value]
+    }
+    try {
+      this.subscription.requestLimitedSnapshot({
+        orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
+        limit: count,
+        minValues,
+        trackLoadSubsetPromise: false,
+        onLoadSubsetResult: (result) => this.observe(result, refine),
+      })
+    } catch (error) {
+      this.failed = true
+      throw error
+    }
+  }
+
+  private observe(result: LoadSubsetRequestResult, refine: boolean): void {
+    this.onResult(result)
+    const generation = this.generation
+    const complete = () => {
+      if (!this.active || generation !== this.generation) return
+      this.failed = false
+      if (refine) this.loadPage(1, false)
+    }
+    if (!(result instanceof Promise)) {
+      queueMicrotask(complete)
+      return
+    }
+
+    this.pending = result
+    void result.then(
+      () => {
+        if (this.pending === result) this.pending = undefined
+        complete()
+      },
+      () => {
+        if (this.pending === result) this.pending = undefined
+        if (!this.active || generation !== this.generation) return
+        this.failed = true
+      },
+    )
+  }
 }

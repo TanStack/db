@@ -5,8 +5,8 @@ import type { CollectionSubscription } from '../../collection/subscription.js'
 import type { LazyDemandPlan } from '../compiler/joins.js'
 import type { BasicExpression } from '../ir.js'
 import type {
-  AppliedLoadSubsetOutcome,
   LoadSubsetRequestResult,
+  LoadSubsetResult,
 } from '../../types.js'
 
 type DemandSegment = {
@@ -25,7 +25,7 @@ type DemandState = {
 export type DemandUpdate = {
   changed: boolean
   empty: boolean
-  ready: Promise<Array<AppliedLoadSubsetOutcome>> | true
+  ready: Promise<unknown[]> | true
 }
 
 /**
@@ -94,7 +94,7 @@ export class SubsetDemandController {
     const pending = activeSegments
       .map((segment) => segment.ready)
       .filter(
-        (ready): ready is Promise<AppliedLoadSubsetOutcome> =>
+        (ready): ready is Promise<void | LoadSubsetResult> =>
           ready instanceof Promise,
       )
     return {

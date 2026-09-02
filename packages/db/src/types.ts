@@ -343,27 +343,11 @@ export interface LoadSubsetResult {
    * exact request. Return `undefined` when the source cannot prove either
    * direction.
    */
-  hasMore: boolean | undefined
-}
-
-/** @internal Normalized source extent for one applied subset demand. */
-export type SourceExtent = `unknown` | `continues` | `exhausted`
-
-/**
- * @internal A source result attached to the exact demand and attempt that
- * established it. Ownership fields are omitted from the retained demand.
- */
-export interface AppliedLoadSubsetOutcome {
-  collectionId: string
-  /** @internal Lexical live-query source, attached after collection loading. */
-  sourceId?: string
-  demand: LoadSubsetOptions
-  generation: number
-  extent: SourceExtent
+  hasMore?: boolean
 }
 
 /** @internal Result returned by the collection's normalized subset boundary. */
-export type LoadSubsetRequestResult = true | Promise<AppliedLoadSubsetOutcome>
+export type LoadSubsetRequestResult = true | Promise<void | LoadSubsetResult>
 
 /**
  * Loads one subset and transfers its ongoing resource ownership only after
@@ -976,6 +960,12 @@ export interface SubscribeChangesOptions<
   onLoadSubsetResult?: (result: LoadSubsetRequestResult) => void
   /** Receives subset-load failures scoped to this subscription. @internal */
   onLoadSubsetError?: (event: SubscriptionLoadSubsetErrorEvent) => void
+  /** Lets a live-query graph retain its last publication during replay. @internal */
+  truncateReplayPublication?: {
+    readonly start: () => void
+    readonly succeed: () => void
+    readonly fail?: () => void
+  }
 }
 
 export interface SubscribeChangesSnapshotOptions<

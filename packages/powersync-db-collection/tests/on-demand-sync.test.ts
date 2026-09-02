@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { PowerSyncDatabase, Schema, Table, column } from '@powersync/node'
+import { fc, test as fcTest } from '@fast-check/vitest'
 import {
+  IR,
   and,
   createCollection,
   createLiveQueryCollection,
@@ -12,8 +14,17 @@ import {
   lt,
   or,
 } from '@tanstack/db'
+import pDefer from 'p-defer'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { powerSyncCollectionOptions } from '../src'
+import { POWERSYNC_TEST_HOOKS } from '../src/internal'
+import {
+  projectRetainedRowKeys,
+  projectTransportLoads,
+} from '../../db/tests/load-subset-full-flow-model'
+import type { PowerSyncTestHooks } from '../src/internal'
+import type { LoadSubsetFullFlowEvent } from '../../db/tests/load-subset-full-flow-model'
+import type { Scheduler } from 'fast-check'
 
 const APP_SCHEMA = new Schema({
   products: new Table({
@@ -54,6 +65,118 @@ describe(`On-Demand Sync Mode`, () => {
         (uuid(), 'Product D', 200, 'electronics'),
         (uuid(), 'Product E', 75, 'clothing')
     `)
+  }
+
+  type ProductRow = {
+    id: string
+    name: string
+    price: number
+    category: string
+  }
+
+  type StagedChange = {
+    type: `insert` | `update` | `delete`
+    value?: ProductRow
+    key?: string
+  }
+
+  type ControlledReceipt = {
+    promise: Promise<void>
+    resolve: () => void
+    reject: (reason: unknown) => void
+  }
+
+  async function startAppliedOutcomeLoad(
+    source: `rows` | `empty`,
+    syncBatchSize?: number,
+    receiptMode: `controlled` | `immediate` = `controlled`,
+  ) {
+    const db = await createDatabase()
+    await createTestProducts(db)
+    const category = source === `rows` ? `electronics` : `furniture`
+    const authoritativeRows = await db.getAll<ProductRow>(
+      `SELECT id, name, price, category FROM products WHERE category = ?`,
+      [category],
+    )
+    const receipts: Array<ControlledReceipt> = []
+    const readableRows = new Map<string, ProductRow>()
+    let stagedChanges: Array<StagedChange> = []
+    const applyChanges = (changes: Array<StagedChange>) => {
+      for (const change of changes) {
+        if (change.type === `delete`) {
+          if (!change.key) throw new Error(`Delete requires a key`)
+          readableRows.delete(change.key)
+        } else {
+          if (!change.value) throw new Error(`Write requires a value`)
+          readableRows.set(change.value.id, change.value)
+        }
+      }
+    }
+    const commit = vi.fn(() => {
+      const changes = stagedChanges
+      stagedChanges = []
+      if (receiptMode === `immediate`) {
+        applyChanges(changes)
+        return true
+      }
+      const receipt = pDefer<void>()
+      receipts.push(receipt)
+      return receipt.promise.then(() => applyChanges(changes))
+    })
+    const config = powerSyncCollectionOptions({
+      database: db,
+      table: APP_SCHEMA.props.products,
+      syncMode: `on-demand`,
+      ...(syncBatchSize === undefined ? {} : { syncBatchSize }),
+    })
+    const sync = config.sync.sync({
+      collection: {
+        status: `ready`,
+        has: (key: string) => readableRows.has(key),
+      },
+      begin: vi.fn(() => {
+        stagedChanges = []
+      }),
+      write: vi.fn((change: StagedChange) => {
+        stagedChanges.push(change)
+      }),
+      commit,
+      markReady: vi.fn(),
+      markError: vi.fn(),
+      truncate: vi.fn(),
+    } as never)
+    if (!sync || typeof sync === `function` || !sync.loadSubset) {
+      throw new Error(`Expected on-demand sync controls`)
+    }
+
+    let settled = false
+    const where = new IR.Func<boolean>(`eq`, [
+      new IR.PropRef([`category`]),
+      new IR.Value(category),
+    ])
+    const observed = Promise.resolve(sync.loadSubset({ where })).then(
+      () => {
+        settled = true
+        return { status: `fulfilled` } as const
+      },
+      (reason: unknown) => {
+        settled = true
+        return { status: `rejected`, reason } as const
+      },
+    )
+
+    return {
+      authoritativeRows,
+      readableRows,
+      receipts,
+      observed,
+      isSettled: () => settled,
+      cleanup: async () => {
+        receipts.forEach((receipt) => receipt.resolve())
+        sync.cleanup?.()
+        await observed
+      },
+    }
   }
 
   it(`should not load any data initially in on-demand mode`, async () => {
@@ -216,6 +339,194 @@ describe(`On-Demand Sync Mode`, () => {
       await Promise.allSettled([preload])
     }
   })
+
+  it.each([
+    { source: `rows`, settlement: `fulfill` },
+    { source: `empty`, settlement: `fulfill` },
+    { source: `rows`, settlement: `reject` },
+    { source: `empty`, settlement: `reject` },
+  ] as const)(
+    `settles a $source subset only through an applied $settlement outcome`,
+    async ({ source, settlement }) => {
+      const harness = await startAppliedOutcomeLoad(source)
+      const receiptFailure = new Error(`applied receipt failed`)
+      expect(harness.authoritativeRows.length > 0).toBe(source === `rows`)
+
+      try {
+        await vi.waitFor(() => expect(harness.receipts).toHaveLength(1))
+        expect(harness.isSettled()).toBe(false)
+        expect(harness.readableRows.size).toBe(0)
+
+        if (settlement === `reject`) {
+          harness.receipts[0]!.reject(receiptFailure)
+        } else {
+          harness.receipts[0]!.resolve()
+        }
+
+        const result = await harness.observed
+        if (settlement === `reject`) {
+          expect(result).toEqual({
+            status: `rejected`,
+            reason: receiptFailure,
+          })
+          expect(harness.readableRows.size).toBe(0)
+        } else {
+          expect(result).toEqual({ status: `fulfilled` })
+          expect(
+            Array.from(harness.readableRows.values(), (row) => row.name).sort(),
+          ).toEqual(harness.authoritativeRows.map((row) => row.name).sort())
+        }
+      } finally {
+        await harness.cleanup()
+      }
+    },
+  )
+
+  it(`waits for every applied receipt before fulfilling a multi-batch subset`, async () => {
+    const harness = await startAppliedOutcomeLoad(`rows`, 1)
+
+    try {
+      await vi.waitFor(() =>
+        expect(harness.receipts).toHaveLength(
+          harness.authoritativeRows.length + 1,
+        ),
+      )
+
+      for (const [index, receipt] of harness.receipts.entries()) {
+        receipt.resolve()
+        await vi.waitFor(() =>
+          expect(harness.readableRows.size).toBe(
+            Math.min(index + 1, harness.authoritativeRows.length),
+          ),
+        )
+        if (index < harness.receipts.length - 1) {
+          expect(harness.isSettled()).toBe(false)
+        }
+      }
+      await expect(harness.observed).resolves.toEqual({
+        status: `fulfilled`,
+      })
+      expect(
+        Array.from(harness.readableRows.values(), (row) => row.name).sort(),
+      ).toEqual(harness.authoritativeRows.map((row) => row.name).sort())
+    } finally {
+      await harness.cleanup()
+    }
+  })
+
+  it.each([
+    { receiptIndex: 0 },
+    { receiptIndex: 1 },
+    { receiptIndex: 2 },
+    { receiptIndex: 3 },
+  ])(
+    `keeps applied receipt $receiptIndex independent in a multi-batch subset`,
+    async ({ receiptIndex }) => {
+      const harness = await startAppliedOutcomeLoad(`rows`, 1)
+      const receiptFailure = new Error(`applied receipt ${receiptIndex} failed`)
+
+      try {
+        await vi.waitFor(() =>
+          expect(harness.receipts).toHaveLength(
+            harness.authoritativeRows.length + 1,
+          ),
+        )
+        expect(receiptIndex).toBeLessThan(harness.receipts.length)
+
+        harness.receipts.forEach((receipt, index) => {
+          if (index !== receiptIndex) receipt.resolve()
+        })
+        const expectedRows = harness.authoritativeRows.filter(
+          (_row, index) => index !== receiptIndex,
+        )
+        await vi.waitFor(() =>
+          expect(harness.readableRows.size).toBe(expectedRows.length),
+        )
+        expect(
+          Array.from(harness.readableRows.values(), (row) => row.name).sort(),
+        ).toEqual(expectedRows.map((row) => row.name).sort())
+        expect(harness.isSettled()).toBe(false)
+
+        harness.receipts[receiptIndex]!.reject(receiptFailure)
+        await expect(harness.observed).resolves.toEqual({
+          status: `rejected`,
+          reason: receiptFailure,
+        })
+        expect(
+          Array.from(harness.readableRows.values(), (row) => row.name).sort(),
+        ).toEqual(expectedRows.map((row) => row.name).sort())
+      } finally {
+        await harness.cleanup()
+      }
+    },
+  )
+
+  it.each([
+    { receiptIndex: 0 },
+    { receiptIndex: 1 },
+    { receiptIndex: 2 },
+    { receiptIndex: 3 },
+  ])(
+    `fails fast at applied receipt $receiptIndex while later receipts remain pending`,
+    async ({ receiptIndex }) => {
+      const harness = await startAppliedOutcomeLoad(`rows`, 1)
+      const receiptFailure = new Error(
+        `applied receipt ${receiptIndex} failed before its suffix settled`,
+      )
+
+      try {
+        await vi.waitFor(() =>
+          expect(harness.receipts).toHaveLength(
+            harness.authoritativeRows.length + 1,
+          ),
+        )
+        expect(receiptIndex).toBeLessThan(harness.receipts.length)
+
+        harness.receipts
+          .slice(0, receiptIndex)
+          .forEach((receipt) => receipt.resolve())
+        const expectedRows = harness.authoritativeRows.slice(0, receiptIndex)
+        await vi.waitFor(() =>
+          expect(harness.readableRows.size).toBe(expectedRows.length),
+        )
+
+        harness.receipts[receiptIndex]!.reject(receiptFailure)
+        await expect(harness.observed).resolves.toEqual({
+          status: `rejected`,
+          reason: receiptFailure,
+        })
+        expect(
+          Array.from(harness.readableRows.values(), (row) => row.name).sort(),
+        ).toEqual(expectedRows.map((row) => row.name).sort())
+      } finally {
+        await harness.cleanup()
+      }
+    },
+  )
+
+  it.each([`rows`, `empty`] as const)(
+    `accepts an immediate applied outcome for a %s subset`,
+    async (source) => {
+      const harness = await startAppliedOutcomeLoad(
+        source,
+        undefined,
+        `immediate`,
+      )
+
+      try {
+        expect(harness.authoritativeRows.length > 0).toBe(source === `rows`)
+        await expect(harness.observed).resolves.toEqual({
+          status: `fulfilled`,
+        })
+        expect(harness.receipts).toHaveLength(0)
+        expect(
+          Array.from(harness.readableRows.values(), (row) => row.name).sort(),
+        ).toEqual(harness.authoritativeRows.map((row) => row.name).sort())
+      } finally {
+        await harness.cleanup()
+      }
+    },
+  )
 
   it(`should reactively update live query when new matching data is inserted into SQLite`, async () => {
     const db = await createDatabase()
@@ -1792,6 +2103,113 @@ describe(`On-Demand Sync Mode`, () => {
         { timeout: 2000 },
       )
     })
+
+    it(`matches the shared remount history after final-owner release`, async () => {
+      const db = await createDatabase()
+      await createTestProducts(db)
+      const expectedRowKeys = (
+        await db.getAll<{ id: string }>(
+          `SELECT id FROM products WHERE category = 'electronics'`,
+        )
+      )
+        .map(({ id }) => String(id))
+        .sort()
+      expect(expectedRowKeys).toHaveLength(3)
+      let transportLoads = 0
+      const collection = createCollection(
+        powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.products,
+          syncMode: `on-demand`,
+          onLoadSubset: () => {
+            transportLoads++
+          },
+        }),
+      )
+      await collection.stateWhenReady()
+      const createLive = () =>
+        createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ product: collection })
+              .where(({ product }) => eq(product.category, `electronics`)),
+        })
+      const first = createLive()
+      let second: ReturnType<typeof createLive> | undefined
+      const history: Array<LoadSubsetFullFlowEvent> = [
+        {
+          type: `requestDemand`,
+          ownerId: `owner-1`,
+          sessionId: `session-1`,
+          sourceId: `powersync-products`,
+          demandId: `electronics`,
+          attemptId: `attempt-1`,
+          alreadyAborted: false,
+        },
+      ]
+
+      try {
+        await first.preload()
+        history.push({
+          type: `applyAuthoritativeRows`,
+          ownerId: `owner-1`,
+          sourceId: `powersync-products`,
+          demandId: `electronics`,
+          attemptId: `attempt-1`,
+          rowKeys: expectedRowKeys,
+        })
+        expect(first.toArray.map(({ id }) => String(id)).sort()).toEqual(
+          projectRetainedRowKeys(history),
+        )
+
+        await first.cleanup()
+        history.push(
+          {
+            type: `releaseDemand`,
+            ownerId: `owner-1`,
+            sourceId: `powersync-products`,
+            demandId: `electronics`,
+            attemptId: `attempt-1`,
+          },
+          {
+            type: `restartSession`,
+            previousSessionId: `session-1`,
+            nextSessionId: `session-2`,
+          },
+          {
+            type: `requestDemand`,
+            ownerId: `owner-2`,
+            sessionId: `session-2`,
+            sourceId: `powersync-products`,
+            demandId: `electronics`,
+            attemptId: `attempt-2`,
+            alreadyAborted: false,
+          },
+        )
+        await vi.waitFor(() => expect(collection.size).toBe(0))
+
+        second = createLive()
+        await second.preload()
+        const reloadedKeys = second.toArray.map(({ id }) => String(id)).sort()
+        history.push({
+          type: `applyAuthoritativeRows`,
+          ownerId: `owner-2`,
+          sourceId: `powersync-products`,
+          demandId: `electronics`,
+          attemptId: `attempt-2`,
+          rowKeys: expectedRowKeys,
+        })
+
+        expect(transportLoads).toBe(projectTransportLoads(history))
+        expect(reloadedKeys).toEqual(projectRetainedRowKeys(history))
+      } finally {
+        await Promise.all([
+          first.cleanup(),
+          second?.cleanup(),
+          collection.cleanup(),
+        ])
+      }
+    })
   })
 
   describe(`Overlapping data across queries`, () => {
@@ -2228,6 +2646,1076 @@ describe(`On-Demand Sync Mode`, () => {
             })),
       })
     }
+
+    function queueWriteLocks(
+      db: PowerSyncDatabase,
+      scheduler?: Scheduler,
+      invocationOrder?: Array<string>,
+    ) {
+      const queued: Array<() => Promise<void>> = []
+      vi.spyOn(db, `writeLock`).mockImplementation(
+        (callback) =>
+          new Promise((resolve, reject) => {
+            let started = false
+            const label = `write-lock-${queued.length + 1}`
+            const run = async () => {
+              if (started) return
+              started = true
+              invocationOrder?.push(label)
+              try {
+                const result = await callback({} as never)
+                resolve(result as never)
+              } catch (error) {
+                reject(error)
+              }
+            }
+            queued.push(run)
+            if (scheduler) {
+              void scheduler.schedule(Promise.resolve(), label).then(run)
+            }
+          }) as never,
+      )
+      return queued
+    }
+
+    async function startConcurrentLifecycleHarness(scheduler?: Scheduler) {
+      const db = await createDatabase()
+      const hooks: Array<ReturnType<typeof pDefer<void>>> = []
+      const hookCleanups: Array<ReturnType<typeof vi.fn>> = []
+      const onLoadSubset = vi.fn(() => {
+        const hook = pDefer<void>()
+        hooks.push(hook)
+        const cleanup = vi.fn()
+        hookCleanups.push(cleanup)
+        return hook.promise.then(() => cleanup)
+      })
+      const queuedLocks = queueWriteLocks(db, scheduler)
+      vi.spyOn(db, `getAll`).mockResolvedValue([])
+      const trackingHandles: Array<{
+        when: Record<`INSERT` | `UPDATE` | `DELETE`, string>
+        dispose: ReturnType<typeof vi.fn>
+      }> = []
+      const createDiffTrigger = vi
+        .spyOn(db.triggers, `createDiffTrigger`)
+        .mockImplementation(({ when }) => {
+          const dispose = vi.fn(() => Promise.resolve())
+          trackingHandles.push({
+            when: when as Record<`INSERT` | `UPDATE` | `DELETE`, string>,
+            dispose,
+          })
+          return Promise.resolve(dispose)
+        })
+      const config = powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+        onLoadSubset,
+      })
+      const sync = config.sync.sync({
+        collection: { status: `ready`, has: () => false },
+        begin: vi.fn(),
+        write: vi.fn(),
+        commit: () => true,
+        markReady: vi.fn(),
+        markError: vi.fn(),
+        truncate: vi.fn(),
+      } as never)
+      if (
+        !sync ||
+        typeof sync === `function` ||
+        !sync.loadSubset ||
+        !sync.unloadSubset
+      ) {
+        throw new Error(`Expected on-demand sync controls`)
+      }
+      const first = { where: eq(`category`, `electronics`) }
+      const second = { where: eq(`category`, `clothing`) }
+      const loadSubset = sync.loadSubset
+      const unloadSubset = sync.unloadSubset
+
+      return {
+        sync,
+        loadSubset,
+        unloadSubset,
+        first,
+        second,
+        hooks,
+        hookCleanups,
+        queuedLocks,
+        createDiffTrigger,
+        trackingHandles,
+        cleanup: async () => {
+          hooks.forEach((hook) => hook.resolve())
+          sync.cleanup?.()
+          await Promise.all(queuedLocks.map((run) => run()))
+        },
+      }
+    }
+
+    type ScheduledSecondOutcome =
+      | `activate`
+      | `reject`
+      | `release-during-hook`
+      | `release-after-publication`
+      | `cleanup-during-hook`
+      | `cleanup-after-publication`
+
+    async function drainScheduledLifecycle(scheduler: Scheduler) {
+      let quietTurns = 0
+      while (quietTurns < 2) {
+        if (scheduler.count() > 0) {
+          quietTurns = 0
+          await scheduler.waitAll()
+        } else {
+          quietTurns++
+          await Promise.resolve()
+        }
+      }
+    }
+
+    async function expectScheduledLifecycleMatches(
+      scheduler: Scheduler,
+      secondOutcome: ScheduledSecondOutcome,
+      expectedActionOrder?: ReadonlyArray<string>,
+    ) {
+      const harness = await startConcurrentLifecycleHarness(scheduler)
+      const hookFailure = new Error(`scheduled hook failure`)
+      const actionOrder: Array<string> = []
+      let firstError: unknown
+      let secondError: unknown
+
+      const firstLoad = Promise.resolve(harness.loadSubset(harness.first))
+        .then(() => undefined)
+        .catch((error: unknown) => {
+          firstError = error
+        })
+      let secondLoad: Promise<void> | undefined
+
+      try {
+        await vi.waitFor(() => expect(harness.hooks).toHaveLength(1))
+        harness.hooks[0]!.resolve()
+        await vi.waitFor(() => expect(harness.queuedLocks).toHaveLength(1))
+
+        secondLoad = Promise.resolve(harness.loadSubset(harness.second))
+          .then(() => undefined)
+          .catch((error: unknown) => {
+            secondError = error
+          })
+        await vi.waitFor(() => expect(harness.hooks).toHaveLength(2))
+
+        const schedule = (label: string, action: () => void) => {
+          void scheduler.schedule(Promise.resolve(), label).then(() => {
+            actionOrder.push(label)
+            action()
+          })
+        }
+        const endsInRelease = secondOutcome.startsWith(`release-`)
+        const endsInCleanup = secondOutcome.startsWith(`cleanup-`)
+        const actsAfterPublication = secondOutcome.endsWith(`after-publication`)
+
+        if (secondOutcome === `reject`) {
+          schedule(`reject-second-hook`, () =>
+            harness.hooks[1]!.reject(hookFailure),
+          )
+        } else {
+          schedule(`resolve-second-hook`, () => harness.hooks[1]!.resolve())
+          if (secondOutcome === `release-during-hook`) {
+            schedule(`release-second-demand`, () =>
+              harness.unloadSubset(harness.second),
+            )
+          } else if (secondOutcome === `cleanup-during-hook`) {
+            schedule(`cleanup-sync`, () => harness.sync.cleanup?.())
+          }
+        }
+
+        await scheduler.waitFor(Promise.all([firstLoad, secondLoad]))
+        await drainScheduledLifecycle(scheduler)
+        if (actsAfterPublication) {
+          if (endsInRelease) {
+            harness.unloadSubset(harness.second)
+          } else {
+            harness.sync.cleanup?.()
+          }
+          await drainScheduledLifecycle(scheduler)
+        }
+
+        if (expectedActionOrder) {
+          expect(actionOrder).toEqual(expectedActionOrder)
+        }
+
+        expect(firstError).toBeUndefined()
+        expect(secondError).toBe(
+          secondOutcome === `reject` ? hookFailure : undefined,
+        )
+        expect(harness.hookCleanups[0]).toHaveBeenCalledTimes(
+          endsInCleanup ? 1 : 0,
+        )
+        expect(harness.hookCleanups[1]).toHaveBeenCalledTimes(
+          endsInRelease || endsInCleanup ? 1 : 0,
+        )
+
+        const liveTracking = harness.trackingHandles.filter(
+          ({ dispose }) => dispose.mock.calls.length === 0,
+        )
+        if (endsInCleanup) {
+          expect(liveTracking).toEqual([])
+          return
+        }
+
+        expect(liveTracking).toHaveLength(1)
+        for (const operation of [`INSERT`, `UPDATE`, `DELETE`] as const) {
+          const finalClause = liveTracking[0]!.when[operation]
+          expect(finalClause).toContain(`electronics`)
+          if (secondOutcome === `activate`) {
+            expect(finalClause).toContain(`clothing`)
+          } else {
+            expect(finalClause).not.toContain(`clothing`)
+          }
+        }
+        if (secondOutcome === `reject`) {
+          expect(
+            harness.trackingHandles.every(({ when }) =>
+              ([`INSERT`, `UPDATE`, `DELETE`] as const).every(
+                (operation) => !when[operation].includes(`clothing`),
+              ),
+            ),
+          ).toBe(true)
+        }
+      } finally {
+        await harness.cleanup()
+        if (scheduler.count() > 0) await scheduler.waitAll()
+        await Promise.allSettled([firstLoad, secondLoad])
+      }
+    }
+
+    it(`does not acquire a subset released while tracking startup is suspended`, async () => {
+      const db = await createDatabase()
+      const onLoadSubset = vi.fn()
+      const createDiffTrigger = vi.spyOn(db.triggers, `createDiffTrigger`)
+      const config = powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+        onLoadSubset,
+      })
+      const sync = config.sync.sync({
+        collection: { status: `ready`, has: () => false },
+        begin: vi.fn(),
+        write: vi.fn(),
+        commit: () => true,
+        markReady: vi.fn(),
+        markError: vi.fn(),
+        truncate: vi.fn(),
+      } as never)
+
+      if (!sync || typeof sync === `function` || !sync.loadSubset) {
+        throw new Error(`Expected on-demand sync controls`)
+      }
+
+      const abortController = new AbortController()
+      const request = {
+        where: eq(`category`, `electronics`),
+        signal: abortController.signal,
+      }
+      const load = sync.loadSubset(request)
+
+      // Release the request before start() crosses its first async boundary.
+      abortController.abort()
+      sync.unloadSubset?.(request)
+
+      try {
+        await load
+
+        expect(onLoadSubset).not.toHaveBeenCalled()
+        expect(createDiffTrigger).not.toHaveBeenCalled()
+      } finally {
+        sync.cleanup?.()
+      }
+    })
+
+    it.each([`reject`, `release`] as const)(
+      `keeps an active rebuild current when a provisional hook will %s`,
+      async (secondOutcome) => {
+        const harness = await startConcurrentLifecycleHarness()
+        const hookFailure = new Error(`second hook failed`)
+        let firstSettled = false
+        let secondLoad: Promise<void> | undefined
+
+        try {
+          const firstLoad = Promise.resolve(
+            harness.loadSubset(harness.first),
+          ).then(() => {
+            firstSettled = true
+          })
+          await vi.waitFor(() => expect(harness.hooks).toHaveLength(1))
+          harness.hooks[0]!.resolve()
+          await vi.waitFor(() => expect(harness.queuedLocks).toHaveLength(1))
+
+          secondLoad = Promise.resolve(harness.loadSubset(harness.second)).then(
+            () => undefined,
+          )
+          await vi.waitFor(() => expect(harness.hooks).toHaveLength(2))
+
+          await harness.queuedLocks[0]!()
+          await new Promise((resolve) => setTimeout(resolve, 0))
+          expect(firstSettled).toBe(true)
+          expect(harness.createDiffTrigger).toHaveBeenCalledOnce()
+          const when = harness.createDiffTrigger.mock.calls[0]?.[0].when
+          expect(when?.INSERT).toContain(`electronics`)
+          expect(when?.INSERT).not.toContain(`clothing`)
+
+          if (secondOutcome === `reject`) {
+            harness.hooks[1]!.reject(hookFailure)
+            await expect(secondLoad).rejects.toBe(hookFailure)
+          } else {
+            harness.unloadSubset(harness.second)
+            harness.hooks[1]!.resolve()
+            await secondLoad
+          }
+
+          await firstLoad
+          expect(harness.queuedLocks).toHaveLength(1)
+          expect(harness.hookCleanups[1]).toHaveBeenCalledTimes(
+            secondOutcome === `release` ? 1 : 0,
+          )
+        } finally {
+          await harness.cleanup()
+          await secondLoad?.catch(() => undefined)
+        }
+      },
+    )
+
+    it(`does not settle a superseded rebuild before its replacement publishes`, async () => {
+      const harness = await startConcurrentLifecycleHarness()
+      let firstSettled = false
+      let secondSettled = false
+      let firstLoad: Promise<void> | undefined
+      let secondLoad: Promise<void> | undefined
+
+      try {
+        firstLoad = Promise.resolve(harness.loadSubset(harness.first)).then(
+          () => {
+            firstSettled = true
+          },
+        )
+        await vi.waitFor(() => expect(harness.hooks).toHaveLength(1))
+        harness.hooks[0]!.resolve()
+        await vi.waitFor(() => expect(harness.queuedLocks).toHaveLength(1))
+
+        secondLoad = Promise.resolve(harness.loadSubset(harness.second)).then(
+          () => {
+            secondSettled = true
+          },
+        )
+        await vi.waitFor(() => expect(harness.hooks).toHaveLength(2))
+        harness.hooks[1]!.resolve()
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        expect(secondSettled).toBe(false)
+
+        await harness.queuedLocks[0]!()
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        expect(firstSettled).toBe(false)
+        expect(secondSettled).toBe(false)
+        expect(harness.createDiffTrigger).not.toHaveBeenCalled()
+
+        await vi.waitFor(() => expect(harness.queuedLocks).toHaveLength(2))
+        await harness.queuedLocks[1]!()
+        await Promise.all([firstLoad, secondLoad])
+
+        expect(harness.queuedLocks).toHaveLength(2)
+        expect(harness.createDiffTrigger).toHaveBeenCalledOnce()
+        const when = harness.createDiffTrigger.mock.calls[0]?.[0].when
+        expect(when?.INSERT).toContain(`electronics`)
+        expect(when?.INSERT).toContain(`clothing`)
+      } finally {
+        await harness.cleanup()
+        await Promise.all([
+          firstLoad?.catch(() => undefined),
+          secondLoad?.catch(() => undefined),
+        ])
+      }
+    })
+
+    it(`disposes superseded tracking before its replacement starts`, async () => {
+      const db = await createDatabase()
+      const hooks: Array<ReturnType<typeof pDefer<void>>> = []
+      const onLoadSubset = vi.fn(() => {
+        const hook = pDefer<void>()
+        hooks.push(hook)
+        return hook.promise.then(() => vi.fn())
+      })
+      const queuedLocks = queueWriteLocks(db)
+      vi.spyOn(db, `getAll`).mockResolvedValue([])
+
+      const triggerStarted = pDefer<void>()
+      const finishTrigger = pDefer<void>()
+      const staleDispose = vi.fn(() => Promise.resolve())
+      const currentDispose = vi.fn(() => Promise.resolve())
+      const triggerClauses: Array<
+        Record<`INSERT` | `UPDATE` | `DELETE`, string>
+      > = []
+      const createDiffTrigger = vi
+        .spyOn(db.triggers, `createDiffTrigger`)
+        .mockImplementation(async ({ when }) => {
+          triggerClauses.push(
+            when as Record<`INSERT` | `UPDATE` | `DELETE`, string>,
+          )
+          if (triggerClauses.length === 1) {
+            triggerStarted.resolve()
+            await finishTrigger.promise
+            return staleDispose
+          }
+          return currentDispose
+        })
+
+      const config = powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+        onLoadSubset,
+      })
+      const sync = config.sync.sync({
+        collection: { status: `ready`, has: () => false },
+        begin: vi.fn(),
+        write: vi.fn(),
+        commit: () => true,
+        markReady: vi.fn(),
+        markError: vi.fn(),
+        truncate: vi.fn(),
+      } as never)
+      if (!sync || typeof sync === `function` || !sync.loadSubset) {
+        throw new Error(`Expected on-demand sync controls`)
+      }
+
+      const first = { where: eq(`category`, `electronics`) }
+      const second = { where: eq(`category`, `clothing`) }
+      let firstLoad: Promise<void> | undefined
+      let secondLoad: Promise<void> | undefined
+
+      try {
+        firstLoad = Promise.resolve(sync.loadSubset(first)).then(
+          () => undefined,
+        )
+        await vi.waitFor(() => expect(hooks).toHaveLength(1))
+        hooks[0]!.resolve()
+        await vi.waitFor(() => expect(queuedLocks).toHaveLength(1))
+
+        const staleRebuild = queuedLocks[0]!()
+        await triggerStarted.promise
+
+        secondLoad = Promise.resolve(sync.loadSubset(second)).then(
+          () => undefined,
+        )
+        await vi.waitFor(() => expect(hooks).toHaveLength(2))
+        hooks[1]!.resolve()
+        await new Promise((resolve) => setTimeout(resolve, 0))
+
+        finishTrigger.resolve()
+        await staleRebuild
+
+        expect(staleDispose).toHaveBeenCalledOnce()
+        expect(createDiffTrigger).toHaveBeenCalledOnce()
+
+        await vi.waitFor(() => expect(queuedLocks).toHaveLength(2))
+        await queuedLocks[1]!()
+        await Promise.all([firstLoad, secondLoad])
+
+        expect(createDiffTrigger).toHaveBeenCalledTimes(2)
+        expect(currentDispose).not.toHaveBeenCalled()
+        for (const operation of [`INSERT`, `UPDATE`, `DELETE`] as const) {
+          expect(triggerClauses[1]![operation]).toContain(`electronics`)
+          expect(triggerClauses[1]![operation]).toContain(`clothing`)
+        }
+      } finally {
+        hooks.forEach((hook) => hook.resolve())
+        sync.cleanup?.()
+        await Promise.all(queuedLocks.map((run) => run()))
+        await Promise.allSettled([firstLoad, secondLoad])
+      }
+    })
+
+    for (const secondOutcome of [
+      `activate`,
+      `reject`,
+      `release-during-hook`,
+      `release-after-publication`,
+      `cleanup-during-hook`,
+      `cleanup-after-publication`,
+    ] as const) {
+      fcTest.prop([fc.scheduler()], { numRuns: 8 })(
+        `keeps tracking coherent when concurrent lifecycle tasks end in ${secondOutcome}`,
+        async (scheduler) => {
+          await expectScheduledLifecycleMatches(scheduler, secondOutcome)
+        },
+        15_000,
+      )
+    }
+
+    it.each([
+      {
+        name: `release before hook resolution`,
+        outcome: `release-during-hook` as const,
+        order: [3, 2, 1],
+        expectedActionOrder: [`release-second-demand`, `resolve-second-hook`],
+      },
+      {
+        name: `hook resolution before release`,
+        outcome: `release-during-hook` as const,
+        order: [2, 3, 1, 4],
+        expectedActionOrder: [`resolve-second-hook`, `release-second-demand`],
+      },
+      {
+        name: `cleanup before hook resolution`,
+        outcome: `cleanup-during-hook` as const,
+        order: [3, 2, 1],
+        expectedActionOrder: [`cleanup-sync`, `resolve-second-hook`],
+      },
+      {
+        name: `hook resolution before cleanup`,
+        outcome: `cleanup-during-hook` as const,
+        order: [2, 3, 1],
+        expectedActionOrder: [`resolve-second-hook`, `cleanup-sync`],
+      },
+    ])(
+      `keeps tracking coherent when $name`,
+      async ({ outcome, order, expectedActionOrder }) => {
+        await expectScheduledLifecycleMatches(
+          fc.schedulerFor(order),
+          outcome,
+          expectedActionOrder,
+        )
+      },
+    )
+
+    it.each([
+      {
+        name: `the stopped callback runs before the restarted callback`,
+        order: [1, 2],
+        expectedInvocationOrder: [`write-lock-1`, `write-lock-2`],
+      },
+      {
+        name: `the restarted callback runs before the stopped callback`,
+        order: [2, 1],
+        expectedInvocationOrder: [`write-lock-2`, `write-lock-1`],
+      },
+    ])(
+      `keeps a restarted sync isolated when $name`,
+      async ({ order, expectedInvocationOrder }) => {
+        const scheduler = fc.schedulerFor(order)
+        const db = await createDatabase()
+        const invocationOrder: Array<string> = []
+        queueWriteLocks(db, scheduler, invocationOrder)
+        vi.spyOn(db, `getAll`).mockResolvedValue([])
+
+        const hookCleanups: Array<ReturnType<typeof vi.fn>> = []
+        const onLoadSubset = vi.fn(() => {
+          const cleanup = vi.fn()
+          hookCleanups.push(cleanup)
+          return cleanup
+        })
+        const trackingHandles: Array<{
+          when: Record<`INSERT` | `UPDATE` | `DELETE`, string>
+          dispose: ReturnType<typeof vi.fn>
+        }> = []
+        const createDiffTrigger = vi
+          .spyOn(db.triggers, `createDiffTrigger`)
+          .mockImplementation(({ when }) => {
+            const dispose = vi.fn(() => Promise.resolve())
+            trackingHandles.push({
+              when: when as Record<`INSERT` | `UPDATE` | `DELETE`, string>,
+              dispose,
+            })
+            return Promise.resolve(dispose)
+          })
+        const config = powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.products,
+          syncMode: `on-demand`,
+          onLoadSubset,
+        })
+        const startSync = () => {
+          const started = config.sync.sync({
+            collection: { status: `ready`, has: () => false },
+            begin: vi.fn(),
+            write: vi.fn(),
+            commit: () => true,
+            markReady: vi.fn(),
+            markError: vi.fn(),
+            truncate: vi.fn(),
+          } as never)
+          if (
+            !started ||
+            typeof started === `function` ||
+            !started.loadSubset
+          ) {
+            throw new Error(`Expected on-demand sync controls`)
+          }
+          return started
+        }
+
+        const stoppedSync = startSync()
+        let stoppedSettled = false
+        let restartedSettled = false
+        const stoppedLoad = Promise.resolve(
+          stoppedSync.loadSubset!({
+            where: eq(`category`, `electronics`),
+          }),
+        ).then(() => {
+          stoppedSettled = true
+        })
+        let restartedSync: ReturnType<typeof startSync> | undefined
+        let restartedLoad: Promise<void> | undefined
+        let restartedCleaned = false
+        let usingFakeTimers = false
+
+        try {
+          await vi.waitFor(() => expect(scheduler.count()).toBe(1))
+          stoppedSync.cleanup?.()
+
+          restartedSync = startSync()
+          restartedLoad = Promise.resolve(
+            restartedSync.loadSubset!({
+              where: eq(`category`, `clothing`),
+            }),
+          ).then(() => {
+            restartedSettled = true
+          })
+          await vi.waitFor(() => expect(scheduler.count()).toBe(2))
+          expect(stoppedSettled).toBe(false)
+          expect(restartedSettled).toBe(false)
+
+          await scheduler.waitOne()
+          const stoppedRunsFirst = order[0] === 1
+          await vi.waitFor(() => {
+            expect(stoppedSettled).toBe(stoppedRunsFirst)
+            expect(restartedSettled).toBe(!stoppedRunsFirst)
+          })
+
+          await scheduler.waitFor(Promise.all([stoppedLoad, restartedLoad]))
+          await drainScheduledLifecycle(scheduler)
+
+          expect(invocationOrder).toEqual(expectedInvocationOrder)
+          expect(hookCleanups[0]).toHaveBeenCalledOnce()
+          expect(hookCleanups[1]).not.toHaveBeenCalled()
+          expect(createDiffTrigger).toHaveBeenCalledOnce()
+          expect(trackingHandles).toHaveLength(1)
+          expect(trackingHandles[0]!.dispose).not.toHaveBeenCalled()
+          for (const operation of [`INSERT`, `UPDATE`, `DELETE`] as const) {
+            expect(trackingHandles[0]!.when[operation]).toContain(`clothing`)
+            expect(trackingHandles[0]!.when[operation]).not.toContain(
+              `electronics`,
+            )
+          }
+
+          vi.useFakeTimers()
+          usingFakeTimers = true
+          restartedSync.cleanup?.()
+          restartedSync.cleanup?.()
+          restartedCleaned = true
+          await vi.runAllTimersAsync()
+          expect(hookCleanups[1]).toHaveBeenCalledOnce()
+          expect(trackingHandles[0]!.dispose).toHaveBeenCalledOnce()
+          vi.useRealTimers()
+          usingFakeTimers = false
+        } finally {
+          if (usingFakeTimers) vi.useRealTimers()
+          stoppedSync.cleanup?.()
+          if (!restartedCleaned) restartedSync?.cleanup?.()
+          if (scheduler.count() > 0) await scheduler.waitAll()
+          await Promise.allSettled([stoppedLoad, restartedLoad])
+        }
+      },
+    )
+
+    it(`does not start queued tracking after collection cleanup`, async () => {
+      const db = await createDatabase()
+      const queued = pDefer<void>()
+      let runQueuedWriteLock!: () => Promise<void>
+      vi.spyOn(db, `writeLock`).mockImplementation(
+        (callback) =>
+          new Promise((resolve, reject) => {
+            runQueuedWriteLock = async () => {
+              try {
+                await callback({} as never)
+                resolve(undefined as never)
+              } catch (error) {
+                reject(error)
+              }
+            }
+            queued.resolve()
+          }) as never,
+      )
+      const createDiffTrigger = vi
+        .spyOn(db.triggers, `createDiffTrigger`)
+        .mockResolvedValue(vi.fn())
+      const config = powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+      })
+      const sync = config.sync.sync({
+        collection: { status: `ready`, has: () => false },
+        begin: vi.fn(),
+        write: vi.fn(),
+        commit: () => true,
+        markReady: vi.fn(),
+        markError: vi.fn(),
+        truncate: vi.fn(),
+      } as never)
+      if (!sync || typeof sync === `function` || !sync.loadSubset) {
+        throw new Error(`Expected on-demand sync controls`)
+      }
+
+      const load = sync.loadSubset({ where: eq(`category`, `electronics`) })
+      await queued.promise
+      sync.cleanup?.()
+      await runQueuedWriteLock()
+      await load
+
+      expect(createDiffTrigger).not.toHaveBeenCalled()
+    })
+
+    it(`does not retain a predicate whose load hook rejects`, async () => {
+      const db = await createDatabase()
+      const hookFailure = new Error(`subset hook failed`)
+      const onLoadSubset = vi
+        .fn()
+        .mockRejectedValueOnce(hookFailure)
+        .mockRejectedValueOnce(hookFailure)
+        .mockRejectedValueOnce(hookFailure)
+        .mockResolvedValueOnce(undefined)
+      const createDiffTrigger = vi
+        .spyOn(db.triggers, `createDiffTrigger`)
+        .mockResolvedValue(vi.fn())
+      const config = powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+        onLoadSubset,
+      })
+      const sync = config.sync.sync({
+        collection: { status: `ready`, has: () => false },
+        begin: vi.fn(),
+        write: vi.fn(),
+        commit: () => true,
+        markReady: vi.fn(),
+        markError: vi.fn(),
+        truncate: vi.fn(),
+      } as never)
+      if (!sync || typeof sync === `function` || !sync.loadSubset) {
+        throw new Error(`Expected on-demand sync controls`)
+      }
+      const { getDemandCount } = (
+        sync as typeof sync & {
+          [POWERSYNC_TEST_HOOKS]: PowerSyncTestHooks
+        }
+      )[POWERSYNC_TEST_HOOKS]
+
+      try {
+        for (const category of [`electronics`, `clothing`, `outdoors`]) {
+          await expect(
+            sync.loadSubset({ where: eq(`category`, category) }),
+          ).rejects.toBe(hookFailure)
+          expect(getDemandCount()).toBe(0)
+        }
+        await sync.loadSubset({ where: eq(`category`, `clothing`) })
+
+        const when = createDiffTrigger.mock.calls.at(-1)?.[0].when
+        expect(when?.INSERT).toContain(`clothing`)
+        expect(when?.INSERT).not.toContain(`electronics`)
+      } finally {
+        sync.cleanup?.()
+      }
+    })
+
+    it(`does not publish a provisional hook through another active demand`, async () => {
+      const db = await createDatabase()
+      const firstHook = pDefer<void>()
+      const onLoadSubset = vi
+        .fn()
+        .mockReturnValueOnce(firstHook.promise)
+        .mockResolvedValueOnce(undefined)
+      const createDiffTrigger = vi
+        .spyOn(db.triggers, `createDiffTrigger`)
+        .mockResolvedValue(vi.fn())
+      const config = powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+        onLoadSubset,
+      })
+      const sync = config.sync.sync({
+        collection: { status: `ready`, has: () => false },
+        begin: vi.fn(),
+        write: vi.fn(),
+        commit: () => true,
+        markReady: vi.fn(),
+        markError: vi.fn(),
+        truncate: vi.fn(),
+      } as never)
+      if (!sync || typeof sync === `function` || !sync.loadSubset) {
+        throw new Error(`Expected on-demand sync controls`)
+      }
+
+      const provisional = sync.loadSubset({
+        where: eq(`category`, `electronics`),
+      })
+      await vi.waitFor(() => expect(onLoadSubset).toHaveBeenCalledTimes(1))
+      await sync.loadSubset({ where: eq(`category`, `clothing`) })
+
+      const when = createDiffTrigger.mock.calls.at(-1)?.[0].when
+      expect(when?.INSERT).toContain(`clothing`)
+      expect(when?.INSERT).not.toContain(`electronics`)
+
+      firstHook.resolve()
+      await provisional
+      sync.cleanup?.()
+    })
+
+    it(`hands subset release to the adapter without returning a promise`, async () => {
+      const db = await createDatabase()
+      vi.spyOn(db.triggers, `createDiffTrigger`).mockResolvedValue(vi.fn())
+      vi.spyOn(db, `getAll`).mockResolvedValue([])
+      const config = powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+      })
+      const sync = config.sync.sync({
+        collection: { status: `ready`, has: () => false },
+        begin: vi.fn(),
+        write: vi.fn(),
+        commit: () => true,
+        markReady: vi.fn(),
+        markError: vi.fn(),
+        truncate: vi.fn(),
+      } as never)
+      if (
+        !sync ||
+        typeof sync === `function` ||
+        !sync.loadSubset ||
+        !sync.unloadSubset
+      ) {
+        throw new Error(`Expected on-demand sync controls`)
+      }
+      const request = { where: eq(`category`, `electronics`) }
+
+      await sync.loadSubset(request)
+      const release = (
+        sync.unloadSubset as (options: typeof request) => unknown
+      )(request)
+      try {
+        expect(release).toBeUndefined()
+      } finally {
+        await Promise.resolve(release)
+        sync.cleanup?.()
+      }
+    })
+
+    it(`retries physical subset release after asynchronous adapter failure`, async () => {
+      vi.useFakeTimers()
+      const db = await createDatabase()
+      vi.spyOn(db.triggers, `createDiffTrigger`).mockResolvedValue(vi.fn())
+      const getAll = vi
+        .spyOn(db, `getAll`)
+        .mockRejectedValueOnce(new Error(`transient eviction failure`))
+        .mockResolvedValueOnce([])
+      const config = powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+      })
+      const sync = config.sync.sync({
+        collection: { status: `ready`, has: () => false },
+        begin: vi.fn(),
+        write: vi.fn(),
+        commit: () => true,
+        markReady: vi.fn(),
+        markError: vi.fn(),
+        truncate: vi.fn(),
+      } as never)
+      if (
+        !sync ||
+        typeof sync === `function` ||
+        !sync.loadSubset ||
+        !sync.unloadSubset
+      ) {
+        throw new Error(`Expected on-demand sync controls`)
+      }
+      const request = { where: eq(`category`, `electronics`) }
+
+      try {
+        await sync.loadSubset(request)
+        expect(sync.unloadSubset(request)).toBeUndefined()
+        await vi.waitFor(() => expect(getAll).toHaveBeenCalledTimes(1))
+
+        await vi.advanceTimersByTimeAsync(1000)
+        await vi.waitFor(() => expect(getAll).toHaveBeenCalledTimes(2))
+      } finally {
+        sync.cleanup?.()
+        await vi.runOnlyPendingTimersAsync()
+        vi.useRealTimers()
+      }
+    })
+
+    it(`recomputes eviction when another demand activates during release`, async () => {
+      const db = await createDatabase()
+      vi.spyOn(db.triggers, `createDiffTrigger`).mockResolvedValue(vi.fn())
+      const firstEviction = pDefer<Array<{ id: string }>>()
+      const getAll = vi
+        .spyOn(db, `getAll`)
+        .mockReturnValueOnce(firstEviction.promise)
+        .mockResolvedValueOnce([])
+      const write = vi.fn()
+      const config = powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+      })
+      const sync = config.sync.sync({
+        collection: { status: `ready`, has: () => false },
+        begin: vi.fn(),
+        write,
+        commit: () => true,
+        markReady: vi.fn(),
+        markError: vi.fn(),
+        truncate: vi.fn(),
+      } as never)
+      if (
+        !sync ||
+        typeof sync === `function` ||
+        !sync.loadSubset ||
+        !sync.unloadSubset
+      ) {
+        throw new Error(`Expected on-demand sync controls`)
+      }
+      const departing = { where: eq(`category`, `electronics`) }
+
+      try {
+        await sync.loadSubset(departing)
+        sync.unloadSubset(departing)
+        await vi.waitFor(() => expect(getAll).toHaveBeenCalledTimes(1))
+
+        await sync.loadSubset({ where: eq(`category`, `clothing`) })
+        firstEviction.resolve([{ id: `row-now-owned-by-clothing` }])
+
+        await vi.waitFor(() => expect(getAll).toHaveBeenCalledTimes(2))
+        expect(write).not.toHaveBeenCalledWith({
+          type: `delete`,
+          key: `row-now-owned-by-clothing`,
+        })
+      } finally {
+        firstEviction.resolve([])
+        sync.cleanup?.()
+      }
+    })
+
+    it(`flushes eager changes that arrive before the tracking handle is published`, async () => {
+      const db = await createDatabase()
+      await createTestProducts(db)
+
+      let flushTrackingChanges:
+        | ((event: { changedTables: Array<string> }) => Promise<void> | void)
+        | undefined
+      vi.spyOn(db, `onChangeWithCallback`).mockImplementation((handler) => {
+        flushTrackingChanges = handler?.onChange
+        return () => {}
+      })
+
+      const triggerCreated = pDefer<void>()
+      const publishTrackingHandle = pDefer<void>()
+      const createDiffTrigger = db.triggers.createDiffTrigger.bind(db.triggers)
+      vi.spyOn(db.triggers, `createDiffTrigger`).mockImplementation(
+        async (options) => {
+          const dispose = await createDiffTrigger(options)
+          triggerCreated.resolve()
+          await publishTrackingHandle.promise
+          return dispose
+        },
+      )
+
+      const collection = createCollection(
+        powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.products,
+        }),
+      )
+      onTestFinished(() => collection.cleanup())
+
+      await triggerCreated.promise
+      await db.execute(`
+        INSERT INTO products (id, name, price, category)
+        VALUES ('during-startup', 'During startup', 300, 'electronics')
+      `)
+
+      expect(flushTrackingChanges).toBeDefined()
+      const flush = Promise.resolve(
+        flushTrackingChanges!({
+          changedTables: [collection.utils.getMeta().trackedTableName],
+        }),
+      )
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      publishTrackingHandle.resolve()
+      await Promise.all([flush, collection.stateWhenReady()])
+
+      expect(collection.get(`during-startup`)?.name).toBe(`During startup`)
+    })
+
+    it(`does not create tracking when change observation fails to start`, async () => {
+      const db = await createDatabase()
+      const startupError = new Error(`change observation failed`)
+      vi.spyOn(db.logger, `error`).mockImplementation(() => {})
+      const consoleError = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+      onTestFinished(() => consoleError.mockRestore())
+      vi.spyOn(db, `onChangeWithCallback`).mockImplementation(() => {
+        throw startupError
+      })
+      const createDiffTrigger = vi.spyOn(db.triggers, `createDiffTrigger`)
+
+      const collection = makeCollection(db)
+      onTestFinished(() => collection.cleanup())
+      await collection.stateWhenReady()
+
+      const query = categoryQuery(collection, `electronics`)
+      onTestFinished(() => query.cleanup())
+
+      await expect(query.preload()).rejects.toBe(startupError)
+      expect(createDiffTrigger).not.toHaveBeenCalled()
+    })
+
+    it(`disposes tracking that finishes starting during collection cleanup`, async () => {
+      const db = await createDatabase()
+      vi.spyOn(db, `onChangeWithCallback`).mockImplementation(() => () => {})
+
+      const triggerStarted = pDefer<void>()
+      const finishTrigger = pDefer<void>()
+      const dispose = vi.fn(async () => {})
+      vi.spyOn(db.triggers, `createDiffTrigger`).mockImplementation(
+        async () => {
+          triggerStarted.resolve()
+          await finishTrigger.promise
+          return dispose
+        },
+      )
+
+      const collection = createCollection(
+        powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.products,
+        }),
+      )
+
+      await triggerStarted.promise
+      collection.cleanup()
+      finishTrigger.resolve()
+
+      await vi.waitFor(() => {
+        expect(dispose).toHaveBeenCalledTimes(1)
+      })
+    })
 
     it(`should start tracking again when a subset is loaded after every subset was unloaded`, async () => {
       const db = await createDatabase()

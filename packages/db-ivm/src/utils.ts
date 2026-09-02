@@ -185,6 +185,14 @@ function range(start: number, end: number): Array<number> {
 export function compareKeys(a: string | number, b: string | number): number {
   // Same type: compare directly
   if (typeof a === typeof b) {
+    if (typeof a === `number` && typeof b === `number`) {
+      const aIsNaN = Number.isNaN(a)
+      const bIsNaN = Number.isNaN(b)
+      if (aIsNaN || bIsNaN) {
+        if (aIsNaN && bIsNaN) return 0
+        return aIsNaN ? 1 : -1
+      }
+    }
     if (a < b) return -1
     if (a > b) return 1
     return 0

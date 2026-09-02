@@ -7401,11 +7401,7 @@ describe(`QueryCollection`, () => {
       }
     })
 
-    it(`should reset refcount after query GC and reload (stale refcount bug)`, async () => {
-      // This test catches Bug 2: stale refcounts after GC/remove
-      // When TanStack Query GCs a query, the refcount should be cleaned up
-      // Otherwise, reloading the same subset will start with a stale count
-
+    it(`should reload a released subset without retaining a stale refcount`, async () => {
       const baseQueryKey = [`stale-refcount-test`]
       const items: Array<CategorisedItem> = [
         { id: `1`, name: `Item 1`, category: `A` },
@@ -7443,12 +7439,16 @@ describe(`QueryCollection`, () => {
         expect(collection.size).toBe(2)
       })
 
-      // Force GC by calling removeQueries (simulates gcTime expiry)
+      // Release the first acquisition before its cache entry is removed.
+      // Cache events do not revoke active collection ownership.
+      await query1.cleanup()
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(0)
+      })
+
+      // Force GC by calling removeQueries (simulates gcTime expiry).
       queryClient.removeQueries({ queryKey: baseQueryKey })
       await flushPromises()
-
-      // BUG: queryRefCounts still has stale count, wasn't cleaned up by cleanupQuery
-      // When we load again, the refcount will be wrong (starts at 1 instead of 0, or accumulates)
 
       // Reload the same query
       const query2 = createLiveQueryCollection({
@@ -7466,14 +7466,11 @@ describe(`QueryCollection`, () => {
         expect(collection.size).toBe(2)
       })
 
-      // Cleanup - this should properly decrement from 1 to 0 and clean up
+      // Cleanup should decrement the new acquisition from one to zero.
       await query2.cleanup()
       await vi.waitFor(() => {
-        expect(collection.size).toBe(0) // Should be cleaned up
+        expect(collection.size).toBe(0)
       })
-
-      // BUG SYMPTOM: If refcount was stale (e.g. was 2, decremented to 1),
-      // the observer won't be destroyed and data won't be cleaned up
     })
 
     it(`should handle mount/unmount/remount without breaking cache (destroyed observer bug)`, async () => {

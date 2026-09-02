@@ -1,3 +1,4 @@
+import { runInNewContext } from 'node:vm'
 import { expect } from 'vitest'
 import { BTreeIndex } from '../src/indexes/btree-index'
 import { withCollectionConfigFactory } from '../src/client'
@@ -10,34 +11,12 @@ import type {
 import type { IndexConstructor } from '../src/indexes/base-index'
 import type { WithVirtualProps } from '../src/virtual-props.js'
 
-type OracleEnvironment = Record<string, string | undefined>
-
-export function readOracleRunConfig(
-  environment: OracleEnvironment = process.env,
-): { multiplier: number; replaySeed: number | undefined } {
-  const multiplierValue = environment.TANSTACK_DB_ORACLE_RUNS_MULTIPLIER ?? `1`
-  const multiplier = Number(multiplierValue)
-  if (!Number.isSafeInteger(multiplier) || multiplier < 1) {
-    throw new Error(
-      `TANSTACK_DB_ORACLE_RUNS_MULTIPLIER must be a positive integer`,
-    )
-  }
-
-  const seedValue = environment.TANSTACK_DB_ORACLE_SEED
-  if (seedValue === undefined) return { multiplier, replaySeed: undefined }
-
-  const replaySeed = Number(seedValue)
-  if (!Number.isSafeInteger(replaySeed)) {
-    throw new Error(`TANSTACK_DB_ORACLE_SEED must be an integer`)
-  }
-  return { multiplier, replaySeed }
-}
-
-export function oracleRandomParameters(
-  numRuns: number,
-  replaySeed: number | undefined,
-): { numRuns: number; seed?: number } {
-  return replaySeed === undefined ? { numRuns } : { numRuns, seed: replaySeed }
+export function createCrossRealmUint8Array(
+  values: ReadonlyArray<number>,
+): Uint8Array {
+  return runInNewContext(`new Uint8Array(values)`, {
+    values: Array.from(values),
+  }) as Uint8Array
 }
 
 export type OutputWithVirtual<

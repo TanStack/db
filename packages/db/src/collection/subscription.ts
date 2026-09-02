@@ -59,7 +59,14 @@ type CollectionSubscriptionOptions = {
   onUnsubscribe?: (event: SubscriptionUnsubscribedEvent) => void
   /** Callback for subset-load failures scoped to this subscription. */
   onLoadSubsetError?: (event: SubscriptionLoadSubsetErrorEvent) => void
+  truncateReplayPublication?: TruncateReplayPublicationControl
 }
+
+type TruncateReplayPublicationControl = Readonly<{
+  start: () => void
+  succeed: () => void
+  fail?: () => void
+}>
 
 type TruncatePublicationState = {
   loadedInitialState: boolean
@@ -98,6 +105,9 @@ export class CollectionSubscription
   extends EventEmitter<SubscriptionEvents>
   implements Subscription
 {
+  private readonly truncateReplayPublication:
+    | TruncateReplayPublicationControl
+    | undefined
   private loadedInitialState = false
 
   // Flag to skip filtering in filterAndFlipChanges.
@@ -160,6 +170,7 @@ export class CollectionSubscription
     private options: CollectionSubscriptionOptions,
   ) {
     super()
+    this.truncateReplayPublication = options.truncateReplayPublication
     if (options.onUnsubscribe) {
       this.on(`unsubscribed`, options.onUnsubscribe)
     }
@@ -223,6 +234,8 @@ export class CollectionSubscription
       this.lastSentKey = undefined
       return
     }
+
+    this.truncateReplayPublication?.start()
 
     const attempt: TruncateReplayAttempt = {
       pending: new Set(),
@@ -376,6 +389,12 @@ export class CollectionSubscription
    */
   private abandonTruncateReplay(session: TruncateReplaySession): void {
     if (this.truncateReplaySession !== session) return
+    if (this.truncateReplayPublication) {
+      this.truncateReplaySession = undefined
+      this.stalePublishedRows.clear()
+      this.truncateReplayPublication.fail?.()
+      return
+    }
     const publicationState = session.publicationState
     this.loadedInitialState = publicationState.loadedInitialState
     this.snapshotSent = publicationState.snapshotSent
@@ -391,6 +410,21 @@ export class CollectionSubscription
   private flushTruncateReplay(session: TruncateReplaySession): void {
     if (this.truncateReplaySession !== session) return
     this.truncateReplaySession = undefined
+
+    if (this.truncateReplayPublication) {
+      this.stalePublishedRows.clear()
+      this.sentKeys = new Set(this.publishedRows.keys())
+      if (this.orderByIndex) {
+        this.limitedSnapshotRowCount = this.sentKeys.size
+        const orderedSentKeys = this.orderByIndex.takeFromStart(
+          this.sentKeys.size,
+          (key) => this.sentKeys.has(key),
+        )
+        this.lastSentKey = orderedSentKeys.at(-1)
+      }
+      this.truncateReplayPublication.succeed()
+      return
+    }
 
     const retainedDeletes = [...this.stalePublishedRows].map(
       ([key, value]): ChangeMessage<any, any> => ({
@@ -467,6 +501,10 @@ export class CollectionSubscription
   }
 
   private get isBufferingForTruncate(): boolean {
+    return this.truncateReplaySession !== undefined
+  }
+
+  public get isTruncateReplayActive(): boolean {
     return this.truncateReplaySession !== undefined
   }
 
@@ -671,6 +709,9 @@ export class CollectionSubscription
     if (changes.length > 0 && newChanges.length === 0) return false
 
     if (this.isBufferingForTruncate) {
+      if (this.truncateReplayPublication) {
+        return this.filteredCallback(newChanges)
+      }
       // Buffer the changes instead of emitting immediately
       // This prevents a flash of missing content during truncate/refetch
       if (newChanges.length > 0) {

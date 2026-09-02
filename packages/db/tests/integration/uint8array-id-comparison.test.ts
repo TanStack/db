@@ -79,8 +79,7 @@ describe(`Uint8Array ID comparison (user reproduction)`, () => {
     expect(resultByName?.name).toBe(makeItemName(selectedItemIndex))
   })
 
-  it(`should use reference equality for large Uint8Arrays (> 128 bytes)`, async () => {
-    // Create a large Uint8Array (> 128 bytes) that should use reference equality
+  it(`should use content equality for large Uint8Arrays`, async () => {
     const largeId = new Uint8Array(200).fill(42)
 
     interface LargeItem {
@@ -102,7 +101,7 @@ describe(`Uint8Array ID comparison (user reproduction)`, () => {
       }),
     )
 
-    // Query with the exact same reference - this should work
+    // The same reference works.
     const queryWithSameRef = createLiveQueryCollection((q) =>
       q
         .from({ item: collection })
@@ -113,12 +112,10 @@ describe(`Uint8Array ID comparison (user reproduction)`, () => {
     await queryWithSameRef.preload()
     const resultWithSameRef = Array.from(queryWithSameRef.entries())[0]?.[1]
 
-    // Should find the item because we're using the same reference
     expect(resultWithSameRef).toBeDefined()
     expect(resultWithSameRef?.name).toBe(`Large Item`)
 
-    // Query with a different instance but same content - this will NOT work
-    // because large arrays use reference equality
+    // A different instance with the same bytes has the same value.
     const differentInstance = new Uint8Array(200).fill(42)
     const queryWithDifferentRef = createLiveQueryCollection((q) =>
       q
@@ -132,8 +129,7 @@ describe(`Uint8Array ID comparison (user reproduction)`, () => {
       queryWithDifferentRef.entries(),
     )[0]?.[1]
 
-    // Should NOT find the item because large arrays use reference equality
-    // This is expected behavior to avoid memory overhead
-    expect(resultWithDifferentRef).toBeUndefined()
+    expect(resultWithDifferentRef).toBeDefined()
+    expect(resultWithDifferentRef?.name).toBe(`Large Item`)
   })
 })

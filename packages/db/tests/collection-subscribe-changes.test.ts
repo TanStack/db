@@ -2340,6 +2340,8 @@ describe(`Virtual properties`, () => {
     )
     expect(optimisticInsert).toBeDefined()
     expect(optimisticInsert!.value.$synced).toBe(false)
+    expect(collection._state.pendingLocalOrigins.has(`row-1`)).toBe(true)
+    expect(collection._state.pendingOptimisticUpserts.has(`row-1`)).toBe(true)
 
     changes.length = 0
 
@@ -2361,6 +2363,8 @@ describe(`Virtual properties`, () => {
     expect(confirmedUpdate).toBeDefined()
     expect(confirmedUpdate!.value.$synced).toBe(true)
     expect(confirmedUpdate!.previousValue?.$synced).toBe(false)
+    expect(collection._state.pendingLocalOrigins.size).toBe(0)
+    expect(collection._state.pendingOptimisticUpserts.size).toBe(0)
 
     subscription.unsubscribe()
   })

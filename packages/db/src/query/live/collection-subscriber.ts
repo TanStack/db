@@ -1,11 +1,8 @@
+import { normalizeExpressionPaths } from '../compiler/expressions.js'
 import {
-  normalizeExpressionPaths,
-  normalizeOrderByPaths,
-} from '../compiler/expressions.js'
-import {
-  computeOrderedLoadCursor,
   computeSubscriptionOrderByHints,
   filterDuplicateInserts,
+  OrderedSourceLoader,
   sendChangesToInput,
   splitUpdates,
   trackBiggestSentValue,
@@ -13,9 +10,9 @@ import {
 import { SubsetDemandController } from './subset-demand-controller.js'
 import type { Collection } from '../../collection/index.js'
 import type {
-  AppliedLoadSubsetOutcome,
   ChangeMessage,
   LoadSubsetRequestResult,
+  SubscribeChangesOptions,
   SubscriptionLoadSubsetErrorEvent,
   SubscriptionStatusChangeEvent,
 } from '../../types.js'
@@ -30,6 +27,10 @@ const loadMoreCallbackSymbol = Symbol.for(
   `@tanstack/db.collection-config-builder`,
 )
 
+type TruncateReplayPublicationControl = NonNullable<
+  SubscribeChangesOptions[`truncateReplayPublication`]
+>
+
 export class CollectionSubscriber<
   TContext extends Context,
   TResult extends object = GetResult<TContext>,
@@ -40,8 +41,6 @@ export class CollectionSubscriber<
   // Track the most recent ordered load request key (cursor + window).
   // This avoids infinite loops from cached data re-writes while still allowing
   // window moves or new keys at the same cursor value to trigger new requests.
-  private lastLoadRequestKey: string | undefined
-
   // Track deferred promises for subscription loading states
   private subscriptionLoadingPromises = new Map<
     CollectionSubscription,
@@ -55,10 +54,7 @@ export class CollectionSubscriber<
 
   // Direct load tracking callback for ordered path (set during subscribeToOrderedChanges,
   // used by loadNextItems for subsequent requestLimitedSnapshot calls)
-  private orderedLoadSubsetResult?: (result: LoadSubsetRequestResult) => void
-  private pendingOrderedLoadPromise:
-    | Promise<AppliedLoadSubsetOutcome>
-    | undefined
+  private orderedLoader: OrderedSourceLoader | undefined
   private readonly demand = new SubsetDemandController()
 
   constructor(
@@ -81,9 +77,9 @@ export class CollectionSubscriber<
 
   private subscribeToChanges(whereExpression?: BasicExpression<boolean>) {
     const orderByInfo = this.getOrderByInfo()
-    let initialSubsetPending = !this.collectionConfigBuilder.isLazySource(
-      this.sourceId,
-    )
+    let initialSubsetPending =
+      !this.collectionConfigBuilder.isLazySource(this.sourceId) &&
+      orderByInfo?.limit !== 0
 
     // Direct load promise tracking: pipes loadSubset results straight to the
     // live query collection, avoiding the multi-hop deferred promise chain that
@@ -97,10 +93,7 @@ export class CollectionSubscriber<
           await Promise.resolve()
           throw error
         })
-        this.collectionConfigBuilder.trackSubsetLoadPromise(
-          trackedResult,
-          this.sourceId,
-        )
+        this.collectionConfigBuilder.trackSubsetLoadPromise(trackedResult)
         if (initialSubsetPending) {
           void result.then(
             () => {
@@ -228,28 +221,14 @@ export class CollectionSubscriber<
 
     const generation = this.collectionConfigBuilder.beginDemand(plan.id)
     if (update.ready instanceof Promise) {
-      this.collectionConfigBuilder.trackSubsetLoadOperationPromise(
-        update.ready,
-        this.sourceId,
-      )
+      this.collectionConfigBuilder.trackSubsetLoadOperationPromise(update.ready)
       void update.ready.then(
-        (outcomes) =>
-          this.collectionConfigBuilder.settleDemand(
-            plan.id,
-            generation,
-            outcomes,
-            this.sourceId,
-          ),
+        () => this.collectionConfigBuilder.settleDemand(plan.id, generation),
         (error) =>
           this.collectionConfigBuilder.failDemand(plan.id, generation, error),
       )
     } else {
-      this.collectionConfigBuilder.settleDemand(
-        plan.id,
-        generation,
-        [],
-        this.sourceId,
-      )
+      this.collectionConfigBuilder.settleDemand(plan.id, generation)
     }
   }
 
@@ -262,7 +241,6 @@ export class CollectionSubscriber<
       changesArray,
       this.sentToD2Keys,
     )
-
     // currentSyncState and input are always defined when this method is called
     // (only called from active subscriptions during a sync session)
     const input =
@@ -272,7 +250,11 @@ export class CollectionSubscriber<
     // Do not provide the callback that loads more data
     // if there's no more data to load
     // otherwise we end up in an infinite loop trying to load more data
-    const dataLoader = sentChanges > 0 ? callback : undefined
+    const dataLoader =
+      sentChanges > 0 &&
+      !this.collectionConfigBuilder.isSourceRecoveryPending(this.sourceId)
+        ? callback
+        : undefined
 
     // We need to schedule a graph run even if there's no data to load
     // because we need to mark the collection as ready if it's not already
@@ -309,6 +291,7 @@ export class CollectionSubscriber<
       whereExpression,
       onStatusChange,
       onLoadSubsetError,
+      truncateReplayPublication: this.truncateReplayPublicationControl(),
       orderBy: hints.orderBy,
       limit: hints.limit,
       onLoadSubsetResult: includeInitialState ? onLoadSubsetResult : undefined,
@@ -324,42 +307,21 @@ export class CollectionSubscriber<
     onLoadSubsetResult: (result: LoadSubsetRequestResult) => void,
     onLoadSubsetError: (event: SubscriptionLoadSubsetErrorEvent) => void,
   ): CollectionSubscription {
-    const { orderBy, offset, limit, index } = orderByInfo
-
-    // Store the callback so loadNextItems can also use direct tracking.
-    // Track in-flight ordered loads to avoid issuing redundant requests while
-    // a previous snapshot is still pending.
-    const handleLoadSubsetResult = (result: LoadSubsetRequestResult) => {
-      if (result instanceof Promise) {
-        this.pendingOrderedLoadPromise = result
-        const finish = () => {
-          if (this.pendingOrderedLoadPromise === result) {
-            this.pendingOrderedLoadPromise = undefined
-          }
-        }
-        void result.then(finish, finish)
-      }
-      onLoadSubsetResult(result)
-    }
-
-    this.orderedLoadSubsetResult = handleLoadSubsetResult
-
     // Use a holder to forward-reference subscription in the callback
     const subscriptionHolder: { current?: CollectionSubscription } = {}
 
     const sendChangesInRange = (
       changes: Iterable<ChangeMessage<any, string | number>>,
     ) => {
+      const subscription = subscriptionHolder.current
+      if (!subscription) return
       const changesArray = Array.isArray(changes) ? changes : [...changes]
 
       this.trackSentValues(changesArray, orderByInfo.comparator)
 
       // Split live updates into a delete of the old value and an insert of the new value
       const splittedChanges = splitUpdates(changesArray)
-      this.sendChangesToPipelineWithTracking(
-        splittedChanges,
-        subscriptionHolder.current!,
-      )
+      this.sendChangesToPipelineWithTracking(splittedChanges, subscription)
     }
 
     // Subscribe to changes with onStatusChange - listener is registered before any snapshot
@@ -368,6 +330,14 @@ export class CollectionSubscriber<
       whereExpression,
       onStatusChange,
       onLoadSubsetError,
+      truncateReplayPublication: this.truncateReplayPublicationControl(() => {
+        // Recovery favors a simple, authoritative rebuild over resuming a
+        // fragile cursor. The retained full-source demand is replayed on later
+        // truncates, so this adds at most one demand per subscription.
+        queueMicrotask(() => {
+          this.orderedLoader?.loadFullSource()
+        })
+      }),
     })
     subscriptionHolder.current = subscription
     this.registerSubscriptionCleanup(subscription)
@@ -377,50 +347,51 @@ export class CollectionSubscriber<
     // and allow re-inserts of previously sent keys
     const truncateUnsubscribe = this.collection.on(`truncate`, () => {
       this.biggest = undefined
-      this.lastLoadRequestKey = undefined
-      this.pendingOrderedLoadPromise = undefined
+      this.orderedLoader?.resetCursor()
       this.sentToD2Keys.clear()
     })
 
     // Clean up truncate listener when subscription is unsubscribed
     subscription.on(`unsubscribed`, () => {
       truncateUnsubscribe()
+      subscriptionHolder.current = undefined
+      this.orderedLoader?.dispose()
+      this.orderedLoader = undefined
     })
 
-    // Normalize the orderBy clauses such that the references are relative to the collection
-    const normalizedOrderBy = normalizeOrderByPaths(orderBy, this.alias)
-
-    // Trigger the snapshot request — use direct load tracking (trackLoadSubsetPromise: false)
-    // to pipe the loadSubset result straight to the live query collection. This bypasses
-    // the subscription status → onStatusChange → deferred promise chain which is fragile
-    // under microtask timing (e.g., queueMicrotask delays in TanStack Query observers).
-    if (index) {
-      // We have an index on the first orderBy column - use lazy loading optimization
-      subscription.setOrderByIndex(index)
-
-      subscription.requestLimitedSnapshot({
-        limit: offset + limit,
-        orderBy: normalizedOrderBy,
-        trackLoadSubsetPromise: false,
-        onLoadSubsetResult: handleLoadSubsetResult,
-      })
-    } else {
-      // No index available (e.g., non-ref expression): pass orderBy/limit to loadSubset
-      subscription.requestSnapshot({
-        orderBy: normalizedOrderBy,
-        limit: offset + limit,
-        trackLoadSubsetPromise: false,
-        onLoadSubsetResult: handleLoadSubsetResult,
-      })
-    }
+    this.orderedLoader = new OrderedSourceLoader(
+      orderByInfo,
+      subscription,
+      this.alias,
+      () => this.biggest,
+      onLoadSubsetResult,
+    )
+    this.orderedLoader.start()
 
     return subscription
+  }
+
+  private truncateReplayPublicationControl(
+    onStart?: () => void,
+  ): TruncateReplayPublicationControl {
+    return {
+      start: () => {
+        this.collectionConfigBuilder.beginSourceRecovery(this.sourceId)
+        onStart?.()
+      },
+      succeed: () =>
+        this.collectionConfigBuilder.completeSourceRecovery(this.sourceId),
+    }
   }
 
   // This function is called by maybeRunGraph
   // after each iteration of the query pipeline
   // to ensure that the orderBy operator has enough data to work with
   loadMoreIfNeeded(subscription: CollectionSubscription) {
+    if (this.collectionConfigBuilder.isSourceRecoveryPending(this.sourceId)) {
+      return true
+    }
+
     const orderByInfo = this.getOrderByInfo()
 
     if (!orderByInfo) {
@@ -429,36 +400,13 @@ export class CollectionSubscriber<
       return true
     }
 
-    const { dataNeeded, index } = orderByInfo
-
-    if (!dataNeeded || !index) {
-      // dataNeeded is not set when there's no index (e.g., non-ref expression
-      // or auto-indexing is disabled). Without an index, lazy loading can't work —
-      // all data was already loaded eagerly via requestSnapshot.
-      return true
-    }
-
-    // `dataNeeded` probes the orderBy operator to see if it needs more data
-    // if it needs more data, it returns the number of items it needs
-    const n = dataNeeded()
-    if (n > 0) {
-      if (this.pendingOrderedLoadPromise) {
-        // The current window still needs the in-flight coverage. Attach it to
-        // this operation without making an unrelated or superseded request a
-        // dependency of every window change.
-        this.collectionConfigBuilder.trackSubsetLoadOperationPromise(
-          this.pendingOrderedLoadPromise,
-          this.sourceId,
-        )
-        return true
+    try {
+      const pending = this.orderedLoader?.loadMore()
+      if (pending) {
+        this.collectionConfigBuilder.trackSubsetLoadOperationPromise(pending)
       }
-      try {
-        this.loadNextItems(n, subscription)
-      } catch (error) {
-        if (subscription.lastError !== error) throw error
-        // The subscription already reported the failure. Automatic refills
-        // must not make the source transaction that exposed the gap fail.
-      }
+    } catch (error) {
+      if (subscription.lastError !== error) throw error
     }
     return true
   }
@@ -491,54 +439,6 @@ export class CollectionSubscriber<
     )
   }
 
-  // Loads the next `n` items from the collection
-  // starting from the biggest item it has sent
-  private loadNextItems(n: number, subscription: CollectionSubscription) {
-    const orderByInfo = this.getOrderByInfo()
-    if (!orderByInfo) {
-      return
-    }
-
-    const cursor = computeOrderedLoadCursor(
-      orderByInfo,
-      this.biggest,
-      this.lastLoadRequestKey,
-      this.alias,
-      n,
-    )
-    if (!cursor) return // Duplicate request — skip
-
-    const loadRequestKey = cursor.loadRequestKey
-    this.lastLoadRequestKey = loadRequestKey
-
-    // Take the `n` items after the biggest sent value
-    // Omit offset so requestLimitedSnapshot can advance based on
-    // the number of rows already loaded (supports offset-based backends).
-    try {
-      subscription.requestLimitedSnapshot({
-        orderBy: cursor.normalizedOrderBy,
-        limit: n,
-        minValues: cursor.minValues,
-        trackLoadSubsetPromise: false,
-        onLoadSubsetResult: (result) => {
-          if (result instanceof Promise) {
-            void result.then(undefined, () => {
-              if (this.lastLoadRequestKey === loadRequestKey) {
-                this.lastLoadRequestKey = undefined
-              }
-            })
-          }
-          this.orderedLoadSubsetResult?.(result)
-        },
-      })
-    } catch (error) {
-      if (this.lastLoadRequestKey === loadRequestKey) {
-        this.lastLoadRequestKey = undefined
-      }
-      throw error
-    }
-  }
-
   private getWhereClause(): BasicExpression<boolean> | undefined {
     const sourceWhereClausesCache =
       this.collectionConfigBuilder.sourceWhereClausesCache
@@ -569,7 +469,7 @@ export class CollectionSubscriber<
     )
     this.biggest = result.biggest
     if (result.shouldResetLoadKey) {
-      this.lastLoadRequestKey = undefined
+      this.orderedLoader?.resetCursor()
     }
   }
 
@@ -586,6 +486,6 @@ export class CollectionSubscriber<
     this.subscriptionLoadingPromises.set(subscription, {
       resolve: resolve!,
     })
-    this.collectionConfigBuilder.trackSubsetLoadPromise(promise, this.sourceId)
+    this.collectionConfigBuilder.trackSubsetLoadPromise(promise)
   }
 }

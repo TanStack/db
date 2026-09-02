@@ -26,7 +26,6 @@ export function buildCursor(
     return undefined
   }
 
-  // For single column, just use simple gt/lt
   if (orderBy.length === 1) {
     const { expression, compareOptions } = orderBy[0]!
     const operator = compareOptions.direction === `asc` ? gt : lt
@@ -75,4 +74,28 @@ export function buildCursor(
   }
   // Use reduce to combine with or() which expects exactly 2 args
   return clauses.reduce((acc, clause) => or(acc, clause))
+}
+
+/**
+ * Whether the public predicate IR can express this boundary's comparison.
+ * Unsupported values must use an unbounded fetch rather than a provider order
+ * that may differ from the local comparator.
+ */
+export function canExpressCursorOrder(
+  orderBy: OrderBy,
+  values: ReadonlyArray<unknown>,
+): boolean {
+  return orderBy.every((clause, index) => {
+    const value = values[index]
+    if (value == null) return false
+    if (value instanceof Date) return Number.isFinite(value.getTime())
+    if (typeof value === `string`) {
+      return clause.compareOptions.stringSort === `lexical`
+    }
+    return (
+      (typeof value === `number` && Number.isFinite(value)) ||
+      typeof value === `bigint` ||
+      typeof value === `boolean`
+    )
+  })
 }

@@ -1,5 +1,4 @@
 import type { CollectionConfigBuilder } from './collection-config-builder.js'
-import type { AppliedLoadSubsetOutcome } from '../../types.js'
 
 /**
  * Symbol for accessing internal utilities that should not be part of the public API
@@ -14,6 +13,4 @@ export type LiveQueryInternalUtils = {
   hasCustomGetKey: boolean
   hasJoins: boolean
   hasDistinct: boolean
-  getLatestSubsetOutcomes: () => ReadonlyArray<AppliedLoadSubsetOutcome>
-  getLastWindowOutcomes: () => ReadonlyArray<AppliedLoadSubsetOutcome>
 }

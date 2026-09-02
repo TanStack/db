@@ -328,16 +328,21 @@ describe(`loadSubset with subqueries`, () => {
     // Verify loadSubset was called
     expect(loadSubsetCalls.length).toBeGreaterThan(0)
 
-    // Verify the last call has the orderBy clause and limit
+    // Without a range index, core asks the adapter for the full ordered source
+    // and applies the query limit locally.
     const lastCall = loadSubsetCalls[loadSubsetCalls.length - 1]
     expect(lastCall).toBeDefined()
     expect(lastCall!.orderBy).toBeDefined()
-    expect(lastCall!.limit).toBe(2)
+    expect(lastCall!.limit).toBeUndefined()
 
     const expectedOrderBy: OrderBy = [
       {
         expression: new PropRef([`scheduled_at`]),
-        compareOptions: { direction: `desc`, nulls: `first` },
+        compareOptions: {
+          direction: `desc`,
+          nulls: `first`,
+          stringSort: `locale`,
+        },
       },
     ]
 
@@ -369,16 +374,21 @@ describe(`loadSubset with subqueries`, () => {
     // Verify loadSubset was called for the orders collection
     expect(loadSubsetCalls.length).toBeGreaterThan(0)
 
-    // Verify the last call has the orderBy clause and limit
+    // Without a range index, core asks the adapter for the full ordered source
+    // and applies the subquery limit locally.
     const lastCall = loadSubsetCalls[loadSubsetCalls.length - 1]
     expect(lastCall).toBeDefined()
     expect(lastCall!.orderBy).toBeDefined()
-    expect(lastCall!.limit).toBe(2)
+    expect(lastCall!.limit).toBeUndefined()
 
     const expectedOrderBy: OrderBy = [
       {
         expression: new PropRef([`scheduled_at`]),
-        compareOptions: { direction: `desc`, nulls: `first` },
+        compareOptions: {
+          direction: `desc`,
+          nulls: `first`,
+          stringSort: `locale`,
+        },
       },
     ]
 

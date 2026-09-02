@@ -252,11 +252,15 @@ describe(`Collection Auto-Indexing`, () => {
 
   it(`should create auto-indexes for transformed fields of subqueries when autoIndex is "eager"`, async () => {})
 
-  it(`should not create duplicate auto-indexes for the same field`, async () => {
+  it(`should not create duplicate auto-indexes when locale options are omitted`, async () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
       autoIndex: `eager`,
       defaultIndexType: BTreeIndex,
+      defaultStringCollation: {
+        stringSort: `locale`,
+        localeOptions: { sensitivity: undefined },
+      },
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {

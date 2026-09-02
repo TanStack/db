@@ -1,17 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  BasicIndex,
   createCollection,
   createLiveQueryCollection,
   eq,
   gt,
   lt,
-  BasicIndex,
 } from '@tanstack/db'
 import { electricCollectionOptions } from '../src/electric'
+import {
+  projectRetainedRowKeys,
+  projectTransportLoads,
+} from '../../db/tests/load-subset-full-flow-model'
 import type { ElectricCollectionUtils } from '../src/electric'
 import type { Collection } from '@tanstack/db'
 import type { Message } from '@electric-sql/client'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
+import type { LoadSubsetFullFlowEvent } from '../../db/tests/load-subset-full-flow-model'
 
 // Sample user type for tests
 type User = {
@@ -1206,8 +1211,8 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
     // Wait for the existing live query to re-request data after truncate
     await new Promise((resolve) => setTimeout(resolve, 0))
 
-    // The existing live query re-requests its data after truncate
-    // After must-refetch, the query requests data again (1 initial + 1 after truncate)
+    // Truncate replays the exact demand once. Releasing the old acquisition
+    // must not discard that replacement while it is still owned.
     expect(mockRequestSnapshot).toHaveBeenCalledTimes(2)
 
     // Create the same live query again after reset
@@ -1226,8 +1231,8 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
 
     await new Promise((resolve) => setTimeout(resolve, 0))
 
-    // Should have more calls - the different query triggered a new request
-    // 1 initial + 1 after must-refetch + 1 for new query = 3
+    // The different query triggers one more physical request.
+    // 1 initial + 1 replay + 1 new query = 3
     expect(mockRequestSnapshot).toHaveBeenCalledTimes(3)
   })
 
@@ -1315,5 +1320,106 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
 
     // Still 2 calls - third was covered by the union of first two
     expect(mockRequestSnapshot).toHaveBeenCalledTimes(2)
+  })
+
+  it(`matches the shared remount history after final-owner release`, async () => {
+    const electricCollection = createElectricCollectionWithSyncMode(`on-demand`)
+    const row = sampleUsers[0]!
+    const history: Array<LoadSubsetFullFlowEvent> = [
+      {
+        type: `requestDemand`,
+        ownerId: `owner-1`,
+        sessionId: `session-1`,
+        sourceId: `electric-users`,
+        demandId: `active-users`,
+        attemptId: `attempt-1`,
+        alreadyAborted: false,
+      },
+    ]
+    const createLive = (id: string) =>
+      createLiveQueryCollection({
+        id,
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: electricCollection })
+            .where(({ user }) => eq(user.active, true)),
+      })
+    simulateInitialSync([])
+    mockRequestSnapshot.mockResolvedValue({
+      data: [
+        {
+          headers: { operation: `insert` },
+          key: row.id,
+          value: row,
+        },
+      ],
+    })
+    const first = createLive(`electric-conformance-first`)
+    let second: ReturnType<typeof createLive> | undefined
+
+    try {
+      await first.preload()
+      history.push({
+        type: `applyAuthoritativeRows`,
+        ownerId: `owner-1`,
+        sourceId: `electric-users`,
+        demandId: `active-users`,
+        attemptId: `attempt-1`,
+        rowKeys: [String(row.id)],
+      })
+      expect(first.toArray.map(({ id }) => String(id))).toEqual([
+        String(row.id),
+      ])
+
+      await first.cleanup()
+      history.push(
+        {
+          type: `releaseDemand`,
+          ownerId: `owner-1`,
+          sourceId: `electric-users`,
+          demandId: `active-users`,
+          attemptId: `attempt-1`,
+        },
+        {
+          type: `restartSession`,
+          previousSessionId: `session-1`,
+          nextSessionId: `session-2`,
+        },
+        {
+          type: `requestDemand`,
+          ownerId: `owner-2`,
+          sessionId: `session-2`,
+          sourceId: `electric-users`,
+          demandId: `active-users`,
+          attemptId: `attempt-2`,
+          alreadyAborted: false,
+        },
+      )
+
+      second = createLive(`electric-conformance-second`)
+      await second.preload()
+      history.push({
+        type: `applyAuthoritativeRows`,
+        ownerId: `owner-2`,
+        sourceId: `electric-users`,
+        demandId: `active-users`,
+        attemptId: `attempt-2`,
+        rowKeys: [String(row.id)],
+      })
+
+      expect(mockRequestSnapshot).toHaveBeenCalledTimes(
+        projectTransportLoads(history),
+      )
+      expect(second.toArray.map(({ id }) => String(id))).toEqual(
+        projectRetainedRowKeys(history),
+      )
+    } finally {
+      await Promise.all([
+        first.cleanup(),
+        second?.cleanup(),
+        electricCollection.cleanup(),
+      ])
+    }
   })
 })

@@ -4,11 +4,13 @@ import { createLiveQueryCollection, eq, isNull } from '../../src/query/index.js'
 import { createTransaction } from '../../src/transactions.js'
 import { createOptimisticAction } from '../../src/optimistic-action.js'
 import {
+  Scheduler,
   getActivePublicationContext,
   transactionScopedScheduler,
   withPublicationContext,
 } from '../../src/scheduler.js'
 import { CollectionConfigBuilder } from '../../src/query/live/collection-config-builder.js'
+import { CollectionSubscriber } from '../../src/query/live/collection-subscriber.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 import type { OutputWithVirtual } from '../utils.js'
 import type { FullSyncState } from '../../src/query/live/types.js'
@@ -23,6 +25,17 @@ interface User {
   id: number
   name: string
 }
+
+const falsyListenerFailureCases = [
+  { name: `undefined`, failure: undefined },
+  { name: `null`, failure: null },
+  { name: `false`, failure: false },
+  { name: `zero`, failure: 0 },
+  { name: `negative zero`, failure: -0 },
+  { name: `bigint zero`, failure: 0n },
+  { name: `empty string`, failure: `` },
+  { name: `NaN`, failure: Number.NaN },
+]
 
 type UserWithVirtual = OutputWithVirtual<User, string | number>
 
@@ -141,9 +154,677 @@ describe(`Collection publication scheduler context`, () => {
     expect(getActivePublicationContext()).toBeUndefined()
     expect(transactionScopedScheduler.hasPendingJobs(contextId!)).toBe(false)
   })
+
+  it(`preserves a falsy graph failure through a publication boundary`, () => {
+    let didThrow = false
+    let thrown: unknown
+
+    try {
+      withPublicationContext(() => {
+        const contextId = getActivePublicationContext()
+        transactionScopedScheduler.schedule({
+          contextId,
+          jobId: `failing`,
+          run: () => {
+            throw undefined
+          },
+        })
+      })
+    } catch (error) {
+      didThrow = true
+      thrown = error
+    }
+
+    expect(didThrow).toBe(true)
+    expect(thrown).toBeUndefined()
+  })
+
+  it(`attempts every clear listener and preserves its first failure`, () => {
+    const scheduler = new Scheduler()
+    const firstFailure = new Error(`first clear listener failed`)
+    const laterFailure = new Error(`later clear listener failed`)
+    const calls: Array<string> = []
+    let firstClear = true
+    let removeAdded: (() => void) | undefined
+    scheduler.onClear(() => {
+      calls.push(`first`)
+      if (!firstClear) return
+      removeSecond()
+      removeAdded ??= scheduler.onClear(() => calls.push(`added`))
+      throw firstFailure
+    })
+    const removeSecond = scheduler.onClear(() => {
+      calls.push(`second`)
+      if (firstClear) throw laterFailure
+    })
+
+    let thrown: unknown
+    try {
+      scheduler.clear(`context`)
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(thrown).toBe(firstFailure)
+    expect(calls).toEqual([`first`, `second`])
+
+    firstClear = false
+    expect(() => scheduler.clear(`next context`)).not.toThrow()
+    expect(calls).toEqual([`first`, `second`, `first`, `added`])
+    removeAdded?.()
+  })
+
+  it.each([
+    { source: `publication`, failureKind: `Error` },
+    { source: `publication`, failureKind: `undefined` },
+    { source: `graph`, failureKind: `Error` },
+    { source: `graph`, failureKind: `undefined` },
+  ] as const)(
+    `does not replace a $failureKind $source failure with a clear-listener failure`,
+    ({ source, failureKind }) => {
+      const primaryFailure =
+        failureKind === `Error` ? new Error(`${source} failed`) : undefined
+      const clearFailure = new Error(`clear listener failed`)
+      const laterClear = vi.fn()
+      const removeThrowingClear = transactionScopedScheduler.onClear(() => {
+        throw clearFailure
+      })
+      const removeLaterClear = transactionScopedScheduler.onClear(laterClear)
+
+      try {
+        let didThrow = false
+        let thrown: unknown
+        try {
+          withPublicationContext(() => {
+            if (source === `publication`) throw primaryFailure
+            const contextId = getActivePublicationContext()
+            transactionScopedScheduler.schedule({
+              contextId,
+              jobId: `failing graph`,
+              run: () => {
+                throw primaryFailure
+              },
+            })
+          })
+        } catch (error) {
+          didThrow = true
+          thrown = error
+        }
+
+        expect(didThrow).toBe(true)
+        expect(Object.is(thrown, primaryFailure)).toBe(true)
+        expect(laterClear).toHaveBeenCalledOnce()
+      } finally {
+        removeThrowingClear()
+        removeLaterClear()
+      }
+    },
+  )
 })
 
 describe(`live query scheduler`, () => {
+  it(`delivers an ordinary source batch to its frozen listener snapshot`, async () => {
+    let begin!: () => void
+    let write!: (message: { type: `insert`; value: User }) => void
+    let commit!: () => void
+    const calls: Array<string> = []
+    const source = createCollection<User>({
+      id: `ordinary-listener-membership-source`,
+      getKey: (user) => user.id,
+      startSync: true,
+      sync: {
+        sync: (actions) => {
+          begin = actions.begin
+          write = actions.write
+          commit = () => {
+            actions.commit()
+          }
+          actions.markReady()
+        },
+      },
+    })
+    let added: { unsubscribe: () => void } | undefined
+    const first = source.subscribeChanges(() => {
+      calls.push(`first`)
+      second.unsubscribe()
+      added ??= source.subscribeChanges(() => calls.push(`added`), {
+        includeInitialState: false,
+      })
+    })
+    const second = source.subscribeChanges(() => calls.push(`second`))
+
+    try {
+      begin()
+      write({ type: `insert`, value: { id: 1, name: `Ada` } })
+      commit()
+      expect(calls).toEqual([`first`, `second`])
+
+      begin()
+      write({ type: `insert`, value: { id: 2, name: `Grace` } })
+      commit()
+      expect(calls).toEqual([`first`, `second`, `first`, `added`])
+    } finally {
+      first.unsubscribe()
+      second.unsubscribe()
+      added?.unsubscribe()
+      await source.cleanup()
+    }
+  })
+
+  it(`delivers a layout-only batch to its frozen listener snapshot`, async () => {
+    type RankedUser = User & { rank: number }
+    const calls: Array<string> = []
+    const firstFailure = new Error(`first layout listener failed`)
+    const laterFailure = new Error(`later public listener failed`)
+    const graphJob = vi.fn(() => calls.push(`graph`))
+    const source = createCollection(
+      mockSyncCollectionOptions<RankedUser>({
+        id: `layout-listener-membership-source`,
+        getKey: (user) => user.id,
+        initialData: [
+          { id: 1, name: `Ada`, rank: 1 },
+          { id: 2, name: `Grace`, rank: 2 },
+        ],
+      }),
+    )
+    const ordered = createLiveQueryCollection({
+      id: `layout-listener-membership-ordered`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ user: source })
+          .orderBy(({ user }) => user.rank, `asc`)
+          .select(({ user }) => ({ id: user.id, name: user.name })),
+    })
+    await ordered.preload()
+    expect(ordered.toArray.map(({ id }) => id)).toEqual([1, 2])
+    let firstPublication = true
+    let addedLayout: (() => void) | undefined
+    let addedPublic: { unsubscribe: () => void } | undefined
+    const unsubscribeFirstLayout = ordered._subscribeLayoutChanges(() => {
+      calls.push(`layout:first`)
+      if (!firstPublication) return
+      unsubscribeSecondLayout()
+      secondPublic.unsubscribe()
+      addedLayout ??= ordered._subscribeLayoutChanges(() =>
+        calls.push(`layout:added`),
+      )
+      addedPublic ??= ordered.subscribeChanges(
+        () => calls.push(`public:added`),
+        { includeInitialState: false },
+      )
+      throw firstFailure
+    })
+    const unsubscribeSecondLayout = ordered._subscribeLayoutChanges(() => {
+      calls.push(`layout:second`)
+      const contextId = getActivePublicationContext()
+      transactionScopedScheduler.schedule({
+        contextId,
+        jobId: graphJob,
+        run: graphJob,
+      })
+    })
+    const firstPublic = ordered.subscribeChanges(
+      () => {
+        calls.push(`public:first`)
+        if (firstPublication) throw laterFailure
+      },
+      { includeInitialState: false },
+    )
+    const secondPublic = ordered.subscribeChanges(
+      () => calls.push(`public:second`),
+      {
+        includeInitialState: false,
+      },
+    )
+
+    try {
+      let thrown: unknown
+      try {
+        source.utils.begin()
+        source.utils.write({
+          type: `update`,
+          value: { id: 1, name: `Ada`, rank: 3 },
+        })
+        source.utils.commit()
+      } catch (error) {
+        thrown = error
+      }
+
+      expect(thrown).toBe(firstFailure)
+      expect(calls).toEqual([
+        `layout:first`,
+        `layout:second`,
+        `public:first`,
+        `public:second`,
+        `graph`,
+      ])
+      expect(graphJob).toHaveBeenCalledOnce()
+      expect(ordered.toArray.map(({ id }) => id)).toEqual([2, 1])
+
+      firstPublication = false
+      source.utils.begin()
+      source.utils.write({
+        type: `update`,
+        value: { id: 1, name: `Ada`, rank: 0 },
+      })
+      expect(() => source.utils.commit()).not.toThrow()
+      expect(calls).toEqual([
+        `layout:first`,
+        `layout:second`,
+        `public:first`,
+        `public:second`,
+        `graph`,
+        `layout:first`,
+        `layout:added`,
+        `public:first`,
+        `public:added`,
+      ])
+    } finally {
+      unsubscribeFirstLayout()
+      unsubscribeSecondLayout()
+      addedLayout?.()
+      firstPublic.unsubscribe()
+      secondPublic.unsubscribe()
+      addedPublic?.unsubscribe()
+      await ordered.cleanup()
+      await source.cleanup()
+    }
+  })
+
+  it(`settles a dependent live query when an earlier source listener throws`, async () => {
+    let begin!: () => void
+    let write!: (message: { type: `insert`; value: User }) => void
+    let commit!: () => void
+    const listenerFailure = new Error(`source listener failed`)
+    const source = createCollection<User>({
+      id: `throwing-listener-live-source`,
+      getKey: (user) => user.id,
+      startSync: true,
+      sync: {
+        sync: (actions) => {
+          begin = actions.begin
+          write = actions.write
+          commit = () => {
+            actions.commit()
+          }
+          actions.markReady()
+        },
+      },
+    })
+    const throwingSubscription = source.subscribeChanges(
+      () => {
+        throw listenerFailure
+      },
+      { includeInitialState: false },
+    )
+    const live = createLiveQueryCollection({
+      id: `throwing-listener-live-dependent`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ user: source })
+          .select(({ user }) => ({ id: user.id, name: user.name })),
+    })
+
+    try {
+      await live.preload()
+      begin()
+      write({ type: `insert`, value: { id: 1, name: `Ada` } })
+      expect(() => commit()).toThrow(listenerFailure)
+      expect(live.get(1)).toEqual(expect.objectContaining({ name: `Ada` }))
+    } finally {
+      throwingSubscription.unsubscribe()
+      await live.cleanup()
+      await source.cleanup()
+    }
+  })
+
+  it.each(falsyListenerFailureCases)(
+    `preserves an exact $name row-listener failure after later delivery`,
+    async ({ name, failure }) => {
+      let begin!: () => void
+      let write!: (message: { type: `insert`; value: User }) => void
+      let commit!: () => void
+      type UserObservation = {
+        changes: Array<{
+          type: string
+          key: string | number
+          value: UserWithVirtual
+          previousValue: UserWithVirtual | undefined
+        }>
+        rows: Array<UserWithVirtual>
+      }
+      const sourceObservations: Array<UserObservation> = []
+      const dependentObservations: Array<UserObservation> = []
+      const snapshotUser = ({
+        id,
+        name: userName,
+        $collectionId,
+        $key,
+        $origin,
+        $synced,
+      }: UserWithVirtual): UserWithVirtual => ({
+        id,
+        name: userName,
+        $collectionId,
+        $key,
+        $origin,
+        $synced,
+      })
+      const source = createCollection<User>({
+        id: `falsy-row-listener-${name.replaceAll(` `, `-`)}`,
+        getKey: (user) => user.id,
+        startSync: true,
+        sync: {
+          sync: (actions) => {
+            begin = actions.begin
+            write = actions.write
+            commit = () => {
+              actions.commit()
+            }
+            actions.markReady()
+          },
+        },
+      })
+      const throwingSubscription = source.subscribeChanges(
+        () => {
+          throw failure
+        },
+        { includeInitialState: false },
+      )
+      const laterSubscription = source.subscribeChanges(
+        (changes) => {
+          sourceObservations.push({
+            changes: changes.map(({ type, key, value, previousValue }) => ({
+              type,
+              key,
+              value: snapshotUser(value),
+              previousValue:
+                previousValue === undefined
+                  ? undefined
+                  : snapshotUser(previousValue),
+            })),
+            rows: [...source.state.values()].map(snapshotUser),
+          })
+        },
+        { includeInitialState: false },
+      )
+      const live = createLiveQueryCollection({
+        id: `falsy-row-listener-dependent-${name.replaceAll(` `, `-`)}`,
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: source })
+            .select(({ user }) => ({ id: user.id, name: user.name })),
+      })
+      let dependentSubscription:
+        | ReturnType<typeof live.subscribeChanges>
+        | undefined
+
+      try {
+        await live.preload()
+        dependentSubscription = live.subscribeChanges(
+          (changes) => {
+            dependentObservations.push({
+              changes: changes.map(({ type, key, value, previousValue }) => ({
+                type,
+                key,
+                value: snapshotUser(value),
+                previousValue:
+                  previousValue === undefined
+                    ? undefined
+                    : snapshotUser(previousValue),
+              })),
+              rows: [...live.state.values()].map(snapshotUser),
+            })
+          },
+          { includeInitialState: false },
+        )
+        begin()
+        write({ type: `insert`, value: { id: 1, name: `Ada` } })
+        let didThrow = false
+        let thrown: unknown
+        try {
+          commit()
+        } catch (error) {
+          didThrow = true
+          thrown = error
+        }
+
+        expect(didThrow).toBe(true)
+        expect(Object.is(thrown, failure)).toBe(true)
+        const expectedObservation = (collectionId: string): UserObservation => {
+          const row: UserWithVirtual = {
+            id: 1,
+            name: `Ada`,
+            $collectionId: collectionId,
+            $key: 1,
+            $origin: `remote`,
+            $synced: true,
+          }
+          return {
+            changes: [
+              {
+                type: `insert`,
+                key: 1,
+                value: row,
+                previousValue: undefined,
+              },
+            ],
+            rows: [row],
+          }
+        }
+        const expectedDependent = expectedObservation(live.id)
+        expect(sourceObservations).toEqual([expectedObservation(source.id)])
+        expect(dependentObservations).toEqual([expectedDependent])
+        expect([...live.state.values()].map(snapshotUser)).toEqual(
+          expectedDependent.rows,
+        )
+      } finally {
+        throwingSubscription.unsubscribe()
+        laterSubscription.unsubscribe()
+        dependentSubscription?.unsubscribe()
+        await live.cleanup()
+        await source.cleanup()
+      }
+    },
+  )
+
+  it.each([
+    {
+      name: `Error`,
+      failure: new Error(`filtered source listener failed`),
+    },
+    ...falsyListenerFailureCases,
+  ])(
+    `preserves an exact $name filtered row-listener failure`,
+    async ({ name, failure }) => {
+      let begin!: () => void
+      let write!: (message: { type: `insert`; value: User }) => void
+      let commit!: () => void
+      const filteredCalls = vi.fn()
+      const laterListener = vi.fn()
+      const source = createCollection<User>({
+        id: `filtered-throwing-listener-source-${name.replaceAll(` `, `-`)}`,
+        getKey: (user) => user.id,
+        startSync: true,
+        sync: {
+          sync: (actions) => {
+            begin = actions.begin
+            write = actions.write
+            commit = () => {
+              actions.commit()
+            }
+            actions.markReady()
+          },
+        },
+      })
+      const throwingSubscription = source.subscribeChanges(
+        (changes) => {
+          filteredCalls(changes)
+          throw failure
+        },
+        {
+          includeInitialState: false,
+          where: (user) => eq(user.name, `Ada`),
+        },
+      )
+      const laterSubscription = source.subscribeChanges(laterListener, {
+        includeInitialState: false,
+      })
+      const live = createLiveQueryCollection({
+        id: `filtered-throwing-listener-dependent-${name.replaceAll(` `, `-`)}`,
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: source })
+            .select(({ user }) => ({ id: user.id, name: user.name })),
+      })
+
+      try {
+        await live.preload()
+        begin()
+        write({ type: `insert`, value: { id: 1, name: `Ada` } })
+        let didThrow = false
+        let thrown: unknown
+        try {
+          commit()
+        } catch (error) {
+          didThrow = true
+          thrown = error
+        }
+        expect(didThrow).toBe(true)
+        expect(Object.is(thrown, failure)).toBe(true)
+        expect(filteredCalls).toHaveBeenCalledOnce()
+        expect(filteredCalls.mock.calls[0]?.[0]).toEqual([
+          expect.objectContaining({ type: `insert`, key: 1 }),
+        ])
+        expect(laterListener).toHaveBeenCalledOnce()
+        expect(live.get(1)).toEqual(expect.objectContaining({ name: `Ada` }))
+
+        begin()
+        write({ type: `insert`, value: { id: 2, name: `Grace` } })
+        expect(() => commit()).not.toThrow()
+        expect(filteredCalls).toHaveBeenCalledOnce()
+        expect(laterListener).toHaveBeenCalledTimes(2)
+        expect(live.get(2)).toEqual(expect.objectContaining({ name: `Grace` }))
+      } finally {
+        throwingSubscription.unsubscribe()
+        laterSubscription.unsubscribe()
+        await live.cleanup()
+        await source.cleanup()
+      }
+    },
+  )
+
+  it(`keeps a nested ready failure when a later outer listener throws`, async () => {
+    let markInnerReady!: () => void
+    const readyFailure = new Error(`nested ready listener failed`)
+    const laterFailure = new Error(`later outer listener failed`)
+    const scheduledJob = vi.fn()
+    const inner = createCollection<User>({
+      id: `nested-ready-collision-inner`,
+      getKey: (user) => user.id,
+      sync: {
+        sync: ({ markReady }) => {
+          markInnerReady = markReady
+        },
+      },
+    })
+    const innerFirst = inner.subscribeChanges(() => {
+      const contextId = getActivePublicationContext()
+      transactionScopedScheduler.schedule({
+        contextId,
+        jobId: scheduledJob,
+        run: scheduledJob,
+      })
+    })
+    const innerSecond = inner.subscribeChanges(() => {
+      throw readyFailure
+    })
+
+    let beginOuter!: () => void
+    let writeOuter!: (message: { type: `insert`; value: User }) => void
+    let commitOuter!: () => void
+    const outer = createCollection<User>({
+      id: `nested-ready-collision-outer`,
+      getKey: (user) => user.id,
+      startSync: true,
+      sync: {
+        sync: (actions) => {
+          beginOuter = actions.begin
+          writeOuter = actions.write
+          commitOuter = () => {
+            actions.commit()
+          }
+          actions.markReady()
+        },
+      },
+    })
+    const outerFirst = outer.subscribeChanges(() => markInnerReady())
+    const outerSecond = outer.subscribeChanges(() => {
+      throw laterFailure
+    })
+
+    try {
+      beginOuter()
+      writeOuter({ type: `insert`, value: { id: 1, name: `Ada` } })
+      expect(() => commitOuter()).toThrow(readyFailure)
+      expect(scheduledJob).toHaveBeenCalledOnce()
+    } finally {
+      outerFirst.unsubscribe()
+      outerSecond.unsubscribe()
+      innerFirst.unsubscribe()
+      innerSecond.unsubscribe()
+      await outer.cleanup()
+      await inner.cleanup()
+    }
+  })
+
+  it(`settles a dependent live query before a nested ready failure escapes`, async () => {
+    let markSourceReady: (() => void) | undefined
+    const listenerFailure = new Error(`source ready listener failed`)
+    const source = createCollection<User>({
+      id: `nested-ready-live-source`,
+      getKey: (user) => user.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit, markReady }) => {
+          begin()
+          commit()
+          markSourceReady = markReady
+        },
+      },
+    })
+    const live = createLiveQueryCollection({
+      id: `nested-ready-live-dependent`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ user: source })
+          .select(({ user }) => ({ id: user.id, name: user.name })),
+    })
+    const preload = live.preload()
+    const throwingSubscription = source.subscribeChanges(() => {
+      throw listenerFailure
+    })
+
+    try {
+      expect(live.status).toBe(`loading`)
+      expect(() => withPublicationContext(() => markSourceReady!())).toThrow(
+        listenerFailure,
+      )
+      await expect(preload).resolves.toBeUndefined()
+      expect(source.status).toBe(`ready`)
+      expect(live.status).toBe(`ready`)
+    } finally {
+      throwingSubscription.unsubscribe()
+      await live.cleanup()
+      await source.cleanup()
+    }
+  })
+
   it(`runs the live query graph once per transaction that touches multiple collections`, async () => {
     const { users, tasks, assignments } =
       setupLiveQueryCollections(`single-batch`)
@@ -594,6 +1275,213 @@ describe(`live query scheduler`, () => {
     expect(maybeRunGraphSpy).toHaveBeenCalledTimes(1)
 
     maybeRunGraphSpy.mockRestore()
+  })
+
+  it.each([
+    { name: `undefined`, failure: undefined },
+    { name: `null`, failure: null },
+    { name: `false`, failure: false },
+    { name: `zero`, failure: 0 },
+    { name: `empty string`, failure: `` },
+    { name: `NaN`, failure: Number.NaN },
+  ])(`preserves the first falsy graph-loader failure: $name`, ({ failure }) => {
+    const baseCollection = createCollection<User>({
+      id: `falsy-loader-users-${String(failure)}`,
+      getKey: (user) => user.id,
+      sync: {
+        sync: () => () => {},
+      },
+    })
+    const builder = new CollectionConfigBuilder({
+      id: `falsy-loader-builder-${String(failure)}`,
+      query: (q) => q.from({ user: baseCollection }),
+    })
+    const contextId = Symbol(`falsy-loader-context`)
+    const laterLoader = vi.fn(() => true)
+    const config = {
+      begin: vi.fn(),
+      write: vi.fn(),
+      commit: vi.fn(),
+      markReady: vi.fn(),
+      truncate: vi.fn(),
+    } as unknown as Parameters<SyncConfig<UserWithVirtual>[`sync`]>[0]
+    const syncState = {
+      messagesCount: 0,
+      subscribedToAllCollections: true,
+      unsubscribeCallbacks: new Set<() => void>(),
+      graph: {
+        pendingWork: () => false,
+        run: vi.fn(),
+      },
+      inputs: {},
+      pipeline: {},
+    } as unknown as FullSyncState
+    const maybeRunGraphSpy = vi
+      .spyOn(builder, `maybeRunGraph`)
+      .mockImplementation((combinedLoader) => {
+        combinedLoader?.()
+      })
+
+    builder.currentSyncConfig = config
+    builder.currentSyncState = syncState
+    builder.scheduleGraphRun(
+      () => {
+        throw failure
+      },
+      { contextId },
+    )
+    builder.scheduleGraphRun(laterLoader, { contextId })
+
+    let didThrow = false
+    let thrown: unknown
+    try {
+      transactionScopedScheduler.flush(contextId)
+    } catch (error) {
+      didThrow = true
+      thrown = error
+    } finally {
+      maybeRunGraphSpy.mockRestore()
+    }
+
+    expect(didThrow).toBe(true)
+    expect(Object.is(thrown, failure)).toBe(true)
+    expect(laterLoader).toHaveBeenCalledOnce()
+  })
+
+  it(`attempts every repeated-alias source loader and preserves the first failure`, async () => {
+    const createSource = (name: string) =>
+      createCollection<User>({
+        id: `source-loader-${name}`,
+        getKey: (user) => user.id,
+        startSync: true,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return () => {}
+          },
+        },
+      })
+    const firstSource = createSource(`first`)
+    const secondSource = createSource(`second`)
+    const thirdSource = createSource(`third`)
+    const builder = new CollectionConfigBuilder({
+      id: `source-loader-builder`,
+      query: (q) =>
+        q.from({ root: firstSource }).select(({ root }) => ({
+          id: root.id,
+          second: q
+            .from({ item: secondSource })
+            .where(({ item }) => eq(item.id, root.id)),
+          third: q
+            .from({ item: thirdSource })
+            .where(({ item }) => eq(item.id, root.id)),
+        })),
+    })
+    type BuilderSyncConfig = Parameters<
+      ReturnType<typeof builder.getConfig>[`sync`][`sync`]
+    >[0]
+    const config = {
+      begin: vi.fn(),
+      write: vi.fn(),
+      commit: vi.fn(),
+      markReady: vi.fn(),
+      truncate: vi.fn(),
+    } as unknown as BuilderSyncConfig
+    const builderInternals = builder as unknown as {
+      graphCache: FullSyncState[`graph`]
+      inputsCache: FullSyncState[`inputs`]
+      pipelineCache: FullSyncState[`pipeline`]
+      collectionSources: Array<{
+        sourceId: string
+        alias: string
+        collection: object
+      }>
+      subscribeToAllCollections: (
+        syncConfig: typeof config,
+        state: FullSyncState,
+      ) => () => boolean
+    }
+    const syncState = {
+      messagesCount: 0,
+      unsubscribeCallbacks: new Set<() => void>(),
+      subscribedToAllCollections: false,
+      graph: builderInternals.graphCache,
+      inputs: builderInternals.inputsCache,
+      pipeline: builderInternals.pipelineCache,
+    } as unknown as FullSyncState
+    const sourceIdFor = (collection: object): string => {
+      const source = builderInternals.collectionSources.find(
+        (candidate) => candidate.collection === collection,
+      )
+      if (!source) throw new Error(`Expected a lexical source`)
+      return source.sourceId
+    }
+    const firstSourceId = sourceIdFor(firstSource)
+    const secondSourceId = sourceIdFor(secondSource)
+    const thirdSourceId = sourceIdFor(thirdSource)
+    expect(
+      builderInternals.collectionSources.map(({ alias }) => alias),
+    ).toEqual([`root`, `item`, `item`])
+    expect(new Set([firstSourceId, secondSourceId, thirdSourceId]).size).toBe(3)
+    const laterFailure = new Error(`later source failed`)
+    const loaderCalls: Array<string> = []
+    const loaderCallCounts = new Map<string, number>()
+    const loadMoreSpy = vi
+      .spyOn(CollectionSubscriber.prototype, `loadMoreIfNeeded`)
+      .mockImplementation(function (this: unknown) {
+        const { sourceId } = this as { sourceId: string }
+        loaderCalls.push(sourceId)
+        loaderCallCounts.set(
+          sourceId,
+          (loaderCallCounts.get(sourceId) ?? 0) + 1,
+        )
+        if (sourceId === firstSourceId) throw undefined
+        if (sourceId === secondSourceId) throw laterFailure
+        if (sourceId === thirdSourceId) return true
+        throw new Error(`Unexpected source: ${sourceId}`)
+      })
+
+    try {
+      builder.currentSyncConfig = config
+      builder.currentSyncState = syncState
+      const loadAllSources = builderInternals.subscribeToAllCollections(
+        config,
+        syncState,
+      )
+
+      let didThrow = false
+      let thrown: unknown
+      try {
+        loadAllSources()
+      } catch (error) {
+        didThrow = true
+        thrown = error
+      }
+
+      expect(didThrow).toBe(true)
+      expect(Object.is(thrown, undefined)).toBe(true)
+      expect(loaderCalls).toEqual([
+        firstSourceId,
+        secondSourceId,
+        thirdSourceId,
+      ])
+      expect(loaderCallCounts).toEqual(
+        new Map([
+          [firstSourceId, 1],
+          [secondSourceId, 1],
+          [thirdSourceId, 1],
+        ]),
+      )
+      expect(loadMoreSpy).toHaveBeenCalledTimes(3)
+    } finally {
+      for (const unsubscribe of syncState.unsubscribeCallbacks) unsubscribe()
+      loadMoreSpy.mockRestore()
+      await Promise.all([
+        firstSource.cleanup(),
+        secondSource.cleanup(),
+        thirdSource.cleanup(),
+      ])
+    }
   })
 
   it(`should handle optimistic mutations with nested left joins without scheduler errors`, async () => {

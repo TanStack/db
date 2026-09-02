@@ -5,19 +5,16 @@ import {
 } from '../scheduler.js'
 import { getActiveTransaction } from '../transactions.js'
 import { compileQuery } from './compiler/index.js'
-import {
-  normalizeExpressionPaths,
-  normalizeOrderByPaths,
-} from './compiler/expressions.js'
+import { normalizeExpressionPaths } from './compiler/expressions.js'
 import { getCollectionBuilder } from './live/collection-registry.js'
 import { SubsetDemandController } from './live/subset-demand-controller.js'
 import {
   buildQueryFromConfig,
-  computeOrderedLoadCursor,
   computeSubscriptionOrderByHints,
   extractCollectionSources,
   extractCollectionsFromQuery,
   filterDuplicateInserts,
+  OrderedSourceLoader,
   sendChangesToInput,
   splitUpdates,
   trackBiggestSentValue,
@@ -33,13 +30,7 @@ import type {
   LazyCollectionCallbacks,
   LazyDemandPlan,
 } from './compiler/joins.js'
-import type {
-  AppliedLoadSubsetOutcome,
-  ChangeMessage,
-  KeyedStream,
-  LoadSubsetRequestResult,
-  ResultStream,
-} from '../types.js'
+import type { ChangeMessage, KeyedStream, ResultStream } from '../types.js'
 
 // ---------------------------------------------------------------------------
 // Public Types
@@ -389,10 +380,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   // Ordered subscription state for cursor-based loading
   private readonly biggestSentValue = new Map<string, any>()
-  private readonly lastLoadRequestKey = new Map<string, string>()
-  private pendingOrderedLoadPromise:
-    | Promise<AppliedLoadSubsetOutcome>
-    | undefined
+  private readonly orderedLoaders = new Map<string, OrderedSourceLoader>()
 
   // Subscription management
   private readonly unsubscribeCallbacks = new Set<() => void>()
@@ -621,7 +609,14 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       // For ordered aliases with an index, trigger the initial limited snapshot.
       // This loads only the top N rows rather than the entire collection.
       if (orderByInfo) {
-        this.requestInitialOrderedSnapshot(alias, orderByInfo, subscription)
+        const loader = new OrderedSourceLoader(
+          orderByInfo,
+          subscription,
+          alias,
+          () => this.biggestSentValue.get(sourceId),
+        )
+        this.orderedLoaders.set(sourceId, loader)
+        loader.start()
       }
 
       // Listen for status changes on source collections
@@ -923,35 +918,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     }
   }
 
-  /**
-   * Request the initial ordered snapshot for an alias.
-   * Uses requestLimitedSnapshot (index-based cursor) or requestSnapshot
-   * (full load with limit) depending on whether an index is available.
-   */
-  private requestInitialOrderedSnapshot(
-    alias: string,
-    orderByInfo: OrderByOptimizationInfo,
-    subscription: CollectionSubscription,
-  ): void {
-    const { orderBy, offset, limit, index } = orderByInfo
-    const normalizedOrderBy = normalizeOrderByPaths(orderBy, alias)
-
-    if (index) {
-      subscription.setOrderByIndex(index)
-      subscription.requestLimitedSnapshot({
-        limit: offset + limit,
-        orderBy: normalizedOrderBy,
-        trackLoadSubsetPromise: false,
-      })
-    } else {
-      subscription.requestSnapshot({
-        orderBy: normalizedOrderBy,
-        limit: offset + limit,
-        trackLoadSubsetPromise: false,
-      })
-    }
-  }
-
   /** Get orderBy optimization info for one lexical source. */
   private getOrderByInfoForSource(
     sourceId: string,
@@ -968,73 +934,16 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
    * needs more data. If so, load more rows via requestLimitedSnapshot.
    */
   private loadMoreIfNeeded(): void {
-    for (const [, orderByInfo] of Object.entries(
-      this.optimizableOrderByCollections,
-    )) {
-      if (!orderByInfo.dataNeeded || !orderByInfo.index) continue
-
-      if (this.pendingOrderedLoadPromise) {
-        // Wait for in-flight loads to complete before requesting more
-        continue
-      }
-
-      const n = orderByInfo.dataNeeded()
-      if (n > 0) {
-        this.loadNextItems(orderByInfo, n)
-      }
-    }
-  }
-
-  /**
-   * Load n more items from the source collection, starting from the cursor
-   * position (the biggest value sent so far).
-   */
-  private loadNextItems(orderByInfo: OrderByOptimizationInfo, n: number): void {
-    const { alias, sourceId } = orderByInfo
-    const source = this.collectionSources.find(
-      (candidate) => candidate.sourceId === sourceId,
-    )
-    if (!source) return
-    const subscription = this.subscriptions[sourceId]
-    if (!subscription) return
-
-    const cursor = computeOrderedLoadCursor(
-      orderByInfo,
-      this.biggestSentValue.get(sourceId),
-      this.lastLoadRequestKey.get(sourceId),
-      alias,
-      n,
-    )
-    if (!cursor) return // Duplicate request — skip
-
-    this.lastLoadRequestKey.set(sourceId, cursor.loadRequestKey)
-
-    try {
-      subscription.requestLimitedSnapshot({
-        orderBy: cursor.normalizedOrderBy,
-        limit: n,
-        minValues: cursor.minValues,
-        trackLoadSubsetPromise: false,
-        onLoadSubsetResult: (loadResult: LoadSubsetRequestResult) => {
-          // Track in-flight load to prevent redundant concurrent requests
-          if (loadResult instanceof Promise) {
-            this.pendingOrderedLoadPromise = loadResult
-            const finish = () => {
-              if (this.pendingOrderedLoadPromise === loadResult) {
-                this.pendingOrderedLoadPromise = undefined
-              }
-            }
-            void loadResult.then(finish, finish)
-          }
-        },
-      })
-    } catch (error) {
-      if (subscription.lastError !== error) throw error
-      // subscribeChanges already routed the error through onSourceError. Do
-      // not let an automatic refill fail the source transaction that exposed
-      // the missing row.
-      if (this.lastLoadRequestKey.get(sourceId) === cursor.loadRequestKey) {
-        this.lastLoadRequestKey.delete(sourceId)
+    for (const loader of this.orderedLoaders.values()) {
+      try {
+        loader.loadMore()
+      } catch (error) {
+        if (
+          !Object.values(this.subscriptions).some(
+            (subscription) => subscription.lastError === error,
+          )
+        )
+          throw error
       }
     }
   }
@@ -1057,7 +966,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     )
     this.biggestSentValue.set(sourceId, result.biggest)
     if (result.shouldResetLoadKey) {
-      this.lastLoadRequestKey.delete(sourceId)
+      this.orderedLoaders.get(sourceId)?.resetCursor()
     }
   }
 
@@ -1083,8 +992,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.demand.clear()
     this.builderDependencies.clear()
     this.biggestSentValue.clear()
-    this.lastLoadRequestKey.clear()
-    this.pendingOrderedLoadPromise = undefined
+    for (const loader of this.orderedLoaders.values()) loader.dispose()
+    this.orderedLoaders.clear()
 
     // Clear mutable objects
     for (const key of Object.keys(this.lazySourcesCallbacks)) {

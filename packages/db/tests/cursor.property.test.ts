@@ -1,370 +1,95 @@
-import { describe, expect, it } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { buildCursor } from '../src/utils/cursor'
-import { Func, PropRef, Value } from '../src/query/ir'
-import type { OrderBy, OrderByClause } from '../src/query/ir'
-import type { CompareOptions } from '../src/query/builder/types'
+import { describe, expect, it } from 'vitest'
+import { PropRef } from '../src/query/ir.js'
+import { buildCursor } from '../src/utils/cursor.js'
+import { evaluateReferenceExpression } from './reference-expression.js'
+import type { OrderBy } from '../src/query/ir.js'
 
-/**
- * Property-based tests for cursor building
- *
- * Key properties:
- * 1. Empty inputs return undefined
- * 2. Single column produces simple gt/lt based on direction
- * 3. Direction affects operator choice (asc = gt, desc = lt)
- * 4. Determinism - same inputs always produce same output
- * 5. Result structure is always valid
- */
+type Term = {
+  direction: `asc` | `desc`
+  nulls: `first` | `last`
+}
 
-// Arbitraries for generating test data
-const arbitraryDirection = fc.constantFrom(`asc`, `desc`)
-
-const arbitraryNulls = fc.constantFrom(`first`, `last`)
-
-const arbitraryStringSort = fc.constantFrom(`locale`, `lexical`)
-
-const arbitraryCompareOptions = fc.record({
-  direction: arbitraryDirection,
-  nulls: arbitraryNulls,
-  stringSort: arbitraryStringSort,
-}) as fc.Arbitrary<CompareOptions>
-
-const arbitraryPropRef = fc
-  .array(fc.string({ minLength: 1, maxLength: 10 }), {
-    minLength: 1,
-    maxLength: 3,
-  })
-  .map((path) => new PropRef(path))
-
-const arbitraryOrderByClause = fc
-  .tuple(arbitraryPropRef, arbitraryCompareOptions)
-  .map(
-    ([expr, compareOptions]): OrderByClause => ({
-      expression: expr,
-      compareOptions,
-    }),
-  )
-
-const arbitraryOrderBy = (
-  minLength: number,
-  maxLength: number,
-): fc.Arbitrary<OrderBy> =>
-  fc.array(arbitraryOrderByClause, { minLength, maxLength })
-
-const arbitraryValue = fc.oneof(
-  fc.string(),
-  fc.integer(),
-  fc.double({ noNaN: true }),
-  fc.boolean(),
+const termArbitrary = fc.record<Term>({
+  direction: fc.constantFrom(`asc`, `desc`),
+  nulls: fc.constantFrom(`first`, `last`),
+})
+const valueArbitrary = fc.oneof(
+  fc.integer({ min: -2, max: 2 }),
   fc.constant(null),
+  fc.constant(undefined),
 )
+const cursorCaseArbitrary = fc
+  .integer({ min: 1, max: 4 })
+  .chain((length) =>
+    fc.tuple(
+      fc.array(termArbitrary, { minLength: length, maxLength: length }),
+      fc.array(valueArbitrary, { minLength: length, maxLength: length }),
+      fc.array(valueArbitrary, { minLength: length, maxLength: length }),
+    ),
+  )
 
-const arbitraryValues = (
-  minLength: number,
-  maxLength: number,
-): fc.Arbitrary<Array<unknown>> =>
-  fc.array(arbitraryValue, { minLength, maxLength })
-
-// Helper to check if result is a Func
-function isFunc(expr: unknown): expr is Func {
-  return expr instanceof Func
+function compareValue(left: unknown, right: unknown, term: Term): number {
+  if (left == null && right == null) return 0
+  if (left == null) return term.nulls === `first` ? -1 : 1
+  if (right == null) return term.nulls === `first` ? 1 : -1
+  const compared = left === right ? 0 : left < right ? -1 : 1
+  return term.direction === `asc` ? compared : -compared
 }
 
-// Helper to get operator name from Func
-function getFuncName(expr: Func): string {
-  return expr.name
+function compareTuple(
+  left: ReadonlyArray<unknown>,
+  right: ReadonlyArray<unknown>,
+  terms: ReadonlyArray<Term>,
+): number {
+  for (let index = 0; index < terms.length; index++) {
+    const compared = compareValue(left[index], right[index], terms[index]!)
+    if (compared !== 0) return compared
+  }
+  return 0
 }
 
-// Helper to recursively count operators in an expression
-function countOperators(expr: unknown, name: string): number {
-  if (!isFunc(expr)) return 0
-  const selfCount = expr.name === name ? 1 : 0
-  return (
-    selfCount +
-    expr.args.reduce((sum, arg) => sum + countOperators(arg, name), 0)
+function row(values: ReadonlyArray<unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    values.map((value, index) => [`column${index}`, value]),
   )
 }
 
-describe(`buildCursor property-based tests`, () => {
-  describe(`empty input handling`, () => {
-    fcTest.prop([arbitraryOrderBy(0, 5)])(
-      `returns undefined for empty values array`,
-      (orderBy) => {
-        const result = buildCursor(orderBy, [])
-        expect(result).toBeUndefined()
-      },
-    )
+function orderBy(terms: ReadonlyArray<Term>): OrderBy {
+  return terms.map((compareOptions, index) => ({
+    expression: new PropRef([`column${index}`]),
+    compareOptions,
+  }))
+}
 
-    fcTest.prop([arbitraryValues(0, 5)])(
-      `returns undefined for empty orderBy array`,
-      (values) => {
-        const result = buildCursor([], values)
-        expect(result).toBeUndefined()
-      },
-    )
-
-    it(`returns undefined for both empty`, () => {
-      expect(buildCursor([], [])).toBeUndefined()
-    })
+describe(`buildCursor properties`, () => {
+  it(`returns no cursor without terms or boundary values`, () => {
+    expect(buildCursor([], [1])).toBeUndefined()
+    expect(
+      buildCursor(orderBy([{ direction: `asc`, nulls: `first` }]), []),
+    ).toBeUndefined()
   })
 
-  describe(`single column cursor`, () => {
-    fcTest.prop([arbitraryOrderByClause, arbitraryValue])(
-      `produces a simple comparison for single column`,
-      (clause, value) => {
-        const result = buildCursor([clause], [value])
+  fcTest.prop([cursorCaseArbitrary], { numRuns: 300 })(
+    `selects exactly the tuples after a nullable mixed-direction boundary`,
+    ([terms, boundary, candidate]) => {
+      const cursor = buildCursor(orderBy(terms), [...boundary])
+      expect(cursor).toBeDefined()
 
-        expect(result).toBeDefined()
-        expect(isFunc(result!)).toBe(true)
-
-        // Should be either 'gt' or 'lt' based on direction
-        const func = result as Func
-        expect([`gt`, `lt`]).toContain(getFuncName(func))
-      },
-    )
-
-    fcTest.prop([
-      arbitraryPropRef,
-      arbitraryNulls,
-      arbitraryStringSort,
-      arbitraryValue,
-    ])(
-      `ascending direction produces gt operator`,
-      (expr, nulls, stringSort, value) => {
-        const clause: OrderByClause = {
-          expression: expr,
-          compareOptions: {
-            direction: `asc`,
-            nulls: nulls as `first` | `last`,
-            stringSort: stringSort as `locale` | `lexical`,
-          },
-        }
-        const result = buildCursor([clause], [value])
-
-        expect(result).toBeDefined()
-        expect(getFuncName(result as Func)).toBe(`gt`)
-      },
-    )
-
-    fcTest.prop([
-      arbitraryPropRef,
-      arbitraryNulls,
-      arbitraryStringSort,
-      arbitraryValue,
-    ])(
-      `descending direction produces lt operator`,
-      (expr, nulls, stringSort, value) => {
-        const clause: OrderByClause = {
-          expression: expr,
-          compareOptions: {
-            direction: `desc`,
-            nulls: nulls as `first` | `last`,
-            stringSort: stringSort as `locale` | `lexical`,
-          },
-        }
-        const result = buildCursor([clause], [value])
-
-        expect(result).toBeDefined()
-        expect(getFuncName(result as Func)).toBe(`lt`)
-      },
-    )
-  })
-
-  describe(`multi-column cursor structure`, () => {
-    fcTest.prop([arbitraryOrderBy(2, 4), arbitraryValues(2, 4)])(
-      `multi-column produces or at top level when matching lengths`,
-      (orderBy, values) => {
-        // Ensure we have matching lengths for a valid multi-column cursor
-        const minLen = Math.min(orderBy.length, values.length)
-        if (minLen < 2) return // Skip if not enough for multi-column
-
-        const trimmedOrderBy = orderBy.slice(0, minLen)
-        const trimmedValues = values.slice(0, minLen)
-
-        const result = buildCursor(trimmedOrderBy, trimmedValues)
-
-        expect(result).toBeDefined()
-        expect(isFunc(result!)).toBe(true)
-
-        // For 2+ columns, top level should be 'or'
-        const func = result as Func
-        expect(getFuncName(func)).toBe(`or`)
-      },
-    )
-
-    fcTest.prop([
-      fc.tuple(arbitraryOrderByClause, arbitraryOrderByClause),
-      fc.tuple(arbitraryValue, arbitraryValue),
-    ])(
-      `two columns produces correct structure`,
-      ([clause1, clause2], [val1, val2]) => {
-        const result = buildCursor([clause1, clause2], [val1, val2])
-
-        expect(result).toBeDefined()
-        const func = result as Func
-
-        // Top level should be 'or'
-        expect(getFuncName(func)).toBe(`or`)
-
-        // Should have structure: or(comparison1, and(eq, comparison2))
-        expect(func.args).toHaveLength(2)
-
-        // First arg should be direct gt/lt
-        expect(isFunc(func.args[0])).toBe(true)
-        expect([`gt`, `lt`]).toContain(getFuncName(func.args[0] as Func))
-
-        // Second arg should be 'and' combining eq and comparison
-        expect(isFunc(func.args[1])).toBe(true)
-        expect(getFuncName(func.args[1] as Func)).toBe(`and`)
-      },
-    )
-  })
-
-  describe(`determinism`, () => {
-    fcTest.prop([arbitraryOrderBy(1, 3), arbitraryValues(1, 3)])(
-      `buildCursor is deterministic`,
-      (orderBy, values) => {
-        const result1 = buildCursor(orderBy, values)
-        const result2 = buildCursor(orderBy, values)
-
-        // Both should be defined or both undefined
-        expect(result1 === undefined).toBe(result2 === undefined)
-
-        if (result1 !== undefined && result2 !== undefined) {
-          // Compare structure by JSON representation
-          expect(JSON.stringify(result1)).toBe(JSON.stringify(result2))
-        }
-      },
-    )
-  })
-
-  describe(`value preservation`, () => {
-    fcTest.prop([arbitraryOrderByClause, arbitraryValue])(
-      `cursor contains the provided value`,
-      (clause, value) => {
-        const result = buildCursor([clause], [value])
-
-        expect(result).toBeDefined()
-        const func = result as Func
-
-        // Second argument should be a Value containing our value
-        expect(func.args[1]).toBeInstanceOf(Value)
-        expect((func.args[1] as Value).value).toBe(value)
-      },
-    )
-
-    fcTest.prop([arbitraryOrderByClause, arbitraryValue])(
-      `cursor references the correct property`,
-      (clause, value) => {
-        const result = buildCursor([clause], [value])
-
-        expect(result).toBeDefined()
-        const func = result as Func
-
-        // First argument should be the same PropRef
-        expect(func.args[0]).toBeInstanceOf(PropRef)
-        expect((func.args[0] as PropRef).path).toEqual(
-          (clause.expression as PropRef).path,
-        )
-      },
-    )
-  })
-
-  describe(`length mismatch handling`, () => {
-    fcTest.prop([arbitraryOrderBy(3, 5), arbitraryValues(1, 2)])(
-      `handles more orderBy columns than values gracefully`,
-      (orderBy, values) => {
-        // Should use the minimum of the two lengths
-        const result = buildCursor(orderBy, values)
-
-        if (values.length === 0) {
-          expect(result).toBeUndefined()
-        } else {
-          expect(result).toBeDefined()
-          expect(isFunc(result!)).toBe(true)
-        }
-      },
-    )
-
-    fcTest.prop([arbitraryOrderBy(1, 2), arbitraryValues(3, 5)])(
-      `handles more values than orderBy columns gracefully`,
-      (orderBy, values) => {
-        // Should use the minimum of the two lengths
-        const result = buildCursor(orderBy, values)
-
-        if (orderBy.length === 0) {
-          expect(result).toBeUndefined()
-        } else {
-          expect(result).toBeDefined()
-          expect(isFunc(result!)).toBe(true)
-        }
-      },
-    )
-  })
-
-  describe(`operator consistency`, () => {
-    fcTest.prop([
-      fc.array(
-        fc.tuple(arbitraryPropRef, arbitraryNulls, arbitraryStringSort),
-        { minLength: 2, maxLength: 4 },
-      ),
-      arbitraryValues(2, 4),
-    ])(`all ascending columns use gt operators`, (clauseParts, values) => {
-      const orderBy: OrderBy = clauseParts.map(([expr, nulls, stringSort]) => ({
-        expression: expr,
-        compareOptions: {
-          direction: `asc` as const,
-          nulls: nulls as `first` | `last`,
-          stringSort: stringSort as `locale` | `lexical`,
-        },
-      }))
-
-      const minLen = Math.min(orderBy.length, values.length)
-      const result = buildCursor(
-        orderBy.slice(0, minLen),
-        values.slice(0, minLen),
+      const actual = Boolean(
+        evaluateReferenceExpression(cursor!, row(candidate)),
       )
+      const expected = compareTuple(candidate, boundary, terms) > 0
+      expect(actual).toBe(expected)
+    },
+  )
 
-      if (result) {
-        // Count gt operators - should equal number of columns
-        const gtCount = countOperators(result, `gt`)
-        expect(gtCount).toBe(minLen)
-        // Should have no lt operators
-        const ltCount = countOperators(result, `lt`)
-        expect(ltCount).toBe(0)
-      }
-    })
-
-    fcTest.prop([
-      fc.array(
-        fc.tuple(arbitraryPropRef, arbitraryNulls, arbitraryStringSort),
-        { minLength: 2, maxLength: 4 },
-      ),
-      arbitraryValues(2, 4),
-    ])(`all descending columns use lt operators`, (clauseParts, values) => {
-      const orderBy: OrderBy = clauseParts.map(([expr, nulls, stringSort]) => ({
-        expression: expr,
-        compareOptions: {
-          direction: `desc` as const,
-          nulls: nulls as `first` | `last`,
-          stringSort: stringSort as `locale` | `lexical`,
-        },
-      }))
-
-      const minLen = Math.min(orderBy.length, values.length)
-      const result = buildCursor(
-        orderBy.slice(0, minLen),
-        values.slice(0, minLen),
+  fcTest.prop([cursorCaseArbitrary], { numRuns: 100 })(
+    `is deterministic`,
+    ([terms, boundary]) => {
+      expect(buildCursor(orderBy(terms), [...boundary])).toEqual(
+        buildCursor(orderBy(terms), [...boundary]),
       )
-
-      if (result) {
-        // Count lt operators - should equal number of columns
-        const ltCount = countOperators(result, `lt`)
-        expect(ltCount).toBe(minLen)
-        // Should have no gt operators
-        const gtCount = countOperators(result, `gt`)
-        expect(gtCount).toBe(0)
-      }
-    })
-  })
+    },
+  )
 })

@@ -497,12 +497,18 @@ describe(`includes cross-formulation oracle`, () => {
     }),
   )
 
-  fcTest.prop([scenarioArbitrary], oraclePropertyOptions(8))(
+  fcTest.prop(
+    [scenarioArbitrary],
+    oraclePropertyOptions(8, `includes-cross-formulation.equivalence`),
+  )(
     `agrees across nested includes, flat joins, per-parent queries, and TLP partitions`,
     expectFormulationsEquivalent,
   )
 
-  fcTest.prop([windowedScenarioArbitrary], oraclePropertyOptions(12))(
+  fcTest.prop(
+    [windowedScenarioArbitrary],
+    oraclePropertyOptions(12, `includes-cross-formulation.ordered-window`),
+  )(
     `matches recomputation for ordered offset and limit child windows`,
     ({ scenario, offset, limit }) =>
       expectWindowedIncludeMatches(scenario, offset, limit),

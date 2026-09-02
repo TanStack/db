@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { QueryClient } from '@tanstack/query-core'
+import { QueryClient, hashKey } from '@tanstack/query-core'
 import { createCollection, eq } from '@tanstack/db'
-import { expectAssertionFailure } from '../../db/tests/expected-failure.js'
+import { createDeferred } from '../../db/src/deferred.js'
 import { TraceAssertionError } from '../../db/tests/trace-runner.js'
 import { queryCollectionOptions } from '../src/query.js'
 import type { Collection, SyncMetadataApi } from '@tanstack/db'
@@ -28,9 +28,10 @@ type MetadataRecorder = {
 
 type OwnershipFixtureOptions = {
   id: string
-  results: Array<Array<Item>>
+  results: Array<Array<Item> | Promise<Array<Item>>>
   syncMode?: `eager` | `on-demand`
   metadataRecorder?: MetadataRecorder
+  setupMetadata?: (metadata: SyncMetadataApi<string | number>) => void
 }
 
 type OwnershipFixture = {
@@ -140,102 +141,6 @@ function assertCheckpoint(
   }
 }
 
-function asRecords({
-  actual,
-  expected,
-}: {
-  actual: unknown
-  expected: unknown
-}):
-  | {
-      observed: Record<string, unknown>
-      wanted: Record<string, unknown>
-    }
-  | undefined {
-  if (
-    !actual ||
-    typeof actual !== `object` ||
-    !expected ||
-    typeof expected !== `object`
-  ) {
-    return undefined
-  }
-
-  return {
-    observed: actual as Record<string, unknown>,
-    wanted: expected as Record<string, unknown>,
-  }
-}
-
-function classifyEagerOwnerLoss(difference: {
-  actual: unknown
-  expected: unknown
-}): boolean {
-  const records = asRecords(difference)
-  if (!records) return false
-  const { observed, wanted } = records
-  return (
-    observed.status === `ready` &&
-    Array.isArray(observed.rows) &&
-    observed.rows.length === 0 &&
-    observed.owners === 0 &&
-    wanted.status === `ready` &&
-    Array.isArray(wanted.rows) &&
-    wanted.rows.length === 1 &&
-    wanted.rows[0] === shared.id &&
-    wanted.owners === 1
-  )
-}
-
-function classifyInsertedOwnerMetadataLoss(difference: {
-  actual: unknown
-  expected: unknown
-}): boolean {
-  const records = asRecords(difference)
-  if (!records) return false
-  const { observed, wanted } = records
-  return (
-    Array.isArray(observed.persistedOwners) &&
-    observed.persistedOwners.length === 0 &&
-    Array.isArray(observed.metadataSetKeys) &&
-    observed.metadataSetKeys.length === 1 &&
-    observed.metadataSetKeys[0] === shared.id &&
-    Array.isArray(wanted.persistedOwners) &&
-    wanted.persistedOwners.length === 1 &&
-    typeof wanted.persistedOwners[0] === `string` &&
-    Array.isArray(wanted.metadataSetKeys) &&
-    wanted.metadataSetKeys.length === 1 &&
-    wanted.metadataSetKeys[0] === shared.id
-  )
-}
-
-function sameArray(actual: unknown, expected: unknown): boolean {
-  return (
-    Array.isArray(actual) &&
-    Array.isArray(expected) &&
-    actual.length === expected.length &&
-    actual.every((value, index) => value === expected[index])
-  )
-}
-
-function classifyPersistedBaselineLoss(difference: {
-  actual: unknown
-  expected: unknown
-}): boolean {
-  const records = asRecords(difference)
-  if (!records) return false
-  const { observed, wanted } = records
-  return (
-    sameArray(observed.liveOwners, wanted.liveOwners) &&
-    sameArray(observed.persistedOwners, wanted.insertedOwners) &&
-    Array.isArray(observed.insertedOwners) &&
-    observed.insertedOwners.length === 0 &&
-    Array.isArray(wanted.persistedOwners) &&
-    wanted.persistedOwners.length === 2 &&
-    sameArray(observed.metadataSetKeys, wanted.metadataSetKeys)
-  )
-}
-
 function recordMetadataWrites(
   metadata: SyncMetadataApi<string | number>,
   recorder: MetadataRecorder,
@@ -266,10 +171,13 @@ function createOwnershipFixture({
   results,
   syncMode = `on-demand`,
   metadataRecorder,
+  setupMetadata,
 }: OwnershipFixtureOptions): OwnershipFixture {
   const queryClient = createQueryClient()
   const queryFn = vi.fn<() => Promise<Array<Item>>>()
-  results.forEach((result) => queryFn.mockResolvedValueOnce(result))
+  results.forEach((result) =>
+    queryFn.mockImplementationOnce(() => Promise.resolve(result)),
+  )
   queryFn.mockRejectedValue(new Error(`Unexpected ownership-oracle refetch`))
   const baseOptions = queryCollectionOptions<Item>({
     id,
@@ -282,8 +190,9 @@ function createOwnershipFixture({
   })
   const maps = inspectOwnershipMaps(baseOptions)
   const originalSync = baseOptions.sync
+  let pendingSetupMetadata = setupMetadata
   const collection = createCollection(
-    metadataRecorder
+    metadataRecorder || setupMetadata
       ? {
           ...baseOptions,
           sync: {
@@ -291,12 +200,17 @@ function createOwnershipFixture({
               if (!params.metadata) {
                 throw new Error(`Sync metadata API is unavailable`)
               }
+              if (pendingSetupMetadata) {
+                params.begin()
+                pendingSetupMetadata(params.metadata)
+                params.commit()
+                pendingSetupMetadata = undefined
+              }
               return originalSync.sync({
                 ...params,
-                metadata: recordMetadataWrites(
-                  params.metadata,
-                  metadataRecorder,
-                ),
+                metadata: metadataRecorder
+                  ? recordMetadataWrites(params.metadata, metadataRecorder)
+                  : params.metadata,
               })
             },
           },
@@ -559,16 +473,16 @@ describe(`query collection ownership lifecycle oracle`, () => {
     )
   })
 
-  it(`#1631 keeps the eager owner when its last collection listener departs`, async () => {
-    const id = `ownership-eager-listener-1631`
-    const { collection, maps, queryClient } = createOwnershipFixture({
+  it(`keeps the eager owner when its last collection listener departs`, async () => {
+    const id = `ownership-eager-listener`
+    const { collection, maps, queryClient, queryFn } = createOwnershipFixture({
       id,
       syncMode: `eager`,
-      results: [[shared]],
+      results: [[shared], [{ ...shared, name: `Refetched` }]],
     })
 
     await collection.stateWhenReady()
-    const queryHash = onlyOwner(maps, shared.id)
+    onlyOwner(maps, shared.id)
     const subscription = collection.subscribeChanges(() => {})
     assertCheckpoint(
       0,
@@ -589,40 +503,91 @@ describe(`query collection ownership lifecycle oracle`, () => {
       // without making the defect boundary depend on a timer.
       queryClient.removeQueries({ queryKey: [id], exact: true })
 
-      const assertOwnerSurvives = expectAssertionFailure(
-        () =>
-          Promise.resolve().then(() => {
-            assertCheckpoint(
-              2,
-              {
-                status: collection.status,
-                rows: collectionRows(collection),
-                owners: ownersOf(maps, shared.id).length,
-              },
-              { status: `ready`, rows: [shared.id], owners: 1 },
-            )
-          }),
+      assertCheckpoint(
+        2,
         {
-          checkpoint: 2,
-          classify: classifyEagerOwnerLoss,
+          status: collection.status,
+          rows: collectionRows(collection),
+          owners: ownersOf(maps, shared.id).length,
         },
+        { status: `ready`, rows: [shared.id], owners: 1 },
       )
+      expect(warning).not.toHaveBeenCalled()
 
-      await assertOwnerSurvives()
-      expect(warning).toHaveBeenCalledOnce()
-      expect(warning).toHaveBeenCalledWith(
-        expect.stringContaining(`[cleanupQueryIfIdle]`),
-        { hashedQueryKey: queryHash },
+      await vi.waitFor(() => {
+        expect(observerCount(queryClient, onlyOwner(maps, shared.id))).toBe(1)
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        expect(collection.get(shared.id)?.name).toBe(`Refetched`)
+      })
+
+      const remounted = collection.subscribeChanges(() => {})
+      assertCheckpoint(
+        3,
+        {
+          status: collection.status,
+          rows: collectionRows(collection),
+          owners: ownersOf(maps, shared.id).length,
+        },
+        { status: `ready`, rows: [shared.id], owners: 1 },
       )
+      remounted.unsubscribe()
     } finally {
       warning.mockRestore()
     }
   })
 
-  it(`#1656 keeps the first persisted owner when a second query inserts another row`, async () => {
+  it(`keeps an active on-demand owner when its cache entry is removed`, async () => {
+    const id = `ownership-active-cache-removal`
+    const { collection, maps, queryClient } = createOwnershipFixture({
+      id,
+      results: [[shared]],
+    })
+    const subset = { where: eq(`category`, `detail`) }
+
+    await collection._sync.loadSubset(subset)
+    const queryHash = onlyOwner(maps, shared.id)
+    const subscription = collection.subscribeChanges(() => {})
+    subscription.unsubscribe()
+    assertCheckpoint(0, collection.subscriberCount, 0)
+
+    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    try {
+      queryClient.removeQueries({ queryKey: [id] })
+
+      assertCheckpoint(
+        1,
+        {
+          rows: collectionRows(collection),
+          owners: ownersOf(maps, shared.id),
+          ownedRows: rowsOwnedBy(maps, queryHash),
+        },
+        {
+          rows: [shared.id],
+          owners: [queryHash],
+          ownedRows: [shared.id],
+        },
+      )
+      expect(warning).not.toHaveBeenCalled()
+    } finally {
+      warning.mockRestore()
+    }
+
+    collection._sync.unloadSubset(subset)
+    assertCheckpoint(
+      2,
+      {
+        rows: collectionRows(collection),
+        ownershipRows: maps.rowToQueries.size,
+        ownershipQueries: maps.queryToRows.size,
+      },
+      { rows: [], ownershipRows: 0, ownershipQueries: 0 },
+    )
+  })
+
+  it(`keeps every persisted owner when overlapping queries insert rows`, async () => {
     const metadataRecorder: MetadataRecorder = { rowWrites: [] }
     const { collection, maps } = createOwnershipFixture({
-      id: `ownership-persisted-baseline-1656`,
+      id: `ownership-persisted-baseline`,
       results: [[shared], [shared, listOnly]],
       metadataRecorder,
     })
@@ -631,59 +596,41 @@ describe(`query collection ownership lifecycle oracle`, () => {
 
     await collection._sync.loadSubset(detailSubset)
     const detailHash = onlyOwner(maps, shared.id)
-    // The production metadata API records the owner write, but the insert's
-    // commit currently loses it. Accept only that exact #1656 boundary.
-    const assertInsertedOwnerPersists = expectAssertionFailure(
-      () =>
-        Promise.resolve().then(() => {
-          assertCheckpoint(
-            0,
-            {
-              persistedOwners: persistedOwners(
-                collection._state.syncedMetadata,
-                shared.id,
-              ),
-              metadataSetKeys: setMetadataKeys(metadataRecorder),
-            },
-            { persistedOwners: [detailHash], metadataSetKeys: [shared.id] },
-          )
-        }),
-      { checkpoint: 0, classify: classifyInsertedOwnerMetadataLoss },
+    assertCheckpoint(
+      0,
+      {
+        persistedOwners: persistedOwners(
+          collection._state.syncedMetadata,
+          shared.id,
+        ),
+        metadataSetKeys: setMetadataKeys(metadataRecorder),
+      },
+      { persistedOwners: [detailHash], metadataSetKeys: [shared.id] },
     )
-    await assertInsertedOwnerPersists()
 
     await collection._sync.loadSubset(listSubset)
     const listHash = otherOwner(maps, shared.id, detailHash)
-    // A second insert loses its own owner and rebuilds the persisted baseline
-    // with only the later query, while the in-memory ownership remains sound.
-    const assertPersistedBaselineSurvives = expectAssertionFailure(
-      () =>
-        Promise.resolve().then(() => {
-          assertCheckpoint(
-            1,
-            {
-              liveOwners: ownersOf(maps, shared.id),
-              persistedOwners: persistedOwners(
-                collection._state.syncedMetadata,
-                shared.id,
-              ),
-              insertedOwners: persistedOwners(
-                collection._state.syncedMetadata,
-                listOnly.id,
-              ),
-              metadataSetKeys: setMetadataKeys(metadataRecorder),
-            },
-            {
-              liveOwners: sorted([detailHash, listHash]),
-              persistedOwners: sorted([detailHash, listHash]),
-              insertedOwners: [listHash],
-              metadataSetKeys: [listOnly.id, shared.id],
-            },
-          )
-        }),
-      { checkpoint: 1, classify: classifyPersistedBaselineLoss },
+    assertCheckpoint(
+      1,
+      {
+        liveOwners: ownersOf(maps, shared.id),
+        persistedOwners: persistedOwners(
+          collection._state.syncedMetadata,
+          shared.id,
+        ),
+        insertedOwners: persistedOwners(
+          collection._state.syncedMetadata,
+          listOnly.id,
+        ),
+        metadataSetKeys: setMetadataKeys(metadataRecorder),
+      },
+      {
+        liveOwners: sorted([detailHash, listHash]),
+        persistedOwners: sorted([detailHash, listHash]),
+        insertedOwners: [listHash],
+        metadataSetKeys: [listOnly.id, shared.id],
+      },
     )
-    await assertPersistedBaselineSurvives()
 
     collection._sync.unloadSubset(listSubset)
     assertCheckpoint(
@@ -700,6 +647,91 @@ describe(`query collection ownership lifecycle oracle`, () => {
         rows: [shared.id],
         liveOwners: [detailHash],
         persistedOwners: [detailHash],
+      },
+    )
+  })
+
+  it(`restages an existing persisted owner when its absent row is inserted`, async () => {
+    const id = `ownership-existing-metadata-before-insert`
+    const queryHash = hashKey([id])
+    const result = createDeferred<Array<Item>>()
+    let setupCalls = 0
+    const { collection, maps, queryFn } = createOwnershipFixture({
+      id,
+      syncMode: `eager`,
+      results: [result.promise, [{ ...shared, name: `Restarted` }]],
+      setupMetadata: (metadata) => {
+        setupCalls += 1
+        metadata.row.set(shared.id, {
+          queryCollection: { owners: { [queryHash]: true } },
+        })
+      },
+    })
+
+    expect(queryFn).toHaveBeenCalledTimes(1)
+    assertCheckpoint(
+      0,
+      {
+        rows: collectionRows(collection),
+        liveOwners: ownersOf(maps, shared.id),
+        persistedOwners: persistedOwners(
+          collection._state.syncedMetadata,
+          shared.id,
+        ),
+      },
+      {
+        rows: [],
+        liveOwners: [],
+        persistedOwners: [queryHash],
+      },
+    )
+
+    result.resolve([shared])
+    await collection.stateWhenReady()
+    assertCheckpoint(
+      1,
+      {
+        rows: collectionRows(collection),
+        liveOwners: ownersOf(maps, shared.id),
+        persistedOwners: persistedOwners(
+          collection._state.syncedMetadata,
+          shared.id,
+        ),
+      },
+      {
+        rows: [shared.id],
+        liveOwners: [queryHash],
+        persistedOwners: [queryHash],
+      },
+    )
+
+    await collection.cleanup()
+    assertCheckpoint(2, collection.status, `cleaned-up`)
+    await collection.preload()
+    await vi.waitFor(() => {
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(collection.get(shared.id)?.name).toBe(`Restarted`)
+    })
+    assertCheckpoint(
+      3,
+      {
+        status: collection.status,
+        fetches: queryFn.mock.calls.length,
+        rows: collectionRows(collection),
+        liveOwners: ownersOf(maps, shared.id),
+        persistedOwners: persistedOwners(
+          collection._state.syncedMetadata,
+          shared.id,
+        ),
+        setupCalls,
+      },
+      {
+        status: `ready`,
+        fetches: 2,
+        rows: [shared.id],
+        liveOwners: [queryHash],
+        persistedOwners: [queryHash],
+        setupCalls: 1,
       },
     )
   })

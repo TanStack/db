@@ -11,24 +11,16 @@ import {
 import { createDeferred } from '../deferred'
 import { deepEquals } from '../utils'
 import { LIVE_QUERY_INTERNAL } from '../query/live/internal.js'
-import {
-  createAppliedLoadSubsetOutcome,
-  isAppliedLoadSubsetOutcome,
-  isLoadSubsetResultForDemand,
-} from '../query/load-subset-outcome.js'
-import {
-  cloneLoadSubsetOptions,
-  snapshotLoadSubsetDemand,
-} from '../query/load-subset-options.js'
+import { cloneOptions } from '../query/subset-dedupe.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
-  AppliedLoadSubsetOutcome,
   ChangeMessageOrDeleteKeyMessage,
   CleanupFn,
   CollectionConfig,
   LoadSubsetFn,
   LoadSubsetOptions,
   LoadSubsetRequestResult,
+  LoadSubsetResult,
   OptimisticChangeMessage,
   SyncConfigRes,
   SyncMetadataApi,
@@ -41,24 +33,12 @@ import type { LiveQueryCollectionUtils } from '../query/live/collection-config-b
 import type { Deferred } from '../deferred'
 
 type DeferredLoadSubset = {
-  ownerOptions: LoadSubsetOptions
   options: LoadSubsetOptions
-  demand: LoadSubsetOptions
-  generation: number
-  deferred: Deferred<AppliedLoadSubsetOutcome>
-}
-
-type DeferredAdapterAcquisition = {
-  options: LoadSubsetOptions
-  releaseFailed: boolean
+  deferred: Deferred<void | LoadSubsetResult>
 }
 
 type LoadSubsetOperation = {
   pending: Set<Promise<unknown>>
-  outcomes: Map<
-    string | undefined,
-    Map<string, Map<number, AppliedLoadSubsetOutcome>>
-  >
   waiting: boolean
   completed: boolean
   hasError: boolean
@@ -92,13 +72,8 @@ export class CollectionSyncManager<
   private syncStartDeferred = false
   private syncStartRequested = false
   private deferredLoadSubsets: Array<DeferredLoadSubset> = []
-  private deferredAdapterOptions = new Map<
-    LoadSubsetOptions,
-    Array<DeferredAdapterAcquisition>
-  >()
   private syncEpoch = 0
   private loadSubsetSession = 0
-  private loadSubsetGeneration = 0
 
   /**
    * Creates a new CollectionSyncManager instance
@@ -408,52 +383,19 @@ export class CollectionSyncManager<
       throw error
     }
 
-    for (const {
-      ownerOptions,
-      options,
-      demand,
-      generation,
-      deferred,
-    } of deferredLoadSubsets) {
+    for (const { options, deferred } of deferredLoadSubsets) {
       const loadSubset = this.syncLoadSubsetFn
-      const adapterAcquisition =
-        loadSubset && this.syncUnloadSubsetFn
-          ? this.retainDeferredAdapterOptions(ownerOptions, options)
-          : undefined
       try {
         const result = loadSubset?.(options) ?? true
         if (result instanceof Promise) {
           void result.then(
-            (sourceResult) =>
-              deferred.resolve(
-                createAppliedLoadSubsetOutcome(
-                  this.id,
-                  demand,
-                  generation,
-                  isLoadSubsetResultForDemand(result, sourceResult, demand)
-                    ? sourceResult
-                    : undefined,
-                ),
-              ),
+            (sourceResult) => deferred.resolve(sourceResult),
             (error: unknown) => deferred.reject(error),
           )
         } else {
-          deferred.resolve(
-            createAppliedLoadSubsetOutcome(
-              this.id,
-              demand,
-              generation,
-              undefined,
-            ),
-          )
+          deferred.resolve(undefined)
         }
       } catch (error) {
-        // A reentrant release marks the tentative acquisition before its
-        // error escapes through loadSubset. Preserve only that known lease;
-        // a plain loadSubset throw established no acquisition to release.
-        if (adapterAcquisition && !adapterAcquisition.releaseFailed) {
-          this.forgetDeferredAdapterOptions(ownerOptions, adapterAcquisition)
-        }
         deferred.reject(error)
       }
     }
@@ -686,11 +628,9 @@ export class CollectionSyncManager<
   public beginLoadSubsetOperation(): {
     wait: () => true | Promise<void>
     cancel: () => void
-    getOutcomes: () => ReadonlyArray<AppliedLoadSubsetOutcome>
   } {
     const operation: LoadSubsetOperation = {
       pending: new Set(),
-      outcomes: new Map(),
       waiting: false,
       completed: false,
       hasError: false,
@@ -709,12 +649,6 @@ export class CollectionSyncManager<
           this.activeLoadSubsetOperation = undefined
         }
       },
-      getOutcomes: () =>
-        [...operation.outcomes.values()].flatMap((byCollection) =>
-          [...byCollection.values()].flatMap((byGeneration) => [
-            ...byGeneration.values(),
-          ]),
-        ),
     }
   }
 
@@ -737,32 +671,13 @@ export class CollectionSyncManager<
   private settleLoadSubsetOperation(
     operation: LoadSubsetOperation,
     promise: Promise<unknown>,
-    outcome: { ok: true; result: unknown } | { ok: false; error: unknown },
+    outcome: { ok: true } | { ok: false; error: unknown },
   ): void {
     if (operation.completed) return
     operation.pending.delete(promise)
     if (!outcome.ok && !operation.hasError) {
       operation.hasError = true
       operation.error = outcome.error
-    } else if (outcome.ok) {
-      const results = Array.isArray(outcome.result)
-        ? outcome.result.filter(isAppliedLoadSubsetOutcome)
-        : isAppliedLoadSubsetOutcome(outcome.result)
-          ? [outcome.result]
-          : []
-      for (const result of results) {
-        let byCollection = operation.outcomes.get(result.sourceId)
-        if (!byCollection) {
-          byCollection = new Map()
-          operation.outcomes.set(result.sourceId, byCollection)
-        }
-        let byGeneration = byCollection.get(result.collectionId)
-        if (!byGeneration) {
-          byGeneration = new Map()
-          byCollection.set(result.collectionId, byGeneration)
-        }
-        byGeneration.set(result.generation, result)
-      }
     }
     if (!operation.waiting || operation.pending.size > 0) return
 
@@ -791,11 +706,7 @@ export class CollectionSyncManager<
 
     operation.pending.add(promise)
     void promise.then(
-      (result) =>
-        this.settleLoadSubsetOperation(operation, promise, {
-          ok: true,
-          result,
-        }),
+      () => this.settleLoadSubsetOperation(operation, promise, { ok: true }),
       (error) =>
         this.settleLoadSubsetOperation(operation, promise, {
           ok: false,
@@ -869,37 +780,23 @@ export class CollectionSyncManager<
 
     if (this.syncStartDeferred) {
       this.syncStartRequested = true
-      const deferred = createDeferred<AppliedLoadSubsetOutcome>()
-      const loadOptions = cloneLoadSubsetOptions(options)
-      this.deferredLoadSubsets.push({
-        ownerOptions: options,
-        options: loadOptions,
-        demand: snapshotLoadSubsetDemand(loadOptions),
-        generation: ++this.loadSubsetGeneration,
-        deferred,
-      })
+      const deferred = createDeferred<void | LoadSubsetResult>()
+      const loadOptions = cloneOptions(options)
+      // This object is an internal acquisition identity. Snapshot mutable
+      // predicate values in place so the later adapter call and unload retain
+      // that same identity without a translation registry.
+      Object.assign(options, loadOptions)
+      this.deferredLoadSubsets.push({ options, deferred })
       this.trackLoadPromise(deferred.promise)
       return deferred.promise
     }
 
     if (this.syncLoadSubsetFn) {
-      const demand = snapshotLoadSubsetDemand(options)
-      const generation = ++this.loadSubsetGeneration
       const result = this.syncLoadSubsetFn(options)
       // If the result is a promise, track it
       if (result instanceof Promise) {
-        const outcome = result.then((sourceResult) =>
-          createAppliedLoadSubsetOutcome(
-            this.id,
-            demand,
-            generation,
-            isLoadSubsetResultForDemand(result, sourceResult, demand)
-              ? sourceResult
-              : undefined,
-          ),
-        )
-        this.trackLoadPromise(outcome)
-        return outcome
+        this.trackLoadPromise(result)
+        return result
       }
     }
 
@@ -913,63 +810,18 @@ export class CollectionSyncManager<
   public unloadSubset(options: LoadSubsetOptions): void {
     if (this.syncStartDeferred) {
       this.deferredLoadSubsets = this.deferredLoadSubsets.filter((request) => {
-        if (request.ownerOptions !== options) {
+        if (request.options !== options) {
           return true
         }
 
-        request.deferred.resolve(
-          createAppliedLoadSubsetOutcome(
-            this.id,
-            request.demand,
-            request.generation,
-            undefined,
-          ),
-        )
+        request.deferred.resolve(undefined)
         return false
       })
       return
     }
 
     if (this.syncUnloadSubsetFn) {
-      const adapterAcquisitions = this.deferredAdapterOptions.get(options)
-      const acquisition = adapterAcquisitions?.[0]
-      try {
-        this.syncUnloadSubsetFn(acquisition?.options ?? options)
-      } catch (error) {
-        if (acquisition) acquisition.releaseFailed = true
-        throw error
-      }
-      if (acquisition) {
-        this.forgetDeferredAdapterOptions(options, acquisition)
-      }
-    }
-  }
-
-  private retainDeferredAdapterOptions(
-    ownerOptions: LoadSubsetOptions,
-    acquiredOptions: LoadSubsetOptions,
-  ): DeferredAdapterAcquisition {
-    const acquisition = { options: acquiredOptions, releaseFailed: false }
-    const adapterAcquisitions = this.deferredAdapterOptions.get(ownerOptions)
-    if (adapterAcquisitions) {
-      adapterAcquisitions.push(acquisition)
-    } else {
-      this.deferredAdapterOptions.set(ownerOptions, [acquisition])
-    }
-    return acquisition
-  }
-
-  private forgetDeferredAdapterOptions(
-    ownerOptions: LoadSubsetOptions,
-    acquisition: DeferredAdapterAcquisition,
-  ): void {
-    const adapterAcquisitions = this.deferredAdapterOptions.get(ownerOptions)
-    if (!adapterAcquisitions) return
-
-    const index = adapterAcquisitions.indexOf(acquisition)
-    if (index !== -1) adapterAcquisitions.splice(index, 1)
-    if (adapterAcquisitions.length === 0) {
-      this.deferredAdapterOptions.delete(ownerOptions)
+      this.syncUnloadSubsetFn(options)
     }
   }
 
@@ -1002,7 +854,6 @@ export class CollectionSyncManager<
     this.syncUnloadSubsetFn = null
     this.syncStartDeferred = false
     this.syncStartRequested = false
-    this.deferredAdapterOptions.clear()
     const wasLoadingSubset = this.pendingLoadSubsetPromises.size > 0
     this.pendingLoadSubsetPromises.clear()
     if (wasLoadingSubset) {
@@ -1026,14 +877,7 @@ export class CollectionSyncManager<
     const deferredLoadSubsets = this.deferredLoadSubsets
     this.deferredLoadSubsets = []
     for (const request of deferredLoadSubsets) {
-      request.deferred.resolve(
-        createAppliedLoadSubsetOutcome(
-          this.id,
-          request.demand,
-          request.generation,
-          undefined,
-        ),
-      )
+      request.deferred.resolve(undefined)
     }
   }
 }
