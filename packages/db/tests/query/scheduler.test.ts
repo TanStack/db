@@ -26,6 +26,17 @@ interface User {
   name: string
 }
 
+const falsyListenerFailureCases = [
+  { name: `undefined`, failure: undefined },
+  { name: `null`, failure: null },
+  { name: `false`, failure: false },
+  { name: `zero`, failure: 0 },
+  { name: `negative zero`, failure: -0 },
+  { name: `bigint zero`, failure: 0n },
+  { name: `empty string`, failure: `` },
+  { name: `NaN`, failure: Number.NaN },
+]
+
 type UserWithVirtual = OutputWithVirtual<User, string | number>
 
 interface Task {
@@ -460,16 +471,7 @@ describe(`live query scheduler`, () => {
     }
   })
 
-  it.each([
-    { name: `undefined`, failure: undefined },
-    { name: `null`, failure: null },
-    { name: `false`, failure: false },
-    { name: `zero`, failure: 0 },
-    { name: `negative zero`, failure: -0 },
-    { name: `bigint zero`, failure: 0n },
-    { name: `empty string`, failure: `` },
-    { name: `NaN`, failure: Number.NaN },
-  ])(
+  it.each(falsyListenerFailureCases)(
     `preserves an exact $name row-listener failure after later delivery`,
     async ({ name, failure }) => {
       let begin!: () => void
@@ -620,75 +622,92 @@ describe(`live query scheduler`, () => {
     },
   )
 
-  it(`preserves a filtered row-listener failure after later delivery`, async () => {
-    let begin!: () => void
-    let write!: (message: { type: `insert`; value: User }) => void
-    let commit!: () => void
-    const failure = new Error(`filtered source listener failed`)
-    const filteredCalls = vi.fn()
-    const laterListener = vi.fn()
-    const source = createCollection<User>({
-      id: `filtered-throwing-listener-source`,
-      getKey: (user) => user.id,
-      startSync: true,
-      sync: {
-        sync: (actions) => {
-          begin = actions.begin
-          write = actions.write
-          commit = () => {
-            actions.commit()
-          }
-          actions.markReady()
+  it.each([
+    {
+      name: `Error`,
+      failure: new Error(`filtered source listener failed`),
+    },
+    ...falsyListenerFailureCases,
+  ])(
+    `preserves an exact $name filtered row-listener failure`,
+    async ({ name, failure }) => {
+      let begin!: () => void
+      let write!: (message: { type: `insert`; value: User }) => void
+      let commit!: () => void
+      const filteredCalls = vi.fn()
+      const laterListener = vi.fn()
+      const source = createCollection<User>({
+        id: `filtered-throwing-listener-source-${name.replaceAll(` `, `-`)}`,
+        getKey: (user) => user.id,
+        startSync: true,
+        sync: {
+          sync: (actions) => {
+            begin = actions.begin
+            write = actions.write
+            commit = () => {
+              actions.commit()
+            }
+            actions.markReady()
+          },
         },
-      },
-    })
-    const throwingSubscription = source.subscribeChanges(
-      (changes) => {
-        filteredCalls(changes)
-        throw failure
-      },
-      {
+      })
+      const throwingSubscription = source.subscribeChanges(
+        (changes) => {
+          filteredCalls(changes)
+          throw failure
+        },
+        {
+          includeInitialState: false,
+          where: (user) => eq(user.name, `Ada`),
+        },
+      )
+      const laterSubscription = source.subscribeChanges(laterListener, {
         includeInitialState: false,
-        where: (user) => eq(user.name, `Ada`),
-      },
-    )
-    const laterSubscription = source.subscribeChanges(laterListener, {
-      includeInitialState: false,
-    })
-    const live = createLiveQueryCollection({
-      id: `filtered-throwing-listener-dependent`,
-      startSync: true,
-      query: (q) =>
-        q
-          .from({ user: source })
-          .select(({ user }) => ({ id: user.id, name: user.name })),
-    })
+      })
+      const live = createLiveQueryCollection({
+        id: `filtered-throwing-listener-dependent-${name.replaceAll(` `, `-`)}`,
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: source })
+            .select(({ user }) => ({ id: user.id, name: user.name })),
+      })
 
-    try {
-      await live.preload()
-      begin()
-      write({ type: `insert`, value: { id: 1, name: `Ada` } })
-      expect(() => commit()).toThrow(failure)
-      expect(filteredCalls).toHaveBeenCalledOnce()
-      expect(filteredCalls.mock.calls[0]?.[0]).toEqual([
-        expect.objectContaining({ type: `insert`, key: 1 }),
-      ])
-      expect(laterListener).toHaveBeenCalledOnce()
-      expect(live.get(1)).toEqual(expect.objectContaining({ name: `Ada` }))
+      try {
+        await live.preload()
+        begin()
+        write({ type: `insert`, value: { id: 1, name: `Ada` } })
+        let didThrow = false
+        let thrown: unknown
+        try {
+          commit()
+        } catch (error) {
+          didThrow = true
+          thrown = error
+        }
+        expect(didThrow).toBe(true)
+        expect(Object.is(thrown, failure)).toBe(true)
+        expect(filteredCalls).toHaveBeenCalledOnce()
+        expect(filteredCalls.mock.calls[0]?.[0]).toEqual([
+          expect.objectContaining({ type: `insert`, key: 1 }),
+        ])
+        expect(laterListener).toHaveBeenCalledOnce()
+        expect(live.get(1)).toEqual(expect.objectContaining({ name: `Ada` }))
 
-      begin()
-      write({ type: `insert`, value: { id: 2, name: `Grace` } })
-      expect(() => commit()).not.toThrow()
-      expect(filteredCalls).toHaveBeenCalledOnce()
-      expect(laterListener).toHaveBeenCalledTimes(2)
-      expect(live.get(2)).toEqual(expect.objectContaining({ name: `Grace` }))
-    } finally {
-      throwingSubscription.unsubscribe()
-      laterSubscription.unsubscribe()
-      await live.cleanup()
-      await source.cleanup()
-    }
-  })
+        begin()
+        write({ type: `insert`, value: { id: 2, name: `Grace` } })
+        expect(() => commit()).not.toThrow()
+        expect(filteredCalls).toHaveBeenCalledOnce()
+        expect(laterListener).toHaveBeenCalledTimes(2)
+        expect(live.get(2)).toEqual(expect.objectContaining({ name: `Grace` }))
+      } finally {
+        throwingSubscription.unsubscribe()
+        laterSubscription.unsubscribe()
+        await live.cleanup()
+        await source.cleanup()
+      }
+    },
+  )
 
   it(`keeps a nested ready failure when a later outer listener throws`, async () => {
     let markInnerReady!: () => void
