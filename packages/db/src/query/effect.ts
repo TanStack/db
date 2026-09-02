@@ -17,7 +17,7 @@ import {
   computeSubscriptionOrderByHints,
   extractCollectionSources,
   extractCollectionsFromQuery,
-  filterDuplicateInserts,
+  reconcileChangesForD2,
   sendChangesToInput,
   splitUpdates,
   trackBiggestSentValue,
@@ -264,13 +264,13 @@ export function createEffect<
     // Abort signal for in-flight handlers
     abortController.abort()
 
-    disposalPromise = (async () => {
+    const attempt = (async () => {
       // Tear down the pipeline (unsubscribe from sources, etc.)
-      let cleanupError: unknown
+      let cleanupFailure: { error: unknown } | undefined
       try {
         runner.dispose()
       } catch (error) {
-        cleanupError = error
+        cleanupFailure = { error }
       }
 
       // Wait for any in-flight async handlers to settle
@@ -278,9 +278,13 @@ export function createEffect<
         await Promise.allSettled([...inFlightHandlers])
       }
 
-      if (cleanupError !== undefined) throw cleanupError
+      if (cleanupFailure) throw cleanupFailure.error
     })()
-    return disposalPromise
+    disposalPromise = attempt
+    void attempt.catch(() => {
+      if (disposalPromise === attempt) disposalPromise = undefined
+    })
+    return attempt
   }
 
   // Create and start the pipeline
@@ -396,10 +400,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   // Subscription management
   private readonly unsubscribeCallbacks = new Set<() => void>()
-  // Duplicate insert prevention per lexical source
-  private readonly sentToD2KeysBySource = new Map<
+  // Exact D2 contributions per lexical source
+  private readonly sentToD2RowsBySource = new Map<
     string,
-    Set<string | number>
+    Map<string | number, Record<string, unknown>>
   >()
 
   // Output accumulator
@@ -521,8 +525,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       const { sourceId, alias, collection } = source
       const collectionId = collection.id
 
-      // Initialise per-source duplicate tracking
-      this.sentToD2KeysBySource.set(sourceId, new Set())
+      this.sentToD2RowsBySource.set(sourceId, new Map())
 
       // Discover dependencies: if source collection is itself a live query
       // collection, its builder must run first during transaction flushes.
@@ -631,7 +634,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         const truncateUnsubscribe = collection.on(`truncate`, () => {
           this.lastLoadRequestKey.delete(sourceId)
           this.biggestSentValue.delete(sourceId)
-          this.sentToD2KeysBySource.get(sourceId)?.clear()
           this.pendingOrderedLoadPromise = undefined
         })
         this.unsubscribeCallbacks.add(truncateUnsubscribe)
@@ -753,6 +755,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       if (this.starting) throw error
       return
     }
+    if (update.releaseFailure) {
+      this.onSourceError(normaliseError(update.releaseFailure.error))
+      return
+    }
     if (update.ready instanceof Promise) {
       // Each segment reports its own failure through the subscription. Consume
       // the aggregate rejection so Promise.all does not create a second,
@@ -831,11 +837,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     const input = this.inputs[sourceId]
     if (!input) return 0
 
-    // Filter duplicates per lexical source
-    const sentKeys = this.sentToD2KeysBySource.get(sourceId)!
-    const filtered = filterDuplicateInserts(changes, sentKeys)
+    const sentRows = this.sentToD2RowsBySource.get(sourceId)!
+    const reconciled = reconcileChangesForD2(changes, sentRows)
 
-    return sendChangesToInput(input, filtered)
+    return sendChangesToInput(input, reconciled)
   }
 
   /**
@@ -947,8 +952,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   /**
    * Request the initial ordered snapshot for an alias.
-   * Uses requestLimitedSnapshot (index-based cursor) or requestSnapshot
-   * (full load with limit) depending on whether an index is available.
+   * Uses requestLimitedSnapshot (index-based cursor) or an unbounded
+   * requestSnapshot depending on whether an index is available.
    */
   private requestInitialOrderedSnapshot(
     alias: string,
@@ -958,19 +963,21 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     const { orderBy, offset, limit, index } = orderByInfo
     const normalizedOrderBy = normalizeOrderByPaths(orderBy, alias)
 
+    if (limit === 0) return
+
     if (index) {
-      subscription.setOrderByIndex(index)
+      subscription.setOrderByIndex(index, orderByInfo.expandSourceOrderTies)
       subscription.requestLimitedSnapshot({
         limit: offset + limit,
         orderBy: normalizedOrderBy,
         trackLoadSubsetPromise: false,
-        onLoadSubsetResult: (result) =>
-          this.trackOrderedLoad(result, orderByInfo.sourceId),
+        onLoadSubsetResult: (result) => this.trackOrderedLoad(result),
       })
     } else {
+      // Without an index there is no sound cursor continuation. Load the full
+      // ordered source so later relational operators cannot underfill top-K.
       subscription.requestSnapshot({
         orderBy: normalizedOrderBy,
-        limit: offset + limit,
         trackLoadSubsetPromise: false,
       })
     }
@@ -996,13 +1003,17 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       this.optimizableOrderByCollections,
     )) {
       if (!orderByInfo.dataNeeded || !orderByInfo.index) continue
-
+      if (orderByInfo.limit === 0) continue
       const subscription = this.subscriptions[orderByInfo.sourceId]
       if (!subscription) continue
       subscription.ensureOrderedWindowSize(
         orderByInfo.offset + orderByInfo.limit,
       )
-      if (subscription.hasOrderedCoverageForActiveWindow) {
+      const missingResultRows = orderByInfo.dataNeeded()
+      if (
+        (!orderByInfo.refillFromResultDeficit || missingResultRows === 0) &&
+        subscription.hasOrderedResultForActiveWindow
+      ) {
         continue
       }
 
@@ -1011,23 +1022,23 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         continue
       }
 
-      const n = Math.max(
-        orderByInfo.dataNeeded(),
-        subscription.orderedRowsNeeded,
-      )
+      if (orderByInfo.refillFromResultDeficit && missingResultRows > 0) {
+        subscription.ensureOrderedWindowSize(
+          subscription.orderedRetainedWindowSize + missingResultRows,
+        )
+      }
+      if (subscription.hasOrderedResultForActiveWindow) {
+        continue
+      }
+
+      const n = Math.max(missingResultRows, subscription.orderedRowsNeeded)
       this.loadNextItems(orderByInfo, Math.max(1, n))
     }
   }
 
-  private trackOrderedLoad(
-    result: LoadSubsetRequestResult,
-    sourceId: string,
-  ): void {
+  private trackOrderedLoad(result: LoadSubsetRequestResult): void {
     const continueAfterFulfillment = () => {
       if (this.disposed) return
-      if (this.subscriptions[sourceId]?.requiresOrderedPrefixRefresh) {
-        this.lastLoadRequestKey.delete(sourceId)
-      }
       this.loadMoreIfNeeded()
     }
     if (!(result instanceof Promise)) {
@@ -1070,8 +1081,12 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       n,
       subscription.orderedRetainedWindowSize,
       subscription.orderedBoundaryKey,
+      subscription.orderedCoverageRevision,
     )
-    if (!cursor) return // Duplicate request — skip
+    if (!cursor) {
+      subscription.settleOrderedResultAfterNoProgress()
+      return
+    }
 
     this.lastLoadRequestKey.set(sourceId, cursor.loadRequestKey)
 
@@ -1083,7 +1098,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         minValues: cursor.minValues,
         trackLoadSubsetPromise: false,
         onLoadSubsetResult: (loadResult: LoadSubsetRequestResult) =>
-          this.trackOrderedLoad(loadResult, sourceId),
+          this.trackOrderedLoad(loadResult),
       })
     } catch (error) {
       if (
@@ -1110,11 +1125,11 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     changes: Array<ChangeMessage<any, string | number>>,
     comparator: (a: any, b: any) => number,
   ): void {
-    const sentKeys = this.sentToD2KeysBySource.get(sourceId) ?? new Set()
+    const sentRows = this.sentToD2RowsBySource.get(sourceId) ?? new Map()
     const result = trackBiggestSentValue(
       changes,
       this.biggestSentValue.get(sourceId),
-      sentKeys,
+      sentRows,
       comparator,
     )
     this.biggestSentValue.set(sourceId, result.biggest)
@@ -1125,21 +1140,21 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   /** Tear down subscriptions and clear state */
   dispose(): void {
-    if (this.disposed) return
+    if (this.disposed && this.unsubscribeCallbacks.size === 0) return
     this.disposed = true
     this.subscribedToAllCollections = false
 
     // Immediately unsubscribe from every source, even if one release fails.
-    let firstCleanupError: unknown
+    let firstCleanupFailure: { error: unknown } | undefined
     for (const unsubscribe of this.unsubscribeCallbacks) {
       try {
         unsubscribe()
+        this.unsubscribeCallbacks.delete(unsubscribe)
       } catch (error) {
-        firstCleanupError ??= error
+        firstCleanupFailure ??= { error }
       }
     }
-    this.unsubscribeCallbacks.clear()
-    this.sentToD2KeysBySource.clear()
+    this.sentToD2RowsBySource.clear()
     this.pendingChanges.clear()
     this.lazySources.clear()
     this.demand.clear()
@@ -1167,7 +1182,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       this.finalCleanup()
     }
 
-    if (firstCleanupError !== undefined) throw firstCleanupError
+    if (firstCleanupFailure) throw firstCleanupFailure.error
   }
 
   /** Clear graph references — called after graph run completes or immediately from dispose */

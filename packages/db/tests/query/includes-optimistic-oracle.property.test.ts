@@ -499,7 +499,10 @@ describe(`optimistic relationship-transition oracle`, () => {
     },
   )
 
-  fcTest.prop([routeValuesArbitrary], oraclePropertyOptions(12))(
+  fcTest.prop(
+    [routeValuesArbitrary],
+    oraclePropertyOptions(12, `includes-optimistic.rekey-detach`),
+  )(
     `an optimistic rekey detaches its old descendants immediately`,
     async (routes) => {
       await expectHistoryMatches(routes, [
@@ -514,7 +517,10 @@ describe(`optimistic relationship-transition oracle`, () => {
     },
   )
 
-  fcTest.prop([routeValuesArbitrary], oraclePropertyOptions(12))(
+  fcTest.prop(
+    [routeValuesArbitrary],
+    oraclePropertyOptions(12, `includes-optimistic.rekey-rollback`),
+  )(
     `restores the authoritative relationship after an optimistic rekey rolls back`,
     async (routes) => {
       await expectHistoryMatches(routes, [
@@ -528,7 +534,10 @@ describe(`optimistic relationship-transition oracle`, () => {
     },
   )
 
-  fcTest.prop([routeValuesArbitrary], oraclePropertyOptions(12))(
+  fcTest.prop(
+    [routeValuesArbitrary],
+    oraclePropertyOptions(12, `includes-optimistic.descendant-rollback`),
+  )(
     `rolls back a descendant update made while its ancestor is reparented`,
     async (routes) => {
       await expectHistoryMatches(routes, [
@@ -552,7 +561,10 @@ describe(`optimistic relationship-transition oracle`, () => {
     },
   )
 
-  fcTest.prop([routeValuesArbitrary], oraclePropertyOptions(12))(
+  fcTest.prop(
+    [routeValuesArbitrary],
+    oraclePropertyOptions(12, `includes-optimistic.ancestor-rollback`),
+  )(
     `rolls back a reparented ancestor while its descendant update remains pending`,
     async (routes) => {
       await expectHistoryMatches(routes, [
@@ -576,7 +588,10 @@ describe(`optimistic relationship-transition oracle`, () => {
     },
   )
 
-  fcTest.prop([routeValuesArbitrary], oraclePropertyOptions(12))(
+  fcTest.prop(
+    [routeValuesArbitrary],
+    oraclePropertyOptions(12, `includes-optimistic.confirm-same-route`),
+  )(
     `settles a confirmed optimistic reparent on the same authoritative route`,
     async (routes) => {
       await expectHistoryMatches(routes, [
@@ -614,7 +629,10 @@ describe(`optimistic relationship-transition oracle`, () => {
     },
   )
 
-  fcTest.prop([routeValuesArbitrary], oraclePropertyOptions(12))(
+  fcTest.prop(
+    [routeValuesArbitrary],
+    oraclePropertyOptions(12, `includes-optimistic.confirm-different-route`),
+  )(
     `settles a confirmed optimistic reparent on a different authoritative route`,
     async (routes) => {
       await expectHistoryMatches(routes, [
@@ -654,100 +672,100 @@ describe(`optimistic relationship-transition oracle`, () => {
     },
   )
 
-  fcTest.prop([routeValuesArbitrary], oraclePropertyOptions(12))(
-    `restores a rekey after a sibling enters its old route`,
-    async (routes) => {
-      await expectHistoryMatches(routes, [
-        {
-          type: `optimisticRollback`,
+  fcTest.prop(
+    [routeValuesArbitrary],
+    oraclePropertyOptions(12, `includes-optimistic.sibling-route-rollback`),
+  )(`restores a rekey after a sibling enters its old route`, async (routes) => {
+    await expectHistoryMatches(routes, [
+      {
+        type: `optimisticRollback`,
+        level: 1,
+        id: 11,
+        patch: { group: routes.optimistic },
+        beforeRollback: {
           level: 1,
-          id: 11,
-          patch: { group: routes.optimistic },
-          beforeRollback: {
-            level: 1,
-            changes: [
-              {
-                type: `insert`,
-                value: {
-                  id: 12,
-                  parentGroup: routes.rootA,
-                  group: routes.original,
-                  value: 120,
-                  position: 1,
-                },
+          changes: [
+            {
+              type: `insert`,
+              value: {
+                id: 12,
+                parentGroup: routes.rootA,
+                group: routes.original,
+                value: 120,
+                position: 1,
               },
-            ],
+            },
+          ],
+        },
+      },
+      {
+        type: `sync`,
+        level: 2,
+        changes: [
+          {
+            type: `update`,
+            value: {
+              id: 21,
+              parentGroup: routes.original,
+              group: routes.original + 1000,
+              value: 211,
+              position: 0,
+            },
           },
-        },
-        {
-          type: `sync`,
-          level: 2,
-          changes: [
-            {
-              type: `update`,
-              value: {
-                id: 21,
-                parentGroup: routes.original,
-                group: routes.original + 1000,
-                value: 211,
-                position: 0,
-              },
-            },
-          ],
-        },
-      ])
-    },
-  )
+        ],
+      },
+    ])
+  })
 
-  fcTest.prop([routeValuesArbitrary], oraclePropertyOptions(12))(
-    `supports repeated rollback and confirmation histories`,
-    async (routes) => {
-      await expectHistoryMatches(routes, [
-        {
-          type: `optimistic`,
-          handle: `first`,
-          level: 1,
-          id: 11,
-          patch: { parentGroup: routes.rootB },
-        },
-        { type: `rollback`, handle: `first` },
-        {
-          type: `optimistic`,
-          handle: `second`,
-          level: 1,
-          id: 11,
-          patch: { parentGroup: routes.rootB },
-        },
-        {
-          type: `confirm`,
-          handle: `second`,
-          authoritative: firstChild(routes, {
-            parentGroup: routes.rootB,
-          }),
-        },
-        {
-          type: `optimisticRollback`,
-          level: 1,
-          id: 11,
-          patch: { group: routes.optimistic },
-        },
-        {
-          type: `sync`,
-          level: 2,
-          changes: [
-            {
-              type: `update`,
-              value: {
-                id: 21,
-                parentGroup: routes.original,
-                group: routes.original + 1000,
-                value: 212,
-                position: 0,
-              },
+  fcTest.prop(
+    [routeValuesArbitrary],
+    oraclePropertyOptions(12, `includes-optimistic.repeated-history`),
+  )(`supports repeated rollback and confirmation histories`, async (routes) => {
+    await expectHistoryMatches(routes, [
+      {
+        type: `optimistic`,
+        handle: `first`,
+        level: 1,
+        id: 11,
+        patch: { parentGroup: routes.rootB },
+      },
+      { type: `rollback`, handle: `first` },
+      {
+        type: `optimistic`,
+        handle: `second`,
+        level: 1,
+        id: 11,
+        patch: { parentGroup: routes.rootB },
+      },
+      {
+        type: `confirm`,
+        handle: `second`,
+        authoritative: firstChild(routes, {
+          parentGroup: routes.rootB,
+        }),
+      },
+      {
+        type: `optimisticRollback`,
+        level: 1,
+        id: 11,
+        patch: { group: routes.optimistic },
+      },
+      {
+        type: `sync`,
+        level: 2,
+        changes: [
+          {
+            type: `update`,
+            value: {
+              id: 21,
+              parentGroup: routes.original,
+              group: routes.original + 1000,
+              value: 212,
+              position: 0,
             },
-          ],
-        },
-      ])
-    },
-  )
+          },
+        ],
+      },
+    ])
+  })
 })

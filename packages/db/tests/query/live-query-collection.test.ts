@@ -2836,7 +2836,7 @@ describe(`createLiveQueryCollection`, () => {
       }
     })
 
-    it(`passes single orderBy clause to loadSubset when using limit`, async () => {
+    it(`loads an ordered source without a range index unbounded`, async () => {
       const capturedOptions: Array<LoadSubsetOptions> = []
       let resolveLoadSubset: () => void
       const loadSubsetPromise = new Promise<void>((resolve) => {
@@ -2886,7 +2886,7 @@ describe(`createLiveQueryCollection`, () => {
       expect(callWithOrderBy).toBeDefined()
       expect(callWithOrderBy?.orderBy).toHaveLength(1)
       expect(callWithOrderBy?.orderBy?.[0]?.expression.type).toBe(`ref`)
-      expect(callWithOrderBy?.limit).toBe(10)
+      expect(callWithOrderBy?.limit).toBeUndefined()
 
       // Resolve the loadSubset promise so preload can complete
       resolveLoadSubset!()
@@ -2894,7 +2894,7 @@ describe(`createLiveQueryCollection`, () => {
       await preloadPromise
     })
 
-    it(`passes multiple orderBy columns to loadSubset when using limit`, async () => {
+    it(`loads a multi-column ordered source without an index unbounded`, async () => {
       const capturedOptions: Array<LoadSubsetOptions> = []
       let resolveLoadSubset: () => void
       const loadSubsetPromise = new Promise<void>((resolve) => {
@@ -2950,7 +2950,7 @@ describe(`createLiveQueryCollection`, () => {
       expect(callWithMultiOrderBy?.orderBy).toHaveLength(2)
       expect(callWithMultiOrderBy?.orderBy?.[0]?.expression.type).toBe(`ref`)
       expect(callWithMultiOrderBy?.orderBy?.[1]?.expression.type).toBe(`ref`)
-      expect(callWithMultiOrderBy?.limit).toBe(10)
+      expect(callWithMultiOrderBy?.limit).toBeUndefined()
 
       // Resolve the loadSubset promise so preload can complete
       resolveLoadSubset!()

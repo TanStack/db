@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { PowerSyncDatabase, Schema, Table, column } from '@powersync/node'
 import { createCollection, createLiveQueryCollection, eq } from '@tanstack/db'
+import pDefer from 'p-defer'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { powerSyncCollectionOptions } from '../src'
 
@@ -89,6 +90,34 @@ describe(`Sync Streams`, () => {
 
     await expect(collection.preload()).rejects.toBe(initialError)
     expect(collection.status).toBe(`error`)
+  })
+
+  it(`eager mode: releases a load hook that resolves after cleanup`, async () => {
+    const db = await createDatabase()
+    const releaseLoad = pDefer<void>()
+    const loadStarted = pDefer<void>()
+    const cleanupLoad = vi.fn()
+    const createDiffTrigger = vi
+      .spyOn(db.triggers, `createDiffTrigger`)
+      .mockResolvedValue(async () => {})
+    const collection = createCollection(
+      powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        onLoad: async () => {
+          loadStarted.resolve()
+          await releaseLoad.promise
+          return cleanupLoad
+        },
+      }),
+    )
+
+    await loadStarted.promise
+    collection.cleanup()
+    releaseLoad.resolve()
+
+    await vi.waitFor(() => expect(cleanupLoad).toHaveBeenCalledOnce())
+    expect(createDiffTrigger).not.toHaveBeenCalled()
   })
 
   it(`on-demand mode: should call onLoadSubset/onUnloadSubset for each live query`, async () => {

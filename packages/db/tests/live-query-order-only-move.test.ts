@@ -43,7 +43,7 @@ async function makeOrderedByAge(source: ReturnType<typeof makeSource>) {
 
 const flush = () => new Promise((r) => setTimeout(r, 0))
 
-describe(`order-only move (RFC #1623 phase 4)`, () => {
+describe(`order-only move publication`, () => {
   it(`republishes the ordered result when a row moves but its value is unchanged`, async () => {
     const source = makeSource()
     const lq = await makeOrderedByAge(source)
@@ -117,7 +117,7 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
     observer.dispose()
   })
 
-  it(`refreshes a detached observer when an order-only sync is parked`, async () => {
+  it(`refreshes a detached observer while a separate mutation persists`, async () => {
     const source = makeSource()
     const persist = createDeferred<void>()
     const lq = createLiveQueryCollection({
@@ -134,9 +134,14 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
       { id: string; name: string },
       string
     >(lq as any)
+    const publications: Array<Array<unknown>> = []
+    const subscription = lq.subscribeChanges(
+      (changes) => publications.push(changes),
+      { includeInitialState: false },
+    )
 
     const before = observer.getSnapshot()
-    const collectionLayoutRevisionBefore = lq._layoutRevision
+    const layoutRevisionBeforeMutation = lq._layoutRevision
     expect((before.data as Array<any>).map((row) => row.id)).toEqual([
       `2`,
       `1`,
@@ -149,6 +154,9 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
       (draft) => void (draft.name = `Pending`),
     )
     expect(mutation.state).toBe(`persisting`)
+    expect(lq._layoutRevision).toBe(layoutRevisionBeforeMutation)
+    expect(publications).toEqual([])
+    const layoutRevisionBeforeSourceCommit = lq._layoutRevision
 
     source.utils.begin()
     source.utils.write({
@@ -156,15 +164,16 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
       value: { id: `2`, name: `Bob`, age: 99 },
     })
     source.utils.commit()
-    await flush()
 
-    const parked = observer.getSnapshot()
-    expect((parked.data as Array<any>).map((row) => row.id)).toEqual([
-      `2`,
+    const whilePersisting = observer.getSnapshot()
+    expect((whilePersisting.data as Array<any>).map((row) => row.id)).toEqual([
       `1`,
       `3`,
+      `2`,
     ])
-    expect(lq._layoutRevision).toBe(collectionLayoutRevisionBefore)
+    expect(lq._layoutRevision).toBe(layoutRevisionBeforeSourceCommit + 1)
+    expect(publications).toEqual([[]])
+    const publishedLayoutRevision = lq._layoutRevision
 
     persist.resolve()
     await mutation.isPersisted.promise
@@ -176,7 +185,9 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
       `3`,
       `2`,
     ])
-    expect(lq._layoutRevision).toBeGreaterThan(collectionLayoutRevisionBefore)
+    expect(lq._layoutRevision).toBe(publishedLayoutRevision)
+    expect(publications).toEqual([[]])
+    subscription.unsubscribe()
     observer.dispose()
   })
 
@@ -209,6 +220,48 @@ describe(`order-only move (RFC #1623 phase 4)`, () => {
     expect(after.layoutRevision).toBe(revBefore)
     expect(notifications).toBe(0)
     observer.dispose()
+  })
+
+  it(`does not publish a move whose only crossed peer is optimistically deleted`, async () => {
+    const source = makeSource()
+    const persist = createDeferred<void>()
+    const lq = createLiveQueryCollection({
+      getKey: (row) => row.id,
+      query: (q) =>
+        q
+          .from({ p: source })
+          .orderBy(({ p }) => p.age, `asc`)
+          .select(({ p }) => ({ id: p.id, name: p.name })),
+      onDelete: () => persist.promise,
+    })
+    await lq.preload()
+    const publications: Array<Array<unknown>> = []
+    const subscription = lq.subscribeChanges(
+      (changes) => publications.push(changes),
+      { includeInitialState: false },
+    )
+    const mutation = lq.delete(`2`)
+
+    expect(mutation.state).toBe(`persisting`)
+    expect(lq.toArray.map(({ id }) => id)).toEqual([`1`, `3`])
+    publications.length = 0
+    const revisionBeforeSource = lq._layoutRevision
+
+    source.utils.begin()
+    source.utils.write({
+      type: `update`,
+      value: { id: `1`, name: `Alice`, age: 10 },
+    })
+    source.utils.commit()
+
+    expect(lq.toArray.map(({ id }) => id)).toEqual([`1`, `3`])
+    expect(publications).toEqual([])
+    expect(lq._layoutRevision).toBe(revisionBeforeSource)
+
+    persist.resolve()
+    await mutation.isPersisted.promise
+    subscription.unsubscribe()
+    await Promise.all([lq.cleanup(), source.cleanup()])
   })
 
   it(`does not publish when multiple moves cancel within one transaction`, async () => {

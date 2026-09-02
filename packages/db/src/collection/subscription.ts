@@ -6,6 +6,7 @@ import {
   getSyncRequestProvenance,
   isLoadSubsetRequestSignalFor,
 } from '../load-subset-request-provenance.js'
+import { cloneLoadSubsetOptions } from '../query/load-subset-options.js'
 import {
   buildCursor,
   buildCursorEquality,
@@ -116,6 +117,7 @@ type ReplayHandoffResult =
 
 type SubsetDemand = SubsetAcquisition & {
   requestOptions: LoadSubsetOptions
+  matchesWhere: (row: object) => boolean
   onLoadSubsetResult?: (
     result: LoadSubsetRequestResult,
     demand: LoadSubsetOptions,
@@ -227,6 +229,8 @@ function createSubsetCleanupError(errors: ReadonlyArray<unknown>): unknown {
   return new SubsetCleanupAggregateError(errors)
 }
 
+const matchesEveryRow = () => true
+
 export class CollectionSubscription
   extends EventEmitter<SubscriptionEvents>
   implements Subscription
@@ -262,9 +266,14 @@ export class CollectionSubscription
   private stalePublication: PublicationState | undefined
 
   private filteredCallback: (changes: Array<ChangeMessage<any, any>>) => boolean
+  // Execution uses the frozen predicate; release keeps the caller's handle.
+  private readonly whereExpression: BasicExpression<boolean> | undefined
+  private readonly releaseWhereExpression: BasicExpression<boolean> | undefined
 
   private orderByIndex: IndexInterface<string | number> | undefined
   private orderedWindow: WindowState | undefined
+  // The first ordered request fixes this subscription's total order.
+  private orderedRequestOptions: LoadSubsetOptions | undefined
 
   // Status tracking
   private _status: SubscriptionStatus = `ready`
@@ -315,13 +324,7 @@ export class CollectionSubscription
   private activeAdditionalFilters(): Array<(row: object) => boolean> {
     return this.subsetDemands
       .filter((demand) => demand.active && demand.ordered === undefined)
-      .map((demand) =>
-        demand.requestOptions.where
-          ? createFilterFunctionFromExpression<object>(
-              demand.requestOptions.where,
-            )
-          : () => true,
-      )
+      .map((demand) => demand.matchesWhere)
   }
 
   private diffPublishedRows(
@@ -412,9 +415,13 @@ export class CollectionSubscription
   constructor(
     private collection: CollectionImpl<any, any, any, any, any>,
     private callback: (changes: Array<ChangeMessage<any, any>>) => void,
-    private options: CollectionSubscriptionOptions,
+    options: CollectionSubscriptionOptions,
   ) {
     super()
+    this.releaseWhereExpression = options.whereExpression
+    this.whereExpression = cloneLoadSubsetOptions({
+      where: options.whereExpression,
+    }).where
     if (options.onUnsubscribe) {
       this.on(`unsubscribed`, options.onUnsubscribe)
     }
@@ -423,8 +430,8 @@ export class CollectionSubscription
     }
 
     // Auto-index for where expressions if enabled
-    if (options.whereExpression) {
-      ensureIndexForExpression(options.whereExpression, this.collection)
+    if (this.whereExpression) {
+      ensureIndexForExpression(this.whereExpression, this.collection)
     }
 
     const callbackWithSentKeysTracking = (
@@ -439,8 +446,11 @@ export class CollectionSubscription
     this.callback = callbackWithSentKeysTracking
 
     // Create a filtered callback if where clause is provided
-    this.filteredCallback = options.whereExpression
-      ? createFilteredCallback(this.callback, options)
+    this.filteredCallback = this.whereExpression
+      ? createFilteredCallback(this.callback, {
+          ...options,
+          whereExpression: this.whereExpression,
+        })
       : (changes) => {
           this.callback(changes)
           return true
@@ -1177,11 +1187,7 @@ export class CollectionSubscription
     const merged = [...session.buffer.flat(), ...retainedDeletes]
     const activeDemandFilters = this.subsetDemands
       .filter((demand) => demand.active)
-      .map((demand) =>
-        demand.requestOptions.where
-          ? createFilterFunctionFromExpression(demand.requestOptions.where)
-          : undefined,
-      )
+      .map((demand) => demand.matchesWhere)
     // The raw replay buffer can contain rows retained for another demand or
     // outside the ordered prefix. Publish the settled ordered reconciliation
     // as the replacement's one atomic batch.
@@ -1190,8 +1196,7 @@ export class CollectionSubscription
       : this.createPublicationDiff(
           session.publicationState.publishedRows,
           merged,
-          (value) =>
-            activeDemandFilters.some((filter) => filter?.(value) ?? true),
+          (value) => activeDemandFilters.some((filter) => filter(value)),
         )
     if (replacement.length > 0) this.filteredCallback(replacement)
     // Buffering records every source key before active-demand filtering. Reset
@@ -1244,8 +1249,11 @@ export class CollectionSubscription
     return this.truncateReplaySession !== undefined
   }
 
-  setOrderByIndex(index: IndexInterface<any>) {
+  private expandOrderedSourceTies = false
+
+  setOrderByIndex(index: IndexInterface<any>, expandSourceOrderTies = false) {
     this.orderByIndex = index
+    this.expandOrderedSourceTies = expandSourceOrderTies
   }
 
   /**
@@ -1286,6 +1294,10 @@ export class CollectionSubscription
     return this.orderedWindow?.retainedPrefixSize ?? 0
   }
 
+  get orderedCoverageRevision(): number {
+    return this.orderedWindow?.coverageRevision ?? 0
+  }
+
   get requiresOrderedPrefixRefresh(): boolean {
     return this.orderedWindow?.requiresPrefixRefresh ?? false
   }
@@ -1295,6 +1307,18 @@ export class CollectionSubscription
       this.hasActiveOrderedDemand() &&
       (this.orderedWindow?.coversActiveWindow ?? false)
     )
+  }
+
+  get hasOrderedResultForActiveWindow(): boolean {
+    if (!this.hasActiveOrderedDemand() || !this.orderedWindow) return false
+    return this.retainedOrderedPublication
+      ? this.orderedWindow.coversActiveWindow
+      : this.orderedWindow.satisfiesActiveWindow
+  }
+
+  settleOrderedResultAfterNoProgress(): boolean {
+    if (this.retainedOrderedPublication || !this.orderedWindow) return false
+    return this.orderedWindow.settleLocalRequestAfterNoProgress()
   }
 
   get orderedBoundaryRow(): object | undefined {
@@ -1346,6 +1370,45 @@ export class CollectionSubscription
     return changes
   }
 
+  /** Apply logical demand release to the public baseline of a private replay. */
+  private reconcileBufferedOrderedPublicationOnRelease(): Array<
+    ChangeMessage<any, any>
+  > {
+    const publication = this.truncateReplaySession?.publicationState
+    const ordered = publication?.ordered
+    const window = this.orderedWindow
+    if (!publication || !ordered || !window) return []
+
+    const orderedRows = [...ordered.candidateRows]
+      .sort((left, right) => window.totalOrder.compareEntries(left, right))
+      .slice(0, ordered.prefixSize)
+    const desired = new Map<string | number, object>(orderedRows)
+    const additionalFilters = this.activeAdditionalFilters()
+    for (const [key, row] of publication.publishedRows) {
+      if (additionalFilters.some((filter) => filter(row))) {
+        desired.set(key, row)
+      }
+    }
+
+    const lastOrderedRow = orderedRows.at(-1)
+    const nextOrdered: OrderedPublicationState = {
+      prefixSize: orderedRows.length,
+      boundary:
+        lastOrderedRow === undefined
+          ? undefined
+          : window.totalOrder.boundary(lastOrderedRow[1], lastOrderedRow[0]),
+      candidateRows: ordered.candidateRows,
+    }
+    publication.publishedRows = new Map(desired)
+    publication.sentKeys = new Set(desired.keys())
+    publication.ordered = nextOrdered
+    this.orderedPublication = {
+      ...nextOrdered,
+      candidateRows: new Map(nextOrdered.candidateRows),
+    }
+    return this.diffPublishedRows(desired)
+  }
+
   /**
    * Evolve a failed replay's last good ordered publication without admitting
    * rows installed by the rejected replacement. Later source deltas form a
@@ -1367,8 +1430,8 @@ export class CollectionSubscription
     const window = this.orderedWindow
     if (!stalePublication || !ordered || !window) return []
 
-    const orderedFilter = this.options.whereExpression
-      ? createFilterFunctionFromExpression(this.options.whereExpression)
+    const orderedFilter = this.whereExpression
+      ? createFilterFunctionFromExpression(this.whereExpression)
       : undefined
     const additionalFilters = this.activeAdditionalFilters()
     const isOrderedRow = (row: object) => orderedFilter?.(row) ?? true
@@ -1695,7 +1758,7 @@ export class CollectionSubscription
 
     return {
       options: {
-        ...request.options,
+        ...cloneLoadSubsetOptions(request.options),
         signal: abortController.signal,
       },
       ordered: request.ordered,
@@ -1906,21 +1969,29 @@ export class CollectionSubscription
   private startSubsetDemand(
     requestOptions: LoadSubsetOptions,
     ordered?: SubsetDemand[`ordered`],
+    releaseWhere = requestOptions.where,
   ): {
     demand: SubsetDemand
     acquisition: SubsetAcquisition & { abortController: AbortController }
     result: LoadSubsetRequestResult
     replayContext: TruncateReplayContext | undefined
   } {
+    const stableRequestOptions = cloneLoadSubsetOptions(requestOptions)
     const demand: SubsetDemand = {
-      requestOptions,
-      options: requestOptions,
+      requestOptions: stableRequestOptions,
+      options: stableRequestOptions,
+      matchesWhere: stableRequestOptions.where
+        ? createFilterFunctionFromExpression<object>(stableRequestOptions.where)
+        : matchesEveryRow,
       ...(ordered === undefined ? {} : { ordered }),
       pendingReplayAcquisitions: new Set(),
       active: true,
       releaseInProgress: false,
       releaseFailed: false,
       releaseSettled: false,
+    }
+    if (releaseWhere) {
+      this.requestedSubsetWhere.set(stableRequestOptions, releaseWhere)
     }
     const acquisition = this.createSubsetAcquisition(demand)
     demand.options = acquisition.options
@@ -2153,7 +2224,7 @@ export class CollectionSubscription
     }
 
     const stateOpts: RequestSnapshotOptions = {
-      where: this.options.whereExpression,
+      where: this.whereExpression,
       optimizedOnly: opts?.optimizedOnly ?? false,
     }
 
@@ -2185,15 +2256,11 @@ export class CollectionSubscription
       limit: opts?.limit,
     }
 
-    // Reentrant adapter code must be able to release a request by the exact
-    // caller predicate even when the subscription predicate was combined into
-    // the transport predicate.
-    if (opts?.where) this.requestedSubsetWhere.set(loadOptions, opts.where)
     const {
       demand,
       result: syncResult,
       replayContext: startedReplayContext,
-    } = this.startSubsetDemand(loadOptions)
+    } = this.startSubsetDemand(loadOptions, undefined, opts?.where)
     const replayTracksCallback =
       this.retainReplayResultCallback(startedReplayContext)
     // Replay settlement owns the acquisition even if the result callback
@@ -2336,10 +2403,12 @@ export class CollectionSubscription
       releaseFailure = { error }
     } finally {
       this.collectReleasedDemand(demand)
-      if (this.orderedWindow && !this.isBufferingForTruncate) {
-        const changes = this.stalePublication?.ordered
-          ? this.reconcileStaleOrderedPublication([])
-          : this.reconcileOrderedWindow()
+      if (this.orderedWindow) {
+        const changes = this.isBufferingForTruncate
+          ? this.reconcileBufferedOrderedPublicationOnRelease()
+          : this.stalePublication?.ordered
+            ? this.reconcileStaleOrderedPublication([])
+            : this.reconcileOrderedWindow()
         if (changes.length > 0) this.callback(changes)
       }
     }
@@ -2365,11 +2434,32 @@ export class CollectionSubscription
       )
     }
 
+    this.orderedRequestOptions ??= cloneLoadSubsetOptions({
+      where: this.whereExpression,
+      orderBy,
+    })
+    const orderedRequest = this.orderedRequestOptions
+    orderBy = orderedRequest.orderBy!
+    const where = orderedRequest.where
+
+    // Preserve the order for a later positive window without compiling its
+    // predicate or constructing a coordinator that cannot admit any rows.
+    if (limit === 0) {
+      onLoadSubsetResult?.(true, {
+        where,
+        orderBy,
+        limit: 0,
+        subscription: this,
+      })
+      return
+    }
+
     this.orderedWindow ??= new WindowState(
       this.collection,
       orderBy,
-      this.options.whereExpression,
+      where,
       limit,
+      this.expandOrderedSourceTies,
     )
 
     if (this.stalePublication && !this.stalePublication.ordered) {
@@ -2384,7 +2474,6 @@ export class CollectionSubscription
       }
     }
 
-    const where = this.options.whereExpression
     const retainedPublication = this.retainedOrderedPublication
     const activeReplacement = this.truncateReplaySession !== undefined
     const replayOwnsContinuation =
@@ -2419,19 +2508,7 @@ export class CollectionSubscription
 
     if (changes.length > 0) this.callback(changes)
 
-    // A zero window establishes no remote demand, but it must still create the
-    // ordered coordinator so a later setWindow can load from the same order.
-    if (limit === 0) {
-      onLoadSubsetResult?.(true, {
-        where,
-        orderBy,
-        limit: 0,
-        subscription: this,
-      })
-      return
-    }
-
-    if (!retainedPublication && this.orderedWindow.coversActiveWindow) {
+    if (!retainedPublication && this.orderedWindow.satisfiesActiveWindow) {
       // No adapter request was made. Use an impossible zero-window demand so
       // direct tracking can finish without claiming another demand's outcome.
       onLoadSubsetResult?.(true, {
@@ -2498,12 +2575,16 @@ export class CollectionSubscription
       acquisition,
       result: syncResult,
       replayContext: startedReplayContext,
-    } = this.startSubsetDemand(loadOptions, {
-      requestedPrefix,
-      hadBoundary: boundary !== undefined || refreshPrefix,
-      requiresUnboundedRefinement,
-      revision: this.orderedWindow.coverageRevision,
-    })
+    } = this.startSubsetDemand(
+      loadOptions,
+      {
+        requestedPrefix,
+        hadBoundary: boundary !== undefined || refreshPrefix,
+        requiresUnboundedRefinement,
+        revision: this.orderedWindow.coverageRevision,
+      },
+      this.releaseWhereExpression,
+    )
 
     // A synchronous continuation can complete ordered coverage. Retain its
     // callback before applying that evidence so callback failure can still
@@ -2580,7 +2661,11 @@ export class CollectionSubscription
       const rowKeys = outcome?.appliedRowKeys
       const exhausted = outcome?.extent === `exhausted`
 
-      if (outcome !== undefined && rowKeys === undefined && !exhausted) {
+      if (
+        outcome?.extent === `unknown` &&
+        rowKeys === undefined &&
+        !exhausted
+      ) {
         window.recordLocalRequestSatisfaction(ordered.requestedPrefix)
       } else if (!ordered.hadBoundary && !ordered.requiresUnboundedRefinement) {
         window.recordInitialCoverage(rowKeys, exhausted)

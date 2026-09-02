@@ -2,11 +2,15 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
+import { SyncTransactionAbortedError } from '../../src/errors.js'
 import { BTreeIndex, ReverseIndex } from '../../src/index.js'
+import { localOnlyCollectionOptions } from '../../src/local-only.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
 import { createEffect } from '../../src/query/effect.js'
-import { createLiveQueryCollection, eq } from '../../src/query/index.js'
+import { createLiveQueryCollection, eq, gte } from '../../src/query/index.js'
+import { getLoadSubsetDemandKey } from '../../src/query/ir-stable-identity.js'
 import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
+import { normalizeValue } from '../../src/utils/comparison.js'
 import { LIVE_QUERY_INTERNAL } from '../../src/query/live/internal.js'
 import { computeOrderedLoadCursor } from '../../src/query/live/utils.js'
 import { WindowState } from '../../src/query/live/window-state.js'
@@ -18,18 +22,32 @@ import {
   projectAuthorizedContinuationStarts,
   projectOrderedContinuationEvidence,
   projectOrderedPublicationBoundary,
+  projectOrderedSourceProgress,
   projectRetainedRowKeys,
+  projectRetainedSourceRows,
   projectReusableDemands,
+  projectReusableSourceDemands,
   projectTransportLoads,
 } from '../load-subset-full-flow-model.js'
-import { flushPromises, mockSyncCollectionOptions } from '../utils.js'
+import {
+  createCrossRealmUint8Array,
+  flushPromises,
+  mockSyncCollectionOptions,
+} from '../utils.js'
 import {
   oracleRandomParameters,
   readOracleRunConfig,
 } from '../oracle-config.js'
 import type { InitialQueryBuilder } from '../../src/query/builder/index.js'
-import type { LoadSubsetOptions, WritableDeep } from '../../src/types.js'
-import type { LoadSubsetFullFlowEvent } from '../load-subset-full-flow-model.js'
+import type {
+  LoadSubsetOptions,
+  LoadSubsetResult,
+  WritableDeep,
+} from '../../src/types.js'
+import type {
+  LoadSubsetFullFlowEvent,
+  OrderedSourceStep,
+} from '../load-subset-full-flow-model.js'
 
 type AdapterLifecycleEvent =
   | { type: `start`; options: LoadSubsetOptions }
@@ -46,6 +64,2856 @@ function visibleRows<Row extends { id: string; value: number }>(
 ): Array<{ id: string; value: number }> {
   return Array.from(values, ({ id, value }) => ({ id, value }))
 }
+
+it(`loads each side of a filtered inner join once`, async () => {
+  type Order = {
+    id: number
+    scheduledAt: string
+    status: string
+    addressId: number
+  }
+  type Charge = { id: number; addressId: number }
+
+  const orderLoads: Array<LoadSubsetOptions> = []
+  const chargeLoads: Array<LoadSubsetOptions> = []
+  const orders = createCollection<Order>({
+    id: `full-flow-filtered-join-orders`,
+    getKey: (order) => order.id,
+    syncMode: `on-demand`,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        write({
+          type: `insert`,
+          value: {
+            id: 1,
+            scheduledAt: `2024-01-15`,
+            status: `queued`,
+            addressId: 1,
+          },
+        })
+        write({
+          type: `insert`,
+          value: {
+            id: 2,
+            scheduledAt: `2024-01-10`,
+            status: `queued`,
+            addressId: 2,
+          },
+        })
+        commit()
+        markReady()
+        return {
+          loadSubset: (options) => {
+            orderLoads.push(options)
+            return true
+          },
+        }
+      },
+    },
+  })
+  const charges = createCollection<Charge>({
+    id: `full-flow-filtered-join-charges`,
+    getKey: (charge) => charge.id,
+    syncMode: `on-demand`,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        write({ type: `insert`, value: { id: 10, addressId: 1 } })
+        write({ type: `insert`, value: { id: 20, addressId: 2 } })
+        commit()
+        markReady()
+        return {
+          loadSubset: (options) => {
+            chargeLoads.push(options)
+            return true
+          },
+        }
+      },
+    },
+  })
+  const query = createLiveQueryCollection((q) =>
+    q
+      .from({ order: orders })
+      .where(({ order }) => gte(order.scheduledAt, `2024-01-12`))
+      .where(({ order }) => eq(order.status, `queued`))
+      .innerJoin({ charge: charges }, ({ order, charge }) =>
+        eq(order.addressId, charge.addressId),
+      ),
+  )
+
+  try {
+    await query.preload()
+
+    expect(
+      [...query.values()].map(({ order, charge }) => [order.id, charge.id]),
+    ).toEqual([[1, 10]])
+    expect(orderLoads).toHaveLength(1)
+    expect(chargeLoads).toHaveLength(1)
+  } finally {
+    await Promise.all([query.cleanup(), orders.cleanup(), charges.cleanup()])
+  }
+})
+
+const { multiplier: fullFlowMultiplier, ...fullFlowReplay } =
+  readOracleRunConfig()
+
+type MultiSourceOrderedScenario = {
+  primaryRows: ReadonlyArray<{
+    id: string
+    rank: number
+    joinKey: string
+  }>
+  secondaryRows: ReadonlyArray<{ id: string; joinKey: string }>
+  offset: number
+  limit: number
+  direction: `asc` | `desc`
+  primaryAutoIndex: `eager` | `off`
+  secondaryPublication:
+    | `preloaded`
+    | `preloaded-delayed-receipt`
+    | `after-primary-continuation`
+    | `after-primary-exhaustion`
+  secondaryPageSize: 1 | 2
+  secondaryCommitOrder: `insertion` | `reverse`
+}
+
+const multiSourceJoinKeyArbitrary = fc.constantFrom(`x`, `y`, `z`)
+const secondaryJoinKeyOrders = [
+  [`x`, `y`, `z`],
+  [`x`, `z`, `y`],
+  [`y`, `x`, `z`],
+  [`y`, `z`, `x`],
+  [`z`, `x`, `y`],
+  [`z`, `y`, `x`],
+] as const
+const multiSourceOrderedScenarioArbitrary: fc.Arbitrary<MultiSourceOrderedScenario> =
+  fc
+    .record({
+      ranks: fc.tuple(
+        fc.integer({ min: 0, max: 2 }),
+        fc.integer({ min: 0, max: 2 }),
+        fc.integer({ min: 0, max: 2 }),
+        fc.integer({ min: 0, max: 2 }),
+      ),
+      joinKeys: fc.tuple(
+        multiSourceJoinKeyArbitrary,
+        multiSourceJoinKeyArbitrary,
+        multiSourceJoinKeyArbitrary,
+        multiSourceJoinKeyArbitrary,
+      ),
+      secondaryMatchCounts: fc.tuple(
+        fc.integer({ min: 0, max: 2 }),
+        fc.integer({ min: 0, max: 2 }),
+        fc.integer({ min: 0, max: 2 }),
+      ),
+      secondaryJoinKeyOrder: fc.constantFrom(...secondaryJoinKeyOrders),
+      reverseSecondaryMatches: fc.boolean(),
+      offset: fc.integer({ min: 0, max: 2 }),
+      limit: fc.integer({ min: 0, max: 2 }),
+      direction: fc.constantFrom(`asc` as const, `desc` as const),
+      primaryAutoIndex: fc.constantFrom(`eager` as const, `off` as const),
+      secondaryPublication: fc.constantFrom(
+        `preloaded` as const,
+        `preloaded-delayed-receipt` as const,
+        `after-primary-continuation` as const,
+        `after-primary-exhaustion` as const,
+      ),
+      secondaryPageSize: fc.constantFrom(1 as const, 2 as const),
+      secondaryCommitOrder: fc.constantFrom(
+        `insertion` as const,
+        `reverse` as const,
+      ),
+    })
+    .map(
+      ({
+        ranks,
+        joinKeys,
+        secondaryMatchCounts,
+        secondaryJoinKeyOrder,
+        reverseSecondaryMatches,
+        ...scenario
+      }) => ({
+        ...scenario,
+        primaryRows: [`a`, `b`, `c`, `d`].map((id, index) => ({
+          id,
+          rank: ranks[index]!,
+          joinKey: joinKeys[index]!,
+        })),
+        secondaryRows: secondaryJoinKeyOrder.flatMap((joinKey) => {
+          const count = secondaryMatchCounts[[`x`, `y`, `z`].indexOf(joinKey)]!
+          const rows = Array.from({ length: count }, (_, matchIndex) => ({
+            id: `${joinKey}-${matchIndex}`,
+            joinKey,
+          }))
+          return reverseSecondaryMatches ? rows.reverse() : rows
+        }),
+      }),
+    )
+
+if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
+  fc.statistics(
+    multiSourceOrderedScenarioArbitrary,
+    ({
+      primaryRows,
+      secondaryRows,
+      offset,
+      limit,
+      direction,
+      primaryAutoIndex,
+      secondaryPublication,
+      secondaryPageSize,
+      secondaryCommitOrder,
+    }) => [
+      `direction=${direction}`,
+      `primary-auto-index=${primaryAutoIndex}`,
+      `offset=${offset}`,
+      `limit=${limit}`,
+      `secondary=${secondaryPublication}`,
+      `secondary-page-size=${secondaryPageSize}`,
+      `secondary-commit-order=${secondaryCommitOrder}`,
+      `secondary-insertion-order=${secondaryRows
+        .map(({ id }) => id)
+        .join(`,`)}`,
+      `exhaustion=${
+        primaryRows.reduce(
+          (count, { joinKey }) =>
+            count +
+            secondaryRows.filter((row) => row.joinKey === joinKey).length,
+          0,
+        ) <
+        offset + limit
+      }`,
+      `leading-exclusion=${!secondaryRows.some(
+        ({ joinKey }) =>
+          joinKey ===
+          orderedPrimaryRows({
+            primaryRows,
+            secondaryRows,
+            offset,
+            limit,
+            direction,
+            primaryAutoIndex,
+            secondaryPublication,
+            secondaryPageSize,
+            secondaryCommitOrder,
+          })[0]!.joinKey,
+      )}`,
+      `multiplicity=${new Set(secondaryRows.map(({ joinKey }) => joinKey)).size < secondaryRows.length}`,
+      `tied=${new Set(primaryRows.map(({ rank }) => rank)).size < primaryRows.length}`,
+    ],
+    oracleRandomParameters(
+      1_000,
+      fullFlowReplay,
+      `load-subset-full-flow.multi-source-statistics`,
+    ),
+  )
+}
+
+function orderedPrimaryRows(
+  scenario: MultiSourceOrderedScenario,
+): Array<MultiSourceOrderedScenario[`primaryRows`][number]> {
+  return [...scenario.primaryRows].sort((left, right) => {
+    const rankOrder =
+      scenario.direction === `asc`
+        ? left.rank - right.rank
+        : right.rank - left.rank
+    return rankOrder || left.id.localeCompare(right.id)
+  })
+}
+
+let multiSourceOrderedControlId = 0
+
+async function observeOrderedSourceSteps(
+  scenario: MultiSourceOrderedScenario,
+): Promise<Array<OrderedSourceStep>> {
+  const controlId = multiSourceOrderedControlId++
+  const primary = createCollection(
+    localOnlyCollectionOptions({
+      id: `multi-source-control-primary-${controlId}`,
+      getKey: (row) => row.id,
+      initialData: [...scenario.primaryRows],
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+    }),
+  )
+  const secondary = createCollection(
+    localOnlyCollectionOptions({
+      id: `multi-source-control-secondary-${controlId}`,
+      getKey: (row) => row.id,
+      initialData: [...scenario.secondaryRows],
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+    }),
+  )
+  const result = createLiveQueryCollection({
+    id: `multi-source-control-result-${controlId}`,
+    query: (q) =>
+      q
+        .from({ primaryRow: primary })
+        .innerJoin(
+          { secondaryRow: secondary },
+          ({ primaryRow, secondaryRow }) =>
+            eq(primaryRow.joinKey, secondaryRow.joinKey),
+        )
+        .orderBy(({ primaryRow }) => primaryRow.rank, scenario.direction),
+    startSync: true,
+  })
+
+  try {
+    await result.preload()
+    const resultKeysBySource = new Map<string, Array<string>>()
+    for (const { primaryRow, secondaryRow } of result.toArray) {
+      const keys = resultKeysBySource.get(primaryRow.id) ?? []
+      keys.push(`${primaryRow.id}:${secondaryRow.id}`)
+      resultKeysBySource.set(primaryRow.id, keys)
+    }
+    return orderedPrimaryRows(scenario).map((row) => ({
+      sourceKey: row.id,
+      resultKeys: resultKeysBySource.get(row.id) ?? [],
+      demandKeys: [row.joinKey],
+    }))
+  } finally {
+    await Promise.all([
+      result.cleanup(),
+      primary.cleanup(),
+      secondary.cleanup(),
+    ])
+  }
+}
+
+function hasPreloadedSecondary(scenario: MultiSourceOrderedScenario): boolean {
+  return (
+    scenario.secondaryPublication === `preloaded` ||
+    scenario.secondaryPublication === `preloaded-delayed-receipt`
+  )
+}
+
+function collectStringLiterals(
+  expression: Func | PropRef | Value,
+): Array<string> {
+  if (expression instanceof Func) {
+    return expression.args.flatMap((argument) =>
+      collectStringLiterals(argument),
+    )
+  }
+  if (!(expression instanceof Value)) return []
+  if (typeof expression.value === `string`) return [expression.value]
+  if (!Array.isArray(expression.value)) return []
+  return expression.value.filter(
+    (value): value is string => typeof value === `string`,
+  )
+}
+
+let multiSourceOrderedHarnessId = 0
+
+async function expectMultiSourceStepToSettle<T>(
+  scenario: MultiSourceOrderedScenario,
+  step: string,
+  result: T,
+): Promise<Awaited<T>> {
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      Promise.resolve(result),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => {
+          reject(
+            new Error(`${step} did not settle for ${JSON.stringify(scenario)}`),
+          )
+        }, 5_000)
+      }),
+    ])
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout)
+  }
+}
+
+async function runMultiSourceOrderedScenario(
+  scenario: MultiSourceOrderedScenario,
+): Promise<void> {
+  type PrimaryRow = MultiSourceOrderedScenario[`primaryRows`][number]
+  type SecondaryRow = { id: string; joinKey: string }
+
+  const primaryOrder = orderedPrimaryRows(scenario)
+  const sourceSteps = await expectMultiSourceStepToSettle(
+    scenario,
+    `control projection`,
+    observeOrderedSourceSteps(scenario),
+  )
+  expect(
+    sourceSteps.map(({ sourceKey, demandKeys }) => ({ sourceKey, demandKeys })),
+  ).toEqual(
+    primaryOrder.map(({ id, joinKey }) => ({
+      sourceKey: id,
+      demandKeys: [joinKey],
+    })),
+  )
+  const projection = projectOrderedSourceProgress({
+    sourceSteps,
+    offset: scenario.offset,
+    limit: scenario.limit,
+  })
+  const primaryCalls: Array<LoadSubsetOptions> = []
+  const primaryCallProgress: Array<{
+    demandKey: string
+    establishedPrimaryCount: number
+    establishedSecondaryCount: number
+  }> = []
+  const primaryReceipts: Array<{
+    demandKey: string
+    expectedRowKeys: ReadonlyArray<string>
+    appliedRowKeys: ReadonlyArray<string>
+  }> = []
+  const primaryOrderedVisitedKeys: Array<string> = []
+  const secondaryCalls: Array<LoadSubsetOptions> = []
+  const secondaryReceipts: Array<{
+    demandKey: string
+    expectedRowKeys: ReadonlyArray<string>
+    appliedRowKeys: ReadonlyArray<string>
+  }> = []
+  const secondaryLoadCommitSizes: Array<number> = []
+  const delayedSecondaryReceiptWaiters: Array<{
+    index: number
+    gate: ReturnType<typeof createDeferred<void>>
+  }> = []
+  const delayedSecondaryReceiptCompletionOrder: Array<number> = []
+  let releaseDelayedSecondaryReceipts = false
+  const secondaryPublicationGate = createDeferred<void>()
+  const establishedPrimaryKeys = new Set<string>()
+  const committedPrimaryKeys = new Set<string>()
+  const establishedSecondaryKeys = new Set<string>()
+  let primaryOrderedCallCount = 0
+  let primaryOrderedCallCountAtSecondaryRelease: number | undefined
+  let primaryKeysAtSecondaryRelease: ReadonlyArray<string> | undefined
+  let primaryCommittedKeysAtSecondaryRelease: ReadonlyArray<string> | undefined
+  let primaryKeysBeforeSecondaryPublication: ReadonlyArray<string> | undefined
+  let primaryBegin!: () => void
+  let primaryWrite!: (message: { type: `insert`; value: PrimaryRow }) => void
+  let primaryCommit!: (signal?: AbortSignal) => true | Promise<void>
+
+  const applyPrimaryRows = async (
+    rows: ReadonlyArray<PrimaryRow>,
+    signal: AbortSignal | undefined,
+  ): Promise<Array<string>> => {
+    if (rows.length === 0) return []
+    primaryBegin()
+    for (const row of rows) {
+      establishedPrimaryKeys.add(row.id)
+      primaryWrite({ type: `insert`, value: row })
+    }
+    const applied = primaryCommit(signal)
+    if (applied !== true) await applied
+    for (const row of rows) committedPrimaryKeys.add(row.id)
+    return rows.map(({ id }) => id)
+  }
+
+  const releaseSecondaryPublication = (): void => {
+    primaryOrderedCallCountAtSecondaryRelease ??= primaryOrderedCallCount
+    primaryKeysAtSecondaryRelease ??= [...new Set(primaryOrderedVisitedKeys)]
+    primaryCommittedKeysAtSecondaryRelease ??= [...committedPrimaryKeys]
+    secondaryPublicationGate.resolve()
+  }
+  if (scenario.limit === 0) secondaryPublicationGate.resolve()
+
+  const recordPrimaryCall = (options: LoadSubsetOptions): void => {
+    primaryCalls.push(options)
+    // Four source rows, one initial window, and one positive refinement cannot
+    // require an unbounded number of physical acquisitions. Keep a generous
+    // ceiling so a microtask refill loop becomes a shrinkable oracle failure.
+    if (primaryCalls.length > 32) {
+      throw new Error(
+        `primary loadSubset exceeded the bounded source grammar at call ${primaryCalls.length}: ${JSON.stringify(
+          { limit: options.limit, cursor: options.cursor },
+        )}`,
+      )
+    }
+    primaryCallProgress.push({
+      demandKey: getLoadSubsetDemandKey(options) ?? `unfiltered`,
+      establishedPrimaryCount: establishedPrimaryKeys.size,
+      establishedSecondaryCount: establishedSecondaryKeys.size,
+    })
+  }
+
+  const primary = createCollection<PrimaryRow>({
+    id: `multi-source-ordered-primary-${multiSourceOrderedHarnessId}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: scenario.primaryAutoIndex,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (params) => {
+        primaryBegin = params.begin
+        primaryWrite = params.write
+        primaryCommit = params.commit
+        params.markReady()
+        return {
+          loadSubset: async (options) => {
+            recordPrimaryCall(options)
+            if (!options.orderBy) {
+              const rows = primaryOrder.filter(
+                (row) =>
+                  options.where === undefined ||
+                  evaluateReferenceExpression(options.where, row),
+              )
+              const appliedRowKeys = await applyPrimaryRows(
+                rows,
+                options.signal,
+              )
+              primaryReceipts.push({
+                demandKey: getLoadSubsetDemandKey(options) ?? `unfiltered`,
+                expectedRowKeys: rows.map(({ id }) => id),
+                appliedRowKeys,
+              })
+              return {
+                hasMore: false,
+                appliedRowKeys,
+              }
+            }
+
+            primaryOrderedCallCount++
+            if (options.limit === undefined) {
+              primaryOrderedVisitedKeys.push(
+                ...primaryOrder.map(({ id }) => id),
+              )
+              const appliedRowKeys = await applyPrimaryRows(
+                primaryOrder,
+                options.signal,
+              )
+              if (
+                scenario.secondaryPublication ===
+                  `after-primary-continuation` ||
+                scenario.secondaryPublication === `after-primary-exhaustion`
+              ) {
+                releaseSecondaryPublication()
+              }
+              primaryReceipts.push({
+                demandKey: getLoadSubsetDemandKey(options) ?? `unfiltered`,
+                expectedRowKeys: primaryOrder.map(({ id }) => id),
+                appliedRowKeys,
+              })
+              return {
+                hasMore: false,
+                appliedRowKeys,
+              }
+            }
+            const lastKey = options.cursor?.lastKey
+            const previousIndex =
+              lastKey === undefined
+                ? -1
+                : primaryOrder.findIndex(({ id }) => id === lastKey)
+            if (lastKey !== undefined && previousIndex < 0) {
+              throw new Error(`Unknown primary cursor ${String(lastKey)}`)
+            }
+            const row = primaryOrder[previousIndex + 1]
+            let appliedRowKeys: Array<string> = []
+            if (row) {
+              primaryOrderedVisitedKeys.push(row.id)
+              appliedRowKeys = await applyPrimaryRows([row], options.signal)
+            }
+            const hasMore = previousIndex + 1 < primaryOrder.length - 1
+            if (
+              scenario.secondaryPublication === `after-primary-continuation` &&
+              primaryOrderedCallCount >= 2
+            ) {
+              releaseSecondaryPublication()
+            }
+            if (
+              scenario.secondaryPublication === `after-primary-exhaustion` &&
+              !hasMore
+            ) {
+              releaseSecondaryPublication()
+            }
+            primaryReceipts.push({
+              demandKey: getLoadSubsetDemandKey(options) ?? `unfiltered`,
+              expectedRowKeys: row ? [row.id] : [],
+              appliedRowKeys,
+            })
+            return {
+              hasMore,
+              appliedRowKeys,
+            }
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+
+  let secondaryBegin!: () => void
+  let secondaryWrite!: (message: {
+    type: `insert`
+    value: SecondaryRow
+  }) => void
+  let secondaryCommit!: (signal?: AbortSignal) => true | Promise<void>
+  const secondaryRows = scenario.secondaryRows
+  const applySecondaryRows = async (
+    rows: ReadonlyArray<SecondaryRow>,
+    signal: AbortSignal | undefined,
+  ): Promise<Array<string>> => {
+    if (rows.length === 0) return []
+    secondaryLoadCommitSizes.push(rows.length)
+    secondaryBegin()
+    for (const row of rows) {
+      establishedSecondaryKeys.add(row.id)
+      secondaryWrite({ type: `insert`, value: row })
+    }
+    const applied = secondaryCommit(signal)
+    if (applied !== true) await applied
+    return rows.map(({ id }) => id)
+  }
+  const secondary = createCollection<SecondaryRow>({
+    id: `multi-source-ordered-secondary-${multiSourceOrderedHarnessId}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: hasPreloadedSecondary(scenario),
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (params) => {
+        secondaryBegin = params.begin
+        secondaryWrite = params.write
+        secondaryCommit = params.commit
+        if (hasPreloadedSecondary(scenario) && secondaryRows.length > 0) {
+          secondaryBegin()
+          for (const row of secondaryRows) {
+            establishedSecondaryKeys.add(row.id)
+            secondaryWrite({ type: `insert`, value: row })
+          }
+          const applied = secondaryCommit()
+          if (applied !== true) {
+            throw new Error(`Expected synchronous initial secondary rows`)
+          }
+        }
+        params.markReady()
+        return {
+          loadSubset: async (options) => {
+            secondaryCalls.push(options)
+            if (secondaryCalls.length > 32) {
+              throw new Error(
+                `secondary loadSubset exceeded the bounded source grammar`,
+              )
+            }
+            if (!hasPreloadedSecondary(scenario)) {
+              await secondaryPublicationGate.promise
+              primaryKeysBeforeSecondaryPublication ??= [
+                ...new Set(primaryOrderedVisitedKeys),
+              ]
+            }
+            if (
+              scenario.secondaryPublication === `preloaded-delayed-receipt` &&
+              !releaseDelayedSecondaryReceipts
+            ) {
+              const waiter = {
+                index: delayedSecondaryReceiptWaiters.length,
+                gate: createDeferred<void>(),
+              }
+              delayedSecondaryReceiptWaiters.push(waiter)
+              await waiter.gate.promise
+              delayedSecondaryReceiptCompletionOrder.push(waiter.index)
+            }
+            const matchingRows = secondaryRows.filter(
+              (row) =>
+                options.where === undefined ||
+                evaluateReferenceExpression(options.where, row),
+            )
+            const rowsInCommitOrder =
+              scenario.secondaryCommitOrder === `reverse`
+                ? [...matchingRows].reverse()
+                : matchingRows
+            const appliedRowKeys: Array<string> = []
+            for (
+              let index = 0;
+              index < rowsInCommitOrder.length;
+              index += scenario.secondaryPageSize
+            ) {
+              appliedRowKeys.push(
+                ...(await applySecondaryRows(
+                  rowsInCommitOrder.slice(
+                    index,
+                    index + scenario.secondaryPageSize,
+                  ),
+                  options.signal,
+                )),
+              )
+            }
+            secondaryReceipts.push({
+              demandKey: getLoadSubsetDemandKey(options) ?? `unfiltered`,
+              expectedRowKeys: rowsInCommitOrder.map(({ id }) => id),
+              appliedRowKeys,
+            })
+            return {
+              hasMore: false,
+              appliedRowKeys,
+            }
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection({
+    id: `multi-source-ordered-live-${multiSourceOrderedHarnessId++}`,
+    query: (q) =>
+      q
+        .from({ primaryRow: primary })
+        .innerJoin(
+          { secondaryRow: secondary },
+          ({ primaryRow, secondaryRow }) =>
+            eq(primaryRow.joinKey, secondaryRow.joinKey),
+        )
+        .orderBy(({ primaryRow }) => primaryRow.rank, scenario.direction)
+        .offset(scenario.offset)
+        .limit(scenario.limit),
+    startSync: true,
+  })
+
+  try {
+    const preload = live.preload()
+    let preloadSettled = false
+    void preload.then(
+      () => {
+        preloadSettled = true
+      },
+      () => {
+        preloadSettled = true
+      },
+    )
+    if (scenario.secondaryPublication === `preloaded-delayed-receipt`) {
+      await flushPromises()
+      if (scenario.secondaryRows.length > 0 && scenario.limit > 0) {
+        expect(delayedSecondaryReceiptWaiters.length).toBeGreaterThan(0)
+        expect(preloadSettled).toBe(false)
+        expect(live.isReady()).toBe(false)
+      }
+      releaseDelayedSecondaryReceipts = true
+      for (const waiter of [...delayedSecondaryReceiptWaiters].reverse()) {
+        waiter.gate.resolve()
+        await flushPromises()
+      }
+    }
+    await expectMultiSourceStepToSettle(scenario, `preload`, preload)
+    await flushPromises()
+    expect(preloadSettled).toBe(true)
+
+    expect(
+      live.toArray.map(
+        ({ primaryRow, secondaryRow }) => `${primaryRow.id}:${secondaryRow.id}`,
+      ),
+    ).toEqual(projection.visibleResultKeys)
+
+    const initialPrimaryCallCount = primaryCalls.length
+    if (scenario.limit === 0) {
+      expect(
+        primaryCalls
+          .slice(0, initialPrimaryCallCount)
+          .filter(({ orderBy }) => orderBy !== undefined),
+      ).toEqual([])
+    }
+
+    const refinedOffset = scenario.offset === 0 ? 1 : 0
+    const refinedLimit = scenario.limit === 0 ? 1 : scenario.limit + 1
+    const refinedProjection = projectOrderedSourceProgress({
+      sourceSteps,
+      offset: refinedOffset,
+      limit: refinedLimit,
+    })
+    await expectMultiSourceStepToSettle(
+      scenario,
+      `positive window refinement`,
+      live.utils.setWindow({
+        offset: refinedOffset,
+        limit: refinedLimit,
+      }),
+    )
+    await flushPromises()
+    expect(
+      live.toArray.map(
+        ({ primaryRow, secondaryRow }) => `${primaryRow.id}:${secondaryRow.id}`,
+      ),
+    ).toEqual(refinedProjection.visibleResultKeys)
+    if (scenario.limit === 0) {
+      const refinementCalls = primaryCalls
+        .slice(initialPrimaryCallCount)
+        .filter(({ orderBy }) => orderBy !== undefined)
+      expect(refinementCalls.length).toBeGreaterThan(0)
+      if (scenario.primaryAutoIndex === `off`) {
+        expect(refinementCalls).toHaveLength(1)
+        expect(refinementCalls[0]?.limit).toBeUndefined()
+      }
+    }
+
+    const primaryCallsBeforeZeroShrink = primaryCalls.length
+    await expectMultiSourceStepToSettle(
+      scenario,
+      `zero window refinement`,
+      live.utils.setWindow({ offset: 2, limit: 0 }),
+    )
+    await flushPromises()
+    expect(live.toArray).toEqual([])
+    expect(
+      primaryCalls
+        .slice(primaryCallsBeforeZeroShrink)
+        .filter(({ orderBy }) => orderBy !== undefined),
+    ).toEqual([])
+
+    if (scenario.limit > 0) {
+      expect(primaryCalls.some(({ orderBy }) => orderBy !== undefined)).toBe(
+        true,
+      )
+      expect(secondaryCalls.length).toBeGreaterThan(0)
+    }
+
+    expect(primaryCallProgress).toHaveLength(primaryCalls.length)
+    const previousProgressByDemand = new Map<
+      string,
+      (typeof primaryCallProgress)[number]
+    >()
+    for (const progress of primaryCallProgress) {
+      const previous = previousProgressByDemand.get(progress.demandKey)
+      if (previous) {
+        expect(
+          progress.establishedPrimaryCount > previous.establishedPrimaryCount ||
+            progress.establishedSecondaryCount >
+              previous.establishedSecondaryCount,
+        ).toBe(true)
+      }
+      previousProgressByDemand.set(progress.demandKey, progress)
+    }
+    expect(primaryReceipts).toHaveLength(primaryCalls.length)
+    for (const receipt of primaryReceipts) {
+      expect(new Set(receipt.appliedRowKeys).size).toBe(
+        receipt.appliedRowKeys.length,
+      )
+      expect([...receipt.appliedRowKeys].sort(), receipt.demandKey).toEqual(
+        [...receipt.expectedRowKeys].sort(),
+      )
+    }
+
+    expect(secondaryReceipts).toHaveLength(secondaryCalls.length)
+    for (const receipt of secondaryReceipts) {
+      expect(new Set(receipt.appliedRowKeys).size).toBe(
+        receipt.appliedRowKeys.length,
+      )
+      expect([...receipt.appliedRowKeys].sort(), receipt.demandKey).toEqual(
+        [...receipt.expectedRowKeys].sort(),
+      )
+    }
+    expect(
+      secondaryLoadCommitSizes.every(
+        (commitSize) => commitSize <= scenario.secondaryPageSize,
+      ),
+    ).toBe(true)
+
+    const primaryJoinKeys = new Set(
+      scenario.primaryRows.map(({ joinKey }) => joinKey),
+    )
+    const joinCalls = secondaryCalls.filter(({ where }) => where !== undefined)
+    if (
+      hasPreloadedSecondary(scenario) &&
+      scenario.secondaryRows.length > 0 &&
+      scenario.limit > 0
+    ) {
+      expect(joinCalls.length).toBeGreaterThan(0)
+    }
+    if (scenario.secondaryPublication === `preloaded-delayed-receipt`) {
+      expect(delayedSecondaryReceiptCompletionOrder).toEqual(
+        delayedSecondaryReceiptWaiters.map(({ index }) => index).reverse(),
+      )
+    }
+    const requestedJoinKeys = new Set(
+      joinCalls.flatMap(({ where }) =>
+        [...primaryJoinKeys].filter((joinKey) =>
+          evaluateReferenceExpression(where!, {
+            id: `probe-${joinKey}`,
+            joinKey,
+          }),
+        ),
+      ),
+    )
+    const literalJoinKeys = joinCalls.flatMap(({ where }) =>
+      collectStringLiterals(where!),
+    )
+    expect(
+      literalJoinKeys.every((joinKey) => primaryJoinKeys.has(joinKey)),
+    ).toBe(true)
+    expect(
+      [...requestedJoinKeys].every((joinKey) => primaryJoinKeys.has(joinKey)),
+    ).toBe(true)
+    const requiredJoinKeys = new Set([
+      ...projection.demandedKeys,
+      ...refinedProjection.demandedKeys,
+    ])
+    if (joinCalls.length > 0) {
+      for (const joinKey of requiredJoinKeys) {
+        expect(requestedJoinKeys.has(joinKey)).toBe(true)
+      }
+    }
+
+    if (scenario.secondaryPublication === `after-primary-continuation`) {
+      if (scenario.limit > 0) {
+        if (scenario.primaryAutoIndex === `eager`) {
+          expect(primaryOrderedCallCountAtSecondaryRelease).toBe(2)
+          expect(primaryCommittedKeysAtSecondaryRelease).toEqual(
+            expect.arrayContaining(primaryOrderedVisitedKeys.slice(0, 2)),
+          )
+          expect(primaryKeysBeforeSecondaryPublication?.length).toBe(2)
+        } else {
+          expect(primaryOrderedCallCountAtSecondaryRelease).toBe(1)
+          expect(primaryCommittedKeysAtSecondaryRelease).toEqual(
+            expect.arrayContaining(primaryOrder.map(({ id }) => id)),
+          )
+          expect(primaryKeysBeforeSecondaryPublication).toEqual(
+            primaryOrder.map(({ id }) => id),
+          )
+        }
+      }
+    }
+    if (scenario.secondaryPublication === `after-primary-exhaustion`) {
+      if (scenario.limit > 0) {
+        expect(primaryKeysAtSecondaryRelease).toEqual(
+          primaryOrder.map(({ id }) => id),
+        )
+        expect(primaryKeysBeforeSecondaryPublication).toEqual(
+          primaryOrder.map(({ id }) => id),
+        )
+      }
+    }
+  } finally {
+    secondaryPublicationGate.resolve()
+    for (const waiter of delayedSecondaryReceiptWaiters) waiter.gate.resolve()
+    await expectMultiSourceStepToSettle(
+      scenario,
+      `cleanup`,
+      Promise.all([live.cleanup(), primary.cleanup(), secondary.cleanup()]),
+    )
+  }
+}
+
+const orderedPrimaryFixture = [
+  { id: `a`, rank: 1, joinKey: `a` },
+  { id: `b`, rank: 2, joinKey: `b` },
+  { id: `c`, rank: 3, joinKey: `c` },
+  { id: `d`, rank: 4, joinKey: `d` },
+]
+
+it.each([
+  {
+    name: `preloaded rejection continuation`,
+    secondaryRows: [
+      { id: `c-0`, joinKey: `c` },
+      { id: `d-0`, joinKey: `d` },
+    ],
+    offset: 0,
+    limit: 2,
+    secondaryPublication: `preloaded` as const,
+    secondaryPageSize: 1 as const,
+    secondaryCommitOrder: `insertion` as const,
+    primaryAutoIndex: `eager` as const,
+  },
+  {
+    name: `late secondary after continuation`,
+    secondaryRows: [
+      { id: `b-0`, joinKey: `b` },
+      { id: `a-0`, joinKey: `a` },
+    ],
+    offset: 0,
+    limit: 2,
+    secondaryPublication: `after-primary-continuation` as const,
+    secondaryPageSize: 1 as const,
+    secondaryCommitOrder: `reverse` as const,
+    primaryAutoIndex: `eager` as const,
+  },
+  {
+    name: `delayed filtered secondary receipt`,
+    secondaryRows: [
+      { id: `c-0`, joinKey: `c` },
+      { id: `d-0`, joinKey: `d` },
+    ],
+    offset: 0,
+    limit: 2,
+    secondaryPublication: `preloaded-delayed-receipt` as const,
+    secondaryPageSize: 1 as const,
+    secondaryCommitOrder: `reverse` as const,
+    primaryAutoIndex: `eager` as const,
+  },
+  {
+    name: `late secondary after primary exhaustion`,
+    secondaryRows: [{ id: `d-0`, joinKey: `d` }],
+    offset: 0,
+    limit: 2,
+    secondaryPublication: `after-primary-exhaustion` as const,
+    secondaryPageSize: 1 as const,
+    secondaryCommitOrder: `insertion` as const,
+    primaryAutoIndex: `eager` as const,
+  },
+  {
+    name: `joined multiplicity before offset`,
+    secondaryRows: [
+      { id: `a-1`, joinKey: `a` },
+      { id: `a-0`, joinKey: `a` },
+    ],
+    offset: 1,
+    limit: 1,
+    secondaryPublication: `preloaded` as const,
+    secondaryPageSize: 2 as const,
+    secondaryCommitOrder: `insertion` as const,
+    primaryAutoIndex: `eager` as const,
+  },
+  {
+    name: `indexed zero-limit window`,
+    secondaryRows: [{ id: `a-0`, joinKey: `a` }],
+    offset: 2,
+    limit: 0,
+    secondaryPublication: `preloaded` as const,
+    secondaryPageSize: 1 as const,
+    secondaryCommitOrder: `insertion` as const,
+    primaryAutoIndex: `eager` as const,
+  },
+  {
+    name: `unindexed zero-limit window`,
+    secondaryRows: [{ id: `a-0`, joinKey: `a` }],
+    offset: 2,
+    limit: 0,
+    secondaryPublication: `preloaded` as const,
+    secondaryPageSize: 1 as const,
+    secondaryCommitOrder: `insertion` as const,
+    primaryAutoIndex: `off` as const,
+  },
+] satisfies ReadonlyArray<
+  Pick<
+    MultiSourceOrderedScenario,
+    | `secondaryRows`
+    | `offset`
+    | `limit`
+    | `secondaryPublication`
+    | `secondaryPageSize`
+    | `secondaryCommitOrder`
+    | `primaryAutoIndex`
+  > & { name: string }
+>)(`$name`, async ({ name: _name, ...scenario }) => {
+  await runMultiSourceOrderedScenario({
+    ...scenario,
+    primaryRows: orderedPrimaryFixture,
+    direction: `asc`,
+  })
+})
+
+it(`settles a late secondary load after tied primary continuations`, async () => {
+  await runMultiSourceOrderedScenario({
+    offset: 0,
+    limit: 1,
+    direction: `asc`,
+    primaryAutoIndex: `eager`,
+    secondaryPublication: `after-primary-continuation`,
+    secondaryPageSize: 1,
+    secondaryCommitOrder: `reverse`,
+    primaryRows: [
+      { id: `a`, rank: 2, joinKey: `x` },
+      { id: `b`, rank: 0, joinKey: `z` },
+      { id: `c`, rank: 0, joinKey: `y` },
+      { id: `d`, rank: 2, joinKey: `y` },
+    ],
+    secondaryRows: [
+      { id: `x-0`, joinKey: `x` },
+      { id: `z-0`, joinKey: `z` },
+    ],
+  })
+})
+
+it(`settles an empty join after exhausting tied primary rows`, async () => {
+  await runMultiSourceOrderedScenario({
+    offset: 0,
+    limit: 1,
+    direction: `asc`,
+    primaryAutoIndex: `eager`,
+    secondaryPublication: `after-primary-exhaustion`,
+    secondaryPageSize: 1,
+    secondaryCommitOrder: `insertion`,
+    primaryRows: [
+      { id: `a`, rank: 0, joinKey: `x` },
+      { id: `b`, rank: 0, joinKey: `x` },
+      { id: `c`, rank: 0, joinKey: `x` },
+      { id: `d`, rank: 0, joinKey: `x` },
+    ],
+    secondaryRows: [],
+  })
+})
+
+it(`does not start duplicate ordered work from an applying receipt`, async () => {
+  await runMultiSourceOrderedScenario({
+    offset: 0,
+    limit: 2,
+    direction: `asc`,
+    primaryAutoIndex: `eager`,
+    secondaryPublication: `after-primary-continuation`,
+    secondaryPageSize: 1,
+    secondaryCommitOrder: `insertion`,
+    primaryRows: [
+      { id: `a`, rank: 0, joinKey: `y` },
+      { id: `b`, rank: 1, joinKey: `x` },
+      { id: `c`, rank: 1, joinKey: `y` },
+      { id: `d`, rank: 0, joinKey: `z` },
+    ],
+    secondaryRows: [
+      { id: `z-0`, joinKey: `z` },
+      { id: `z-1`, joinKey: `z` },
+      { id: `y-0`, joinKey: `y` },
+    ],
+  })
+})
+
+it(`preserves a synchronous unindexed load error after reentrant cleanup`, async () => {
+  type Row = { id: string; rank: number }
+  const failure = new Error(`unindexed load failed after cleanup`)
+  let cleanupLive: () => Promise<void> = () => Promise.resolve()
+  const source = createCollection<Row>({
+    id: `unindexed-reentrant-cleanup-error`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `off`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: ({ markReady }) => {
+        markReady()
+        return {
+          loadSubset: () => {
+            void cleanupLive()
+            throw failure
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection({
+    id: `unindexed-reentrant-cleanup-error-live`,
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(0),
+    startSync: true,
+  })
+  cleanupLive = () => live.cleanup()
+
+  try {
+    await live.preload()
+
+    let thrown: unknown
+    try {
+      live.utils.setWindow({ offset: 0, limit: 1 })
+    } catch (error) {
+      thrown = error
+    }
+    expect(thrown).toBe(failure)
+  } finally {
+    await Promise.all([live.cleanup(), source.cleanup()])
+  }
+})
+
+it.each([
+  {
+    name: `indexed sync throw without cleanup`,
+    autoIndex: `eager` as const,
+    failureMode: `sync throw` as const,
+    reentrantCleanup: false,
+  },
+  {
+    name: `indexed async reject without cleanup`,
+    autoIndex: `eager` as const,
+    failureMode: `async reject` as const,
+    reentrantCleanup: false,
+  },
+  {
+    name: `unindexed sync throw without cleanup`,
+    autoIndex: `off` as const,
+    failureMode: `sync throw` as const,
+    reentrantCleanup: false,
+  },
+  {
+    name: `unindexed async reject without cleanup`,
+    autoIndex: `off` as const,
+    failureMode: `async reject` as const,
+    reentrantCleanup: false,
+  },
+  {
+    name: `indexed sync throw with cleanup`,
+    autoIndex: `eager` as const,
+    failureMode: `sync throw` as const,
+    reentrantCleanup: true,
+  },
+  {
+    name: `indexed async reject with cleanup`,
+    autoIndex: `eager` as const,
+    failureMode: `async reject` as const,
+    reentrantCleanup: true,
+  },
+  {
+    name: `unindexed sync throw with cleanup`,
+    autoIndex: `off` as const,
+    failureMode: `sync throw` as const,
+    reentrantCleanup: true,
+  },
+  {
+    name: `unindexed async reject with cleanup`,
+    autoIndex: `off` as const,
+    failureMode: `async reject` as const,
+    reentrantCleanup: true,
+  },
+])(
+  `preserves refinement failure and retry state for $name`,
+  async ({ autoIndex, failureMode, reentrantCleanup }) => {
+    type Row = { id: string; rank: number }
+    const failure = new Error(`fallback failed`)
+    let attempts = 0
+    let begin!: () => void
+    let write!: (message: { type: `insert`; value: Row }) => void
+    let commit!: () => true | Promise<void>
+    let cleanupLive: () => Promise<void> = () => Promise.resolve()
+    let staleFailure: ReturnType<typeof createDeferred<void>> | undefined
+    const signals: Array<AbortSignal | undefined> = []
+    let unloads = 0
+    const source = createCollection<Row>({
+      id: `zero-refinement-${autoIndex}-${failureMode}-${reentrantCleanup}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          params.markReady()
+          return {
+            loadSubset: ({ signal }) => {
+              attempts++
+              signals.push(signal)
+              if (attempts === 1) {
+                if (reentrantCleanup) void cleanupLive()
+                if (failureMode === `sync throw`) throw failure
+                if (reentrantCleanup) {
+                  staleFailure = createDeferred<void>()
+                  return staleFailure.promise
+                }
+                return Promise.reject(failure)
+              }
+              begin()
+              write({ type: `insert`, value: { id: `a`, rank: 1 } })
+              const applied = commit()
+              const outcome = { hasMore: false, appliedRowKeys: [`a`] }
+              return applied === true
+                ? Promise.resolve(outcome)
+                : applied.then(() => outcome)
+            },
+            unloadSubset: () => {
+              unloads++
+            },
+          }
+        },
+      },
+    })
+    const live = createLiveQueryCollection({
+      id: `zero-refinement-${autoIndex}-${failureMode}-${reentrantCleanup}-live`,
+      query: (q) =>
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank)
+          .limit(0),
+      startSync: true,
+    })
+    cleanupLive = () => live.cleanup()
+
+    try {
+      await live.preload()
+      expect(attempts).toBe(0)
+
+      if (failureMode === `sync throw`) {
+        let thrown: unknown
+        try {
+          live.utils.setWindow({ offset: 0, limit: 1 })
+        } catch (error) {
+          thrown = error
+        }
+        expect(thrown).toBe(failure)
+      } else if (reentrantCleanup) {
+        expect(live.utils.setWindow({ offset: 0, limit: 1 })).toBe(true)
+      } else {
+        await expect(
+          live.utils.setWindow({ offset: 0, limit: 1 }),
+        ).rejects.toBe(failure)
+      }
+      await flushPromises()
+
+      if (reentrantCleanup) {
+        expect(attempts).toBe(1)
+        expect(live.status).toBe(`cleaned-up`)
+        expect(live.isLoadingSubset).toBe(false)
+        expect(live.utils.lastSubsetError).toBeUndefined()
+        expect(live.toArray).toEqual([])
+        expect(signals).toHaveLength(1)
+        expect(signals[0]).toBeInstanceOf(AbortSignal)
+        expect(signals[0]?.aborted).toBe(true)
+        expect(unloads).toBe(1)
+        expect(live.utils.getWindow()).toEqual({
+          offset: 0,
+          limit: failureMode === `sync throw` ? 0 : 1,
+        })
+
+        await live.preload()
+        if (failureMode === `sync throw`) {
+          expect(attempts).toBe(1)
+          await live.utils.setWindow({ offset: 0, limit: 1 })
+        }
+        await flushPromises()
+
+        expect(attempts).toBe(2)
+        expect(live.status).toBe(`ready`)
+        expect(live.isLoadingSubset).toBe(false)
+        expect(live.utils.lastSubsetError).toBeUndefined()
+        expect(live.toArray.map(({ id }) => id)).toEqual([`a`])
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
+
+        staleFailure?.reject(failure)
+        await flushPromises()
+
+        expect(attempts).toBe(2)
+        expect(live.status).toBe(`ready`)
+        expect(live.isLoadingSubset).toBe(false)
+        expect(live.utils.lastSubsetError).toBeUndefined()
+        expect(live.toArray.map(({ id }) => id)).toEqual([`a`])
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
+        return
+      }
+
+      expect(attempts).toBe(1)
+      expect(live.status).toBe(`ready`)
+      expect(live.isLoadingSubset).toBe(false)
+      expect(live.utils.lastSubsetError).toBe(failure)
+      expect(live.toArray).toEqual([])
+      expect(live.utils.getWindow()).toEqual({
+        offset: 0,
+        limit: failureMode === `sync throw` ? 0 : 1,
+      })
+
+      if (failureMode === `sync throw`) {
+        begin()
+        write({ type: `insert`, value: { id: `b`, rank: 2 } })
+        await commit()
+        await flushPromises()
+        expect(live.toArray).toEqual([])
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 0 })
+      }
+
+      await live.utils.setWindow({ offset: 0, limit: 1 })
+      await flushPromises()
+
+      expect(attempts).toBe(2)
+      expect(live.toArray.map(({ id }) => id)).toEqual([`a`])
+    } finally {
+      staleFailure?.reject(failure)
+      await Promise.all([live.cleanup(), source.cleanup()])
+    }
+  },
+)
+
+it(`publishes once after a loader fills an indexed window across graph turns`, async () => {
+  type Row = { id: string; rank: number }
+  type ObservedChange = {
+    type: `insert` | `update` | `delete`
+    key: string
+    value: Row
+  }
+  const remoteRows: ReadonlyArray<Row> = [
+    { id: `a`, rank: 1 },
+    { id: `b`, rank: 2 },
+  ]
+  const batches: Array<ReadonlyArray<ObservedChange>> = []
+  const callbackReads: Array<ReadonlyArray<Row>> = []
+  let loads = 0
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: Row }) => void
+  let commit!: () => true | Promise<void>
+  const source = createCollection<Row>({
+    id: `indexed-loader-quiescent-publication`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        params.markReady()
+        return {
+          loadSubset: () => {
+            const row = remoteRows[loads++]
+            if (!row) return true
+            begin()
+            write({ type: `insert`, value: row })
+            const applied = commit()
+            if (applied !== true) {
+              throw new Error(`Expected synchronous source application`)
+            }
+            return true
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection({
+    id: `indexed-loader-quiescent-publication-live`,
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(0),
+    startSync: true,
+  })
+  const readRows = () => live.toArray.map(({ id, rank }) => ({ id, rank }))
+  let subscription: ReturnType<typeof live.subscribeChanges> | undefined
+
+  try {
+    await live.preload()
+    subscription = live.subscribeChanges(
+      (changes) => {
+        batches.push(
+          changes
+            .map<ObservedChange>(({ type, key, value }) => ({
+              type,
+              key: String(key),
+              value: { id: value.id, rank: value.rank },
+            }))
+            .sort((left, right) => left.key.localeCompare(right.key)),
+        )
+        callbackReads.push(readRows())
+      },
+      { includeInitialState: false },
+    )
+    await live.utils.setWindow({ offset: 0, limit: 2 })
+    await flushPromises()
+
+    expect(loads).toBe(2)
+    expect(readRows()).toEqual([
+      { id: `a`, rank: 1 },
+      { id: `b`, rank: 2 },
+    ])
+    expect(batches).toEqual([
+      [
+        { type: `insert`, key: `a`, value: { id: `a`, rank: 1 } },
+        { type: `insert`, key: `b`, value: { id: `b`, rank: 2 } },
+      ],
+    ])
+    expect(callbackReads).toEqual([
+      [
+        { id: `a`, rank: 1 },
+        { id: `b`, rank: 2 },
+      ],
+    ])
+  } finally {
+    subscription?.unsubscribe()
+    await Promise.all([live.cleanup(), source.cleanup()])
+  }
+})
+
+it(`fences an unindexed fallback settlement from a cleaned query session`, async () => {
+  type Row = { id: string; rank: number }
+  type Result = {
+    hasMore: boolean
+    appliedRowKeys: ReadonlyArray<string>
+  }
+  const pending: Array<ReturnType<typeof createDeferred<Result>>> = []
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: Row }) => void
+  let commit!: () => true | Promise<void>
+  const source = createCollection<Row>({
+    id: `unindexed-fallback-session-fence`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `off`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        params.markReady()
+        return {
+          loadSubset: () => {
+            const request = createDeferred<Result>()
+            pending.push(request)
+            return request.promise
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection({
+    id: `unindexed-fallback-session-fence-live`,
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(0),
+    startSync: true,
+  })
+  let failedWindow: true | Promise<void> | undefined
+  let firstWindow: true | Promise<void> | undefined
+  let secondWindow: true | Promise<void> | undefined
+  let repeatedWindow: true | Promise<void> | undefined
+
+  try {
+    await live.preload()
+    expect(live.status).toBe(`ready`)
+    expect(live.isLoadingSubset).toBe(false)
+
+    const visibleFailure = new Error(`visible fallback failed`)
+    failedWindow = live.utils.setWindow({ offset: 0, limit: 1 })
+    expect(pending).toHaveLength(1)
+    expect(live.isLoadingSubset).toBe(true)
+    pending[0]!.reject(visibleFailure)
+    await expect(Promise.resolve(failedWindow)).rejects.toBe(visibleFailure)
+    await flushPromises()
+    expect(live.status).toBe(`ready`)
+    expect(live.isLoadingSubset).toBe(false)
+    expect(live.utils.hasSubsetError).toBe(true)
+    expect(live.utils.lastSubsetError).toBe(visibleFailure)
+
+    firstWindow = live.utils.setWindow({ offset: 0, limit: 1 })
+    void Promise.resolve(firstWindow).catch(() => {})
+    expect(pending).toHaveLength(2)
+    expect(live.isLoadingSubset).toBe(true)
+
+    await live.cleanup()
+    await live.preload()
+    expect(live.status).toBe(`ready`)
+    expect(live.isLoadingSubset).toBe(false)
+    expect(live.utils.hasSubsetError).toBe(false)
+    expect(live.utils.lastSubsetError).toBeUndefined()
+    secondWindow = live.utils.setWindow({ offset: 0, limit: 1 })
+    expect(pending).toHaveLength(3)
+    expect(live.isLoadingSubset).toBe(true)
+
+    pending[1]!.reject(new Error(`stale fallback failed`))
+    await flushPromises()
+    expect(live.utils.lastSubsetError).toBeUndefined()
+    expect(live.status).toBe(`ready`)
+    expect(live.isLoadingSubset).toBe(true)
+    repeatedWindow = live.utils.setWindow({ offset: 0, limit: 2 })
+    void Promise.resolve(repeatedWindow).catch(() => {})
+    expect(pending).toHaveLength(3)
+
+    begin()
+    write({ type: `insert`, value: { id: `a`, rank: 1 } })
+    const applied = commit()
+    if (applied !== true) await applied
+    pending[2]!.resolve({ hasMore: false, appliedRowKeys: [`a`] })
+    await Promise.all([secondWindow, repeatedWindow])
+    await flushPromises()
+
+    expect(pending).toHaveLength(3)
+    expect(live.status).toBe(`ready`)
+    expect(live.isLoadingSubset).toBe(false)
+    expect(live.utils.lastSubsetError).toBeUndefined()
+    expect(live.toArray.map(({ id }) => id)).toEqual([`a`])
+  } finally {
+    for (const request of pending) {
+      request.reject(new Error(`test cleanup`))
+    }
+    await Promise.all([
+      Promise.resolve(failedWindow).catch(() => undefined),
+      Promise.resolve(firstWindow).catch(() => undefined),
+      Promise.resolve(secondWindow).catch(() => undefined),
+      Promise.resolve(repeatedWindow).catch(() => undefined),
+      live.cleanup(),
+      source.cleanup(),
+    ])
+  }
+})
+
+it(`keeps an initial unindexed load scoped to its query session`, async () => {
+  type Row = { id: string; rank: number }
+  type Result = {
+    hasMore: boolean
+    appliedRowKeys: ReadonlyArray<string>
+  }
+  const pending: Array<ReturnType<typeof createDeferred<Result>>> = []
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: Row }) => void
+  let commit!: () => true | Promise<void>
+  const source = createCollection<Row>({
+    id: `unindexed-initial-session-fence`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `off`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        params.markReady()
+        return {
+          loadSubset: () => {
+            const request = createDeferred<Result>()
+            pending.push(request)
+            return request.promise
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection({
+    id: `unindexed-initial-session-fence-live`,
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(1),
+    startSync: true,
+  })
+  let firstPreload: Promise<void> | undefined
+  let secondPreload: Promise<void> | undefined
+
+  try {
+    firstPreload = live.preload()
+    void firstPreload.catch(() => {})
+    expect(pending).toHaveLength(1)
+    expect(live.status).toBe(`loading`)
+    expect(live.isLoadingSubset).toBe(true)
+
+    await live.cleanup()
+    secondPreload = live.preload()
+    expect(pending).toHaveLength(2)
+    expect(live.status).toBe(`loading`)
+    expect(live.isLoadingSubset).toBe(true)
+    expect(live.utils.lastSubsetError).toBeUndefined()
+
+    pending[0]!.reject(new Error(`stale initial fallback failed`))
+    await flushPromises()
+    expect(live.status).toBe(`loading`)
+    expect(live.isLoadingSubset).toBe(true)
+    expect(live.utils.lastSubsetError).toBeUndefined()
+
+    begin()
+    write({ type: `insert`, value: { id: `a`, rank: 1 } })
+    const applied = commit()
+    if (applied !== true) await applied
+    pending[1]!.resolve({ hasMore: false, appliedRowKeys: [`a`] })
+    await secondPreload
+    await flushPromises()
+
+    expect(pending).toHaveLength(2)
+    expect(live.status).toBe(`ready`)
+    expect(live.isLoadingSubset).toBe(false)
+    expect(live.utils.lastSubsetError).toBeUndefined()
+    expect(live.toArray.map(({ id }) => id)).toEqual([`a`])
+  } finally {
+    for (const request of pending) {
+      request.reject(new Error(`test cleanup`))
+    }
+    await Promise.all([
+      firstPreload?.catch(() => undefined),
+      secondPreload?.catch(() => undefined),
+      live.cleanup(),
+      source.cleanup(),
+    ])
+  }
+})
+
+it(`replays one unindexed fallback and publishes one replacement after truncate`, async () => {
+  type Row = { id: string; rank: number }
+  type ObservedChange = {
+    type: `insert` | `update` | `delete`
+    key: string
+    value: Row
+  }
+  type Result = {
+    hasMore: boolean
+    appliedRowKeys: ReadonlyArray<string>
+  }
+  const pending: Array<ReturnType<typeof createDeferred<Result>>> = []
+  const batches: Array<ReadonlyArray<ObservedChange>> = []
+  const callbackReads: Array<ReadonlyArray<Row>> = []
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: Row }) => void
+  let commit!: () => true | Promise<void>
+  let truncate!: () => void
+  const source = createCollection<Row>({
+    id: `unindexed-fallback-truncate-replay`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `off`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        truncate = params.truncate
+        params.markReady()
+        return {
+          loadSubset: () => {
+            const request = createDeferred<Result>()
+            pending.push(request)
+            return request.promise
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection({
+    id: `unindexed-fallback-truncate-replay-live`,
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(1),
+    startSync: true,
+  })
+  const readRows = () => live.toArray.map(({ id, rank }) => ({ id, rank }))
+  const subscription = live.subscribeChanges(
+    (changes) => {
+      batches.push(
+        changes
+          .map<ObservedChange>(({ type, key, value }) => ({
+            type,
+            key: String(key),
+            value: { id: value.id, rank: value.rank },
+          }))
+          .sort((left, right) => left.key.localeCompare(right.key)),
+      )
+      callbackReads.push(readRows())
+    },
+    { includeInitialState: false },
+  )
+  const preload = live.preload()
+
+  try {
+    expect(pending).toHaveLength(1)
+    begin()
+    write({ type: `insert`, value: { id: `a`, rank: 1 } })
+    const initialApplied = commit()
+    if (initialApplied !== true) await initialApplied
+    pending[0]!.resolve({ hasMore: false, appliedRowKeys: [`a`] })
+    await preload
+    await flushPromises()
+    expect(readRows()).toEqual([{ id: `a`, rank: 1 }])
+
+    batches.length = 0
+    callbackReads.length = 0
+    begin()
+    truncate()
+    expect(readRows()).toEqual([{ id: `a`, rank: 1 }])
+    expect(batches).toHaveLength(0)
+    expect(callbackReads).toHaveLength(0)
+    const replacement = commit()
+    expect(readRows()).toEqual([{ id: `a`, rank: 1 }])
+    expect(batches).toHaveLength(0)
+    expect(callbackReads).toHaveLength(0)
+    await flushPromises()
+    expect(pending).toHaveLength(2)
+    expect(readRows()).toEqual([{ id: `a`, rank: 1 }])
+    expect(batches).toHaveLength(0)
+    expect(callbackReads).toHaveLength(0)
+
+    begin()
+    write({ type: `insert`, value: { id: `b`, rank: 2 } })
+    expect(readRows()).toEqual([{ id: `a`, rank: 1 }])
+    expect(batches).toHaveLength(0)
+    expect(callbackReads).toHaveLength(0)
+    const replacementApplied = commit()
+    expect(readRows()).toEqual([{ id: `a`, rank: 1 }])
+    expect(batches).toHaveLength(0)
+    expect(callbackReads).toHaveLength(0)
+    if (replacementApplied !== true) await replacementApplied
+    expect(readRows()).toEqual([{ id: `a`, rank: 1 }])
+    expect(batches).toHaveLength(0)
+    expect(callbackReads).toHaveLength(0)
+    pending[1]!.resolve({ hasMore: false, appliedRowKeys: [`b`] })
+    if (replacement !== true) await replacement
+    await flushPromises()
+
+    expect(pending).toHaveLength(2)
+    expect(readRows()).toEqual([{ id: `b`, rank: 2 }])
+    expect(batches).toEqual([
+      [
+        { type: `delete`, key: `a`, value: { id: `a`, rank: 1 } },
+        { type: `insert`, key: `b`, value: { id: `b`, rank: 2 } },
+      ],
+    ])
+    expect(callbackReads).toEqual([[{ id: `b`, rank: 2 }]])
+  } finally {
+    for (const request of pending) {
+      request.reject(new Error(`test cleanup`))
+    }
+    subscription.unsubscribe()
+    await Promise.all([
+      preload.catch(() => undefined),
+      live.cleanup(),
+      source.cleanup(),
+    ])
+  }
+})
+
+type UnindexedReplayRow = { id: string; rank: number }
+type UnindexedReplayResult = {
+  hasMore: boolean
+  appliedRowKeys: ReadonlyArray<string>
+}
+type UnindexedReplayObservedChange = {
+  type: `insert` | `update` | `delete`
+  key: string
+  value: UnindexedReplayRow
+}
+
+function createUnindexedReplayHarness(id: string) {
+  const pending: Array<{
+    options: LoadSubsetOptions
+    request?: ReturnType<typeof createDeferred<UnindexedReplayResult>>
+  }> = []
+  const loadResults: Array<true | Promise<UnindexedReplayResult>> = []
+  const unloads: Array<LoadSubsetOptions> = []
+  const synchronousLoads = new Map<number, ReadonlyArray<UnindexedReplayRow>>()
+  const batches: Array<ReadonlyArray<UnindexedReplayObservedChange>> = []
+  const callbackReads: Array<ReadonlyArray<UnindexedReplayRow>> = []
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: UnindexedReplayRow }) => void
+  let commit!: (signal?: AbortSignal) => true | Promise<void>
+  let truncate!: () => void
+  const source = createCollection<UnindexedReplayRow>({
+    id: `${id}-source`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `off`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        truncate = params.truncate
+        params.markReady()
+        return {
+          loadSubset: (options) => {
+            const loadIndex = pending.length
+            const synchronousRows = synchronousLoads.get(loadIndex)
+            if (synchronousRows) {
+              pending.push({ options })
+              begin()
+              for (const row of synchronousRows) {
+                write({ type: `insert`, value: row })
+              }
+              commit()
+              const result = true as const
+              loadResults.push(result)
+              return result
+            }
+            const request = createDeferred<UnindexedReplayResult>()
+            pending.push({ options, request })
+            const result = request.promise
+            loadResults.push(result)
+            return result
+          },
+          unloadSubset: (options) => {
+            unloads.push(options)
+          },
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection({
+    id: `${id}-live`,
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(1),
+    startSync: true,
+  })
+  const readRows = () =>
+    live.toArray.map(({ id: rowId, rank }) => ({ id: rowId, rank }))
+  let observer: ReturnType<typeof live.subscribeChanges> | undefined
+  const startObserving = () => {
+    observer = live.subscribeChanges(
+      (changes) => {
+        batches.push(
+          changes
+            .map<UnindexedReplayObservedChange>(({ type, key, value }) => ({
+              type,
+              key: String(key),
+              value: { id: value.id, rank: value.rank },
+            }))
+            .sort((left, right) => left.key.localeCompare(right.key)),
+        )
+        callbackReads.push(readRows())
+      },
+      { includeInitialState: false },
+    )
+  }
+  const stopObserving = () => {
+    observer?.unsubscribe()
+    observer = undefined
+  }
+  const clearObservations = () => {
+    batches.length = 0
+    callbackReads.length = 0
+  }
+  const applyRows = async (rows: ReadonlyArray<UnindexedReplayRow>) => {
+    begin()
+    for (const row of rows) write({ type: `insert`, value: row })
+    const receipt = commit()
+    if (receipt !== true) await receipt
+  }
+  const applyRowsForRequest = (
+    requestIndex: number,
+    rows: ReadonlyArray<UnindexedReplayRow>,
+  ): Promise<true | void> => {
+    begin()
+    for (const row of rows) write({ type: `insert`, value: row })
+    return Promise.resolve(commit(pending[requestIndex]!.options.signal))
+  }
+  const startTruncate = () => {
+    begin()
+    truncate()
+    return commit()
+  }
+  const cleanup = async () => {
+    for (const { request } of pending) {
+      request?.reject(new Error(`test cleanup`))
+    }
+    stopObserving()
+    await Promise.all([live.cleanup(), source.cleanup()])
+  }
+
+  startObserving()
+  return {
+    source,
+    live,
+    pending,
+    loadResults,
+    unloads,
+    synchronousLoads,
+    batches,
+    callbackReads,
+    readRows,
+    startObserving,
+    stopObserving,
+    clearObservations,
+    applyRows,
+    applyRowsForRequest,
+    startTruncate,
+    cleanup,
+  }
+}
+
+function expectUnindexedFullSnapshotRequest(options: LoadSubsetOptions): void {
+  expect(Object.keys(options).sort()).toEqual([
+    `cursor`,
+    `limit`,
+    `orderBy`,
+    `signal`,
+    `subscription`,
+    `where`,
+  ])
+  expect(options.where).toBeUndefined()
+  expect(options.limit).toBeUndefined()
+  expect(options.offset).toBeUndefined()
+  expect(options.cursor).toBeUndefined()
+  expect(options.orderBy).toHaveLength(1)
+  const ordering = options.orderBy![0]!
+  expect(Object.keys(ordering).sort()).toEqual([`compareOptions`, `expression`])
+  expect(Object.keys(ordering.expression).sort()).toEqual([`path`, `type`])
+  expect(ordering.expression).toEqual({ type: `ref`, path: [`rank`] })
+  expect(ordering.compareOptions).toStrictEqual({
+    direction: `asc`,
+    nulls: `first`,
+    stringSort: `locale`,
+  })
+  expect(options.signal).toBeInstanceOf(AbortSignal)
+  expect(options.subscription).toBeDefined()
+}
+
+function acquisitionIndices(
+  acquisitions: ReadonlyArray<{ options: LoadSubsetOptions }>,
+  releases: ReadonlyArray<LoadSubsetOptions>,
+): ReadonlyArray<number> {
+  return releases.map((options) =>
+    acquisitions.findIndex((acquisition) => acquisition.options === options),
+  )
+}
+
+it.each([`async`, `sync`] as const)(
+  `retries one unindexed fallback after a rejected truncate replay with %s success`,
+  async (successMode) => {
+    const harness = createUnindexedReplayHarness(
+      `unindexed-rejected-truncate-retry-${successMode}`,
+    )
+    const preload = harness.live.preload()
+    let cleaned = false
+
+    try {
+      expect(harness.pending).toHaveLength(1)
+      await harness.applyRows([{ id: `a`, rank: 1 }])
+      harness.pending[0]!.request!.resolve({
+        hasMore: false,
+        appliedRowKeys: [`a`],
+      })
+      await preload
+      await flushPromises()
+      expect(harness.live.status).toBe(`ready`)
+      expect(harness.live.isLoadingSubset).toBe(false)
+      expect(harness.live.utils.lastSubsetError).toBeUndefined()
+      expect(harness.readRows()).toEqual([{ id: `a`, rank: 1 }])
+
+      harness.clearObservations()
+      const replayFailure = new Error(`truncate replay failed`)
+      const failedReplacement = harness.startTruncate()
+      await flushPromises()
+      expect(harness.pending).toHaveLength(2)
+      expect(harness.live.status).toBe(`ready`)
+      expect(harness.live.isLoadingSubset).toBe(true)
+      harness.pending[1]!.request!.reject(replayFailure)
+      await Promise.resolve(failedReplacement).catch(() => undefined)
+      await flushPromises()
+
+      expect(harness.pending).toHaveLength(2)
+      expect(harness.live.status).toBe(`ready`)
+      expect(harness.live.isLoadingSubset).toBe(false)
+      expect(harness.live.utils.lastSubsetError).toBe(replayFailure)
+      expect(harness.readRows()).toEqual([{ id: `a`, rank: 1 }])
+      expect(harness.batches).toEqual([])
+      expect(harness.callbackReads).toEqual([])
+
+      if (successMode === `sync`) {
+        harness.synchronousLoads.set(2, [{ id: `b`, rank: 2 }])
+      }
+      const successfulReplacement = harness.startTruncate()
+      await flushPromises()
+      expect(harness.pending).toHaveLength(3)
+      expect(harness.live.isLoadingSubset).toBe(successMode === `async`)
+      expect(harness.live.utils.lastSubsetError).toBe(replayFailure)
+      if (successMode === `async`) {
+        expect(harness.readRows()).toEqual([{ id: `a`, rank: 1 }])
+        expect(harness.batches).toEqual([])
+        await harness.applyRows([{ id: `b`, rank: 2 }])
+        harness.pending[2]!.request!.resolve({
+          hasMore: false,
+          appliedRowKeys: [`b`],
+        })
+      } else {
+        expect(harness.readRows()).toEqual([{ id: `b`, rank: 2 }])
+        expect(harness.batches).toEqual([
+          [
+            { type: `delete`, key: `a`, value: { id: `a`, rank: 1 } },
+            { type: `insert`, key: `b`, value: { id: `b`, rank: 2 } },
+          ],
+        ])
+      }
+      if (successfulReplacement !== true) await successfulReplacement
+      await flushPromises()
+
+      expect(harness.pending).toHaveLength(3)
+      expect(harness.live.status).toBe(`ready`)
+      expect(harness.live.isLoadingSubset).toBe(false)
+      expect(harness.live.utils.lastSubsetError).toBe(replayFailure)
+      expect(harness.readRows()).toEqual([{ id: `b`, rank: 2 }])
+      expect(harness.batches).toEqual([
+        [
+          { type: `delete`, key: `a`, value: { id: `a`, rank: 1 } },
+          { type: `insert`, key: `b`, value: { id: `b`, rank: 2 } },
+        ],
+      ])
+      expect(harness.callbackReads).toEqual([[{ id: `b`, rank: 2 }]])
+
+      for (const { options } of harness.pending) {
+        expectUnindexedFullSnapshotRequest(options)
+      }
+      expect(
+        harness.loadResults.map((result) =>
+          result === true ? `sync` : `async`,
+        ),
+      ).toEqual([`async`, `async`, successMode === `sync` ? `sync` : `async`])
+      const signals = harness.pending.map(({ options }) => options.signal!)
+      expect(new Set(signals)).toHaveLength(3)
+      expect(signals.map(({ aborted }) => aborted)).toEqual([true, true, false])
+      expect(
+        new Set(harness.pending.map(({ options }) => options.subscription)),
+      ).toHaveLength(1)
+      expect(harness.unloads).toHaveLength(2)
+      expect(acquisitionIndices(harness.pending, harness.unloads)).toEqual([
+        1, 0,
+      ])
+
+      await harness.cleanup()
+      cleaned = true
+      expect(harness.live.status).toBe(`cleaned-up`)
+      expect(harness.live.isLoadingSubset).toBe(false)
+      expect(harness.live.utils.lastSubsetError).toBe(replayFailure)
+      expect(harness.readRows()).toEqual([])
+      expect(signals.map(({ aborted }) => aborted)).toEqual([true, true, true])
+      expect(harness.unloads).toHaveLength(3)
+      expect(acquisitionIndices(harness.pending, harness.unloads)).toEqual([
+        1, 0, 2,
+      ])
+    } finally {
+      await Promise.all([
+        preload.catch(() => undefined),
+        cleaned ? Promise.resolve() : harness.cleanup(),
+      ])
+    }
+  },
+)
+
+it.each([`resolve`, `reject`] as const)(
+  `fences a %s settlement from a truncate replay cleaned before completion`,
+  async (lateSettlement) => {
+    const harness = createUnindexedReplayHarness(
+      `unindexed-pending-replay-cleanup-${lateSettlement}`,
+    )
+    const firstPreload = harness.live.preload()
+    let restartPreload: Promise<void> | undefined
+    let replacement: true | Promise<void> | undefined
+    let cleaned = false
+
+    try {
+      expect(harness.pending).toHaveLength(1)
+      await harness.applyRows([{ id: `a`, rank: 1 }])
+      harness.pending[0]!.request!.resolve({
+        hasMore: false,
+        appliedRowKeys: [`a`],
+      })
+      await firstPreload
+      await flushPromises()
+      expect(harness.live.status).toBe(`ready`)
+      expect(harness.live.isLoadingSubset).toBe(false)
+      expect(harness.live.utils.lastSubsetError).toBeUndefined()
+      expect(harness.readRows()).toEqual([{ id: `a`, rank: 1 }])
+
+      harness.clearObservations()
+      replacement = harness.startTruncate()
+      void Promise.resolve(replacement).catch(() => {})
+      await flushPromises()
+      expect(harness.pending).toHaveLength(2)
+      expect(harness.live.status).toBe(`ready`)
+      expect(harness.live.isLoadingSubset).toBe(true)
+      expect(harness.live.utils.lastSubsetError).toBeUndefined()
+      expect(harness.readRows()).toEqual([{ id: `a`, rank: 1 }])
+      expect(harness.batches).toEqual([])
+      expect(harness.callbackReads).toEqual([])
+
+      const firstSessionSubscription = harness.pending[0]!.options.subscription
+      harness.stopObserving()
+      await harness.live.cleanup()
+      expect(harness.live.status).toBe(`cleaned-up`)
+      expect(harness.live.isLoadingSubset).toBe(false)
+      expect(harness.live.utils.lastSubsetError).toBeUndefined()
+      expect(harness.readRows()).toEqual([])
+      expect(harness.batches).toEqual([])
+      expect(harness.callbackReads).toEqual([])
+      expect(harness.unloads).toHaveLength(2)
+      expect(acquisitionIndices(harness.pending, harness.unloads)).toEqual([
+        1, 0,
+      ])
+
+      restartPreload = harness.live.preload()
+      harness.startObserving()
+      await flushPromises()
+      expect(harness.pending).toHaveLength(3)
+      expect(harness.live.status).toBe(`loading`)
+      expect(harness.live.isLoadingSubset).toBe(true)
+      expect(harness.live.utils.lastSubsetError).toBeUndefined()
+      expect(harness.readRows()).toEqual([])
+
+      const staleError = new Error(`stale replay failed`)
+      await expect(
+        harness.applyRowsForRequest(1, [{ id: `stale`, rank: -1 }]),
+      ).rejects.toBeInstanceOf(SyncTransactionAbortedError)
+      if (lateSettlement === `resolve`) {
+        harness.pending[1]!.request!.resolve({
+          hasMore: false,
+          appliedRowKeys: [`stale`],
+        })
+      } else {
+        harness.pending[1]!.request!.reject(staleError)
+      }
+      await Promise.resolve(replacement).catch(() => undefined)
+      await flushPromises()
+      expect(harness.pending).toHaveLength(3)
+      expect(harness.live.status).toBe(`loading`)
+      expect(harness.live.isLoadingSubset).toBe(true)
+      expect(harness.live.utils.lastSubsetError).toBeUndefined()
+      expect(harness.readRows()).toEqual([])
+      expect(harness.batches).toEqual([])
+      expect(harness.callbackReads).toEqual([])
+
+      await harness.applyRows([{ id: `c`, rank: 3 }])
+      expect(harness.readRows()).toEqual([{ id: `c`, rank: 3 }])
+      expect(harness.batches).toEqual([
+        [{ type: `insert`, key: `c`, value: { id: `c`, rank: 3 } }],
+      ])
+      expect(harness.callbackReads).toEqual([[{ id: `c`, rank: 3 }]])
+      const appliedStateRevision = harness.live._stateRevision
+      const appliedLayoutRevision = harness.live._layoutRevision
+      harness.pending[2]!.request!.resolve({
+        hasMore: false,
+        appliedRowKeys: [`c`],
+      })
+      await restartPreload
+      await flushPromises()
+
+      expect(harness.pending).toHaveLength(3)
+      expect(harness.live.status).toBe(`ready`)
+      expect(harness.live.isLoadingSubset).toBe(false)
+      expect(harness.live.utils.lastSubsetError).toBeUndefined()
+      expect(harness.readRows()).toEqual([{ id: `c`, rank: 3 }])
+      expect(harness.batches).toEqual([
+        [{ type: `insert`, key: `c`, value: { id: `c`, rank: 3 } }],
+        [],
+      ])
+      expect(harness.callbackReads).toEqual([
+        [{ id: `c`, rank: 3 }],
+        [{ id: `c`, rank: 3 }],
+      ])
+      expect(harness.live._stateRevision).toBe(appliedStateRevision)
+      expect(harness.live._layoutRevision).toBe(appliedLayoutRevision)
+
+      for (const { options } of harness.pending) {
+        expectUnindexedFullSnapshotRequest(options)
+      }
+      const signals = harness.pending.map(({ options }) => options.signal!)
+      expect(new Set(signals)).toHaveLength(3)
+      expect(signals.map(({ aborted }) => aborted)).toEqual([true, true, false])
+      expect(harness.pending[1]!.options.subscription).toBe(
+        firstSessionSubscription,
+      )
+      expect(harness.pending[2]!.options.subscription).not.toBe(
+        firstSessionSubscription,
+      )
+      const loadResults = await Promise.allSettled(
+        harness.loadResults.map((result) => Promise.resolve(result)),
+      )
+      expect(loadResults[0]).toStrictEqual({
+        status: `fulfilled`,
+        value: { hasMore: false, appliedRowKeys: [`a`] },
+      })
+      if (lateSettlement === `resolve`) {
+        expect(loadResults[1]).toStrictEqual({
+          status: `fulfilled`,
+          value: { hasMore: false, appliedRowKeys: [`stale`] },
+        })
+      } else {
+        expect(loadResults[1]!.status).toBe(`rejected`)
+        if (loadResults[1]!.status === `rejected`) {
+          expect(loadResults[1]!.reason).toBe(staleError)
+        }
+      }
+      expect(loadResults[2]).toStrictEqual({
+        status: `fulfilled`,
+        value: { hasMore: false, appliedRowKeys: [`c`] },
+      })
+
+      await harness.cleanup()
+      cleaned = true
+      expect(harness.live.status).toBe(`cleaned-up`)
+      expect(harness.live.isLoadingSubset).toBe(false)
+      expect(harness.live.utils.lastSubsetError).toBeUndefined()
+      expect(harness.readRows()).toEqual([])
+      expect(signals.map(({ aborted }) => aborted)).toEqual([true, true, true])
+      expect(harness.unloads).toHaveLength(3)
+      expect(acquisitionIndices(harness.pending, harness.unloads)).toEqual([
+        1, 0, 2,
+      ])
+    } finally {
+      await Promise.all([
+        firstPreload.catch(() => undefined),
+        restartPreload?.catch(() => undefined),
+        cleaned ? Promise.resolve() : harness.cleanup(),
+      ])
+    }
+  },
+)
+
+it.each(
+  ([`resolve`, `reject`] as const).flatMap((supersededSettlement) =>
+    ([`superseded-first`, `current-first`] as const).map((settlementOrder) => ({
+      supersededSettlement,
+      settlementOrder,
+    })),
+  ),
+)(
+  `publishes only the current replay when an overlapping replay settles $settlementOrder with $supersededSettlement`,
+  async ({ supersededSettlement, settlementOrder }) => {
+    const harness = createUnindexedReplayHarness(
+      `unindexed-overlapping-replays-${supersededSettlement}-${settlementOrder}`,
+    )
+    const preload = harness.live.preload()
+    let firstReplacement: true | Promise<void> | undefined
+    let currentReplacement: true | Promise<void> | undefined
+    let cleaned = false
+
+    try {
+      expect(harness.pending).toHaveLength(1)
+      await harness.applyRows([{ id: `a`, rank: 1 }])
+      harness.pending[0]!.request!.resolve({
+        hasMore: false,
+        appliedRowKeys: [`a`],
+      })
+      await preload
+      await flushPromises()
+      expect(harness.live.status).toBe(`ready`)
+      expect(harness.live.isLoadingSubset).toBe(false)
+      expect(harness.live.utils.lastSubsetError).toBeUndefined()
+      expect(harness.readRows()).toEqual([{ id: `a`, rank: 1 }])
+
+      harness.clearObservations()
+      firstReplacement = harness.startTruncate()
+      void Promise.resolve(firstReplacement).catch(() => {})
+      await flushPromises()
+      expect(harness.pending).toHaveLength(2)
+
+      currentReplacement = harness.startTruncate()
+      void Promise.resolve(currentReplacement).catch(() => {})
+      await flushPromises()
+      expect(harness.pending).toHaveLength(3)
+      expect(harness.live.status).toBe(`ready`)
+      expect(harness.live.isLoadingSubset).toBe(true)
+      expect(harness.live.utils.lastSubsetError).toBeUndefined()
+      expect(harness.readRows()).toEqual([{ id: `a`, rank: 1 }])
+      expect(harness.batches).toEqual([])
+      expect(harness.callbackReads).toEqual([])
+
+      const signals = harness.pending.map(({ options }) => options.signal!)
+      expect(new Set(signals)).toHaveLength(3)
+      expect(signals.map(({ aborted }) => aborted)).toEqual([true, true, false])
+      expect(
+        new Set(harness.pending.map(({ options }) => options.subscription)),
+      ).toHaveLength(1)
+      expect(harness.unloads).toEqual([])
+
+      await expect(
+        harness.applyRowsForRequest(1, [{ id: `stale`, rank: -1 }]),
+      ).rejects.toBeInstanceOf(SyncTransactionAbortedError)
+      await harness.applyRowsForRequest(2, [{ id: `c`, rank: 3 }])
+      expect(harness.readRows()).toEqual([{ id: `a`, rank: 1 }])
+      expect(harness.batches).toEqual([])
+      expect(harness.callbackReads).toEqual([])
+
+      const supersededError = new Error(`superseded replay failed`)
+      const settleSuperseded = () => {
+        if (supersededSettlement === `resolve`) {
+          harness.pending[1]!.request!.resolve({
+            hasMore: false,
+            appliedRowKeys: [`stale`],
+          })
+        } else {
+          harness.pending[1]!.request!.reject(supersededError)
+        }
+      }
+      const settleCurrent = () => {
+        harness.pending[2]!.request!.resolve({
+          hasMore: false,
+          appliedRowKeys: [`c`],
+        })
+      }
+      const settleFirst =
+        settlementOrder === `superseded-first`
+          ? settleSuperseded
+          : settleCurrent
+      const settleLast =
+        settlementOrder === `superseded-first`
+          ? settleCurrent
+          : settleSuperseded
+
+      settleFirst()
+      await flushPromises()
+      expect(harness.live.status).toBe(`ready`)
+      expect(harness.live.isLoadingSubset).toBe(true)
+      expect(harness.live.utils.lastSubsetError).toBeUndefined()
+      expect(harness.readRows()).toEqual([{ id: `a`, rank: 1 }])
+      expect(harness.batches).toEqual([])
+      expect(harness.callbackReads).toEqual([])
+      expect(acquisitionIndices(harness.pending, harness.unloads)).toEqual(
+        settlementOrder === `superseded-first` ? [1] : [0],
+      )
+
+      settleLast()
+      await Promise.all([
+        Promise.resolve(firstReplacement),
+        Promise.resolve(currentReplacement),
+      ])
+      await flushPromises()
+
+      expect(harness.pending).toHaveLength(3)
+      expect(harness.live.status).toBe(`ready`)
+      expect(harness.live.isLoadingSubset).toBe(false)
+      expect(harness.live.utils.lastSubsetError).toBeUndefined()
+      expect(harness.readRows()).toEqual([{ id: `c`, rank: 3 }])
+      expect(harness.batches).toEqual([
+        [
+          { type: `delete`, key: `a`, value: { id: `a`, rank: 1 } },
+          { type: `insert`, key: `c`, value: { id: `c`, rank: 3 } },
+        ],
+      ])
+      expect(harness.callbackReads).toEqual([[{ id: `c`, rank: 3 }]])
+      expect(acquisitionIndices(harness.pending, harness.unloads)).toEqual(
+        settlementOrder === `superseded-first` ? [1, 0] : [0, 1],
+      )
+
+      for (const { options } of harness.pending) {
+        expectUnindexedFullSnapshotRequest(options)
+      }
+      const loadResults = await Promise.allSettled(
+        harness.loadResults.map((result) => Promise.resolve(result)),
+      )
+      expect(loadResults[0]).toStrictEqual({
+        status: `fulfilled`,
+        value: { hasMore: false, appliedRowKeys: [`a`] },
+      })
+      if (supersededSettlement === `resolve`) {
+        expect(loadResults[1]).toStrictEqual({
+          status: `fulfilled`,
+          value: { hasMore: false, appliedRowKeys: [`stale`] },
+        })
+      } else {
+        expect(loadResults[1]!.status).toBe(`rejected`)
+        if (loadResults[1]!.status === `rejected`) {
+          expect(loadResults[1]!.reason).toBe(supersededError)
+        }
+      }
+      expect(loadResults[2]).toStrictEqual({
+        status: `fulfilled`,
+        value: { hasMore: false, appliedRowKeys: [`c`] },
+      })
+
+      await harness.cleanup()
+      cleaned = true
+      expect(harness.live.status).toBe(`cleaned-up`)
+      expect(harness.live.isLoadingSubset).toBe(false)
+      expect(harness.live.utils.lastSubsetError).toBeUndefined()
+      expect(harness.readRows()).toEqual([])
+      expect(signals.map(({ aborted }) => aborted)).toEqual([true, true, true])
+      expect(acquisitionIndices(harness.pending, harness.unloads)).toEqual(
+        settlementOrder === `superseded-first` ? [1, 0, 2] : [0, 1, 2],
+      )
+    } finally {
+      await Promise.all([
+        preload.catch(() => undefined),
+        cleaned ? Promise.resolve() : harness.cleanup(),
+      ])
+    }
+  },
+)
+
+it.each([`eager`, `off`] as const)(
+  `keeps an Effect zero-limit join free of ordered transport work with autoIndex %s`,
+  async (autoIndex) => {
+    type PrimaryRow = { id: string; rank: number; joinKey: string }
+    type SecondaryRow = { id: string; joinKey: string }
+    const primaryLoads: Array<LoadSubsetOptions> = []
+    const primary = createCollection<PrimaryRow>({
+      id: `multi-source-zero-limit-effect-primary-${autoIndex}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: (options) => {
+              primaryLoads.push(options)
+              return true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const secondary = createCollection<SecondaryRow>({
+      id: `multi-source-zero-limit-effect-secondary-${autoIndex}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => true,
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const effect = createEffect({
+      query: (q) =>
+        q
+          .from({ primaryRow: primary })
+          .innerJoin(
+            { secondaryRow: secondary },
+            ({ primaryRow, secondaryRow }) =>
+              eq(primaryRow.joinKey, secondaryRow.joinKey),
+          )
+          .orderBy(({ primaryRow }) => primaryRow.rank)
+          .offset(2)
+          .limit(0),
+      onBatch: () => {},
+    })
+
+    try {
+      await flushPromises()
+      expect(primaryLoads).toEqual([])
+    } finally {
+      await effect.dispose()
+      await Promise.all([primary.cleanup(), secondary.cleanup()])
+    }
+  },
+)
+
+it(`settles concurrent secondary loads out of order across paged commits`, async () => {
+  type PrimaryRow = { id: string; rank: number; joinKey: string }
+  type SecondaryRow = { id: string; joinKey: string }
+  type PendingSecondaryLoad = {
+    requestIndex: number
+    options: LoadSubsetOptions
+    gate: ReturnType<typeof createDeferred<void>>
+    joinKeys: ReadonlyArray<string>
+  }
+
+  const primaryOptions = mockSyncCollectionOptions<PrimaryRow>({
+    id: `multi-source-filtered-primary`,
+    initialData: [
+      { id: `a`, rank: 1, joinKey: `a` },
+      { id: `b`, rank: 2, joinKey: `b` },
+    ],
+    getKey: (row) => row.id,
+    syncMode: `eager`,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+  })
+  const primary = createCollection(primaryOptions)
+  const secondaryRows = [
+    { id: `a-1`, joinKey: `a` },
+    { id: `a-0`, joinKey: `a` },
+    { id: `b-1`, joinKey: `b` },
+    { id: `b-0`, joinKey: `b` },
+    { id: `c-0`, joinKey: `c` },
+  ]
+  const pendingSecondaryLoads: Array<PendingSecondaryLoad> = []
+  const secondaryCompletionOrder: Array<number> = []
+  const secondaryReceipts: Array<{
+    requestIndex: number
+    appliedRowKeys: ReadonlyArray<string>
+  }> = []
+  const secondaryLoadCommitSizes: Array<number> = []
+  let secondaryBegin!: () => void
+  let secondaryWrite!: (message: {
+    type: `insert`
+    value: SecondaryRow
+  }) => void
+  let secondaryCommit!: () => true | Promise<void>
+  const establishedSecondaryKeys = new Set<string>()
+  const secondary = createCollection<SecondaryRow>({
+    id: `multi-source-filtered-secondary`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (params) => {
+        secondaryBegin = params.begin
+        secondaryWrite = params.write
+        secondaryCommit = params.commit
+        secondaryBegin()
+        secondaryWrite({
+          type: `insert`,
+          value: { id: `unrelated`, joinKey: `unrelated` },
+        })
+        establishedSecondaryKeys.add(`unrelated`)
+        const seeded = secondaryCommit()
+        if (seeded !== true) {
+          throw new Error(`Expected synchronous secondary seed`)
+        }
+        params.markReady()
+        return {
+          loadSubset: async (options) => {
+            const matchingRows = secondaryRows.filter(
+              (row) =>
+                options.where === undefined ||
+                evaluateReferenceExpression(options.where, row),
+            )
+            const joinKeys = [
+              ...new Set(matchingRows.map(({ joinKey }) => joinKey)),
+            ]
+            const pending = {
+              requestIndex: pendingSecondaryLoads.length,
+              options,
+              gate: createDeferred<void>(),
+              joinKeys,
+            }
+            pendingSecondaryLoads.push(pending)
+            await pending.gate.promise
+
+            const appliedRowKeys: Array<string> = []
+            for (const row of [...matchingRows].reverse()) {
+              if (establishedSecondaryKeys.has(row.id)) continue
+              establishedSecondaryKeys.add(row.id)
+              secondaryLoadCommitSizes.push(1)
+              secondaryBegin()
+              secondaryWrite({ type: `insert`, value: row })
+              const applied = secondaryCommit()
+              if (applied !== true) await applied
+              appliedRowKeys.push(row.id)
+            }
+            secondaryCompletionOrder.push(pending.requestIndex)
+            secondaryReceipts.push({
+              requestIndex: pending.requestIndex,
+              appliedRowKeys,
+            })
+            return { hasMore: false, appliedRowKeys }
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const createFilteredLive = (id: string, primaryId: string) =>
+    createLiveQueryCollection({
+      id,
+      query: (q) =>
+        q
+          .from({ primaryRow: primary })
+          .where(({ primaryRow }) => eq(primaryRow.id, primaryId))
+          .innerJoin(
+            { secondaryRow: secondary },
+            ({ primaryRow, secondaryRow }) =>
+              eq(primaryRow.joinKey, secondaryRow.joinKey),
+          )
+          .orderBy(({ primaryRow }) => primaryRow.rank)
+          .limit(2),
+      startSync: true,
+    })
+  const liveA = createFilteredLive(`multi-source-filtered-live-a`, `a`)
+  const liveB = createFilteredLive(`multi-source-filtered-live-b`, `b`)
+
+  try {
+    const preload = Promise.all([liveA.preload(), liveB.preload()])
+    await flushPromises()
+    expect(pendingSecondaryLoads).toHaveLength(2)
+    expect(pendingSecondaryLoads.every(({ options }) => !options.where)).toBe(
+      true,
+    )
+    expect(pendingSecondaryLoads.map(({ joinKeys }) => joinKeys)).toEqual([
+      [`a`, `b`, `c`],
+      [`a`, `b`, `c`],
+    ])
+
+    pendingSecondaryLoads[1]!.gate.resolve()
+    await flushPromises()
+    pendingSecondaryLoads[0]!.gate.resolve()
+    await preload
+    await flushPromises()
+
+    expect(secondaryCompletionOrder).toEqual([1, 0])
+    expect(secondaryLoadCommitSizes).toEqual([1, 1, 1, 1, 1])
+    expect(secondaryReceipts.map(({ requestIndex }) => requestIndex)).toEqual([
+      1, 0,
+    ])
+    const claimedSecondaryKeys = secondaryReceipts.flatMap(
+      ({ appliedRowKeys }) => appliedRowKeys,
+    )
+    expect(new Set(claimedSecondaryKeys).size).toBe(claimedSecondaryKeys.length)
+    expect(new Set(claimedSecondaryKeys)).toEqual(
+      new Set(secondaryRows.map(({ id }) => id)),
+    )
+    expect(secondaryReceipts[0]?.appliedRowKeys).toEqual(
+      [...secondaryRows].reverse().map(({ id }) => id),
+    )
+    expect(secondaryReceipts[1]?.appliedRowKeys).toEqual([])
+    expect(
+      liveA.toArray.map(
+        ({ primaryRow, secondaryRow }) => `${primaryRow.id}:${secondaryRow.id}`,
+      ),
+    ).toEqual([`a:a-0`, `a:a-1`])
+    expect(
+      liveB.toArray.map(
+        ({ primaryRow, secondaryRow }) => `${primaryRow.id}:${secondaryRow.id}`,
+      ),
+    ).toEqual([`b:b-0`, `b:b-1`])
+  } finally {
+    for (const pending of pendingSecondaryLoads) pending.gate.resolve()
+    await Promise.all([
+      liveA.cleanup(),
+      liveB.cleanup(),
+      primary.cleanup(),
+      secondary.cleanup(),
+    ])
+  }
+})
+
+it(`projects the minimal source prefix needed by evaluated result contributions`, () => {
+  const projection = projectOrderedSourceProgress({
+    sourceSteps: [
+      { sourceKey: `a`, resultKeys: [`a:x-0`], demandKeys: [`x`] },
+      { sourceKey: `b`, resultKeys: [], demandKeys: [`y`] },
+      { sourceKey: `c`, resultKeys: [`c:z-0`], demandKeys: [`z`] },
+      { sourceKey: `d`, resultKeys: [`d:x-0`], demandKeys: [`x`] },
+    ],
+    offset: 0,
+    limit: 2,
+  })
+
+  expect(projection).toEqual({
+    visibleResultKeys: [`a:x-0`, `c:z-0`],
+    scannedSourceKeys: [`a`, `b`, `c`],
+    sourceCursorKeys: [undefined, `a`, `b`],
+    demandedKeys: [`x`, `y`, `z`],
+    rowsNeeded: 0,
+    sourceExhausted: false,
+  })
+})
+
+it(`erases demand-key spelling without changing source progress`, () => {
+  const original = projectOrderedSourceProgress({
+    sourceSteps: [
+      { sourceKey: `a`, resultKeys: [`a:match-0`], demandKeys: [`x`] },
+      { sourceKey: `b`, resultKeys: [], demandKeys: [`y`] },
+      { sourceKey: `c`, resultKeys: [`c:match-0`], demandKeys: [`x`] },
+    ],
+    offset: 0,
+    limit: 2,
+  })
+  const renamed = projectOrderedSourceProgress({
+    sourceSteps: [
+      {
+        sourceKey: `a`,
+        resultKeys: [`a:match-0`],
+        demandKeys: [`renamed-x`],
+      },
+      { sourceKey: `b`, resultKeys: [], demandKeys: [`renamed-y`] },
+      {
+        sourceKey: `c`,
+        resultKeys: [`c:match-0`],
+        demandKeys: [`renamed-x`],
+      },
+    ],
+    offset: 0,
+    limit: 2,
+  })
+
+  expect({
+    visibleResultKeys: original.visibleResultKeys,
+    scannedSourceKeys: original.scannedSourceKeys,
+    sourceCursorKeys: original.sourceCursorKeys,
+    rowsNeeded: original.rowsNeeded,
+    sourceExhausted: original.sourceExhausted,
+  }).toEqual({
+    visibleResultKeys: renamed.visibleResultKeys,
+    scannedSourceKeys: renamed.scannedSourceKeys,
+    sourceCursorKeys: renamed.sourceCursorKeys,
+    rowsNeeded: renamed.rowsNeeded,
+    sourceExhausted: renamed.sourceExhausted,
+  })
+})
+
+it(`exhausts the bounded multi-source ordered-window model`, () => {
+  const rows = [
+    { key: `a`, joinKey: `x` },
+    { key: `b`, joinKey: `y` },
+    { key: `c`, joinKey: `z` },
+  ]
+  for (const xCount of [0, 1, 2]) {
+    for (const yCount of [0, 1, 2]) {
+      for (const zCount of [0, 1, 2]) {
+        const counts = [xCount, yCount, zCount]
+        const sourceSteps = rows.map((row, index) => ({
+          sourceKey: row.key,
+          resultKeys: Array.from(
+            { length: counts[index]! },
+            (_, matchIndex) => `${row.key}:${row.joinKey}-${matchIndex}`,
+          ),
+          demandKeys: [row.joinKey],
+        }))
+        for (const offset of [0, 1, 2]) {
+          for (const limit of [0, 1, 2]) {
+            const projection = projectOrderedSourceProgress({
+              sourceSteps,
+              offset,
+              limit,
+            })
+            const direct = sourceSteps
+              .flatMap(({ resultKeys }) => resultKeys)
+              .slice(offset, offset + limit)
+
+            expect(projection.visibleResultKeys).toEqual(direct)
+            expect(projection.rowsNeeded).toBe(
+              Math.max(0, limit - direct.length),
+            )
+            if (limit === 0) {
+              expect(projection.scannedSourceKeys).toEqual([])
+              continue
+            }
+            if (projection.scannedSourceKeys.length < sourceSteps.length) {
+              const shorterPrefix = sourceSteps.slice(
+                0,
+                projection.scannedSourceKeys.length - 1,
+              )
+              const shorterPairCount = shorterPrefix.reduce(
+                (count, step) => count + step.resultKeys.length,
+                0,
+              )
+              expect(shorterPairCount).toBeLessThan(offset + limit)
+            } else {
+              expect(projection.sourceExhausted).toBe(true)
+            }
+          }
+        }
+      }
+    }
+  }
+})
+
+fcTest.prop([multiSourceOrderedScenarioArbitrary], {
+  numRuns: 12 * fullFlowMultiplier,
+  seed: 17802,
+})(
+  `fills joined ordered windows for a fixed seed`,
+  runMultiSourceOrderedScenario,
+)
+
+fcTest.prop(
+  [multiSourceOrderedScenarioArbitrary],
+  oracleRandomParameters(
+    12 * fullFlowMultiplier,
+    fullFlowReplay,
+    `load-subset-full-flow.multi-source-ordered`,
+  ),
+)(
+  `fills joined ordered windows for a random or replayed seed`,
+  runMultiSourceOrderedScenario,
+)
 
 type TruncateCoverageScenario = {
   oldRequest: `none` | `settles-late`
@@ -79,9 +2947,6 @@ const exhaustiveTruncateCoverageScenarios: Array<TruncateCoverageScenario> = [
     })),
   ),
 )
-
-const { multiplier: fullFlowMultiplier, replaySeed: fullFlowReplaySeed } =
-  readOracleRunConfig()
 
 let truncateCoverageHarnessId = 0
 
@@ -134,9 +2999,11 @@ async function runTruncateCoverageScenario(
   const request = (ownerId: string, options: LoadSubsetOptions) => {
     histories.push({
       type: `requestDemand`,
+      sourceId: `source`,
       ownerId,
       sessionId: `session`,
       demandId: `prefix-${options.limit}`,
+      attemptId: `${ownerId}-attempt`,
       alreadyAborted: false,
     })
     activeOptions.push(options)
@@ -162,8 +3029,10 @@ async function runTruncateCoverageScenario(
     histories.push({
       type:
         hasMore === undefined ? `applyUnprovenRows` : `applyAuthoritativeRows`,
+      sourceId: `source`,
       ownerId,
       demandId: `prefix-${options.limit}`,
+      attemptId: `${ownerId}-attempt`,
       rowKeys: rows.map(({ id }) => id),
     })
   }
@@ -172,8 +3041,10 @@ async function runTruncateCoverageScenario(
     pending.get(options)!.reject(new Error(`fresh replay failed`))
     histories.push({
       type: `rejectDemand`,
+      sourceId: `source`,
       ownerId,
       demandId: `prefix-${options.limit}`,
+      attemptId: `${ownerId}-attempt`,
     })
   }
 
@@ -205,7 +3076,11 @@ async function runTruncateCoverageScenario(
     truncate()
     const truncated = commit()
     if (truncated !== true) await truncated
-    histories.push({ type: `truncateSource`, sessionId: `session` })
+    histories.push({
+      type: `truncateSource`,
+      sessionId: `session`,
+      sourceId: `source`,
+    })
     expectModel()
 
     const freshLoad = request(`fresh`, freshOptions)
@@ -243,6 +3118,7 @@ async function runTruncateCoverageScenario(
       source._sync.unloadSubset(options)
       histories.push({
         type: `releaseDemand`,
+        sourceId: `source`,
         ownerId:
           options === initialOptions
             ? `initial`
@@ -250,16 +3126,13 @@ async function runTruncateCoverageScenario(
               ? `old`
               : `fresh`,
         demandId: `prefix-${options.limit}`,
-        rowKeys:
+        attemptId: `${
           options === initialOptions
-            ? [`initial`]
+            ? `initial`
             : options === oldOptions
-              ? [`old`]
-              : scenario.freshResult === `reject`
-                ? []
-                : [`fresh`],
-        finalRowOwner: true,
-        invalidatesAdapterEvidence: true,
+              ? `old`
+              : `fresh`
+        }-attempt`,
       })
     }
     expect(unloadSubset.mock.calls.map(([options]) => options)).toEqual(
@@ -274,24 +3147,448 @@ async function runTruncateCoverageScenario(
   }
 }
 
+it.each([
+  { oldOutcome: `authoritative`, freshSettlesFirst: false },
+  { oldOutcome: `unproven`, freshSettlesFirst: false },
+  { oldOutcome: `rejected`, freshSettlesFirst: false },
+  { oldOutcome: `evidence-free`, freshSettlesFirst: false },
+  { oldOutcome: `released`, freshSettlesFirst: false },
+  { oldOutcome: `released`, freshSettlesFirst: true },
+] as const)(
+  `keeps fresh exact-demand work shared after a pre-truncate $oldOutcome request (freshSettlesFirst=$freshSettlesFirst)`,
+  async ({ oldOutcome, freshSettlesFirst }) => {
+    type Row = { id: string; value: number }
+    type AdapterResult =
+      | {
+          hasMore: boolean | undefined
+          appliedRowKeys: ReadonlyArray<string>
+        }
+      | undefined
+    let begin!: () => void
+    let write!: (message: { type: `insert`; value: Row }) => void
+    let commit!: () => true | Promise<void>
+    let truncate!: () => void
+    const pending: Array<ReturnType<typeof createDeferred<AdapterResult>>> = []
+    const deduplicated = new DeduplicatedLoadSubset({
+      loadSubset: () => {
+        const request = createDeferred<AdapterResult>()
+        pending.push(request)
+        return request.promise
+      },
+    })
+    const source = createCollection<Row>({
+      id: `same-demand-truncate-${oldOutcome}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          truncate = params.truncate
+          params.markReady()
+          return {
+            loadSubset: deduplicated.loadSubset,
+            unloadSubset: deduplicated.unloadSubset,
+          }
+        },
+      },
+    })
+    const oldOptions = { limit: 2 }
+    const freshOptions = { limit: 2 }
+    const peerOptions = { limit: 2 }
+    const applyRows = async (rows: ReadonlyArray<Row>) => {
+      begin()
+      rows.forEach((row) => write({ type: `insert`, value: row }))
+      const applied = commit()
+      if (applied !== true) await applied
+    }
+
+    try {
+      const oldLoad = source._sync.loadSubset(oldOptions)
+      if (oldLoad === true) throw new Error(`Expected an async old request`)
+      expect(pending).toHaveLength(1)
+
+      begin()
+      truncate()
+      const truncated = commit()
+      if (truncated !== true) await truncated
+      deduplicated.reset()
+
+      const freshLoad = source._sync.loadSubset(freshOptions)
+      if (freshLoad === true) throw new Error(`Expected an async fresh request`)
+      expect(pending).toHaveLength(2)
+
+      if (freshSettlesFirst) {
+        await applyRows([{ id: `fresh-row`, value: 2 }])
+        pending[1]!.resolve({
+          hasMore: false,
+          appliedRowKeys: [`fresh-row`],
+        })
+        await freshLoad
+
+        source._sync.unloadSubset(oldOptions)
+        expect(source._sync.loadSubset(peerOptions)).toBe(true)
+        expect(pending).toHaveLength(2)
+        expect(source._sync.getLoadSubsetOutcome(peerOptions)).toBeDefined()
+
+        pending[0]!.resolve(undefined)
+        await oldLoad
+        return
+      }
+
+      if (oldOutcome === `released`) {
+        source._sync.unloadSubset(oldOptions)
+      } else if (oldOutcome === `rejected`) {
+        const rejection = expect(oldLoad).rejects.toThrow(`old request failed`)
+        pending[0]!.reject(new Error(`old request failed`))
+        await rejection
+      } else if (oldOutcome === `evidence-free`) {
+        pending[0]!.resolve(undefined)
+        await oldLoad
+      } else {
+        await applyRows([{ id: `old-row`, value: 1 }])
+        pending[0]!.resolve({
+          hasMore: oldOutcome === `authoritative` ? false : undefined,
+          appliedRowKeys: [`old-row`],
+        })
+        await oldLoad
+      }
+
+      expect(source._sync.getLoadSubsetOutcome(freshOptions)).toBeUndefined()
+      const peerLoad = source._sync.loadSubset(peerOptions)
+      if (peerLoad === true) throw new Error(`Expected a shared peer request`)
+      expect(pending).toHaveLength(2)
+
+      await applyRows([{ id: `fresh-row`, value: 2 }])
+      pending[1]!.resolve({
+        hasMore: false,
+        appliedRowKeys: [`fresh-row`],
+      })
+      await Promise.all([freshLoad, peerLoad])
+      expect(source._sync.getLoadSubsetOutcome(peerOptions)).toBeDefined()
+      if (oldOutcome === `released`) {
+        pending[0]!.resolve(undefined)
+        await oldLoad
+      }
+    } finally {
+      for (const request of pending) {
+        request.reject(new Error(`test cleanup`))
+      }
+      await source.cleanup()
+    }
+  },
+)
+
+it(`keeps adapter release obligations distinct across attempts by one owner`, () => {
+  const history: ReadonlyArray<LoadSubsetFullFlowEvent> = [
+    {
+      type: `requestDemand`,
+      sourceId: `source`,
+      ownerId: `owner`,
+      sessionId: `session`,
+      demandId: `demand`,
+      attemptId: `attempt-1`,
+      alreadyAborted: false,
+    },
+    {
+      type: `requestDemand`,
+      sourceId: `source`,
+      ownerId: `owner`,
+      sessionId: `session`,
+      demandId: `demand`,
+      attemptId: `attempt-2`,
+      alreadyAborted: false,
+    },
+    {
+      type: `releaseDemand`,
+      sourceId: `source`,
+      ownerId: `owner`,
+      demandId: `demand`,
+      attemptId: `attempt-1`,
+    },
+    {
+      type: `releaseDemand`,
+      sourceId: `source`,
+      ownerId: `owner`,
+      demandId: `demand`,
+      attemptId: `attempt-2`,
+    },
+  ]
+
+  expect(projectAdapterLifecycle(history)).toEqual([
+    {
+      type: `invoke`,
+      ownerId: `owner`,
+      sourceId: `source`,
+      attemptId: `attempt-1`,
+    },
+    {
+      type: `invoke`,
+      ownerId: `owner`,
+      sourceId: `source`,
+      attemptId: `attempt-2`,
+    },
+    {
+      type: `release`,
+      ownerId: `owner`,
+      sourceId: `source`,
+      attemptId: `attempt-1`,
+    },
+    {
+      type: `release`,
+      ownerId: `owner`,
+      sourceId: `source`,
+      attemptId: `attempt-2`,
+    },
+  ])
+})
+
+let sourceIdentityHarnessId = 0
+
+it(`keeps identical demand and row identities local to each source`, async () => {
+  type Row = { id: string }
+  type Result = { hasMore: false; appliedRowKeys: ReadonlyArray<string> }
+  const createSource = (sourceId: string) => {
+    const result = createDeferred<Result>()
+    let begin!: () => void
+    let write!: (message: { type: `insert`; value: Row }) => void
+    let commit!: () => true | Promise<void>
+    const collection = createCollection<Row>({
+      id: `source-identity-${sourceIdentityHarnessId++}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          params.markReady()
+          return { loadSubset: () => result.promise }
+        },
+      },
+    })
+    const options = { limit: 1 }
+    const load = collection._sync.loadSubset(options)
+    if (load === true) throw new Error(`Expected a controlled async load`)
+    return {
+      sourceId,
+      collection,
+      options,
+      load,
+      settle: async () => {
+        begin()
+        write({ type: `insert`, value: { id: `shared-row` } })
+        const applied = commit()
+        if (applied !== true) await applied
+        result.resolve({ hasMore: false, appliedRowKeys: [`shared-row`] })
+        await load
+      },
+    }
+  }
+  const sourceA = createSource(`source-a`)
+  const sourceB = createSource(`source-b`)
+  const request = (sourceId: string): LoadSubsetFullFlowEvent => ({
+    type: `requestDemand`,
+    sourceId,
+    ownerId: `owner`,
+    sessionId: `session`,
+    demandId: `shared-demand`,
+    attemptId: `shared-attempt`,
+    alreadyAborted: false,
+  })
+  const settle = (sourceId: string): LoadSubsetFullFlowEvent => ({
+    type: `applyAuthoritativeRows`,
+    sourceId,
+    ownerId: `owner`,
+    demandId: `shared-demand`,
+    attemptId: `shared-attempt`,
+    rowKeys: [`shared-row`],
+  })
+  const history: Array<LoadSubsetFullFlowEvent> = [
+    request(sourceA.sourceId),
+    request(sourceB.sourceId),
+  ]
+  const actualRows = () =>
+    [sourceA, sourceB].flatMap(({ sourceId, collection }) =>
+      Array.from(collection.keys(), (rowKey) => ({ sourceId, rowKey })),
+    )
+
+  try {
+    await sourceA.settle()
+    history.push(settle(sourceA.sourceId))
+    expect(actualRows()).toEqual(projectRetainedSourceRows(history))
+    expect(projectReusableSourceDemands(history)).toEqual([
+      { sourceId: `source-a`, demandId: `shared-demand` },
+    ])
+
+    await sourceB.settle()
+    history.push(settle(sourceB.sourceId))
+    expect(actualRows()).toEqual(projectRetainedSourceRows(history))
+    expect(projectTransportLoads(history)).toBe(2)
+
+    sourceA.collection._sync.unloadSubset(sourceA.options)
+    history.push({
+      type: `releaseDemand`,
+      sourceId: sourceA.sourceId,
+      ownerId: `owner`,
+      demandId: `shared-demand`,
+      attemptId: `shared-attempt`,
+    })
+    expect(actualRows()).toEqual(projectRetainedSourceRows(history))
+    expect(projectReusableSourceDemands(history)).toEqual([
+      { sourceId: `source-b`, demandId: `shared-demand` },
+    ])
+  } finally {
+    await Promise.all([
+      sourceA.collection.cleanup(),
+      sourceB.collection.cleanup(),
+    ])
+  }
+})
+
+it(`derives shared row and evidence lifetime from active attempts`, () => {
+  const sharedHistory: ReadonlyArray<LoadSubsetFullFlowEvent> = [
+    {
+      type: `requestDemand`,
+      sourceId: `source`,
+      ownerId: `owner-a`,
+      sessionId: `session`,
+      demandId: `shared`,
+      attemptId: `attempt-a`,
+      alreadyAborted: false,
+    },
+    {
+      type: `requestDemand`,
+      sourceId: `source`,
+      ownerId: `owner-b`,
+      sessionId: `session`,
+      demandId: `shared`,
+      attemptId: `attempt-b`,
+      alreadyAborted: false,
+    },
+    {
+      type: `applyAuthoritativeRows`,
+      sourceId: `source`,
+      ownerId: `owner-a`,
+      demandId: `shared`,
+      attemptId: `attempt-a`,
+      rowKeys: [`x`],
+    },
+    {
+      type: `releaseDemand`,
+      sourceId: `source`,
+      ownerId: `owner-a`,
+      demandId: `shared`,
+      attemptId: `attempt-a`,
+    },
+  ]
+
+  expect(projectRetainedRowKeys(sharedHistory)).toEqual([`x`])
+  expect(
+    projectTransportLoads([
+      ...sharedHistory,
+      {
+        type: `requestDemand`,
+        sourceId: `source`,
+        ownerId: `owner-c`,
+        sessionId: `session`,
+        demandId: `shared`,
+        attemptId: `attempt-c`,
+        alreadyAborted: false,
+      },
+    ]),
+  ).toBe(1)
+
+  expect(
+    projectRetainedRowKeys([
+      ...sharedHistory,
+      {
+        type: `releaseDemand`,
+        sourceId: `source`,
+        ownerId: `owner-b`,
+        demandId: `shared`,
+        attemptId: `attempt-b`,
+      },
+    ]),
+  ).toEqual([])
+})
+
+it(`keeps an additional demand active until its final attempt releases`, () => {
+  const history: ReadonlyArray<LoadSubsetFullFlowEvent> = [
+    {
+      type: `requestDemand`,
+      sourceId: `source`,
+      ownerId: `owner-a`,
+      sessionId: `session`,
+      demandId: `other`,
+      attemptId: `attempt-a`,
+      alreadyAborted: false,
+    },
+    {
+      type: `requestDemand`,
+      sourceId: `source`,
+      ownerId: `owner-b`,
+      sessionId: `session`,
+      demandId: `other`,
+      attemptId: `attempt-b`,
+      alreadyAborted: false,
+    },
+    {
+      type: `stagePublicationRows`,
+      publicationId: `next`,
+      sourceId: `source`,
+      demandId: `ordered`,
+      rows: [{ key: `o`, orderValue: 0 }],
+    },
+    {
+      type: `stagePublicationRows`,
+      publicationId: `next`,
+      sourceId: `source`,
+      demandId: `other`,
+      rows: [{ key: `x`, orderValue: 1 }],
+    },
+    {
+      type: `releaseDemand`,
+      sourceId: `source`,
+      ownerId: `owner-a`,
+      demandId: `other`,
+      attemptId: `attempt-a`,
+    },
+    { type: `commitPublication`, publicationId: `next` },
+  ]
+
+  expect(
+    projectAtomicOrderedPublicationState(history, {
+      sourceId: `source`,
+      demandId: `ordered`,
+      direction: `asc`,
+      initialWindowSize: 1,
+    }).currentPublication?.rows.map(({ key }) => key),
+  ).toEqual([`o`, `x`])
+})
+
 it(`does not release physical work when an already-aborted demand skips adapter start`, async () => {
   const ownerId = `aborted-owner`
   const requestEvent: LoadSubsetFullFlowEvent = {
     type: `requestDemand`,
+    sourceId: `source`,
     ownerId,
     sessionId: `session-1`,
     demandId: `all-rows`,
+    attemptId: `aborted-attempt`,
     alreadyAborted: true,
   }
   const history: ReadonlyArray<LoadSubsetFullFlowEvent> = [
     requestEvent,
     {
       type: `releaseDemand`,
+      sourceId: `source`,
       ownerId,
       demandId: `all-rows`,
-      rowKeys: [],
-      finalRowOwner: false,
-      invalidatesAdapterEvidence: false,
+      attemptId: `aborted-attempt`,
     },
   ]
   const adapterEvents: Array<AdapterLifecycleEvent> = []
@@ -345,30 +3642,502 @@ it(`does not release physical work when an already-aborted demand skips adapter 
   }
 })
 
+it.each([127, 128, 129])(
+  `freezes a %i-byte equality constant across local filtering and adapter acquisition`,
+  async (byteLength) => {
+    type Row = { id: `original` | `changed`; token: Uint8Array }
+    const originalToken = new Uint8Array(byteLength).fill(1)
+    const changedToken = new Uint8Array(byteLength).fill(2)
+    const callerToken = new Uint8Array(originalToken)
+    Object.defineProperty(callerToken, `slice`, {
+      value: () => callerToken,
+    })
+    const rows: ReadonlyArray<Row> = [
+      { id: `original`, token: originalToken },
+      { id: `changed`, token: changedToken },
+    ]
+    let acquired: LoadSubsetOptions | undefined
+    const collection = createCollection<Row>({
+      id: `frozen-binary-equality-${byteLength}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          rows.forEach((value) => write({ type: `insert`, value }))
+          commit()
+          markReady()
+          return {
+            loadSubset: (options) => {
+              acquired = options
+              return true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const visible = new Set<Row[`id`]>()
+    const where = new Func<boolean>(`eq`, [
+      new PropRef([`token`]),
+      new Value(callerToken),
+    ])
+    const subscription = collection.subscribeChanges(
+      (changes) => {
+        for (const change of changes) {
+          if (change.type === `delete`) visible.delete(change.key as Row[`id`])
+          else visible.add(change.key as Row[`id`])
+        }
+      },
+      { whereExpression: where },
+    )
+
+    try {
+      callerToken.fill(2)
+      subscription.requestSnapshot({ optimizedOnly: false })
+
+      expect([...visible]).toEqual([`original`])
+      const acquiredValue = (
+        (acquired?.where as Func | undefined)?.args[1] as
+          | Value<Uint8Array>
+          | undefined
+      )?.value
+      expect(acquiredValue).toEqual(originalToken)
+      expect(acquiredValue).not.toBe(callerToken)
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  },
+)
+
+it(`rejects binary values without intrinsic typed-array slots before adapter acquisition`, async () => {
+  const bytes = new Proxy(new Uint8Array([2]), {
+    get: (target, key) =>
+      key === Symbol.iterator
+        ? function* () {
+            yield 1
+          }
+        : Reflect.get(target, key, target),
+  })
+  let adapterCalls = 0
+  const collection = createCollection<{ id: string; token: Uint8Array }>({
+    id: `reject-binary-proxy`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: ({ markReady }) => {
+        markReady()
+        return {
+          loadSubset: () => {
+            adapterCalls += 1
+            return true
+          },
+        }
+      },
+    },
+  })
+
+  try {
+    expect(() =>
+      collection.subscribeChanges(() => {}, {
+        whereExpression: new Func(`eq`, [
+          new PropRef([`token`]),
+          new Value(bytes),
+        ]),
+      }),
+    ).toThrow(/Cannot snapshot binary equality value/)
+    expect(adapterCalls).toBe(0)
+    expect(collection.subscriberCount).toBe(0)
+  } finally {
+    await collection.cleanup()
+  }
+})
+
+it(`freezes cross-realm binary equality across filtering and acquisition`, async () => {
+  type Row = { id: `original` | `changed`; token: Uint8Array }
+  const rows: ReadonlyArray<Row> = [
+    { id: `original`, token: new Uint8Array([1]) },
+    { id: `changed`, token: new Uint8Array([2]) },
+  ]
+  const callerToken = createCrossRealmUint8Array([1])
+  let acquired: LoadSubsetOptions | undefined
+  const collection = createCollection<Row>({
+    id: `frozen-cross-realm-binary-equality`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        rows.forEach((value) => write({ type: `insert`, value }))
+        commit()
+        markReady()
+        return {
+          loadSubset: (options) => {
+            acquired = options
+            return true
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const visible = new Set<Row[`id`]>()
+  const subscription = collection.subscribeChanges(
+    (changes) => {
+      for (const change of changes) {
+        if (change.type === `delete`) visible.delete(change.key as Row[`id`])
+        else visible.add(change.key as Row[`id`])
+      }
+    },
+    {
+      whereExpression: new Func(`eq`, [
+        new PropRef([`token`]),
+        new Value(callerToken),
+      ]),
+    },
+  )
+
+  try {
+    callerToken[0] = 2
+    subscription.requestSnapshot({ optimizedOnly: false })
+
+    expect([...visible]).toEqual([`original`])
+    const acquiredValue = (
+      (acquired?.where as Func | undefined)?.args[1] as
+        | Value<Uint8Array>
+        | undefined
+    )?.value
+    expect(acquiredValue).toEqual(new Uint8Array([1]))
+    expect(acquiredValue).not.toBe(callerToken)
+  } finally {
+    subscription.unsubscribe()
+    await collection.cleanup()
+  }
+})
+
+it(`keeps binary equality distinct from a sentinel-looking string`, async () => {
+  type Row = { id: `binary` | `string`; token: Uint8Array | string }
+  const binary = new Uint8Array([1, 2, 3])
+  const sentinel = normalizeValue(binary) as string
+  const collection = createCollection<Row>({
+    id: `binary-string-normalization-domains`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        write({ type: `insert`, value: { id: `binary`, token: binary } })
+        write({ type: `insert`, value: { id: `string`, token: sentinel } })
+        commit()
+        markReady()
+        return { loadSubset: () => true }
+      },
+    },
+  })
+  const visible = new Set<Row[`id`]>()
+  const subscription = collection.subscribeChanges(
+    (changes) => {
+      for (const change of changes) {
+        if (change.type === `delete`) visible.delete(change.key as Row[`id`])
+        else visible.add(change.key as Row[`id`])
+      }
+    },
+    {
+      whereExpression: new Func(`eq`, [
+        new PropRef([`token`]),
+        new Value(binary),
+      ]),
+    },
+  )
+
+  try {
+    subscription.requestSnapshot({ optimizedOnly: false })
+    expect([...visible]).toEqual([`binary`])
+  } finally {
+    subscription.unsubscribe()
+    await collection.cleanup()
+  }
+})
+
+it(`freezes computed membership candidates across local filtering and adapter acquisition`, async () => {
+  type Row = { id: `original` | `changed`; token: Uint8Array }
+  const candidates = [new Uint8Array([1])]
+  let acquired: LoadSubsetOptions | undefined
+  const collection = createCollection<Row>({
+    id: `frozen-computed-membership-candidates`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        write({
+          type: `insert`,
+          value: { id: `original`, token: new Uint8Array([1]) },
+        })
+        write({
+          type: `insert`,
+          value: { id: `changed`, token: new Uint8Array([2]) },
+        })
+        commit()
+        markReady()
+        return {
+          loadSubset: (options) => {
+            acquired = options
+            return true
+          },
+        }
+      },
+    },
+  })
+  const visible = new Set<Row[`id`]>()
+  const subscription = collection.subscribeChanges(
+    (changes) => {
+      for (const change of changes) {
+        if (change.type === `delete`) visible.delete(change.key as Row[`id`])
+        else visible.add(change.key as Row[`id`])
+      }
+    },
+    {
+      whereExpression: new Func(`in`, [
+        new PropRef([`token`]),
+        new Func(`coalesce`, [new Value(candidates)]),
+      ]),
+    },
+  )
+
+  try {
+    candidates[0]![0] = 2
+    subscription.requestSnapshot({ optimizedOnly: false })
+
+    expect([...visible]).toEqual([`original`])
+    const acquiredCandidates = (
+      ((acquired?.where as Func).args[1] as Func).args[0] as Value<
+        Array<Uint8Array>
+      >
+    ).value
+    expect(acquiredCandidates).toEqual([new Uint8Array([1])])
+    expect(acquiredCandidates).not.toBe(candidates)
+  } finally {
+    subscription.unsubscribe()
+    await collection.cleanup()
+  }
+})
+
+it(`rejects custom membership observation before adapter acquisition`, async () => {
+  const candidates = [new Uint8Array([2])]
+  Object.defineProperty(candidates, Symbol.iterator, {
+    value: function* () {
+      yield new Uint8Array([1])
+    },
+  })
+  let adapterCalls = 0
+  const collection = createCollection<{ id: string; token: Uint8Array }>({
+    id: `reject-custom-membership-observation`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: ({ markReady }) => {
+        markReady()
+        return {
+          loadSubset: () => {
+            adapterCalls += 1
+            return true
+          },
+        }
+      },
+    },
+  })
+  try {
+    expect(() =>
+      collection.subscribeChanges(() => {}, {
+        whereExpression: new Func(`in`, [
+          new PropRef([`token`]),
+          new Func(`coalesce`, [new Value(candidates)]),
+        ]),
+      }),
+    ).toThrow(/Cannot snapshot membership candidates/)
+    expect(adapterCalls).toBe(0)
+    expect(collection.subscriberCount).toBe(0)
+  } finally {
+    await collection.cleanup()
+  }
+})
+
+it(`uses intrinsic Date state for local filtering and adapter acquisition`, async () => {
+  type Row = { id: `instance-hook` | `intrinsic`; date: Date }
+  const callerDate = new Date(2)
+  Object.defineProperty(callerDate, `getTime`, { value: () => 1 })
+  let acquired: LoadSubsetOptions | undefined
+  const collection = createCollection<Row>({
+    id: `intrinsic-date-equality`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        write({
+          type: `insert`,
+          value: { id: `instance-hook`, date: new Date(1) },
+        })
+        write({
+          type: `insert`,
+          value: { id: `intrinsic`, date: new Date(2) },
+        })
+        commit()
+        markReady()
+        return {
+          loadSubset: (options) => {
+            acquired = options
+            return true
+          },
+        }
+      },
+    },
+  })
+  const visible = new Set<Row[`id`]>()
+  const subscription = collection.subscribeChanges(
+    (changes) => {
+      for (const change of changes) {
+        if (change.type === `delete`) visible.delete(change.key as Row[`id`])
+        else visible.add(change.key as Row[`id`])
+      }
+    },
+    {
+      whereExpression: new Func(`eq`, [
+        new PropRef([`date`]),
+        new Value(callerDate),
+      ]),
+    },
+  )
+
+  try {
+    subscription.requestSnapshot({ optimizedOnly: false })
+
+    expect([...visible]).toEqual([`intrinsic`])
+    const acquiredDate = ((acquired?.where as Func).args[1] as Value<Date>)
+      .value
+    expect(acquiredDate.getTime()).toBe(2)
+  } finally {
+    subscription.unsubscribe()
+    await collection.cleanup()
+  }
+})
+
+it(`rejects constructor-shaped Temporal lookalikes before adapter acquisition`, async () => {
+  class TemporalLookalike {
+    static from(): TemporalLookalike {
+      return new TemporalLookalike()
+    }
+    get [Symbol.toStringTag](): string {
+      return `Temporal.PlainDate`
+    }
+    toString(): string {
+      return `2024-01-15`
+    }
+  }
+  let adapterCalls = 0
+  const collection = createCollection<{ id: string; date: TemporalLookalike }>({
+    id: `reject-constructor-shaped-temporal`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: ({ markReady }) => {
+        markReady()
+        return {
+          loadSubset: () => {
+            adapterCalls += 1
+            return true
+          },
+        }
+      },
+    },
+  })
+
+  try {
+    expect(() =>
+      collection.subscribeChanges(() => {}, {
+        whereExpression: new Func(`eq`, [
+          new PropRef([`date`]),
+          new Value(new TemporalLookalike()),
+        ]),
+      }),
+    ).toThrow(/Cannot snapshot Temporal.PlainDate equality value/)
+    expect(adapterCalls).toBe(0)
+    expect(collection.subscriberCount).toBe(0)
+  } finally {
+    await collection.cleanup()
+  }
+})
+
+it(`rejects unsupported relational coercion before adapter entry`, async () => {
+  let adapterCalls = 0
+  const collection = createCollection<{ id: string; value: number }>({
+    id: `unsupported-relational-coercion`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: ({ markReady }) => {
+        markReady()
+        return {
+          loadSubset: () => {
+            adapterCalls += 1
+            return true
+          },
+        }
+      },
+    },
+  })
+  const coercion = { [Symbol.toPrimitive]: () => 1 }
+
+  try {
+    expect(() =>
+      collection.subscribeChanges(() => {}, {
+        whereExpression: new Func(`gt`, [
+          new PropRef([`value`]),
+          new Value(coercion),
+        ]),
+      }),
+    ).toThrow(/Cannot snapshot structural expression value/)
+    expect(adapterCalls).toBe(0)
+    expect(collection.subscriberCount).toBe(0)
+  } finally {
+    await collection.cleanup()
+  }
+})
+
 it(`reloads authoritative rows after final-owner cleanup invalidates retained adapter coverage`, async () => {
   type Row = { id: string; value: number }
   const row: Row = { id: `row`, value: 1 }
   const history: ReadonlyArray<LoadSubsetFullFlowEvent> = [
     {
       type: `requestDemand`,
+      sourceId: `source`,
       ownerId: `owner-1`,
       sessionId: `session-1`,
       demandId: `all-rows`,
+      attemptId: `attempt-1`,
       alreadyAborted: false,
     },
     {
       type: `applyAuthoritativeRows`,
+      sourceId: `source`,
       ownerId: `owner-1`,
       demandId: `all-rows`,
+      attemptId: `attempt-1`,
       rowKeys: [row.id],
     },
     {
       type: `releaseDemand`,
+      sourceId: `source`,
       ownerId: `owner-1`,
       demandId: `all-rows`,
-      rowKeys: [row.id],
-      finalRowOwner: true,
-      invalidatesAdapterEvidence: true,
+      attemptId: `attempt-1`,
     },
     {
       type: `restartSession`,
@@ -377,15 +4146,19 @@ it(`reloads authoritative rows after final-owner cleanup invalidates retained ad
     },
     {
       type: `requestDemand`,
+      sourceId: `source`,
       ownerId: `owner-2`,
       sessionId: `session-2`,
       demandId: `all-rows`,
+      attemptId: `attempt-2`,
       alreadyAborted: false,
     },
     {
       type: `applyAuthoritativeRows`,
+      sourceId: `source`,
       ownerId: `owner-2`,
       demandId: `all-rows`,
+      attemptId: `attempt-2`,
       rowKeys: [row.id],
     },
   ]
@@ -460,9 +4233,11 @@ it(`does not let an ordered continuation from a cleaned session start new work a
   const history: ReadonlyArray<LoadSubsetFullFlowEvent> = [
     {
       type: `requestDemand`,
+      sourceId: `source`,
       ownerId: `owner-1`,
       sessionId: `session-1`,
       demandId: `top-1`,
+      attemptId: `attempt-1`,
       alreadyAborted: false,
     },
     {
@@ -479,9 +4254,11 @@ it(`does not let an ordered continuation from a cleaned session start new work a
     },
     {
       type: `requestDemand`,
+      sourceId: `source`,
       ownerId: `owner-2`,
       sessionId: `session-2`,
       demandId: `top-1`,
+      attemptId: `attempt-2`,
       alreadyAborted: false,
     },
     { type: `runContinuation`, taskId: `load-1-settlement` },
@@ -619,12 +4396,206 @@ it.each([`sync`, `async`] as const)(
       expect(demands).toHaveLength(2)
       expect(demands[1]).toMatchObject({ limit: 2, offset: 0 })
       expect(demands[1]?.cursor).toBeUndefined()
+
+      await live.utils.setWindow({ offset: 0, limit: 4 })
+
+      expect(live.toArray.map(({ id }) => id)).toEqual([1, 2, 3])
+      expect(live.status).toBe(`ready`)
+      expect(demands).toHaveLength(4)
+      expect(demands[2]).toMatchObject({ limit: 4, offset: 0 })
+      expect(demands[2]?.cursor).toBeUndefined()
+      expect(demands[3]).toMatchObject({ limit: 4, offset: 0 })
+      expect(demands[3]?.cursor).toBeUndefined()
+      expect(source._sync.getLoadSubsetCoverage()).toEqual([])
+
+      await live.utils.setWindow({ offset: 0, limit: 5 })
+
+      expect(live.toArray.map(({ id }) => id)).toEqual([1, 2, 3])
+      expect(live.status).toBe(`ready`)
+      expect(demands).toHaveLength(5)
+      expect(demands[4]).toMatchObject({ limit: 5, offset: 0 })
+      expect(demands[4]?.cursor).toBeUndefined()
+      expect(source._sync.getLoadSubsetCoverage()).toEqual([])
+
+      await live.utils.setWindow({ offset: 0, limit: 2 })
+
+      expect(live.toArray.map(({ id }) => id)).toEqual([1, 2])
+      expect(demands).toHaveLength(5)
+
+      await live.utils.setWindow({ offset: 0, limit: 5 })
+
+      expect(live.toArray.map(({ id }) => id)).toEqual([1, 2, 3])
+      expect(live.status).toBe(`ready`)
+      expect(demands).toHaveLength(6)
+      expect(demands[5]).toMatchObject({ limit: 5, offset: 0 })
+      expect(demands[5]?.cursor).toBeUndefined()
+      expect(source._sync.getLoadSubsetCoverage()).toEqual([])
     } finally {
       await live.cleanup()
       await source.cleanup()
     }
   },
 )
+
+it(`does not treat explicit continuation as outcome-free satisfaction`, async () => {
+  type Row = { id: number; rank: number }
+  const pending: Array<ReturnType<typeof createDeferred<LoadSubsetResult>>> = []
+  const calls: Array<LoadSubsetOptions> = []
+  const source = createCollection<Row>({
+    id: `full-flow-explicit-continuation-source`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        markReady()
+        return {
+          loadSubset: (options) => {
+            calls.push(options)
+            if (calls.length === 1) {
+              begin()
+              write({ type: `insert`, value: { id: 1, rank: 1 } })
+              commit()
+            }
+            const deferred = createDeferred<LoadSubsetResult>()
+            pending.push(deferred)
+            return deferred.promise
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection({
+    id: `full-flow-explicit-continuation-live`,
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(2),
+    startSync: true,
+  })
+  const preload = live.preload()
+
+  try {
+    expect(pending).toHaveLength(1)
+    pending[0]!.resolve({ hasMore: true })
+    await flushPromises()
+
+    expect(pending).toHaveLength(2)
+    expect(calls[1]?.limit).toBeUndefined()
+    const [subscription] = Object.values(
+      live.utils[LIVE_QUERY_INTERNAL].getBuilder().subscriptions,
+    )
+    expect(subscription?.hasOrderedResultForActiveWindow).toBe(false)
+    expect(source._sync.getLoadSubsetCoverage()).toEqual([])
+
+    pending[1]!.resolve({ hasMore: false, appliedRowKeys: [] })
+    await preload
+    expect(live.toArray.map(({ id }) => id)).toEqual([1])
+  } finally {
+    for (const request of pending) {
+      request.resolve({ hasMore: false, appliedRowKeys: [] })
+    }
+    await Promise.all([preload.catch(() => undefined), live.cleanup()])
+    await source.cleanup()
+  }
+})
+
+it(`keeps the prior ordered publication until truncate replay gains authoritative coverage`, async () => {
+  type Row = { id: number; rank: number }
+  const oldRows: ReadonlyArray<Row> = [
+    { id: 1, rank: 1 },
+    { id: 2, rank: 2 },
+  ]
+  const replacementRows: ReadonlyArray<Row> = [
+    { id: 3, rank: 3 },
+    { id: 4, rank: 4 },
+  ]
+  const authoritative = createDeferred<LoadSubsetResult>()
+  let calls = 0
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: Row }) => void
+  let commit!: () => true | Promise<void>
+  let truncate!: () => void
+  const source = createCollection<Row>({
+    id: `full-flow-outcome-free-truncate-source`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        truncate = params.truncate
+        params.markReady()
+        return {
+          loadSubset: () => {
+            calls++
+            const rows = calls === 1 ? oldRows : replacementRows
+            if (calls <= 2) {
+              begin()
+              for (const row of rows) write({ type: `insert`, value: row })
+              commit()
+            }
+            if (calls === 1) {
+              return Promise.resolve({
+                hasMore: false,
+                appliedRowKeys: oldRows.map(({ id }) => id),
+              })
+            }
+            if (calls === 2) return Promise.resolve()
+            if (calls === 3) return authoritative.promise
+            throw new Error(`Unexpected fourth replay request`)
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection({
+    id: `full-flow-outcome-free-truncate-live`,
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(2),
+    startSync: true,
+  })
+  const preload = live.preload()
+
+  try {
+    await preload
+    expect(live.toArray.map(({ id }) => id)).toEqual([1, 2])
+
+    begin()
+    truncate()
+    const replacement = commit()
+    await flushPromises()
+
+    expect(calls).toBe(3)
+    expect(live.toArray.map(({ id }) => id)).toEqual([1, 2])
+    expect(source._sync.getLoadSubsetCoverage()).toEqual([])
+
+    authoritative.resolve({
+      hasMore: false,
+      appliedRowKeys: replacementRows.map(({ id }) => id),
+    })
+    if (replacement !== true) await replacement
+    await flushPromises()
+
+    expect(live.toArray.map(({ id }) => id)).toEqual([3, 4])
+  } finally {
+    authoritative.resolve({ hasMore: false, appliedRowKeys: [] })
+    await Promise.all([preload.catch(() => undefined), live.cleanup()])
+    await source.cleanup()
+  }
+})
 
 it.each([
   {
@@ -1001,7 +4972,11 @@ fcTest.prop([orderedConsumerParityScenarioArbitrary], {
 
 fcTest.prop(
   [orderedConsumerParityScenarioArbitrary],
-  oracleRandomParameters(12 * fullFlowMultiplier, fullFlowReplaySeed),
+  oracleRandomParameters(
+    12 * fullFlowMultiplier,
+    fullFlowReplay,
+    `load-subset-full-flow.consumer-parity`,
+  ),
 )(
   `keeps ordered collection consumers equal for a random or replayed seed`,
   assertOrderedConsumerParity,
@@ -1211,7 +5186,7 @@ it(`retries an evidence-free ordered Effect after truncate`, async () => {
   }
 })
 
-it(`rechecks an ordered Effect after synchronous truncate replay`, async () => {
+it(`rechecks an ordered Effect until truncate replay proves replacement coverage`, async () => {
   type Row = { id: number; rank: number }
   type Result = {
     hasMore: boolean
@@ -1255,6 +5230,10 @@ it(`rechecks an ordered Effect after synchronous truncate replay`, async () => {
               begin()
               write({ type: `insert`, value: finalRow })
               commit()
+              return Promise.resolve({
+                hasMore: false,
+                appliedRowKeys: [finalRow.id],
+              })
             }
             return true
           },
@@ -1295,6 +5274,81 @@ it(`rechecks an ordered Effect after synchronous truncate replay`, async () => {
     expect(replayCalls).toBe(3)
     expect(calls).toBe(5)
     expect([...visible.keys()]).toEqual([finalRow.id])
+  } finally {
+    await effect.dispose()
+    await source.cleanup()
+  }
+})
+
+it(`settles an outcome-free ordered Effect when its boundary stops advancing`, async () => {
+  type Row = { id: number; rank: number }
+  const rows: ReadonlyArray<Row> = [
+    { id: 1, rank: 1 },
+    { id: 2, rank: 2 },
+    { id: 3, rank: 3 },
+  ]
+  const visible = new Map<number, Row>()
+  let calls = 0
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: Row }) => void
+  let commit!: () => true | Promise<void>
+  const source = createCollection<Row>({
+    id: `full-flow-effect-outcome-free-no-progress`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        params.markReady()
+        return {
+          loadSubset: () => {
+            calls++
+            if (calls <= rows.length) {
+              begin()
+              write({ type: `insert`, value: rows[calls - 1]! })
+              commit()
+            }
+
+            // Bound the old loop. A correct implementation stops when the
+            // fourth request completes without moving the local boundary.
+            if (calls === 5) {
+              return Promise.resolve({
+                hasMore: false,
+                appliedRowKeys: [],
+              })
+            }
+            return Promise.resolve()
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const effect = createEffect<Row, number>({
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(4),
+    onBatch: (events) => {
+      for (const event of events) {
+        if (event.type === `exit`) visible.delete(event.key)
+        else visible.set(event.key, event.value)
+      }
+    },
+  })
+
+  try {
+    await flushPromises()
+
+    expect([...visible.keys()]).toEqual([1, 2, 3])
+    expect(calls).toBe(4)
+    expect(source._sync.getLoadSubsetCoverage()).toEqual([])
   } finally {
     await effect.dispose()
     await source.cleanup()
@@ -1657,7 +5711,11 @@ if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
       )}`,
       `exhaustion=${pages.some((page) => page.extent === `exhausted`)}`,
     ],
-    oracleRandomParameters(1_000, fullFlowReplaySeed),
+    oracleRandomParameters(
+      1_000,
+      fullFlowReplay,
+      `load-subset-full-flow.continuation-statistics`,
+    ),
   )
 }
 
@@ -1928,7 +5986,11 @@ fcTest.prop(
       maxLength: 8,
     }),
   ],
-  oracleRandomParameters(128 * fullFlowMultiplier, fullFlowReplaySeed),
+  oracleRandomParameters(
+    128 * fullFlowMultiplier,
+    fullFlowReplay,
+    `load-subset-full-flow.automatic-progress`,
+  ),
 )(
   `starts automatic continuation only for new semantic progress with a random or replayed seed`,
   assertAutomaticOrderedProgress,
@@ -1944,7 +6006,11 @@ fcTest.prop([orderedContinuationEvidenceScenarioArbitrary], {
 
 fcTest.prop(
   [orderedContinuationEvidenceScenarioArbitrary],
-  oracleRandomParameters(64 * fullFlowMultiplier, fullFlowReplaySeed),
+  oracleRandomParameters(
+    64 * fullFlowMultiplier,
+    fullFlowReplay,
+    `load-subset-full-flow.continuation-evidence`,
+  ),
 )(
   `derives ordered progress from applied eligible evidence for a random or replayed seed`,
   runOrderedContinuationEvidenceScenario,
@@ -2041,6 +6107,7 @@ async function runOrderedBoundaryProvenanceScenario(
     {
       type: `stagePublicationRows`,
       publicationId: `initial-publication`,
+      sourceId: `source`,
       demandId: `ordered-window`,
       rows: orderedForDirection.slice(0, prefixSize).map((row) => ({
         key: row.id,
@@ -2056,6 +6123,7 @@ async function runOrderedBoundaryProvenanceScenario(
           {
             type: `stagePublicationRows`,
             publicationId: `additional-publication`,
+            sourceId: `source`,
             demandId: `ordered-window`,
             rows: expectedOrderedPrefix.map((row) => ({
               key: row.id,
@@ -2067,14 +6135,16 @@ async function runOrderedBoundaryProvenanceScenario(
     {
       type: `stagePublicationRows`,
       publicationId: `additional-publication`,
+      sourceId: `source`,
       demandId: `unordered-retention`,
       rows: [{ key: addedRow.id, orderValue: addedRow.rank }],
     },
     { type: `commitPublication`, publicationId: `additional-publication` },
-    { type: `truncateSource`, sessionId: `session` },
+    { type: `truncateSource`, sessionId: `session`, sourceId: `source` },
     {
       type: `stagePublicationRows`,
       publicationId: `failed-replacement`,
+      sourceId: `source`,
       demandId: `ordered-window`,
       rows: [
         {
@@ -2087,11 +6157,14 @@ async function runOrderedBoundaryProvenanceScenario(
     },
     {
       type: `rejectDemand`,
+      sourceId: `source`,
       ownerId: `ordered-owner`,
       demandId: `ordered-window`,
+      attemptId: `ordered-attempt`,
     },
   ]
   const expectedBoundary = projectOrderedPublicationBoundary(history, {
+    sourceId: `source`,
     demandId: `ordered-window`,
     direction: scenario.direction,
     prefixSize,
@@ -2274,7 +6347,11 @@ fcTest.prop([orderedBoundaryProvenanceArbitrary], {
 
 fcTest.prop(
   [orderedBoundaryProvenanceArbitrary],
-  oracleRandomParameters(32 * fullFlowMultiplier, fullFlowReplaySeed),
+  oracleRandomParameters(
+    32 * fullFlowMultiplier,
+    fullFlowReplay,
+    `load-subset-full-flow.boundary-provenance`,
+  ),
 )(
   `keeps ordered boundary provenance for a random or replayed seed`,
   runOrderedBoundaryProvenanceScenario,
@@ -2457,6 +6534,7 @@ async function runAtomicOrderedReplayScenario(
     {
       type: `stagePublicationRows`,
       publicationId: `initial`,
+      sourceId: `source`,
       demandId: `ordered`,
       rows: toModelRows(initialRows),
     },
@@ -2555,12 +6633,14 @@ async function runAtomicOrderedReplayScenario(
 
   const expectedPublicationProjection = () =>
     projectAtomicOrderedPublicationState(history, {
+      sourceId: `source`,
       demandId: `ordered`,
       direction: scenario.direction,
       initialWindowSize,
     })
   const expectedPublications = () =>
     projectAtomicOrderedPublications(history, {
+      sourceId: `source`,
       demandId: `ordered`,
       direction: scenario.direction,
       initialWindowSize,
@@ -2597,9 +6677,10 @@ async function runAtomicOrderedReplayScenario(
     history.push({
       type: `beginReplacement`,
       publicationId,
-      demandIds: acquisitions.map((acquisition) =>
-        acquisition === ordered ? `ordered` : `other`,
-      ),
+      demands: acquisitions.map((acquisition) => ({
+        sourceId: `source`,
+        demandId: acquisition === ordered ? `ordered` : `other`,
+      })),
     })
     expectPublicationHistory()
     return { publicationId, acquisitions, ordered } satisfies PendingAttempt
@@ -2624,6 +6705,7 @@ async function runAtomicOrderedReplayScenario(
       history.push({
         type: `stagePublicationRows`,
         publicationId: replay.publicationId,
+        sourceId: `source`,
         demandId: `ordered`,
         rows: toModelRows(rows),
       })
@@ -2663,6 +6745,7 @@ async function runAtomicOrderedReplayScenario(
           ? {
               type: `settleReplacement`,
               publicationId: replay.publicationId,
+              sourceId: `source`,
               demandId,
               outcome: settledOutcome,
               extent: isOrdered ? extent : `exhausted`,
@@ -2670,6 +6753,7 @@ async function runAtomicOrderedReplayScenario(
           : {
               type: `settleReplacement`,
               publicationId: replay.publicationId,
+              sourceId: `source`,
               demandId,
               outcome: settledOutcome,
             },
@@ -2685,11 +6769,10 @@ async function runAtomicOrderedReplayScenario(
         expect(released?.options.signal?.aborted).toBe(true)
         history.push({
           type: `releaseDemand`,
+          sourceId: `source`,
           ownerId: `other-owner`,
           demandId: `other`,
-          rowKeys: [replacementOtherRow.id],
-          finalRowOwner: true,
-          invalidatesAdapterEvidence: true,
+          attemptId: `other-attempt`,
         })
         expectPublicationHistory()
       }
@@ -2708,9 +6791,11 @@ async function runAtomicOrderedReplayScenario(
     if (scenario.otherDemand !== `none`) {
       history.push({
         type: `requestDemand`,
+        sourceId: `source`,
         ownerId: `other-owner`,
         sessionId: `atomic-session`,
         demandId: `other`,
+        attemptId: `other-attempt`,
         alreadyAborted: false,
       })
       subscription.requestSnapshot({ where: otherWhere })
@@ -2719,6 +6804,7 @@ async function runAtomicOrderedReplayScenario(
         {
           type: `stagePublicationRows`,
           publicationId: `initial`,
+          sourceId: `source`,
           demandId: `other`,
           rows: toModelRows(initialOtherRows),
         },
@@ -2733,6 +6819,7 @@ async function runAtomicOrderedReplayScenario(
       history.push({
         type: `stagePublicationRows`,
         publicationId: firstReplay.publicationId,
+        sourceId: `source`,
         demandId: `ordered`,
         rows: toModelRows([obsoleteRow]),
       })
@@ -2754,7 +6841,12 @@ async function runAtomicOrderedReplayScenario(
         ? ([2, 0] as const)
         : ([0, 2] as const)
     for (const size of resizeSizes) {
-      history.push({ type: `resizeOrderedWindow`, size })
+      history.push({
+        type: `resizeOrderedWindow`,
+        sourceId: `source`,
+        demandId: `ordered`,
+        size,
+      })
       subscription.ensureOrderedWindowSize(size)
       expectPublicationHistory()
     }
@@ -2764,6 +6856,7 @@ async function runAtomicOrderedReplayScenario(
       history.push({
         type: `stagePublicationRows`,
         publicationId: currentReplay.publicationId,
+        sourceId: `source`,
         demandId: `other`,
         rows: toModelRows([replacementOtherRow]),
       })
@@ -2772,11 +6865,10 @@ async function runAtomicOrderedReplayScenario(
         subscription.releaseSnapshot(otherWhere)
         history.push({
           type: `releaseDemand`,
+          sourceId: `source`,
           ownerId: `other-owner`,
           demandId: `other`,
-          rowKeys: [replacementOtherRow.id],
-          finalRowOwner: true,
-          invalidatesAdapterEvidence: true,
+          attemptId: `other-attempt`,
         })
         expectPublicationHistory()
       }
@@ -2787,6 +6879,7 @@ async function runAtomicOrderedReplayScenario(
       history.push({
         type: `stagePublicationRows`,
         publicationId: currentReplay.publicationId,
+        sourceId: `source`,
         demandId: `ordered`,
         rows: toModelRows([sourceDelta]),
       })
@@ -2798,6 +6891,7 @@ async function runAtomicOrderedReplayScenario(
       history.push({
         type: `stagePublicationRows`,
         publicationId: currentReplay.publicationId,
+        sourceId: `source`,
         demandId: `ordered`,
         rows: toModelRows([partialRow]),
       })
@@ -2815,6 +6909,7 @@ async function runAtomicOrderedReplayScenario(
       history.push({
         type: `stagePublicationRows`,
         publicationId: currentReplay.publicationId,
+        sourceId: `source`,
         demandId: `ordered`,
         rows: toModelRows([partialRow, continuationRow]),
       })
@@ -2880,6 +6975,7 @@ async function runAtomicOrderedReplayScenario(
         history.push({
           type: `stagePublicationRows`,
           publicationId: currentReplay.publicationId,
+          sourceId: `source`,
           demandId: `ordered`,
           rows: toModelRows([...finalRows, continuationRow]),
         })
@@ -2946,6 +7042,8 @@ async function runAtomicOrderedReplayScenario(
       history.push({
         type: `establishReplacementCoverage`,
         publicationId: currentReplay.publicationId,
+        sourceId: `source`,
+        demandId: `ordered`,
       })
       await flushPromises()
       expectPublicationHistory()
@@ -3062,20 +7160,22 @@ const mixedDemandSettlementScenarios: ReadonlyArray<AtomicOrderedReplayScenario>
         },
       ],
     ),
-    {
-      direction,
-      resizeOrder: `grow-shrink` as const,
-      overlap: false,
-      currentOutcome: `resolve` as const,
-      currentExtent: `exhausted` as const,
-      settleCurrentFirst: false,
-      sourceDelta: false,
-      otherDemand: `active` as const,
-      otherOutcome: `reject` as const,
-      demandSettlementOrder: `ordered-first` as const,
-      releaseAfterOrdered: true,
-    },
   ])
+
+const releaseDuringPrivateReplayScenarios: ReadonlyArray<AtomicOrderedReplayScenario> =
+  ([`asc`, `desc`] as const).map((direction) => ({
+    direction,
+    resizeOrder: `grow-shrink`,
+    overlap: false,
+    currentOutcome: `resolve`,
+    currentExtent: `exhausted`,
+    settleCurrentFirst: false,
+    sourceDelta: false,
+    otherDemand: `active`,
+    otherOutcome: `reject`,
+    demandSettlementOrder: `ordered-first`,
+    releaseAfterOrdered: true,
+  }))
 
 it(`does not reuse caller or public continuation state when an active replacement has no progress`, async () => {
   for (const direction of [`asc`, `desc`] as const) {
@@ -3153,6 +7253,12 @@ it(`keeps mixed demand settlements inside one replacement epoch`, async () => {
   }
 })
 
+it(`removes a released peer from the public baseline while replay remains private`, async () => {
+  for (const scenario of releaseDuringPrivateReplayScenarios) {
+    await runAtomicOrderedReplayScenario(scenario)
+  }
+})
+
 it(`discards pending replacement epochs on teardown`, async () => {
   for (const direction of [`asc`, `desc`] as const) {
     for (const overlap of [false, true]) {
@@ -3187,7 +7293,11 @@ fcTest.prop([atomicOrderedReplayArbitrary], {
 
 fcTest.prop(
   [atomicOrderedReplayArbitrary],
-  oracleRandomParameters(32 * fullFlowMultiplier, fullFlowReplaySeed),
+  oracleRandomParameters(
+    32 * fullFlowMultiplier,
+    fullFlowReplay,
+    `load-subset-full-flow.atomic-replacement`,
+  ),
 )(
   `keeps ordered replacement publication atomic for a random or replayed seed`,
   runAtomicOrderedReplayScenario,
@@ -3206,7 +7316,11 @@ fcTest.prop([truncateCoverageScenarioArbitrary], {
 
 fcTest.prop(
   [truncateCoverageScenarioArbitrary],
-  oracleRandomParameters(12 * fullFlowMultiplier, fullFlowReplaySeed),
+  oracleRandomParameters(
+    12 * fullFlowMultiplier,
+    fullFlowReplay,
+    `load-subset-full-flow.truncate-evidence`,
+  ),
 )(
   `fences pre-truncate evidence for a random or replayed seed`,
   runTruncateCoverageScenario,

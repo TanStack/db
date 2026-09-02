@@ -6,6 +6,7 @@ import {
   createLoadSubsetCoverageRegistry,
 } from '../../src/query/coverage-registry.js'
 import { oraclePropertyOptions } from '../oracle-config.js'
+import type { CoverageRegistryResourceCounts } from '../../src/query/coverage-registry.js'
 import type { AppliedLoadSubsetOutcome } from '../../src/types.js'
 import type { Command } from 'fast-check'
 
@@ -468,6 +469,22 @@ function createReleaseProbe(failFirst: boolean): ReleaseProbe {
   return probe
 }
 
+function expectRegistryResourceBounds(
+  resourceCounts: CoverageRegistryResourceCounts,
+): void {
+  // One logical lease may own several physical attempts. Bound each retained
+  // slot by claims, not by the number of unique lease tokens.
+  expect(resourceCounts.claims).toBeLessThanOrEqual(
+    resourceCounts.retainedDemands + resourceCounts.unsettledClaims,
+  )
+  expect(resourceCounts.retainedDemands).toBeLessThanOrEqual(
+    resourceCounts.claims,
+  )
+  expect(resourceCounts.retainedOutcomes).toBeLessThanOrEqual(
+    resourceCounts.claims,
+  )
+}
+
 function expectReleaseFailure(release: () => unknown): void {
   let threw = false
   try {
@@ -573,15 +590,7 @@ function assertRegistryModel(model: RegistryModel, real: RegistryReal): void {
   }
   const resourceCounts = real.registry.resourceCounts()
   expect(resourceCounts).toEqual(expectedResourceCounts)
-  expect(resourceCounts.claims).toBeLessThanOrEqual(
-    resourceCounts.liveLeases + resourceCounts.unsettledClaims,
-  )
-  expect(resourceCounts.retainedDemands).toBeLessThanOrEqual(
-    resourceCounts.liveLeases + resourceCounts.unsettledClaims,
-  )
-  expect(resourceCounts.retainedOutcomes).toBeLessThanOrEqual(
-    resourceCounts.liveLeases + resourceCounts.unsettledClaims,
-  )
+  expectRegistryResourceBounds(resourceCounts)
   for (const row of modelRows) {
     expect(real.registry.rowOwnerCount(row)).toBe(
       model.acquisitions.filter(
@@ -1090,6 +1099,38 @@ class DisposeCommand implements Command<RegistryModel, RegistryReal> {
 }
 
 describe(`coverage registry oracle`, () => {
+  it(`bounds evidence when one lease owns parallel physical acquisitions`, () => {
+    const registry = createPrefixRegistry()
+    const lease = registry.addLease(1)
+    const acquisitions = [
+      addPrefixAcquisition(registry, {
+        generation: 1,
+        leases: [lease],
+        release: vi.fn(),
+        prefix: 1,
+      }),
+      addPrefixAcquisition(registry, {
+        generation: 1,
+        leases: [lease],
+        release: vi.fn(),
+        prefix: 1,
+      }),
+    ]
+
+    acquisitions.forEach((acquisition) =>
+      registry.settleLease(acquisition, lease),
+    )
+
+    expect(registry.resourceCounts()).toMatchObject({
+      liveLeases: 1,
+      acquisitions: 2,
+      claims: 2,
+      unsettledClaims: 0,
+      retainedDemands: 2,
+    })
+    expectRegistryResourceBounds(registry.resourceCounts())
+  })
+
   it(`fences old evidence while retaining its physical release obligation`, () => {
     const registry = createPrefixRegistry()
     const oldRelease = vi.fn()
@@ -1329,7 +1370,7 @@ describe(`coverage registry oracle`, () => {
 
   fcTest.prop(
     [claimChurnArbitrary, fc.integer({ min: 1, max: 8 })],
-    oraclePropertyOptions(20),
+    oraclePropertyOptions(20, `coverage-registry.claim-churn`),
   )(`bounds long claim churn for a random or replayed seed`, runClaimChurn)
 
   it(`restores a compacted narrower fact when the wider acquisition retires`, () => {
@@ -1985,7 +2026,7 @@ describe(`coverage registry oracle`, () => {
         maxCommands: 40,
       }),
     ],
-    oraclePropertyOptions(100),
+    oraclePropertyOptions(100, `coverage-registry.state-machine`),
   )(
     `matches the lease, retry, settlement, publication, ownership, and disposal state machine`,
     (commands) => {

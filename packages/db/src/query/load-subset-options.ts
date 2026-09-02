@@ -1,4 +1,17 @@
+import {
+  isUint8ArrayCandidate,
+  readDateTimestamp,
+  snapshotTemporalEqualityValue,
+  snapshotUint8ArrayBytes,
+} from '../utils/comparison.js'
+import { isTemporal } from '../utils.js'
 import { Func, PropRef, Value } from './ir.js'
+import {
+  assertSnapshotCapableStructuralValue,
+  getExpressionArgumentValueContext,
+  snapshotMembershipCandidateValues,
+} from './expression-value-context.js'
+import type { ExpressionValueContext } from './expression-value-context.js'
 import type { BasicExpression } from './ir.js'
 import type { LoadSubsetOptions } from '../types.js'
 
@@ -44,14 +57,9 @@ export function snapshotLoadSubsetDemand(
   return demand
 }
 
-type ExpressionCloneContext =
-  | `exact-output`
-  | `equality-operand`
-  | `ordering-operand`
-
 function cloneBasicExpression<T>(
   expression: BasicExpression<T>,
-  context: ExpressionCloneContext = `exact-output`,
+  context: ExpressionValueContext = `exact-output`,
 ): BasicExpression<T> {
   switch (expression.type) {
     case `ref`:
@@ -60,56 +68,60 @@ function cloneBasicExpression<T>(
       return new Value<T>(
         context === `equality-operand`
           ? snapshotEqualityValue(expression.value)
-          : context === `ordering-operand`
-            ? snapshotStructuralValue(expression.value)
-            : expression.value,
+          : context === `membership-candidates`
+            ? snapshotMembershipCandidates(expression.value)
+            : context === `ordering-operand`
+              ? snapshotStructuralOperand(expression.value)
+              : context === `structural-operand`
+                ? snapshotStructuralOperand(expression.value)
+                : expression.value,
       )
     case `func`:
       return new Func<T>(
         expression.name,
         expression.args.map((arg, index) => {
-          if (
-            expression.name === `in` &&
-            index === 1 &&
-            arg.type === `val` &&
-            Array.isArray(arg.value)
-          ) {
-            return new Value(
-              arg.value.map((value) => snapshotEqualityValue(value)),
-            )
-          }
-
-          const argumentContext: ExpressionCloneContext =
-            expression.name === `eq`
-              ? `equality-operand`
-              : isOrderingFunction(expression.name)
-                ? `ordering-operand`
-                : `exact-output`
+          const argumentContext = getExpressionArgumentValueContext(
+            expression.name,
+            index,
+            expression.args.length,
+            context,
+          )
           return cloneBasicExpression(arg, argumentContext)
         }),
       )
   }
 }
 
-function isOrderingFunction(name: string): boolean {
-  return name === `gt` || name === `gte` || name === `lt` || name === `lte`
+function snapshotStructuralOperand<T>(value: T): T {
+  assertSnapshotCapableStructuralValue(value)
+  return snapshotStructuralValue(value)
 }
 
 function snapshotEqualityValue<T>(value: T): T {
   if (value instanceof Date) {
-    return new Date(value.getTime()) as T
+    return new Date(readDateTimestamp(value)) as T
   }
 
   if (typeof Buffer !== `undefined` && value instanceof Buffer) {
-    return Buffer.from(value) as T
+    return Buffer.from(snapshotUint8ArrayBytes(value)) as T
   }
 
-  if (value instanceof Uint8Array) {
-    return value.slice() as T
+  if (isUint8ArrayCandidate(value)) {
+    return snapshotUint8ArrayBytes(value) as T
+  }
+
+  if (isTemporal(value)) {
+    return snapshotTemporalEqualityValue(value) as T
   }
 
   // Other objects use reference equality in predicate identity and comparison.
   return value
+}
+
+function snapshotMembershipCandidates<T>(value: T): T {
+  const candidates = snapshotMembershipCandidateValues(value)
+  if (candidates === undefined) return value
+  return candidates.map((candidate) => snapshotEqualityValue(candidate)) as T
 }
 
 function snapshotStructuralValue<T>(
@@ -155,10 +167,15 @@ function snapshotStructuralValue<T>(
   }
 
   if (Array.isArray(value)) {
-    const result: Array<unknown> = []
+    const result: Array<unknown> = new Array(value.length)
     seen.set(value, result)
-    for (const item of value) {
-      result.push(snapshotStructuralValue(item, seen))
+    for (const key of Object.keys(value)) {
+      Object.defineProperty(result, key, {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: snapshotStructuralValue(value[Number(key)], seen),
+      })
     }
     return result as T
   }
@@ -194,10 +211,15 @@ function snapshotStructuralValue<T>(
   const result = Object.create(prototype) as Record<string, unknown>
   seen.set(value, result)
   for (const key of Object.keys(value)) {
-    result[key] = snapshotStructuralValue(
-      (value as Record<string, unknown>)[key],
-      seen,
-    )
+    Object.defineProperty(result, key, {
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: snapshotStructuralValue(
+        (value as Record<string, unknown>)[key],
+        seen,
+      ),
+    })
   }
   return result as T
 }

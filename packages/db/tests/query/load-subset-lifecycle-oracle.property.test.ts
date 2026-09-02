@@ -348,7 +348,7 @@ fcTest.prop(
       maxCommands: 20,
     }),
   ],
-  oraclePropertyOptions(100),
+  oraclePropertyOptions(100, `load-subset-lifecycle.state-machine`),
 )(
   `matches the scheduled acquisition, coverage, release, teardown, and stale-settlement lifecycle`,
   (commands) => {

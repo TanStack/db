@@ -2,7 +2,6 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
-import { createOptimisticAction } from '../../src/optimistic-action.js'
 import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
@@ -71,11 +70,6 @@ type WindowRequest = {
 type PersistedLoadRow = {
   id: string
   projectId: string
-}
-
-type OptimisticDerivedRow = {
-  id: string
-  value: string
 }
 
 type CoverageSubject = {
@@ -1119,12 +1113,10 @@ async function runAsyncScenarioWithKnownFailures(
   }
 }
 
-const { multiplier, replaySeed } = readOracleRunConfig()
+const { multiplier, ...replay } = readOracleRunConfig()
 const coverageScenarioRuns = 40 * multiplier
-const coverageRandomParameters = oracleRandomParameters(
-  coverageScenarioRuns,
-  replaySeed,
-)
+const coverageRandomParameters = (property: string) =>
+  oracleRandomParameters(coverageScenarioRuns, replay, property)
 
 let collectionSequence = 0
 
@@ -1789,6 +1781,8 @@ async function expectCanceledReceiptReleasesOnlyItsSuppression() {
     expect(source._state.recentlySyncedKeys).toEqual(new Set([`second`]))
     expect(source._state.preSyncVisibleState.has(`first`)).toBe(false)
     expect(source._state.preSyncVisibleState.has(`second`)).toBe(true)
+    expect(source._state.preSyncVirtualState.has(`first`)).toBe(false)
+    expect(source._state.preSyncVirtualState.has(`second`)).toBe(true)
     if (canceled !== true) {
       await expect(canceled).rejects.toMatchObject({ name: `AbortError` })
     }
@@ -1879,75 +1873,23 @@ async function expectCleanupRejectsReceiptOnce() {
   await source.cleanup()
 }
 
-async function expectDerivedSyncDuringOptimisticMutation(): Promise<void> {
-  let begin!: () => void
-  let write!: (message: { type: `insert`; value: OptimisticDerivedRow }) => void
-  let commit!: () => void
-  const source = createCollection<OptimisticDerivedRow>({
-    id: `optimistic-derived-source-${collectionSequence++}`,
-    getKey: (row) => row.id,
-    sync: {
-      sync: (params) => {
-        begin = params.begin
-        write = params.write
-        commit = params.commit
-        params.markReady()
-      },
-    },
-  })
-  const derived = createLiveQueryCollection({
-    query: (query) =>
-      query
-        .from({ row: source })
-        .select(({ row }) => ({ id: row.id, value: row.value })),
-    getKey: (row) => row.id,
-    startSync: true,
-  })
-  const persistence = createDeferred<void>()
-  // Query collections currently expose read-side virtual properties in their
-  // insert input type even though the runtime accepts the plain selected row.
-  const insertDerived = derived.insert.bind(derived) as unknown as (
-    row: OptimisticDerivedRow,
-  ) => ReturnType<typeof derived.insert>
-  const insertOptimistically = createOptimisticAction<OptimisticDerivedRow>({
-    onMutate: insertDerived,
-    mutationFn: () => persistence.promise,
-  })
-
-  await derived.preload()
-  const transaction = insertOptimistically({
-    id: `optimistic`,
-    value: `optimistic`,
-  })
-  try {
-    begin()
-    write({ type: `insert`, value: { id: `synced`, value: `synced` } })
-    commit()
-
-    try {
-      expect([...derived.keys()].sort()).toEqual([`optimistic`, `synced`])
-    } catch (error) {
-      throw new TraceAssertionError(0, error)
-    }
-  } finally {
-    persistence.resolve()
-    await transaction.isPersisted.promise
-    await derived.cleanup()
-    await source.cleanup()
-  }
-}
-
 async function expectDeduplicatedWaiterHandlesRejection(
   scenario: RejectedWaiterScenario,
 ): Promise<void> {
-  const detachedBranches: Array<Promise<unknown>> = []
+  let sourceRejectionObservers = 0
   class LocallyTrackedPromise<T> extends Promise<T> {
-    catch<TResult = never>(
-      onRejected?: ((reason: unknown) => TResult | PromiseLike<TResult>) | null,
-    ): Promise<T | TResult> {
-      const branch = super.catch(onRejected)
-      detachedBranches.push(branch)
-      return branch
+    static get [Symbol.species](): PromiseConstructor {
+      return Promise
+    }
+
+    override then<TResult1 = T, TResult2 = never>(
+      onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | null,
+      onrejected?:
+        | ((reason: unknown) => TResult2 | PromiseLike<TResult2>)
+        | null,
+    ): Promise<TResult1 | TResult2> {
+      if (onrejected) sourceRejectionObservers += 1
+      return super.then(onfulfilled, onrejected)
     }
   }
 
@@ -1970,7 +1912,6 @@ async function expectDeduplicatedWaiterHandlesRejection(
   }
 
   const callerOutcomes = Promise.allSettled([first, second])
-  const detachedOutcomes = Promise.allSettled(detachedBranches)
   rejectSource(new Error(`transport failed`))
   expect((await callerOutcomes).map(({ status }) => status)).toEqual([
     `rejected`,
@@ -1978,10 +1919,7 @@ async function expectDeduplicatedWaiterHandlesRejection(
   ])
 
   try {
-    expect({
-      branchCount: detachedBranches.length,
-      statuses: (await detachedOutcomes).map(({ status }) => status),
-    }).toEqual({ branchCount: 1, statuses: [`fulfilled`] })
+    expect(sourceRejectionObservers).toBe(1)
   } catch (error) {
     throw new TraceAssertionError(0, error)
   }
@@ -2164,14 +2102,37 @@ describe(`loadSubset coverage oracle`, () => {
     ),
   )
 
-  it(
-    `discovered trace: an empty ordered window issues no transport work`,
-    expectExactCountFailure(
-      () => countWindowLoads([{ direction: `asc`, offset: 0, limit: 0 }]),
-      1,
+  it(`an empty ordered window issues no transport work`, () => {
+    expect(countWindowLoads([{ direction: `asc`, offset: 0, limit: 0 }])).toBe(
       0,
-    ),
-  )
+    )
+  })
+
+  it(`releases a reused zero-window owner without invalidating later coverage`, () => {
+    let loads = 0
+    const dedupe = new DeduplicatedLoadSubset({
+      loadSubset: () => {
+        loads++
+        return true
+      },
+    })
+    const reusedOptions = toWindowOptions({
+      direction: `asc`,
+      offset: 0,
+      limit: 0,
+    })
+
+    expect(dedupe.loadSubset(reusedOptions)).toBe(true)
+    reusedOptions.limit = 1
+    expect(dedupe.loadSubset(reusedOptions)).toBe(true)
+    dedupe.unloadSubset(reusedOptions)
+    expect(
+      dedupe.loadSubset(
+        toWindowOptions({ direction: `asc`, offset: 0, limit: 1 }),
+      ),
+    ).toBe(true)
+    expect(loads).toBe(1)
+  })
 
   it(
     `discovered trace: an empty filtered window issues no transport work`,
@@ -2405,19 +2366,15 @@ describe(`loadSubset coverage oracle`, () => {
     ),
   )
 
-  it(
-    `discovered trace: a composed predicate state forgets one loaded region`,
-    expectExactCountFailure(
-      () =>
-        countLoads([
-          { kind: `in`, values: [0] },
-          { kind: `in`, values: [2] },
-          { kind: `eq`, value: 2 },
-        ]),
-      3,
-      2,
-    ),
-  )
+  it(`retains exact coverage when predicate regions compose`, () => {
+    expect(
+      countLoads([
+        { kind: `in`, values: [0] },
+        { kind: `in`, values: [2] },
+        { kind: `eq`, value: 2 },
+      ]),
+    ).toBe(2)
+  })
 
   it(`rejects repeated transport work for one identical compound predicate`, () => {
     const predicate: PredicateSpec = {
@@ -2666,11 +2623,8 @@ describe(`loadSubset coverage oracle`, () => {
     },
   )
 
-  it(`discovered trace: settled predicate regions cover their union`, async () => {
-    await expectAssertionFailure(runAsyncScenario, {
-      checkpoint: 2,
-      classify: ({ actual, expected }) => actual === true && expected === false,
-    })({
+  it(`settled predicate regions cover their union`, async () => {
+    await runAsyncScenario({
       first: [0],
       second: [1],
       firstOutcome: `resolve`,
@@ -2688,7 +2642,10 @@ describe(`loadSubset coverage oracle`, () => {
     runCoverageTraceWithKnownFailures,
   )
 
-  fcTest.prop([requestTraceArbitrary], coverageRandomParameters)(
+  fcTest.prop(
+    [requestTraceArbitrary],
+    coverageRandomParameters(`load-subset.coverage`),
+  )(
     `matches finite-domain coverage for a random or replayed seed`,
     runCoverageTraceWithKnownFailures,
   )
@@ -2701,7 +2658,10 @@ describe(`loadSubset coverage oracle`, () => {
     runAsyncScenarioWithKnownFailures,
   )
 
-  fcTest.prop([asyncScenarioArbitrary], coverageRandomParameters)(
+  fcTest.prop(
+    [asyncScenarioArbitrary],
+    coverageRandomParameters(`load-subset.async-settlement`),
+  )(
     `settles, retries, and resets in-flight set requests for a random or replayed seed`,
     runAsyncScenarioWithKnownFailures,
   )
@@ -2716,7 +2676,7 @@ describe(`loadSubset coverage oracle`, () => {
 
   fcTest.prop(
     [concurrentAsyncScenarioArbitrary, resultWrapperModeArbitrary],
-    coverageRandomParameters,
+    coverageRandomParameters(`load-subset.concurrent-dedupe`),
   )(
     `deduplicates three or more concurrent requests for a random or replayed seed`,
     runConcurrentAsyncScenario,
@@ -2730,7 +2690,10 @@ describe(`loadSubset coverage oracle`, () => {
     expectDeduplicatedWaiterHandlesRejection,
   )
 
-  fcTest.prop([rejectedWaiterScenarioArbitrary], coverageRandomParameters)(
+  fcTest.prop(
+    [rejectedWaiterScenarioArbitrary],
+    coverageRandomParameters(`load-subset.rejected-waiter`),
+  )(
     `checks rejected requests observed by an in-flight waiter for a random or replayed seed`,
     expectDeduplicatedWaiterHandlesRejection,
   )
@@ -2743,7 +2706,10 @@ describe(`loadSubset coverage oracle`, () => {
     runWindowCoverageTraceWithKnownFailures,
   )
 
-  fcTest.prop([windowTraceArbitrary], coverageRandomParameters)(
+  fcTest.prop(
+    [windowTraceArbitrary],
+    coverageRandomParameters(`load-subset.ordered-window`),
+  )(
     `never treats uncovered ordered windows as loaded for a random or replayed seed`,
     runWindowCoverageTraceWithKnownFailures,
   )
@@ -2756,7 +2722,10 @@ describe(`loadSubset coverage oracle`, () => {
     runWindowCoverageTraceWithKnownFailures,
   )
 
-  fcTest.prop([changingWhereWindowTraceArbitrary], coverageRandomParameters)(
+  fcTest.prop(
+    [changingWhereWindowTraceArbitrary],
+    coverageRandomParameters(`load-subset.changing-predicate`),
+  )(
     `keeps changing predicates distinct across window histories for a random or replayed seed`,
     runWindowCoverageTraceWithKnownFailures,
   )
@@ -2769,7 +2738,10 @@ describe(`loadSubset coverage oracle`, () => {
     expectDistinctWhereStartsDistinctLimitedWindowLoads,
   )
 
-  fcTest.prop([distinctWindowWherePairArbitrary], coverageRandomParameters)(
+  fcTest.prop(
+    [distinctWindowWherePairArbitrary],
+    coverageRandomParameters(`load-subset.distinct-window-predicate`),
+  )(
     `keeps distinct limited-window predicates separate for a random or replayed seed`,
     expectDistinctWhereStartsDistinctLimitedWindowLoads,
   )
@@ -2838,17 +2810,6 @@ describe(`loadSubset coverage oracle`, () => {
 
   it(`rejects an abandoned receipt once without publishing coverage`, async () => {
     await expectCleanupRejectsReceiptOnce()
-  })
-
-  it(`publishes synced source rows while a derived mutation persists`, async () => {
-    await expectAssertionFailure(expectDerivedSyncDuringOptimisticMutation, {
-      checkpoint: 0,
-      classify: ({ actual, expected }) =>
-        Array.isArray(actual) &&
-        actual.join(`,`) === `optimistic` &&
-        Array.isArray(expected) &&
-        expected.join(`,`) === `optimistic,synced`,
-    })()
   })
 
   it(

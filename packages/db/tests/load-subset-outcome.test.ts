@@ -935,7 +935,7 @@ describe(`loadSubset outcomes`, () => {
     },
   )
 
-  it(`tracks opaque demand values by runtime reference`, async () => {
+  it(`tracks opaque equality demand values by runtime reference`, async () => {
     const loadSubset = vi.fn((_options: LoadSubsetOptions) =>
       Promise.resolve({ hasMore: false }),
     )
@@ -958,20 +958,6 @@ describe(`loadSubset outcomes`, () => {
       const createDemands = (value: unknown): Array<LoadSubsetOptions> => [
         { where: new Func(`eq`, [field, new Value(value)]) },
         { where: new Func(`in`, [field, new Value([value])]) },
-        {
-          orderBy: [
-            {
-              expression: new Func(`coalesce`, [field, new Value(value)]),
-              compareOptions: { direction: `asc`, nulls: `first` },
-            },
-          ],
-        },
-        {
-          cursor: {
-            whereFrom: new Func(`gt`, [field, new Value(value)]),
-            whereCurrent: new Func(`eq`, [field, new Value(value)]),
-          },
-        },
       ]
       const demands = [
         ...createDemands(() => `opaque`),
@@ -1323,7 +1309,7 @@ describe(`loadSubset outcomes`, () => {
     },
   )
 
-  it(`scopes source extent to a narrowed physical acquisition`, async () => {
+  it(`preserves source extent for a conservative full acquisition`, async () => {
     const adapterCalls: Array<LoadSubsetOptions> = []
     const deduplicated = new DeduplicatedLoadSubset({
       loadSubset: (options) => {
@@ -1362,8 +1348,8 @@ describe(`loadSubset outcomes`, () => {
       const outcome = collection._sync.loadSubset({})
 
       expect(adapterCalls).toHaveLength(2)
-      expect(adapterCalls[1]?.where).toBeDefined()
-      await expect(outcome).resolves.toMatchObject({ extent: `unknown` })
+      expect(adapterCalls[1]).toEqual({})
+      await expect(outcome).resolves.toMatchObject({ extent: `exhausted` })
     } finally {
       await collection.cleanup()
     }

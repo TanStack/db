@@ -24,11 +24,30 @@ type SharedAbortLease = {
   dispose: () => void
 }
 
-type InflightCall = {
+type LogicalLoadReservation = {
+  generation: number
+  invalidatesCoverage: boolean
+  active: boolean
+  acquisition?: AcquisitionOwnership
+}
+
+type AcquisitionOwnership = {
+  matchesPhysicalRequest: (options: LoadSubsetOptions) => boolean
+  generation: number
+  reservations: Set<LogicalLoadReservation>
+}
+
+type InflightCall = AcquisitionOwnership & {
   options: LoadSubsetOptions
   promise: Promise<void | LoadSubsetResult>
   lease: SharedAbortLease
-  matchesPhysicalRequest: (options: LoadSubsetOptions) => boolean
+  trackable: boolean
+}
+
+function isInflightCall(
+  acquisition: AcquisitionOwnership,
+): acquisition is InflightCall {
+  return `lease` in acquisition
 }
 
 /**
@@ -78,10 +97,21 @@ export class DeduplicatedLoadSubset {
   // Each entry also owns the shared cancellation lease for its requesters.
   private inflightCalls: Array<InflightCall> = []
 
+  // Retain exact acquisition ownership after settlement so a later exact
+  // owner can share its evidence until the final logical lease releases.
+  private exactAcquisitions: Array<AcquisitionOwnership> = []
+
   // Generation counter to invalidate in-flight requests after reset()
   // When reset() is called, this increments, and any in-flight completion handlers
   // check if their captured generation matches before updating tracking state
   private generation = 0
+
+  // Core releases the exact options object that it passed to loadSubset.
+  // A queue preserves that identity when one object is reused across calls.
+  private ownerReservations = new WeakMap<
+    LoadSubsetOptions,
+    Array<LogicalLoadReservation>
+  >()
 
   constructor(opts: {
     loadSubset: LoadSubsetFn
@@ -104,6 +134,39 @@ export class DeduplicatedLoadSubset {
   loadSubset = (
     options: LoadSubsetOptions,
   ): true | Promise<void | LoadSubsetResult> => {
+    const reservation = this.reserveOwner(options, options.limit !== 0)
+    try {
+      // A zero-width window has no rows to acquire and establishes no coverage.
+      // Keep only its logical reservation so reused option objects still
+      // release in invocation order without invalidating another request.
+      if (options.limit === 0) {
+        this.onDeduplicate?.(options)
+        return true
+      }
+
+      return this.loadSubsetRequest(options, reservation)
+    } catch (error) {
+      this.removeOwnerReservation(options, reservation)
+      throw error
+    }
+  }
+
+  private loadSubsetRequest(
+    options: LoadSubsetOptions,
+    reservation: LogicalLoadReservation,
+  ): true | Promise<void | LoadSubsetResult> {
+    const exactAcquisition = this.exactAcquisitions.find(
+      (acquisition) =>
+        acquisition.generation === this.generation &&
+        acquisition.matchesPhysicalRequest(options),
+    )
+    if (exactAcquisition) {
+      exactAcquisition.reservations.add(reservation)
+      reservation.acquisition = exactAcquisition
+      this.onDeduplicate?.(options)
+      return true
+    }
+
     // If we've loaded all data, everything is covered
     if (this.hasLoadedAllData) {
       this.onDeduplicate?.(options)
@@ -140,6 +203,8 @@ export class DeduplicatedLoadSubset {
     )
 
     if (matchingInflight !== undefined) {
+      matchingInflight.reservations.add(reservation)
+      reservation.acquisition = matchingInflight
       matchingInflight.lease.attach(options.signal)
       // An in-flight call will load data that covers this request
       // Every requester shares the physical work and cancellation lease. A
@@ -168,10 +233,7 @@ export class DeduplicatedLoadSubset {
       ...options,
       signal: lease.signal,
     })
-    const loadOptions = cloneLoadSubsetOptions({
-      ...options,
-      signal: lease.signal,
-    })
+    const loadOptions = cloneLoadSubsetOptions(trackingOptions)
     if (
       this.unlimitedWhere !== undefined &&
       options.limit === undefined &&
@@ -191,6 +253,7 @@ export class DeduplicatedLoadSubset {
       isLoadSubsetRequestSubsumedBy(physicalRequest, candidate)
 
     // Call underlying loadSubset to load the missing data
+    const requestGeneration = this.generation
     let resultPromise: true | Promise<void | LoadSubsetResult>
     try {
       resultPromise = this._loadSubset(loadOptions)
@@ -201,43 +264,94 @@ export class DeduplicatedLoadSubset {
 
     // Handle both sync (true) and async (Promise<void>) return values
     if (resultPromise === true) {
-      if (!lease.aborted) this.updateTracking(trackingOptions)
+      if (
+        requestGeneration === this.generation &&
+        reservation.active &&
+        !lease.aborted
+      ) {
+        this.updateTracking(trackingOptions)
+        const acquisition: AcquisitionOwnership = {
+          matchesPhysicalRequest,
+          generation: requestGeneration,
+          reservations: new Set([reservation]),
+        }
+        reservation.acquisition = acquisition
+        this.exactAcquisitions.push(acquisition)
+      }
       lease.dispose()
       return true
     } else {
-      // Async return - track the promise and update tracking after it resolves
-
-      // Capture the current generation - this lets us detect if reset() was called
-      // while this request was in-flight, so we can skip updating tracking state
-      const capturedGeneration = this.generation
-
-      // We need to create a reference to the in-flight entry so we can remove it later
-      const inflightEntry = {
-        options: trackingOptions,
-        lease,
-        matchesPhysicalRequest,
-        promise: resultPromise
+      const ownsRequestAtAdapterReturn =
+        requestGeneration === this.generation && reservation.active
+      // Assimilate foreign Promise implementations before installing stateful
+      // handlers. Calling their `then` now preserves reentrant adapter effects,
+      // while the native bridge defers fulfillment, rejection, and thrown errors
+      // until the entry below exists.
+      const normalizedResultPromise = new Promise<void | LoadSubsetResult>(
+        (resolve, reject) => {
+          resultPromise.then(resolve, reject)
+        },
+      )
+      const installation: { entry: InflightCall | undefined } = {
+        entry: undefined,
+      }
+      let observedPromise: Promise<void | LoadSubsetResult>
+      try {
+        observedPromise = normalizedResultPromise
           .then((result) => {
-            // Only update tracking if this request is still from the current generation
-            // If reset() was called, the generation will have incremented and we should
-            // not repopulate the state that was just cleared
-            if (capturedGeneration === this.generation && !lease.aborted) {
-              this.updateTracking(trackingOptions)
-            }
-            return recordLoadSubsetResultDemandMatcher(
+            // Retain every fallible adapter result field before publishing
+            // coverage. A rejected caller must never leave reusable evidence.
+            const retainedResult = recordLoadSubsetResultDemandMatcher(
               result,
               matchesPhysicalRequest,
             )
+            // Only update tracking if this request is still from the current generation
+            // If reset() was called, the generation will have incremented and we should
+            // not repopulate the state that was just cleared
+            if (
+              installation.entry?.trackable &&
+              installation.entry.generation === this.generation &&
+              !lease.aborted
+            ) {
+              this.updateTracking(trackingOptions)
+              this.exactAcquisitions.push(installation.entry)
+            }
+            return retainedResult
           })
           .finally(() => {
             // Always remove from in-flight array on completion OR rejection
             // This ensures failed requests can be retried instead of being cached forever
-            const index = this.inflightCalls.indexOf(inflightEntry)
-            if (index !== -1) {
-              this.inflightCalls.splice(index, 1)
+            if (installation.entry) {
+              const index = this.inflightCalls.indexOf(installation.entry)
+              if (index !== -1) {
+                this.inflightCalls.splice(index, 1)
+              }
             }
             lease.dispose()
-          }),
+          })
+      } catch (error) {
+        lease.dispose()
+        throw error
+      }
+      const inflightEntry: InflightCall = {
+        options: trackingOptions,
+        lease,
+        matchesPhysicalRequest,
+        generation: requestGeneration,
+        trackable: ownsRequestAtAdapterReturn,
+        reservations: ownsRequestAtAdapterReturn
+          ? new Set([reservation])
+          : new Set(),
+        promise: observedPromise,
+      }
+      installation.entry = inflightEntry
+      const ownsRequestAfterHandlerInstallation =
+        requestGeneration === this.generation && reservation.active
+      inflightEntry.trackable = ownsRequestAfterHandlerInstallation
+      if (ownsRequestAfterHandlerInstallation) {
+        reservation.acquisition = inflightEntry
+      } else {
+        inflightEntry.reservations.clear()
       }
 
       recordLoadSubsetPromiseDemandMatcher(
@@ -246,7 +360,9 @@ export class DeduplicatedLoadSubset {
       )
 
       // Store the in-flight entry so concurrent subset calls can wait for it
-      this.inflightCalls.push(inflightEntry)
+      if (ownsRequestAfterHandlerInstallation) {
+        this.inflightCalls.push(inflightEntry)
+      }
       return projectLoadSubsetResultForCaller(
         inflightEntry.promise,
         options,
@@ -264,15 +380,27 @@ export class DeduplicatedLoadSubset {
    * across live-query lifetimes must return this method as their unloadSubset
    * callback.
    *
-   * The reset is intentionally conservative. One released request may clear
-   * evidence still useful to another owner, causing a later refetch, but it can
-   * never reuse evidence for rows that core no longer retains. Until adapters
-   * report which retained rows came from which demand, the settled-case cost is
-   * bounded to one new physical request for each distinct demand revisited
-   * before deduplication state is rebuilt.
+   * Settled exact evidence and in-flight work are tracked by logical owner, so
+   * a late release cannot retire a newer generation or work that another owner
+   * still needs. Broader inferred coverage remains conservative. Core must
+   * release the same options object that it passed to loadSubset; unmatched
+   * releases are no-ops.
    */
-  unloadSubset = (_options: LoadSubsetOptions): void => {
-    this.reset()
+  unloadSubset = (options: LoadSubsetOptions): void => {
+    const reservation = this.shiftOwnerReservation(options)
+    // A synchronous adapter throw never established helper state. Core may
+    // still release that logical demand later, but it must not invalidate a
+    // newer request that happens to use equivalent options.
+    if (!reservation || reservation.generation !== this.generation) return
+    if (!reservation.invalidatesCoverage) return
+
+    const acquisition = reservation.acquisition
+    if (acquisition) {
+      acquisition.reservations.delete(reservation)
+      if (acquisition.reservations.size > 0) return
+      this.retireAcquisition(acquisition)
+    }
+    this.clearInferredTracking()
   }
 
   /**
@@ -284,13 +412,77 @@ export class DeduplicatedLoadSubset {
    * state after the reset. This prevents old requests from repopulating cleared state.
    */
   reset(): void {
-    this.unlimitedWhere = undefined
-    this.hasLoadedAllData = false
-    this.limitedCalls = []
+    this.clearLoadedTracking()
+    for (const inflight of this.inflightCalls) {
+      inflight.trackable = false
+      inflight.lease.dispose()
+    }
     this.inflightCalls = []
     // Increment generation to invalidate any in-flight completion handlers
     // This ensures requests that were started before reset() don't repopulate the state
     this.generation++
+  }
+
+  private reserveOwner(
+    options: LoadSubsetOptions,
+    invalidatesCoverage: boolean,
+  ): LogicalLoadReservation {
+    const reservation = {
+      generation: this.generation,
+      invalidatesCoverage,
+      active: true,
+    }
+    const reservations = this.ownerReservations.get(options)
+    if (reservations) reservations.push(reservation)
+    else this.ownerReservations.set(options, [reservation])
+    return reservation
+  }
+
+  private shiftOwnerReservation(
+    options: LoadSubsetOptions,
+  ): LogicalLoadReservation | undefined {
+    const reservations = this.ownerReservations.get(options)
+    const reservation = reservations?.shift()
+    if (reservation) reservation.active = false
+    if (reservations?.length === 0) this.ownerReservations.delete(options)
+    return reservation
+  }
+
+  private removeOwnerReservation(
+    options: LoadSubsetOptions,
+    reservation: LogicalLoadReservation,
+  ): void {
+    reservation.active = false
+    const reservations = this.ownerReservations.get(options)
+    const reservationIndex = reservations?.indexOf(reservation) ?? -1
+    if (reservationIndex !== -1) reservations!.splice(reservationIndex, 1)
+    if (reservations?.length === 0) this.ownerReservations.delete(options)
+
+    const acquisition = reservation.acquisition
+    if (!acquisition) return
+    acquisition.reservations.delete(reservation)
+    if (acquisition.reservations.size > 0) return
+    this.retireAcquisition(acquisition)
+  }
+
+  private retireAcquisition(acquisition: AcquisitionOwnership): void {
+    const exactIndex = this.exactAcquisitions.indexOf(acquisition)
+    if (exactIndex !== -1) this.exactAcquisitions.splice(exactIndex, 1)
+    if (!isInflightCall(acquisition)) return
+    acquisition.trackable = false
+    const inflightIndex = this.inflightCalls.indexOf(acquisition)
+    if (inflightIndex !== -1) this.inflightCalls.splice(inflightIndex, 1)
+  }
+
+  private clearLoadedTracking(): void {
+    this.clearInferredTracking()
+    this.exactAcquisitions = []
+  }
+
+  private clearInferredTracking(): void {
+    this.unlimitedWhere = undefined
+    this.hasLoadedAllData = false
+    this.limitedCalls = []
   }
 
   private updateTracking(options: LoadSubsetOptions): void {

@@ -5,6 +5,7 @@ import { createDeferred } from '../src/deferred.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { ReverseIndex } from '../src/indexes/reverse-index.js'
 import { attachLoadSubsetRequestSignal } from '../src/load-subset-request-provenance.js'
+import { getStableExpressionHash } from '../src/query/ir-stable-identity.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
 import { DeduplicatedLoadSubset } from '../src/query/subset-dedupe.js'
 import { createTransaction } from '../src/transactions.js'
@@ -294,7 +295,7 @@ async function exerciseReplayCallbackCleanup({
           },
           unloadSubset: (options) => {
             unloads.push(options)
-            if (cleanupArmed && options.where === whereB && !failedB) {
+            if (cleanupArmed && sameWhere(options.where, whereB) && !failedB) {
               failedB = true
               throw nestedFailure
             }
@@ -629,8 +630,8 @@ function expectSameSubsetRequest(
   actual: LoadSubsetOptions,
   expected: LoadSubsetOptions,
 ): void {
-  expect(actual.where).toBe(expected.where)
-  expect(actual.orderBy).toBe(expected.orderBy)
+  expect(sameWhere(actual.where, expected.where)).toBe(true)
+  expect(actual.orderBy).toEqual(expected.orderBy)
   expect(actual.limit).toBe(expected.limit)
   expect(actual.cursor).toEqual(expected.cursor)
   expect(actual.offset).toBe(expected.offset)
@@ -641,11 +642,21 @@ function expectReplayRequestToRestart(
   stored: LoadSubsetOptions,
   expectedOffset = 0,
 ): void {
-  expect(actual.where).toBe(stored.where)
-  expect(actual.orderBy).toBe(stored.orderBy)
+  expect(sameWhere(actual.where, stored.where)).toBe(true)
+  expect(actual.orderBy).toEqual(stored.orderBy)
   expect(actual.limit).toBe(stored.limit)
   expect(actual.cursor).toBeUndefined()
   expect(actual.offset).toBe(expectedOffset)
+}
+
+function sameWhere(
+  actual: LoadSubsetOptions[`where`],
+  expected: LoadSubsetOptions[`where`],
+): boolean {
+  if (actual === undefined || expected === undefined) {
+    return actual === expected
+  }
+  return getStableExpressionHash(actual) === getStableExpressionHash(expected)
 }
 
 async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
@@ -673,10 +684,12 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
       new Func(`eq`, [new PropRef([`id`]), new Value(demandId)]),
     ]),
   )
-  const demandIdByWhere = new Map<
-    NonNullable<LoadSubsetOptions[`where`]>,
-    ReplayDemandId
-  >([...demandWheres].map(([demandId, where]) => [where, demandId]))
+  const demandIdByWhereHash = new Map(
+    [...demandWheres].map(([demandId, where]) => [
+      getStableExpressionHash(where),
+      demandId,
+    ]),
+  )
   const requestByDemand = new Map<ReplayDemandId, LoadSubsetOptions>()
   const activeDemandIds = new Set(scenario.demandIds)
 
@@ -744,7 +757,9 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
               const demandId =
                 options.where === undefined
                   ? undefined
-                  : demandIdByWhere.get(options.where)
+                  : demandIdByWhereHash.get(
+                      getStableExpressionHash(options.where),
+                    )
               if (demandId === undefined) {
                 throw new Error(`Subset request did not preserve its demand`)
               }
@@ -1794,7 +1809,7 @@ async function runOptimisticReplayScenario(
   }
 }
 
-const { multiplier, replaySeed } = readOracleRunConfig()
+const { multiplier, ...oracleReplay } = readOracleRunConfig()
 const generatedRuns = 30 * multiplier
 const generatedTimeout = 5_000 * multiplier
 
@@ -2742,6 +2757,145 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
+  it(`keeps an ordinary same-key write authoritative while an unordered request is pending`, async () => {
+    type Row = { id: `a` | `x`; rank: number }
+    type Outcome = {
+      hasMore: boolean
+      appliedRowKeys: ReadonlyArray<Row[`id`]>
+    }
+    type Phase = `initial` | `replay` | `additional` | `probe`
+
+    const replayFailure = new Error(`sibling replay failed`)
+    const additionalLoad = createDeferred<Outcome>()
+    const loads: Array<{ phase: Phase; options: LoadSubsetOptions }> = []
+    let phase: Phase = `initial`
+    let begin!: () => void
+    let write!: (
+      message: ChangeMessageOrDeleteKeyMessage<Row, Row[`id`]>,
+    ) => void
+    let commit!: (signal?: AbortSignal) => true | Promise<void>
+    let truncate!: () => void
+
+    const collection = createCollection<Row>({
+      id: `ordinary-write-during-unordered-request`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          truncate = params.truncate
+          params.markReady()
+
+          const apply = (
+            row: Row,
+            signal: AbortSignal | undefined,
+          ): Outcome => {
+            begin()
+            write({ type: `insert`, value: row })
+            commit(signal)
+            return { hasMore: false, appliedRowKeys: [row.id] }
+          }
+
+          return {
+            loadSubset: (options) => {
+              loads.push({ phase, options })
+              if (phase === `initial`) {
+                return options.orderBy
+                  ? Promise.resolve(apply({ id: `a`, rank: 1 }, options.signal))
+                  : Promise.resolve({
+                      hasMore: false,
+                      appliedRowKeys: [] as const,
+                    })
+              }
+              if (phase === `replay`) {
+                return options.orderBy
+                  ? Promise.resolve(apply({ id: `x`, rank: 0 }, options.signal))
+                  : Promise.reject(replayFailure)
+              }
+              if (phase === `additional`) return additionalLoad.promise
+              return Promise.resolve({
+                hasMore: false,
+                appliedRowKeys: [] as const,
+              })
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const index = collection.createIndex((row) => row.rank, {
+      indexType: BTreeIndex,
+    })
+    const orderBy: OrderBy = [
+      {
+        expression: new PropRef([`rank`]),
+        compareOptions: { direction: `asc`, nulls: `first` },
+      },
+    ]
+    const seedWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`a`)])
+    const additionalWhere = new Func(`eq`, [
+      new PropRef([`id`]),
+      new Value(`x`),
+    ])
+    const visible = new Set<Row[`id`]>()
+    const subscription = collection.subscribeChanges((changes) => {
+      for (const change of changes) {
+        const key = change.key as Row[`id`]
+        if (change.type === `delete`) visible.delete(key)
+        else visible.add(key)
+      }
+    })
+    subscription.setOrderByIndex(index)
+
+    try {
+      subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+      subscription.requestSnapshot({ where: seedWhere })
+      await flushPromises()
+      expect([...visible]).toEqual([`a`])
+
+      phase = `replay`
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+      await flushPromises()
+      expect(subscription.lastError).toBe(replayFailure)
+      expect(subscription.orderedBoundaryKey).toBe(`a`)
+      expect([...visible]).toEqual([`a`])
+
+      phase = `additional`
+      subscription.requestSnapshot({ where: additionalWhere })
+      await flushPromises()
+      expect(loads.at(-1)).toMatchObject({ phase: `additional` })
+      expect(loads.at(-1)?.options.orderBy).toBeUndefined()
+
+      begin()
+      write({ type: `update`, value: { id: `x`, rank: -1 } })
+      commit()
+      expect(subscription.orderedBoundaryKey).toBe(`x`)
+      expect([...visible].sort()).toEqual([`a`, `x`])
+
+      additionalLoad.reject(new Error(`sibling acquisition failed`))
+      await flushPromises()
+      subscription.releaseSnapshot(additionalWhere)
+      expect(subscription.orderedBoundaryKey).toBe(`x`)
+      expect([...visible].sort()).toEqual([`a`, `x`])
+
+      phase = `probe`
+      subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+      await flushPromises()
+      expect(loads.at(-1)).toMatchObject({
+        phase: `probe`,
+        options: { cursor: { lastKey: `x` } },
+      })
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   it.each([
     `sync`,
     `async`,
@@ -3429,17 +3583,17 @@ describe(`CollectionSubscription replay oracle`, () => {
             return {
               loadSubset: (options) => {
                 loads.push(options)
-                if (options.where === whereX) {
+                if (sameWhere(options.where, whereX)) {
                   begin()
                   write({ type: `insert`, value: { id: `x`, value: 3 } })
                   return commit(options.signal)
                 }
                 if (replaying) {
-                  return options.where === whereA
+                  return sameWhere(options.where, whereA)
                     ? replayA.promise
                     : replayB.promise
                 }
-                const id = options.where === whereA ? `a` : `b`
+                const id = sameWhere(options.where, whereA) ? `a` : `b`
                 begin()
                 write({
                   type: `insert`,
@@ -3620,7 +3774,7 @@ describe(`CollectionSubscription replay oracle`, () => {
         }
         await flushPromises()
 
-        if (replacementResult === `return` || replacementResult === `resolve`) {
+        if (replacementResult === `resolve`) {
           expect(errorObservations).toEqual([])
           expect([...visible.keys()]).toEqual([`y`])
           expect(subscription.orderedBoundaryKey).toBe(`y`)
@@ -3631,6 +3785,12 @@ describe(`CollectionSubscription replay oracle`, () => {
           await flushPromises()
           expect([...visible.keys()]).toEqual([`z`])
           expect(subscription.orderedBoundaryKey).toBe(`z`)
+        } else if (replacementResult === `return`) {
+          // A synchronous outcome-free result can settle this acquisition,
+          // but cannot prove that the replay is a complete replacement.
+          expect(errorObservations).toEqual([])
+          expect([...visible.keys()]).toEqual([])
+          expect(subscription.orderedBoundaryKey).toBe(`y`)
         } else {
           expect(errorObservations).toEqual([[`x`]])
           expect([...visible.keys()]).toEqual([`x`])
@@ -3694,11 +3854,11 @@ describe(`CollectionSubscription replay oracle`, () => {
             params.markReady()
             return {
               loadSubset: (options) => {
-                if (options.where === whereNested) {
+                if (sameWhere(options.where, whereNested)) {
                   nestedOptions.push(options)
                   throw startError
                 }
-                if (options.where === whereNestedSecond) {
+                if (sameWhere(options.where, whereNestedSecond)) {
                   nestedOptions.push(options)
                   throw secondStartError
                 }
@@ -3835,11 +3995,11 @@ describe(`CollectionSubscription replay oracle`, () => {
             params.markReady()
             return {
               loadSubset: (options) => {
-                if (options.where === whereInner) {
+                if (sameWhere(options.where, whereInner)) {
                   innerOptions = options
                   throw failure
                 }
-                if (options.where === whereOuter) {
+                if (sameWhere(options.where, whereOuter)) {
                   outerLoadCount++
                   if (
                     originContext === `replay-entry` &&
@@ -3854,7 +4014,7 @@ describe(`CollectionSubscription replay oracle`, () => {
                     requestInner()
                   }
                 }
-                if (options.where === whereMiddle) {
+                if (sameWhere(options.where, whereMiddle)) {
                   if (propagation === `async`) {
                     return (async () => {
                       requestInner()
@@ -3868,7 +4028,7 @@ describe(`CollectionSubscription replay oracle`, () => {
               unloadSubset: (options) => {
                 if (
                   originContext === `cleanup` &&
-                  options.where === whereOuter
+                  sameWhere(options.where, whereOuter)
                 ) {
                   requestMiddle()
                 }
@@ -4002,12 +4162,12 @@ describe(`CollectionSubscription replay oracle`, () => {
             params.markReady()
             return {
               loadSubset: (options) => {
-                if (options.where === whereNested) {
+                if (sameWhere(options.where, whereNested)) {
                   nestedOptions = options
                   throw startError
                 }
                 if (
-                  options.where === whereOuter ||
+                  sameWhere(options.where, whereOuter) ||
                   options.orderBy !== undefined
                 ) {
                   outerLoadCount++
@@ -4027,7 +4187,7 @@ describe(`CollectionSubscription replay oracle`, () => {
               unloadSubset: (options) => {
                 if (
                   cleanupArmed &&
-                  options.where === whereCleanup &&
+                  sameWhere(options.where, whereCleanup) &&
                   cleanupThrowCount === 0
                 ) {
                   cleanupThrowCount++
@@ -4766,7 +4926,12 @@ describe(`CollectionSubscription replay oracle`, () => {
                   value: { id: `b`, rank: 2, version: 2 },
                 })
                 commit(options.signal)
-                return settlement === `sync` ? true : Promise.resolve()
+                return settlement === `sync`
+                  ? true
+                  : Promise.resolve({
+                      hasMore: false,
+                      appliedRowKeys: [`b`] as const,
+                    })
               },
               unloadSubset: (options) => {
                 unloads.push(options)
@@ -4847,8 +5012,7 @@ describe(`CollectionSubscription replay oracle`, () => {
         await flushPromises()
 
         const publishesReplacement =
-          callback === `none` ||
-          (callback === `cleanup-succeed` && settlement === `sync`)
+          settlement === `async` && callback === `none`
         expect(subscription.status).toBe(`ready`)
         expect(escapedCallbackError).toBeUndefined()
         expect(
@@ -5022,6 +5186,479 @@ describe(`CollectionSubscription replay oracle`, () => {
       subscription.releaseSnapshot(sameKeyWhere)
       expect(visibleRows()).toEqual([])
       expect(subscription.orderedBoundaryKey).toBeUndefined()
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`compiles an additional-demand predicate once per logical demand`, async () => {
+    type Row = { id: string; rank: number }
+    let begin!: () => void
+    let write!: (
+      message: ChangeMessageOrDeleteKeyMessage<Row, Row[`id`]>,
+    ) => void
+    let commit!: () => void
+    const collection = createCollection<Row>({
+      id: `additional-demand-predicate-compilation`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          params.markReady()
+          return {
+            loadSubset: () => true,
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const index = collection.createIndex((row) => row.rank, {
+      indexType: BTreeIndex,
+    })
+    const orderBy: OrderBy = [
+      {
+        expression: new PropRef([`rank`]),
+        compareOptions: { direction: `asc`, nulls: `first` },
+      },
+    ]
+    let expressionReads = 0
+    // Compilation reads the IR node type; the compiled evaluator does not.
+    // Count those reads without exposing test instrumentation in production.
+    const expression = new Proxy(
+      new Func<boolean>(`eq`, [new PropRef([`id`]), new Value(`sibling`)]),
+      {
+        get(target, property, receiver) {
+          if (property === `type`) expressionReads++
+          return Reflect.get(target, property, receiver)
+        },
+      },
+    )
+    const subscription = collection.subscribeChanges(() => {})
+    subscription.setOrderByIndex(index)
+
+    const publish = (value: Row) => {
+      begin()
+      write({ type: `insert`, value })
+      commit()
+    }
+
+    try {
+      subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+      subscription.requestSnapshot({ where: expression })
+      const firstDemandReads = expressionReads
+      expect(firstDemandReads).toBeGreaterThan(0)
+
+      publish({ id: `sibling`, rank: 2 })
+      publish({ id: `ordered`, rank: 1 })
+      expect(expressionReads).toBe(firstDemandReads)
+
+      subscription.releaseSnapshot(expression)
+      const beforeReplacement = expressionReads
+      subscription.requestSnapshot({ where: expression })
+      expect(expressionReads).toBeGreaterThan(beforeReplacement)
+      const replacementDemandReads = expressionReads
+
+      publish({ id: `later`, rank: 0 })
+      expect(expressionReads).toBe(replacementDemandReads)
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`snapshots a logical demand before caller-owned predicate mutation`, async () => {
+    type Row = { id: `a` | `b`; other: `a` | `b` }
+    type Outcome = {
+      hasMore: false
+      appliedRowKeys: ReadonlyArray<Row[`id`]>
+    }
+    const rows: ReadonlyArray<Row> = [
+      { id: `a`, other: `b` },
+      { id: `b`, other: `a` },
+    ]
+    let begin!: () => void
+    let write!: (
+      message: ChangeMessageOrDeleteKeyMessage<Row, Row[`id`]>,
+    ) => void
+    let commit!: (signal?: AbortSignal) => true | Promise<void>
+    let truncate!: () => void
+    const replay = createDeferred<Outcome>()
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const collection = createCollection<Row>({
+      id: `logical-demand-predicate-snapshot`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          truncate = params.truncate
+          begin()
+          for (const row of rows) write({ type: `insert`, value: row })
+          commit()
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              if (loads.length === 1) {
+                // Adapter code owns only this acquisition copy. Mutating it
+                // must not rewrite the private demand used by later replay.
+                ;((options.where as Func).args[0] as PropRef).path[0] = `other`
+                return true
+              }
+              return replay.promise
+            },
+            unloadSubset: (options) => {
+              unloads.push(options)
+            },
+          }
+        },
+      },
+    })
+    const visible = new Map<Row[`id`], Row>()
+    const subscription = collection.subscribeChanges((changes) => {
+      for (const change of changes) {
+        const key = change.key as Row[`id`]
+        if (change.type === `delete`) visible.delete(key)
+        else visible.set(key, change.value)
+      }
+    })
+    const ref = new PropRef([`id`])
+    const where = new Func<boolean>(`eq`, [ref, new Value(`a`)])
+
+    try {
+      subscription.requestSnapshot({ where })
+      expect([...visible.keys()]).toEqual([`a`])
+
+      ref.path[0] = `other`
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+      expect(loads).toHaveLength(2)
+
+      begin()
+      for (const row of rows) write({ type: `insert`, value: row })
+      const receipt = commit(loads[1]?.signal)
+      if (receipt !== true) await receipt
+      replay.resolve({ hasMore: false, appliedRowKeys: [`a`, `b`] })
+      await flushPromises()
+
+      expect(((loads[1]?.where as Func).args[0] as PropRef).path).toEqual([
+        `id`,
+      ])
+      expect([...visible.keys()]).toEqual([`a`])
+
+      subscription.releaseSnapshot(where)
+      expect(unloads.at(-1)).toBe(loads[1])
+    } finally {
+      replay.resolve({ hasMore: false, appliedRowKeys: [] })
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`snapshots mutable values beneath output-producing predicate functions`, async () => {
+    type Row = { id: `row` }
+    type Outcome = {
+      hasMore: false
+      appliedRowKeys: ReadonlyArray<Row[`id`]>
+    }
+    let begin!: () => void
+    let write!: (
+      message: ChangeMessageOrDeleteKeyMessage<Row, Row[`id`]>,
+    ) => void
+    let commit!: (signal?: AbortSignal) => true | Promise<void>
+    let truncate!: () => void
+    const replay = createDeferred<Outcome>()
+    const loads: Array<LoadSubsetOptions> = []
+    const collection = createCollection<Row>({
+      id: `logical-demand-value-snapshot`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          truncate = params.truncate
+          begin()
+          write({ type: `insert`, value: { id: `row` } })
+          commit()
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return loads.length === 1 ? true : replay.promise
+            },
+          }
+        },
+      },
+    })
+    const visible = new Map<Row[`id`], Row>()
+    const subscription = collection.subscribeChanges((changes) => {
+      for (const change of changes) {
+        const key = change.key as Row[`id`]
+        if (change.type === `delete`) visible.delete(key)
+        else visible.set(key, change.value)
+      }
+    })
+    const bytes = Buffer.from([65])
+    const where = new Func<boolean>(`eq`, [
+      new Func(`concat`, [new Value(bytes)]),
+      new Value(`A`),
+    ])
+
+    try {
+      subscription.requestSnapshot({ where })
+      expect([...visible.keys()]).toEqual([`row`])
+
+      bytes[0] = 66
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+
+      begin()
+      write({ type: `insert`, value: { id: `row` } })
+      const receipt = commit(loads[1]?.signal)
+      if (receipt !== true) await receipt
+      replay.resolve({ hasMore: false, appliedRowKeys: [`row`] })
+      await flushPromises()
+
+      expect([...visible.keys()]).toEqual([`row`])
+    } finally {
+      replay.resolve({ hasMore: false, appliedRowKeys: [] })
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it.each([`reference-path`, `direction`] as const)(
+    `snapshots ordered demand state before %s mutation`,
+    async (mutation) => {
+      type Row = {
+        id: `a` | `b`
+        rank: number
+        other: number
+        version: number
+      }
+      let begin!: () => void
+      let write!: (
+        message: ChangeMessageOrDeleteKeyMessage<Row, Row[`id`]>,
+      ) => void
+      let commit!: () => void
+      const collection = createCollection<Row>({
+        id: `ordered-demand-snapshot-${mutation}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            begin = params.begin
+            write = params.write
+            commit = params.commit
+            begin()
+            write({
+              type: `insert`,
+              value: { id: `a`, rank: 1, other: 2, version: 0 },
+            })
+            write({
+              type: `insert`,
+              value: { id: `b`, rank: 2, other: 1, version: 0 },
+            })
+            commit()
+            params.markReady()
+            return { loadSubset: () => true }
+          },
+        },
+      })
+      const index = collection.createIndex((row) => row.rank, {
+        indexType: BTreeIndex,
+      })
+      const orderRef = new PropRef<number>([`rank`])
+      const compareOptions: OrderBy[number][`compareOptions`] = {
+        direction: `asc`,
+        nulls: `first`,
+        stringSort: `lexical`,
+      }
+      const orderBy: OrderBy = [{ expression: orderRef, compareOptions }]
+      const visible = new Map<Row[`id`], Row>()
+      const subscription = collection.subscribeChanges((changes) => {
+        for (const change of changes) {
+          const key = change.key as Row[`id`]
+          if (change.type === `delete`) visible.delete(key)
+          else visible.set(key, change.value)
+        }
+      })
+      subscription.setOrderByIndex(index)
+
+      try {
+        subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+        expect([...visible.keys()]).toEqual([`a`])
+
+        if (mutation === `reference-path`) orderRef.path[0] = `other`
+        else compareOptions.direction = `desc`
+
+        begin()
+        write({
+          type: `update`,
+          value: { id: `b`, rank: 2, other: 1, version: 1 },
+        })
+        commit()
+
+        expect([...visible.keys()]).toEqual([`a`])
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it.each([`before-first-request`, `after-first-publication`] as const)(
+    `keeps one ordered machine when caller state mutates %s`,
+    async (timing) => {
+      type Row = {
+        id: `a` | `b`
+        group: `keep` | `drop`
+        alternate: `keep` | `drop`
+        rank: number
+        other: number
+      }
+      const loads: Array<LoadSubsetOptions> = []
+      const collection = createCollection<Row>({
+        id: `ordered-machine-${timing}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            params.begin()
+            params.write({
+              type: `insert`,
+              value: {
+                id: `a`,
+                group: `keep`,
+                alternate: `drop`,
+                rank: 1,
+                other: 2,
+              },
+            })
+            params.write({
+              type: `insert`,
+              value: {
+                id: `b`,
+                group: `drop`,
+                alternate: `keep`,
+                rank: 2,
+                other: 1,
+              },
+            })
+            params.commit()
+            params.markReady()
+            return {
+              loadSubset: (options) => {
+                loads.push(options)
+                return true
+              },
+            }
+          },
+        },
+      })
+      const index = collection.createIndex((row) => row.rank, {
+        indexType: BTreeIndex,
+      })
+      const whereRef = new PropRef<Row[`group`]>([`group`])
+      const where = new Func<boolean>(`eq`, [
+        whereRef,
+        new Value<Row[`group`]>(`keep`),
+      ])
+      const orderRef = new PropRef<number>([`rank`])
+      const compareOptions: OrderBy[number][`compareOptions`] = {
+        direction: `asc`,
+        nulls: `first`,
+        stringSort: `lexical`,
+      }
+      const orderBy: OrderBy = [{ expression: orderRef, compareOptions }]
+      const visible = new Map<Row[`id`], Row>()
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          for (const change of changes) {
+            const key = change.key as Row[`id`]
+            if (change.type === `delete`) visible.delete(key)
+            else visible.set(key, change.value)
+          }
+        },
+        { whereExpression: where },
+      )
+      subscription.setOrderByIndex(index)
+      const mutateCallerState = () => {
+        whereRef.path[0] = `alternate`
+        if (timing === `after-first-publication`) {
+          orderRef.path[0] = `other`
+          compareOptions.direction = `desc`
+        }
+      }
+
+      try {
+        if (timing === `before-first-request`) mutateCallerState()
+        subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+
+        if (timing === `after-first-publication`) {
+          expect([...visible.keys()]).toEqual([`a`])
+          mutateCallerState()
+          subscription.requestLimitedSnapshot({ orderBy, limit: 2 })
+        }
+
+        const lastLoad = loads.at(-1)!
+        const loadedWhere = lastLoad.where as Func<boolean>
+        const loadedOrder = lastLoad.orderBy![0]!
+        expect((loadedWhere.args[0] as PropRef).path).toEqual([`group`])
+        expect((loadedOrder.expression as PropRef).path).toEqual([`rank`])
+        expect(loadedOrder.compareOptions.direction).toBe(`asc`)
+        expect([...visible.keys()]).toEqual([`a`])
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it(`rejects unsupported structural demand constants before adapter entry`, async () => {
+    type Row = { id: string }
+    let loadCount = 0
+    const collection = createCollection<Row>({
+      id: `unsupported-structural-demand`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          params.markReady()
+          return {
+            loadSubset: () => {
+              loadCount++
+              return true
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {})
+    const value = { [Symbol.toPrimitive]: () => `A` }
+    const where = new Func<boolean>(`eq`, [
+      new Func(`concat`, [new Value(value)]),
+      new Value(`A`),
+    ])
+
+    try {
+      expect(() => subscription.requestSnapshot({ where })).toThrow(
+        /snapshot structural expression value/i,
+      )
+      expect(loadCount).toBe(0)
     } finally {
       subscription.unsubscribe()
       await collection.cleanup()
@@ -6215,7 +6852,11 @@ describe(`CollectionSubscription replay oracle`, () => {
             },
             unloadSubset: (options) => {
               unloads.push(options)
-              if (cleanupArmed && options.where === whereC && !cleanupFailed) {
+              if (
+                cleanupArmed &&
+                sameWhere(options.where, whereC) &&
+                !cleanupFailed
+              ) {
                 cleanupFailed = true
                 throw cleanupFailure
               }
@@ -6468,15 +7109,17 @@ describe(`CollectionSubscription replay oracle`, () => {
           return {
             loadSubset: (options) => {
               loads.push(options)
-              if (options.where === whereNested) {
+              if (sameWhere(options.where, whereNested)) {
                 nestedOptions = options
                 throw startFailure
               }
-              if (replaying && options.where === whereA) throw replayFailure
+              if (replaying && sameWhere(options.where, whereA)) {
+                throw replayFailure
+              }
               return true
             },
             unloadSubset: (options) => {
-              if (options.where === whereC && !cleanupFailed) {
+              if (sameWhere(options.where, whereC) && !cleanupFailed) {
                 cleanupFailed = true
                 throw cleanupFailure
               }
@@ -6581,12 +7224,12 @@ describe(`CollectionSubscription replay oracle`, () => {
             loadSubset: (options) => {
               loads.push(options)
               if (!replaying) return true
-              return options.where === whereA
+              return sameWhere(options.where, whereA)
                 ? replayA.promise
                 : replayB.promise
             },
             unloadSubset: (options) => {
-              if (options.where !== whereA) return
+              if (!sameWhere(options.where, whereA)) return
               unloadAttempts++
               if (unloadAttempts <= 2) {
                 throw cleanupFailure
@@ -6688,7 +7331,7 @@ describe(`CollectionSubscription replay oracle`, () => {
           params.markReady()
           return {
             loadSubset: (options) => {
-              if (options.where === whereNested) {
+              if (sameWhere(options.where, whereNested)) {
                 failedOptions = options
                 throw failure
               }
@@ -6764,7 +7407,7 @@ describe(`CollectionSubscription replay oracle`, () => {
             loadSubset: () => true,
             unloadSubset: (options) => {
               unloads.push(options)
-              if (armed && options.where === whereB && !failed) {
+              if (armed && sameWhere(options.where, whereB) && !failed) {
                 failed = true
                 failedOptions = options
                 throw failure
@@ -6892,31 +7535,31 @@ describe(`CollectionSubscription replay oracle`, () => {
             params.markReady()
             return {
               loadSubset: (options) => {
-                if (options.where === whereAfterTeardown) {
+                if (sameWhere(options.where, whereAfterTeardown)) {
                   postTeardownLoads++
                 }
-                if (options.where === whereInner) {
+                if (sameWhere(options.where, whereInner)) {
                   failedOptions = options
                   throw failure
                 }
                 if (
                   replaying &&
                   activeFrame === `adapter-entry` &&
-                  options.where === whereOuter
+                  sameWhere(options.where, whereOuter)
                 ) {
                   failWithinBoundary(options)
                 }
                 if (
                   replaying &&
                   activeFrame === `cleanup` &&
-                  options.where === whereOuter
+                  sameWhere(options.where, whereOuter)
                 ) {
                   subscription.releaseSnapshot(whereCleanup)
                 }
                 return true
               },
               unloadSubset: (options) => {
-                if (options.where !== whereCleanup) return
+                if (!sameWhere(options.where, whereCleanup)) return
                 cleanupUnloads.push(options)
                 if (replaying && activeFrame === `cleanup`) {
                   failWithinBoundary(options)
@@ -7042,14 +7685,14 @@ describe(`CollectionSubscription replay oracle`, () => {
                 if (
                   replaying &&
                   activeFrame === `adapter-entry` &&
-                  options.where === whereOuter
+                  sameWhere(options.where, whereOuter)
                 ) {
                   startTeardown()
                 }
                 if (
                   replaying &&
                   activeFrame === `cleanup` &&
-                  options.where === whereOuter
+                  sameWhere(options.where, whereOuter)
                 ) {
                   subscription.releaseSnapshot(whereActiveCleanup)
                 }
@@ -7059,11 +7702,11 @@ describe(`CollectionSubscription replay oracle`, () => {
                 if (
                   replaying &&
                   activeFrame === `cleanup` &&
-                  options.where === whereActiveCleanup
+                  sameWhere(options.where, whereActiveCleanup)
                 ) {
                   startTeardown()
                 }
-                if (options.where !== whereTeardownCleanup) return
+                if (!sameWhere(options.where, whereTeardownCleanup)) return
                 teardownCleanupOptions = options
                 teardownCleanupUnloads++
                 if (!teardownCleanupFailed) {
@@ -7174,11 +7817,11 @@ describe(`CollectionSubscription replay oracle`, () => {
             params.markReady()
             return {
               loadSubset: (options) => {
-                if (options.where === whereInner) {
+                if (sameWhere(options.where, whereInner)) {
                   subscription.releaseSnapshot(whereCleanup)
                   return true
                 }
-                if (options.where !== whereOuter) return true
+                if (!sameWhere(options.where, whereOuter)) return true
                 outerLoads++
                 if (!replaying || outerLoads !== 2) return true
 
@@ -7197,7 +7840,7 @@ describe(`CollectionSubscription replay oracle`, () => {
                 throw outerFailure
               },
               unloadSubset: (options) => {
-                if (options.where !== whereCleanup) return
+                if (!sameWhere(options.where, whereCleanup)) return
                 cleanupUnloads++
                 cleanupOptions ??= options
                 if (!cleanupFailed) {
@@ -7337,7 +7980,7 @@ describe(`CollectionSubscription replay oracle`, () => {
           return {
             loadSubset: (options) => {
               loads.push(options)
-              if (options.where === whereB) {
+              if (sameWhere(options.where, whereB)) {
                 nestedOptions = options
                 throw failure
               }
@@ -7345,7 +7988,7 @@ describe(`CollectionSubscription replay oracle`, () => {
             },
             unloadSubset: (options) => {
               unloads.push(options)
-              if (options.where === whereA) {
+              if (sameWhere(options.where, whereA)) {
                 try {
                   owner.current!.requestSnapshot({ where: whereB })
                 } catch {
@@ -7408,11 +8051,11 @@ describe(`CollectionSubscription replay oracle`, () => {
           params.markReady()
           return {
             loadSubset: (options) => {
-              if (options.where === whereInner) {
+              if (sameWhere(options.where, whereInner)) {
                 innerOptions = options
                 throw failure
               }
-              if (options.where === whereMiddle) {
+              if (sameWhere(options.where, whereMiddle)) {
                 return (async () => {
                   owner.current!.requestSnapshot({ where: whereInner })
                   await Promise.resolve()
@@ -7421,7 +8064,7 @@ describe(`CollectionSubscription replay oracle`, () => {
               return true
             },
             unloadSubset: (options) => {
-              if (options.where === whereOuter) {
+              if (sameWhere(options.where, whereOuter)) {
                 owner.current!.requestSnapshot({ where: whereMiddle })
               }
             },
@@ -7501,11 +8144,11 @@ describe(`CollectionSubscription replay oracle`, () => {
             params.markReady()
             return {
               loadSubset: (options) => {
-                if (options.where === whereInner) {
+                if (sameWhere(options.where, whereInner)) {
                   innerOptions = options
                   throw failure
                 }
-                if (options.where === whereMiddle) {
+                if (sameWhere(options.where, whereMiddle)) {
                   try {
                     owner.current!.requestSnapshot({ where: whereInner })
                   } catch (error) {
@@ -7514,8 +8157,8 @@ describe(`CollectionSubscription replay oracle`, () => {
                   return true
                 }
                 if (
-                  options.where === whereLater ||
-                  (demandKind === `ordered` && options.orderBy === orderBy)
+                  sameWhere(options.where, whereLater) ||
+                  (demandKind === `ordered` && options.orderBy !== undefined)
                 ) {
                   laterOptions = options
                   if (laterFailure === `throw`) throw retainedCarrier
@@ -7524,7 +8167,7 @@ describe(`CollectionSubscription replay oracle`, () => {
                 return true
               },
               unloadSubset: (options) => {
-                if (options.where === whereOuter) {
+                if (sameWhere(options.where, whereOuter)) {
                   owner.current!.requestSnapshot({ where: whereMiddle })
                 }
               },
@@ -7597,11 +8240,11 @@ describe(`CollectionSubscription replay oracle`, () => {
           params.markReady()
           return {
             loadSubset: (options) => {
-              if (options.where === whereInner) {
+              if (sameWhere(options.where, whereInner)) {
                 innerOptions = options
                 throw failure
               }
-              if (options.where === whereMiddle) {
+              if (sameWhere(options.where, whereMiddle)) {
                 middleOptions = options
                 return (async () => {
                   await Promise.resolve()
@@ -7611,7 +8254,7 @@ describe(`CollectionSubscription replay oracle`, () => {
               return true
             },
             unloadSubset: (options) => {
-              if (options.where === whereOuter) {
+              if (sameWhere(options.where, whereOuter)) {
                 owner.current!.requestSnapshot({ where: whereMiddle })
               }
             },
@@ -8330,7 +8973,8 @@ describe(`CollectionSubscription replay oracle`, () => {
         direction === `asc`
           ? ([`three`, `four`] as const)
           : ([`four`, `three`] as const)
-      const succeeds = delivery === `return` || delivery === `resolve`
+      const sourceSucceeded = delivery === `return` || delivery === `resolve`
+      const publishesReplacement = delivery === `resolve`
       const expectedIds = identity === `changed` ? replacementIds : initialIds
 
       try {
@@ -8397,14 +9041,12 @@ describe(`CollectionSubscription replay oracle`, () => {
         }
         await flushPromises()
         expect(collection.toArray.map(({ id }) => id).sort()).toEqual(
-          succeeds ? [...expectedIds].sort() : [],
+          sourceSucceeded ? [...expectedIds].sort() : [],
         )
         expect(publicationSnapshots).toEqual(
           delivery === `resolve`
             ? [[initialIds[0]], [...expectedIds].sort()]
-            : delivery === `return` && identity === `changed`
-              ? [[initialIds[0]], [expectedIds[0]]]
-              : [[initialIds[0]]],
+            : [[initialIds[0]]],
         )
 
         const loadCountBeforeWiden = loadOptions.length
@@ -8413,13 +9055,17 @@ describe(`CollectionSubscription replay oracle`, () => {
           limit: 1,
           minValues: [direction === `asc` ? 2 : 1],
         })
-        if (succeeds) {
+        if (publishesReplacement) {
           expect(loadOptions).toHaveLength(loadCountBeforeWiden)
         } else {
-          expect(loadOptions[loadCountBeforeWiden]).toMatchObject({
-            offset: 1,
-            cursor: { lastKey: initialIds[0] },
-          })
+          expect(loadOptions[loadCountBeforeWiden]).toMatchObject(
+            delivery === `return`
+              ? { offset: 1, cursor: undefined }
+              : {
+                  offset: 1,
+                  cursor: { lastKey: initialIds[0] },
+                },
+          )
         }
       } finally {
         subscription.unsubscribe()
@@ -8451,20 +9097,24 @@ describe(`CollectionSubscription replay oracle`, () => {
         {
           type: `stagePublicationRows`,
           publicationId: `initial`,
+          sourceId: `source`,
           demandId: `ordered`,
           rows: [],
         },
         { type: `commitPublication`, publicationId: `initial` },
         {
           type: `requestDemand`,
+          sourceId: `source`,
           ownerId: `other-owner`,
           sessionId: `session`,
           demandId: `other`,
+          attemptId: `other-attempt`,
           alreadyAborted: false,
         },
         {
           type: `stagePublicationRows`,
           publicationId: `initial`,
+          sourceId: `source`,
           demandId: `other`,
           rows: [],
         },
@@ -8472,6 +9122,7 @@ describe(`CollectionSubscription replay oracle`, () => {
       ]
       const expectedBoundary = () =>
         projectAtomicOrderedPublicationState(history, {
+          sourceId: `source`,
           demandId: `ordered`,
           direction: `asc`,
           initialWindowSize: 1,
@@ -8547,7 +9198,10 @@ describe(`CollectionSubscription replay oracle`, () => {
         history.push({
           type: `beginReplacement`,
           publicationId: `replacement`,
-          demandIds: [`ordered`, `other`],
+          demands: [
+            { sourceId: `source`, demandId: `ordered` },
+            { sourceId: `source`, demandId: `other` },
+          ],
         })
 
         const orderedReplay = replayLoads.find(({ options }) => options.orderBy)
@@ -8565,6 +9219,7 @@ describe(`CollectionSubscription replay oracle`, () => {
         history.push({
           type: `stagePublicationRows`,
           publicationId: `replacement`,
+          sourceId: `source`,
           demandId: `ordered`,
           rows: [{ key: `new-ordered`, orderValue: 1 }],
         })
@@ -8575,6 +9230,7 @@ describe(`CollectionSubscription replay oracle`, () => {
         history.push({
           type: `settleReplacement`,
           publicationId: `replacement`,
+          sourceId: `source`,
           demandId: `ordered`,
           outcome: `success`,
           extent: `exhausted`,
@@ -8592,6 +9248,7 @@ describe(`CollectionSubscription replay oracle`, () => {
           history.push({
             type: `settleReplacement`,
             publicationId: `replacement`,
+            sourceId: `source`,
             demandId: `other`,
             outcome: `success`,
             extent: `exhausted`,
@@ -8601,6 +9258,7 @@ describe(`CollectionSubscription replay oracle`, () => {
           history.push({
             type: `settleReplacement`,
             publicationId: `replacement`,
+            sourceId: `source`,
             demandId: `other`,
             outcome: `failure`,
           })
@@ -8625,7 +9283,10 @@ describe(`CollectionSubscription replay oracle`, () => {
           history.push({
             type: `beginReplacement`,
             publicationId: `failed-replacement`,
-            demandIds: [`ordered`, `other`],
+            demands: [
+              { sourceId: `source`, demandId: `ordered` },
+              { sourceId: `source`, demandId: `other` },
+            ],
           })
           const nextOrderedReplay = nextReplayLoads.find(
             ({ options }) => options.orderBy,
@@ -8640,6 +9301,7 @@ describe(`CollectionSubscription replay oracle`, () => {
           history.push({
             type: `settleReplacement`,
             publicationId: `failed-replacement`,
+            sourceId: `source`,
             demandId: `ordered`,
             outcome: `failure`,
           })
@@ -8650,6 +9312,7 @@ describe(`CollectionSubscription replay oracle`, () => {
           history.push({
             type: `settleReplacement`,
             publicationId: `failed-replacement`,
+            sourceId: `source`,
             demandId: `other`,
             outcome: `success`,
             extent: `exhausted`,
@@ -8892,7 +9555,11 @@ describe(`CollectionSubscription replay oracle`, () => {
 
   fcTest.prop(
     [replayScenarioArbitrary],
-    oracleRandomParameters(generatedRuns, replaySeed),
+    oracleRandomParameters(
+      generatedRuns,
+      oracleReplay,
+      `subscription-replay.ownership`,
+    ),
   )(
     `matches replay and ownership laws for a random or replayed seed`,
     runReplayScenario,
@@ -8901,7 +9568,11 @@ describe(`CollectionSubscription replay oracle`, () => {
 
   fcTest.prop(
     [sequentialReplayScenarioArbitrary],
-    oracleRandomParameters(generatedRuns, replaySeed),
+    oracleRandomParameters(
+      generatedRuns,
+      oracleReplay,
+      `subscription-replay.sequential`,
+    ),
   )(
     `matches synchronous, asynchronous, and partial-failure replay laws`,
     runSequentialReplayScenario,
@@ -8924,7 +9595,11 @@ describe(`CollectionSubscription replay oracle`, () => {
 
   fcTest.prop(
     [replayCompletionScenarioArbitrary],
-    oracleRandomParameters(generatedRuns, replaySeed),
+    oracleRandomParameters(
+      generatedRuns,
+      oracleReplay,
+      `subscription-replay.completion`,
+    ),
   )(
     `preserves replay completion authority for a random or replayed seed`,
     runReplayCompletionScenario,
@@ -8941,7 +9616,11 @@ describe(`CollectionSubscription replay oracle`, () => {
 
   fcTest.prop(
     [cleanupRestartScenarioArbitrary],
-    oracleRandomParameters(generatedRuns, replaySeed),
+    oracleRandomParameters(
+      generatedRuns,
+      oracleReplay,
+      `subscription-replay.restart`,
+    ),
   )(
     `isolates cleanup and restart sessions for a random or replayed seed`,
     runCleanupRestartScenario,
@@ -8959,7 +9638,11 @@ describe(`CollectionSubscription replay oracle`, () => {
 
   fcTest.prop(
     [sharedSubscriptionScenarioArbitrary],
-    oracleRandomParameters(generatedRuns, replaySeed),
+    oracleRandomParameters(
+      generatedRuns,
+      oracleReplay,
+      `subscription-replay.shared`,
+    ),
   )(
     `keeps shared transport and logical ownership distinct for a random or replayed seed`,
     runSharedSubscriptionScenario,
@@ -8977,7 +9660,11 @@ describe(`CollectionSubscription replay oracle`, () => {
 
   fcTest.prop(
     [optimisticReplayScenarioArbitrary],
-    oracleRandomParameters(generatedRuns, replaySeed),
+    oracleRandomParameters(
+      generatedRuns,
+      oracleReplay,
+      `subscription-replay.optimistic`,
+    ),
   )(
     `preserves optimistic overlays across replay outcomes for a random or replayed seed`,
     runOptimisticReplayScenario,

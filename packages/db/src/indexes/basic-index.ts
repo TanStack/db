@@ -1,12 +1,10 @@
 import {
   areSameValueZeroEqual,
   defaultComparator,
+  makeComparator,
   normalizeValue,
 } from '../utils/comparison.js'
-import {
-  deleteInSortedArray,
-  findInsertPositionInArray,
-} from '../utils/array-utils.js'
+import { findInsertPositionInArray } from '../utils/array-utils.js'
 import { BaseIndex } from './base-index.js'
 import type { CompareOptions } from '../query/builder/types.js'
 import type { BasicExpression } from '../query/ir.js'
@@ -68,11 +66,11 @@ export class BasicIndex<
     options?: any,
   ) {
     super(id, expression, name, options)
-    this.compareFn = options?.compareFn ?? defaultComparator
-    this.hasCustomComparator = options?.compareFn != null
     if (options?.compareOptions) {
       this.compareOptions = options!.compareOptions
     }
+    this.compareFn = options?.compareFn ?? makeComparator(this.compareOptions)
+    this.hasCustomComparator = options?.compareFn != null
   }
 
   protected initialize(_options?: BasicIndexOptions): void {}
@@ -151,7 +149,23 @@ export class BasicIndex<
       if (keySet.size === 0) {
         // No more keys for this value, remove from map and sorted array
         this.valueMap.delete(normalizedValue)
-        deleteInSortedArray(this.sortedValues, normalizedValue, this.compareFn)
+        const firstEqual = findInsertPositionInArray(
+          this.sortedValues,
+          normalizedValue,
+          this.compareFn,
+        )
+        for (
+          let index = firstEqual;
+          index < this.sortedValues.length;
+          index++
+        ) {
+          const candidate = this.sortedValues[index]
+          if (this.compareFn(candidate, normalizedValue) !== 0) break
+          if (areSameValueZeroEqual(candidate, normalizedValue)) {
+            this.sortedValues.splice(index, 1)
+            break
+          }
+        }
       }
     }
   }
@@ -216,8 +230,13 @@ export class BasicIndex<
       }
     }
 
-    // Build sorted array from unique values
-    this.sortedValues = Array.from(this.valueMap.keys()).sort(this.compareFn)
+    // Array.sort always moves bare undefined elements to the end without
+    // consulting the comparator. Wrap values while sorting so null placement
+    // and comparator-equivalent null/undefined tie classes stay authoritative.
+    this.sortedValues = Array.from(this.valueMap.keys())
+      .map((value) => ({ value }))
+      .sort((left, right) => this.compareFn(left.value, right.value))
+      .map(({ value }) => value)
 
     this.updateTimestamp()
   }
@@ -529,11 +548,52 @@ export class BasicIndex<
 
   get orderedEntriesArrayReversed(): Array<[any, Set<TKey>]> {
     const result: Array<[any, Set<TKey>]> = []
-    for (let i = this.sortedValues.length - 1; i >= 0; i--) {
-      const value = this.sortedValues[i]
+    for (let index = this.sortedValues.length - 1; index >= 0; index--) {
+      const value = this.sortedValues[index]
       result.push([value, this.valueMap.get(value) ?? new Set()])
     }
     return result
+  }
+
+  *orderedBuckets(): IterableIterator<readonly [unknown, ReadonlySet<TKey>]> {
+    yield* this.groupOrderedBuckets(this.sortedValues)
+  }
+
+  *orderedBucketsReversed(): IterableIterator<
+    readonly [unknown, ReadonlySet<TKey>]
+  > {
+    const reversedValues = function* (values: ReadonlyArray<unknown>) {
+      for (let index = values.length - 1; index >= 0; index--) {
+        yield values[index]
+      }
+    }
+    yield* this.groupOrderedBuckets(reversedValues(this.sortedValues))
+  }
+
+  private *groupOrderedBuckets(
+    values: Iterable<unknown>,
+  ): IterableIterator<readonly [unknown, ReadonlySet<TKey>]> {
+    let hasGroup = false
+    let groupValue: unknown
+    let groupKeys = new Set<TKey>()
+
+    for (const value of values) {
+      if (!hasGroup) {
+        groupValue = value
+        hasGroup = true
+      } else if (this.compareFn(groupValue, value) !== 0) {
+        yield [groupValue, groupKeys]
+        groupKeys = new Set()
+        groupValue = value
+      }
+      for (const key of this.valueMap.get(value) ?? []) {
+        groupKeys.add(key)
+      }
+    }
+
+    if (hasGroup) {
+      yield [groupValue, groupKeys]
+    }
   }
 
   get valueMapData(): Map<any, Set<TKey>> {

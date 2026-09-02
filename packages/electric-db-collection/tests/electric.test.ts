@@ -2,11 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ShapeStream } from '@electric-sql/client'
 import {
   CollectionImpl,
+  IR,
   createCollection,
   createTransaction,
 } from '@tanstack/db'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
-import { electricCollectionOptions, isChangeMessage } from '../src/electric'
+import {
+  ELECTRIC_TEST_HOOKS,
+  electricCollectionOptions,
+  isChangeMessage,
+} from '../src/electric'
 import { stripVirtualProps } from '../../db/tests/utils'
 import type { ElectricCollectionUtils } from '../src/electric'
 import type {
@@ -26,12 +31,15 @@ const NativeAbortController = globalThis.AbortController
 function createDeferred<T>(): {
   promise: Promise<T>
   resolve: (value: T | PromiseLike<T>) => void
+  reject: (reason?: unknown) => void
 } {
   let resolve!: (value: T | PromiseLike<T>) => void
-  const promise = new Promise<T>((resolvePromise) => {
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise
+    reject = rejectPromise
   })
-  return { promise, resolve }
+  return { promise, resolve, reject }
 }
 
 // Mock the ShapeStream module
@@ -2659,6 +2667,53 @@ describe(`Electric Integration`, () => {
 
   // Tests for syncMode configuration
   describe(`syncMode configuration`, () => {
+    const createOnDemandCollection = (id: string) =>
+      createCollection(
+        electricCollectionOptions({
+          id,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+          },
+          syncMode: `on-demand`,
+          getKey: (item: Row) => item.id as number,
+          startSync: true,
+        }),
+      )
+
+    it(`removes the external shape abort listener across cleanup and restart`, async () => {
+      const externalAbort = new NativeAbortController()
+      const addSpy = vi.spyOn(externalAbort.signal, `addEventListener`)
+      const removeSpy = vi.spyOn(externalAbort.signal, `removeEventListener`)
+      const testCollection = createCollection(
+        electricCollectionOptions({
+          id: `shape-signal-listener-cleanup-test`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+            signal: externalAbort.signal,
+          },
+          syncMode: `progressive`,
+          getKey: (item: Row) => item.id as number,
+          startSync: true,
+        }),
+      )
+
+      await testCollection.cleanup()
+      const subscription = testCollection.subscribeChanges(() => {})
+      await testCollection.cleanup()
+      subscription.unsubscribe()
+
+      const addedListeners = addSpy.mock.calls
+        .filter(([type]) => type === `abort`)
+        .map(([, listener]) => listener)
+      const removedListeners = removeSpy.mock.calls
+        .filter(([type]) => type === `abort`)
+        .map(([, listener]) => listener)
+      expect(addedListeners).toHaveLength(2)
+      expect(removedListeners).toEqual(addedListeners)
+    })
+
     it(`should not request snapshots during subscription in eager mode`, () => {
       vi.clearAllMocks()
 
@@ -2745,6 +2800,911 @@ describe(`Electric Integration`, () => {
 
         expect(mockRequestSnapshot).toHaveBeenCalledTimes(2)
       } finally {
+        await testCollection.cleanup()
+      }
+    })
+
+    it.each([
+      { abortPhase: `before-publication`, result: `empty` },
+      { abortPhase: `before-publication`, result: `rows` },
+      { abortPhase: `after-publication`, result: `empty` },
+      { abortPhase: `after-publication`, result: `rows` },
+    ] as const)(
+      `keeps an on-demand $result result applied $abortPhase cancellation but retries the canceled demand`,
+      async ({ abortPhase, result }) => {
+        const request = createDeferred<void>()
+        mockRequestSnapshot.mockReturnValueOnce(request.promise)
+        const testCollection = createOnDemandCollection(
+          `on-demand-${abortPhase}-abort-boundary-test`,
+        )
+        const abortController = new AbortController()
+
+        try {
+          const load = Promise.resolve(
+            testCollection._sync.loadSubset({
+              limit: 10,
+              signal: abortController.signal,
+            }),
+          )
+          const loadError = load.then(
+            () => undefined,
+            (error: unknown) => error,
+          )
+          await vi.waitFor(() =>
+            expect(mockRequestSnapshot).toHaveBeenCalledOnce(),
+          )
+
+          if (abortPhase === `before-publication`) abortController.abort()
+          subscriber([
+            ...(result === `rows`
+              ? [
+                  {
+                    key: `2`,
+                    value: { id: 2, name: `Applied on-demand row` },
+                    headers: { operation: `insert` as const },
+                  },
+                ]
+              : []),
+            { headers: { control: `subset-end` } },
+          ])
+          await vi.waitFor(() =>
+            expect(testCollection.has(2)).toBe(result === `rows`),
+          )
+          if (abortPhase === `after-publication`) abortController.abort()
+          request.resolve()
+
+          await expect(loadError).resolves.toBeUndefined()
+          if (result === `rows`) {
+            expect(stripVirtualProps(testCollection.get(2))).toEqual({
+              id: 2,
+              name: `Applied on-demand row`,
+            })
+          }
+          await load
+
+          const retry = Promise.resolve(
+            testCollection._sync.loadSubset({ limit: 10 }),
+          )
+          await vi.waitFor(() =>
+            expect(mockRequestSnapshot).toHaveBeenCalledTimes(2),
+          )
+          subscriber([{ headers: { control: `subset-end` } }])
+          await retry
+        } finally {
+          abortController.abort()
+          request.resolve()
+          await testCollection.cleanup()
+        }
+      },
+    )
+
+    it.each([
+      { cancellationSource: `collection`, requestOutcome: `fulfillment` },
+      { cancellationSource: `collection`, requestOutcome: `rejection` },
+      { cancellationSource: `cleanup`, requestOutcome: `fulfillment` },
+      { cancellationSource: `cleanup`, requestOutcome: `rejection` },
+    ] as const)(
+      `rejects with AbortError when $cancellationSource cancellation ends an active on-demand request before $requestOutcome`,
+      async ({ cancellationSource, requestOutcome }) => {
+        const request = createDeferred<void>()
+        mockRequestSnapshot.mockReturnValueOnce(request.promise)
+        const collectionAbortController = new AbortController()
+        const testCollection = createCollection(
+          electricCollectionOptions({
+            id: `on-demand-${cancellationSource}-active-request-test`,
+            shapeOptions: {
+              url: `http://test-url`,
+              params: { table: `test_table` },
+              signal: collectionAbortController.signal,
+            },
+            syncMode: `on-demand`,
+            getKey: (item: Row) => item.id as number,
+            startSync: true,
+          }),
+        )
+        const failure = new Error(`request failed after cancellation`)
+
+        try {
+          const load = Promise.resolve(
+            testCollection._sync.loadSubset({ limit: 10 }),
+          )
+          const loadError = load.then(
+            () => undefined,
+            (error: unknown) => error,
+          )
+          await vi.waitFor(() =>
+            expect(mockRequestSnapshot).toHaveBeenCalledOnce(),
+          )
+          if (cancellationSource === `collection`) {
+            collectionAbortController.abort()
+          } else {
+            await testCollection.cleanup()
+          }
+          if (requestOutcome === `rejection`) request.reject(failure)
+          else request.resolve()
+
+          await expect(loadError).resolves.toMatchObject({ name: `AbortError` })
+          await load.catch(() => undefined)
+        } finally {
+          collectionAbortController.abort()
+          request.resolve()
+          await testCollection.cleanup()
+        }
+      },
+    )
+
+    it.each([`collection`, `cleanup`] as const)(
+      `cancels a parked on-demand commit after %s cancellation`,
+      async (cancellationSource) => {
+        const request = createDeferred<void>()
+        mockRequestSnapshot.mockReturnValueOnce(request.promise)
+        const collectionAbortController = new AbortController()
+        const testCollection = createCollection(
+          electricCollectionOptions({
+            id: `on-demand-${cancellationSource}-parked-commit-test`,
+            shapeOptions: {
+              url: `http://test-url`,
+              params: { table: `test_table` },
+              signal: collectionAbortController.signal,
+            },
+            syncMode: `on-demand`,
+            getKey: (item: Row) => item.id as number,
+            startSync: true,
+          }),
+        )
+        const persistence = createDeferred<void>()
+        const transaction = createTransaction({
+          mutationFn: () => persistence.promise,
+        })
+
+        try {
+          transaction.mutate(() =>
+            testCollection.insert({ id: 3, name: `Local row` }),
+          )
+          const load = Promise.resolve(
+            testCollection._sync.loadSubset({ limit: 10 }),
+          )
+          const loadError = load.then(
+            () => undefined,
+            (error: unknown) => error,
+          )
+          await vi.waitFor(() =>
+            expect(mockRequestSnapshot).toHaveBeenCalledOnce(),
+          )
+          subscriber([
+            {
+              key: `2`,
+              value: { id: 2, name: `Canceled parked row` },
+              headers: { operation: `insert` },
+            },
+            { headers: { control: `subset-end` } },
+          ])
+          if (cancellationSource === `collection`) {
+            collectionAbortController.abort()
+          } else {
+            await testCollection.cleanup()
+          }
+          request.resolve()
+          persistence.resolve()
+          await transaction.isPersisted.promise
+
+          await expect(loadError).resolves.toMatchObject({ name: `AbortError` })
+          expect(testCollection.has(2)).toBe(false)
+          await load.catch(() => undefined)
+        } finally {
+          collectionAbortController.abort()
+          request.resolve()
+          persistence.resolve()
+          await transaction.isPersisted.promise.catch(() => undefined)
+          await testCollection.cleanup()
+        }
+      },
+    )
+
+    it.each([`collection`, `cleanup`] as const)(
+      `disposes the active commit capture during %s cancellation while the request remains pending`,
+      async (cancellationSource) => {
+        const request = createDeferred<void>()
+        mockRequestSnapshot.mockReturnValueOnce(request.promise)
+        const collectionAbortController = new AbortController()
+        const activeCaptureCounts: Array<number> = []
+        const testCollection = createCollection(
+          electricCollectionOptions({
+            id: `on-demand-${cancellationSource}-pending-capture-test`,
+            shapeOptions: {
+              url: `http://test-url`,
+              params: { table: `test_table` },
+              signal: collectionAbortController.signal,
+            },
+            syncMode: `on-demand`,
+            getKey: (item: Row) => item.id as number,
+            startSync: true,
+            [ELECTRIC_TEST_HOOKS]: {
+              onActiveCommitCapturesChange: (activeCount) =>
+                activeCaptureCounts.push(activeCount),
+            },
+          }),
+        )
+
+        try {
+          const load = Promise.resolve(
+            testCollection._sync.loadSubset({ limit: 10 }),
+          )
+          await vi.waitFor(() =>
+            expect(mockRequestSnapshot).toHaveBeenCalledOnce(),
+          )
+          expect(activeCaptureCounts.at(-1)).toBe(1)
+
+          if (cancellationSource === `collection`) {
+            collectionAbortController.abort()
+          } else {
+            await testCollection.cleanup()
+          }
+
+          expect(activeCaptureCounts.at(-1)).toBe(0)
+          request.resolve()
+          await expect(load).rejects.toMatchObject({ name: `AbortError` })
+        } finally {
+          collectionAbortController.abort()
+          request.resolve()
+          await testCollection.cleanup()
+        }
+      },
+    )
+
+    it(`waits for a successful on-demand commit to apply`, async () => {
+      const request = createDeferred<void>()
+      mockRequestSnapshot.mockReturnValueOnce(request.promise)
+      const testCollection = createOnDemandCollection(
+        `on-demand-successful-parked-commit-test`,
+      )
+      const persistence = createDeferred<void>()
+      const transaction = createTransaction({
+        mutationFn: () => persistence.promise,
+      })
+
+      try {
+        transaction.mutate(() =>
+          testCollection.insert({ id: 3, name: `Local row` }),
+        )
+        const load = Promise.resolve(
+          testCollection._sync.loadSubset({ limit: 10 }),
+        )
+        await vi.waitFor(() =>
+          expect(mockRequestSnapshot).toHaveBeenCalledOnce(),
+        )
+        subscriber([
+          {
+            key: `2`,
+            value: { id: 2, name: `Applied parked row` },
+            headers: { operation: `insert` },
+          },
+          { headers: { control: `subset-end` } },
+        ])
+        request.resolve()
+
+        const nextTurn = new Promise<`next-turn`>((resolve) =>
+          setTimeout(() => resolve(`next-turn`), 0),
+        )
+        await expect(
+          Promise.race([load.then(() => `load-settled` as const), nextTurn]),
+        ).resolves.toBe(`next-turn`)
+        expect(testCollection.has(2)).toBe(false)
+
+        persistence.resolve()
+        await transaction.isPersisted.promise
+        await load
+        expect(stripVirtualProps(testCollection.get(2))).toEqual({
+          id: 2,
+          name: `Applied parked row`,
+        })
+      } finally {
+        request.resolve()
+        persistence.resolve()
+        await transaction.isPersisted.promise.catch(() => undefined)
+        await testCollection.cleanup()
+      }
+    })
+
+    it(`retains every applied receipt until the on-demand request settles`, async () => {
+      const request = createDeferred<void>()
+      mockRequestSnapshot.mockReturnValueOnce(request.promise)
+      const testCollection = createOnDemandCollection(
+        `on-demand-retained-receipts-test`,
+      )
+      const persistence = createDeferred<void>()
+      const transaction = createTransaction({
+        mutationFn: () => persistence.promise,
+      })
+
+      try {
+        transaction.mutate(() =>
+          testCollection.insert({ id: 3, name: `Local row` }),
+        )
+        const load = Promise.resolve(
+          testCollection._sync.loadSubset({ limit: 10 }),
+        )
+        const loadError = load.then(
+          () => undefined,
+          (error: unknown) => error,
+        )
+        await vi.waitFor(() =>
+          expect(mockRequestSnapshot).toHaveBeenCalledOnce(),
+        )
+
+        subscriber([
+          {
+            key: `2`,
+            value: { id: 2, name: `Applied row` },
+            headers: { operation: `insert` },
+          },
+          { headers: { control: `subset-end` } },
+        ])
+        subscriber([
+          {
+            key: `4`,
+            value: { id: 4, name: `Canceled row` },
+            headers: { operation: `insert` },
+          },
+          { headers: { control: `subset-end` } },
+        ])
+        expect(testCollection._state.pendingSyncedTransactions).toHaveLength(2)
+        const canceledReceipt =
+          testCollection._state.pendingSyncedTransactions[1]!
+        testCollection._state.cancelPendingSyncedTransaction(canceledReceipt)
+        await Promise.resolve()
+
+        request.resolve()
+        persistence.resolve()
+        await transaction.isPersisted.promise
+
+        await expect(loadError).resolves.toMatchObject({ name: `AbortError` })
+        expect(testCollection.has(2)).toBe(true)
+        expect(testCollection.has(4)).toBe(false)
+        await load.catch(() => undefined)
+
+        const retry = Promise.resolve(
+          testCollection._sync.loadSubset({ limit: 10 }),
+        )
+        await vi.waitFor(() =>
+          expect(mockRequestSnapshot).toHaveBeenCalledTimes(2),
+        )
+        await retry
+      } finally {
+        request.resolve()
+        persistence.resolve()
+        await transaction.isPersisted.promise.catch(() => undefined)
+        await testCollection.cleanup()
+      }
+    })
+
+    it(`rejects when collection cancellation lands after request fulfillment but before applied settlement`, async () => {
+      const request = createDeferred<void>()
+      mockRequestSnapshot.mockReturnValueOnce(request.promise)
+      const collectionAbortController = new AbortController()
+      const testCollection = createCollection(
+        electricCollectionOptions({
+          id: `on-demand-post-request-collection-cancel-test`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+            signal: collectionAbortController.signal,
+          },
+          syncMode: `on-demand`,
+          getKey: (item: Row) => item.id as number,
+          startSync: true,
+        }),
+      )
+
+      try {
+        const load = Promise.resolve(
+          testCollection._sync.loadSubset({ limit: 10 }),
+        )
+        await vi.waitFor(() =>
+          expect(mockRequestSnapshot).toHaveBeenCalledOnce(),
+        )
+
+        request.resolve()
+        queueMicrotask(() => collectionAbortController.abort())
+
+        await expect(load).rejects.toMatchObject({ name: `AbortError` })
+      } finally {
+        collectionAbortController.abort()
+        request.resolve()
+        await testCollection.cleanup()
+      }
+    })
+
+    it.each([`external abort`, `cleanup`] as const)(
+      `prefers %s over an already-rejected applied receipt`,
+      async (cancellationSource) => {
+        const request = createDeferred<void>()
+        mockRequestSnapshot.mockReturnValueOnce(request.promise)
+        const collectionAbortController = new AbortController()
+        const receiptFailure = new Error(`applied receipt failed`)
+        const options = electricCollectionOptions({
+          id: `on-demand-pre-wait-collection-cancel-test`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+            signal: collectionAbortController.signal,
+          },
+          syncMode: `on-demand`,
+          getKey: (item: Row) => item.id as number,
+          startSync: true,
+        })
+        const commitMock = vi.fn(() => Promise.reject(receiptFailure))
+        const controls = options.sync.sync({
+          collection: {
+            id: options.id,
+            status: `loading`,
+            getKeyFromItem: (item: Row) => item.id,
+          },
+          begin: vi.fn(),
+          write: vi.fn(),
+          commit: commitMock,
+          markReady: vi.fn(),
+          markError: vi.fn(),
+          truncate: vi.fn(),
+        } as never)
+        if (
+          !controls ||
+          typeof controls === `function` ||
+          !controls.loadSubset
+        ) {
+          throw new Error(`Expected on-demand sync controls`)
+        }
+
+        try {
+          const load = Promise.resolve(controls.loadSubset({ limit: 10 }))
+          await vi.waitFor(() =>
+            expect(mockRequestSnapshot).toHaveBeenCalledOnce(),
+          )
+          subscriber([
+            {
+              key: `2`,
+              value: { id: 2, name: `Rejected receipt row` },
+              headers: { operation: `insert` },
+            },
+            { headers: { control: `subset-end` } },
+          ])
+          await vi.waitFor(() => expect(commitMock).toHaveBeenCalledOnce())
+
+          if (cancellationSource === `external abort`) {
+            collectionAbortController.abort()
+          } else {
+            controls.cleanup?.()
+          }
+          request.resolve()
+
+          await expect(load).rejects.toMatchObject({ name: `AbortError` })
+        } finally {
+          collectionAbortController.abort()
+          request.resolve()
+          controls.cleanup?.()
+        }
+      },
+    )
+
+    it.each([`success`, `rejection`, `cancellation`] as const)(
+      `removes the on-demand request lease listener after %s`,
+      async (settlement) => {
+        const request = createDeferred<void>()
+        mockRequestSnapshot.mockReturnValueOnce(request.promise)
+        const testCollection = createOnDemandCollection(
+          `on-demand-request-listener-${settlement}-test`,
+        )
+        const abortController = new AbortController()
+        const addSpy = vi.spyOn(abortController.signal, `addEventListener`)
+        const removeSpy = vi.spyOn(
+          abortController.signal,
+          `removeEventListener`,
+        )
+        const failure = new Error(`request failed`)
+
+        try {
+          const load = Promise.resolve(
+            testCollection._sync.loadSubset({
+              limit: 10,
+              signal: abortController.signal,
+            }),
+          )
+          const loadError = load.then(
+            () => undefined,
+            (error: unknown) => error,
+          )
+          await vi.waitFor(() =>
+            expect(mockRequestSnapshot).toHaveBeenCalledOnce(),
+          )
+          if (settlement === `cancellation`) abortController.abort()
+          subscriber([{ headers: { control: `subset-end` } }])
+          if (settlement === `rejection`) request.reject(failure)
+          else request.resolve()
+
+          if (settlement === `rejection`) {
+            await expect(loadError).resolves.toBe(failure)
+          } else {
+            await expect(loadError).resolves.toBeUndefined()
+          }
+          await load.catch(() => undefined)
+
+          const addedListeners = addSpy.mock.calls
+            .filter(([type]) => type === `abort`)
+            .map(([, listener]) => listener)
+          const removedListeners = removeSpy.mock.calls
+            .filter(([type]) => type === `abort`)
+            .map(([, listener]) => listener)
+          expect(addedListeners.length).toBeGreaterThan(0)
+          expect(removedListeners).toEqual(addedListeners)
+        } finally {
+          addSpy.mockRestore()
+          removeSpy.mockRestore()
+          abortController.abort()
+          request.resolve()
+          await testCollection.cleanup()
+        }
+      },
+    )
+
+    it(`keeps on-demand coverage when cancellation happens after settlement`, async () => {
+      const request = createDeferred<void>()
+      mockRequestSnapshot.mockReturnValueOnce(request.promise)
+      const testCollection = createOnDemandCollection(
+        `on-demand-post-settlement-abort-test`,
+      )
+      const abortController = new AbortController()
+      const options = { limit: 10, signal: abortController.signal }
+
+      try {
+        const load = Promise.resolve(testCollection._sync.loadSubset(options))
+        await vi.waitFor(() =>
+          expect(mockRequestSnapshot).toHaveBeenCalledOnce(),
+        )
+        subscriber([
+          {
+            key: `2`,
+            value: { id: 2, name: `Settled on-demand row` },
+            headers: { operation: `insert` },
+          },
+          { headers: { control: `subset-end` } },
+        ])
+        request.resolve()
+        await load
+
+        abortController.abort()
+        expect(testCollection.has(2)).toBe(true)
+        await testCollection._sync.loadSubset({ limit: 10 })
+        expect(mockRequestSnapshot).toHaveBeenCalledOnce()
+      } finally {
+        abortController.abort()
+        request.resolve()
+        await testCollection.cleanup()
+      }
+    })
+
+    it.each([
+      { cancellation: `none`, result: `empty` },
+      { cancellation: `none`, result: `rows` },
+      { cancellation: `request`, result: `empty` },
+      { cancellation: `request`, result: `rows` },
+    ] as const)(
+      `propagates an on-demand request error with $result after $cancellation cancellation`,
+      async ({ cancellation, result }) => {
+        const request = createDeferred<void>()
+        mockRequestSnapshot.mockReturnValueOnce(request.promise)
+        const testCollection = createOnDemandCollection(
+          `on-demand-${cancellation}-${result}-request-error-test`,
+        )
+        const abortController = new AbortController()
+        const failure = new Error(`request failed`)
+
+        try {
+          const load = Promise.resolve(
+            testCollection._sync.loadSubset({
+              limit: 10,
+              signal: abortController.signal,
+            }),
+          )
+          const loadError = load.then(
+            () => undefined,
+            (error: unknown) => error,
+          )
+          await vi.waitFor(() =>
+            expect(mockRequestSnapshot).toHaveBeenCalledOnce(),
+          )
+          if (cancellation === `request`) abortController.abort()
+          subscriber([
+            ...(result === `rows`
+              ? [
+                  {
+                    key: `2`,
+                    value: { id: 2, name: `Partial on-demand row` },
+                    headers: { operation: `insert` as const },
+                  },
+                ]
+              : []),
+            { headers: { control: `subset-end` } },
+          ])
+          request.reject(failure)
+
+          await expect(loadError).resolves.toBe(failure)
+          expect(testCollection.has(2)).toBe(result === `rows`)
+          await load.catch(() => undefined)
+
+          const retry = Promise.resolve(
+            testCollection._sync.loadSubset({ limit: 10 }),
+          )
+          await vi.waitFor(() =>
+            expect(mockRequestSnapshot).toHaveBeenCalledTimes(2),
+          )
+          subscriber([{ headers: { control: `subset-end` } }])
+          await retry
+        } finally {
+          abortController.abort()
+          request.resolve()
+          await testCollection.cleanup()
+        }
+      },
+    )
+
+    it(`does not fulfill a failed on-demand request before its published receipt applies`, async () => {
+      const request = createDeferred<void>()
+      mockRequestSnapshot.mockReturnValueOnce(request.promise)
+      const testCollection = createOnDemandCollection(
+        `on-demand-parked-request-error-test`,
+      )
+      const persistence = createDeferred<void>()
+      const transaction = createTransaction({
+        mutationFn: () => persistence.promise,
+      })
+      const abortController = new AbortController()
+      const failure = new Error(`request failed`)
+
+      try {
+        transaction.mutate(() =>
+          testCollection.insert({ id: 3, name: `Local row` }),
+        )
+        const load = Promise.resolve(
+          testCollection._sync.loadSubset({
+            limit: 10,
+            signal: abortController.signal,
+          }),
+        )
+        const loadError = load.then(
+          () => undefined,
+          (error: unknown) => error,
+        )
+        await vi.waitFor(() =>
+          expect(mockRequestSnapshot).toHaveBeenCalledOnce(),
+        )
+        subscriber([
+          {
+            key: `2`,
+            value: { id: 2, name: `Parked on-demand row` },
+            headers: { operation: `insert` },
+          },
+          { headers: { control: `subset-end` } },
+        ])
+        abortController.abort()
+        request.reject(failure)
+
+        await expect(loadError).resolves.toBe(failure)
+        expect(testCollection.has(2)).toBe(false)
+
+        persistence.resolve()
+        await transaction.isPersisted.promise
+        await vi.waitFor(() => expect(testCollection.has(2)).toBe(true))
+        await load.catch(() => undefined)
+      } finally {
+        abortController.abort()
+        request.resolve()
+        persistence.resolve()
+        await transaction.isPersisted.promise.catch(() => undefined)
+        await testCollection.cleanup()
+      }
+    })
+
+    it.each([`whereCurrent`, `whereFrom`] as const)(
+      `waits for the cursor sibling after $failedRequest rejects`,
+      async (failedRequest) => {
+        const whereCurrent = createDeferred<void>()
+        const whereFrom = createDeferred<void>()
+        mockRequestSnapshot
+          .mockReturnValueOnce(whereCurrent.promise)
+          .mockReturnValueOnce(whereFrom.promise)
+        const testCollection = createOnDemandCollection(
+          `on-demand-cursor-${failedRequest}-error-test`,
+        )
+        const abortController = new AbortController()
+        const failure = new Error(`${failedRequest} request failed`)
+        const id = new IR.PropRef([`id`])
+
+        try {
+          const load = Promise.resolve(
+            testCollection._sync.loadSubset({
+              limit: 10,
+              orderBy: [
+                {
+                  expression: id,
+                  compareOptions: {
+                    direction: `asc`,
+                    nulls: `last`,
+                    stringSort: `lexical`,
+                  },
+                },
+              ],
+              cursor: {
+                whereCurrent: new IR.Func(`eq`, [id, new IR.Value(1)]),
+                whereFrom: new IR.Func(`gt`, [id, new IR.Value(1)]),
+                lastKey: 1,
+              },
+              signal: abortController.signal,
+            }),
+          )
+          const loadError = load.then(
+            () => undefined,
+            (error: unknown) => error,
+          )
+          await vi.waitFor(() =>
+            expect(mockRequestSnapshot).toHaveBeenCalledTimes(2),
+          )
+          abortController.abort()
+          const failed =
+            failedRequest === `whereCurrent` ? whereCurrent : whereFrom
+          const sibling =
+            failedRequest === `whereCurrent` ? whereFrom : whereCurrent
+          failed.reject(failure)
+
+          const nextTurn = new Promise<`next-turn`>((resolve) =>
+            setTimeout(() => resolve(`next-turn`), 0),
+          )
+          await expect(
+            Promise.race([loadError.then(() => `settled` as const), nextTurn]),
+          ).resolves.toBe(`next-turn`)
+
+          subscriber([
+            {
+              key: `2`,
+              value: { id: 2, name: `Late cursor row` },
+              headers: { operation: `insert` },
+            },
+            { headers: { control: `subset-end` } },
+          ])
+          sibling.resolve()
+
+          await expect(loadError).resolves.toBe(failure)
+          await vi.waitFor(() => expect(testCollection.has(2)).toBe(true))
+          await load.catch(() => undefined)
+        } finally {
+          abortController.abort()
+          whereCurrent.resolve()
+          whereFrom.resolve()
+          await testCollection.cleanup()
+        }
+      },
+    )
+
+    it.each([`whereCurrent`, `whereFrom`] as const)(
+      `uses stable cursor error priority when $firstFailure rejects first`,
+      async (firstFailure) => {
+        const whereCurrent = createDeferred<void>()
+        const whereFrom = createDeferred<void>()
+        mockRequestSnapshot
+          .mockReturnValueOnce(whereCurrent.promise)
+          .mockReturnValueOnce(whereFrom.promise)
+        const testCollection = createOnDemandCollection(
+          `on-demand-cursor-${firstFailure}-first-double-error-test`,
+        )
+        const currentFailure = new Error(`whereCurrent request failed`)
+        const fromFailure = new Error(`whereFrom request failed`)
+        const id = new IR.PropRef([`id`])
+
+        try {
+          const load = Promise.resolve(
+            testCollection._sync.loadSubset({
+              limit: 10,
+              orderBy: [
+                {
+                  expression: id,
+                  compareOptions: {
+                    direction: `asc`,
+                    nulls: `last`,
+                    stringSort: `lexical`,
+                  },
+                },
+              ],
+              cursor: {
+                whereCurrent: new IR.Func(`eq`, [id, new IR.Value(1)]),
+                whereFrom: new IR.Func(`gt`, [id, new IR.Value(1)]),
+                lastKey: 1,
+              },
+            }),
+          )
+          const loadError = load.then(
+            () => undefined,
+            (error: unknown) => error,
+          )
+          await vi.waitFor(() =>
+            expect(mockRequestSnapshot).toHaveBeenCalledTimes(2),
+          )
+
+          const first =
+            firstFailure === `whereCurrent` ? whereCurrent : whereFrom
+          const second =
+            firstFailure === `whereCurrent` ? whereFrom : whereCurrent
+          first.reject(
+            firstFailure === `whereCurrent` ? currentFailure : fromFailure,
+          )
+
+          const nextTurn = new Promise<`next-turn`>((resolve) =>
+            setTimeout(() => resolve(`next-turn`), 0),
+          )
+          await expect(
+            Promise.race([loadError.then(() => `settled` as const), nextTurn]),
+          ).resolves.toBe(`next-turn`)
+
+          second.reject(
+            firstFailure === `whereCurrent` ? fromFailure : currentFailure,
+          )
+          await expect(loadError).resolves.toBe(currentFailure)
+          await load.catch(() => undefined)
+        } finally {
+          whereCurrent.resolve()
+          whereFrom.resolve()
+          await testCollection.cleanup()
+        }
+      },
+    )
+
+    it(`waits for both cursor snapshot requests before settling`, async () => {
+      const whereCurrent = createDeferred<void>()
+      const whereFrom = createDeferred<void>()
+      mockRequestSnapshot
+        .mockReturnValueOnce(whereCurrent.promise)
+        .mockReturnValueOnce(whereFrom.promise)
+      const testCollection = createOnDemandCollection(
+        `on-demand-cursor-all-requests-test`,
+      )
+      const id = new IR.PropRef([`id`])
+
+      try {
+        const load = Promise.resolve(
+          testCollection._sync.loadSubset({
+            limit: 10,
+            orderBy: [
+              {
+                expression: id,
+                compareOptions: {
+                  direction: `asc`,
+                  nulls: `last`,
+                  stringSort: `lexical`,
+                },
+              },
+            ],
+            cursor: {
+              whereCurrent: new IR.Func(`eq`, [id, new IR.Value(1)]),
+              whereFrom: new IR.Func(`gt`, [id, new IR.Value(1)]),
+              lastKey: 1,
+            },
+          }),
+        )
+        await vi.waitFor(() =>
+          expect(mockRequestSnapshot).toHaveBeenCalledTimes(2),
+        )
+
+        whereCurrent.resolve()
+        const nextTurn = new Promise<`next-turn`>((resolve) =>
+          setTimeout(() => resolve(`next-turn`), 0),
+        )
+        await expect(
+          Promise.race([load.then(() => `load-settled` as const), nextTurn]),
+        ).resolves.toBe(`next-turn`)
+
+        whereFrom.resolve()
+        await load
+      } finally {
+        whereCurrent.resolve()
+        whereFrom.resolve()
         await testCollection.cleanup()
       }
     })
@@ -2896,6 +3856,464 @@ describe(`Electric Integration`, () => {
       }
     })
 
+    it(`should cancel a pending refresh wait when the collection is cleaned up`, async () => {
+      vi.useFakeTimers()
+      const refresh = createDeferred<void>()
+
+      try {
+        mockStream.isUpToDate = true
+        mockForceDisconnectAndRefresh.mockReturnValueOnce(refresh.promise)
+
+        const testCollection = createOnDemandCollection(
+          `on-demand-refresh-cleanup-test`,
+        )
+
+        let loadSettled = false
+        const load = Promise.resolve(
+          testCollection._sync.loadSubset({ limit: 10 }),
+        ).finally(() => {
+          loadSettled = true
+        })
+        const loadError = load.then(
+          () => undefined,
+          (error: unknown) => error,
+        )
+
+        await Promise.resolve()
+        await testCollection.cleanup()
+        await vi.advanceTimersByTimeAsync(0)
+
+        expect(loadSettled).toBe(true)
+        await expect(loadError).resolves.toMatchObject({ name: `AbortError` })
+        expect(mockRequestSnapshot).not.toHaveBeenCalled()
+        expect(vi.getTimerCount()).toBe(0)
+
+        refresh.resolve()
+        await refresh.promise
+        await load.catch(() => undefined)
+        expect(mockRequestSnapshot).not.toHaveBeenCalled()
+      } finally {
+        refresh.resolve()
+        await vi.runOnlyPendingTimersAsync()
+        vi.useRealTimers()
+      }
+    })
+
+    it(`rejects buffered snapshot publication after adapter cleanup`, async () => {
+      const snapshot = createDeferred<{
+        data: Array<{
+          key: string
+          value: Row
+          headers: { operation: `insert` }
+        }>
+      }>()
+      mockFetchSnapshot.mockReturnValueOnce(snapshot.promise)
+      const options = electricCollectionOptions({
+        id: `progressive-snapshot-cleanup-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        syncMode: `progressive`,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      })
+      const begin = vi.fn()
+      const write = vi.fn()
+      const commit = vi.fn(() => true as const)
+      const controls = options.sync.sync({
+        collection: { id: options.id, status: `loading` },
+        begin,
+        write,
+        commit,
+        markReady: vi.fn(),
+        markError: vi.fn(),
+        truncate: vi.fn(),
+      } as never)
+      if (!controls || typeof controls === `function` || !controls.loadSubset) {
+        throw new Error(`Expected progressive sync controls`)
+      }
+
+      const load = Promise.resolve(controls.loadSubset({ limit: 10 }))
+      const loadError = load.then(
+        () => undefined,
+        (error: unknown) => error,
+      )
+      controls.cleanup?.()
+      snapshot.resolve({
+        data: [
+          {
+            key: `1`,
+            value: { id: 1, name: `Late snapshot user` },
+            headers: { operation: `insert` },
+          },
+        ],
+      })
+      await expect(loadError).resolves.toMatchObject({ name: `AbortError` })
+
+      expect(begin).not.toHaveBeenCalled()
+      expect(write).not.toHaveBeenCalled()
+      expect(commit).not.toHaveBeenCalled()
+      await load.catch(() => undefined)
+    })
+
+    it.each([
+      { syncMode: `on-demand`, signalSource: `collection` },
+      { syncMode: `on-demand`, signalSource: `request` },
+      { syncMode: `progressive`, signalSource: `collection` },
+      { syncMode: `progressive`, signalSource: `request` },
+    ] as const)(
+      `rejects before starting $syncMode work when the $signalSource signal is already aborted`,
+      async ({ syncMode, signalSource }) => {
+        mockStream.isUpToDate = true
+        const abortController = new AbortController()
+        abortController.abort()
+        const testCollection = createCollection(
+          electricCollectionOptions({
+            id: `${syncMode}-${signalSource}-already-aborted-test`,
+            shapeOptions: {
+              url: `http://test-url`,
+              params: { table: `test_table` },
+              signal:
+                signalSource === `collection`
+                  ? abortController.signal
+                  : undefined,
+            },
+            syncMode,
+            getKey: (item: Row) => item.id as number,
+            startSync: true,
+          }),
+        )
+
+        await expect(
+          testCollection._sync.loadSubset({
+            limit: 10,
+            signal:
+              signalSource === `request` ? abortController.signal : undefined,
+          }),
+        ).rejects.toMatchObject({ name: `AbortError` })
+
+        expect(mockForceDisconnectAndRefresh).not.toHaveBeenCalled()
+        expect(mockRequestSnapshot).not.toHaveBeenCalled()
+        expect(mockFetchSnapshot).not.toHaveBeenCalled()
+        await testCollection.cleanup()
+      },
+    )
+
+    it(`retries immediately after the requesting demand is aborted`, async () => {
+      vi.useFakeTimers()
+      const refresh = createDeferred<void>()
+
+      try {
+        mockStream.isUpToDate = true
+        mockForceDisconnectAndRefresh.mockReturnValueOnce(refresh.promise)
+
+        const testCollection = createOnDemandCollection(
+          `on-demand-refresh-abort-retry-test`,
+        )
+        const abortController = new AbortController()
+        let abortedLoadSettled = false
+        const abortedLoad = Promise.resolve(
+          testCollection._sync.loadSubset({
+            limit: 10,
+            signal: abortController.signal,
+          }),
+        ).finally(() => {
+          abortedLoadSettled = true
+        })
+        const abortedLoadError = abortedLoad.then(
+          () => undefined,
+          (error: unknown) => error,
+        )
+
+        await Promise.resolve()
+        abortController.abort()
+
+        expect(mockRequestSnapshot).not.toHaveBeenCalled()
+
+        mockForceDisconnectAndRefresh.mockResolvedValueOnce(undefined)
+        const retry = testCollection._sync.loadSubset({ limit: 10 })
+
+        expect(mockForceDisconnectAndRefresh).toHaveBeenCalledTimes(2)
+        await vi.advanceTimersByTimeAsync(0)
+
+        expect(abortedLoadSettled).toBe(true)
+        await expect(abortedLoadError).resolves.toMatchObject({
+          name: `AbortError`,
+        })
+        expect(vi.getTimerCount()).toBe(0)
+
+        await retry
+
+        expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
+        await testCollection.cleanup()
+        await abortedLoad.catch(() => undefined)
+      } finally {
+        refresh.resolve()
+        await vi.runOnlyPendingTimersAsync()
+        vi.useRealTimers()
+      }
+    })
+
+    it.each([
+      { cancellationSource: `request`, order: `rejection-first` },
+      { cancellationSource: `request`, order: `cancellation-first` },
+      { cancellationSource: `collection`, order: `rejection-first` },
+      { cancellationSource: `collection`, order: `cancellation-first` },
+    ] as const)(
+      `prefers AbortError for $cancellationSource cancellation in $order order`,
+      async ({ cancellationSource, order }) => {
+        vi.useFakeTimers()
+        let rejectRefresh: (error: Error) => void = () => {}
+        const refresh = new Promise<void>((_resolve, reject) => {
+          rejectRefresh = reject
+        })
+        const request = new AbortController()
+        let testCollection:
+          | ReturnType<typeof createOnDemandCollection>
+          | undefined
+
+        try {
+          mockStream.isUpToDate = true
+          mockForceDisconnectAndRefresh.mockReturnValueOnce(refresh)
+          testCollection = createOnDemandCollection(
+            `on-demand-refresh-${cancellationSource}-race-test`,
+          )
+          const load = Promise.resolve(
+            testCollection._sync.loadSubset({
+              limit: 10,
+              signal: request.signal,
+            }),
+          )
+          const loadError = load.then(
+            () => undefined,
+            (error: unknown) => error,
+          )
+
+          await Promise.resolve()
+          let cleanup: Promise<void> | undefined
+          const cancel = () => {
+            if (cancellationSource === `request`) {
+              request.abort()
+            } else {
+              cleanup = testCollection?.cleanup()
+            }
+          }
+          const reject = () => rejectRefresh(new Error(`refresh failed`))
+          if (order === `rejection-first`) {
+            reject()
+            cancel()
+          } else {
+            cancel()
+            reject()
+          }
+          await cleanup
+
+          await expect(loadError).resolves.toMatchObject({
+            name: `AbortError`,
+          })
+          expect(mockRequestSnapshot).not.toHaveBeenCalled()
+          await load.catch(() => undefined)
+        } finally {
+          request.abort()
+          await testCollection?.cleanup()
+          await vi.runOnlyPendingTimersAsync()
+          vi.useRealTimers()
+        }
+      },
+    )
+
+    it.each([
+      { cancellationSource: `request`, lateSettlement: `fulfillment` },
+      { cancellationSource: `request`, lateSettlement: `rejection` },
+      { cancellationSource: `collection`, lateSettlement: `fulfillment` },
+      { cancellationSource: `collection`, lateSettlement: `rejection` },
+    ] as const)(
+      `keeps $cancellationSource cancellation final after late refresh $lateSettlement`,
+      async ({ cancellationSource, lateSettlement }) => {
+        vi.useFakeTimers()
+        let resolveRefresh: () => void = () => {}
+        let rejectRefresh: (error: Error) => void = () => {}
+        const refresh = new Promise<void>((resolve, reject) => {
+          resolveRefresh = resolve
+          rejectRefresh = reject
+        })
+        const refreshOutcome = refresh.then(
+          () => `fulfilled` as const,
+          () => `rejected` as const,
+        )
+        const request = new AbortController()
+        let testCollection:
+          | ReturnType<typeof createOnDemandCollection>
+          | undefined
+
+        try {
+          mockStream.isUpToDate = true
+          mockForceDisconnectAndRefresh.mockReturnValueOnce(refresh)
+          testCollection = createOnDemandCollection(
+            `on-demand-refresh-${cancellationSource}-late-${lateSettlement}-test`,
+          )
+          const load = Promise.resolve(
+            testCollection._sync.loadSubset({
+              limit: 10,
+              signal: request.signal,
+            }),
+          )
+          const loadError = load.then(
+            () => undefined,
+            (error: unknown) => error,
+          )
+
+          await Promise.resolve()
+          let cleanup: Promise<void> | undefined
+          if (cancellationSource === `request`) {
+            request.abort()
+          } else {
+            cleanup = testCollection.cleanup()
+          }
+          await expect(loadError).resolves.toMatchObject({
+            name: `AbortError`,
+          })
+          await cleanup
+          expect(mockRequestSnapshot).not.toHaveBeenCalled()
+
+          if (lateSettlement === `fulfillment`) {
+            resolveRefresh()
+          } else {
+            rejectRefresh(new Error(`late refresh failure`))
+          }
+          await expect(refreshOutcome).resolves.toBe(
+            lateSettlement === `fulfillment` ? `fulfilled` : `rejected`,
+          )
+          await Promise.resolve()
+
+          await expect(loadError).resolves.toMatchObject({
+            name: `AbortError`,
+          })
+          expect(mockRequestSnapshot).not.toHaveBeenCalled()
+          expect(vi.getTimerCount()).toBe(0)
+          await load.catch(() => undefined)
+        } finally {
+          request.abort()
+          resolveRefresh()
+          await testCollection?.cleanup()
+          await vi.runOnlyPendingTimersAsync()
+          vi.useRealTimers()
+        }
+      },
+    )
+
+    it.each([
+      `refresh`,
+      `rejection`,
+      `timeout`,
+      `request`,
+      `collection`,
+    ] as const)(
+      `removes every abort listener when %s settles the refresh wait`,
+      async (settlement) => {
+        vi.useFakeTimers()
+        const refresh = createDeferred<void>()
+        const request = new AbortController()
+        const added: Array<{
+          signal: AbortSignal
+          listener: EventListenerOrEventListenerObject
+        }> = []
+        const removed: Array<{
+          signal: AbortSignal
+          listener: EventListenerOrEventListenerObject
+        }> = []
+        const originalAdd = AbortSignal.prototype.addEventListener
+        const originalRemove = AbortSignal.prototype.removeEventListener
+        mockStream.isUpToDate = true
+        if (settlement === `refresh`) {
+          mockForceDisconnectAndRefresh.mockResolvedValueOnce(undefined)
+        } else if (settlement === `rejection`) {
+          mockForceDisconnectAndRefresh.mockRejectedValueOnce(
+            new Error(`refresh failed`),
+          )
+        } else {
+          mockForceDisconnectAndRefresh.mockReturnValueOnce(refresh.promise)
+        }
+        const testCollection = createOnDemandCollection(
+          `on-demand-refresh-${settlement}-listener-cleanup-test`,
+        )
+
+        const addSpy = vi
+          .spyOn(AbortSignal.prototype, `addEventListener`)
+          .mockImplementation(function (
+            this: AbortSignal,
+            type,
+            listener,
+            options,
+          ) {
+            if (type === `abort`) added.push({ signal: this, listener })
+            return originalAdd.call(this, type, listener, options)
+          })
+        const removeSpy = vi
+          .spyOn(AbortSignal.prototype, `removeEventListener`)
+          .mockImplementation(function (
+            this: AbortSignal,
+            type,
+            listener,
+            options,
+          ) {
+            if (type === `abort`) removed.push({ signal: this, listener })
+            return originalRemove.call(this, type, listener, options)
+          })
+
+        try {
+          const load = Promise.resolve(
+            testCollection._sync.loadSubset({
+              limit: 10,
+              signal: request.signal,
+            }),
+          )
+          const loadError = load.then(
+            () => undefined,
+            (error: unknown) => error,
+          )
+
+          if (settlement === `timeout`) {
+            await vi.advanceTimersByTimeAsync(250)
+          } else if (settlement === `request`) {
+            request.abort()
+          } else if (settlement === `collection`) {
+            await testCollection.cleanup()
+          }
+
+          if (settlement === `request` || settlement === `collection`) {
+            await expect(loadError).resolves.toMatchObject({
+              name: `AbortError`,
+            })
+          } else {
+            await expect(loadError).resolves.toBeUndefined()
+          }
+          expect(vi.getTimerCount()).toBe(0)
+
+          expect(added.length).toBeGreaterThan(0)
+          for (const installed of added) {
+            expect(
+              removed.some(
+                (candidate) =>
+                  candidate.signal === installed.signal &&
+                  candidate.listener === installed.listener,
+              ),
+            ).toBe(true)
+          }
+          await load.catch(() => undefined)
+        } finally {
+          request.abort()
+          refresh.resolve()
+          await testCollection.cleanup()
+          addSpy.mockRestore()
+          removeSpy.mockRestore()
+          await vi.runOnlyPendingTimersAsync()
+          vi.useRealTimers()
+        }
+      },
+    )
+
     it(`should clear the refresh timeout when refresh settles early`, async () => {
       vi.useFakeTimers()
       try {
@@ -2979,46 +4397,92 @@ describe(`Electric Integration`, () => {
       })
     })
 
-    it(`ignores a progressive snapshot after its subset request is aborted`, async () => {
-      mockFetchSnapshot.mockReset()
-      let resolveSnapshot!: (value: {
-        metadata: Record<string, never>
-        data: Array<{
-          key: string
-          value: Row
-          headers: { operation: `insert` }
-        }>
-      }) => void
-      mockFetchSnapshot.mockReturnValue(
-        new Promise((resolve) => {
-          resolveSnapshot = resolve
-        }),
-      )
-      mockSubscribe.mockImplementation(() => () => {})
-      const testCollection = createCollection(
-        electricCollectionOptions({
-          id: `progressive-aborted-snapshot-test`,
-          shapeOptions: {
-            url: `http://test-url`,
-            params: { table: `test_table` },
-          },
-          syncMode: `progressive`,
-          getKey: (item: Row) => item.id as number,
-          startSync: true,
-        }),
-      )
-      const abortController = new AbortController()
+    it.each([
+      { signalSource: `request`, result: `empty` },
+      { signalSource: `request`, result: `rows` },
+      { signalSource: `collection`, result: `empty` },
+      { signalSource: `collection`, result: `rows` },
+    ] as const)(
+      `rejects a progressive $result snapshot when the $signalSource signal aborts before application`,
+      async ({ signalSource, result }) => {
+        const snapshot = createDeferred<{
+          metadata: Record<string, never>
+          data: Array<{
+            key: string
+            value: Row
+            headers: { operation: `insert` }
+          }>
+        }>()
+        mockFetchSnapshot.mockReturnValue(snapshot.promise)
+        mockSubscribe.mockImplementation(() => () => {})
+        const collectionAbortController = new AbortController()
+        const requestAbortController = new AbortController()
+        const testCollection = createCollection(
+          electricCollectionOptions({
+            id: `progressive-${signalSource}-${result}-abort-test`,
+            shapeOptions: {
+              url: `http://test-url`,
+              params: { table: `test_table` },
+              signal: collectionAbortController.signal,
+            },
+            syncMode: `progressive`,
+            getKey: (item: Row) => item.id as number,
+            startSync: true,
+          }),
+        )
+        const abortController =
+          signalSource === `request`
+            ? requestAbortController
+            : collectionAbortController
 
-      try {
-        expect(mockFetchSnapshot).not.toHaveBeenCalled()
-        const load = testCollection._sync.loadSubset({
-          limit: 1,
-          signal: abortController.signal,
-        })
-        expect(mockFetchSnapshot).toHaveBeenCalledOnce()
-        expect(testCollection.has(2)).toBe(false)
-        abortController.abort()
-        resolveSnapshot({
+        try {
+          expect(mockFetchSnapshot).not.toHaveBeenCalled()
+          const load = Promise.resolve(
+            testCollection._sync.loadSubset({
+              limit: 1,
+              signal: requestAbortController.signal,
+            }),
+          )
+          const loadError = load.then(
+            () => undefined,
+            (error: unknown) => error,
+          )
+          expect(mockFetchSnapshot).toHaveBeenCalledOnce()
+          abortController.abort()
+          snapshot.resolve({
+            metadata: {},
+            data:
+              result === `rows`
+                ? [
+                    {
+                      key: `2`,
+                      value: { id: 2, name: `Obsolete snapshot` },
+                      headers: { operation: `insert` },
+                    },
+                  ]
+                : [],
+          })
+          await expect(loadError).resolves.toMatchObject({ name: `AbortError` })
+          expect(testCollection.has(2)).toBe(false)
+          await load.catch(() => undefined)
+        } finally {
+          collectionAbortController.abort()
+          requestAbortController.abort()
+          snapshot.resolve({ metadata: {}, data: [] })
+          await testCollection.cleanup()
+        }
+      },
+    )
+
+    it.each([
+      { cancellationSource: `request`, requestSignal: `present` },
+      { cancellationSource: `collection`, requestSignal: `present` },
+      { cancellationSource: `collection`, requestSignal: `absent` },
+      { cancellationSource: `cleanup`, requestSignal: `present` },
+    ] as const)(
+      `rejects a progressive snapshot when $cancellationSource cancellation occurs with the request signal $requestSignal while its commit is parked`,
+      async ({ cancellationSource, requestSignal }) => {
+        mockFetchSnapshot.mockResolvedValue({
           metadata: {},
           data: [
             {
@@ -3028,30 +4492,95 @@ describe(`Electric Integration`, () => {
             },
           ],
         })
-        if (load instanceof Promise) await load
+        mockSubscribe.mockImplementation(() => () => {})
+        const collectionAbortController = new AbortController()
+        const testCollection = createCollection(
+          electricCollectionOptions({
+            id: `progressive-parked-abort-test`,
+            shapeOptions: {
+              url: `http://test-url`,
+              params: { table: `test_table` },
+              signal: collectionAbortController.signal,
+            },
+            syncMode: `progressive`,
+            getKey: (item: Row) => item.id as number,
+            startSync: true,
+          }),
+        )
+        const persistence = createDeferred<void>()
+        const transaction = createTransaction({
+          mutationFn: () => persistence.promise,
+        })
+        const requestAbortController = new AbortController()
+        const abortController =
+          cancellationSource === `request`
+            ? requestAbortController
+            : collectionAbortController
 
-        expect(testCollection.has(2)).toBe(false)
-      } finally {
-        resolveSnapshot({ metadata: {}, data: [] })
-        await testCollection.cleanup()
-      }
-    })
+        try {
+          transaction.mutate(() =>
+            testCollection.insert({ id: 3, name: `Local row` }),
+          )
+          const load = Promise.resolve(
+            testCollection._sync.loadSubset({
+              limit: 1,
+              signal:
+                requestSignal === `present`
+                  ? requestAbortController.signal
+                  : undefined,
+            }),
+          )
+          const loadError = load.then(
+            () => undefined,
+            (error: unknown) => error,
+          )
+          await vi.waitFor(() =>
+            expect(mockFetchSnapshot).toHaveBeenCalledOnce(),
+          )
+          await Promise.resolve()
+          await Promise.resolve()
 
-    it(`does not publish a progressive snapshot aborted while its commit is parked`, async () => {
-      mockFetchSnapshot.mockResolvedValue({
-        metadata: {},
-        data: [
-          {
-            key: `2`,
-            value: { id: 2, name: `Obsolete snapshot` },
-            headers: { operation: `insert` },
-          },
-        ],
-      })
-      mockSubscribe.mockImplementation(() => () => {})
-      const testCollection = createCollection(
-        electricCollectionOptions({
-          id: `progressive-parked-abort-test`,
+          expect(testCollection.has(2)).toBe(false)
+          if (cancellationSource === `cleanup`) {
+            await testCollection.cleanup()
+          } else {
+            abortController.abort()
+          }
+          persistence.resolve()
+          await transaction.isPersisted.promise
+          await expect(loadError).resolves.toMatchObject({ name: `AbortError` })
+
+          expect(testCollection.has(2)).toBe(false)
+          await load.catch(() => undefined)
+        } finally {
+          abortController.abort()
+          persistence.resolve()
+          await transaction.isPersisted.promise.catch(() => undefined)
+          await testCollection.cleanup()
+        }
+      },
+    )
+
+    it.each([`fetch`, `commit`] as const)(
+      `propagates an uncanceled progressive %s error`,
+      async (failurePhase) => {
+        const failure = new Error(`${failurePhase} failed`)
+        if (failurePhase === `fetch`) {
+          mockFetchSnapshot.mockRejectedValue(failure)
+        } else {
+          mockFetchSnapshot.mockResolvedValue({
+            metadata: {},
+            data: [
+              {
+                key: `2`,
+                value: { id: 2, name: `Snapshot row` },
+                headers: { operation: `insert` },
+              },
+            ],
+          })
+        }
+        const options = electricCollectionOptions({
+          id: `progressive-${failurePhase}-error-test`,
           shapeOptions: {
             url: `http://test-url`,
             params: { table: `test_table` },
@@ -3059,40 +4588,435 @@ describe(`Electric Integration`, () => {
           syncMode: `progressive`,
           getKey: (item: Row) => item.id as number,
           startSync: true,
-        }),
-      )
-      const persistence = createDeferred<void>()
-      const transaction = createTransaction({
-        mutationFn: () => persistence.promise,
-      })
-      const abortController = new AbortController()
-
-      try {
-        transaction.mutate(() =>
-          testCollection.insert({ id: 3, name: `Local row` }),
-        )
-        const load = testCollection._sync.loadSubset({
-          limit: 1,
-          signal: abortController.signal,
         })
-        await vi.waitFor(() => expect(mockFetchSnapshot).toHaveBeenCalledOnce())
-        await Promise.resolve()
-        await Promise.resolve()
+        const controls = options.sync.sync({
+          collection: { id: options.id, status: `loading` },
+          begin: vi.fn(),
+          write: vi.fn(),
+          commit:
+            failurePhase === `commit`
+              ? vi.fn(() => Promise.reject(failure))
+              : vi.fn(() => true as const),
+          markReady: vi.fn(),
+          markError: vi.fn(),
+          truncate: vi.fn(),
+        } as never)
+        if (
+          !controls ||
+          typeof controls === `function` ||
+          !controls.loadSubset
+        ) {
+          throw new Error(`Expected progressive sync controls`)
+        }
 
-        expect(testCollection.has(2)).toBe(false)
-        abortController.abort()
-        persistence.resolve()
-        await transaction.isPersisted.promise
-        if (load instanceof Promise) await load
+        try {
+          await expect(
+            Promise.resolve(controls.loadSubset({ limit: 1 })),
+          ).rejects.toBe(failure)
+        } finally {
+          controls.cleanup?.()
+        }
+      },
+    )
 
-        expect(testCollection.has(2)).toBe(false)
-      } finally {
-        abortController.abort()
-        persistence.resolve()
-        await transaction.isPersisted.promise.catch(() => undefined)
-        await testCollection.cleanup()
-      }
-    })
+    it.each([
+      { failurePhase: `fetch`, signalSource: `request`, order: `cancel-first` },
+      { failurePhase: `fetch`, signalSource: `request`, order: `error-first` },
+      {
+        failurePhase: `fetch`,
+        signalSource: `collection`,
+        order: `cancel-first`,
+      },
+      {
+        failurePhase: `fetch`,
+        signalSource: `collection`,
+        order: `error-first`,
+      },
+      {
+        failurePhase: `commit`,
+        signalSource: `request`,
+        order: `cancel-first`,
+      },
+      { failurePhase: `commit`, signalSource: `request`, order: `error-first` },
+      {
+        failurePhase: `commit`,
+        signalSource: `collection`,
+        order: `cancel-first`,
+      },
+      {
+        failurePhase: `commit`,
+        signalSource: `collection`,
+        order: `error-first`,
+      },
+    ] as const)(
+      `prefers AbortError when $signalSource cancellation races a progressive $failurePhase error in $order order`,
+      async ({ failurePhase, signalSource, order }) => {
+        const failure = new Error(`${failurePhase} failed`)
+        const fetch = createDeferred<{
+          metadata: Record<string, never>
+          data: Array<{
+            key: string
+            value: Row
+            headers: { operation: `insert` }
+          }>
+        }>()
+        const commit = createDeferred<void>()
+        if (failurePhase === `fetch`) {
+          mockFetchSnapshot.mockReturnValue(fetch.promise)
+        } else {
+          mockFetchSnapshot.mockResolvedValue({
+            metadata: {},
+            data: [
+              {
+                key: `2`,
+                value: { id: 2, name: `Snapshot row` },
+                headers: { operation: `insert` },
+              },
+            ],
+          })
+        }
+        const collectionAbortController = new AbortController()
+        const requestAbortController = new AbortController()
+        const options = electricCollectionOptions({
+          id: `progressive-${failurePhase}-${signalSource}-${order}-test`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+            signal: collectionAbortController.signal,
+          },
+          syncMode: `progressive`,
+          getKey: (item: Row) => item.id as number,
+          startSync: true,
+        })
+        const commitMock =
+          failurePhase === `commit`
+            ? vi.fn(() => commit.promise)
+            : vi.fn(() => true as const)
+        const controls = options.sync.sync({
+          collection: { id: options.id, status: `loading` },
+          begin: vi.fn(),
+          write: vi.fn(),
+          commit: commitMock,
+          markReady: vi.fn(),
+          markError: vi.fn(),
+          truncate: vi.fn(),
+        } as never)
+        if (
+          !controls ||
+          typeof controls === `function` ||
+          !controls.loadSubset
+        ) {
+          throw new Error(`Expected progressive sync controls`)
+        }
+        const abortController =
+          signalSource === `request`
+            ? requestAbortController
+            : collectionAbortController
+        const load = Promise.resolve(
+          controls.loadSubset({
+            limit: 1,
+            signal: requestAbortController.signal,
+          }),
+        )
+        const loadError = load.then(
+          () => undefined,
+          (error: unknown) => error,
+        )
+
+        try {
+          if (failurePhase === `commit`) {
+            await vi.waitFor(() => expect(commitMock).toHaveBeenCalledOnce())
+          }
+          if (order === `cancel-first`) abortController.abort()
+          if (failurePhase === `fetch`) fetch.reject(failure)
+          else commit.reject(failure)
+          if (order === `error-first`) abortController.abort()
+
+          await expect(loadError).resolves.toMatchObject({ name: `AbortError` })
+          await load.catch(() => undefined)
+        } finally {
+          collectionAbortController.abort()
+          requestAbortController.abort()
+          fetch.resolve({ metadata: {}, data: [] })
+          commit.resolve()
+          controls.cleanup?.()
+        }
+      },
+    )
+
+    it.each([`request`, `collection`, `cleanup`] as const)(
+      `keeps a progressive snapshot applied before %s cancellation`,
+      async (cancellationSource) => {
+        mockFetchSnapshot.mockResolvedValue({
+          metadata: {},
+          data: [
+            {
+              key: `2`,
+              value: { id: 2, name: `Applied snapshot` },
+              headers: { operation: `insert` },
+            },
+          ],
+        })
+        const requestAbortController = new AbortController()
+        const collectionAbortController = new AbortController()
+        const stagedRows: Array<Row> = []
+        const appliedRows: Array<Row> = []
+        let cleanup = () => {}
+        const options = electricCollectionOptions({
+          id: `progressive-applied-before-${cancellationSource}-test`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+            signal: collectionAbortController.signal,
+          },
+          syncMode: `progressive`,
+          getKey: (item: Row) => item.id as number,
+          startSync: true,
+        })
+        const controls = options.sync.sync({
+          collection: { id: options.id, status: `loading` },
+          begin: vi.fn(),
+          write: vi.fn((change: { value: Row }) =>
+            stagedRows.push(change.value),
+          ),
+          commit: vi.fn(() => {
+            appliedRows.push(...stagedRows)
+            if (cancellationSource === `request`) {
+              requestAbortController.abort()
+            } else if (cancellationSource === `collection`) {
+              collectionAbortController.abort()
+            } else {
+              cleanup()
+            }
+            return true as const
+          }),
+          markReady: vi.fn(),
+          markError: vi.fn(),
+          truncate: vi.fn(),
+        } as never)
+        if (
+          !controls ||
+          typeof controls === `function` ||
+          !controls.loadSubset
+        ) {
+          throw new Error(`Expected progressive sync controls`)
+        }
+        cleanup = controls.cleanup ?? (() => {})
+
+        try {
+          await expect(
+            Promise.resolve(
+              controls.loadSubset({
+                limit: 1,
+                signal: requestAbortController.signal,
+              }),
+            ),
+          ).resolves.toBeUndefined()
+          expect(appliedRows).toEqual([{ id: 2, name: `Applied snapshot` }])
+        } finally {
+          controls.cleanup?.()
+        }
+      },
+    )
+
+    it.each([`success`, `rejection`, `request-abort`, `cleanup`] as const)(
+      `removes combined commit abort listeners after %s`,
+      async (settlement) => {
+        mockFetchSnapshot.mockResolvedValue({
+          metadata: {},
+          data: [
+            {
+              key: `2`,
+              value: { id: 2, name: `Snapshot row` },
+              headers: { operation: `insert` },
+            },
+          ],
+        })
+        const commit = createDeferred<void>()
+        const requestAbortController = new AbortController()
+        const options = electricCollectionOptions({
+          id: `progressive-combined-listener-${settlement}-test`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+          },
+          syncMode: `progressive`,
+          getKey: (item: Row) => item.id as number,
+          startSync: true,
+        })
+        const commitMock = vi.fn(() => commit.promise)
+        const controls = options.sync.sync({
+          collection: { id: options.id, status: `loading` },
+          begin: vi.fn(),
+          write: vi.fn(),
+          commit: commitMock,
+          markReady: vi.fn(),
+          markError: vi.fn(),
+          truncate: vi.fn(),
+        } as never)
+        if (
+          !controls ||
+          typeof controls === `function` ||
+          !controls.loadSubset
+        ) {
+          throw new Error(`Expected progressive sync controls`)
+        }
+
+        const added: Array<{
+          signal: AbortSignal
+          listener: EventListenerOrEventListenerObject
+        }> = []
+        const removed: Array<{
+          signal: AbortSignal
+          listener: EventListenerOrEventListenerObject
+        }> = []
+        const originalAdd = AbortSignal.prototype.addEventListener
+        const originalRemove = AbortSignal.prototype.removeEventListener
+        const addSpy = vi
+          .spyOn(AbortSignal.prototype, `addEventListener`)
+          .mockImplementation(function (
+            this: AbortSignal,
+            type,
+            listener,
+            listenerOptions,
+          ) {
+            if (type === `abort`) added.push({ signal: this, listener })
+            return originalAdd.call(this, type, listener, listenerOptions)
+          })
+        const removeSpy = vi
+          .spyOn(AbortSignal.prototype, `removeEventListener`)
+          .mockImplementation(function (
+            this: AbortSignal,
+            type,
+            listener,
+            listenerOptions,
+          ) {
+            if (type === `abort`) removed.push({ signal: this, listener })
+            return originalRemove.call(this, type, listener, listenerOptions)
+          })
+        const failure = new Error(`commit failed`)
+
+        try {
+          const load = Promise.resolve(
+            controls.loadSubset({
+              limit: 1,
+              signal: requestAbortController.signal,
+            }),
+          )
+          const loadError = load.then(
+            () => undefined,
+            (error: unknown) => error,
+          )
+          await vi.waitFor(() => expect(commitMock).toHaveBeenCalledOnce())
+
+          if (settlement === `request-abort`) {
+            requestAbortController.abort()
+          } else if (settlement === `cleanup`) {
+            controls.cleanup?.()
+          }
+          if (settlement === `rejection`) commit.reject(failure)
+          else commit.resolve()
+
+          if (settlement === `rejection`) {
+            await expect(loadError).resolves.toBe(failure)
+          } else {
+            await expect(loadError).resolves.toBeUndefined()
+          }
+          await load.catch(() => undefined)
+
+          for (const installed of added) {
+            expect(removed).toContainEqual(installed)
+          }
+        } finally {
+          addSpy.mockRestore()
+          removeSpy.mockRestore()
+          requestAbortController.abort()
+          commit.resolve()
+          controls.cleanup?.()
+        }
+      },
+    )
+
+    it.each(
+      ([`progressive atomic-swap`, `metadata-only`] as const).flatMap(
+        (commitPath) =>
+          ([`external abort`, `cleanup`] as const).map(
+            (cancellationSource) => [commitPath, cancellationSource] as const,
+          ),
+      ),
+    )(
+      `binds the %s commit to collection lifetime through %s`,
+      (commitPath, cancellationSource) => {
+        const collectionAbortController = new AbortController()
+        const receipt = createDeferred<void>()
+        const metadataHarness = createInMemorySyncMetadataApi()
+        const isProgressive = commitPath === `progressive atomic-swap`
+        let commitSignal: AbortSignal | undefined
+        const options = electricCollectionOptions({
+          id: `${commitPath.replaceAll(` `, `-`)}-commit-signal-test`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+            signal: collectionAbortController.signal,
+          },
+          syncMode: isProgressive ? `progressive` : `eager`,
+          getKey: (item: Row) => item.id as number,
+          startSync: true,
+        })
+        const commitMock = vi.fn((signal?: AbortSignal) => {
+          commitSignal = signal
+          return receipt.promise
+        })
+        const controls = options.sync.sync({
+          collection: {
+            id: options.id,
+            status: `loading`,
+            getKeyFromItem: (item: Row) => item.id,
+          },
+          begin: vi.fn(),
+          write: vi.fn(),
+          commit: commitMock,
+          markReady: vi.fn(),
+          markError: vi.fn(),
+          truncate: vi.fn(),
+          metadata: isProgressive ? undefined : metadataHarness.api,
+        } as never)
+        if (!controls || typeof controls === `function`) {
+          throw new Error(`Expected sync controls`)
+        }
+
+        try {
+          if (isProgressive) {
+            subscriber([
+              {
+                key: `2`,
+                value: { id: 2, name: `Buffered row` },
+                headers: { operation: `insert` },
+              },
+              { headers: { control: `up-to-date` } },
+            ])
+          } else {
+            subscriber([{ headers: { control: `up-to-date` } }])
+          }
+
+          expect(commitMock).toHaveBeenCalledOnce()
+          expect(commitSignal).toBeDefined()
+          expect(commitSignal?.aborted).toBe(false)
+
+          if (cancellationSource === `external abort`) {
+            collectionAbortController.abort()
+          } else {
+            controls.cleanup?.()
+          }
+
+          expect(commitSignal?.aborted).toBe(true)
+        } finally {
+          collectionAbortController.abort()
+          receipt.resolve()
+          controls.cleanup?.()
+        }
+      },
+    )
 
     it(`should not request snapshots when loadSubset is called in eager mode`, async () => {
       vi.clearAllMocks()

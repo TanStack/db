@@ -6,7 +6,7 @@ import {
 import {
   computeOrderedLoadCursor,
   computeSubscriptionOrderByHints,
-  filterDuplicateInserts,
+  reconcileChangesForD2,
   sendChangesToInput,
   splitUpdates,
 } from './utils.js'
@@ -47,10 +47,9 @@ export class CollectionSubscriber<
     { resolve: () => void }
   >()
 
-  // Track keys that have been sent to the D2 pipeline to prevent duplicate inserts
-  // This is necessary because different code paths (initial load, change events)
-  // can potentially send the same item to D2 multiple times.
-  private sentToD2Keys = new Set<string | number>()
+  // Track the exact row contributed for each source key. D2 retractions must
+  // use that row, even when the incoming event reports a changed previous row.
+  private sentToD2Rows = new Map<string | number, Record<string, unknown>>()
 
   // Direct load tracking callback for ordered path (set during subscribeToOrderedChanges,
   // used by loadNextItems for subsequent requestLimitedSnapshot calls)
@@ -60,6 +59,18 @@ export class CollectionSubscriber<
   ) => void
   private pendingOrderedLoadPromise:
     | Promise<AppliedLoadSubsetOutcome>
+    | undefined
+  // A sync commit can publish rows before an async loadSubset call returns its
+  // Promise. Block graph callbacks in that entry window; the Promise guard
+  // takes over as soon as requestLimitedSnapshot returns.
+  private orderedLoadStartInProgress = false
+  // Overlapping replays share one subscription, so only the latest result
+  // token may clear the full-source acquisition guard.
+  private unindexedSnapshot:
+    | {
+        subscription: CollectionSubscription
+        token: symbol
+      }
     | undefined
   private readonly demand = new SubsetDemandController()
 
@@ -161,6 +172,7 @@ export class CollectionSubscriber<
         trackLoadResult,
         onLoadSubsetError,
       )
+      if (orderByInfo.limit === 0) initialSubsetPending = false
     } else {
       // Lazy sources load only the subsets demanded by the compiled graph.
       const includeInitialState = !this.collectionConfigBuilder.isLazySource(
@@ -206,6 +218,7 @@ export class CollectionSubscriber<
         this.sourceId,
         subscription,
       )
+      this.sentToD2Rows.clear()
     }
     // currentSyncState is always defined when subscribe() is called
     // (called during sync session setup)
@@ -240,6 +253,11 @@ export class CollectionSubscriber<
       this.collectionConfigBuilder.failDemand(plan.id, generation, error)
       if (isInitialSync) throw error
       return
+    }
+    if (update.releaseFailure) {
+      this.collectionConfigBuilder.recordSubsetError(
+        update.releaseFailure.error,
+      )
     }
     if (!update.changed) return
 
@@ -280,16 +298,16 @@ export class CollectionSubscriber<
     callback?: () => boolean,
   ) {
     const changesArray = Array.isArray(changes) ? changes : [...changes]
-    const filteredChanges = filterDuplicateInserts(
+    const reconciledChanges = reconcileChangesForD2(
       changesArray,
-      this.sentToD2Keys,
+      this.sentToD2Rows,
     )
 
     // currentSyncState and input are always defined when this method is called
     // (only called from active subscriptions during a sync session)
     const input =
       this.collectionConfigBuilder.currentSyncState!.inputs[this.sourceId]!
-    const sentChanges = sendChangesToInput(input, filteredChanges)
+    const sentChanges = sendChangesToInput(input, reconciledChanges)
 
     // Do not provide the callback that loads more data
     // if there's no more data to load
@@ -353,6 +371,7 @@ export class CollectionSubscriber<
     onLoadSubsetError: (event: SubscriptionLoadSubsetErrorEvent) => void,
   ): CollectionSubscription {
     const { orderBy, offset, limit, index } = orderByInfo
+    this.unindexedSnapshot = undefined
 
     // Store the callback so loadNextItems can also use direct tracking.
     // Track in-flight ordered loads to avoid issuing redundant requests while
@@ -405,14 +424,12 @@ export class CollectionSubscriber<
     subscriptionHolder.current = subscription
     this.registerSubscriptionCleanup(subscription)
 
-    // Listen for truncate events to reset cursor tracking state and sentToD2Keys
-    // This ensures that after a must-refetch/truncate, we don't use stale cursor data
-    // and allow re-inserts of previously sent keys
+    // Reset ordered-load state on truncate. Keep exact D2 source rows until
+    // their later delete/replacement batch retracts them from the live graph.
     const truncateUnsubscribe = this.collection.on(`truncate`, () => {
       this.lastLoadRequestKey = undefined
       this.lastNoProgressRequestKey = undefined
       this.pendingOrderedLoadPromise = undefined
-      this.sentToD2Keys.clear()
     })
 
     // Clean up truncate listener when subscription is unsubscribed
@@ -421,6 +438,9 @@ export class CollectionSubscriber<
       subscriptionHolder.current = undefined
       this.lastLoadRequestKey = undefined
       this.lastNoProgressRequestKey = undefined
+      if (this.unindexedSnapshot?.subscription === subscription) {
+        this.unindexedSnapshot = undefined
+      }
 
       // Ordered continuations belong to this subscription session. A settled
       // load from a cleaned session must not refill through a later session.
@@ -439,22 +459,18 @@ export class CollectionSubscriber<
     // under microtask timing (e.g., queueMicrotask delays in TanStack Query observers).
     if (index) {
       // We have an index on the first orderBy column - use lazy loading optimization
-      subscription.setOrderByIndex(index)
+      subscription.setOrderByIndex(index, orderByInfo.expandSourceOrderTies)
 
       subscription.requestLimitedSnapshot({
-        limit: offset + limit,
+        limit: limit === 0 ? 0 : offset + limit,
         orderBy: normalizedOrderBy,
         trackLoadSubsetPromise: false,
         onLoadSubsetResult: handleLoadSubsetResult,
       })
-    } else {
-      // No index available (e.g., non-ref expression): pass orderBy/limit to loadSubset
-      subscription.requestSnapshot({
-        orderBy: normalizedOrderBy,
-        limit: offset + limit,
-        trackLoadSubsetPromise: false,
-        onLoadSubsetResult: handleLoadSubsetResult,
-      })
+    } else if (limit > 0) {
+      // Without an index there is no sound cursor continuation. Load the full
+      // ordered source so later relational operators cannot underfill top-K.
+      this.requestUnindexedSnapshot(subscription, normalizedOrderBy)
     }
 
     return subscription
@@ -472,19 +488,38 @@ export class CollectionSubscriber<
       return true
     }
 
-    const { dataNeeded, index, offset, limit } = orderByInfo
+    const { dataNeeded, index, offset, limit, refillFromResultDeficit } =
+      orderByInfo
 
-    if (!dataNeeded || !index) {
-      // dataNeeded is not set when there's no index (e.g., non-ref expression
-      // or auto-indexing is disabled). Without an index, lazy loading can't work —
-      // all data was already loaded eagerly via requestSnapshot.
+    // The ordered subscription keeps its frozen order for later window changes,
+    // but an empty active window has no coordinator or continuation work.
+    if (limit === 0) return true
+
+    if (!index) {
+      // A zero-width subscription defers this full fallback until the window
+      // first becomes positive. Once requested, the snapshot covers every
+      // later window because cursor continuation is unavailable.
+      this.requestUnindexedSnapshot(
+        subscription,
+        normalizeOrderByPaths(orderByInfo.orderBy, this.alias),
+      )
+      return true
+    }
+
+    if (!dataNeeded) {
       return true
     }
 
     subscription.ensureOrderedWindowSize(offset + limit)
-    if (subscription.hasOrderedCoverageForActiveWindow) {
+    const missingResultRows = refillFromResultDeficit ? dataNeeded() : 0
+    if (
+      missingResultRows === 0 &&
+      subscription.hasOrderedResultForActiveWindow
+    ) {
       return true
     }
+
+    if (this.orderedLoadStartInProgress) return true
 
     if (this.pendingOrderedLoadPromise) {
       // The current window still needs the in-flight coverage. Attach it to
@@ -497,7 +532,21 @@ export class CollectionSubscriber<
       return true
     }
 
-    const n = Math.max(dataNeeded(), subscription.orderedRowsNeeded)
+    // A join or later predicate can discard source rows. Once the prior
+    // acquisition settles, grow the retained source prefix by the observed
+    // result deficit so already-local rows publish before another request.
+    // Never grow from callbacks while an acquisition is still pending: the
+    // same deficit can be observed more than once in that transaction.
+    if (missingResultRows > 0) {
+      subscription.ensureOrderedWindowSize(
+        subscription.orderedRetainedWindowSize + missingResultRows,
+      )
+    }
+    if (subscription.hasOrderedResultForActiveWindow) {
+      return true
+    }
+
+    const n = Math.max(missingResultRows, subscription.orderedRowsNeeded)
     const errorVersion = subscription.lastErrorVersion
     try {
       // Local rows may fill the visible window without proving its remote
@@ -514,6 +563,52 @@ export class CollectionSubscriber<
       // must not make the source transaction that exposed the gap fail.
     }
     return true
+  }
+
+  private requestUnindexedSnapshot(
+    subscription: CollectionSubscription,
+    orderBy: LoadSubsetOptions[`orderBy`],
+  ): void {
+    if (this.unindexedSnapshot?.subscription === subscription) return
+
+    const requestToken = Symbol()
+    this.unindexedSnapshot = {
+      subscription,
+      token: requestToken,
+    }
+    try {
+      subscription.requestSnapshot({
+        orderBy,
+        trackLoadSubsetPromise: false,
+        onLoadSubsetResult: (result, demand) => {
+          const token = Symbol()
+          this.unindexedSnapshot = { subscription, token }
+          if (result instanceof Promise) {
+            void result.catch(() => {
+              const current = this.unindexedSnapshot
+              if (
+                current?.subscription === subscription &&
+                current.token === token
+              ) {
+                this.unindexedSnapshot = undefined
+              }
+            })
+          }
+          this.orderedLoadSubsetResult?.(result, demand)
+        },
+      })
+    } catch (error) {
+      const current = this.unindexedSnapshot
+      if (
+        // requestSnapshot can reentrantly unsubscribe and clear this field.
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        current?.subscription === subscription &&
+        current.token === requestToken
+      ) {
+        this.unindexedSnapshot = undefined
+      }
+      throw error
+    }
   }
 
   private sendChangesToPipelineWithTracking(
@@ -560,8 +655,10 @@ export class CollectionSubscriber<
       n,
       subscription.orderedRetainedWindowSize,
       subscription.orderedBoundaryKey,
+      subscription.orderedCoverageRevision,
     )
     if (!cursor) {
+      if (subscription.settleOrderedResultAfterNoProgress()) return
       if (this.lastNoProgressRequestKey !== this.lastLoadRequestKey) {
         this.lastNoProgressRequestKey = this.lastLoadRequestKey
         this.collectionConfigBuilder.recordSubsetError(
@@ -582,22 +679,27 @@ export class CollectionSubscriber<
     // Omit offset so requestLimitedSnapshot can advance based on
     // the number of rows already loaded (supports offset-based backends).
     try {
-      subscription.requestLimitedSnapshot({
-        orderBy: cursor.normalizedOrderBy,
-        limit: n,
-        minValues: cursor.minValues,
-        trackLoadSubsetPromise: false,
-        onLoadSubsetResult: (result, demand) => {
-          if (result instanceof Promise) {
-            void result.catch(() => {
-              if (this.lastLoadRequestKey === loadRequestKey) {
-                this.lastLoadRequestKey = undefined
-              }
-            })
-          }
-          this.orderedLoadSubsetResult?.(result, demand)
-        },
-      })
+      this.orderedLoadStartInProgress = true
+      try {
+        subscription.requestLimitedSnapshot({
+          orderBy: cursor.normalizedOrderBy,
+          limit: n,
+          minValues: cursor.minValues,
+          trackLoadSubsetPromise: false,
+          onLoadSubsetResult: (result, demand) => {
+            if (result instanceof Promise) {
+              void result.catch(() => {
+                if (this.lastLoadRequestKey === loadRequestKey) {
+                  this.lastLoadRequestKey = undefined
+                }
+              })
+            }
+            this.orderedLoadSubsetResult?.(result, demand)
+          },
+        })
+      } finally {
+        this.orderedLoadStartInProgress = false
+      }
     } catch (error) {
       if (this.lastLoadRequestKey === loadRequestKey) {
         this.lastLoadRequestKey = undefined

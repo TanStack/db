@@ -1,0 +1,254 @@
+import { describe, expect, it } from 'vitest'
+import { createCollection } from '../../src/collection/index.js'
+import { createDeferred } from '../../src/deferred.js'
+import { createLiveQueryCollection } from '../../src/query/index.js'
+import { projectReplayPublication } from '../load-subset-full-flow-model.js'
+import { flushPromises } from '../utils.js'
+import type {
+  FullFlowVersionedRow,
+  LoadSubsetFullFlowEvent,
+} from '../load-subset-full-flow-model.js'
+import type {
+  ChangeMessageOrDeleteKeyMessage,
+  LoadSubsetOptions,
+} from '../../src/types.js'
+
+type Row = { id: string; version: number }
+
+describe(`loadSubset replay refinement`, () => {
+  function createHarness(sourceId: string) {
+    let begin!: () => void
+    let write!: (message: ChangeMessageOrDeleteKeyMessage<Row, string>) => void
+    let commit!: () => void
+    let truncate!: () => void
+    let loadCount = 0
+    const pending: Array<{
+      options: LoadSubsetOptions
+      deferred: ReturnType<typeof createDeferred<void>>
+    }> = []
+    const batches: Array<
+      Array<{
+        type: `insert` | `update` | `delete`
+        row: { sourceId: string; rowKey: string; version: number }
+        previousVersion?: number
+      }>
+    > = []
+    const source = createCollection<Row>({
+      id: sourceId,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          truncate = params.truncate
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              loadCount++
+              if (loadCount === 1) {
+                begin()
+                write({ type: `insert`, value: { id: `row`, version: 1 } })
+                commit()
+                return true
+              }
+              const deferred = createDeferred<void>()
+              pending.push({ options, deferred })
+              return deferred.promise
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const downstream = createLiveQueryCollection({
+      id: `${sourceId}-downstream`,
+      query: (q) =>
+        q.from({ row: source }).select(({ row }) => ({
+          id: row.id,
+          version: row.version,
+        })),
+      startSync: true,
+    })
+    const callbackReads: Array<Array<FullFlowVersionedRow>> = []
+    const subscription = downstream.subscribeChanges(
+      (changes) => {
+        const batch = changes.map((change) => ({
+          type: change.type,
+          row: {
+            sourceId,
+            rowKey: String(change.key),
+            version: change.value.version,
+          },
+          ...(change.previousValue === undefined
+            ? {}
+            : { previousVersion: change.previousValue.version }),
+        }))
+        if (batch.length > 0) {
+          batches.push(batch)
+          callbackReads.push(
+            downstream.toArray.map(({ id, version }) => ({
+              sourceId,
+              rowKey: id,
+              version,
+            })),
+          )
+        }
+      },
+      { includeInitialState: true },
+    )
+
+    const replaceCore = (version: number) => {
+      begin()
+      write({ type: `insert`, value: { id: `row`, version } })
+      commit()
+    }
+    const startReplay = async () => {
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+    }
+    const coreRows = () =>
+      source.toArray.map(({ id, version }) => ({
+        sourceId,
+        rowKey: id,
+        version,
+      }))
+    const visibleRows = () =>
+      downstream.toArray.map(({ id, version }) => ({
+        sourceId,
+        rowKey: id,
+        version,
+      }))
+
+    return {
+      source,
+      downstream,
+      subscription,
+      pending,
+      batches,
+      callbackReads,
+      replaceCore,
+      startReplay,
+      coreRows,
+      visibleRows,
+    }
+  }
+
+  it(`retains the last complete publication when replay fails after writing`, async () => {
+    const sourceId = `replay-refinement-failure`
+    const row = (version: number) => ({
+      sourceId,
+      rowKey: `row`,
+      version,
+    })
+    const history: Array<LoadSubsetFullFlowEvent> = [
+      { type: `establishPublication`, sourceId, rows: [row(1)] },
+    ]
+    const harness = createHarness(sourceId)
+
+    try {
+      await harness.downstream.preload()
+      await harness.startReplay()
+      history.push({ type: `startReplay`, attemptId: `replay-1`, sourceId })
+
+      harness.replaceCore(2)
+      history.push({
+        type: `writeReplayRows`,
+        attemptId: `replay-1`,
+        rows: [row(2)],
+        acceptedByCore: true,
+      })
+      harness.pending[0]?.deferred.reject(new Error(`replay failed`))
+      history.push({
+        type: `settleReplay`,
+        attemptId: `replay-1`,
+        outcome: `reject`,
+      })
+      await flushPromises()
+
+      const expected = projectReplayPublication(history)
+      expect(harness.coreRows()).toEqual(expected.coreRows)
+      expect(harness.visibleRows()).toEqual(expected.visibleRows)
+      expect(harness.batches).toEqual(expected.publishedBatches)
+      expect(harness.callbackReads).toEqual(expected.callbackReads)
+    } finally {
+      harness.subscription.unsubscribe()
+      await Promise.all([
+        harness.downstream.cleanup(),
+        harness.source.cleanup(),
+      ])
+    }
+  })
+
+  it(`waits for every overlapping replay before publishing the newest success`, async () => {
+    const sourceId = `replay-refinement-overlap`
+    const row = (version: number) => ({
+      sourceId,
+      rowKey: `row`,
+      version,
+    })
+    const history: Array<LoadSubsetFullFlowEvent> = [
+      { type: `establishPublication`, sourceId, rows: [row(1)] },
+    ]
+    const harness = createHarness(sourceId)
+
+    try {
+      await harness.downstream.preload()
+      await harness.startReplay()
+      history.push({ type: `startReplay`, attemptId: `replay-1`, sourceId })
+      await harness.startReplay()
+      history.push({ type: `startReplay`, attemptId: `replay-2`, sourceId })
+
+      expect(harness.pending[0]?.options.signal?.aborted).toBe(true)
+      harness.replaceCore(3)
+      history.push({
+        type: `writeReplayRows`,
+        attemptId: `replay-2`,
+        rows: [row(3)],
+        acceptedByCore: true,
+      })
+      harness.pending[1]?.deferred.resolve()
+      history.push({
+        type: `settleReplay`,
+        attemptId: `replay-2`,
+        outcome: `resolve`,
+      })
+      await flushPromises()
+
+      const beforeObsoleteSettlement = projectReplayPublication(history)
+      expect(harness.visibleRows()).toEqual(
+        beforeObsoleteSettlement.visibleRows,
+      )
+      expect(harness.batches).toEqual(beforeObsoleteSettlement.publishedBatches)
+      expect(harness.callbackReads).toEqual(
+        beforeObsoleteSettlement.callbackReads,
+      )
+
+      harness.pending[0]?.deferred.reject(
+        new DOMException(`obsolete`, `AbortError`),
+      )
+      history.push({
+        type: `settleReplay`,
+        attemptId: `replay-1`,
+        outcome: `reject`,
+      })
+      await flushPromises()
+
+      const expected = projectReplayPublication(history)
+      expect(harness.coreRows()).toEqual(expected.coreRows)
+      expect(harness.visibleRows()).toEqual(expected.visibleRows)
+      expect(harness.batches).toEqual(expected.publishedBatches)
+      expect(harness.callbackReads).toEqual(expected.callbackReads)
+    } finally {
+      for (const replay of harness.pending) replay.deferred.resolve()
+      harness.subscription.unsubscribe()
+      await Promise.all([
+        harness.downstream.cleanup(),
+        harness.source.cleanup(),
+      ])
+    }
+  })
+})

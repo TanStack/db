@@ -369,6 +369,13 @@ export class CollectionIndexesManager<
     }
   }
 
+  /** Rebuild every retained index from the Collection's current state. */
+  public rebuildIndexes(): void {
+    for (const index of this.indexes.values()) {
+      index.build(this.state.entries())
+    }
+  }
+
   /**
    * Clean up indexes
    */

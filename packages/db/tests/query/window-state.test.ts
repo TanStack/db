@@ -234,10 +234,129 @@ describe(`WindowState`, () => {
       window.recordLocalRequestSatisfaction(requestedPrefix)
 
       expect(window.localPrefixSize).toBe(Math.min(requestedPrefix, 3))
-      expect(window.coversActiveWindow).toBe(requestedPrefix <= 3)
+      expect(window.coversActiveWindow).toBe(false)
+      expect(window.satisfiesActiveWindow).toBe(requestedPrefix <= 3)
       expect(window.requestBoundary()).toBeUndefined()
       expect(window.progressBoundary()?.key).toBe(Math.min(requestedPrefix, 3))
       expect(window.requiresPrefixRefresh).toBe(true)
+
+      if (requestedPrefix > 3) {
+        expect(window.settleLocalRequestAfterNoProgress()).toBe(true)
+        expect(window.satisfiesActiveWindow).toBe(true)
+      }
+
+      window.ensureSize(requestedPrefix + 1)
+      expect(window.satisfiesActiveWindow).toBe(false)
+    },
+  )
+
+  it(`refreshes an outcome-free window after shrinking and regrowing`, () => {
+    const window = new WindowState<Row, number>(
+      mockCollection([
+        { id: 1, rank: 1 },
+        { id: 2, rank: 2 },
+        { id: 3, rank: 3 },
+      ]),
+      [
+        {
+          expression: new PropRef([`rank`]),
+          compareOptions: { direction: `asc`, nulls: `last` },
+        },
+      ],
+      undefined,
+      4,
+    )
+
+    window.recordLocalRequestSatisfaction(4)
+    expect(window.settleLocalRequestAfterNoProgress()).toBe(true)
+    expect(window.satisfiesActiveWindow).toBe(true)
+    expect(window.coversRetainedWindow).toBe(false)
+
+    window.ensureSize(2)
+    expect(window.satisfiesActiveWindow).toBe(true)
+
+    window.ensureSize(3)
+    expect(window.satisfiesActiveWindow).toBe(false)
+    expect(window.requestBoundary()).toBeUndefined()
+    expect(window.coverageRevision).toBe(1)
+
+    window.recordLocalRequestSatisfaction(3)
+    expect(window.satisfiesActiveWindow).toBe(true)
+
+    window.ensureSize(2)
+    window.ensureSize(3)
+    expect(window.satisfiesActiveWindow).toBe(false)
+    expect(window.coverageRevision).toBe(2)
+  })
+
+  it.each([
+    {
+      transition: `coverage reset`,
+      apply: (window: WindowState<Row, number>) => window.resetCoverage(),
+      expectedCoverage: false,
+      expectedSatisfaction: false,
+    },
+    {
+      transition: `continuing authoritative result`,
+      apply: (window: WindowState<Row, number>) =>
+        window.recordContinuationCoverage(
+          [],
+          false,
+          4,
+          window.coverageRevision,
+        ),
+      expectedCoverage: false,
+      expectedSatisfaction: false,
+    },
+    {
+      transition: `exhausted authoritative result`,
+      apply: (window: WindowState<Row, number>) =>
+        window.recordContinuationCoverage([], true, 4, window.coverageRevision),
+      expectedCoverage: true,
+      expectedSatisfaction: true,
+    },
+    {
+      transition: `prefix-invalidating live change`,
+      apply: (window: WindowState<Row, number>) =>
+        window.admitChanges([
+          {
+            type: `delete`,
+            key: 1,
+            value: { id: 1, rank: 1 },
+          },
+        ]),
+      expectedCoverage: false,
+      expectedSatisfaction: false,
+    },
+  ])(
+    `clears local outcome-free satisfaction after $transition`,
+    ({ apply, expectedCoverage, expectedSatisfaction }) => {
+      const window = new WindowState<Row, number>(
+        mockCollection([
+          { id: 1, rank: 1 },
+          { id: 2, rank: 2 },
+          { id: 3, rank: 3 },
+        ]),
+        [
+          {
+            expression: new PropRef([`rank`]),
+            compareOptions: { direction: `asc`, nulls: `last` },
+          },
+        ],
+        undefined,
+        4,
+      )
+
+      window.recordLocalRequestSatisfaction(4)
+      window.settleLocalRequestAfterNoProgress()
+      expect(window.satisfiesActiveWindow).toBe(true)
+      expect(window.coversActiveWindow).toBe(false)
+
+      apply(window)
+
+      expect(window.coversActiveWindow).toBe(expectedCoverage)
+      expect(window.satisfiesActiveWindow).toBe(expectedSatisfaction)
+      expect(window.settleLocalRequestAfterNoProgress()).toBe(false)
     },
   )
 })

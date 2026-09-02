@@ -7,9 +7,11 @@ import {
 import {
   getActivePublicationContext,
   transactionScopedScheduler,
+  withPublicationContext,
 } from '../../scheduler.js'
 import { getActiveTransaction } from '../../transactions.js'
 import { deepEquals } from '../../utils.js'
+import { runAllCallbacks } from '../../utils/callbacks.js'
 import { getLoadSubsetDemandKey } from '../ir-stable-identity.js'
 import { isAppliedLoadSubsetOutcome } from '../load-subset-outcome.js'
 import { CollectionSubscriber } from './collection-subscriber.js'
@@ -27,6 +29,7 @@ import type { LiveQueryInternalUtils } from './internal.js'
 import type { WindowOptions } from '../compiler/index.js'
 import type { SchedulerContextId } from '../../scheduler.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
+import type { CollectionPublicationStateSnapshot } from '../../collection/state.js'
 import type { RootStreamBuilder } from '@tanstack/db-ivm'
 import type { OrderByOptimizationInfo } from '../compiler/order-by.js'
 import type { Collection } from '../../collection/index.js'
@@ -52,6 +55,8 @@ import type { AllCollectionEvents } from '../../collection/events.js'
 
 export type LiveQueryCollectionUtils = UtilsRecord & {
   getRunCount: () => number
+  /** Whether this live query has observed a subset-load failure in its current sync session. */
+  readonly hasSubsetError: boolean
   /** Most recent subset-load failure observed by this live query. */
   readonly lastSubsetError: unknown | undefined
   /**
@@ -72,6 +77,21 @@ export type LiveQueryCollectionUtils = UtilsRecord & {
 
 type PendingGraphRun = {
   loadCallbacks: Set<() => boolean>
+}
+
+function runLoadCallbacks(callbacks: Iterable<() => boolean>): boolean {
+  let allDone = true
+  let firstFailure: { error: unknown } | undefined
+  for (const callback of callbacks) {
+    try {
+      allDone = callback() && allDone
+    } catch (error) {
+      allDone = false
+      firstFailure ??= { error }
+    }
+  }
+  if (firstFailure) throw firstFailure.error
+  return allDone
 }
 
 // Global counter for auto-generated collection IDs
@@ -119,6 +139,7 @@ export class CollectionConfigBuilder<
   private isInErrorState = false
   private fatalQueryError = false
   private readonly erroredSourceIds = new Set<string>()
+  private hasSubsetError = false
   private lastSubsetError: unknown | undefined
 
   // Reference to the live query collection for error state transitions
@@ -282,6 +303,9 @@ export class CollectionConfigBuilder<
       singleResult: this.query.singleResult,
       utils: {
         getRunCount: this.getRunCount.bind(this),
+        get hasSubsetError() {
+          return builder.hasSubsetError
+        },
         get lastSubsetError() {
           return builder.lastSubsetError
         },
@@ -302,7 +326,8 @@ export class CollectionConfigBuilder<
   }
 
   setWindow(options: WindowOptions): true | Promise<void> {
-    if (!this.windowFn) {
+    const windowFn = this.windowFn
+    if (!windowFn) {
       throw new SetWindowRequiresOrderByError()
     }
 
@@ -316,18 +341,38 @@ export class CollectionConfigBuilder<
     const operation: { failed: boolean; error?: unknown } = { failed: false }
     this.activeWindowOperation = operation
     try {
-      this.windowFn(options)
-      this.maybeRunGraphFn?.()
-      if (operation.failed) throw operation.error
+      // Window metadata is part of the synchronous publication. This also
+      // gives a nested operation the effective window of its immediate parent
+      // to restore if the nested operation fails.
       this.currentWindow = options
+      withPublicationContext(() => {
+        windowFn(options)
+        this.maybeRunGraphFn?.()
+      })
+      if (operation.failed) throw operation.error
+      if (windowOperationGeneration === this.windowOperationGeneration) {
+        // Teardown may clear the runtime while an accepted request is still
+        // unwinding. Preserve that request as the desired window for the next
+        // sync session, but never overwrite a newer nested operation.
+        this.currentWindow = options
+      }
     } catch (error) {
+      // A rejected nested window returns ownership to its parent before the
+      // rollback publishes. Work caused by that publication must settle with
+      // the restored parent operation, not the canceled child.
+      loadOperation?.cancel()
       if (
         previousWindow &&
+        syncSession === this.syncSession &&
+        this.currentSyncConfig !== undefined &&
         windowOperationGeneration === this.windowOperationGeneration
       ) {
         try {
-          this.windowFn(previousWindow)
-          this.maybeRunGraphFn?.()
+          this.currentWindow = previousWindow
+          withPublicationContext(() => {
+            windowFn(previousWindow)
+            this.maybeRunGraphFn?.()
+          })
           if (windowOperationGeneration === this.windowOperationGeneration) {
             this.windowOperationGeneration = previousWindowOperationGeneration
           }
@@ -336,7 +381,6 @@ export class CollectionConfigBuilder<
           // window rather than replacing it with a rollback failure.
         }
       }
-      loadOperation?.cancel()
       throw error
     } finally {
       this.activeWindowOperation = previousOperation
@@ -465,6 +509,7 @@ export class CollectionConfigBuilder<
   }
 
   recordSubsetError(error: unknown, fatalBeforeReady = false): void {
+    this.hasSubsetError = true
     this.lastSubsetError = error
     if (this.activeWindowOperation) {
       this.activeWindowOperation.failed = true
@@ -559,8 +604,11 @@ export class CollectionConfigBuilder<
     this.isGraphRunning = true
 
     try {
-      const { begin, commit } = this.currentSyncConfig
+      const config = this.currentSyncConfig
+      const { begin, commit } = config
       const syncState = this.currentSyncState
+      const sessionIsActive = () =>
+        this.currentSyncConfig === config && this.currentSyncState === syncState
 
       // Don't run if the live query is in an error state
       if (this.isInErrorState) {
@@ -569,30 +617,34 @@ export class CollectionConfigBuilder<
 
       // Always run the graph if subscribed (eager execution)
       if (syncState.subscribedToAllCollections) {
-        let callbackCalled = false
+        // A window change can reach this point with no pending graph work.
+        // Let the loader run first so any synchronous source commit it starts
+        // becomes part of this same quiescence pass.
+        if (!syncState.graph.pendingWork()) {
+          callback?.()
+          if (!sessionIsActive()) return
+        }
+
         while (syncState.graph.pendingWork()) {
           syncState.graph.run()
+          if (!sessionIsActive()) return
           callback?.()
-          callbackCalled = true
+          if (!sessionIsActive()) return
         }
 
         // Publish only after every operator has reached quiescence. A source
         // change can reach sibling materializations in different graph steps;
         // flushing between those steps would expose a mixed root snapshot.
         syncState.flushPendingChanges?.()
-
-        // Ensure the callback runs at least once even when the graph has no pending work.
-        // This handles lazy loading scenarios where setWindow() increases the limit or
-        // an async loadSubset completes and we need to re-check if more data is needed.
-        if (!callbackCalled) {
-          callback?.()
-        }
+        if (!sessionIsActive()) return
 
         // On the initial run, we may need to do an empty commit to ensure that
         // the collection is initialized
         if (syncState.messagesCount === 0) {
           begin()
+          if (!sessionIsActive()) return
           commit()
+          if (!sessionIsActive()) return
         }
 
         // After graph processing completes, check if we should mark ready.
@@ -600,7 +652,7 @@ export class CollectionConfigBuilder<
         // 1. All data has been processed through the graph
         // 2. All source collections have had a chance to send their initial data
         // This prevents marking ready before data is processed (fixes isReady=true with empty data)
-        this.updateLiveQueryStatus(this.currentSyncConfig)
+        this.updateLiveQueryStatus(config)
       }
     } finally {
       this.isGraphRunning = false
@@ -758,23 +810,8 @@ export class CollectionConfigBuilder<
 
     this.incrementRunCount()
 
-    const combinedLoader = () => {
-      let allDone = true
-      let firstError: unknown
-      pending.loadCallbacks.forEach((loader) => {
-        try {
-          allDone = loader() && allDone
-        } catch (error) {
-          allDone = false
-          firstError ??= error
-        }
-      })
-      if (firstError) {
-        throw firstError
-      }
-      // Returning false signals that callers should schedule another pass.
-      return allDone
-    }
+    // Returning false signals that callers should schedule another pass.
+    const combinedLoader = () => runLoadCallbacks(pending.loadCallbacks)
 
     this.maybeRunGraph(combinedLoader)
   }
@@ -811,6 +848,7 @@ export class CollectionConfigBuilder<
     this.isInErrorState = false
     this.fatalQueryError = false
     this.erroredSourceIds.clear()
+    this.hasSubsetError = false
     this.lastSubsetError = undefined
     this.latestSubsetOutcomes.clear()
     this.lastWindowOutcomes = []
@@ -833,13 +871,13 @@ export class CollectionConfigBuilder<
         if (this.syncSession === syncSession) this.syncSession++
       }
 
-      let firstCleanupError: unknown
+      let firstCleanupFailure: { error: unknown } | undefined
       for (const unsubscribe of syncState.unsubscribeCallbacks) {
         try {
           unsubscribe()
           syncState.unsubscribeCallbacks.delete(unsubscribe)
         } catch (error) {
-          firstCleanupError ??= error
+          firstCleanupFailure ??= { error }
         }
       }
 
@@ -871,7 +909,7 @@ export class CollectionConfigBuilder<
         this.compiledAliasToCollectionId = {}
       }
 
-      if (firstCleanupError !== undefined) throw firstCleanupError
+      if (firstCleanupFailure) throw firstCleanupFailure.error
       tornDown = true
     }
 
@@ -1007,6 +1045,10 @@ export class CollectionConfigBuilder<
     // transaction, avoiding duplicate key errors when joins produce multiple outputs
     // for the same key (e.g., first output with null, then output with joined data).
     let pendingChanges: Map<unknown, Changes<TResult>> = new Map()
+    let rootNeedsReady = false
+    let rootRecoveryState:
+      | CollectionPublicationStateSnapshot<TResult, string | number>
+      | undefined
 
     pipeline.pipe(
       output((data) => {
@@ -1038,11 +1080,41 @@ export class CollectionConfigBuilder<
         return
       }
 
+      let rootRecoveryFailure: { error: unknown } | undefined
+      try {
+        runAllCallbacks([
+          () => {
+            if (!rootRecoveryState) return
+            const stateToRecover = rootRecoveryState
+            try {
+              config.collection._restorePublicationState(stateToRecover)
+              rootRecoveryState = undefined
+            } catch (error) {
+              rootRecoveryFailure = { error }
+              throw error
+            }
+          },
+          () => bucketFacades.recover(),
+        ])
+      } catch (error) {
+        if (rootRecoveryFailure) {
+          try {
+            config.markError(rootRecoveryFailure.error)
+          } catch {
+            // Keep the first recovery failure authoritative and retryable.
+          }
+        }
+        throw error
+      }
+
       let facadePublication:
         | ReturnType<BucketFacadeAdapter[`flush`]>
         | undefined
       let rootPublication:
         | ReturnType<Collection[`_deferPublication`]>
+        | undefined
+      let rootStateSnapshot:
+        | CollectionPublicationStateSnapshot<TResult, string | number>
         | undefined
       try {
         facadePublication = bucketFacades.flush()
@@ -1065,7 +1137,13 @@ export class CollectionConfigBuilder<
         )
 
         if (hasParentChanges) {
-          begin()
+          rootStateSnapshot = config.collection._snapshotPublicationState(
+            changesToApply.keys() as Iterable<string | number>,
+          )
+          // The graph has already reached quiescence, so this is one complete
+          // derived publication. Apply it beneath any pending optimistic
+          // overlay instead of parking source progress behind that mutation.
+          begin({ immediate: true })
           changesToApply.forEach(this.applyChanges.bind(this, config))
           if (hasOrderOnlyMove(changesToApply)) {
             markLayoutChange(config.collection)
@@ -1073,26 +1151,62 @@ export class CollectionConfigBuilder<
           commit()
         }
       } catch (error) {
-        pendingChanges = new Map()
-        rootPublication?.discard()
-        facadePublication?.rollback()
+        const failedRootState = rootStateSnapshot
+        let rootRestoreFailure: { error: unknown } | undefined
+        try {
+          runAllCallbacks([
+            ...(rootPublication ? [rootPublication.discard] : []),
+            ...(failedRootState
+              ? [
+                  () => {
+                    try {
+                      config.collection._restorePublicationState(
+                        failedRootState,
+                      )
+                    } catch (restoreError) {
+                      rootNeedsReady = true
+                      rootRecoveryState = failedRootState
+                      rootRestoreFailure = { error: restoreError }
+                      throw restoreError
+                    }
+                  },
+                ]
+              : []),
+            ...(facadePublication ? [facadePublication.rollback] : []),
+          ])
+        } catch {
+          // Preserve the graph-install failure after attempting every recovery
+          // step. A failed root restore remains retryable from staged deltas.
+        }
+        if (rootRestoreFailure) {
+          try {
+            config.markError(rootRestoreFailure.error)
+          } catch {
+            // The install failure remains authoritative after every graph
+            // participant has restored its public state.
+          }
+        }
         throw error
       }
       pendingChanges = new Map()
 
-      let publicationError: unknown
-      for (const publish of [
-        rootPublication?.publish,
+      // Advance every participating Collection's public clocks and facade
+      // readiness before the first root callback. A callback failure cannot
+      // suppress another prepared participant's release.
+      runAllCallbacks([
+        ...(rootPublication ? [rootPublication.prepare] : []),
+        facadePublication.prepare,
+        ...(rootNeedsReady
+          ? [
+              () => {
+                rootNeedsReady = false
+                config.markReady()
+              },
+            ]
+          : []),
+        ...(rootPublication ? [rootPublication.publish] : []),
         facadePublication.publish,
-      ]) {
-        if (!publish) continue
-        try {
-          publish()
-        } catch (error) {
-          publicationError ??= error
-        }
-      }
-      if (publicationError !== undefined) throw publicationError
+      ])
     }
 
     graph.finalize()
@@ -1121,6 +1235,11 @@ export class CollectionConfigBuilder<
     // Store the key of the result so that we can retrieve it in the
     // getKey function
     this.resultKeys.set(value, key)
+    const resultKey = collection.getKeyFromItem(value)
+    // Graph deltas update the synced base. A pending optimistic delete can
+    // hide that base row from the public Collection view, so collection.has()
+    // cannot distinguish a base update from a delete.
+    const hasSyncedRow = collection._state.syncedData.has(resultKey)
 
     // Store the orderBy index if it exists
     if (orderByIndex !== undefined) {
@@ -1138,7 +1257,7 @@ export class CollectionConfigBuilder<
       inserts > deletes ||
       // Just update(s) but the item is already in the collection (so
       // was inserted previously).
-      (inserts === deletes && collection.has(collection.getKeyFromItem(value)))
+      (inserts === deletes && hasSyncedRow)
     ) {
       write({
         value,
@@ -1341,10 +1460,7 @@ export class CollectionConfigBuilder<
     // Combine all loaders into a single callback that initiates loading more data
     // from any source that needs it. Returns true once all loaders have been called,
     // but the actual async loading may still be in progress.
-    const loadSubsetDataCallbacks = () => {
-      loaders.map((loader) => loader())
-      return true
-    }
+    const loadSubsetDataCallbacks = () => runLoadCallbacks(loaders)
 
     // Mark as subscribed so the graph can start running
     // (graph only runs when all collections are subscribed)

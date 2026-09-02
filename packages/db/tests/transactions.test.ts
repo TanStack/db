@@ -216,6 +216,173 @@ describe(`Transactions`, () => {
     transaction.isPersisted.promise.catch(() => {})
     expect(transaction.state).toBe(`failed`)
   })
+  it(`keeps a persisting transaction failed when rollback wins`, async () => {
+    let releasePersistence!: () => void
+    const persistence = new Promise<void>((resolve) => {
+      releasePersistence = resolve
+    })
+    const collection = createCollection<{ id: number }>({
+      id: `persisting-rollback-wins`,
+      getKey: (item) => item.id,
+      sync: { sync: () => {} },
+    })
+    const transaction = createTransaction({
+      autoCommit: false,
+      mutationFn: () => persistence,
+    })
+
+    try {
+      transaction.mutate(() => collection.insert({ id: 1 }))
+      const persisted = transaction.isPersisted.promise.then(
+        (value) => ({ status: `fulfilled` as const, value }),
+        (reason: unknown) => ({ status: `rejected` as const, reason }),
+      )
+      const commit = transaction.commit()
+      expect(transaction.state).toBe(`persisting`)
+
+      transaction.rollback()
+      expect(transaction.state).toBe(`failed`)
+
+      releasePersistence()
+      await expect(commit).resolves.toBe(transaction)
+      expect(await persisted).toEqual({
+        status: `rejected`,
+        reason: undefined,
+      })
+      expect(transaction.state).toBe(`failed`)
+      expect(transaction.error).toBeUndefined()
+    } finally {
+      releasePersistence()
+      await collection.cleanup()
+    }
+  })
+  it.each([
+    [`Error`, (): unknown => new Error(`late persistence rejection`)],
+    [`undefined`, (): unknown => undefined],
+    [`false`, (): unknown => false],
+    [`zero`, (): unknown => 0],
+    [`NaN`, (): unknown => Number.NaN],
+    [`string`, (): unknown => `late persistence rejection`],
+    [`object`, (): unknown => ({ late: true })],
+  ] as const)(
+    `ignores a late %s persistence rejection after rollback wins`,
+    async (reasonName, createReason) => {
+      type Row = { id: number; owner: string }
+      let rejectPersistence!: (reason: unknown) => void
+      const persistence = new Promise<void>((_resolve, reject) => {
+        rejectPersistence = reject
+      })
+      const collection = createCollection<Row, number>({
+        id: `late-persistence-rejection-${reasonName}`,
+        getKey: (item) => item.id,
+        sync: { sync: () => {} },
+      })
+      const batches: Array<Array<{ type: string; key: string | number }>> = []
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          batches.push(
+            changes.map(({ type, key }) => ({
+              type,
+              key,
+            })),
+          )
+        },
+        { includeInitialState: false },
+      )
+      const first = createTransaction({
+        autoCommit: false,
+        mutationFn: () => persistence,
+      })
+      const second = createTransaction({
+        autoCommit: false,
+        mutationFn: async () => {},
+      })
+
+      try {
+        const persisted = first.isPersisted.promise.then(
+          (value) => ({ status: `fulfilled` as const, value }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        )
+        first.mutate(() => collection.insert({ id: 1, owner: `first` }))
+        const commit = first.commit().then(
+          (value) => ({ status: `fulfilled` as const, value }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        )
+
+        first.rollback()
+        second.mutate(() => collection.insert({ id: 1, owner: `second` }))
+        rejectPersistence(createReason())
+
+        const commitOutcome = await commit
+        expect(commitOutcome.status).toBe(`fulfilled`)
+        if (commitOutcome.status === `fulfilled`) {
+          expect(commitOutcome.value).toBe(first)
+        }
+        expect(await persisted).toEqual({
+          status: `rejected`,
+          reason: undefined,
+        })
+        expect(first.state).toBe(`failed`)
+        expect(first.error).toBeUndefined()
+        expect(second.state).toBe(`pending`)
+        expect(collection.get(1)).toEqual({
+          id: 1,
+          owner: `second`,
+          $collectionId: collection.id,
+          $key: 1,
+          $origin: `local`,
+          $synced: false,
+        })
+        expect(batches).toEqual([
+          [{ type: `insert`, key: 1 }],
+          [{ type: `delete`, key: 1 }],
+          [{ type: `insert`, key: 1 }],
+        ])
+      } finally {
+        rejectPersistence(new Error(`test cleanup`))
+        if (second.state === `pending`) {
+          second.rollback({ isSecondaryRollback: true })
+        }
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+  it(`keeps repeated rollback from affecting newer transactions`, async () => {
+    type Row = { id: number; owner: string }
+    const collection = createCollection<Row, number>({
+      id: `repeated-rollback-is-terminal`,
+      getKey: (item) => item.id,
+      sync: { sync: () => {} },
+    })
+    const first = createTransaction({
+      autoCommit: false,
+      mutationFn: async () => {},
+    })
+    const second = createTransaction({
+      autoCommit: false,
+      mutationFn: async () => {},
+    })
+
+    try {
+      void first.isPersisted.promise.catch(() => undefined)
+      first.mutate(() => collection.insert({ id: 1, owner: `first` }))
+      first.rollback()
+
+      second.mutate(() => collection.insert({ id: 1, owner: `second` }))
+      expect(second.state).toBe(`pending`)
+
+      expect(first.rollback()).toBe(first)
+      expect(first.state).toBe(`failed`)
+      expect(second.state).toBe(`pending`)
+      expect(collection.get(1)).toMatchObject({ id: 1, owner: `second` })
+    } finally {
+      if (second.state === `pending`) {
+        second.rollback({ isSecondaryRollback: true })
+      }
+      await collection.cleanup()
+    }
+  })
   it(`should rollback if the mutationFn throws an error`, async () => {
     const transaction = createTransaction({
       mutationFn: async () => {

@@ -6,6 +6,29 @@ import type { ChangeMessage } from '../../types.js'
 import type { BasicExpression, OrderBy } from '../ir.js'
 import type { TotalOrderBoundary } from '../total-order.js'
 
+/** Compute the exact change set between two materialized publications. */
+export function diffPublications<
+  TRow extends object,
+  TKey extends string | number,
+>(
+  publishedRows: ReadonlyMap<TKey, TRow>,
+  desiredRows: ReadonlyMap<TKey, TRow>,
+): Array<ChangeMessage<TRow, TKey>> {
+  const changes: Array<ChangeMessage<TRow, TKey>> = []
+  for (const [key, previousValue] of publishedRows) {
+    const value = desiredRows.get(key)
+    if (value === undefined) {
+      changes.push({ type: `delete`, key, value: previousValue })
+    } else if (!deepEquals(previousValue, value)) {
+      changes.push({ type: `update`, key, value, previousValue })
+    }
+  }
+  for (const [key, value] of desiredRows) {
+    if (!publishedRows.has(key)) changes.push({ type: `insert`, key, value })
+  }
+  return changes
+}
+
 /**
  * Owns the active ordered demand and its retained local coverage. Rows outside
  * the retained prefix stay in the source collection until a later window
@@ -22,6 +45,8 @@ export class WindowState<
   private hasFullCoverage = false
   private needsFullRefinement = false
   private needsPrefixRefresh = false
+  private locallySettledSize = 0
+  private hasOutcomeFreeSettlement = false
   private hasInitialCoverage = false
   private hasUnsettledInitialMutation = false
   private revision = 0
@@ -29,12 +54,19 @@ export class WindowState<
   private readonly candidateKeys = new Set<TKey>()
   private readonly provenanceKeys = new Set<TKey>()
   private readonly admittedKeys = new Set<TKey>()
+  private sourceSnapshot:
+    | {
+        revision: number
+        rows: Array<ChangeMessage<TRow, TKey>>
+      }
+    | undefined
 
   constructor(
     private readonly collection: CollectionImpl<TRow, TKey>,
     orderBy: OrderBy,
-    private readonly where: BasicExpression<boolean> | undefined,
+    where: BasicExpression<boolean> | undefined,
     targetSize: number,
+    private readonly expandSourceOrderTies = false,
   ) {
     this.totalOrder = new TotalOrder(orderBy, collection)
     const evaluateWhere = where && compileSingleRowExpression(where)
@@ -46,6 +78,25 @@ export class WindowState<
   }
 
   ensureSize(size: number): void {
+    if (
+      size > this.activeSize &&
+      this.hasOutcomeFreeSettlement &&
+      this.locallySettledSize === this.activeSize
+    ) {
+      // The same numerical window can recur after a shrink. Give that growth
+      // a new request generation so an old no-progress key cannot suppress
+      // the required refresh from the start.
+      this.revision++
+    }
+    if (
+      size < this.activeSize &&
+      this.hasOutcomeFreeSettlement &&
+      this.localPrefixSize >= size
+    ) {
+      // A shrink can reuse the already-published local prefix. Keep the
+      // settlement exact to the smaller window so any later growth refreshes.
+      this.locallySettledSize = size
+    }
     this.activeSize = size
     this.retainedSize = Math.max(this.retainedSize, size)
   }
@@ -69,6 +120,13 @@ export class WindowState<
 
   get coversActiveWindow(): boolean {
     return this.hasFullCoverage || this.coveredSize >= this.activeSize
+  }
+
+  /** Whether this caller may stop loading its exact active window. */
+  get satisfiesActiveWindow(): boolean {
+    return (
+      this.coversActiveWindow || this.locallySettledSize === this.activeSize
+    )
   }
 
   get coveredPrefixSize(): number {
@@ -103,6 +161,8 @@ export class WindowState<
     this.hasFullCoverage = false
     this.needsFullRefinement = false
     this.needsPrefixRefresh = false
+    this.locallySettledSize = 0
+    this.hasOutcomeFreeSettlement = false
     this.hasInitialCoverage = false
     this.hasUnsettledInitialMutation = false
     this.candidateKeys.clear()
@@ -114,6 +174,8 @@ export class WindowState<
     rowKeys: ReadonlyArray<TKey> | undefined,
     exhausted: boolean,
   ): void {
+    this.locallySettledSize = 0
+    this.hasOutcomeFreeSettlement = false
     this.hasInitialCoverage = true
     if (exhausted) {
       this.hasUnsettledInitialMutation = false
@@ -146,6 +208,8 @@ export class WindowState<
     requestedPrefix: number,
     requestRevision: number,
   ): void {
+    this.locallySettledSize = 0
+    this.hasOutcomeFreeSettlement = false
     this.hasInitialCoverage = true
     if (exhausted) {
       this.establishFullCoverage()
@@ -192,6 +256,7 @@ export class WindowState<
    * proof.
    */
   recordLocalRequestSatisfaction(requestedPrefix: number): void {
+    this.hasOutcomeFreeSettlement = true
     this.candidateKeys.clear()
     this.provenanceKeys.clear()
     this.admittedKeys.clear()
@@ -199,11 +264,20 @@ export class WindowState<
       this.admittedKeys.add(change.key)
     }
     // Outcome-free completions (`true` and Promise<void>) do not prove
-    // exhaustion. Only count rows that are now present, so a short synchronous
-    // page can request another pass until the active prefix is actually filled.
-    this.coveredSize = Math.min(requestedPrefix, this.admittedKeys.size)
+    // exhaustion. Keep their exact settled request separate from the applied
+    // row count so this caller can publish without creating reusable evidence.
+    if (this.admittedKeys.size >= requestedPrefix) {
+      this.locallySettledSize = requestedPrefix
+    }
     this.needsFullRefinement = false
     this.needsPrefixRefresh = true
+  }
+
+  /** Stop a legacy outcome-free request only after its boundary stops moving. */
+  settleLocalRequestAfterNoProgress(): boolean {
+    if (!this.hasOutcomeFreeSettlement) return false
+    this.locallySettledSize = this.activeSize
+    return true
   }
 
   admitChanges(changes: ReadonlyArray<ChangeMessage<TRow, TKey>>): void {
@@ -212,7 +286,7 @@ export class WindowState<
     // Initial applied rows remain candidates until their boundary equivalence
     // class is refined. Live source changes during that request still belong
     // to the same ordered prefix and must survive its later settlement.
-    if (this.admittedKeys.size === 0) {
+    if (this.admittedKeys.size === 0 && this.locallySettledSize === 0) {
       if (this.hasInitialCoverage) {
         if (this.updateKnownPrefix(this.candidateKeys, changes)) {
           this.revision++
@@ -251,6 +325,8 @@ export class WindowState<
       this.provenanceKeys.clear()
       this.needsFullRefinement = false
       this.needsPrefixRefresh = true
+      this.locallySettledSize = 0
+      this.hasOutcomeFreeSettlement = false
     }
   }
 
@@ -352,19 +428,7 @@ export class WindowState<
       }
     }
 
-    const changes: Array<ChangeMessage<TRow, TKey>> = []
-    for (const [key, previousValue] of publishedRows) {
-      const value = desired.get(key)
-      if (value === undefined) {
-        changes.push({ type: `delete`, key, value: previousValue })
-      } else if (!deepEquals(previousValue, value)) {
-        changes.push({ type: `update`, key, value, previousValue })
-      }
-    }
-    for (const [key, value] of desired) {
-      if (!publishedRows.has(key)) changes.push({ type: `insert`, key, value })
-    }
-    return changes
+    return diffPublications(publishedRows, desired)
   }
 
   private readPrefix(): Array<ChangeMessage<TRow, TKey>> {
@@ -379,6 +443,8 @@ export class WindowState<
     this.hasFullCoverage = true
     this.needsFullRefinement = false
     this.needsPrefixRefresh = false
+    this.locallySettledSize = 0
+    this.hasOutcomeFreeSettlement = false
     this.coveredSize = Number.POSITIVE_INFINITY
     this.candidateKeys.clear()
     this.provenanceKeys.clear()
@@ -389,28 +455,66 @@ export class WindowState<
     allowedKeys: ReadonlySet<TKey> | undefined,
     limit?: number,
   ): Array<ChangeMessage<TRow, TKey>> {
-    const rows = this.collection.currentStateAsChanges({
-      ...(this.where && { where: this.where }),
-      orderBy: this.totalOrder.orderBy,
-    }) as Array<ChangeMessage<TRow, TKey>> | undefined
+    const rows = this.readSourceSnapshot().filter(({ value }) =>
+      this.matchesWhere(value),
+    )
     const allowed =
       allowedKeys === undefined
-        ? (rows ?? [])
-        : (rows ?? []).filter((change) => allowedKeys.has(change.key))
-    return limit === undefined ? allowed : allowed.slice(0, limit)
+        ? rows
+        : rows.filter((change) => allowedKeys.has(change.key))
+    if (limit === undefined) return allowed
+    return this.expandSourceOrderTies
+      ? this.prefixThroughTieClass(allowed, limit)
+      : allowed.slice(0, limit)
+  }
+
+  /**
+   * A provider orders only by the source-owned query terms. Keep the complete
+   * boundary equivalence class so D2 can apply the local key tie-breaker and
+   * any later joined or derived order terms without missing candidates.
+   */
+  private prefixThroughTieClass(
+    rows: Array<ChangeMessage<TRow, TKey>>,
+    limit: number,
+  ): Array<ChangeMessage<TRow, TKey>> {
+    if (limit <= 0 || rows.length <= limit) return rows.slice(0, limit)
+
+    const boundary = rows[limit - 1]!
+    let end = limit
+    while (
+      end < rows.length &&
+      this.totalOrder.compareRows(boundary.value, rows[end]!.value) === 0
+    ) {
+      end++
+    }
+    return rows.slice(0, end)
   }
 
   private readSourceRows(
     allowedKeys: ReadonlySet<TKey> | undefined,
     limit?: number,
   ): Array<ChangeMessage<TRow, TKey>> {
-    const rows = this.collection.currentStateAsChanges({
-      orderBy: this.totalOrder.orderBy,
-    }) as Array<ChangeMessage<TRow, TKey>> | undefined
+    const rows = this.readSourceSnapshot()
     const allowed =
       allowedKeys === undefined
-        ? (rows ?? [])
-        : (rows ?? []).filter((change) => allowedKeys.has(change.key))
+        ? rows
+        : rows.filter((change) => allowedKeys.has(change.key))
     return limit === undefined ? allowed : allowed.slice(0, limit)
+  }
+
+  private readSourceSnapshot(): Array<ChangeMessage<TRow, TKey>> {
+    const revision = this.collection._stateRevision
+    if (
+      this.sourceSnapshot !== undefined &&
+      this.sourceSnapshot.revision === revision
+    ) {
+      return this.sourceSnapshot.rows
+    }
+
+    const rows = this.collection.currentStateAsChanges({
+      orderBy: this.totalOrder.orderBy,
+    }) as Array<ChangeMessage<TRow, TKey>>
+    this.sourceSnapshot = { revision, rows }
+    return rows
   }
 }

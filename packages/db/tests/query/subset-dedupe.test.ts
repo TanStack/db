@@ -4,8 +4,13 @@ import {
   cloneOptions,
 } from '../../src/query/subset-dedupe'
 import { Func, PropRef, Value } from '../../src/query/ir'
+import { createCrossRealmUint8Array } from '../utils'
 import type { BasicExpression, OrderBy } from '../../src/query/ir'
-import type { LoadSubsetOptions } from '../../src/types'
+import type {
+  LoadSubsetFn,
+  LoadSubsetOptions,
+  LoadSubsetResult,
+} from '../../src/types'
 
 // Helper functions to build expressions more easily
 function ref(path: string | Array<string>): PropRef {
@@ -40,11 +45,253 @@ function lte(left: BasicExpression<any>, right: BasicExpression<any>): Func {
   return new Func(`lte`, [left, right])
 }
 
-function not(expression: BasicExpression<boolean>): Func {
-  return new Func(`not`, [expression])
-}
-
 describe(`createDeduplicatedLoadSubset`, () => {
+  it(`does not let mutation rewrite settled large-binary coverage`, () => {
+    const loadSubset = vi.fn(() => true as const)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const mutableToken = new Uint8Array(129).fill(1)
+    const demand = (token: Uint8Array): LoadSubsetOptions => ({
+      where: eq(ref(`token`), val(token)),
+      limit: 1,
+    })
+
+    deduplicated.loadSubset(demand(mutableToken))
+    mutableToken.fill(2)
+    deduplicated.loadSubset(demand(new Uint8Array(129).fill(2)))
+
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+  })
+
+  it(`does not let custom binary iteration alias intrinsic byte coverage`, () => {
+    const loadSubset = vi.fn(() => true as const)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const customBytes = new Uint8Array([2])
+    Object.defineProperty(customBytes, Symbol.iterator, {
+      value: function* () {
+        yield 1
+      },
+    })
+    const demand = (token: Uint8Array): LoadSubsetOptions => ({
+      where: eq(ref(`token`), val(token)),
+    })
+
+    deduplicated.loadSubset(demand(new Uint8Array([1])))
+    deduplicated.loadSubset(demand(customBytes))
+
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+  })
+
+  it(`rejects binary proxies before adapter entry`, () => {
+    const loadSubset = vi.fn(() => true as const)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const bytes = new Proxy(new Uint8Array([2]), {
+      get: (target, key) =>
+        key === Symbol.iterator
+          ? function* () {
+              yield 1
+            }
+          : Reflect.get(target, key, target),
+    })
+
+    expect(() =>
+      deduplicated.loadSubset({ where: eq(ref(`token`), val(bytes)) }),
+    ).toThrow(/Cannot snapshot binary equality value/)
+    expect(loadSubset).not.toHaveBeenCalled()
+  })
+
+  it(`retains cross-realm binary coverage by acquired bytes`, () => {
+    const acquired: Array<Array<number>> = []
+    const loadSubset = vi.fn((options: LoadSubsetOptions) => {
+      acquired.push(
+        Array.from(((options.where as Func).args[1] as Value).value),
+      )
+      return true as const
+    })
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const bytes = createCrossRealmUint8Array([1])
+    const demand = (): LoadSubsetOptions => ({
+      where: eq(ref(`token`), val(bytes)),
+    })
+
+    deduplicated.loadSubset(demand())
+    bytes[0] = 2
+    deduplicated.loadSubset(demand())
+
+    expect(acquired).toEqual([[1], [2]])
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+  })
+
+  it(`observes computed membership once for tracking and acquisition`, () => {
+    const first = new Uint8Array([1])
+    const second = new Uint8Array([2])
+    let observations = 0
+    const candidates = new Proxy([first], {
+      getOwnPropertyDescriptor: (target, key) => {
+        const descriptor = Reflect.getOwnPropertyDescriptor(target, key)
+        if (key !== `0` || descriptor === undefined) return descriptor
+        observations += 1
+        return {
+          ...descriptor,
+          value: observations === 1 ? first : second,
+        }
+      },
+    })
+    const acquired: Array<Uint8Array> = []
+    const loadSubset = vi.fn((options: LoadSubsetOptions) => {
+      acquired.push(
+        ...(
+          ((options.where as Func).args[1] as Func).args[0] as Value<
+            Array<Uint8Array>
+          >
+        ).value,
+      )
+      return true as const
+    })
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+
+    deduplicated.loadSubset({
+      where: new Func(`in`, [
+        ref(`token`),
+        new Func(`coalesce`, [val(candidates)]),
+      ]),
+    })
+    deduplicated.loadSubset({
+      where: new Func(`in`, [
+        ref(`token`),
+        new Func(`coalesce`, [val([first])]),
+      ]),
+    })
+
+    expect(observations).toBe(1)
+    expect(acquired).toEqual([first])
+    expect(loadSubset).toHaveBeenCalledTimes(1)
+  })
+
+  it(`rejects custom membership observation before adapter entry`, () => {
+    const loadSubset = vi.fn(() => true as const)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const candidates = [new Uint8Array([2])]
+    Object.defineProperty(candidates, Symbol.iterator, {
+      value: function* () {
+        yield new Uint8Array([1])
+      },
+    })
+
+    expect(() =>
+      deduplicated.loadSubset({
+        where: new Func(`in`, [
+          ref(`token`),
+          new Func(`coalesce`, [val(candidates)]),
+        ]),
+      }),
+    ).toThrow(/Cannot snapshot membership candidates/)
+    expect(loadSubset).not.toHaveBeenCalled()
+  })
+
+  it(`uses intrinsic Date state for tracking and adapter acquisition`, () => {
+    const acquiredDates: Array<number> = []
+    const loadSubset = vi.fn((options: LoadSubsetOptions) => {
+      acquiredDates.push(
+        ((options.where as Func).args[1] as Value<Date>).value.getTime(),
+      )
+      return true as const
+    })
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const date = new Date(2)
+    let observedTime = 0
+    Object.defineProperty(date, `getTime`, {
+      value: () => ++observedTime,
+    })
+    const demand = (value: Date): LoadSubsetOptions => ({
+      where: eq(ref(`date`), val(value)),
+    })
+
+    deduplicated.loadSubset(demand(date))
+    deduplicated.loadSubset(demand(new Date(1)))
+
+    expect(acquiredDates).toEqual([2, 1])
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+  })
+
+  it(`rejects constructor-shaped Temporal lookalikes before adapter entry`, () => {
+    class TemporalLookalike {
+      static from(): TemporalLookalike {
+        return new TemporalLookalike()
+      }
+      get [Symbol.toStringTag](): string {
+        return `Temporal.PlainDate`
+      }
+      toString(): string {
+        return `2024-01-15`
+      }
+    }
+    const loadSubset = vi.fn(() => true as const)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+
+    expect(() =>
+      deduplicated.loadSubset({
+        where: eq(ref(`date`), val(new TemporalLookalike())),
+      }),
+    ).toThrow(/Cannot snapshot Temporal.PlainDate equality value/)
+    expect(loadSubset).not.toHaveBeenCalled()
+  })
+
+  it(`does not let mutation rewrite computed membership coverage`, () => {
+    const loadSubset = vi.fn(() => true as const)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const candidates = [new Uint8Array([1])]
+    const demand = (): LoadSubsetOptions => ({
+      where: new Func(`in`, [
+        ref(`token`),
+        new Func(`coalesce`, [val(candidates)]),
+      ]),
+    })
+
+    deduplicated.loadSubset(demand())
+    candidates[0]![0] = 2
+    deduplicated.loadSubset({
+      where: new Func(`in`, [
+        ref(`token`),
+        new Func(`coalesce`, [val([new Uint8Array([2])])]),
+      ]),
+    })
+
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+  })
+
+  it(`rejects unsupported relational coercion before adapter entry`, () => {
+    const loadSubset = vi.fn(() => true as const)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const coercion = { [Symbol.toPrimitive]: () => 1 }
+
+    expect(() =>
+      deduplicated.loadSubset({
+        where: gt(ref(`value`), val(coercion)),
+      }),
+    ).toThrow(/Cannot snapshot structural expression value/)
+    expect(loadSubset).not.toHaveBeenCalled()
+  })
+
+  it(`does not deduplicate structural predicates with different observable key order`, () => {
+    const left = Object.create(null) as Record<string, number>
+    left.a = 1
+    left.b = 2
+    const right = Object.create(null) as Record<string, number>
+    right.b = 2
+    right.a = 1
+    const loadSubset = vi.fn(() => true as const)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const expected = JSON.stringify(left)
+    const demand = (value: Record<string, number>): LoadSubsetOptions => ({
+      where: eq(new Func(`concat`, [val(value)]), val(expected)),
+    })
+
+    deduplicated.loadSubset(demand(left))
+    deduplicated.loadSubset(demand(right))
+
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+  })
+
   it.each(
     [
       {
@@ -68,26 +315,33 @@ describe(`createDeduplicatedLoadSubset`, () => {
       })),
     ),
   )(
-    `invalidates $settlement $name settled coverage on unload`,
+    `invalidates $settlement $name settled coverage after its final owner unloads`,
     async ({ createOptions, settlement }) => {
       const loadSubset = vi.fn(() =>
         settlement === `sync` ? (true as const) : Promise.resolve(),
       )
       const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
       const owner = createOptions()
+      const peer = createOptions()
 
       await deduplicated.loadSubset(owner)
-      expect(deduplicated.loadSubset(createOptions())).toBe(true)
+      expect(deduplicated.loadSubset(peer)).toBe(true)
       expect(loadSubset).toHaveBeenCalledTimes(1)
 
       deduplicated.unloadSubset(owner)
+      const coOwner = createOptions()
+      expect(deduplicated.loadSubset(coOwner)).toBe(true)
+      expect(loadSubset).toHaveBeenCalledTimes(1)
+
+      deduplicated.unloadSubset(peer)
+      deduplicated.unloadSubset(coOwner)
       await deduplicated.loadSubset(createOptions())
 
       expect(loadSubset).toHaveBeenCalledTimes(2)
     },
   )
 
-  it(`bounds conservative adapter-wide invalidation to one refetch per revisited demand`, async () => {
+  it(`invalidates a released acquisition without erasing other exact owners`, async () => {
     const loadSubset = vi.fn(() => Promise.resolve())
     const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
     const demands = Array.from({ length: 6 }, (_, id) => ({
@@ -98,24 +352,24 @@ describe(`createDeduplicatedLoadSubset`, () => {
     for (const demand of demands) await deduplicated.loadSubset(demand)
     expect(loadSubset).toHaveBeenCalledTimes(demands.length)
 
-    // Core may delete rows owned by any remembered request when one collection
-    // owner leaves. Without adapter row provenance, preserving the other five
-    // request facts would be unsafe, so one release invalidates all six.
+    // A release invalidates broader coverage inferred from the combined
+    // request history, but each other physical acquisition still has a live
+    // exact owner and therefore retains its own evidence.
     deduplicated.unloadSubset(demands[0]!)
-    for (const demand of demands.slice(1)) {
-      await deduplicated.loadSubset(demand)
-    }
-    expect(loadSubset).toHaveBeenCalledTimes(
-      demands.length + demands.length - 1,
-    )
-
-    // Once those demands have rebuilt the cache, revisiting them is free again.
     for (const demand of demands.slice(1)) {
       expect(deduplicated.loadSubset(demand)).toBe(true)
     }
-    expect(loadSubset).toHaveBeenCalledTimes(
-      demands.length + demands.length - 1,
-    )
+    expect(loadSubset).toHaveBeenCalledTimes(demands.length)
+
+    await deduplicated.loadSubset(demands[0]!)
+    expect(loadSubset).toHaveBeenCalledTimes(demands.length + 1)
+
+    // Once the released demand has rebuilt its acquisition, every exact owner
+    // can be revisited without transport.
+    for (const demand of demands) {
+      expect(deduplicated.loadSubset(demand)).toBe(true)
+    }
+    expect(loadSubset).toHaveBeenCalledTimes(demands.length + 1)
   })
 
   it(`does not restore invalidated coverage when unloaded work settles late`, async () => {
@@ -135,6 +389,468 @@ describe(`createDeduplicatedLoadSubset`, () => {
 
     deduplicated.loadSubset({ limit: 2 })
     expect(loadSubset).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([`reset`, `rejection`] as const)(
+    `keeps newer exact in-flight work when an older owner unloads after %s`,
+    async (oldOutcome) => {
+      const pending: Array<{
+        resolve: () => void
+        reject: (error: Error) => void
+      }> = []
+      const loadSubset = vi.fn(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            pending.push({ resolve, reject })
+          }),
+      )
+      const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+      const reusedOptions = { limit: 2 }
+      const oldLoad = deduplicated.loadSubset(reusedOptions)
+
+      if (oldOutcome === `reset`) {
+        deduplicated.reset()
+      } else {
+        const rejected = expect(oldLoad).rejects.toThrow(`old failed`)
+        pending[0]!.reject(new Error(`old failed`))
+        await rejected
+      }
+
+      const freshLoad = deduplicated.loadSubset(reusedOptions)
+      deduplicated.unloadSubset(reusedOptions)
+      const peerLoad = deduplicated.loadSubset({ limit: 2 })
+
+      expect(loadSubset).toHaveBeenCalledTimes(2)
+      pending[1]!.resolve()
+      if (oldOutcome === `reset`) {
+        pending[0]!.resolve()
+        await oldLoad
+      }
+      await Promise.all([freshLoad, peerLoad])
+    },
+  )
+
+  it(`keeps newer settled exact work when a rejected older owner unloads late`, async () => {
+    const pending: Array<{
+      resolve: () => void
+      reject: (error: Error) => void
+    }> = []
+    const loadSubset = vi.fn(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          pending.push({ resolve, reject })
+        }),
+    )
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const reusedOptions = { limit: 2 }
+    const oldLoad = deduplicated.loadSubset(reusedOptions)
+    const rejected = expect(oldLoad).rejects.toThrow(`old failed`)
+
+    pending[0]!.reject(new Error(`old failed`))
+    await rejected
+
+    const freshLoad = deduplicated.loadSubset(reusedOptions)
+    pending[1]!.resolve()
+    await freshLoad
+
+    deduplicated.unloadSubset(reusedOptions)
+    const peerOptions = { limit: 2 }
+    expect(deduplicated.loadSubset(peerOptions)).toBe(true)
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+
+    deduplicated.unloadSubset(reusedOptions)
+    deduplicated.unloadSubset(peerOptions)
+  })
+
+  it.each([`sync`, `async`] as const)(
+    `does not retain exact evidence when its sole owner unloads during %s adapter entry`,
+    async (settlement) => {
+      const options = { limit: 2 }
+      const loadSubset = vi.fn(() => {
+        deduplicated.unloadSubset(options)
+        return settlement === `sync` ? (true as const) : Promise.resolve()
+      })
+      const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+
+      await deduplicated.loadSubset(options)
+      await deduplicated.loadSubset({ limit: 2 })
+
+      expect(loadSubset).toHaveBeenCalledTimes(2)
+    },
+  )
+
+  it(`keeps shared exact in-flight work while another logical owner remains`, async () => {
+    let resolveLoad: (() => void) | undefined
+    const loadSubset = vi.fn(
+      () => new Promise<void>((resolve) => (resolveLoad = resolve)),
+    )
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const firstOptions = { limit: 2 }
+    const first = deduplicated.loadSubset(firstOptions)
+    const second = deduplicated.loadSubset({ limit: 2 })
+
+    deduplicated.unloadSubset(firstOptions)
+    const peer = deduplicated.loadSubset({ limit: 2 })
+
+    expect(loadSubset).toHaveBeenCalledTimes(1)
+    resolveLoad?.()
+    await Promise.all([first, second, peer])
+  })
+
+  it(`ignores an unload that has no matching logical owner`, async () => {
+    let resolveLoad: (() => void) | undefined
+    const loadSubset = vi.fn(
+      () => new Promise<void>((resolve) => (resolveLoad = resolve)),
+    )
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const load = deduplicated.loadSubset({ limit: 2 })
+
+    deduplicated.unloadSubset({ limit: 2 })
+    const peer = deduplicated.loadSubset({ limit: 2 })
+
+    expect(loadSubset).toHaveBeenCalledTimes(1)
+    resolveLoad?.()
+    await Promise.all([load, peer])
+  })
+
+  it(`rolls back only the reservation whose adapter start throws`, async () => {
+    const pending: Array<() => void> = []
+    const loadSubset = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error(`start failed`)
+      })
+      .mockImplementation(
+        () => new Promise<void>((resolve) => pending.push(resolve)),
+      )
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const reusedOptions = { limit: 2 }
+
+    expect(() => deduplicated.loadSubset(reusedOptions)).toThrow(`start failed`)
+    const accepted = deduplicated.loadSubset(reusedOptions)
+    deduplicated.unloadSubset(reusedOptions)
+    const peer = deduplicated.loadSubset({ limit: 2 })
+
+    expect(loadSubset).toHaveBeenCalledTimes(3)
+    pending.forEach((resolve) => resolve())
+    await Promise.all([accepted, peer])
+  })
+
+  it(`does not cache synchronous work from before a reentrant reset`, () => {
+    const loadSubset = vi
+      .fn<LoadSubsetFn>()
+      .mockImplementationOnce(() => {
+        deduplicated.reset()
+        return true
+      })
+      .mockReturnValue(true)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+
+    expect(deduplicated.loadSubset({ limit: 2 })).toBe(true)
+    expect(deduplicated.loadSubset({ limit: 2 })).toBe(true)
+
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+  })
+
+  it(`does not share pending work from before a reentrant reset`, async () => {
+    let resolveOld!: () => void
+    const loadSubset = vi
+      .fn<LoadSubsetFn>()
+      .mockImplementationOnce(() => {
+        deduplicated.reset()
+        return new Promise<void>((resolve) => (resolveOld = resolve))
+      })
+      .mockResolvedValue(undefined)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+
+    const oldLoad = deduplicated.loadSubset({ limit: 2 })
+    const freshLoad = deduplicated.loadSubset({ limit: 2 })
+
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+    resolveOld()
+    await Promise.all([oldLoad, freshLoad])
+  })
+
+  it(`does not cache settled work from before a reentrant reset`, async () => {
+    const loadSubset = vi
+      .fn<LoadSubsetFn>()
+      .mockImplementationOnce(() => {
+        deduplicated.reset()
+        return Promise.resolve()
+      })
+      .mockResolvedValue(undefined)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+
+    await deduplicated.loadSubset({ limit: 2 })
+    await deduplicated.loadSubset({ limit: 2 })
+
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+  })
+
+  it(`rolls back a stale reservation when adapter reset precedes a throw`, () => {
+    const loadSubset = vi
+      .fn<LoadSubsetFn>()
+      .mockImplementationOnce(() => {
+        deduplicated.reset()
+        throw new Error(`start failed after reset`)
+      })
+      .mockReturnValue(true)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const reusedOptions = { limit: 2 }
+
+    expect(() => deduplicated.loadSubset(reusedOptions)).toThrow(
+      `start failed after reset`,
+    )
+    expect(deduplicated.loadSubset(reusedOptions)).toBe(true)
+    deduplicated.unloadSubset(reusedOptions)
+    expect(deduplicated.loadSubset({ limit: 2 })).toBe(true)
+
+    expect(loadSubset).toHaveBeenCalledTimes(3)
+  })
+
+  it(`rolls back the exact throw behind an older stale owner`, () => {
+    const loadSubset = vi
+      .fn<LoadSubsetFn>()
+      .mockReturnValueOnce(true)
+      .mockImplementationOnce(() => {
+        throw new Error(`replacement start failed`)
+      })
+      .mockReturnValue(true)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const reusedOptions = { limit: 2 }
+
+    expect(deduplicated.loadSubset(reusedOptions)).toBe(true)
+    deduplicated.reset()
+    expect(() => deduplicated.loadSubset(reusedOptions)).toThrow(
+      `replacement start failed`,
+    )
+    expect(deduplicated.loadSubset(reusedOptions)).toBe(true)
+    deduplicated.unloadSubset(reusedOptions)
+    expect(deduplicated.loadSubset({ limit: 2 })).toBe(true)
+
+    expect(loadSubset).toHaveBeenCalledTimes(3)
+  })
+
+  it(`consumes a stale owner before releasing a fresh reused owner`, () => {
+    const loadSubset = vi
+      .fn<LoadSubsetFn>()
+      .mockImplementationOnce(() => {
+        deduplicated.reset()
+        return true
+      })
+      .mockReturnValue(true)
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const reusedOptions = { limit: 2 }
+
+    expect(deduplicated.loadSubset(reusedOptions)).toBe(true)
+    deduplicated.unloadSubset(reusedOptions)
+    expect(deduplicated.loadSubset(reusedOptions)).toBe(true)
+    deduplicated.unloadSubset(reusedOptions)
+    expect(deduplicated.loadSubset({ limit: 2 })).toBe(true)
+
+    expect(loadSubset).toHaveBeenCalledTimes(3)
+  })
+
+  it(`does not share work reset while installing Promise handlers`, async () => {
+    let resolveOld!: () => void
+    class ResetOnThenPromise extends Promise<void> {
+      static get [Symbol.species](): PromiseConstructor {
+        return Promise
+      }
+
+      override then<TResult1 = void, TResult2 = never>(
+        onfulfilled?:
+          | ((value: void) => TResult1 | PromiseLike<TResult1>)
+          | null,
+        onrejected?:
+          | ((reason: unknown) => TResult2 | PromiseLike<TResult2>)
+          | null,
+      ): Promise<TResult1 | TResult2> {
+        deduplicated.reset()
+        return super.then(onfulfilled, onrejected)
+      }
+    }
+    let loadSubsetCalls = 0
+    const loadSubset: LoadSubsetFn = () => {
+      loadSubsetCalls += 1
+      if (loadSubsetCalls === 1) {
+        return new ResetOnThenPromise((resolve) => {
+          resolveOld = resolve
+        })
+      }
+      return Promise.resolve()
+    }
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+
+    const oldLoad = deduplicated.loadSubset({ limit: 2 })
+    const freshLoad = deduplicated.loadSubset({ limit: 2 })
+
+    expect(loadSubsetCalls).toBe(2)
+    resolveOld()
+    await Promise.all([oldLoad, freshLoad])
+  })
+
+  it(`releases its abort lease when Promise handler installation throws`, async () => {
+    class ThrowOnThenPromise extends Promise<void> {
+      static get [Symbol.species](): PromiseConstructor {
+        return Promise
+      }
+
+      override then<TResult1 = void, TResult2 = never>(
+        _onfulfilled?:
+          | ((value: void) => TResult1 | PromiseLike<TResult1>)
+          | null,
+        _onrejected?:
+          | ((reason: unknown) => TResult2 | PromiseLike<TResult2>)
+          | null,
+      ): Promise<TResult1 | TResult2> {
+        throw new Error(`then install failed`)
+      }
+    }
+    const signal = {
+      aborted: false,
+      reason: undefined,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as AbortSignal
+    let loadSubsetCalls = 0
+    const loadSubset: LoadSubsetFn = () => {
+      loadSubsetCalls += 1
+      return loadSubsetCalls === 1
+        ? new ThrowOnThenPromise((resolve) => resolve())
+        : Promise.resolve()
+    }
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+
+    const failedLoad = deduplicated.loadSubset({ limit: 2, signal })
+
+    expect(failedLoad).toBeInstanceOf(Promise)
+    await expect(failedLoad).rejects.toThrow(`then install failed`)
+    expect(signal.addEventListener).toHaveBeenCalledTimes(1)
+    expect(signal.removeEventListener).toHaveBeenCalledTimes(1)
+
+    await deduplicated.loadSubset({ limit: 2 })
+    expect(loadSubsetCalls).toBe(2)
+  })
+
+  it(`retains exact evidence when a Promise subclass settles during handler installation`, async () => {
+    class SynchronousThenPromise extends Promise<void> {
+      static get [Symbol.species](): PromiseConstructor {
+        return Promise
+      }
+
+      override then<TResult1 = void, TResult2 = never>(
+        onfulfilled?:
+          | ((value: void) => TResult1 | PromiseLike<TResult1>)
+          | null,
+        _onrejected?:
+          | ((reason: unknown) => TResult2 | PromiseLike<TResult2>)
+          | null,
+      ): Promise<TResult1 | TResult2> {
+        return Promise.resolve(onfulfilled?.()) as Promise<TResult1 | TResult2>
+      }
+    }
+    let loadSubsetCalls = 0
+    const loadSubset: LoadSubsetFn = () => {
+      loadSubsetCalls += 1
+      return loadSubsetCalls === 1
+        ? new SynchronousThenPromise((resolve) => resolve())
+        : Promise.resolve()
+    }
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+
+    await deduplicated.loadSubset({ limit: 2 })
+
+    expect(deduplicated.loadSubset({ limit: 2 })).toBe(true)
+    expect(loadSubsetCalls).toBe(1)
+  })
+
+  it(`does not retain coverage when fulfilled result normalization throws`, async () => {
+    const resultError = new Error(`result read failed`)
+    const hostileResult = {
+      get hasMore(): boolean | undefined {
+        throw resultError
+      },
+    }
+    const signal = {
+      aborted: false,
+      reason: undefined,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as AbortSignal
+    let loadSubsetCalls = 0
+    const loadSubset: LoadSubsetFn = () => {
+      loadSubsetCalls += 1
+      return Promise.resolve(
+        loadSubsetCalls === 1 ? hostileResult : { hasMore: undefined },
+      )
+    }
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+
+    await expect(deduplicated.loadSubset({ limit: 2, signal })).rejects.toBe(
+      resultError,
+    )
+    expect(signal.addEventListener).toHaveBeenCalledTimes(1)
+    expect(signal.removeEventListener).toHaveBeenCalledTimes(1)
+
+    const retry = deduplicated.loadSubset({ limit: 2 })
+    expect(retry).toBeInstanceOf(Promise)
+    await retry
+    expect(loadSubsetCalls).toBe(2)
+  })
+
+  it(`does not retain coverage when row-key snapshotting throws`, async () => {
+    const resultError = new Error(`row-key snapshot failed`)
+    const hostileRowKeys = new Proxy<ReadonlyArray<string | number>>([1], {
+      get: (target, property, receiver) => {
+        if (property === Symbol.iterator) throw resultError
+        return Reflect.get(target, property, receiver)
+      },
+    })
+    const hostileResult: LoadSubsetResult = {
+      hasMore: false,
+      appliedRowKeys: hostileRowKeys,
+    }
+    let loadSubsetCalls = 0
+    const loadSubset: LoadSubsetFn = () => {
+      loadSubsetCalls += 1
+      return Promise.resolve(
+        loadSubsetCalls === 1 ? hostileResult : { hasMore: undefined },
+      )
+    }
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+
+    await expect(deduplicated.loadSubset({ limit: 2 })).rejects.toBe(
+      resultError,
+    )
+
+    const retry = deduplicated.loadSubset({ limit: 2 })
+    expect(retry).toBeInstanceOf(Promise)
+    await retry
+    expect(loadSubsetCalls).toBe(2)
+  })
+
+  it(`rejects sparse applied-row evidence without retaining coverage`, async () => {
+    const sparseRowKeys = new Array<string | number>(1)
+    let loadSubsetCalls = 0
+    const loadSubset: LoadSubsetFn = () => {
+      loadSubsetCalls += 1
+      return Promise.resolve(
+        loadSubsetCalls === 1
+          ? { hasMore: true, appliedRowKeys: sparseRowKeys }
+          : { hasMore: undefined },
+      )
+    }
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+
+    await expect(deduplicated.loadSubset({ limit: 1 })).rejects.toThrow(
+      `appliedRowKeys must contain only string or number keys`,
+    )
+
+    const retry = deduplicated.loadSubset({ limit: 1 })
+    expect(retry).toBeInstanceOf(Promise)
+    await retry
+    expect(loadSubsetCalls).toBe(2)
   })
 
   it(`shares in-flight work while any cancellation owner remains active`, async () => {
@@ -210,6 +926,30 @@ describe(`createDeduplicatedLoadSubset`, () => {
     await retry
   })
 
+  it(`does not reuse an aborted in-flight lease while its work is still settling`, async () => {
+    const releases: Array<() => void> = []
+    const loadSubset = vi.fn(
+      () => new Promise<void>((resolve) => releases.push(resolve)),
+    )
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const owner = new AbortController()
+    const where = gt(ref(`age`), val(10))
+
+    const canceled = deduplicated.loadSubset({
+      where,
+      signal: owner.signal,
+    })
+    owner.abort()
+
+    const retry = deduplicated.loadSubset({ where })
+
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+    expect(retry).not.toBe(canceled)
+
+    for (const release of releases) release()
+    await Promise.all([canceled, retry])
+  })
+
   it(`keeps shared work active for a signal-less owner`, async () => {
     let resolveLoad: (() => void) | undefined
     let sharedSignal: AbortSignal | undefined
@@ -238,6 +978,105 @@ describe(`createDeduplicatedLoadSubset`, () => {
     resolveLoad?.()
     await Promise.all([abortable, persistent])
     expect(deduplicated.loadSubset({ where })).toBe(true)
+  })
+
+  it(`releases every owner from every in-flight lease when reset`, async () => {
+    const releases: Array<() => void> = []
+    const sharedSignals: Array<AbortSignal | undefined> = []
+    const loadSubset = vi.fn(
+      (options: LoadSubsetOptions) =>
+        new Promise<void>((resolve) => {
+          sharedSignals.push(options.signal)
+          releases.push(resolve)
+        }),
+    )
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const owners = Array.from({ length: 4 }, () => new AbortController())
+    const addSpies = owners.map((owner) =>
+      vi.spyOn(owner.signal, `addEventListener`),
+    )
+    const removeSpies = owners.map((owner) =>
+      vi.spyOn(owner.signal, `removeEventListener`),
+    )
+
+    const loads = [
+      deduplicated.loadSubset({
+        where: gt(ref(`age`), val(10)),
+        signal: owners[0]!.signal,
+      }),
+      deduplicated.loadSubset({
+        where: gt(ref(`age`), val(10)),
+        signal: owners[1]!.signal,
+      }),
+      deduplicated.loadSubset({
+        where: lt(ref(`age`), val(0)),
+        signal: owners[2]!.signal,
+      }),
+      deduplicated.loadSubset({
+        where: lt(ref(`age`), val(0)),
+        signal: owners[3]!.signal,
+      }),
+    ]
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+    for (const addSpy of addSpies) expect(addSpy).toHaveBeenCalledOnce()
+
+    deduplicated.reset()
+
+    for (const removeSpy of removeSpies)
+      expect(removeSpy).toHaveBeenCalledOnce()
+    for (const signal of sharedSignals) expect(signal?.aborted).toBe(false)
+    for (const owner of owners) owner.abort()
+    for (const signal of sharedSignals) expect(signal?.aborted).toBe(false)
+
+    for (const release of releases) release()
+    await Promise.all(loads)
+    for (const removeSpy of removeSpies)
+      expect(removeSpy).toHaveBeenCalledOnce()
+  })
+
+  it(`releases settled exact acquisition evidence when reset`, () => {
+    const deduplicated = new DeduplicatedLoadSubset({
+      loadSubset: () => true,
+    })
+    const retainedAcquisitions = () =>
+      (
+        deduplicated as unknown as {
+          exactAcquisitions: ReadonlyArray<unknown>
+        }
+      ).exactAcquisitions.length
+
+    expect(deduplicated.loadSubset({ limit: 2 })).toBe(true)
+    expect(retainedAcquisitions()).toBe(1)
+
+    deduplicated.reset()
+
+    expect(retainedAcquisitions()).toBe(0)
+  })
+
+  it(`starts new work immediately after reset and protects it from old completion`, async () => {
+    const releases: Array<() => void> = []
+    const loadSubset = vi.fn(
+      () => new Promise<void>((resolve) => releases.push(resolve)),
+    )
+    const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+    const where = gt(ref(`age`), val(10))
+
+    const oldLoad = deduplicated.loadSubset({ where })
+    deduplicated.reset()
+    const currentLoad = deduplicated.loadSubset({ where })
+
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+    expect(currentLoad).not.toBe(oldLoad)
+
+    releases[0]?.()
+    await oldLoad
+
+    const joinedLoad = deduplicated.loadSubset({ where })
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+    expect(joinedLoad).toBe(currentLoad)
+
+    releases[1]?.()
+    await Promise.all([currentLoad, joinedLoad])
   })
 
   it(`should call underlying loadSubset on first call`, async () => {
@@ -628,6 +1467,37 @@ describe(`createDeduplicatedLoadSubset`, () => {
       })
     })
 
+    it(`tracks the original demand while a narrowed transport is in flight`, async () => {
+      let resolveNarrowed: (() => void) | undefined
+      const calls: Array<LoadSubsetOptions> = []
+      const deduplicated = new DeduplicatedLoadSubset({
+        loadSubset: (options) => {
+          calls.push(cloneOptions(options))
+          if (calls.length === 1) return Promise.resolve()
+          return new Promise<void>((resolve) => {
+            resolveNarrowed = resolve
+          })
+        },
+      })
+
+      await deduplicated.loadSubset({ where: gt(ref(`age`), val(20)) })
+
+      const wider = { where: gt(ref(`age`), val(10)) }
+      const first = deduplicated.loadSubset(wider)
+      const second = deduplicated.loadSubset(wider)
+
+      expect(calls).toHaveLength(2)
+      expect(calls[1]?.where).toEqual(
+        and(gt(ref(`age`), val(10)), lte(ref(`age`), val(20))),
+      )
+      expect(first).toBeInstanceOf(Promise)
+      expect(second).toBeInstanceOf(Promise)
+
+      resolveNarrowed?.()
+      await Promise.all([first, second])
+      expect(deduplicated.loadSubset(wider)).toBe(true)
+    })
+
     it(`should request only the difference for set predicates`, async () => {
       let callCount = 0
       const calls: Array<LoadSubsetOptions> = []
@@ -783,11 +1653,11 @@ describe(`createDeduplicatedLoadSubset`, () => {
       expect(callCount).toBe(1)
 
       // Second call: no where clause (all data)
-      // Should request all data except what we already loaded
-      // i.e. should request NOT (age > 20)
+      // The missing difference is not safe to express under three-valued
+      // logic, so the adapter receives the full all-data request.
       await deduplicated.loadSubset({})
       expect(callCount).toBe(2)
-      expect(calls[1]).toEqual({ where: not(gt(ref(`age`), val(20))) })
+      expect(calls[1]).toEqual({})
 
       // After loading all data, subsequent calls should be deduplicated
       const result = await deduplicated.loadSubset({
@@ -795,6 +1665,37 @@ describe(`createDeduplicatedLoadSubset`, () => {
       })
       expect(result).toBe(true)
       expect(callCount).toBe(2)
+    })
+
+    it(`retries a full-request fallback after transport failure`, async () => {
+      let rejectAllData: ((error: Error) => void) | undefined
+      const calls: Array<LoadSubsetOptions> = []
+      const deduplicated = new DeduplicatedLoadSubset({
+        loadSubset: (options) => {
+          calls.push(cloneOptions(options))
+          if (calls.length === 1 || calls.length === 3) {
+            return Promise.resolve()
+          }
+          return new Promise<void>((_resolve, reject) => {
+            rejectAllData = reject
+          })
+        },
+      })
+
+      await deduplicated.loadSubset({ where: gt(ref(`age`), val(20)) })
+
+      const failed = deduplicated.loadSubset({})
+      const rejected = expect(failed).rejects.toThrow(`all-data failed`)
+      rejectAllData?.(new Error(`all-data failed`))
+      await rejected
+
+      expect(calls).toHaveLength(2)
+      expect(calls[1]).toEqual({})
+
+      await deduplicated.loadSubset({})
+      expect(calls).toHaveLength(3)
+      expect(calls[2]).toEqual({})
+      expect(deduplicated.loadSubset({})).toBe(true)
     })
 
     describe(`hasLoadedAllData after loading filtered + unfiltered data`, () => {
@@ -818,9 +1719,7 @@ describe(`createDeduplicatedLoadSubset`, () => {
 
         await deduplicated.loadSubset({})
         expect(callCount).toBe(2)
-        expect(calls[1]).toEqual({
-          where: not(inOp(ref(`task_id`), [`id1`, `id2`, `id3`])),
-        })
+        expect(calls[1]).toEqual({})
 
         const result = await deduplicated.loadSubset({})
         expect(result).toBe(true)
@@ -912,9 +1811,7 @@ describe(`createDeduplicatedLoadSubset`, () => {
 
       await deduplicated.loadSubset({})
 
-      expect(calls[2]).toEqual({
-        where: not(inOp(ref(`task_id`), [`uuid-1`, `uuid-2`])),
-      })
+      expect(calls[2]).toEqual({})
 
       expect((deduplicated as any).hasLoadedAllData).toBe(true)
       expect((deduplicated as any).unlimitedWhere).toBeUndefined()
@@ -975,11 +1872,8 @@ describe(`createDeduplicatedLoadSubset`, () => {
       const secondAllDataLoad = deduplicated.loadSubset({})
 
       expect(callCount).toBe(2)
-      expect(calls[1]).toEqual({
-        where: not(eq(ref(`task_id`), val(`uuid-1`))),
-      })
-      expect(firstAllDataLoad).toBeInstanceOf(Promise)
-      expect(secondAllDataLoad).toBeInstanceOf(Promise)
+      expect(calls[1]).toEqual({})
+      expect(secondAllDataLoad).toBe(firstAllDataLoad)
 
       resolveAllDataLoad?.()
       await firstAllDataLoad
@@ -1012,23 +1906,12 @@ describe(`createDeduplicatedLoadSubset`, () => {
       expect(callCount).toBe(10)
 
       // Now load all data (no WHERE clause)
-      // This should send NOT(IN(...)) to the backend but track as "all data loaded"
+      // The adapter receives the full request because NOT(IN(...)) would drop
+      // rows whose task_id is null under three-valued logic.
       await deduplicated.loadSubset({})
       expect(callCount).toBe(11)
 
-      // The load request should be NOT(IN(task_id, [all accumulated uuids]))
-      const loadWhere = calls[10]!.where as any
-      expect(loadWhere.name).toBe(`not`)
-      expect(loadWhere.args[0].name).toBe(`in`)
-      expect(loadWhere.args[0].args[0].path).toEqual([`task_id`])
-      const loadedUuids = (
-        loadWhere.args[0].args[1].value as Array<string>
-      ).sort()
-      const expectedUuids = Array.from(
-        { length: 10 },
-        (_, i) => `uuid-${i}`,
-      ).sort()
-      expect(loadedUuids).toEqual(expectedUuids)
+      expect(calls[10]).toEqual({})
 
       // Critical: after loading all data, subsequent requests should be deduplicated
       const result1 = await deduplicated.loadSubset({

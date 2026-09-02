@@ -1,5 +1,9 @@
 import { NegativeActiveSubscribersError } from '../errors'
-import { withPublicationContext } from '../scheduler.js'
+import {
+  deferPublicationFailure,
+  withPublicationContext,
+} from '../scheduler.js'
+import { runAllCallbacks } from '../utils/callbacks.js'
 import {
   createSingleRowRefProxy,
   toExpression,
@@ -15,8 +19,34 @@ import type { CollectionStateManager } from './state.js'
 import type { WithVirtualProps } from '../virtual-props.js'
 
 export type PublicationDeferral = {
+  /** Irrevocably advance held revision clocks without invoking callbacks. */
+  prepare: () => void
+  /** Prepare if needed, then release the held callbacks. */
   publish: () => void
+  /** Discard held clocks and callbacks before preparation. */
   discard: () => void
+}
+
+type PublicationDeferralState<
+  TOutput extends object,
+  TKey extends string | number,
+> = {
+  depth: number
+  discard: boolean
+  publications: Array<{
+    changes: Array<ChangeMessage<TOutput, TKey>>
+    layoutChanged: boolean
+  }>
+  stateRevisionDelta: number
+  layoutRevisionDelta: number
+  afterPublication: Array<() => void>
+  prepared:
+    | {
+        changes: Array<ChangeMessage<TOutput, TKey>>
+        layoutChanged: boolean
+      }
+    | undefined
+  published: boolean
 }
 
 export class CollectionChangesManager<
@@ -35,12 +65,12 @@ export class CollectionChangesManager<
   public changeSubscriptions = new Set<CollectionSubscription>()
   public batchedEvents: Array<ChangeMessage<TOutput, TKey>> = []
   public shouldBatchEvents = false
-  private publicationDeferralDepth = 0
-  private discardDeferredPublications = false
-  private deferredPublications: Array<{
-    changes: Array<ChangeMessage<TOutput, TKey>>
-    layoutChanged: boolean
-  }> = []
+  private publicationDeferral:
+    | PublicationDeferralState<TOutput, TKey>
+    | undefined
+  private preparedPublicationDeferral:
+    | PublicationDeferralState<TOutput, TKey>
+    | undefined
   private layoutChangeListeners = new Set<() => void>()
 
   /**
@@ -83,8 +113,17 @@ export class CollectionChangesManager<
    */
   public emitEmptyReadyEvent(): void {
     withPublicationContext(() => {
-      for (const subscription of this.changeSubscriptions) {
-        subscription.emitEvents([])
+      try {
+        runAllCallbacks(
+          [...this.changeSubscriptions].map(
+            (subscription) => () => subscription.emitEvents([]),
+          ),
+        )
+      } catch (error) {
+        // The ready snapshot is already public. Keep the callback failure on
+        // the shared publication so nested graph work can drain before the
+        // outer boundary rethrows it.
+        deferPublicationFailure(error)
       }
     })
   }
@@ -107,10 +146,16 @@ export class CollectionChangesManager<
     forceEmit = false,
     layoutChanged = false,
   ): void {
-    // The visible state was already committed by the caller, so the revision
-    // advances even when the events below end up batched for later emission.
-    if (changes.length > 0) this.stateRevision++
-    if (layoutChanged) this.layoutRevision++
+    // A coherent multi-Collection publication may still roll back. Hold its
+    // revision clocks with its events so discard leaves no public trace.
+    const publicationDeferral = this.publicationDeferral
+    if (publicationDeferral) {
+      if (changes.length > 0) publicationDeferral.stateRevisionDelta++
+      if (layoutChanged) publicationDeferral.layoutRevisionDelta++
+    } else {
+      if (changes.length > 0) this.stateRevision++
+      if (layoutChanged) this.layoutRevision++
+    }
 
     // Skip batching for user actions (forceEmit=true) to keep UI responsive
     if (this.shouldBatchEvents && !forceEmit) {
@@ -133,8 +178,11 @@ export class CollectionChangesManager<
       this.shouldBatchEvents = false
     }
 
-    if (this.publicationDeferralDepth > 0) {
-      this.deferredPublications.push({ changes: rawEvents, layoutChanged })
+    if (publicationDeferral) {
+      publicationDeferral.publications.push({
+        changes: rawEvents,
+        layoutChanged,
+      })
       return
     }
 
@@ -147,34 +195,88 @@ export class CollectionChangesManager<
    * normal transaction boundaries.
    */
   public deferPublication(): PublicationDeferral {
-    this.publicationDeferralDepth++
-    let closed = false
+    if (this.preparedPublicationDeferral) {
+      throw new Error(
+        `Cannot start a publication cycle while another is prepared`,
+      )
+    }
+    const publicationDeferral = this.publicationDeferral ?? {
+      depth: 0,
+      discard: false,
+      publications: [],
+      stateRevisionDelta: 0,
+      layoutRevisionDelta: 0,
+      afterPublication: [],
+      prepared: undefined,
+      published: false,
+    }
+    this.publicationDeferral = publicationDeferral
+    publicationDeferral.depth++
+    let handleState: `open` | `prepared` | `discarded` = `open`
 
-    const close = (discard: boolean) => {
-      if (closed) return
-      closed = true
-      if (this.publicationDeferralDepth === 0) return
-      this.discardDeferredPublications ||= discard
+    const prepare = (discard: boolean) => {
+      if (handleState !== `open`) return
+      handleState = discard ? `discarded` : `prepared`
+      publicationDeferral.discard ||= discard
+      publicationDeferral.depth--
+      if (publicationDeferral.depth > 0) return
 
-      this.publicationDeferralDepth--
-      if (this.publicationDeferralDepth > 0) return
-
-      const publications = this.deferredPublications
-      this.deferredPublications = []
-      if (this.discardDeferredPublications) {
-        this.discardDeferredPublications = false
+      if (this.publicationDeferral === publicationDeferral) {
+        this.publicationDeferral = undefined
+      }
+      if (publicationDeferral.discard) {
+        publicationDeferral.afterPublication = []
         return
       }
-      this.publishEvents(
-        publications.flatMap(({ changes }) => changes),
-        publications.some(({ layoutChanged }) => layoutChanged),
-      )
+
+      this.stateRevision += publicationDeferral.stateRevisionDelta
+      this.layoutRevision += publicationDeferral.layoutRevisionDelta
+      publicationDeferral.prepared = {
+        changes: publicationDeferral.publications.flatMap(
+          ({ changes }) => changes,
+        ),
+        layoutChanged: publicationDeferral.publications.some(
+          ({ layoutChanged }) => layoutChanged,
+        ),
+      }
+      this.preparedPublicationDeferral = publicationDeferral
     }
 
     return {
-      publish: () => close(false),
-      discard: () => close(true),
+      prepare: () => prepare(false),
+      publish: () => {
+        if (handleState === `discarded`) return
+        prepare(false)
+        if (
+          publicationDeferral.depth > 0 ||
+          publicationDeferral.discard ||
+          publicationDeferral.published
+        ) {
+          return
+        }
+        publicationDeferral.published = true
+        if (this.preparedPublicationDeferral === publicationDeferral) {
+          this.preparedPublicationDeferral = undefined
+        }
+        const publication = publicationDeferral.prepared
+        publicationDeferral.prepared = undefined
+        if (publication) {
+          this.publishEvents(publication.changes, publication.layoutChanged)
+        }
+        runAllCallbacks(publicationDeferral.afterPublication.splice(0))
+      },
+      discard: () => prepare(true),
     }
+  }
+
+  /** Run work only after a held coherent publication becomes public. */
+  public afterPublication(callback: () => void): void {
+    const publicationDeferral = this.publicationDeferral
+    if (publicationDeferral) {
+      publicationDeferral.afterPublication.push(callback)
+      return
+    }
+    callback()
   }
 
   private publishEvents(
@@ -194,15 +296,24 @@ export class CollectionChangesManager<
     // Every subscriber sees one committed source batch before dependent query
     // graphs run. This keeps repeated aliases and sibling subqueries coherent.
     withPublicationContext(() => {
-      // Notify both internal layout consumers and the public subscription API.
-      // Public subscribers historically receive an empty batch for order-only
-      // moves because there is no row-value ChangeMessage to publish.
-      if (rawEvents.length === 0) {
-        for (const listener of this.layoutChangeListeners) listener()
-      }
-
-      for (const subscription of this.changeSubscriptions) {
-        subscription.emitEvents(enrichedEvents)
+      const callbacks = [
+        // Notify both internal layout consumers and the public subscription API.
+        // Public subscribers historically receive an empty batch for order-only
+        // moves because there is no row-value ChangeMessage to publish.
+        ...(rawEvents.length === 0
+          ? [...this.layoutChangeListeners].map((listener) => () => listener())
+          : []),
+        ...[...this.changeSubscriptions].map(
+          (subscription) => () => subscription.emitEvents(enrichedEvents),
+        ),
+      ]
+      try {
+        runAllCallbacks(callbacks)
+      } catch (error) {
+        // The committed batch is already public. Keep the first callback
+        // failure on the publication while later subscribers and graph work
+        // finish observing the same snapshot.
+        deferPublicationFailure(error)
       }
     })
   }
@@ -347,7 +458,17 @@ export class CollectionChangesManager<
   public cleanup(): void {
     this.batchedEvents = []
     this.shouldBatchEvents = false
-    this.deferredPublications = []
-    this.publicationDeferralDepth = 0
+    if (this.publicationDeferral) {
+      this.publicationDeferral.discard = true
+      this.publicationDeferral.publications = []
+      this.publicationDeferral.prepared = undefined
+    }
+    this.publicationDeferral = undefined
+    if (this.preparedPublicationDeferral) {
+      this.preparedPublicationDeferral.discard = true
+      this.preparedPublicationDeferral.publications = []
+      this.preparedPublicationDeferral.prepared = undefined
+    }
+    this.preparedPublicationDeferral = undefined
   }
 }
