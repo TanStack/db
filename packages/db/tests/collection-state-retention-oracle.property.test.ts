@@ -196,20 +196,34 @@ async function runRetentionHistory(
         let restartedSync: SyncActions | undefined
         let restartedReceipt: true | Promise<void> | undefined
         let restartedReceiptSettled = false
-        const events: Array<{
-          type: string
-          key: string | number
-          row: RetainedRow
+        const batches: Array<{
+          changes: Array<{
+            type: string
+            key: string | number
+            row: RetainedRow
+            previousRow: RetainedRow | undefined
+          }>
+          rows: Array<RetainedRow>
         }> = []
         const subscription = collection.subscribeChanges(
           (changes) => {
-            events.push(
-              ...changes.map(({ type, key, value }) => ({
+            batches.push({
+              changes: changes.map(({ type, key, value, previousValue }) => ({
                 type,
                 key,
                 row: { id: value.id, value: value.value },
+                previousRow:
+                  previousValue === undefined
+                    ? undefined
+                    : {
+                        id: previousValue.id,
+                        value: previousValue.value,
+                      },
               })),
-            )
+              rows: [...collection.values()]
+                .map(({ id, value }) => ({ id, value }))
+                .sort((left, right) => left.id - right.id),
+            })
             if (restarted) return
             restarted = true
             cleanup = collection.cleanup()
@@ -270,12 +284,43 @@ async function runRetentionHistory(
           expect(restartedSync.commit()).toBe(true)
           expect(collection._state.preSyncVisibleState.size).toBe(0)
           expect(collection._state.hasReceivedFirstCommit).toBe(true)
+          expect(collection._state.recentlySyncedKeys).toEqual(
+            new Set([restartedRow.id]),
+          )
           await Promise.resolve()
           expect(collection._state.recentlySyncedKeys.size).toBe(0)
         }
-        expect(events).toEqual([
-          { type: triggerType, key: triggerRow.id, row: triggerRow },
-          { type: `insert`, key: restartedRow.id, row: restartedRow },
+        const triggerRows = new Map(model)
+        triggerRows.set(triggerRow.id, triggerRow)
+        expect(batches).toEqual([
+          {
+            changes: [
+              {
+                type: triggerType,
+                key: triggerRow.id,
+                row: triggerRow,
+                previousRow: model.get(triggerRow.id),
+              },
+            ],
+            rows: [...triggerRows.values()].sort(
+              (left, right) => left.id - right.id,
+            ),
+          },
+          {
+            changes: [],
+            rows: [],
+          },
+          {
+            changes: [
+              {
+                type: `insert`,
+                key: restartedRow.id,
+                row: restartedRow,
+                previousRow: undefined,
+              },
+            ],
+            rows: [restartedRow],
+          },
         ])
         subscription.unsubscribe()
 
@@ -311,6 +356,7 @@ it.each([`insideListener`, `afterOldReturn`] as const)(
   `retains a restarted row committed %s`,
   async (commitPhase) => {
     await runRetentionHistory([
+      { type: `insert`, row: { id: 1, value: 1 } },
       {
         type: `reentrantRestart`,
         row: { id: 1, value: 1 },
