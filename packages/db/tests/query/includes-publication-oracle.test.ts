@@ -964,6 +964,105 @@ describe(`layered-query publication oracle`, () => {
 })
 
 describe(`source publication across pending derived mutations`, () => {
+  for (const settlement of pendingPublicationSettlements) {
+    it(`keeps ordinary source sync parked while layered graph publication ${settlement}`, async () => {
+      let sync!: Parameters<
+        SyncConfig<PendingPublicationRow, number>[`sync`]
+      >[0]
+      const source = createCollection<PendingPublicationRow, number>({
+        id: `ordinary-source-prefix-${nextCollectionId++}`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (methods) => {
+            sync = methods
+            methods.markReady()
+          },
+        },
+      })
+      await source.preload()
+      sync.begin()
+      sync.write({ type: `insert`, value: { ...optimisticExistingRow } })
+      sync.write({ type: `insert`, value: { ...sourceExistingRow } })
+      const initialReceipt = sync.commit()
+      if (initialReceipt !== true) await initialReceipt
+
+      const q1 = createPendingPublicationQuery(source, `passThrough`)
+      const q2 = createPendingPublicationQuery(q1, `select`)
+      await q2.preload()
+      const observed = observePendingPublication(q2, `select`)
+      const persistence = createDeferred<void>()
+      const settlementError = new Error(`ordinary source prefix rollback`)
+      const mutate = createOptimisticAction({
+        onMutate: () => {
+          source.update(1, (draft) => {
+            draft.value = 11
+          })
+        },
+        mutationFn: () => persistence.promise,
+      })
+      const transaction = mutate()
+
+      try {
+        expect(q2.get(1)?.value).toBe(11)
+        observed.batches.length = 0
+        observed.callbackSnapshots.length = 0
+
+        sync.begin()
+        sync.write({ type: `update`, value: { id: 2, value: 5 } })
+        const parkedReceipt = sync.commit()
+        expect(parkedReceipt).not.toBe(true)
+        if (parkedReceipt === true) {
+          throw new Error(`ordinary source sync did not park`)
+        }
+        let parkedReceiptSettled = false
+        void parkedReceipt.then(() => {
+          parkedReceiptSettled = true
+        })
+        await flushPromises()
+
+        expect(parkedReceiptSettled).toBe(false)
+        expect(source.get(2)?.value).toBe(20)
+        expect(q2.get(2)?.value).toBe(20)
+        expect(
+          observed.batches.flat().filter((event) => event.key === 2),
+        ).toEqual([])
+
+        if (settlement === `succeeds`) {
+          persistence.resolve()
+          await transaction.isPersisted.promise
+        } else {
+          persistence.reject(settlementError)
+          await expect(transaction.isPersisted.promise).rejects.toBe(
+            settlementError,
+          )
+        }
+        await parkedReceipt
+        await flushPromises()
+
+        expect(parkedReceiptSettled).toBe(true)
+        expect(source.get(2)?.value).toBe(5)
+        expect(q2.get(2)?.value).toBe(5)
+        expect(
+          observed.batches.flat().filter((event) => event.key === 2),
+        ).toEqual([
+          {
+            type: `update`,
+            key: 2,
+            value: { id: 2, value: 5 },
+            previousValue: { id: 2, value: 20 },
+          },
+        ])
+      } finally {
+        persistence.resolve()
+        await transaction.isPersisted.promise.catch(() => undefined)
+        observed.subscription.unsubscribe()
+        await q2.cleanup()
+        await q1.cleanup()
+        await source.cleanup()
+      }
+    })
+  }
+
   async function expectSourceConfirmationPreservesGraphIntegrity(
     operation: SourceConfirmationOperation,
     depth: PendingPublicationDepth,
