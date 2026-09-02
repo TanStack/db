@@ -4416,6 +4416,20 @@ it.each([`sync`, `async`] as const)(
       expect(demands[4]).toMatchObject({ limit: 5, offset: 0 })
       expect(demands[4]?.cursor).toBeUndefined()
       expect(source._sync.getLoadSubsetCoverage()).toEqual([])
+
+      await live.utils.setWindow({ offset: 0, limit: 2 })
+
+      expect(live.toArray.map(({ id }) => id)).toEqual([1, 2])
+      expect(demands).toHaveLength(5)
+
+      await live.utils.setWindow({ offset: 0, limit: 5 })
+
+      expect(live.toArray.map(({ id }) => id)).toEqual([1, 2, 3])
+      expect(live.status).toBe(`ready`)
+      expect(demands).toHaveLength(6)
+      expect(demands[5]).toMatchObject({ limit: 5, offset: 0 })
+      expect(demands[5]?.cursor).toBeUndefined()
+      expect(source._sync.getLoadSubsetCoverage()).toEqual([])
     } finally {
       await live.cleanup()
       await source.cleanup()
@@ -4485,6 +4499,99 @@ it(`does not treat explicit continuation as outcome-free satisfaction`, async ()
     for (const request of pending) {
       request.resolve({ hasMore: false, appliedRowKeys: [] })
     }
+    await Promise.all([preload.catch(() => undefined), live.cleanup()])
+    await source.cleanup()
+  }
+})
+
+it(`keeps the prior ordered publication until truncate replay gains authoritative coverage`, async () => {
+  type Row = { id: number; rank: number }
+  const oldRows: ReadonlyArray<Row> = [
+    { id: 1, rank: 1 },
+    { id: 2, rank: 2 },
+  ]
+  const replacementRows: ReadonlyArray<Row> = [
+    { id: 3, rank: 3 },
+    { id: 4, rank: 4 },
+  ]
+  const authoritative = createDeferred<LoadSubsetResult>()
+  let calls = 0
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: Row }) => void
+  let commit!: () => true | Promise<void>
+  let truncate!: () => void
+  const source = createCollection<Row>({
+    id: `full-flow-outcome-free-truncate-source`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        truncate = params.truncate
+        params.markReady()
+        return {
+          loadSubset: () => {
+            calls++
+            const rows = calls === 1 ? oldRows : replacementRows
+            if (calls <= 2) {
+              begin()
+              for (const row of rows) write({ type: `insert`, value: row })
+              commit()
+            }
+            if (calls === 1) {
+              return Promise.resolve({
+                hasMore: false,
+                appliedRowKeys: oldRows.map(({ id }) => id),
+              })
+            }
+            if (calls === 2) return Promise.resolve()
+            if (calls === 3) return authoritative.promise
+            throw new Error(`Unexpected fourth replay request`)
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection({
+    id: `full-flow-outcome-free-truncate-live`,
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(2),
+    startSync: true,
+  })
+  const preload = live.preload()
+
+  try {
+    await preload
+    expect(live.toArray.map(({ id }) => id)).toEqual([1, 2])
+
+    begin()
+    truncate()
+    const replacement = commit()
+    await flushPromises()
+
+    expect(calls).toBe(3)
+    expect(live.toArray.map(({ id }) => id)).toEqual([1, 2])
+    expect(source._sync.getLoadSubsetCoverage()).toEqual([])
+
+    authoritative.resolve({
+      hasMore: false,
+      appliedRowKeys: replacementRows.map(({ id }) => id),
+    })
+    if (replacement !== true) await replacement
+    await flushPromises()
+
+    expect(live.toArray.map(({ id }) => id)).toEqual([3, 4])
+  } finally {
+    authoritative.resolve({ hasMore: false, appliedRowKeys: [] })
     await Promise.all([preload.catch(() => undefined), live.cleanup()])
     await source.cleanup()
   }
@@ -5079,7 +5186,7 @@ it(`retries an evidence-free ordered Effect after truncate`, async () => {
   }
 })
 
-it(`rechecks an ordered Effect after synchronous truncate replay`, async () => {
+it(`rechecks an ordered Effect until truncate replay proves replacement coverage`, async () => {
   type Row = { id: number; rank: number }
   type Result = {
     hasMore: boolean
@@ -5123,6 +5230,10 @@ it(`rechecks an ordered Effect after synchronous truncate replay`, async () => {
               begin()
               write({ type: `insert`, value: finalRow })
               commit()
+              return Promise.resolve({
+                hasMore: false,
+                appliedRowKeys: [finalRow.id],
+              })
             }
             return true
           },
@@ -5163,6 +5274,81 @@ it(`rechecks an ordered Effect after synchronous truncate replay`, async () => {
     expect(replayCalls).toBe(3)
     expect(calls).toBe(5)
     expect([...visible.keys()]).toEqual([finalRow.id])
+  } finally {
+    await effect.dispose()
+    await source.cleanup()
+  }
+})
+
+it(`settles an outcome-free ordered Effect when its boundary stops advancing`, async () => {
+  type Row = { id: number; rank: number }
+  const rows: ReadonlyArray<Row> = [
+    { id: 1, rank: 1 },
+    { id: 2, rank: 2 },
+    { id: 3, rank: 3 },
+  ]
+  const visible = new Map<number, Row>()
+  let calls = 0
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: Row }) => void
+  let commit!: () => true | Promise<void>
+  const source = createCollection<Row>({
+    id: `full-flow-effect-outcome-free-no-progress`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (params) => {
+        begin = params.begin
+        write = params.write
+        commit = params.commit
+        params.markReady()
+        return {
+          loadSubset: () => {
+            calls++
+            if (calls <= rows.length) {
+              begin()
+              write({ type: `insert`, value: rows[calls - 1]! })
+              commit()
+            }
+
+            // Bound the old loop. A correct implementation stops when the
+            // fourth request completes without moving the local boundary.
+            if (calls === 5) {
+              return Promise.resolve({
+                hasMore: false,
+                appliedRowKeys: [],
+              })
+            }
+            return Promise.resolve()
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const effect = createEffect<Row, number>({
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(4),
+    onBatch: (events) => {
+      for (const event of events) {
+        if (event.type === `exit`) visible.delete(event.key)
+        else visible.set(event.key, event.value)
+      }
+    },
+  })
+
+  try {
+    await flushPromises()
+
+    expect([...visible.keys()]).toEqual([1, 2, 3])
+    expect(calls).toBe(4)
+    expect(source._sync.getLoadSubsetCoverage()).toEqual([])
   } finally {
     await effect.dispose()
     await source.cleanup()

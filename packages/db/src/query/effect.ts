@@ -971,8 +971,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         limit: offset + limit,
         orderBy: normalizedOrderBy,
         trackLoadSubsetPromise: false,
-        onLoadSubsetResult: (result) =>
-          this.trackOrderedLoad(result, orderByInfo.sourceId),
+        onLoadSubsetResult: (result) => this.trackOrderedLoad(result),
       })
     } else {
       // Without an index there is no sound cursor continuation. Load the full
@@ -1037,15 +1036,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     }
   }
 
-  private trackOrderedLoad(
-    result: LoadSubsetRequestResult,
-    sourceId: string,
-  ): void {
+  private trackOrderedLoad(result: LoadSubsetRequestResult): void {
     const continueAfterFulfillment = () => {
       if (this.disposed) return
-      if (this.subscriptions[sourceId]?.requiresOrderedPrefixRefresh) {
-        this.lastLoadRequestKey.delete(sourceId)
-      }
       this.loadMoreIfNeeded()
     }
     if (!(result instanceof Promise)) {
@@ -1088,6 +1081,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       n,
       subscription.orderedRetainedWindowSize,
       subscription.orderedBoundaryKey,
+      subscription.orderedCoverageRevision,
     )
     if (!cursor) {
       subscription.settleOrderedResultAfterNoProgress()
@@ -1104,7 +1098,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         minValues: cursor.minValues,
         trackLoadSubsetPromise: false,
         onLoadSubsetResult: (loadResult: LoadSubsetRequestResult) =>
-          this.trackOrderedLoad(loadResult, sourceId),
+          this.trackOrderedLoad(loadResult),
       })
     } catch (error) {
       if (

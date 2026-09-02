@@ -1294,6 +1294,10 @@ export class CollectionSubscription
     return this.orderedWindow?.retainedPrefixSize ?? 0
   }
 
+  get orderedCoverageRevision(): number {
+    return this.orderedWindow?.coverageRevision ?? 0
+  }
+
   get requiresOrderedPrefixRefresh(): boolean {
     return this.orderedWindow?.requiresPrefixRefresh ?? false
   }

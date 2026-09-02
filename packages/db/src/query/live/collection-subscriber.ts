@@ -655,6 +655,7 @@ export class CollectionSubscriber<
       n,
       subscription.orderedRetainedWindowSize,
       subscription.orderedBoundaryKey,
+      subscription.orderedCoverageRevision,
     )
     if (!cursor) {
       if (subscription.settleOrderedResultAfterNoProgress()) return

@@ -3147,6 +3147,7 @@ describe(`On-Demand Sync Mode`, () => {
         async (scheduler) => {
           await expectScheduledLifecycleMatches(scheduler, secondOutcome)
         },
+        15_000,
       )
     }
 

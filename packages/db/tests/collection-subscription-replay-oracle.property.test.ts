@@ -3774,7 +3774,7 @@ describe(`CollectionSubscription replay oracle`, () => {
         }
         await flushPromises()
 
-        if (replacementResult === `return` || replacementResult === `resolve`) {
+        if (replacementResult === `resolve`) {
           expect(errorObservations).toEqual([])
           expect([...visible.keys()]).toEqual([`y`])
           expect(subscription.orderedBoundaryKey).toBe(`y`)
@@ -3785,6 +3785,12 @@ describe(`CollectionSubscription replay oracle`, () => {
           await flushPromises()
           expect([...visible.keys()]).toEqual([`z`])
           expect(subscription.orderedBoundaryKey).toBe(`z`)
+        } else if (replacementResult === `return`) {
+          // A synchronous outcome-free result can settle this acquisition,
+          // but cannot prove that the replay is a complete replacement.
+          expect(errorObservations).toEqual([])
+          expect([...visible.keys()]).toEqual([])
+          expect(subscription.orderedBoundaryKey).toBe(`y`)
         } else {
           expect(errorObservations).toEqual([[`x`]])
           expect([...visible.keys()]).toEqual([`x`])
@@ -4920,7 +4926,12 @@ describe(`CollectionSubscription replay oracle`, () => {
                   value: { id: `b`, rank: 2, version: 2 },
                 })
                 commit(options.signal)
-                return settlement === `sync` ? true : Promise.resolve()
+                return settlement === `sync`
+                  ? true
+                  : Promise.resolve({
+                      hasMore: false,
+                      appliedRowKeys: [`b`] as const,
+                    })
               },
               unloadSubset: (options) => {
                 unloads.push(options)
@@ -5001,8 +5012,7 @@ describe(`CollectionSubscription replay oracle`, () => {
         await flushPromises()
 
         const publishesReplacement =
-          callback === `none` ||
-          (callback === `cleanup-succeed` && settlement === `sync`)
+          settlement === `async` && callback === `none`
         expect(subscription.status).toBe(`ready`)
         expect(escapedCallbackError).toBeUndefined()
         expect(
@@ -8963,7 +8973,8 @@ describe(`CollectionSubscription replay oracle`, () => {
         direction === `asc`
           ? ([`three`, `four`] as const)
           : ([`four`, `three`] as const)
-      const succeeds = delivery === `return` || delivery === `resolve`
+      const sourceSucceeded = delivery === `return` || delivery === `resolve`
+      const publishesReplacement = delivery === `resolve`
       const expectedIds = identity === `changed` ? replacementIds : initialIds
 
       try {
@@ -9030,14 +9041,12 @@ describe(`CollectionSubscription replay oracle`, () => {
         }
         await flushPromises()
         expect(collection.toArray.map(({ id }) => id).sort()).toEqual(
-          succeeds ? [...expectedIds].sort() : [],
+          sourceSucceeded ? [...expectedIds].sort() : [],
         )
         expect(publicationSnapshots).toEqual(
           delivery === `resolve`
             ? [[initialIds[0]], [...expectedIds].sort()]
-            : delivery === `return` && identity === `changed`
-              ? [[initialIds[0]], [expectedIds[0]]]
-              : [[initialIds[0]]],
+            : [[initialIds[0]]],
         )
 
         const loadCountBeforeWiden = loadOptions.length
@@ -9046,13 +9055,17 @@ describe(`CollectionSubscription replay oracle`, () => {
           limit: 1,
           minValues: [direction === `asc` ? 2 : 1],
         })
-        if (succeeds) {
+        if (publishesReplacement) {
           expect(loadOptions).toHaveLength(loadCountBeforeWiden)
         } else {
-          expect(loadOptions[loadCountBeforeWiden]).toMatchObject({
-            offset: 1,
-            cursor: { lastKey: initialIds[0] },
-          })
+          expect(loadOptions[loadCountBeforeWiden]).toMatchObject(
+            delivery === `return`
+              ? { offset: 1, cursor: undefined }
+              : {
+                  offset: 1,
+                  cursor: { lastKey: initialIds[0] },
+                },
+          )
         }
       } finally {
         subscription.unsubscribe()

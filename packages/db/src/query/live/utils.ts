@@ -284,6 +284,7 @@ export function computeOrderedLoadCursor(
   limit: number,
   demandedPrefix = limit,
   boundaryKey?: string | number,
+  progressRevision = 0,
 ):
   | {
       minValues: Array<unknown> | undefined
@@ -315,6 +316,7 @@ export function computeOrderedLoadCursor(
     boundaryKey: boundaryKey ?? null,
     offset,
     demandedPrefix,
+    progressRevision,
   })
   if (lastLoadRequestKey === loadRequestKey) {
     return undefined

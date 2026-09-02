@@ -78,6 +78,25 @@ export class WindowState<
   }
 
   ensureSize(size: number): void {
+    if (
+      size > this.activeSize &&
+      this.hasOutcomeFreeSettlement &&
+      this.locallySettledSize === this.activeSize
+    ) {
+      // The same numerical window can recur after a shrink. Give that growth
+      // a new request generation so an old no-progress key cannot suppress
+      // the required refresh from the start.
+      this.revision++
+    }
+    if (
+      size < this.activeSize &&
+      this.hasOutcomeFreeSettlement &&
+      this.localPrefixSize >= size
+    ) {
+      // A shrink can reuse the already-published local prefix. Keep the
+      // settlement exact to the smaller window so any later growth refreshes.
+      this.locallySettledSize = size
+    }
     this.activeSize = size
     this.retainedSize = Math.max(this.retainedSize, size)
   }
@@ -105,7 +124,9 @@ export class WindowState<
 
   /** Whether this caller may stop loading its exact active window. */
   get satisfiesActiveWindow(): boolean {
-    return this.coversActiveWindow || this.locallySettledSize >= this.activeSize
+    return (
+      this.coversActiveWindow || this.locallySettledSize === this.activeSize
+    )
   }
 
   get coveredPrefixSize(): number {
@@ -245,7 +266,6 @@ export class WindowState<
     // Outcome-free completions (`true` and Promise<void>) do not prove
     // exhaustion. Keep their exact settled request separate from the applied
     // row count so this caller can publish without creating reusable evidence.
-    this.coveredSize = Math.min(requestedPrefix, this.admittedKeys.size)
     if (this.admittedKeys.size >= requestedPrefix) {
       this.locallySettledSize = requestedPrefix
     }
