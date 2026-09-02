@@ -465,6 +465,8 @@ describe(`live query scheduler`, () => {
     { name: `null`, failure: null },
     { name: `false`, failure: false },
     { name: `zero`, failure: 0 },
+    { name: `negative zero`, failure: -0 },
+    { name: `bigint zero`, failure: 0n },
     { name: `empty string`, failure: `` },
     { name: `NaN`, failure: Number.NaN },
   ])(
@@ -473,7 +475,21 @@ describe(`live query scheduler`, () => {
       let begin!: () => void
       let write!: (message: { type: `insert`; value: User }) => void
       let commit!: () => void
-      const laterListener = vi.fn()
+      type UserObservation = {
+        changes: Array<{
+          type: string
+          key: string | number
+          value: User
+          previousValue: User | undefined
+        }>
+        rows: Array<User>
+      }
+      const sourceObservations: Array<UserObservation> = []
+      const dependentObservations: Array<UserObservation> = []
+      const snapshotUser = ({ id, name: userName }: User): User => ({
+        id,
+        name: userName,
+      })
       const source = createCollection<User>({
         id: `falsy-row-listener-${name.replaceAll(` `, `-`)}`,
         getKey: (user) => user.id,
@@ -495,9 +511,23 @@ describe(`live query scheduler`, () => {
         },
         { includeInitialState: false },
       )
-      const laterSubscription = source.subscribeChanges(laterListener, {
-        includeInitialState: false,
-      })
+      const laterSubscription = source.subscribeChanges(
+        (changes) => {
+          sourceObservations.push({
+            changes: changes.map(({ type, key, value, previousValue }) => ({
+              type,
+              key,
+              value: snapshotUser(value),
+              previousValue:
+                previousValue === undefined
+                  ? undefined
+                  : snapshotUser(previousValue),
+            })),
+            rows: [...source.state.values()].map(snapshotUser),
+          })
+        },
+        { includeInitialState: false },
+      )
       const live = createLiveQueryCollection({
         id: `falsy-row-listener-dependent-${name.replaceAll(` `, `-`)}`,
         startSync: true,
@@ -506,9 +536,29 @@ describe(`live query scheduler`, () => {
             .from({ user: source })
             .select(({ user }) => ({ id: user.id, name: user.name })),
       })
+      let dependentSubscription:
+        | ReturnType<typeof live.subscribeChanges>
+        | undefined
 
       try {
         await live.preload()
+        dependentSubscription = live.subscribeChanges(
+          (changes) => {
+            dependentObservations.push({
+              changes: changes.map(({ type, key, value, previousValue }) => ({
+                type,
+                key,
+                value: snapshotUser(value),
+                previousValue:
+                  previousValue === undefined
+                    ? undefined
+                    : snapshotUser(previousValue),
+              })),
+              rows: [...live.state.values()].map(snapshotUser),
+            })
+          },
+          { includeInitialState: false },
+        )
         begin()
         write({ type: `insert`, value: { id: 1, name: `Ada` } })
         let didThrow = false
@@ -522,11 +572,23 @@ describe(`live query scheduler`, () => {
 
         expect(didThrow).toBe(true)
         expect(Object.is(thrown, failure)).toBe(true)
-        expect(laterListener).toHaveBeenCalledOnce()
-        expect(live.get(1)).toEqual(expect.objectContaining({ name: `Ada` }))
+        const expectedObservation: UserObservation = {
+          changes: [
+            {
+              type: `insert`,
+              key: 1,
+              value: { id: 1, name: `Ada` },
+              previousValue: undefined,
+            },
+          ],
+          rows: [{ id: 1, name: `Ada` }],
+        }
+        expect(sourceObservations).toEqual([expectedObservation])
+        expect(dependentObservations).toEqual([expectedObservation])
       } finally {
         throwingSubscription.unsubscribe()
         laterSubscription.unsubscribe()
+        dependentSubscription?.unsubscribe()
         await live.cleanup()
         await source.cleanup()
       }
