@@ -579,18 +579,21 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
 
   const loadSubset = async (opts: LoadSubsetOptions) => {
     const commitCursor = getCommitCursor()
-    if (opts.signal?.aborted) return
+    const isAborted = (): boolean =>
+      signal.aborted || opts.signal?.aborted === true
+    if (isAborted()) return
 
     if (isBufferingInitialSync()) {
       const snapshotParams = compileSQL<T>(opts, compileOptions)
       try {
         const { data: rows } = await stream.fetchSnapshot(snapshotParams)
-        if (opts.signal?.aborted || !isBufferingInitialSync()) {
+        if (isAborted() || !isBufferingInitialSync()) {
           debug(`${logPrefix}Ignoring snapshot - sync completed while fetching`)
           return
         }
 
         if (rows.length > 0) {
+          if (isAborted()) return
           begin()
           for (const row of rows) {
             write({
@@ -603,7 +606,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
           debug(`${logPrefix}Applied snapshot with ${rows.length} rows`)
         }
       } catch (error) {
-        if (opts.signal?.aborted) return
+        if (isAborted()) return
         if (handleSnapshotError(error, `fetchSnapshot`)) {
           return
         }
@@ -625,10 +628,34 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
     // long-poll requests promptly. Bound the wait so on-demand live queries don't
     // remain loading until the long-poll naturally times out.
     // If the refresh fails or times out, we fall through to requestSnapshot which
-    // still works.
+    // still works. Cleanup or request cancellation ends the wait without starting
+    // a snapshot that no current demand can use.
     if (stream.isUpToDate) {
       let timeoutId: ReturnType<typeof setTimeout> | undefined
+      let removeAbortListeners = () => {}
       try {
+        const abortSignals = new Set(
+          [signal, opts.signal].filter(
+            (candidate): candidate is AbortSignal => candidate !== undefined,
+          ),
+        )
+        const aborted = new Promise<void>((resolve) => {
+          const onAbort = () => resolve()
+          if (Array.from(abortSignals).some((candidate) => candidate.aborted)) {
+            resolve()
+            return
+          }
+
+          abortSignals.forEach((candidate) =>
+            candidate.addEventListener(`abort`, onAbort, { once: true }),
+          )
+          removeAbortListeners = () => {
+            abortSignals.forEach((candidate) =>
+              candidate.removeEventListener(`abort`, onAbort),
+            )
+          }
+        })
+
         await Promise.race([
           stream.forceDisconnectAndRefresh(),
           new Promise<void>((resolve) => {
@@ -637,6 +664,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
               FORCE_DISCONNECT_AND_REFRESH_TIMEOUT_MS,
             )
           }),
+          aborted,
         ])
       } catch (error) {
         if (handleSnapshotError(error, `forceDisconnectAndRefresh`)) {
@@ -647,11 +675,12 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
           error,
         )
       } finally {
+        removeAbortListeners()
         clearTimeout(timeoutId)
       }
     }
 
-    if (opts.signal?.aborted) return
+    if (isAborted()) return
 
     // Upstream limitation: ShapeStream.requestSnapshot() publishes its rows
     // through the stream callback before its Promise resolves. It accepts no
