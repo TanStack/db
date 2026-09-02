@@ -1152,6 +1152,10 @@ describe(`Collection-valued includes oracle`, () => {
       const recentlySyncedBeforeFailure = new Set(
         facade._state.recentlySyncedKeys,
       )
+      const preSyncVirtualBeforeFailure = new Map(
+        facade._state.preSyncVirtualState,
+      )
+      expect([...preSyncVirtualBeforeFailure.keys()]).toEqual([initialChild.id])
       const rootPublications: Array<unknown> = []
       const childPublications: Array<unknown> = []
       const childReceiptStates: Array<boolean> = []
@@ -1235,9 +1239,15 @@ describe(`Collection-valued includes oracle`, () => {
         expect(facade._state.recentlySyncedKeys).toEqual(
           recentlySyncedBeforeFailure,
         )
+        expect(facade._state.preSyncVirtualState).toEqual(
+          preSyncVirtualBeforeFailure,
+        )
         await Promise.resolve()
         expect(facade._state.recentlySyncedKeys).toEqual(
           recentlySyncedBeforeFailure,
+        )
+        expect(facade._state.preSyncVirtualState).toEqual(
+          preSyncVirtualBeforeFailure,
         )
 
         rootIndex.updateFailure = undefined
