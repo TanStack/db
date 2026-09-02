@@ -228,7 +228,9 @@ retraction and new contribution enter the same graph turn, so the public
 boundary observes one update rather than an intermediate removal. Graph
 teardown clears the tracker and graph together. Thus every source key has
 multiplicity zero or one and every negative weight cancels the exact positive
-row that entered D2.
+row that entered D2. The source Collection owns its rows independently: graph
+teardown does not erase them, source changes continue while the graph is down,
+and a new graph replays the source's then-current rows into a fresh tracker.
 
 Internal contribution identity is independent of the user-visible Collection
 key. When several internal rows collapse to one public key, a keyed D2

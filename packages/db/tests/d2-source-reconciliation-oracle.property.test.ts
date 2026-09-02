@@ -44,6 +44,13 @@ type ReconciliationStep =
   | { type: `teardown` }
   | { type: `restart` }
 
+type ReconciliationModel = {
+  sourceRows: Map<SourceKey, SourceRow>
+  sentRows: Map<SourceKey, SourceRow>
+  relation: Map<string, number>
+  graphActive: boolean
+}
+
 const sourceRowArbitrary = fc.record({
   id: fc.integer({ min: 0, max: 3 }),
   revision: fc.integer({ min: 0, max: 4 }),
@@ -90,6 +97,11 @@ const reconciliationStepArbitrary: fc.Arbitrary<ReconciliationStep> = fc.oneof(
   { weight: 1, arbitrary: fc.constant({ type: `teardown` as const }) },
   { weight: 1, arbitrary: fc.constant({ type: `restart` as const }) },
 )
+
+const reconciliationHistoryArbitrary = fc.array(reconciliationStepArbitrary, {
+  minLength: 1,
+  maxLength: 30,
+})
 
 function rowIdentity(row: SourceRow): string {
   return `${row.id}:${row.revision}:${row.value}`
@@ -189,6 +201,66 @@ function expectExactSourceRelation(
       )
       .sort(([a], [b]) => a.localeCompare(b)),
   )
+}
+
+function createReconciliationModel(): ReconciliationModel {
+  return {
+    sourceRows: new Map(),
+    sentRows: new Map(),
+    relation: new Map(),
+    graphActive: true,
+  }
+}
+
+function applyReconciliationStep(
+  model: ReconciliationModel,
+  step: ReconciliationStep,
+): void {
+  if (step.type === `truncate`) {
+    // Truncate is only an early lifecycle signal. Its later source batch
+    // still needs the retained exact rows to retract the active graph.
+  } else if (step.type === `teardown`) {
+    model.sentRows.clear()
+    model.relation.clear()
+    model.graphActive = false
+  } else if (step.type === `restart`) {
+    if (!model.graphActive) {
+      const replay = [...model.sourceRows].map(([key, value]) => ({
+        type: `insert` as const,
+        key,
+        value,
+      }))
+      applyToRelation(
+        model.relation,
+        reconcileChangesForD2(replay, model.sentRows),
+      )
+      model.graphActive = true
+    }
+  } else {
+    const changes = sourceChangesFor(step.operations, model.sourceRows)
+    if (model.graphActive) {
+      const reconciled = reconcileChangesForD2(changes, model.sentRows)
+      applyToRelation(model.relation, reconciled)
+    }
+  }
+
+  if (model.graphActive) {
+    expectExactSourceRelation(model.sourceRows, model.sentRows, model.relation)
+  } else {
+    expect(model.sentRows.size).toBe(0)
+    expect(model.relation.size).toBe(0)
+  }
+}
+
+function upsert(
+  key: SourceKey,
+  row: SourceRow,
+  reportedPreviousValue: SourceRow = row,
+): ReconciliationStep {
+  return {
+    type: `batch`,
+    operations: [{ type: `upsert`, key, row, reportedPreviousValue }],
+  }
 }
 
 function createOrderedSourceHarness(id: string) {
@@ -484,48 +556,84 @@ it(`replaces the retained live-query source row after an ordered truncate`, asyn
   }
 })
 
+it(`preserves external source rows across graph teardown and restart`, () => {
+  const model = createReconciliationModel()
+  const row = { id: 1, revision: 1, value: 1 }
+
+  applyReconciliationStep(model, upsert(`row`, row))
+  applyReconciliationStep(model, { type: `teardown` })
+  expect(model.graphActive).toBe(false)
+  expect(model.sourceRows).toEqual(new Map([[`row`, row]]))
+  expect(model.sentRows).toEqual(new Map())
+  expect(model.relation).toEqual(new Map())
+
+  applyReconciliationStep(model, { type: `restart` })
+  expect(model.graphActive).toBe(true)
+  expect(model.sourceRows).toEqual(new Map([[`row`, row]]))
+  expect(model.sentRows).toEqual(new Map([[`row`, row]]))
+  expect(model.relation).toEqual(
+    new Map([[`string:row|${rowIdentity(row)}`, 1]]),
+  )
+})
+
+it(`replays external source changes made while the graph is down`, () => {
+  const model = createReconciliationModel()
+  const first = { id: 1, revision: 1, value: 1 }
+  const replacement = { id: 1, revision: 2, value: 2 }
+
+  applyReconciliationStep(model, upsert(`row`, first))
+  applyReconciliationStep(model, { type: `teardown` })
+  applyReconciliationStep(model, upsert(`row`, replacement, first))
+  expect(model.sourceRows).toEqual(new Map([[`row`, replacement]]))
+  expect(model.sentRows).toEqual(new Map())
+  expect(model.relation).toEqual(new Map())
+
+  applyReconciliationStep(model, { type: `restart` })
+  expect(model.sourceRows).toEqual(new Map([[`row`, replacement]]))
+  expect(model.sentRows).toEqual(new Map([[`row`, replacement]]))
+  expect(model.relation).toEqual(
+    new Map([[`string:row|${rowIdentity(replacement)}`, 1]]),
+  )
+})
+
+it(`generates teardown, down-state source changes, and restart`, () => {
+  const histories = fc.sample(reconciliationHistoryArbitrary, {
+    seed: 1780,
+    numRuns: 500,
+  })
+
+  expect(
+    histories.some((steps) => {
+      let graphActive = true
+      let sawTeardown = false
+      let sawDownStateSourceChange = false
+      for (const step of steps) {
+        if (step.type === `teardown`) {
+          graphActive = false
+          sawTeardown = true
+        } else if (step.type === `restart`) {
+          if (!graphActive && sawTeardown && sawDownStateSourceChange) {
+            return true
+          }
+          graphActive = true
+        } else if (step.type === `batch` && !graphActive) {
+          sawDownStateSourceChange = true
+        }
+      }
+      return false
+    }),
+  ).toBe(true)
+})
+
 fcTest.prop(
-  [fc.array(reconciliationStepArbitrary, { minLength: 1, maxLength: 30 })],
+  [reconciliationHistoryArbitrary],
   oraclePropertyOptions(200, `d2-source.exact-retractions`),
 )(
   `keeps one exact D2 contribution per source key across batched histories`,
   (steps) => {
-    const sourceRows = new Map<SourceKey, SourceRow>()
-    const sentRows = new Map<SourceKey, SourceRow>()
-    const relation = new Map<string, number>()
-    let graphActive = true
-
+    const model = createReconciliationModel()
     for (const step of steps) {
-      if (step.type === `truncate`) {
-        // Truncate is only an early lifecycle signal. Its later source batch
-        // still needs the retained exact rows to retract the active graph.
-      } else if (step.type === `teardown`) {
-        sentRows.clear()
-        relation.clear()
-        graphActive = false
-      } else if (step.type === `restart`) {
-        if (!graphActive) {
-          const replay = [...sourceRows].map(([key, value]) => ({
-            type: `insert` as const,
-            key,
-            value,
-          }))
-          applyToRelation(relation, reconcileChangesForD2(replay, sentRows))
-          graphActive = true
-        }
-      } else {
-        const changes = sourceChangesFor(step.operations, sourceRows)
-        if (graphActive) {
-          const reconciled = reconcileChangesForD2(changes, sentRows)
-          applyToRelation(relation, reconciled)
-        }
-      }
-      if (graphActive) {
-        expectExactSourceRelation(sourceRows, sentRows, relation)
-      } else {
-        expect(sentRows.size).toBe(0)
-        expect(relation.size).toBe(0)
-      }
+      applyReconciliationStep(model, step)
     }
   },
 )
