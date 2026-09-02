@@ -655,11 +655,13 @@ describe(`query collection ownership lifecycle oracle`, () => {
     const id = `ownership-existing-metadata-before-insert`
     const queryHash = hashKey([id])
     const result = createDeferred<Array<Item>>()
+    let setupCalls = 0
     const { collection, maps, queryFn } = createOwnershipFixture({
       id,
       syncMode: `eager`,
-      results: [result.promise],
+      results: [result.promise, [shared]],
       setupMetadata: (metadata) => {
+        setupCalls += 1
         metadata.row.set(shared.id, {
           queryCollection: { owners: { [queryHash]: true } },
         })
@@ -702,5 +704,9 @@ describe(`query collection ownership lifecycle oracle`, () => {
         persistedOwners: [queryHash],
       },
     )
+
+    await collection.cleanup()
+    await collection.preload()
+    assertCheckpoint(2, setupCalls, 1)
   })
 })
