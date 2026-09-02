@@ -1126,7 +1126,10 @@ cannot suppress later first-ready callbacks, preload settlement, or the empty
 ready event that wakes dependent Collections. Core completes every effect, then
 rethrows the first failure unchanged, including a falsy value. Status is ready
 before these effects run; first-ready callbacks keep registration order, and
-the dependent-ready event runs after them. That event snapshots the dependents
+the callback set is frozen before delivery. Removing a copied callback during
+delivery cannot skip it. Since readiness is already public, a callback added
+during delivery runs immediately at its registration point. The dependent-ready
+event runs after the frozen first-ready batch. That event snapshots the dependents
 present at delivery and attempts every one even if an earlier listener fails.
 Removing or adding a dependent during delivery does not change that frozen
 batch; an added dependent starts with the next publication.

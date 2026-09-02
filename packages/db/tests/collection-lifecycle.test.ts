@@ -516,6 +516,41 @@ describe(`Collection Lifecycle Management`, () => {
       subscription.unsubscribe()
     })
 
+    it(`freezes first-ready callback membership before delivery`, async () => {
+      let markReadyCallback: (() => void) | undefined
+      const calls: Array<string> = []
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `first-ready-membership-test`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReadyCallback = markReady
+          },
+        },
+      })
+      const subscription = collection.subscribeChanges(() => {})
+      let removeLater = () => {}
+
+      collection.onFirstReady(() => {
+        calls.push(`first`)
+        removeLater()
+        collection.onFirstReady(() => calls.push(`nested`))
+      })
+      removeLater = collection.onFirstReady(() => calls.push(`later`))
+
+      try {
+        markReadyCallback!()
+
+        expect(calls).toEqual([`first`, `nested`, `later`])
+
+        collection.onFirstReady(() => calls.push(`after`))
+        expect(calls).toEqual([`first`, `nested`, `later`, `after`])
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    })
+
     it(`attempts every first-ready effect before rethrowing the first failure`, async () => {
       let markReadyCallback: (() => void) | undefined
       const readyBatches: Array<Array<unknown>> = []
