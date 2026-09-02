@@ -1219,6 +1219,9 @@ read another participating Collection without seeing new rows behind an old
 revision. If a later root or containing-facade application fails before that
 release, rollback restores the installed state and discards both the held
 events and their revision advances. Routing and identity remain inside D2.
+Applied receipts and asynchronous cleanup tails created by a participating
+Collection join that same release. Rollback leaves restored receipts pending
+and discards cleanup tails that could otherwise mutate the restored state.
 The root and facade adapters retain the graph deltas consumed by that failed
 attempt. A later graph turn retries the whole uncommitted relation even when
 the source emits only an unrelated root delta; D2 does not replay a delta that
@@ -1406,7 +1409,7 @@ create recursive Collection machinery.
 | Optimistic confirmation, rollback, and later reactivity                      | `packages/db/tests/query/includes-optimistic-oracle.property.test.ts`       |
 | Coherent layered publication                                                 | `packages/db/tests/query/includes-publication-oracle.test.ts`               |
 | Exact metadata settlement, cancellation ownership, and rollback recovery     | `packages/db/tests/collection-metadata-publication-oracle.property.test.ts` |
-| Collection facades, event coherence, and route activation                    | `packages/db/tests/query/includes-collection-oracle.property.test.ts`       |
+| Collection facades, event/receipt rollback, and route activation             | `packages/db/tests/query/includes-collection-oracle.property.test.ts`       |
 | Correlated physical work                                                     | `packages/db/tests/query/includes-work-counter-oracle.test.ts`              |
 | Route-context discovery and transport across recursive and join boundaries   | `packages/db/tests/query/includes-context-transport-oracle.test.ts`         |
 | Ordered source coverage, total boundaries, and window transitions            | `packages/db/tests/query/pagination-oracle.property.test.ts`                |

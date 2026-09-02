@@ -1712,11 +1712,14 @@ export class CollectionStateManager<
         this.preSyncVisibleState.clear()
         this.preSyncVirtualState.clear()
 
-        // Clear recently synced keys after a microtask to allow recomputeOptimisticState to see them
-        Promise.resolve().then(() => {
-          if (this.syncSessionGeneration === syncSessionGeneration) {
-            this.recentlySyncedKeys.clear()
-          }
+        // A coherent multi-Collection publication can still roll back this
+        // commit. Start its cleanup tail only after that publication succeeds.
+        this.changes.afterPublication(() => {
+          Promise.resolve().then(() => {
+            if (this.syncSessionGeneration === syncSessionGeneration) {
+              this.recentlySyncedKeys.clear()
+            }
+          })
         })
 
         // Mark that we've received the first commit (for tracking purposes)
@@ -1726,7 +1729,7 @@ export class CollectionStateManager<
       }
 
       for (const transaction of committedSyncedTransactions) {
-        transaction.applied.resolve()
+        this.changes.afterPublication(() => transaction.applied.resolve())
       }
 
       return { processed: true, publicationError }

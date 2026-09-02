@@ -39,6 +39,7 @@ type PublicationDeferralState<
   }>
   stateRevisionDelta: number
   layoutRevisionDelta: number
+  afterPublication: Array<() => void>
   prepared:
     | {
         changes: Array<ChangeMessage<TOutput, TKey>>
@@ -205,6 +206,7 @@ export class CollectionChangesManager<
       publications: [],
       stateRevisionDelta: 0,
       layoutRevisionDelta: 0,
+      afterPublication: [],
       prepared: undefined,
       published: false,
     }
@@ -222,7 +224,10 @@ export class CollectionChangesManager<
       if (this.publicationDeferral === publicationDeferral) {
         this.publicationDeferral = undefined
       }
-      if (publicationDeferral.discard) return
+      if (publicationDeferral.discard) {
+        publicationDeferral.afterPublication = []
+        return
+      }
 
       this.stateRevision += publicationDeferral.stateRevisionDelta
       this.layoutRevision += publicationDeferral.layoutRevisionDelta
@@ -258,9 +263,20 @@ export class CollectionChangesManager<
         if (publication) {
           this.publishEvents(publication.changes, publication.layoutChanged)
         }
+        runAllCallbacks(publicationDeferral.afterPublication.splice(0))
       },
       discard: () => prepare(true),
     }
+  }
+
+  /** Run work only after a held coherent publication becomes public. */
+  public afterPublication(callback: () => void): void {
+    const publicationDeferral = this.publicationDeferral
+    if (publicationDeferral) {
+      publicationDeferral.afterPublication.push(callback)
+      return
+    }
+    callback()
   }
 
   private publishEvents(

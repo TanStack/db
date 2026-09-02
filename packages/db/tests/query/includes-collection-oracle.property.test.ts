@@ -52,9 +52,7 @@ type FacadeCandidateScanScenario = {
 
 class ThrowingUpdateIndex extends BasicIndex<number> {
   updateFailure: { error: unknown } | undefined
-  buildFailure:
-    | { error: unknown; stage: `before` | `after` }
-    | undefined
+  buildFailure: { error: unknown; stage: `before` | `after` } | undefined
   buildCalls = 0
 
   override update(key: number, oldItem: unknown, newItem: unknown): void {
@@ -1133,8 +1131,28 @@ describe(`Collection-valued includes oracle`, () => {
       const rootIndex = live.createIndex((row) => row.value, {
         indexType: ThrowingUpdateIndex,
       }) as ThrowingUpdateIndex
+      const pendingApplied = createDeferred<void>()
+      void pendingApplied.promise.catch(() => undefined)
+      const pendingFacadeSync = {
+        committed: true,
+        applicationStarted: false,
+        layoutChanged: false,
+        operations: [],
+        deletedKeys: new Set<string | number>(),
+        rowMetadataWrites: new Map([
+          [initialChild.id, { type: `set` as const, value: `pending` }],
+        ]),
+        collectionMetadataWrites: new Map(),
+        applied: pendingApplied,
+      }
+      facade._state.pendingSyncedTransactions.push(pendingFacadeSync)
+      facade._state.capturePreSyncVisibleState()
+      const recentlySyncedBeforeFailure = new Set(
+        facade._state.recentlySyncedKeys,
+      )
       const rootPublications: Array<unknown> = []
       const childPublications: Array<unknown> = []
+      const childReceiptStates: Array<boolean> = []
       const rootCallbackFacadeSnapshots: Array<{
         rows: Array<{ id: number; value: number }>
         stateRevision: number
@@ -1152,7 +1170,10 @@ describe(`Collection-valued includes oracle`, () => {
         { includeInitialState: false },
       )
       const childSubscription = facade.subscribeChanges(
-        (batch) => childPublications.push(...batch),
+        (batch) => {
+          childPublications.push(...batch)
+          childReceiptStates.push(pendingApplied.isPending())
+        },
         { includeInitialState: false },
       )
       const childObserver = createLiveQueryObserver(facade)
@@ -1164,10 +1185,11 @@ describe(`Collection-valued includes oracle`, () => {
       const rootLayoutRevisionBeforeFailure = live._layoutRevision
       const childStateRevisionBeforeFailure = facade._stateRevision
       const childLayoutRevisionBeforeFailure = facade._layoutRevision
-      rootIndex.updateFailure = { error: new Error(`root index failed`) }
+      const rootFailure = new Error(`root index failed`)
+      rootIndex.updateFailure = { error: rootFailure }
 
       try {
-        expect(() =>
+        const failure = captureFailure(() =>
           nodes.writeBatch([
             {
               type: `update`,
@@ -1182,7 +1204,8 @@ describe(`Collection-valued includes oracle`, () => {
               value: { ...initialSibling, value: 0 },
             },
           ]),
-        ).toThrow(`root index failed`)
+        )
+        expect(failure?.error).toBe(rootFailure)
         expect(live.get(1)!.value).toBe(1)
         expect([...rootIndex.equalityLookup(1)]).toEqual([1])
         expect([...rootIndex.equalityLookup(2)]).toEqual([])
@@ -1192,6 +1215,7 @@ describe(`Collection-valued includes oracle`, () => {
         ])
         expect(rootPublications).toEqual([])
         expect(childPublications).toEqual([])
+        expect(childReceiptStates).toEqual([])
         expect(rootCallbackFacadeSnapshots).toEqual([])
         expect(live._stateRevision).toBe(rootStateRevisionBeforeFailure)
         expect(live._layoutRevision).toBe(rootLayoutRevisionBeforeFailure)
@@ -1199,12 +1223,31 @@ describe(`Collection-valued includes oracle`, () => {
         expect(facade._layoutRevision).toBe(childLayoutRevisionBeforeFailure)
         expect(childObserver.getSnapshot()).toBe(observerBeforeFailure)
         expect(observerNotifications).toBe(0)
+        expect(facade._state.pendingSyncedTransactions).toHaveLength(1)
+        expect(facade._state.pendingSyncedTransactions[0]).toBe(
+          pendingFacadeSync,
+        )
+        expect(
+          facade._state.pendingSyncedTransactions[0]!.applied.isPending(),
+        ).toBe(true)
+        expect(facade._state.recentlySyncedKeys).toEqual(
+          recentlySyncedBeforeFailure,
+        )
+        await Promise.resolve()
+        expect(facade._state.recentlySyncedKeys).toEqual(
+          recentlySyncedBeforeFailure,
+        )
 
         rootIndex.updateFailure = undefined
         // Only the root changes on retry. The child deltas consumed by the
         // failed graph turn must remain staged until the whole publication
         // commits; the source will not emit them again.
         nodes.write(`update`, { ...initialParent, value: 3 })
+        expect(pendingApplied.isPending()).toBe(false)
+        await pendingApplied.promise
+        expect(facade._state.syncedMetadata.get(initialChild.id)).toBe(
+          `pending`,
+        )
         expect(live.get(1)!.value).toBe(3)
         expect([...rootIndex.equalityLookup(1)]).toEqual([])
         expect([...rootIndex.equalityLookup(3)]).toEqual([1])
@@ -1214,6 +1257,7 @@ describe(`Collection-valued includes oracle`, () => {
         ])
         expect(rootPublications).toHaveLength(1)
         expect(childPublications).toHaveLength(2)
+        expect(childReceiptStates).toEqual([true])
         expect(rootCallbackFacadeSnapshots).toEqual([
           {
             rows: [
@@ -1518,19 +1562,18 @@ describe(`Collection-valued includes oracle`, () => {
           { id: 10, value: 2 },
           { id: 11, value: 20 },
         ])
-        const rootPublicationsAfterRecovery: Array<
-          Array<ProjectedRootChange>
-        > = [
-          [],
+        const rootPublicationsAfterRecovery: Array<Array<ProjectedRootChange>> =
           [
-            {
-              type: `update`,
-              key: 1,
-              value: { id: 1, value: 5, preservesFacade: true },
-              previousValue: { id: 1, value: 1, preservesFacade: true },
-            },
-          ],
-        ]
+            [],
+            [
+              {
+                type: `update`,
+                key: 1,
+                value: { id: 1, value: 5, preservesFacade: true },
+                previousValue: { id: 1, value: 1, preservesFacade: true },
+              },
+            ],
+          ]
         const childPublicationsAfterRecovery: Array<
           Array<ProjectedNodeChange>
         > = [
