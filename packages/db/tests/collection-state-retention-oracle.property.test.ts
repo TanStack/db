@@ -36,6 +36,10 @@ const retainedRowArbitrary = fc.record({
   value: fc.integer({ min: -2, max: 2 }),
 })
 
+function snapshotRetainedRow(row: RetainedRow): RetainedRow {
+  return { id: row.id, value: row.value }
+}
+
 const retentionActionArbitrary: fc.Arbitrary<RetentionAction> = fc.oneof(
   {
     weight: 4,
@@ -114,18 +118,23 @@ function applyAction(
     case `insert`: {
       const previous = model.get(action.row.id)
       if (previous !== undefined && previous.value !== action.row.value) {
-        expect(() => sync.write({ type: `insert`, value: action.row })).toThrow(
-          DuplicateKeySyncError,
-        )
+        expect(() =>
+          sync.write({
+            type: `insert`,
+            value: snapshotRetainedRow(action.row),
+          }),
+        ).toThrow(DuplicateKeySyncError)
         break
       }
-      sync.write({ type: `insert`, value: action.row })
-      model.set(action.row.id, action.row)
+      const expectedRow = snapshotRetainedRow(action.row)
+      sync.write({ type: `insert`, value: snapshotRetainedRow(action.row) })
+      model.set(expectedRow.id, expectedRow)
       break
     }
     case `update`: {
-      sync.write({ type: action.type, value: action.row })
-      model.set(action.row.id, action.row)
+      const expectedRow = snapshotRetainedRow(action.row)
+      sync.write({ type: action.type, value: snapshotRetainedRow(action.row) })
+      model.set(expectedRow.id, expectedRow)
       break
     }
     case `delete`:
@@ -136,8 +145,9 @@ function applyAction(
       sync.truncate()
       model.clear()
       for (const row of action.rows) {
-        sync.write({ type: `insert`, value: row })
-        model.set(row.id, row)
+        const expectedRow = snapshotRetainedRow(row)
+        sync.write({ type: `insert`, value: snapshotRetainedRow(row) })
+        model.set(expectedRow.id, expectedRow)
       }
       break
     case `restart`:
@@ -187,11 +197,14 @@ async function runRetentionHistory(
           id: action.row.id,
           value: (model.get(action.row.id)?.value ?? action.row.value) + 1,
         }
+        const expectedTriggerRow = snapshotRetainedRow(triggerRow)
         const restartedRow = {
           id: (action.row.id + 1) % 4,
           value: action.row.value + 1,
         }
+        const expectedRestartedRow = snapshotRetainedRow(restartedRow)
         const retainedMarker = { id: -1, value: action.row.value }
+        const expectedRetainedMarker = snapshotRetainedRow(retainedMarker)
         let cleanup: Promise<void> | undefined
         let restarted = false
         let restartedSync: SyncActions | undefined
@@ -229,7 +242,7 @@ async function runRetentionHistory(
                 .map(({ id, value }) => ({ id, value }))
                 .sort((left, right) => left.id - right.id),
             })
-            if (changes.some(({ key }) => key === restartedRow.id)) {
+            if (changes.some(({ key }) => key === expectedRestartedRow.id)) {
               queueMicrotask(() => settlementTimeline.push(`publication`))
             }
             if (restarted) return
@@ -238,7 +251,10 @@ async function runRetentionHistory(
             collection.startSyncImmediate()
             restartedSync = harness.sync
             restartedSync.begin()
-            restartedSync.write({ type: `insert`, value: restartedRow })
+            restartedSync.write({
+              type: `insert`,
+              value: snapshotRetainedRow(restartedRow),
+            })
             if (action.commitPhase === `insideListener`) {
               restartedReceipt = restartedSync.commit()
               if (restartedReceipt !== true) {
@@ -254,14 +270,17 @@ async function runRetentionHistory(
               // publication state so the old publication tail cannot clear it.
               // The batch assertions below exercise the public restart path.
               collection._state.preSyncVisibleState.set(-1, retainedMarker)
-              collection._state.recentlySyncedKeys.add(restartedRow.id)
+              collection._state.recentlySyncedKeys.add(expectedRestartedRow.id)
             }
           },
           { includeInitialState: false },
         )
 
         oldSync.begin()
-        oldSync.write({ type: `update`, value: triggerRow })
+        oldSync.write({
+          type: `update`,
+          value: snapshotRetainedRow(triggerRow),
+        })
         expect(oldSync.commit()).toBe(true)
         expect(restarted).toBe(true)
         expect(restartedSync).toBeDefined()
@@ -287,19 +306,19 @@ async function runRetentionHistory(
           ])
         } else {
           expect(collection._state.preSyncVisibleState).toEqual(
-            new Map([[-1, retainedMarker]]),
+            new Map([[-1, expectedRetainedMarker]]),
           )
           expect(collection._state.recentlySyncedKeys).toEqual(
-            new Set([restartedRow.id]),
+            new Set([expectedRestartedRow.id]),
           )
           expect(collection._state.hasReceivedFirstCommit).toBe(false)
 
           await Promise.resolve()
           expect(collection._state.preSyncVisibleState).toEqual(
-            new Map([[-1, retainedMarker]]),
+            new Map([[-1, expectedRetainedMarker]]),
           )
           expect(collection._state.recentlySyncedKeys).toEqual(
-            new Set([restartedRow.id]),
+            new Set([expectedRestartedRow.id]),
           )
           expect(collection._state.hasReceivedFirstCommit).toBe(false)
 
@@ -307,21 +326,21 @@ async function runRetentionHistory(
           expect(collection._state.preSyncVisibleState.size).toBe(0)
           expect(collection._state.hasReceivedFirstCommit).toBe(true)
           expect(collection._state.recentlySyncedKeys).toEqual(
-            new Set([restartedRow.id]),
+            new Set([expectedRestartedRow.id]),
           )
           await Promise.resolve()
           expect(collection._state.recentlySyncedKeys.size).toBe(0)
         }
         const triggerRows = new Map(model)
-        triggerRows.set(triggerRow.id, triggerRow)
+        triggerRows.set(expectedTriggerRow.id, expectedTriggerRow)
         expect(batches).toEqual([
           {
             changes: [
               {
                 type: triggerType,
-                key: triggerRow.id,
-                row: triggerRow,
-                previousRow: model.get(triggerRow.id),
+                key: expectedTriggerRow.id,
+                row: expectedTriggerRow,
+                previousRow: model.get(expectedTriggerRow.id),
               },
             ],
             rows: [...triggerRows.values()].sort(
@@ -336,19 +355,19 @@ async function runRetentionHistory(
             changes: [
               {
                 type: `insert`,
-                key: restartedRow.id,
-                row: restartedRow,
+                key: expectedRestartedRow.id,
+                row: expectedRestartedRow,
                 previousRow: undefined,
               },
             ],
-            rows: [restartedRow],
+            rows: [expectedRestartedRow],
           },
         ])
         subscription.unsubscribe()
 
         await cleanup
         model.clear()
-        model.set(restartedRow.id, restartedRow)
+        model.set(expectedRestartedRow.id, expectedRestartedRow)
       } else {
         applyAction(action, model, harness.sync)
       }
