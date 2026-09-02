@@ -13,9 +13,10 @@ import { runTrace } from '../trace-runner.js'
 import { oraclePropertyOptions } from '../oracle-config.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { Collection } from '../../src/collection/index.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
-import type { ChangeMessage, SyncConfig } from '../../src/types.js'
+import type { ChangeMessage, SyncConfig, UtilsRecord } from '../../src/types.js'
 
 type ParentRow = {
   id: number
@@ -590,9 +591,10 @@ function expectedPendingTransition(
   }
 }
 
-function pendingPublicationEvent(
-  change: ChangeMessage<PendingPublicationRow, number>,
-): PendingPublicationEvent {
+function pendingPublicationEvent<
+  TRow extends PendingPublicationRow,
+  TKey extends string | number,
+>(change: ChangeMessage<TRow, TKey>): PendingPublicationEvent {
   const value = { id: change.value.id, value: change.value.value }
   if (change.type !== `update`) {
     return { type: change.type, key: Number(change.key), value }
@@ -608,14 +610,25 @@ function pendingPublicationEvent(
   }
 }
 
-function createPendingPublicationQuery(
-  source: Collection<PendingPublicationRow, number>,
+function createPendingPublicationQuery<
+  TRow extends PendingPublicationRow,
+  TKey extends string | number,
+  TUtils extends UtilsRecord,
+  TSchema extends StandardSchemaV1,
+  TInput extends object,
+>(
+  source: Collection<TRow, TKey, TUtils, TSchema, TInput>,
   shape: PendingPublicationShape,
 ) {
   return createLiveQueryCollection({
     id: `pending-publication-${shape}-${nextCollectionId++}`,
     query: (query) => {
-      const rows = query.from({ row: source })
+      const rows = query.from({
+        row: source as unknown as Collection<
+          PendingPublicationRow,
+          string | number
+        >,
+      })
       if (shape === `orderBy`) {
         return rows.orderBy(({ row }) => row.value)
       }
@@ -628,8 +641,14 @@ function createPendingPublicationQuery(
   })
 }
 
-function observePendingPublication(
-  collection: Collection<PendingPublicationRow, number>,
+function observePendingPublication<
+  TRow extends PendingPublicationRow,
+  TKey extends string | number,
+  TUtils extends UtilsRecord,
+  TSchema extends StandardSchemaV1,
+  TInput extends object,
+>(
+  collection: Collection<TRow, TKey, TUtils, TSchema, TInput>,
   shape: PendingPublicationShape,
 ) {
   const batches: Array<Array<PendingPublicationEvent>> = []
@@ -645,7 +664,7 @@ function observePendingPublication(
   }
   const subscription = collection.subscribeChanges(
     (changes) => {
-      batches.push(changes.map(pendingPublicationEvent))
+      batches.push(changes.map((change) => pendingPublicationEvent(change)))
       callbackSnapshots.push(currentRows())
     },
     { includeInitialState: false },
@@ -992,7 +1011,7 @@ describe(`source publication across pending derived mutations`, () => {
       const observed = observePendingPublication(q2, `select`)
       const persistence = createDeferred<void>()
       const settlementError = new Error(`ordinary source prefix rollback`)
-      const mutate = createOptimisticAction({
+      const mutate = createOptimisticAction<void>({
         onMutate: () => {
           source.update(1, (draft) => {
             draft.value = 11

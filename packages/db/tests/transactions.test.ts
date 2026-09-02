@@ -257,13 +257,13 @@ describe(`Transactions`, () => {
     }
   })
   it.each([
-    [`Error`, () => new Error(`late persistence rejection`)],
-    [`undefined`, () => undefined],
-    [`false`, () => false],
-    [`zero`, () => 0],
-    [`NaN`, () => Number.NaN],
-    [`string`, () => `late persistence rejection`],
-    [`object`, () => ({ late: true })],
+    [`Error`, (): unknown => new Error(`late persistence rejection`)],
+    [`undefined`, (): unknown => undefined],
+    [`false`, (): unknown => false],
+    [`zero`, (): unknown => 0],
+    [`NaN`, (): unknown => Number.NaN],
+    [`string`, (): unknown => `late persistence rejection`],
+    [`object`, (): unknown => ({ late: true })],
   ] as const)(
     `ignores a late %s persistence rejection after rollback wins`,
     async (reasonName, createReason) => {

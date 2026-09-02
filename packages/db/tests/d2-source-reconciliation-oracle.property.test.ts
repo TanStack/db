@@ -525,7 +525,7 @@ it(`replaces the retained live-query source row after an ordered truncate`, asyn
         .limit(1),
     startSync: true,
   })
-  const batches: Array<Array<ChangeMessage<SourceRow, number>>> = []
+  const batches: Array<Array<ChangeMessage<SourceRow, SourceKey>>> = []
 
   try {
     await live.preload()

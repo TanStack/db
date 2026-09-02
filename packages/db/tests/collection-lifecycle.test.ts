@@ -12,6 +12,16 @@ import {
 const originalSetTimeout = global.setTimeout
 const originalClearTimeout = global.clearTimeout
 
+function getChangesManager(collection: object): {
+  emitEmptyReadyEvent: () => void
+} {
+  return (
+    collection as unknown as {
+      _changes: { emitEmptyReadyEvent: () => void }
+    }
+  )._changes
+}
+
 describe(`Collection Lifecycle Management`, () => {
   let mockSetTimeout: ReturnType<typeof vi.fn>
   let mockClearTimeout: ReturnType<typeof vi.fn>
@@ -634,18 +644,17 @@ describe(`Collection Lifecycle Management`, () => {
             syncError: collection._lifecycle.getSyncError(),
           })
         })
+        const changes = getChangesManager(collection)
         const originalEmitEmptyReadyEvent =
-          collection._changes.emitEmptyReadyEvent.bind(collection._changes)
-        vi.spyOn(collection._changes, `emitEmptyReadyEvent`).mockImplementation(
-          () => {
-            transitionTrace.push({
-              kind: `dependent-ready`,
-              status: collection.status,
-              syncError: collection._lifecycle.getSyncError(),
-            })
-            originalEmitEmptyReadyEvent()
-          },
-        )
+          changes.emitEmptyReadyEvent.bind(changes)
+        vi.spyOn(changes, `emitEmptyReadyEvent`).mockImplementation(() => {
+          transitionTrace.push({
+            kind: `dependent-ready`,
+            status: collection.status,
+            syncError: collection._lifecycle.getSyncError(),
+          })
+          originalEmitEmptyReadyEvent()
+        })
 
         let didThrow = false
         let thrown: unknown
@@ -696,7 +705,10 @@ describe(`Collection Lifecycle Management`, () => {
         startSync: false,
         sync: { sync: () => {} },
       })
-      const readyEvent = vi.spyOn(collection._changes, `emitEmptyReadyEvent`)
+      const readyEvent = vi.spyOn(
+        getChangesManager(collection),
+        `emitEmptyReadyEvent`,
+      )
       const firstReadyStatuses: Array<string> = []
       collection.onFirstReady(() => {
         firstReadyStatuses.push(collection.status)
@@ -727,7 +739,10 @@ describe(`Collection Lifecycle Management`, () => {
         startSync: false,
         sync: { sync: () => {} },
       })
-      const readyEvent = vi.spyOn(collection._changes, `emitEmptyReadyEvent`)
+      const readyEvent = vi.spyOn(
+        getChangesManager(collection),
+        `emitEmptyReadyEvent`,
+      )
       const firstReady = vi.fn()
       collection.onFirstReady(firstReady)
       collection.on(`status:ready`, () => {
@@ -763,7 +778,10 @@ describe(`Collection Lifecycle Management`, () => {
           },
         },
       })
-      const readyEvent = vi.spyOn(collection._changes, `emitEmptyReadyEvent`)
+      const readyEvent = vi.spyOn(
+        getChangesManager(collection),
+        `emitEmptyReadyEvent`,
+      )
       collection.onFirstReady(() => {
         firstReadyStatuses.push(collection.status)
       })
@@ -804,7 +822,10 @@ describe(`Collection Lifecycle Management`, () => {
           },
         },
       })
-      const readyEvent = vi.spyOn(collection._changes, `emitEmptyReadyEvent`)
+      const readyEvent = vi.spyOn(
+        getChangesManager(collection),
+        `emitEmptyReadyEvent`,
+      )
       collection.onFirstReady(() => {
         trace.push(`first failure:${collection.status}`)
         throw firstFailure
