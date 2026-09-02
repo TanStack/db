@@ -459,6 +459,76 @@ describe(`live query scheduler`, () => {
     },
   )
 
+  it(`preserves a filtered row-listener failure after later delivery`, async () => {
+    let begin!: () => void
+    let write!: (message: { type: `insert`; value: User }) => void
+    let commit!: () => void
+    const failure = new Error(`filtered source listener failed`)
+    const filteredCalls = vi.fn()
+    const laterListener = vi.fn()
+    const source = createCollection<User>({
+      id: `filtered-throwing-listener-source`,
+      getKey: (user) => user.id,
+      startSync: true,
+      sync: {
+        sync: (actions) => {
+          begin = actions.begin
+          write = actions.write
+          commit = () => {
+            actions.commit()
+          }
+          actions.markReady()
+        },
+      },
+    })
+    const throwingSubscription = source.subscribeChanges(
+      (changes) => {
+        filteredCalls(changes)
+        throw failure
+      },
+      {
+        includeInitialState: false,
+        where: (user) => eq(user.name, `Ada`),
+      },
+    )
+    const laterSubscription = source.subscribeChanges(laterListener, {
+      includeInitialState: false,
+    })
+    const live = createLiveQueryCollection({
+      id: `filtered-throwing-listener-dependent`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ user: source })
+          .select(({ user }) => ({ id: user.id, name: user.name })),
+    })
+
+    try {
+      await live.preload()
+      begin()
+      write({ type: `insert`, value: { id: 1, name: `Ada` } })
+      expect(() => commit()).toThrow(failure)
+      expect(filteredCalls).toHaveBeenCalledOnce()
+      expect(filteredCalls.mock.calls[0]?.[0]).toEqual([
+        expect.objectContaining({ type: `insert`, key: 1 }),
+      ])
+      expect(laterListener).toHaveBeenCalledOnce()
+      expect(live.get(1)).toEqual(expect.objectContaining({ name: `Ada` }))
+
+      begin()
+      write({ type: `insert`, value: { id: 2, name: `Grace` } })
+      expect(() => commit()).not.toThrow()
+      expect(filteredCalls).toHaveBeenCalledOnce()
+      expect(laterListener).toHaveBeenCalledTimes(2)
+      expect(live.get(2)).toEqual(expect.objectContaining({ name: `Grace` }))
+    } finally {
+      throwingSubscription.unsubscribe()
+      laterSubscription.unsubscribe()
+      await live.cleanup()
+      await source.cleanup()
+    }
+  })
+
   it(`keeps a nested ready failure when a later outer listener throws`, async () => {
     let markInnerReady!: () => void
     const readyFailure = new Error(`nested ready listener failed`)

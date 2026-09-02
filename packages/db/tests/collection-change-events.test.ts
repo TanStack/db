@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
-import { currentStateAsChanges } from '../src/collection/change-events.js'
+import {
+  createFilterFunctionFromExpression,
+  currentStateAsChanges,
+} from '../src/collection/change-events.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
 import { DEFAULT_COMPARE_OPTIONS } from '../src/utils.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
@@ -12,6 +15,26 @@ interface TestUser {
   score: number
   status: `active` | `inactive`
 }
+
+it(`treats predicate evaluation failures as nonmatches`, () => {
+  const filter = createFilterFunctionFromExpression<TestUser>(
+    new Func(`eq`, [new PropRef([`status`]), new Value(`active`)]),
+  )
+  const row = {
+    id: `1`,
+    name: `Ada`,
+    age: 36,
+    score: 100,
+    status: `active`,
+  } as TestUser
+  Object.defineProperty(row, `status`, {
+    get: () => {
+      throw new Error(`predicate evaluation failed`)
+    },
+  })
+
+  expect(filter(row)).toBe(false)
+})
 
 describe(`currentStateAsChanges`, () => {
   let mockSync: ReturnType<typeof vi.fn>
