@@ -813,6 +813,13 @@ describe(`Collection Lifecycle Management`, () => {
         trace.push(`first later:${collection.status}`)
       })
       const firstPreload = collection.preload()
+      let firstPreloadSettled = false
+      void firstPreload.then(() => {
+        firstPreloadSettled = true
+      })
+      await Promise.resolve()
+      expect(collection.status).toBe(`loading`)
+      expect(firstPreloadSettled).toBe(false)
 
       let thrown: unknown
       try {
@@ -835,10 +842,26 @@ describe(`Collection Lifecycle Management`, () => {
       expect(trace).toEqual([`first failure:ready`, `first later:ready`])
 
       const secondPreload = collection.preload()
+      let secondPreloadSettled = false
+      void secondPreload.then(() => {
+        secondPreloadSettled = true
+      })
       expect(secondPreload).not.toBe(firstPreload)
       expect(readyCallbacks).toHaveLength(2)
+      await Promise.resolve()
+      expect(collection.status).toBe(`loading`)
+      expect(secondPreloadSettled).toBe(false)
+
+      readyCallbacks[0]!()
+      await Promise.resolve()
+      expect(collection.status).toBe(`loading`)
+      expect(secondPreloadSettled).toBe(false)
+      expect(trace).toEqual([`first failure:ready`, `first later:ready`])
+      expect(readyEvent).toHaveBeenCalledOnce()
+
       readyCallbacks[1]!()
       await expect(secondPreload).resolves.toBeUndefined()
+      expect(secondPreloadSettled).toBe(true)
 
       expect(trace).toEqual([
         `first failure:ready`,
