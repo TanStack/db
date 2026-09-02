@@ -15,7 +15,12 @@ import {
 import { evaluateReferenceExpression } from '../reference-expression.js'
 import { TraceAssertionError } from '../trace-runner.js'
 import type { BasicExpression } from '../../src/query/ir.js'
-import type { LoadSubsetOptions, SyncAppliedReceipt } from '../../src/types.js'
+import type {
+  LoadSubsetFn,
+  LoadSubsetOptions,
+  LoadSubsetResult,
+  SyncAppliedReceipt,
+} from '../../src/types.js'
 
 type PredicateSpec =
   | { kind: `all` }
@@ -42,6 +47,8 @@ type ConcurrentAsyncScenario = {
   requestedValues: ReadonlyArray<ReadonlyArray<number>>
   deliveryOrder: `forward` | `reverse`
 }
+
+type ResultWrapperMode = `direct` | `await` | `rebuild`
 
 type RejectedWaiterScenario = {
   covering: ReadonlyArray<number>
@@ -72,17 +79,15 @@ type OptimisticDerivedRow = {
 }
 
 type CoverageSubject = {
-  loadSubset: (options: LoadSubsetOptions) => true | Promise<void>
+  loadSubset: LoadSubsetFn
   reset?: () => void
 }
 
-type CoverageSubjectFactory = (
-  recordLoad: (options: LoadSubsetOptions) => true | Promise<void>,
-) => CoverageSubject
+type CoverageSubjectFactory = (recordLoad: LoadSubsetFn) => CoverageSubject
 
-function requirePendingAppliedReceipt(
-  receipt: SyncAppliedReceipt,
-): Promise<void> {
+function requirePendingAppliedReceipt<T>(
+  receipt: true | Promise<T>,
+): Promise<T> {
   if (receipt === true) {
     throw new Error(`Expected an asynchronous subset load`)
   }
@@ -226,6 +231,12 @@ const concurrentAsyncScenarioArbitrary: fc.Arbitrary<ConcurrentAsyncScenario> =
     }),
     deliveryOrder: fc.constantFrom(`forward`, `reverse`),
   })
+
+const resultWrapperModeArbitrary = fc.constantFrom<ResultWrapperMode>(
+  `direct`,
+  `await`,
+  `rebuild`,
+)
 
 const rejectedWaiterScenarioArbitrary: fc.Arbitrary<RejectedWaiterScenario> =
   nonEmptyInValuesArbitrary.chain((covering) =>
@@ -940,7 +951,9 @@ async function runAsyncScenario(
   const secondSet = new Set(scenario.second)
   const secondCoveredByFirst = isSubset(secondSet, firstSet)
   expect(requests).toHaveLength(secondCoveredByFirst ? 1 : 2)
-  expect(firstResult === secondResult).toBe(secondCoveredByFirst)
+  expect(firstResult === secondResult).toBe(
+    secondCoveredByFirst && setsEqual(secondSet, firstSet),
+  )
 
   if (scenario.resetBeforeSettlement) subject.reset?.()
 
@@ -1008,23 +1021,29 @@ async function runAsyncScenario(
 
 async function runConcurrentAsyncScenario(
   scenario: ConcurrentAsyncScenario,
+  wrapperMode: ResultWrapperMode = `direct`,
 ): Promise<void> {
   const transports: Array<{
     values: Set<number>
-    deferred: ReturnType<typeof createDeferred<void>>
-    result?: Promise<void>
+    deferred: ReturnType<typeof createDeferred<LoadSubsetResult>>
   }> = []
-  const subject = createDeduplicatedCoverageSubject((options) => {
-    const deferred = createDeferred<void>()
+  const deduplicated = createDeduplicatedCoverageSubject((options) => {
+    const deferred = createDeferred<LoadSubsetResult>()
     transports.push({ values: matchingValues(options.where), deferred })
     return deferred.promise
   })
-  const callerResults: Array<Promise<void>> = []
+  const subject = wrapLoadSubsetResult(deduplicated, wrapperMode)
+  const callerResults: Array<Promise<void | LoadSubsetResult>> = []
+  const callerHasExactAuthority: Array<boolean> = []
 
   for (const values of scenario.requestedValues) {
     const requested = new Set(values)
     const coveringIndex = transports.findIndex(({ values: loaded }) =>
       isSubset(requested, loaded),
+    )
+    callerHasExactAuthority.push(
+      coveringIndex === -1 ||
+        setsEqual(requested, transports[coveringIndex]!.values),
     )
     const transportCount = transports.length
     const result = subject.loadSubset({
@@ -1038,10 +1057,8 @@ async function runConcurrentAsyncScenario(
 
     if (coveringIndex === -1) {
       expect(transports).toHaveLength(transportCount + 1)
-      transports.at(-1)!.result = result
     } else {
       expect(transports).toHaveLength(transportCount)
-      expect(result).toBe(transports[coveringIndex]!.result)
     }
   }
 
@@ -1049,8 +1066,37 @@ async function runConcurrentAsyncScenario(
     scenario.deliveryOrder === `forward`
       ? transports
       : [...transports].reverse()
-  for (const { deferred } of delivery) deferred.resolve()
-  await Promise.all(callerResults)
+  for (const { deferred } of delivery) deferred.resolve({ hasMore: false })
+  const results = await Promise.all(callerResults)
+  for (const [index, result] of results.entries()) {
+    expect(result?.hasMore).toBe(
+      callerHasExactAuthority[index] ? false : undefined,
+    )
+  }
+}
+
+function wrapLoadSubsetResult(
+  subject: CoverageSubject,
+  mode: ResultWrapperMode,
+): CoverageSubject {
+  if (mode === `direct`) return subject
+
+  return {
+    loadSubset: async (options) => {
+      const result = subject.loadSubset(options)
+      if (result === true) return undefined
+      const sourceResult = await result
+      if (mode === `rebuild` && sourceResult !== undefined) {
+        return { hasMore: sourceResult.hasMore }
+      }
+      return sourceResult
+    },
+    reset: subject.reset,
+  }
+}
+
+function setsEqual(left: ReadonlySet<number>, right: ReadonlySet<number>) {
+  return left.size === right.size && isSubset(left, right)
 }
 
 async function runAsyncScenarioWithKnownFailures(
@@ -1383,7 +1429,7 @@ async function expectCoverageWaitsForAppliedRows() {
     await Promise.resolve()
 
     const concurrent = source._sync.loadSubset({})
-    expect(concurrent).toBe(first)
+    expect(concurrent).toBeInstanceOf(Promise)
     expect(transportCalls).toBe(1)
     expect(source.get(`r1`)).toBeUndefined()
 
@@ -1684,7 +1730,7 @@ async function expectAbortDuringPublicationDoesNotCancelReceipt() {
   try {
     persistence.resolve()
     await transaction.isPersisted.promise
-    await expect(load).resolves.toBeUndefined()
+    await expect(load).resolves.toMatchObject({ extent: `unknown` })
     expect(controller.signal.aborted).toBe(true)
     expect(source.get(`row`)).toEqual(expect.objectContaining({ id: `row` }))
   } finally {
@@ -2603,6 +2649,23 @@ describe(`loadSubset coverage oracle`, () => {
     ).rejects.toThrow()
   })
 
+  it.each([
+    `direct`,
+    `await`,
+    `rebuild`,
+  ] satisfies ReadonlyArray<ResultWrapperMode>)(
+    `keeps caller-relative source extent through the %s result wrapper`,
+    async (wrapperMode) => {
+      await runConcurrentAsyncScenario(
+        {
+          requestedValues: [[1, 2], [1], [1, 2]],
+          deliveryOrder: `forward`,
+        },
+        wrapperMode,
+      )
+    },
+  )
+
   it(`discovered trace: settled predicate regions cover their union`, async () => {
     await expectAssertionFailure(runAsyncScenario, {
       checkpoint: 2,
@@ -2643,7 +2706,7 @@ describe(`loadSubset coverage oracle`, () => {
     runAsyncScenarioWithKnownFailures,
   )
 
-  fcTest.prop([concurrentAsyncScenarioArbitrary], {
+  fcTest.prop([concurrentAsyncScenarioArbitrary, resultWrapperModeArbitrary], {
     numRuns: coverageScenarioRuns,
     seed: 1661,
   })(
@@ -2651,7 +2714,10 @@ describe(`loadSubset coverage oracle`, () => {
     runConcurrentAsyncScenario,
   )
 
-  fcTest.prop([concurrentAsyncScenarioArbitrary], coverageRandomParameters)(
+  fcTest.prop(
+    [concurrentAsyncScenarioArbitrary, resultWrapperModeArbitrary],
+    coverageRandomParameters,
+  )(
     `deduplicates three or more concurrent requests for a random or replayed seed`,
     runConcurrentAsyncScenario,
   )

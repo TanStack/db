@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
@@ -580,6 +580,376 @@ describe(`CollectionSubscription status tracking`, () => {
     } finally {
       replay.resolve()
       if (!unsubscribed) subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it.each([`releaseSnapshot`, `unsubscribe`] as const)(
+    `retries a failed deferred release through %s`,
+    async (releaseMode) => {
+      const loads: Array<LoadSubsetOptions> = []
+      const unloads: Array<LoadSubsetOptions> = []
+      const failure = new Error(`release failed`)
+      const collection = createCollection<{ id: string }>({
+        id: `failed-deferred-subscription-release-${releaseMode}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: false,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options) => {
+                loads.push(options)
+                return Promise.resolve()
+              },
+              unloadSubset: (options) => {
+                unloads.push(options)
+                if (unloads.length === 1) throw failure
+              },
+            }
+          },
+        },
+      })
+
+      expect(collection._deferSyncStart()).toBe(true)
+      const subscription = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      const where = new Func(`eq`, [
+        new PropRef([`id`]),
+        new Value(`requested`),
+      ])
+      const firstRelease = () => {
+        if (releaseMode === `releaseSnapshot`) {
+          subscription.releaseSnapshot(where)
+        } else {
+          subscription.unsubscribe()
+        }
+      }
+
+      try {
+        subscription.requestSnapshot({
+          where,
+          limit: 1,
+          optimizedOnly: false,
+        })
+        collection._resumeSyncStart()
+        await flushPromises()
+
+        expect(loads).toHaveLength(1)
+        let releaseError: unknown
+        try {
+          firstRelease()
+        } catch (error) {
+          releaseError = error
+        }
+        expect(releaseError).toBe(failure)
+        expect(() => subscription.unsubscribe()).not.toThrow()
+
+        expect(unloads).toHaveLength(2)
+        expect(unloads[0]).toBe(loads[0])
+        expect(unloads[1]).toBe(loads[0])
+
+        subscription.unsubscribe()
+        expect(unloads).toHaveLength(2)
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it.each([`return`, `resolve`] as const)(
+    `publishes active subset ownership before a reentrant unsubscribe (%s)`,
+    async (resultKind) => {
+      const loads: Array<LoadSubsetOptions> = []
+      const unloads: Array<LoadSubsetOptions> = []
+      let unsubscribeDuringLoad = () => {}
+      const collection = createCollection<{ id: string }>({
+        id: `reentrant-active-subscription-release-${resultKind}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options) => {
+                loads.push(options)
+                unsubscribeDuringLoad()
+                return resultKind === `return` ? true : Promise.resolve()
+              },
+              unloadSubset: (options) => {
+                // Ignore an unknown acquisition, as a keyed adapter would.
+                if (options === loads[0]) unloads.push(options)
+              },
+            }
+          },
+        },
+      })
+      const subscription = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      unsubscribeDuringLoad = () => subscription.unsubscribe()
+
+      try {
+        subscription.requestSnapshot({ limit: 1, optimizedOnly: false })
+        await flushPromises()
+
+        expect(loads).toHaveLength(1)
+        expect(unloads).toEqual([loads[0]])
+
+        subscription.unsubscribe()
+        expect(unloads).toHaveLength(1)
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it(`releases active subset ownership reentrantly without an unload hook`, async () => {
+    const loads: Array<LoadSubsetOptions> = []
+    let unsubscribeDuringLoad = () => {}
+    const collection = createCollection<{ id: string }>({
+      id: `reentrant-active-subscription-release-without-hook`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              unsubscribeDuringLoad()
+              return true
+            },
+          }
+        },
+      },
+    })
+    const unloadSubset = vi.spyOn(collection._sync, `unloadSubset`)
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    unsubscribeDuringLoad = () => subscription.unsubscribe()
+
+    try {
+      subscription.requestSnapshot({ limit: 1, optimizedOnly: false })
+
+      expect(loads).toHaveLength(1)
+      expect(unloadSubset).toHaveBeenCalledTimes(1)
+      expect(unloadSubset).toHaveBeenCalledWith(loads[0])
+
+      subscription.unsubscribe()
+      expect(unloadSubset).toHaveBeenCalledTimes(1)
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it.each([`return`, `resolve`] as const)(
+    `retries an active reentrant release that the adapter catches (%s)`,
+    async (resultKind) => {
+      const loads: Array<LoadSubsetOptions> = []
+      const unloads: Array<LoadSubsetOptions> = []
+      const failure = new Error(`reentrant active release failed`)
+      let releaseError: unknown
+      let unsubscribeDuringLoad = () => {}
+      const collection = createCollection<{ id: string }>({
+        id: `reentrant-active-subscription-release-retry-${resultKind}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options) => {
+                loads.push(options)
+                try {
+                  unsubscribeDuringLoad()
+                } catch (error) {
+                  releaseError = error
+                }
+                return resultKind === `return` ? true : Promise.resolve()
+              },
+              unloadSubset: (options) => {
+                unloads.push(options)
+                if (unloads.length === 1) throw failure
+              },
+            }
+          },
+        },
+      })
+      const subscription = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      unsubscribeDuringLoad = () => subscription.unsubscribe()
+
+      try {
+        subscription.requestSnapshot({ limit: 1, optimizedOnly: false })
+        await flushPromises()
+
+        expect(releaseError).toBe(failure)
+        expect(unloads).toEqual([loads[0]])
+        expect(() => subscription.unsubscribe()).not.toThrow()
+        expect(unloads).toEqual([loads[0], loads[0]])
+
+        subscription.unsubscribe()
+        expect(unloads).toHaveLength(2)
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it(`retries an active reentrant release that escapes the adapter`, async () => {
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const failure = new Error(`reentrant active release escaped`)
+    let unsubscribeDuringLoad = () => {}
+    const collection = createCollection<{ id: string }>({
+      id: `reentrant-active-subscription-release-escaped`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              unsubscribeDuringLoad()
+              return true
+            },
+            unloadSubset: (options) => {
+              unloads.push(options)
+              if (unloads.length === 1) throw failure
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    unsubscribeDuringLoad = () => subscription.unsubscribe()
+
+    try {
+      expect(() =>
+        subscription.requestSnapshot({ limit: 1, optimizedOnly: false }),
+      ).toThrow(failure)
+      expect(unloads).toEqual([loads[0]])
+
+      expect(() => subscription.unsubscribe()).not.toThrow()
+      expect(unloads).toEqual([loads[0], loads[0]])
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`uses the acquired options when deferred load reentrantly unsubscribes`, async () => {
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    let unsubscribeDuringLoad = () => {}
+    const collection = createCollection<{ id: string }>({
+      id: `reentrant-deferred-subscription-release`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: false,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              unsubscribeDuringLoad()
+              return Promise.resolve()
+            },
+            unloadSubset: (options) => {
+              // Model an adapter that silently ignores an unknown acquisition.
+              if (options === loads[0]) unloads.push(options)
+            },
+          }
+        },
+      },
+    })
+
+    expect(collection._deferSyncStart()).toBe(true)
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    unsubscribeDuringLoad = () => subscription.unsubscribe()
+
+    try {
+      subscription.requestSnapshot({ limit: 1, optimizedOnly: false })
+      collection._resumeSyncStart()
+      await flushPromises()
+
+      expect(loads).toHaveLength(1)
+      expect(unloads).toEqual([loads[0]])
+
+      subscription.unsubscribe()
+      expect(unloads).toHaveLength(1)
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`retries the acquired options when deferred load reentrant release throws`, async () => {
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const failure = new Error(`reentrant release failed`)
+    let unsubscribeDuringLoad = () => {}
+    const collection = createCollection<{ id: string }>({
+      id: `reentrant-deferred-subscription-release-failure`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: false,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              unsubscribeDuringLoad()
+              return Promise.resolve()
+            },
+            unloadSubset: (options) => {
+              unloads.push(options)
+              if (unloads.length === 1) throw failure
+            },
+          }
+        },
+      },
+    })
+
+    expect(collection._deferSyncStart()).toBe(true)
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    unsubscribeDuringLoad = () => subscription.unsubscribe()
+
+    try {
+      subscription.requestSnapshot({ limit: 1, optimizedOnly: false })
+      collection._resumeSyncStart()
+      await flushPromises()
+
+      expect(loads).toHaveLength(1)
+      expect(unloads).toHaveLength(1)
+      expect(unloads[0]).toBe(loads[0])
+
+      expect(() => subscription.unsubscribe()).not.toThrow()
+      expect(unloads).toHaveLength(2)
+      expect(unloads[1]).toBe(loads[0])
+
+      subscription.unsubscribe()
+      expect(unloads).toHaveLength(2)
+    } finally {
+      subscription.unsubscribe()
       await collection.cleanup()
     }
   })

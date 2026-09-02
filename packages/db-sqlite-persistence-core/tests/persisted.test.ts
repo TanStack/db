@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   BasicIndex,
   DbClient,
+  DeduplicatedLoadSubset,
   IR,
   collectionOptions,
   createCollection,
@@ -27,11 +28,23 @@ import type {
   PullSinceResponse,
   TxCommitted,
 } from '../src'
-import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
+import type {
+  AppliedLoadSubsetOutcome,
+  LoadSubsetOptions,
+  SyncConfig,
+} from '@tanstack/db'
 
 type Todo = {
   id: string
   title: string
+}
+
+type LoadSubsetTestCollection = {
+  _sync: {
+    loadSubset: (
+      options: LoadSubsetOptions,
+    ) => true | Promise<AppliedLoadSubsetOutcome>
+  }
 }
 
 type RecordingAdapter = PersistenceAdapter & {
@@ -1788,6 +1801,125 @@ describe(`persistedCollectionOptions`, () => {
     await flushAsyncWork(120)
 
     expect(ensureCalls).toBeGreaterThanOrEqual(2)
+  })
+
+  it(`preserves authoritative source extent through persistence`, async () => {
+    const adapter = createRecordingAdapter()
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-source-extent`,
+        syncMode: `on-demand`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => Promise.resolve({ hasMore: false }),
+            }
+          },
+        },
+        persistence: {
+          adapter,
+          coordinator: createCoordinatorHarness(),
+        },
+      }),
+    )
+
+    collection.startSyncImmediate()
+    await flushAsyncWork()
+
+    const sync = (collection as unknown as LoadSubsetTestCollection)._sync
+    const outcome = await sync.loadSubset({ limit: 1 })
+
+    expect(outcome).not.toBe(true)
+    if (outcome !== true) {
+      expect(outcome.extent).toBe(`exhausted`)
+    }
+  })
+
+  it(`preserves exact physical-request provenance through persistence`, async () => {
+    const adapter = createRecordingAdapter()
+    let resolveLoad!: (result: { hasMore: boolean }) => void
+    const load = new Promise<{ hasMore: boolean }>((resolve) => {
+      resolveLoad = resolve
+    })
+    const physicalLimits: Array<number | undefined> = []
+    const deduplicated = new DeduplicatedLoadSubset({
+      loadSubset: (options) => {
+        physicalLimits.push(options.limit)
+        return load
+      },
+    })
+    let upstreamCalls = 0
+    let resolveFirstUpstream!: () => void
+    const firstUpstream = new Promise<void>((resolve) => {
+      resolveFirstUpstream = resolve
+    })
+    const upstreamHasMore = new Map<number | undefined, boolean | undefined>()
+    let resolveSecondUpstream!: () => void
+    const secondUpstream = new Promise<void>((resolve) => {
+      resolveSecondUpstream = resolve
+    })
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-exact-source-extent`,
+        syncMode: `on-demand`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: async (options) => {
+                upstreamCalls++
+                const result = deduplicated.loadSubset(options)
+                if (upstreamCalls === 1) resolveFirstUpstream()
+                if (upstreamCalls === 2) resolveSecondUpstream()
+                if (result === true) return undefined
+                const sourceResult = await result
+                upstreamHasMore.set(options.limit, sourceResult?.hasMore)
+                return sourceResult === undefined
+                  ? undefined
+                  : { hasMore: sourceResult.hasMore }
+              },
+            }
+          },
+        },
+        persistence: {
+          adapter,
+          coordinator: createCoordinatorHarness(),
+        },
+      }),
+    )
+
+    try {
+      collection.startSyncImmediate()
+      await flushAsyncWork()
+
+      const sync = (collection as unknown as LoadSubsetTestCollection)._sync
+      const covering = sync.loadSubset({ limit: 10 })
+      await firstUpstream
+      const narrower = sync.loadSubset({ limit: 5 })
+
+      await secondUpstream
+      expect(physicalLimits).toEqual([10])
+      resolveLoad({ hasMore: false })
+
+      const [coveringOutcome, narrowerOutcome] = await Promise.all([
+        covering,
+        narrower,
+      ])
+      expect(upstreamHasMore).toEqual(
+        new Map([
+          [10, false],
+          [5, undefined],
+        ]),
+      )
+      expect(coveringOutcome).toMatchObject({ extent: `exhausted` })
+      expect(narrowerOutcome).toMatchObject({ extent: `unknown` })
+    } finally {
+      resolveLoad({ hasMore: false })
+      await collection.cleanup()
+    }
   })
 
   it(`fails sync-absent persistence when follower ack omits mutation ids`, async () => {

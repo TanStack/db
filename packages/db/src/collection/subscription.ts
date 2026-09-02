@@ -14,6 +14,7 @@ import type { IndexInterface } from '../indexes/base-index.js'
 import type {
   ChangeMessage,
   LoadSubsetOptions,
+  LoadSubsetRequestResult,
   Subscription,
   SubscriptionEvents,
   SubscriptionLoadSubsetErrorEvent,
@@ -31,8 +32,8 @@ type RequestSnapshotOptions = {
   orderBy?: OrderBy
   /** Optional limit to pass to loadSubset for backend optimization */
   limit?: number
-  /** Callback that receives the raw loadSubset result for external tracking */
-  onLoadSubsetResult?: (result: Promise<void> | true) => void
+  /** Callback that receives the normalized loadSubset result for internal tracking */
+  onLoadSubsetResult?: (result: LoadSubsetRequestResult) => void
   /** Called when the local snapshot must fall back from an index to a scan. */
   onUnoptimized?: () => void
 }
@@ -46,8 +47,8 @@ type RequestLimitedSnapshotOptions = {
   offset?: number
   /** Whether to track the loadSubset promise on this subscription (default: true) */
   trackLoadSubsetPromise?: boolean
-  /** Callback that receives the raw loadSubset result for external tracking */
-  onLoadSubsetResult?: (result: Promise<void> | true) => void
+  /** Callback that receives the normalized loadSubset result for internal tracking */
+  onLoadSubsetResult?: (result: LoadSubsetRequestResult) => void
 }
 
 type CollectionSubscriptionOptions = {
@@ -77,10 +78,11 @@ type SubsetAcquisition = {
 
 type SubsetDemand = SubsetAcquisition & {
   requestOptions: LoadSubsetOptions
+  releaseFailed: boolean
 }
 
 type TruncateReplayAttempt = {
-  pending: Set<{ promise: Promise<void> }>
+  pending: Set<{ promise: Promise<unknown> }>
   failed: boolean
   setupComplete: boolean
 }
@@ -135,7 +137,7 @@ export class CollectionSubscription
   // Status tracking
   private _status: SubscriptionStatus = `ready`
   private _lastError: unknown | undefined
-  private pendingLoadSubsetPromises: Set<Promise<void>> = new Set()
+  private pendingLoadSubsetPromises: Set<Promise<unknown>> = new Set()
 
   // Cleanup function for truncate event listener
   private truncateCleanup: (() => void) | undefined
@@ -276,7 +278,7 @@ export class CollectionSubscription
           this.truncateReplaySession === session &&
           session.currentAttempt === attempt
         const nextAcquisition = this.createSubsetAcquisition(demand)
-        let syncResult: Promise<void> | true
+        let syncResult: LoadSubsetRequestResult
         try {
           syncResult = this.loadSubset(
             nextAcquisition.options,
@@ -346,7 +348,7 @@ export class CollectionSubscription
   private settleTruncateReplay(
     session: TruncateReplaySession,
     attempt: TruncateReplayAttempt,
-    pending: { promise: Promise<void> },
+    pending: { promise: Promise<unknown> },
   ): void {
     if (this.truncateReplaySession !== session) return
     attempt.pending.delete(pending)
@@ -510,7 +512,7 @@ export class CollectionSubscription
 
   /** Observe an asynchronous subset load and restore status on settlement. */
   private observeLoadSubsetResult(
-    syncResult: Promise<void> | true,
+    syncResult: LoadSubsetRequestResult,
     options: LoadSubsetOptions,
     trackStatus: boolean,
     shouldReportError: () => boolean = () => true,
@@ -540,7 +542,7 @@ export class CollectionSubscription
   private loadSubset(
     options: LoadSubsetOptions,
     shouldReportError: () => boolean = () => true,
-  ): Promise<void> | true {
+  ): LoadSubsetRequestResult {
     try {
       return this.collection._sync.loadSubset(options)
     } catch (error) {
@@ -595,6 +597,10 @@ export class CollectionSubscription
     demand.abortController?.abort()
     try {
       this.collection._sync.unloadSubset(demand.options)
+      demand.releaseFailed = false
+    } catch (error) {
+      demand.releaseFailed = true
+      throw error
     } finally {
       demand.removeRequestAbortListener?.()
     }
@@ -603,23 +609,30 @@ export class CollectionSubscription
   /** Start and retain the first acquisition for one logical subset demand. */
   private startSubsetDemand(requestOptions: LoadSubsetOptions): {
     demand: SubsetDemand
-    result: Promise<void> | true
+    result: LoadSubsetRequestResult
   } {
     const demand: SubsetDemand = {
       requestOptions,
       options: requestOptions,
+      releaseFailed: false,
     }
     const acquisition = this.createSubsetAcquisition(demand)
+    demand.options = acquisition.options
+    demand.abortController = acquisition.abortController
+    demand.removeRequestAbortListener = acquisition.removeRequestAbortListener
+    // Reentrant release must see the exact acquisition before adapter work
+    // starts. A genuine load throw removes this tentative logical owner below.
+    this.subsetDemands.push(demand)
     try {
       const result = this.loadSubset(acquisition.options)
-      demand.options = acquisition.options
-      demand.abortController = acquisition.abortController
-      demand.removeRequestAbortListener = acquisition.removeRequestAbortListener
-      this.subsetDemands.push(demand)
       return { demand, result }
     } catch (error) {
-      acquisition.abortController.abort()
-      acquisition.removeRequestAbortListener?.()
+      const demandIndex = this.subsetDemands.indexOf(demand)
+      if (demandIndex !== -1 && !demand.releaseFailed) {
+        this.subsetDemands.splice(demandIndex, 1)
+        acquisition.abortController.abort()
+        acquisition.removeRequestAbortListener?.()
+      }
       throw error
     }
   }
@@ -776,8 +789,10 @@ export class CollectionSubscription
     )
     if (index === -1) return
 
-    const [demand] = this.subsetDemands.splice(index, 1)
-    if (demand) this.releaseSubsetDemand(demand)
+    const demand = this.subsetDemands[index]
+    if (!demand) return
+    this.releaseSubsetDemand(demand)
+    this.subsetDemands.splice(index, 1)
   }
 
   /**
@@ -1158,14 +1173,16 @@ export class CollectionSubscription
     this.stalePublishedRows.clear()
 
     // Release the current adapter acquisition for each logical subset demand.
+    const failedDemands: Array<SubsetDemand> = []
     for (const demand of this.subsetDemands) {
       try {
         this.releaseSubsetDemand(demand)
       } catch (error) {
         firstCleanupError ??= error
+        failedDemands.push(demand)
       }
     }
-    this.subsetDemands = []
+    this.subsetDemands = failedDemands
 
     try {
       this.emitInner(`unsubscribed`, {

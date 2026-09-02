@@ -26,9 +26,10 @@ This architecture covers:
 - coherent publication to public Collections;
 - the boundaries with query-db ownership and physical query planning.
 
-The applied-settlement receipt described below is its only new public boundary
-contract. Optimistic transactions are another source of weighted input changes;
-they do not have a separate routing model.
+The applied-settlement receipt and optional subset source result described
+below are its only new public boundary contracts. Optimistic transactions are
+another source of weighted input changes; they do not have a separate routing
+model.
 
 ## One relational graph
 
@@ -432,6 +433,13 @@ shared abort lease. If one owner releases its lease, the source request remains
 active while another owner still needs its coverage. The source signal aborts
 only after every attached owner has released it.
 
+A Collection subscription installs each logical subset owner before it calls
+the source adapter. Reentrant release during `loadSubset` must therefore see and
+release that exact acquisition. A synchronous `loadSubset` throw that did not
+follow a failed release rolls the tentative owner back without calling
+`unloadSubset`; a failed release keeps the owner so a later cleanup can retry the
+same acquisition identity.
+
 Its semantic contract is:
 
 > Every active, satisfiable bucket must be covered by a settled current demand
@@ -467,6 +475,16 @@ retain their queue-bypass contract; if one applies a parked subset transaction
 as part of that prefix, the subset receipt settles only after the writes are
 visible. Rejected, canceled, and obsolete acquisitions establish no coverage.
 Sources must honor cancellation before publishing request-scoped rows.
+
+After those writes are applied, `loadSubset` may resolve with
+`{ hasMore: boolean | undefined }`. Core normalizes that source fact to
+`continues`, `exhausted`, or `unknown` and binds it to the exact collection
+demand and attempt generation; an omitted result also remains `unknown`. A
+request reused for a narrower demand may
+settle that demand, but its raw extent does not become a fact about the narrower
+demand. Live-query plumbing preserves these outcomes through lazy demand and
+window coordination. Only the root paginated source may use them to replace a
+peek-based pagination decision.
 
 A transaction `mutationFn` must not start or await collection or live-query
 preloads. User persistence owns the causal queue while that function runs, so a
@@ -564,7 +582,8 @@ create recursive Collection machinery.
    rows after cancellation.
 7. **Applied settlement:** a successful subset load settles only after its
    establishing sync transactions are visible; a source must not add queue
-   priority merely to force the load to settle.
+   priority merely to force the load to settle. Any reported source extent is
+   scoped to that exact demand and attempt.
 8. **Nested propagation:** every materialized relation consumes the fully
    materialized output relation of its children.
 9. **Publication:** reads, events, and downstream queries observe the same
@@ -599,6 +618,8 @@ create recursive Collection machinery.
 - **Hydration:** establishing an initial snapshot before forwarding later
   changes.
 - **Generation:** a token that rejects obsolete asynchronous work.
+- **Source extent:** an authoritative source fact that more rows continue past
+  an exact demand, that the source is exhausted there, or that neither is known.
 - **Collection facade:** a stable public Collection view shared by the parents
   routed to one active bucket.
 - **Coherent commit:** one publication in which state, events, and consumers see

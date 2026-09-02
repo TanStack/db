@@ -4,9 +4,17 @@ import {
   minusWherePredicates,
   unionWherePredicates,
 } from './predicate-utils.js'
-import { Func, PropRef, Value } from './ir.js'
+import { cloneLoadSubsetOptions } from './load-subset-options.js'
+import {
+  recordLoadSubsetPromiseDemandMatcher,
+  recordLoadSubsetResultDemandMatcher,
+} from './load-subset-outcome.js'
 import type { BasicExpression } from './ir.js'
-import type { LoadSubsetOptions } from '../types.js'
+import type {
+  LoadSubsetFn,
+  LoadSubsetOptions,
+  LoadSubsetResult,
+} from '../types.js'
 
 type SharedAbortLease = {
   signal: AbortSignal | undefined
@@ -17,8 +25,9 @@ type SharedAbortLease = {
 
 type InflightCall = {
   options: LoadSubsetOptions
-  promise: Promise<void>
+  promise: Promise<void | LoadSubsetResult>
   lease: SharedAbortLease
+  matchesPhysicalRequest: (options: LoadSubsetOptions) => boolean
 }
 
 /**
@@ -47,9 +56,7 @@ type InflightCall = {
  */
 export class DeduplicatedLoadSubset {
   // The underlying loadSubset function to wrap
-  private readonly _loadSubset: (
-    options: LoadSubsetOptions,
-  ) => true | Promise<void>
+  private readonly _loadSubset: LoadSubsetFn
 
   // An optional callback function that is invoked when a loadSubset call is deduplicated.
   private readonly onDeduplicate:
@@ -76,7 +83,7 @@ export class DeduplicatedLoadSubset {
   private generation = 0
 
   constructor(opts: {
-    loadSubset: (options: LoadSubsetOptions) => true | Promise<void>
+    loadSubset: LoadSubsetFn
     onDeduplicate?: (options: LoadSubsetOptions) => void
   }) {
     this._loadSubset = opts.loadSubset
@@ -93,7 +100,9 @@ export class DeduplicatedLoadSubset {
    * @param options - The predicate options (where, orderBy, limit)
    * @returns true if data is already loaded, or a Promise that resolves when data is loaded
    */
-  loadSubset = (options: LoadSubsetOptions): true | Promise<void> => {
+  loadSubset = (
+    options: LoadSubsetOptions,
+  ): true | Promise<void | LoadSubsetResult> => {
     // If we've loaded all data, everything is covered
     if (this.hasLoadedAllData) {
       this.onDeduplicate?.(options)
@@ -132,9 +141,15 @@ export class DeduplicatedLoadSubset {
     if (matchingInflight !== undefined) {
       matchingInflight.lease.attach(options.signal)
       // An in-flight call will load data that covers this request
-      // Return the same promise so this caller waits for the data to load
+      // Every requester shares the physical work and cancellation lease. A
+      // narrower requester receives a caller-relative result whose extent is
+      // conservative even if an outer adapter rebuilds the result object.
       // The in-flight promise already handles tracking updates when it completes
-      const prom = matchingInflight.promise
+      const prom = projectLoadSubsetResultForCaller(
+        matchingInflight.promise,
+        options,
+        matchingInflight.matchesPhysicalRequest,
+      )
       // Call `onDeduplicate` when the inflight request has loaded the data
       void prom
         .then(() => this.onDeduplicate?.(options))
@@ -148,8 +163,14 @@ export class DeduplicatedLoadSubset {
     // Preserve the original request for tracking and in-flight dedupe, but allow
     // the backend request to be narrowed to only the missing subset.
     const lease = createSharedAbortLease(options.signal)
-    const trackingOptions = cloneOptions({ ...options, signal: lease.signal })
-    const loadOptions = cloneOptions({ ...options, signal: lease.signal })
+    const trackingOptions = cloneLoadSubsetOptions({
+      ...options,
+      signal: lease.signal,
+    })
+    const loadOptions = cloneLoadSubsetOptions({
+      ...options,
+      signal: lease.signal,
+    })
     if (
       this.unlimitedWhere !== undefined &&
       options.limit === undefined &&
@@ -163,9 +184,13 @@ export class DeduplicatedLoadSubset {
         minusWherePredicates(loadOptions.where, this.unlimitedWhere) ??
         loadOptions.where
     }
+    const physicalRequest = cloneLoadSubsetOptions(loadOptions)
+    const matchesPhysicalRequest = (candidate: LoadSubsetOptions) =>
+      isLoadSubsetRequestSubsumedBy(candidate, physicalRequest) &&
+      isLoadSubsetRequestSubsumedBy(physicalRequest, candidate)
 
     // Call underlying loadSubset to load the missing data
-    let resultPromise: true | Promise<void>
+    let resultPromise: true | Promise<void | LoadSubsetResult>
     try {
       resultPromise = this._loadSubset(loadOptions)
     } catch (error) {
@@ -189,6 +214,7 @@ export class DeduplicatedLoadSubset {
       const inflightEntry = {
         options: trackingOptions,
         lease,
+        matchesPhysicalRequest,
         promise: resultPromise
           .then((result) => {
             // Only update tracking if this request is still from the current generation
@@ -197,7 +223,10 @@ export class DeduplicatedLoadSubset {
             if (capturedGeneration === this.generation && !lease.aborted) {
               this.updateTracking(trackingOptions)
             }
-            return result
+            return recordLoadSubsetResultDemandMatcher(
+              result,
+              matchesPhysicalRequest,
+            )
           })
           .finally(() => {
             // Always remove from in-flight array on completion OR rejection
@@ -210,9 +239,18 @@ export class DeduplicatedLoadSubset {
           }),
       }
 
+      recordLoadSubsetPromiseDemandMatcher(
+        inflightEntry.promise,
+        matchesPhysicalRequest,
+      )
+
       // Store the in-flight entry so concurrent subset calls can wait for it
       this.inflightCalls.push(inflightEntry)
-      return inflightEntry.promise
+      return projectLoadSubsetResultForCaller(
+        inflightEntry.promise,
+        options,
+        matchesPhysicalRequest,
+      )
     }
   }
 
@@ -259,6 +297,27 @@ export class DeduplicatedLoadSubset {
       this.limitedCalls.push(options)
     }
   }
+}
+
+function projectLoadSubsetResultForCaller(
+  physicalPromise: Promise<void | LoadSubsetResult>,
+  callerOptions: LoadSubsetOptions,
+  matchesPhysicalRequest: (options: LoadSubsetOptions) => boolean,
+): Promise<void | LoadSubsetResult> {
+  if (matchesPhysicalRequest(callerOptions)) return physicalPromise
+
+  const callerRequest = cloneLoadSubsetOptions(callerOptions)
+  const matchesCallerRequest = (candidate: LoadSubsetOptions) =>
+    isLoadSubsetRequestSubsumedBy(candidate, callerRequest) &&
+    isLoadSubsetRequestSubsumedBy(callerRequest, candidate)
+  const projectedPromise = physicalPromise.then((result) =>
+    recordLoadSubsetResultDemandMatcher(
+      result === undefined ? undefined : { ...result, hasMore: undefined },
+      matchesCallerRequest,
+    ),
+  )
+  recordLoadSubsetPromiseDemandMatcher(projectedPromise, matchesCallerRequest)
+  return projectedPromise
 }
 
 function createSharedAbortLease(
@@ -322,97 +381,4 @@ function createSharedAbortLease(
  * properties like limit or where between calls. Without cloning, our stored history
  * would reflect the mutated values rather than what was actually loaded.
  */
-export function cloneOptions(options: LoadSubsetOptions): LoadSubsetOptions {
-  return {
-    ...options,
-    where: options.where
-      ? cloneBasicExpression(options.where, `predicate`)
-      : undefined,
-    orderBy: options.orderBy?.map((clause) => ({
-      ...clause,
-      expression: cloneBasicExpression(clause.expression),
-      compareOptions: { ...clause.compareOptions },
-    })),
-    cursor: options.cursor
-      ? {
-          ...options.cursor,
-          whereFrom: cloneBasicExpression(
-            options.cursor.whereFrom,
-            `predicate`,
-          ),
-          whereCurrent: cloneBasicExpression(
-            options.cursor.whereCurrent,
-            `predicate`,
-          ),
-        }
-      : undefined,
-  }
-}
-
-type ExpressionCloneContext = `exact` | `predicate` | `comparison`
-
-function cloneBasicExpression<T>(
-  expression: BasicExpression<T>,
-  context: ExpressionCloneContext = `exact`,
-): BasicExpression<T> {
-  switch (expression.type) {
-    case `ref`:
-      return new PropRef<T>([...expression.path])
-    case `val`:
-      return new Value<T>(
-        context === `comparison`
-          ? snapshotComparisonValue(expression.value)
-          : expression.value,
-      )
-    case `func`:
-      return new Func<T>(
-        expression.name,
-        expression.args.map((arg, index) => {
-          if (
-            context === `predicate` &&
-            expression.name === `in` &&
-            index === 1 &&
-            arg.type === `val` &&
-            Array.isArray(arg.value)
-          ) {
-            return new Value(
-              arg.value.map((value) => snapshotComparisonValue(value)),
-            )
-          }
-
-          const argumentContext =
-            context === `predicate` && isComparisonFunction(expression.name)
-              ? `comparison`
-              : context
-          return cloneBasicExpression(arg, argumentContext)
-        }),
-      )
-  }
-}
-
-function isComparisonFunction(name: string): boolean {
-  return (
-    name === `eq` ||
-    name === `gt` ||
-    name === `gte` ||
-    name === `lt` ||
-    name === `lte`
-  )
-}
-
-function snapshotComparisonValue<T>(value: T): T {
-  if (value instanceof Date) {
-    return new Date(value.getTime()) as T
-  }
-
-  if (typeof Buffer !== `undefined` && value instanceof Buffer) {
-    return Buffer.from(value) as T
-  }
-
-  if (value instanceof Uint8Array) {
-    return value.slice() as T
-  }
-
-  // Other objects use reference equality in predicate identity and comparison.
-  return value
-}
+export { cloneLoadSubsetOptions as cloneOptions } from './load-subset-options.js'

@@ -10,7 +10,11 @@ import {
   localOnlyCollectionOptions,
 } from '../src'
 import { mockSyncCollectionOptions } from './utils'
-import type { DehydratedLiveQueryResult, InitialQueryBuilder } from '../src'
+import type {
+  DehydratedLiveQueryResult,
+  InitialQueryBuilder,
+  LoadSubsetOptions,
+} from '../src'
 
 type Person = {
   id: string
@@ -457,6 +461,195 @@ describe(`DbClient`, () => {
     resolveLoad()
     await deferredLoad
     expect(collection.isLoadingSubset).toBe(false)
+  })
+
+  it(`releases a deferred subset with the adapter's acquired options`, async () => {
+    const loadSubset = vi.fn((_options: LoadSubsetOptions) =>
+      Promise.resolve(undefined),
+    )
+    const unloadSubset = vi.fn()
+    const descriptor = collectionOptions(`people`, () => ({
+      id: `people`,
+      getKey: (person: Person) => person.id,
+      syncMode: `on-demand` as const,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return { loadSubset, unloadSubset }
+        },
+      },
+    }))
+    const client = new DbClient()
+    const collection = client._materializeCollectionForRender(descriptor)
+    const ownerOptions = { limit: 1 }
+    const deferredLoad = collection._sync.loadSubset(ownerOptions)
+
+    collection._resumeSyncStart()
+    await deferredLoad
+
+    const adapterOptions = loadSubset.mock.calls[0]![0]
+    expect(adapterOptions).toEqual(ownerOptions)
+    expect(adapterOptions).not.toBe(ownerOptions)
+
+    collection._sync.unloadSubset(ownerOptions)
+
+    expect(unloadSubset.mock.calls[0]![0]).toBe(adapterOptions)
+  })
+
+  it(`retries a failed deferred release with the same adapter options`, async () => {
+    const loadSubset = vi.fn((_options: LoadSubsetOptions) =>
+      Promise.resolve(undefined),
+    )
+    let unloadCalls = 0
+    const unloadSubset = vi.fn((_options: LoadSubsetOptions) => {
+      unloadCalls++
+      if (unloadCalls === 1) throw new Error(`release failed`)
+    })
+    const descriptor = collectionOptions(`people`, () => ({
+      id: `people`,
+      getKey: (person: Person) => person.id,
+      syncMode: `on-demand` as const,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return { loadSubset, unloadSubset }
+        },
+      },
+    }))
+    const client = new DbClient()
+    const collection = client._materializeCollectionForRender(descriptor)
+    const ownerOptions = { limit: 1 }
+    const deferredLoad = collection._sync.loadSubset(ownerOptions)
+
+    collection._resumeSyncStart()
+    await deferredLoad
+
+    const adapterOptions = loadSubset.mock.calls[0]![0]
+    expect(() => collection._sync.unloadSubset(ownerOptions)).toThrow(
+      `release failed`,
+    )
+
+    collection._sync.unloadSubset(ownerOptions)
+
+    expect(unloadSubset).toHaveBeenCalledTimes(2)
+    expect(unloadSubset.mock.calls[0]![0]).toBe(adapterOptions)
+    expect(unloadSubset.mock.calls[1]![0]).toBe(adapterOptions)
+  })
+
+  it(`does not reinstall a deferred acquisition released during loadSubset`, async () => {
+    const unloadSubset = vi.fn()
+    const collectionHolder: {
+      current?: {
+        _sync: { unloadSubset: (options: LoadSubsetOptions) => void }
+      }
+    } = {}
+    const ownerOptions = { limit: 1 }
+    const loadSubset = vi.fn((_adapterOptions: LoadSubsetOptions) => {
+      collectionHolder.current!._sync.unloadSubset(ownerOptions)
+      return Promise.resolve(undefined)
+    })
+    const descriptor = collectionOptions(`people`, () => ({
+      id: `people`,
+      getKey: (person: Person) => person.id,
+      syncMode: `on-demand` as const,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return { loadSubset, unloadSubset }
+        },
+      },
+    }))
+    const client = new DbClient()
+    const collection = client._materializeCollectionForRender(descriptor)
+    collectionHolder.current = collection
+    const deferredLoad = collection._sync.loadSubset(ownerOptions)
+
+    collection._resumeSyncStart()
+    await deferredLoad
+
+    const adapterOptions = loadSubset.mock.calls[0]![0]
+    collection._sync.unloadSubset(ownerOptions)
+
+    expect(unloadSubset).toHaveBeenCalledTimes(2)
+    expect(unloadSubset.mock.calls[0]![0]).toBe(adapterOptions)
+    expect(unloadSubset.mock.calls[1]![0]).toBe(ownerOptions)
+  })
+
+  it(`forgets deferred adapter options when loadSubset throws`, async () => {
+    const failure = new Error(`load failed`)
+    const loadSubset = vi.fn((_options: LoadSubsetOptions) => {
+      throw failure
+    })
+    const unloadSubset = vi.fn()
+    const descriptor = collectionOptions(`people`, () => ({
+      id: `people`,
+      getKey: (person: Person) => person.id,
+      syncMode: `on-demand` as const,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return { loadSubset, unloadSubset }
+        },
+      },
+    }))
+    const client = new DbClient()
+    const collection = client._materializeCollectionForRender(descriptor)
+    const ownerOptions = { limit: 1 }
+    const deferredLoad = collection._sync.loadSubset(ownerOptions)
+
+    collection._resumeSyncStart()
+    await expect(deferredLoad).rejects.toBe(failure)
+
+    collection._sync.unloadSubset(ownerOptions)
+
+    expect(loadSubset.mock.calls[0]![0]).not.toBe(ownerOptions)
+    expect(unloadSubset.mock.calls[0]![0]).toBe(ownerOptions)
+  })
+
+  it(`does not retain deferred adapter options without unloadSubset`, async () => {
+    const loadSubset = vi.fn((_options: LoadSubsetOptions) =>
+      Promise.resolve(undefined),
+    )
+    const descriptor = collectionOptions(`people`, () => ({
+      id: `people`,
+      getKey: (person: Person) => person.id,
+      syncMode: `on-demand` as const,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return { loadSubset }
+        },
+      },
+    }))
+    const client = new DbClient()
+    const collection = client._materializeCollectionForRender(descriptor)
+    const ownerOptions = [{ limit: 1 }, { limit: 2 }, { limit: 3 }]
+    const deferredLoads = ownerOptions.map((options) =>
+      collection._sync.loadSubset(options),
+    )
+
+    try {
+      collection._resumeSyncStart()
+      await Promise.all(deferredLoads)
+
+      expect(loadSubset).toHaveBeenCalledTimes(ownerOptions.length)
+      for (const [index, options] of ownerOptions.entries()) {
+        expect(loadSubset.mock.calls[index]![0]).not.toBe(options)
+      }
+
+      const deferredAdapterOptions = Reflect.get(
+        collection._sync,
+        `deferredAdapterOptions`,
+      ) as Map<LoadSubsetOptions, unknown>
+      expect(deferredAdapterOptions).toHaveLength(0)
+
+      for (const options of ownerOptions) {
+        collection._sync.unloadSubset(options)
+      }
+      expect(deferredAdapterOptions).toHaveLength(0)
+    } finally {
+      await collection.cleanup()
+    }
   })
 
   it(`lets the first sync snapshot replace stale hydrated rows`, () => {
