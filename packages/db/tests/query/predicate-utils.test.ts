@@ -10,6 +10,7 @@ import {
   unionWherePredicates,
 } from '../../src/query/predicate-utils'
 import { Func, PropRef, Value } from '../../src/query/ir'
+import { evaluateReferenceExpression } from '../reference-expression'
 import type {
   BasicExpression,
   OrderBy,
@@ -56,6 +57,10 @@ function and(...args: Array<BasicExpression>): Func {
 
 function or(...args: Array<BasicExpression>): Func {
   return func(`or`, ...args)
+}
+
+function not(arg: BasicExpression): Func {
+  return func(`not`, arg)
 }
 
 function inOp(left: BasicExpression, values: Array<any>): Func {
@@ -1194,11 +1199,22 @@ describe(`minusWherePredicates`, () => {
       const subtract = gt(ref(`age`), val(10))
       const result = minusWherePredicates(undefined, subtract)
 
-      expect(result).toEqual({
-        type: `func`,
-        name: `not`,
-        args: [subtract],
-      })
+      expect(result).toBeNull()
+    })
+
+    it(`falls back before negating an IN predicate`, () => {
+      const subtract = inOp(ref(`status`), [`active`, null])
+
+      expect(minusWherePredicates(undefined, subtract)).toBeNull()
+    })
+
+    it(`falls back before negating an OR predicate`, () => {
+      const subtract = or(
+        eq(ref(`status`), val(`active`)),
+        eq(ref(`status`), val(null)),
+      )
+
+      expect(minusWherePredicates(undefined, subtract)).toBeNull()
     })
 
     it(`should return empty set when from is subset of subtract`, () => {
@@ -1431,22 +1447,85 @@ describe(`minusWherePredicates`, () => {
   })
 
   describe(`common conditions`, () => {
-    it(`removes a reordered IN condition from a nested conjunction`, () => {
-      const requested = inOp(ref(`score`), [2, -2, 0, -3, -1, 3])
-      const alreadyLoaded = and(
-        inOp(ref(`score`), [0]),
-        and(
-          lt(ref(`score`), val(1)),
-          inOp(ref(`score`), [2, -3, -2, 3, 0, -1]),
-        ),
+    it(`falls back before negating a nullable residual field`, () => {
+      const shared = lt(ref(`rank`), val(1))
+      const requested = and(shared, shared)
+      const loaded = and(shared, shared, eq(ref(`score`), val(0)))
+
+      expect(minusWherePredicates(requested, loaded)).toBeNull()
+    })
+
+    it(`removes only one matching occurrence for each common condition`, () => {
+      const score = ref(`score`)
+      const requested = and(
+        gt(score, val(0)),
+        or(eq(score, val(null)), eq(score, val(1))),
+        inOp(score, [1, 0]),
+        gt(score, val(-1)),
+      )
+      const loaded = and(
+        gt(score, val(0)),
+        or(eq(score, val(null)), eq(score, val(1))),
+        inOp(score, [1, 0]),
+        gt(score, val(0)),
       )
 
-      expect(minusWherePredicates(requested, alreadyLoaded)).toEqual(
-        and(
-          requested,
-          func(`not`, and(inOp(ref(`score`), [0]), lt(ref(`score`), val(1)))),
-        ),
+      const result = minusWherePredicates(requested, loaded)
+
+      expect(result).not.toBeNull()
+      for (const value of [-1, 0, 1, null]) {
+        const row = { score: value }
+        const expected =
+          evaluateReferenceExpression(requested, row) === true &&
+          evaluateReferenceExpression(loaded, row) !== true
+        expect(evaluateReferenceExpression(result!, row)).toBe(expected)
+      }
+    })
+
+    it(`falls back when nested subtraction would negate an unknown value`, () => {
+      const score = ref(`score`)
+      const requested = eq(score, val(0))
+      const loaded = and(
+        not(eq(score, val(-1))),
+        and(eq(score, val(0)), lt(score, val(1))),
       )
+
+      expect(minusWherePredicates(requested, loaded)).toBeNull()
+    })
+
+    it(`falls back across nested equality, range, and NOT terms`, () => {
+      const score = ref(`score`)
+      const ranges = [gt, gte, lt, lte]
+
+      for (const requestedValue of [-1, 0, 1]) {
+        const requested = eq(score, val(requestedValue))
+        for (const excludedValue of [-1, 0, 1]) {
+          const negatedEquality = not(eq(score, val(excludedValue)))
+          for (const range of ranges) {
+            for (const boundary of [-1, 0, 1]) {
+              const rangePredicate = range(score, val(boundary))
+              const loadedPredicates = [
+                and(
+                  negatedEquality,
+                  and(eq(score, val(requestedValue)), rangePredicate),
+                ),
+                and(
+                  and(negatedEquality, eq(score, val(requestedValue))),
+                  rangePredicate,
+                ),
+                and(
+                  rangePredicate,
+                  and(negatedEquality, eq(score, val(requestedValue))),
+                ),
+              ]
+
+              for (const loaded of loadedPredicates) {
+                expect(minusWherePredicates(requested, loaded)).toBeNull()
+              }
+            }
+          }
+        }
+      }
     })
 
     it(`should handle common conditions: (age > 10 AND status = 'active') - (age > 20 AND status = 'active') = (age > 10 AND age <= 20 AND status = 'active')`, () => {

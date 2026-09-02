@@ -1309,7 +1309,7 @@ describe(`loadSubset outcomes`, () => {
     },
   )
 
-  it(`scopes source extent to a narrowed physical acquisition`, async () => {
+  it(`preserves source extent for a conservative full acquisition`, async () => {
     const adapterCalls: Array<LoadSubsetOptions> = []
     const deduplicated = new DeduplicatedLoadSubset({
       loadSubset: (options) => {
@@ -1348,8 +1348,8 @@ describe(`loadSubset outcomes`, () => {
       const outcome = collection._sync.loadSubset({})
 
       expect(adapterCalls).toHaveLength(2)
-      expect(adapterCalls[1]?.where).toBeDefined()
-      await expect(outcome).resolves.toMatchObject({ extent: `unknown` })
+      expect(adapterCalls[1]).toEqual({})
+      await expect(outcome).resolves.toMatchObject({ extent: `exhausted` })
     } finally {
       await collection.cleanup()
     }

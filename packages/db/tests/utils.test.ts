@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
+import packageJson from '../package.json'
 import { deepEquals } from '../src/utils'
 import { isPromiseLike } from '../src/utils/type-guards'
 import {
@@ -9,6 +10,12 @@ import {
 } from './oracle-config'
 
 describe(`oracle run configuration`, () => {
+  it(`runs the predicate subtraction oracle in the oracle campaign`, () => {
+    expect(packageJson.scripts[`test:oracles`]).toContain(
+      `tests/query/predicate-subtraction-oracle.property.test.ts`,
+    )
+  })
+
   it(`reads the multiplier and replay coordinates from an explicit environment`, () => {
     expect(
       readOracleRunConfig({

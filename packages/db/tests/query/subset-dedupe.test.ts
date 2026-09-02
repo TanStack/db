@@ -45,10 +45,6 @@ function lte(left: BasicExpression<any>, right: BasicExpression<any>): Func {
   return new Func(`lte`, [left, right])
 }
 
-function not(expression: BasicExpression<boolean>): Func {
-  return new Func(`not`, [expression])
-}
-
 describe(`createDeduplicatedLoadSubset`, () => {
   it(`does not let mutation rewrite settled large-binary coverage`, () => {
     const loadSubset = vi.fn(() => true as const)
@@ -1348,6 +1344,37 @@ describe(`createDeduplicatedLoadSubset`, () => {
       })
     })
 
+    it(`tracks the original demand while a narrowed transport is in flight`, async () => {
+      let resolveNarrowed: (() => void) | undefined
+      const calls: Array<LoadSubsetOptions> = []
+      const deduplicated = new DeduplicatedLoadSubset({
+        loadSubset: (options) => {
+          calls.push(cloneOptions(options))
+          if (calls.length === 1) return Promise.resolve()
+          return new Promise<void>((resolve) => {
+            resolveNarrowed = resolve
+          })
+        },
+      })
+
+      await deduplicated.loadSubset({ where: gt(ref(`age`), val(20)) })
+
+      const wider = { where: gt(ref(`age`), val(10)) }
+      const first = deduplicated.loadSubset(wider)
+      const second = deduplicated.loadSubset(wider)
+
+      expect(calls).toHaveLength(2)
+      expect(calls[1]?.where).toEqual(
+        and(gt(ref(`age`), val(10)), lte(ref(`age`), val(20))),
+      )
+      expect(first).toBeInstanceOf(Promise)
+      expect(second).toBeInstanceOf(Promise)
+
+      resolveNarrowed?.()
+      await Promise.all([first, second])
+      expect(deduplicated.loadSubset(wider)).toBe(true)
+    })
+
     it(`should request only the difference for set predicates`, async () => {
       let callCount = 0
       const calls: Array<LoadSubsetOptions> = []
@@ -1503,11 +1530,11 @@ describe(`createDeduplicatedLoadSubset`, () => {
       expect(callCount).toBe(1)
 
       // Second call: no where clause (all data)
-      // Should request all data except what we already loaded
-      // i.e. should request NOT (age > 20)
+      // The missing difference is not safe to express under three-valued
+      // logic, so the adapter receives the full all-data request.
       await deduplicated.loadSubset({})
       expect(callCount).toBe(2)
-      expect(calls[1]).toEqual({ where: not(gt(ref(`age`), val(20))) })
+      expect(calls[1]).toEqual({})
 
       // After loading all data, subsequent calls should be deduplicated
       const result = await deduplicated.loadSubset({
@@ -1515,6 +1542,37 @@ describe(`createDeduplicatedLoadSubset`, () => {
       })
       expect(result).toBe(true)
       expect(callCount).toBe(2)
+    })
+
+    it(`retries a full-request fallback after transport failure`, async () => {
+      let rejectAllData: ((error: Error) => void) | undefined
+      const calls: Array<LoadSubsetOptions> = []
+      const deduplicated = new DeduplicatedLoadSubset({
+        loadSubset: (options) => {
+          calls.push(cloneOptions(options))
+          if (calls.length === 1 || calls.length === 3) {
+            return Promise.resolve()
+          }
+          return new Promise<void>((_resolve, reject) => {
+            rejectAllData = reject
+          })
+        },
+      })
+
+      await deduplicated.loadSubset({ where: gt(ref(`age`), val(20)) })
+
+      const failed = deduplicated.loadSubset({})
+      const rejected = expect(failed).rejects.toThrow(`all-data failed`)
+      rejectAllData?.(new Error(`all-data failed`))
+      await rejected
+
+      expect(calls).toHaveLength(2)
+      expect(calls[1]).toEqual({})
+
+      await deduplicated.loadSubset({})
+      expect(calls).toHaveLength(3)
+      expect(calls[2]).toEqual({})
+      expect(deduplicated.loadSubset({})).toBe(true)
     })
 
     describe(`hasLoadedAllData after loading filtered + unfiltered data`, () => {
@@ -1538,9 +1596,7 @@ describe(`createDeduplicatedLoadSubset`, () => {
 
         await deduplicated.loadSubset({})
         expect(callCount).toBe(2)
-        expect(calls[1]).toEqual({
-          where: not(inOp(ref(`task_id`), [`id1`, `id2`, `id3`])),
-        })
+        expect(calls[1]).toEqual({})
 
         const result = await deduplicated.loadSubset({})
         expect(result).toBe(true)
@@ -1632,9 +1688,7 @@ describe(`createDeduplicatedLoadSubset`, () => {
 
       await deduplicated.loadSubset({})
 
-      expect(calls[2]).toEqual({
-        where: not(inOp(ref(`task_id`), [`uuid-1`, `uuid-2`])),
-      })
+      expect(calls[2]).toEqual({})
 
       expect((deduplicated as any).hasLoadedAllData).toBe(true)
       expect((deduplicated as any).unlimitedWhere).toBeUndefined()
@@ -1695,11 +1749,8 @@ describe(`createDeduplicatedLoadSubset`, () => {
       const secondAllDataLoad = deduplicated.loadSubset({})
 
       expect(callCount).toBe(2)
-      expect(calls[1]).toEqual({
-        where: not(eq(ref(`task_id`), val(`uuid-1`))),
-      })
-      expect(firstAllDataLoad).toBeInstanceOf(Promise)
-      expect(secondAllDataLoad).toBeInstanceOf(Promise)
+      expect(calls[1]).toEqual({})
+      expect(secondAllDataLoad).toBe(firstAllDataLoad)
 
       resolveAllDataLoad?.()
       await firstAllDataLoad
@@ -1732,23 +1783,12 @@ describe(`createDeduplicatedLoadSubset`, () => {
       expect(callCount).toBe(10)
 
       // Now load all data (no WHERE clause)
-      // This should send NOT(IN(...)) to the backend but track as "all data loaded"
+      // The adapter receives the full request because NOT(IN(...)) would drop
+      // rows whose task_id is null under three-valued logic.
       await deduplicated.loadSubset({})
       expect(callCount).toBe(11)
 
-      // The load request should be NOT(IN(task_id, [all accumulated uuids]))
-      const loadWhere = calls[10]!.where as any
-      expect(loadWhere.name).toBe(`not`)
-      expect(loadWhere.args[0].name).toBe(`in`)
-      expect(loadWhere.args[0].args[0].path).toEqual([`task_id`])
-      const loadedUuids = (
-        loadWhere.args[0].args[1].value as Array<string>
-      ).sort()
-      const expectedUuids = Array.from(
-        { length: 10 },
-        (_, i) => `uuid-${i}`,
-      ).sort()
-      expect(loadedUuids).toEqual(expectedUuids)
+      expect(calls[10]).toEqual({})
 
       // Critical: after loading all data, subsequent requests should be deduplicated
       const result1 = await deduplicated.loadSubset({

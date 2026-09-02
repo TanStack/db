@@ -380,15 +380,10 @@ export function minusWherePredicates(
     )
   }
 
-  // If from is undefined then we are asking for all data
-  // so we need to load all data minus what we already loaded
-  // i.e. we need to load NOT(subtractPredicate)
   if (fromPredicate === undefined) {
-    return {
-      type: `func`,
-      name: `not`,
-      args: [subtractPredicate],
-    } as BasicExpression<boolean>
+    // NOT(subtractPredicate) would also filter UNKNOWN rows under three-valued
+    // logic, even though those rows were not loaded. Fall back to the full request.
+    return null
   }
 
   // Check if fromPredicate is entirely contained in subtractPredicate
@@ -404,21 +399,25 @@ export function minusWherePredicates(
   )
   if (commonConditions.length > 0) {
     // Extract predicates without common conditions
-    const fromWithoutCommon = removeConditions(fromPredicate, commonConditions)
-    const subtractWithoutCommon = removeConditions(
+    const fromRemoval = removeConditions(fromPredicate, commonConditions)
+    const subtractRemoval = removeConditions(
       subtractPredicate,
       commonConditions,
     )
 
-    // Recursively compute difference on simplified predicates
-    const simplifiedDifference = minusWherePredicates(
-      fromWithoutCommon,
-      subtractWithoutCommon,
-    )
+    // Recurse only when both operands lost at least one flattened AND term.
+    // This strict decrease is the termination measure for common-condition
+    // simplification.
+    if (fromRemoval.removed && subtractRemoval.removed) {
+      const simplifiedDifference = minusWherePredicates(
+        fromRemoval.predicate,
+        subtractRemoval.predicate,
+      )
 
-    if (simplifiedDifference !== null) {
-      // Combine the simplified difference with common conditions
-      return combineConditions([...commonConditions, simplifiedDifference])
+      if (simplifiedDifference !== null) {
+        // Combine the simplified difference with common conditions
+        return combineConditions([...commonConditions, simplifiedDifference])
+      }
     }
   }
 
@@ -1037,21 +1036,40 @@ function extractAllConditions(
 
 /**
  * Remove specified conditions from a predicate.
- * Returns the predicate with the specified conditions removed, or undefined if all conditions are removed.
+ * Reports whether removal made progress and returns the remaining predicate,
+ * or undefined when all conditions were removed.
  */
 function removeConditions(
   predicate: BasicExpression<boolean>,
   conditionsToRemove: Array<BasicExpression<boolean>>,
-): BasicExpression<boolean> | undefined {
-  const remaining = extractAllConditions(predicate).filter(
-    (candidate) =>
-      !conditionsToRemove.some((condition) =>
-        areExpressionsEqual(candidate, condition),
-      ),
-  )
+): {
+  predicate: BasicExpression<boolean> | undefined
+  removed: boolean
+} {
+  const conditions = extractAllConditions(predicate)
+  const remainingConditions = [...conditions]
 
-  if (remaining.length === 0) return undefined
-  return combineConditions(remaining)
+  // Consume one occurrence per common term so duplicate predicates remain.
+  for (const conditionToRemove of conditionsToRemove) {
+    const matchingIndex = remainingConditions.findIndex((condition) =>
+      areExpressionsEqual(condition, conditionToRemove),
+    )
+    if (matchingIndex !== -1) {
+      remainingConditions.splice(matchingIndex, 1)
+    }
+  }
+
+  if (remainingConditions.length === conditions.length) {
+    return { predicate, removed: false }
+  }
+
+  return {
+    predicate:
+      remainingConditions.length === 0
+        ? undefined
+        : combineConditions(remainingConditions),
+    removed: true,
+  }
 }
 
 /**
