@@ -659,7 +659,7 @@ describe(`query collection ownership lifecycle oracle`, () => {
     const { collection, maps, queryFn } = createOwnershipFixture({
       id,
       syncMode: `eager`,
-      results: [result.promise, [shared]],
+      results: [result.promise, [{ ...shared, name: `Restarted` }]],
       setupMetadata: (metadata) => {
         setupCalls += 1
         metadata.row.set(shared.id, {
@@ -706,7 +706,33 @@ describe(`query collection ownership lifecycle oracle`, () => {
     )
 
     await collection.cleanup()
+    assertCheckpoint(2, collection.status, `cleaned-up`)
     await collection.preload()
-    assertCheckpoint(2, setupCalls, 1)
+    await vi.waitFor(() => {
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(collection.get(shared.id)?.name).toBe(`Restarted`)
+    })
+    assertCheckpoint(
+      3,
+      {
+        status: collection.status,
+        fetches: queryFn.mock.calls.length,
+        rows: collectionRows(collection),
+        liveOwners: ownersOf(maps, shared.id),
+        persistedOwners: persistedOwners(
+          collection._state.syncedMetadata,
+          shared.id,
+        ),
+        setupCalls,
+      },
+      {
+        status: `ready`,
+        fetches: 2,
+        rows: [shared.id],
+        liveOwners: [queryHash],
+        persistedOwners: [queryHash],
+        setupCalls: 1,
+      },
+    )
   })
 })
