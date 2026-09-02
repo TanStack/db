@@ -558,48 +558,38 @@ describe(`Collection Lifecycle Management`, () => {
         from: `ready`,
         expectedStatus: `ready`,
         expectedFirstReadyCalls: 1,
-        expectedDependentReadyEvents: 1,
         invalid: false,
       },
       {
         from: `error`,
         expectedStatus: `ready`,
         expectedFirstReadyCalls: 1,
-        expectedDependentReadyEvents: 2,
         invalid: false,
       },
       {
         from: `idle`,
         expectedStatus: `idle`,
         expectedFirstReadyCalls: 0,
-        expectedDependentReadyEvents: 0,
         invalid: true,
       },
       {
         from: `cleaned-up`,
         expectedStatus: `cleaned-up`,
         expectedFirstReadyCalls: 0,
-        expectedDependentReadyEvents: 0,
         invalid: true,
       },
     ] as const)(
       `defines the $from -> ready transition`,
-      async ({
-        from,
-        expectedStatus,
-        expectedFirstReadyCalls,
-        expectedDependentReadyEvents,
-        invalid,
-      }) => {
+      async ({ from, expectedStatus, expectedFirstReadyCalls, invalid }) => {
         const syncFailure = new Error(`sync failed before recovery`)
         let firstReadyCalls = 0
+        let recoveryFirstReadyCalls = 0
         const collection = createCollection<{ id: string; name: string }>({
           id: `mark-ready-from-${from}`,
           getKey: (item) => item.id,
           startSync: false,
           sync: { sync: () => {} },
         })
-        const readyEvent = vi.spyOn(collection._changes, `emitEmptyReadyEvent`)
         collection.onFirstReady(() => {
           firstReadyCalls++
         })
@@ -616,6 +606,47 @@ describe(`Collection Lifecycle Management`, () => {
         }
         expect(collection.status).toBe(from)
 
+        if (from === `error`) {
+          collection.onFirstReady(() => {
+            recoveryFirstReadyCalls++
+          })
+          expect(recoveryFirstReadyCalls).toBe(1)
+        }
+
+        const transitionTrace: Array<
+          | {
+              kind: `status`
+              previousStatus: string
+              status: string
+              syncError: unknown
+            }
+          | {
+              kind: `dependent-ready`
+              status: string
+              syncError: unknown
+            }
+        > = []
+        collection.on(`status:change`, ({ previousStatus, status }) => {
+          transitionTrace.push({
+            kind: `status`,
+            previousStatus,
+            status,
+            syncError: collection._lifecycle.getSyncError(),
+          })
+        })
+        const originalEmitEmptyReadyEvent =
+          collection._changes.emitEmptyReadyEvent.bind(collection._changes)
+        vi.spyOn(collection._changes, `emitEmptyReadyEvent`).mockImplementation(
+          () => {
+            transitionTrace.push({
+              kind: `dependent-ready`,
+              status: collection.status,
+              syncError: collection._lifecycle.getSyncError(),
+            })
+            originalEmitEmptyReadyEvent()
+          },
+        )
+
         let didThrow = false
         let thrown: unknown
         try {
@@ -628,10 +659,30 @@ describe(`Collection Lifecycle Management`, () => {
         expect(didThrow).toBe(invalid)
         if (invalid) {
           expect(thrown).toBeInstanceOf(InvalidCollectionStatusTransitionError)
+          expect((thrown as Error).message).toBe(
+            `Invalid collection status transition from "${from}" to "ready" for collection "mark-ready-from-${from}"`,
+          )
         }
         expect(collection.status).toBe(expectedStatus)
         expect(firstReadyCalls).toBe(expectedFirstReadyCalls)
-        expect(readyEvent).toHaveBeenCalledTimes(expectedDependentReadyEvents)
+        expect(recoveryFirstReadyCalls).toBe(from === `error` ? 1 : 0)
+        expect(transitionTrace).toEqual(
+          from === `error`
+            ? [
+                {
+                  kind: `status`,
+                  previousStatus: `error`,
+                  status: `ready`,
+                  syncError: undefined,
+                },
+                {
+                  kind: `dependent-ready`,
+                  status: `ready`,
+                  syncError: undefined,
+                },
+              ]
+            : [],
+        )
         expect(collection._lifecycle.getSyncError()).toBeUndefined()
 
         await collection.cleanup()
