@@ -250,6 +250,9 @@ async function runRetentionHistory(
               }
               queueMicrotask(() => settlementTimeline.push(`checkpoint`))
             } else {
+              // Synthetic generation canary: seed restarted-session
+              // publication state so the old publication tail cannot clear it.
+              // The batch assertions below exercise the public restart path.
               collection._state.preSyncVisibleState.set(-1, retainedMarker)
               collection._state.recentlySyncedKeys.add(restartedRow.id)
             }
@@ -371,11 +374,19 @@ it(`retains a missing row introduced by a sync update`, async () => {
   await runRetentionHistory([{ type: `update`, row: { id: 1, value: 1 } }])
 })
 
-it.each([`insideListener`, `afterOldReturn`] as const)(
-  `retains a restarted row committed %s`,
-  async (commitPhase) => {
+it.each(
+  ([`insert`, `update`] as const).flatMap((triggerType) =>
+    ([`insideListener`, `afterOldReturn`] as const).map(
+      (commitPhase) => [triggerType, commitPhase] as const,
+    ),
+  ),
+)(
+  `retains an old-session %s and a restarted row committed %s`,
+  async (triggerType, commitPhase) => {
     await runRetentionHistory([
-      { type: `insert`, row: { id: 1, value: 1 } },
+      ...(triggerType === `update`
+        ? ([{ type: `insert`, row: { id: 1, value: 1 } }] as const)
+        : []),
       {
         type: `reentrantRestart`,
         row: { id: 1, value: 1 },
