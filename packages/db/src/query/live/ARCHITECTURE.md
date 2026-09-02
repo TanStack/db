@@ -1133,6 +1133,12 @@ event runs after the frozen first-ready batch. That event snapshots the dependen
 present at delivery and attempts every one even if an earlier listener fails.
 Removing or adding a dependent during delivery does not change that frozen
 batch; an added dependent starts with the next publication.
+
+`markReady()` from `ready` is a no-op. Recovery from `error` clears the current
+sync error and emits a dependent-ready event, but does not start a second
+first-ready cycle. `idle` and `cleaned-up` cannot transition directly to
+`ready`; sync must establish `loading` first.
+
 Because the ready snapshot is already public, a listener failure also cannot
 discard graph work queued by an earlier listener. Core flushes that work before
 it rethrows the first listener failure. If readiness is nested inside an

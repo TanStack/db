@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { CleanupQueue } from '../src/collection/cleanup-queue.js'
+import { InvalidCollectionStatusTransitionError } from '../src/errors.js'
 import {
   getActivePublicationContext,
   transactionScopedScheduler,
@@ -550,6 +551,91 @@ describe(`Collection Lifecycle Management`, () => {
         await collection.cleanup()
       }
     })
+
+    it.each([
+      {
+        from: `ready`,
+        expectedStatus: `ready`,
+        expectedFirstReadyCalls: 1,
+        expectedDependentReadyEvents: 1,
+        invalid: false,
+      },
+      {
+        from: `error`,
+        expectedStatus: `ready`,
+        expectedFirstReadyCalls: 1,
+        expectedDependentReadyEvents: 2,
+        invalid: false,
+      },
+      {
+        from: `idle`,
+        expectedStatus: `idle`,
+        expectedFirstReadyCalls: 0,
+        expectedDependentReadyEvents: 0,
+        invalid: true,
+      },
+      {
+        from: `cleaned-up`,
+        expectedStatus: `cleaned-up`,
+        expectedFirstReadyCalls: 0,
+        expectedDependentReadyEvents: 0,
+        invalid: true,
+      },
+    ] as const)(
+      `defines the $from -> ready transition`,
+      async ({
+        from,
+        expectedStatus,
+        expectedFirstReadyCalls,
+        expectedDependentReadyEvents,
+        invalid,
+      }) => {
+        const syncFailure = new Error(`sync failed before recovery`)
+        let firstReadyCalls = 0
+        const collection = createCollection<{ id: string; name: string }>({
+          id: `mark-ready-from-${from}`,
+          getKey: (item) => item.id,
+          startSync: false,
+          sync: { sync: () => {} },
+        })
+        const readyEvent = vi.spyOn(collection._changes, `emitEmptyReadyEvent`)
+        collection.onFirstReady(() => {
+          firstReadyCalls++
+        })
+
+        if (from === `ready` || from === `error`) {
+          collection._lifecycle.setStatus(`loading`)
+          collection._lifecycle.markReady()
+        }
+        if (from === `error`) {
+          collection._lifecycle.markError(syncFailure)
+          expect(collection._lifecycle.getSyncError()).toBe(syncFailure)
+        } else if (from === `cleaned-up`) {
+          collection._lifecycle.setStatus(`cleaned-up`)
+        }
+        expect(collection.status).toBe(from)
+
+        let didThrow = false
+        let thrown: unknown
+        try {
+          collection._lifecycle.markReady()
+        } catch (error) {
+          didThrow = true
+          thrown = error
+        }
+
+        expect(didThrow).toBe(invalid)
+        if (invalid) {
+          expect(thrown).toBeInstanceOf(InvalidCollectionStatusTransitionError)
+        }
+        expect(collection.status).toBe(expectedStatus)
+        expect(firstReadyCalls).toBe(expectedFirstReadyCalls)
+        expect(readyEvent).toHaveBeenCalledTimes(expectedDependentReadyEvents)
+        expect(collection._lifecycle.getSyncError()).toBeUndefined()
+
+        await collection.cleanup()
+      },
+    )
 
     it(`attempts every first-ready effect before rethrowing the first failure`, async () => {
       let markReadyCallback: (() => void) | undefined
