@@ -719,6 +719,77 @@ describe(`Collection Lifecycle Management`, () => {
       removeLater()
     })
 
+    it(`does not resume ready effects after a status listener enters error`, async () => {
+      const failure = new Error(`ready listener failed the sync`)
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `ready-listener-error-test`,
+        getKey: (item) => item.id,
+        startSync: false,
+        sync: { sync: () => {} },
+      })
+      const readyEvent = vi.spyOn(collection._changes, `emitEmptyReadyEvent`)
+      const firstReady = vi.fn()
+      collection.onFirstReady(firstReady)
+      collection.on(`status:ready`, () => {
+        collection._lifecycle.markError(failure)
+      })
+      collection._lifecycle.setStatus(`loading`)
+
+      collection._lifecycle.markReady()
+
+      expect(collection.status).toBe(`error`)
+      expect(collection._lifecycle.getSyncError()).toBe(failure)
+      expect(collection._lifecycle.hasBeenReady).toBe(false)
+      expect(firstReady).not.toHaveBeenCalled()
+      expect(readyEvent).not.toHaveBeenCalled()
+      await collection.cleanup()
+    })
+
+    it(`does not resume an outer ready transition after a synchronous restart`, async () => {
+      let syncStarts = 0
+      let restartedPreload: Promise<void> | undefined
+      let restartOnce = true
+      let lateSubscription: { unsubscribe: () => void } | undefined
+      const lateReadyBatches: Array<Array<unknown>> = []
+      const firstReadyStatuses: Array<string> = []
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `ready-listener-aba-test`,
+        getKey: (item) => item.id,
+        startSync: false,
+        sync: {
+          sync: ({ markReady }) => {
+            syncStarts++
+            markReady()
+          },
+        },
+      })
+      const readyEvent = vi.spyOn(collection._changes, `emitEmptyReadyEvent`)
+      collection.onFirstReady(() => {
+        firstReadyStatuses.push(collection.status)
+      })
+      collection.on(`status:ready`, () => {
+        if (!restartOnce) return
+        restartOnce = false
+        void collection.cleanup()
+        restartedPreload = collection.preload()
+        lateSubscription = collection.subscribeChanges((batch) => {
+          lateReadyBatches.push(batch)
+        })
+      })
+      collection._lifecycle.setStatus(`loading`)
+
+      collection._lifecycle.markReady()
+      await restartedPreload
+
+      expect(syncStarts).toBe(1)
+      expect(collection.status).toBe(`ready`)
+      expect(firstReadyStatuses).toEqual([`ready`])
+      expect(lateReadyBatches).toEqual([])
+      expect(readyEvent).toHaveBeenCalledOnce()
+      lateSubscription!.unsubscribe()
+      await collection.cleanup()
+    })
+
     it(`starts a fresh first-ready cycle after cleanup of a failed ready effect`, async () => {
       const readyCallbacks: Array<() => void> = []
       const firstFailure = new Error(`first ready cycle failed exactly`)

@@ -38,6 +38,7 @@ export class CollectionLifecycleManager<
   public onFirstReadyCallbacks: Array<() => void> = []
   private idleCallbackId: number | null = null
   private syncError: unknown
+  private statusRevision = 0
 
   /**
    * Creates a new CollectionLifecycleManager instance
@@ -105,6 +106,7 @@ export class CollectionLifecycleManager<
       )
     }
     this.validateStatusTransition(this.status, newStatus)
+    this.statusRevision++
     const previousStatus = this.status
     this.status = newStatus
 
@@ -148,12 +150,17 @@ export class CollectionLifecycleManager<
     // A successful initial sync or recovery establishes a ready snapshot.
     if (this.status === `loading` || this.status === `error`) {
       this.syncError = undefined
+      const readyRevision = this.statusRevision + 1
       this.setStatus(`ready`, true)
 
-      // A status listener can synchronously supersede this transition, for
-      // example by cleaning up the Collection. Do not publish ready effects
-      // for a snapshot that is no longer ready.
-      if ((this.status as CollectionStatus) !== `ready`) return undefined
+      // A status listener can synchronously supersede this transition, even
+      // when it restarts the Collection back to ready before returning.
+      if (
+        (this.status as CollectionStatus) !== `ready` ||
+        this.statusRevision !== readyRevision
+      ) {
+        return undefined
+      }
 
       const readyEffects: Array<() => void> = []
 

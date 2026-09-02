@@ -1145,10 +1145,13 @@ sync error and emits a dependent-ready event, but does not start a second
 first-ready cycle. `idle` and `cleaned-up` cannot transition directly to
 `ready`; sync must establish `loading` first.
 
-The `status:ready` event precedes first-ready effects. If one of its listeners
-synchronously moves the Collection away from `ready`, that newer lifecycle
-transition supersedes the current one. Core does not resume first-ready effects
-or emit a dependent-ready event for the superseded snapshot.
+The `status:ready` event precedes the ready effects captured by that transition.
+If one of its listeners synchronously performs another lifecycle transition,
+that newer transition supersedes the current one, even if a restart returns the
+Collection to `ready` before the listener returns. Core does not resume the
+captured effects or emit a dependent-ready event for the superseded snapshot.
+Cleanup may separately drain pending first-ready callbacks, including preload
+waiters, so they settle; that cleanup-owned drain is not a ready publication.
 
 A ready-effect failure does not undo effects already attempted in that cycle.
 After cleanup, the next sync is a new first-ready cycle with a fresh preload
