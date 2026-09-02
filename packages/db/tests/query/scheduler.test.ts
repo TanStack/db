@@ -265,6 +265,79 @@ describe(`live query scheduler`, () => {
     }
   })
 
+  it.each([
+    { name: `undefined`, failure: undefined },
+    { name: `null`, failure: null },
+    { name: `false`, failure: false },
+    { name: `zero`, failure: 0 },
+    { name: `empty string`, failure: `` },
+    { name: `NaN`, failure: Number.NaN },
+  ])(
+    `preserves an exact $name row-listener failure after later delivery`,
+    async ({ name, failure }) => {
+      let begin!: () => void
+      let write!: (message: { type: `insert`; value: User }) => void
+      let commit!: () => void
+      const laterListener = vi.fn()
+      const source = createCollection<User>({
+        id: `falsy-row-listener-${name.replaceAll(` `, `-`)}`,
+        getKey: (user) => user.id,
+        startSync: true,
+        sync: {
+          sync: (actions) => {
+            begin = actions.begin
+            write = actions.write
+            commit = () => {
+              actions.commit()
+            }
+            actions.markReady()
+          },
+        },
+      })
+      const throwingSubscription = source.subscribeChanges(
+        () => {
+          throw failure
+        },
+        { includeInitialState: false },
+      )
+      const laterSubscription = source.subscribeChanges(laterListener, {
+        includeInitialState: false,
+      })
+      const live = createLiveQueryCollection({
+        id: `falsy-row-listener-dependent-${name.replaceAll(` `, `-`)}`,
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: source })
+            .select(({ user }) => ({ id: user.id, name: user.name })),
+      })
+
+      try {
+        await live.preload()
+        begin()
+        write({ type: `insert`, value: { id: 1, name: `Ada` } })
+        let didThrow = false
+        let thrown: unknown
+        try {
+          commit()
+        } catch (error) {
+          didThrow = true
+          thrown = error
+        }
+
+        expect(didThrow).toBe(true)
+        expect(Object.is(thrown, failure)).toBe(true)
+        expect(laterListener).toHaveBeenCalledOnce()
+        expect(live.get(1)).toEqual(expect.objectContaining({ name: `Ada` }))
+      } finally {
+        throwingSubscription.unsubscribe()
+        laterSubscription.unsubscribe()
+        await live.cleanup()
+        await source.cleanup()
+      }
+    },
+  )
+
   it(`keeps a nested ready failure when a later outer listener throws`, async () => {
     let markInnerReady!: () => void
     const readyFailure = new Error(`nested ready listener failed`)
