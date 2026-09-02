@@ -112,6 +112,7 @@ export type CollectionPublicationStateSnapshot<
   pendingLocalOrigins: Set<TKey>
   size: number
   preSyncVisibleState: Map<TKey, TOutput>
+  preSyncVirtualState: Map<TKey, VirtualRowProps<TKey>>
   recentlySyncedKeys: Set<TKey>
   hasReceivedFirstCommit: boolean
   isCommittingSyncTransactions: boolean
@@ -197,6 +198,7 @@ export class CollectionStateManager<
   // State used for computing the change events
   public syncedKeys = new Set<TKey>()
   public preSyncVisibleState = new Map<TKey, TOutput>()
+  public preSyncVirtualState = new Map<TKey, VirtualRowProps<TKey>>()
   public recentlySyncedKeys = new Set<TKey>()
   public hasReceivedFirstCommit = false
   public isCommittingSyncTransactions = false
@@ -303,6 +305,7 @@ export class CollectionStateManager<
       pendingLocalOrigins: new Set(this.pendingLocalOrigins),
       size: this.size,
       preSyncVisibleState: new Map(this.preSyncVisibleState),
+      preSyncVirtualState: new Map(this.preSyncVirtualState),
       recentlySyncedKeys: new Set(this.recentlySyncedKeys),
       hasReceivedFirstCommit: this.hasReceivedFirstCommit,
       isCommittingSyncTransactions: this.isCommittingSyncTransactions,
@@ -344,6 +347,7 @@ export class CollectionStateManager<
     replaceSet(this.pendingLocalOrigins, snapshot.pendingLocalOrigins)
     this.size = snapshot.size
     replaceMap(this.preSyncVisibleState, snapshot.preSyncVisibleState)
+    replaceMap(this.preSyncVirtualState, snapshot.preSyncVirtualState)
     replaceSet(this.recentlySyncedKeys, snapshot.recentlySyncedKeys)
     this.hasReceivedFirstCommit = snapshot.hasReceivedFirstCommit
     this.isCommittingSyncTransactions = snapshot.isCommittingSyncTransactions
@@ -1562,12 +1566,14 @@ export class CollectionStateManager<
       for (const key of changedKeys) {
         const previousVisibleValue = currentVisibleState.get(key)
         const newVisibleValue = this.get(key) // This returns the new derived state
-        const previousVirtualProps = this.getVirtualPropsSnapshotForState(key, {
-          rowOrigins: previousRowOrigins,
-          optimisticUpserts: previousOptimisticUpserts,
-          optimisticDeletes: previousOptimisticDeletes,
-          completedOptimisticKeys: completedOptimisticOps,
-        })
+        const previousVirtualProps =
+          this.preSyncVirtualState.get(key) ??
+          this.getVirtualPropsSnapshotForState(key, {
+            rowOrigins: previousRowOrigins,
+            optimisticUpserts: previousOptimisticUpserts,
+            optimisticDeletes: previousOptimisticDeletes,
+            completedOptimisticKeys: completedOptimisticOps,
+          })
         const nextVirtualProps = this.getVirtualPropsSnapshotForState(key)
         const virtualChanged =
           previousVirtualProps.$synced !== nextVirtualProps.$synced ||
@@ -1704,6 +1710,7 @@ export class CollectionStateManager<
       if (this.syncSessionGeneration === syncSessionGeneration) {
         // Clear the pre-sync state since sync operations are complete
         this.preSyncVisibleState.clear()
+        this.preSyncVirtualState.clear()
 
         // Clear recently synced keys after a microtask to allow recomputeOptimisticState to see them
         Promise.resolve().then(() => {
@@ -1781,11 +1788,13 @@ export class CollectionStateManager<
       if (!remainingPendingKeys.has(key)) {
         this.recentlySyncedKeys.delete(key)
         this.preSyncVisibleState.delete(key)
+        this.preSyncVirtualState.delete(key)
       }
     }
 
     if (this.pendingSyncedTransactions.length === 0) {
       this.preSyncVisibleState.clear()
+      this.preSyncVirtualState.clear()
       this.recentlySyncedKeys.clear()
       this.changes.emitEvents([], true)
     } else {
@@ -1840,6 +1849,10 @@ export class CollectionStateManager<
         const currentValue = this.get(key)
         if (currentValue !== undefined) {
           this.preSyncVisibleState.set(key, currentValue)
+          this.preSyncVirtualState.set(
+            key,
+            this.getVirtualPropsSnapshotForState(key),
+          )
         }
       }
     }
@@ -1886,6 +1899,7 @@ export class CollectionStateManager<
     this.pendingSyncedTransactions = []
     this.syncedKeys.clear()
     this.preSyncVisibleState.clear()
+    this.preSyncVirtualState.clear()
     this.recentlySyncedKeys.clear()
     this.hasReceivedFirstCommit = false
   }

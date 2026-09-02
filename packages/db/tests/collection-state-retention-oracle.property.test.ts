@@ -419,6 +419,7 @@ it(`starts a new sync session without retained publication state`, async () => {
     const cleanup = collection.cleanup()
     const retainedAfterCleanup = {
       visibleRows: collection._state.preSyncVisibleState.size,
+      virtualRows: collection._state.preSyncVirtualState.size,
       recentKeys: collection._state.recentlySyncedKeys.size,
     }
     await cleanup
@@ -430,7 +431,7 @@ it(`starts a new sync session without retained publication state`, async () => {
     expect(sync.commit()).toBe(true)
 
     expect({ retainedAfterCleanup, events }).toEqual({
-      retainedAfterCleanup: { visibleRows: 0, recentKeys: 0 },
+      retainedAfterCleanup: { visibleRows: 0, virtualRows: 0, recentKeys: 0 },
       events: [{ type: `insert`, key: 1 }],
     })
   } finally {
@@ -482,6 +483,7 @@ it(`keeps a restarted session's publication state after the old listener returns
     sync.write({ type: `insert`, value: { id: 3, value: 3 } })
     expect(sync.commit()).toBe(true)
     expect(collection._state.preSyncVisibleState.size).toBe(0)
+    expect(collection._state.preSyncVirtualState.size).toBe(0)
     expect(collection._state.hasReceivedFirstCommit).toBe(true)
     await Promise.resolve()
     expect(collection._state.recentlySyncedKeys.size).toBe(0)
@@ -526,6 +528,7 @@ it(`does not let an old publication microtask clear restarted sync state`, async
     expect(collection._state.hasReceivedFirstCommit).toBe(true)
     await Promise.resolve()
     expect(collection._state.preSyncVisibleState.size).toBe(0)
+    expect(collection._state.preSyncVirtualState.size).toBe(0)
     expect(collection._state.recentlySyncedKeys.size).toBe(0)
     await cleanup
   } finally {
@@ -533,7 +536,7 @@ it(`does not let an old publication microtask clear restarted sync state`, async
   }
 })
 
-it(`publishes one insert when a restarted optimistic row is confirmed and rolled back`, async () => {
+it(`publishes a virtual-state update when a restarted optimistic row is confirmed`, async () => {
   let sync!: SyncActions
   let syncSession = 0
   let releaseMutation!: () => void
@@ -552,7 +555,30 @@ it(`publishes one insert when a restarted optimistic row is confirmed and rolled
       },
     },
   })
-  const events: Array<{ type: string; key: string | number }> = []
+  type ObservedRow = RetainedRow & {
+    $collectionId: string
+    $key: number
+    $origin: `local` | `remote`
+    $synced: boolean
+  }
+  type ObservedChange = {
+    type: string
+    key: string | number
+    value: ObservedRow
+    previousValue?: ObservedRow
+  }
+  const snapshotRow = (row: ObservedRow): ObservedRow => ({
+    id: row.id,
+    value: row.value,
+    $collectionId: row.$collectionId,
+    $key: row.$key,
+    $origin: row.$origin,
+    $synced: row.$synced,
+  })
+  const publications: Array<{
+    changes: Array<ObservedChange>
+    rows: Array<ObservedRow>
+  }> = []
   const restartStatuses: Array<string> = []
   let restarted = false
   let readMutationState: (() => TransactionState) | undefined
@@ -561,7 +587,17 @@ it(`publishes one insert when a restarted optimistic row is confirmed and rolled
   let syncReceiptSettled = false
   const subscription = collection.subscribeChanges(
     (changes) => {
-      events.push(...changes.map(({ type, key }) => ({ type, key })))
+      publications.push({
+        changes: changes.map(({ type, key, value, previousValue }) => ({
+          type,
+          key,
+          value: snapshotRow(value),
+          ...(previousValue === undefined
+            ? {}
+            : { previousValue: snapshotRow(previousValue) }),
+        })),
+        rows: [...collection.state.values()].map(snapshotRow),
+      })
       if (restarted || !changes.some(({ key }) => key === 1)) return
 
       restarted = true
@@ -600,10 +636,45 @@ it(`publishes one insert when a restarted optimistic row is confirmed and rolled
     sync.write({ type: `insert`, value: { id: 1, value: 1 } })
     expect(sync.commit()).toBe(true)
 
-    expect(events).toEqual([
-      { type: `insert`, key: 1 },
-      { type: `insert`, key: 2 },
-    ])
+    const remoteRow = (id: number): ObservedRow => ({
+      id,
+      value: id,
+      $collectionId: collection.id,
+      $key: id,
+      $origin: `remote`,
+      $synced: true,
+    })
+    const localRow = (id: number): ObservedRow => ({
+      id,
+      value: id,
+      $collectionId: collection.id,
+      $key: id,
+      $origin: `local`,
+      $synced: false,
+    })
+    const expectedPublications = [
+      {
+        changes: [{ type: `insert`, key: 1, value: remoteRow(1) }],
+        rows: [remoteRow(1)],
+      },
+      { changes: [], rows: [] },
+      {
+        changes: [{ type: `insert`, key: 2, value: localRow(2) }],
+        rows: [localRow(2)],
+      },
+      {
+        changes: [
+          {
+            type: `update`,
+            key: 2,
+            value: remoteRow(2),
+            previousValue: localRow(2),
+          },
+        ],
+        rows: [remoteRow(2)],
+      },
+    ]
+    expect(publications).toEqual(expectedPublications)
     expect([...collection.state.keys()]).toEqual([2])
     expect(restartStatuses).toEqual([`ready`, `cleaned-up`, `loading`, `ready`])
     expect(collection.status).toBe(`ready`)
@@ -616,19 +687,13 @@ it(`publishes one insert when a restarted optimistic row is confirmed and rolled
     }
     await syncReceipt
     expect(syncReceiptSettled).toBe(true)
-    expect(events).toEqual([
-      { type: `insert`, key: 1 },
-      { type: `insert`, key: 2 },
-    ])
+    expect(publications).toEqual(expectedPublications)
     expect([...collection.state.keys()]).toEqual([2])
 
     releaseMutation()
     await mutationCommit
     expect(readMutationState?.()).toBe(`failed`)
-    expect(events).toEqual([
-      { type: `insert`, key: 1 },
-      { type: `insert`, key: 2 },
-    ])
+    expect(publications).toEqual(expectedPublications)
     expect([...collection.state.keys()]).toEqual([2])
   } finally {
     releaseMutation()

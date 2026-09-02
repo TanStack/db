@@ -1781,6 +1781,8 @@ async function expectCanceledReceiptReleasesOnlyItsSuppression() {
     expect(source._state.recentlySyncedKeys).toEqual(new Set([`second`]))
     expect(source._state.preSyncVisibleState.has(`first`)).toBe(false)
     expect(source._state.preSyncVisibleState.has(`second`)).toBe(true)
+    expect(source._state.preSyncVirtualState.has(`first`)).toBe(false)
+    expect(source._state.preSyncVirtualState.has(`second`)).toBe(true)
     if (canceled !== true) {
       await expect(canceled).rejects.toMatchObject({ name: `AbortError` })
     }

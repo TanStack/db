@@ -1247,6 +1247,10 @@ or roll back independently.
 Each ordinary Collection batch is a keyed diff and names an affected row key at
 most once. Row operations and row-metadata writes use one shared affected-key
 derivation for pre-sync capture, commit, cancellation, and rollback snapshots.
+A pre-sync capture retains both the exact visible row and its virtual row
+properties. Confirmation must therefore publish a same-value update when only
+`$origin` or `$synced` changes; its `previousValue` describes the state readers
+actually saw before confirmation.
 A metadata-only transaction can retire optimistic state and change virtual row
 properties, so omitting its key from any of those phases can publish the same
 transition twice, leave stale suppression state after cancellation, or retain
@@ -1426,12 +1430,13 @@ window progress; only a complete publication snapshot reaches readers.
 Release, truncate, replacement, restart, and cleanup change the relevant
 identity or generation without changing this sequence.
 
-Cleanup also ends the current publication history. It must discard both the
-pre-sync visible snapshot and the recently-synced suppression set before a new
-sync session starts. Synchronous publication tails and queued microtasks remain
-scoped to the session that created them; after cleanup they cannot clear or mark
-state owned by a restarted session. Otherwise stale rows can classify a fresh
-insert as an update, or stale keys can suppress the new session's first event.
+Cleanup also ends the current publication history. It must discard the
+pre-sync row and virtual-property snapshots plus the recently-synced
+suppression set before a new sync session starts. Synchronous publication tails
+and queued microtasks remain scoped to the session that created them; after
+cleanup they cannot clear or mark state owned by a restarted session. Otherwise
+stale rows can classify a fresh insert as an update, or stale keys can suppress
+the new session's first event.
 A new-session transaction committed inside the old session's publication
 callback remains in the causal queue. Its receipt stays pending until that new
 row and its event are visible; the old drain cannot discard it.

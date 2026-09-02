@@ -319,6 +319,7 @@ async function applyRound(
     [...metadataModel.entries()].sort(byKey),
   )
   expect(harness.rows._state.preSyncVisibleState.size).toBe(0)
+  expect(harness.rows._state.preSyncVirtualState.size).toBe(0)
   expect(harness.rows._state.recentlySyncedKeys.size).toBe(0)
 }
 
@@ -401,6 +402,9 @@ async function expectMetadataCancellationOwnership(
     expect(new Set(harness.rows._state.preSyncVisibleState.keys())).toEqual(
       expectedBefore,
     )
+    expect(new Set(harness.rows._state.preSyncVirtualState.keys())).toEqual(
+      expectedBefore,
+    )
     const batchCountBefore = harness.batches.length
 
     harness.rows._state.cancelPendingSyncedTransaction(canceled.transaction)
@@ -411,6 +415,9 @@ async function expectMetadataCancellationOwnership(
     ])
     expect(harness.rows._state.recentlySyncedKeys).toEqual(expectedAfter)
     expect(new Set(harness.rows._state.preSyncVisibleState.keys())).toEqual(
+      expectedAfter,
+    )
+    expect(new Set(harness.rows._state.preSyncVirtualState.keys())).toEqual(
       expectedAfter,
     )
     expect(harness.batches).toHaveLength(batchCountBefore)
@@ -488,6 +495,7 @@ async function expectMetadataRollbackRecovery({
   const hydratedBefore = new Set(derived._state.hydratedKeys)
   const syncedBefore = new Set(derived._state.syncedKeys)
   const preSyncBefore = new Map(derived._state.preSyncVisibleState)
+  const preSyncVirtualBefore = new Map(derived._state.preSyncVirtualState)
   const recentlySyncedBefore = new Set(derived._state.recentlySyncedKeys)
   const published: Array<
     ReadonlyArray<ChangeMessage<PublicationRow, string | number>>
@@ -545,6 +553,7 @@ async function expectMetadataRollbackRecovery({
     expect(derived._state.hydratedKeys).toEqual(hydratedBefore)
     expect(derived._state.syncedKeys).toEqual(syncedBefore)
     expect(derived._state.preSyncVisibleState).toEqual(preSyncBefore)
+    expect(derived._state.preSyncVirtualState).toEqual(preSyncVirtualBefore)
     expect(derived._state.recentlySyncedKeys).toEqual(recentlySyncedBefore)
     expect(published).toEqual([])
   } finally {
