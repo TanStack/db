@@ -105,6 +105,7 @@ const metadataCancellationArbitrary = fc.record({
   }),
   canceledOperation: metadataOperationArbitrary,
   retainedOperation: metadataOperationArbitrary,
+  canceledFirst: fc.boolean(),
   initialMetadata: fc.array(metadataEntryStateArbitrary, {
     minLength: 3,
     maxLength: 3,
@@ -354,6 +355,7 @@ async function expectMetadataCancellationOwnership(
   retainedKeys: ReadonlyArray<number>,
   canceledOperation: MetadataOperation,
   retainedOperation: MetadataOperation,
+  canceledFirst: boolean,
   initialMetadataState: ReadonlyArray<MetadataEntryState>,
 ): Promise<void> {
   const harness = await createPublicationHarness()
@@ -400,8 +402,14 @@ async function expectMetadataCancellationOwnership(
     return { receipt, transaction }
   }
 
-  const canceled = stageMetadata(canceledKeys, canceledOperation)
-  const retained = stageMetadata(retainedKeys, retainedOperation)
+  const first = canceledFirst
+    ? stageMetadata(canceledKeys, canceledOperation)
+    : stageMetadata(retainedKeys, retainedOperation)
+  const second = canceledFirst
+    ? stageMetadata(retainedKeys, retainedOperation)
+    : stageMetadata(canceledKeys, canceledOperation)
+  const canceled = canceledFirst ? first : second
+  const retained = canceledFirst ? second : first
 
   try {
     harness.rows._state.capturePreSyncVisibleState()
@@ -421,6 +429,9 @@ async function expectMetadataCancellationOwnership(
     expect(harness.rows._state.pendingSyncedTransactions).toEqual([
       retained.transaction,
     ])
+    expect(retained.transaction.rowMetadataWrites).toEqual(
+      new Map(retainedKeys.map((key) => [key, retainedOperation])),
+    )
     expect(harness.rows._state.recentlySyncedKeys).toEqual(expectedAfter)
     expect(new Set(harness.rows._state.preSyncVisibleState.keys())).toEqual(
       expectedAfter,
@@ -433,9 +444,24 @@ async function expectMetadataCancellationOwnership(
     await expect(canceled.receipt).rejects.toBeInstanceOf(
       SyncTransactionAbortedError,
     )
+
+    persistence.resolve()
+    await heldTransaction.isPersisted.promise
+    await expect(retained.receipt).resolves.toBeUndefined()
+    const expectedMetadata = new Map(initialMetadata)
+    for (const key of retainedKeys) {
+      if (retainedOperation.type === `set`) {
+        expectedMetadata.set(key, retainedOperation.value)
+      } else {
+        expectedMetadata.delete(key)
+      }
+    }
+    expect(harness.rows._state.syncedMetadata).toEqual(expectedMetadata)
   } finally {
-    harness.rows._state.cancelPendingSyncedTransaction(retained.transaction)
-    await retained.receipt.catch(() => undefined)
+    if (retained.transaction.applied.isPending()) {
+      harness.rows._state.cancelPendingSyncedTransaction(retained.transaction)
+      await retained.receipt.catch(() => undefined)
+    }
     persistence.resolve()
     await heldTransaction.isPersisted.promise.catch(() => undefined)
     harness.unsubscribe()
@@ -600,6 +626,7 @@ it(`releases only canceled metadata keys while another sync remains pending`, as
     [1, 2],
     { type: `delete` },
     { type: `set`, value: false },
+    true,
     [
       { present: true, value: undefined },
       { present: true, value: false },
@@ -614,7 +641,23 @@ it(`does not apply canceled metadata to an absent base key`, async () => {
     [1, 2],
     { type: `set`, value: `canceled` },
     { type: `set`, value: `retained` },
+    true,
     [{ present: false }, { present: false }, { present: false }],
+  )
+})
+
+it(`settles an older metadata owner after canceling the newer owner`, async () => {
+  await expectMetadataCancellationOwnership(
+    [0, 1],
+    [1, 2],
+    { type: `delete` },
+    { type: `set`, value: `retained` },
+    false,
+    [
+      { present: true, value: undefined },
+      { present: false },
+      { present: true, value: false },
+    ],
   )
 })
 
@@ -656,6 +699,7 @@ fcTest.prop(
     retainedKeys,
     canceledOperation,
     retainedOperation,
+    canceledFirst,
     initialMetadata,
   }) =>
     expectMetadataCancellationOwnership(
@@ -663,6 +707,7 @@ fcTest.prop(
       retainedKeys,
       canceledOperation,
       retainedOperation,
+      canceledFirst,
       initialMetadata,
     ),
 )
