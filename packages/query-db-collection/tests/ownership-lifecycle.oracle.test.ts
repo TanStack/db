@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, hashKey } from '@tanstack/query-core'
 import { createCollection, eq } from '@tanstack/db'
+import { createDeferred } from '../../db/src/deferred.js'
 import { TraceAssertionError } from '../../db/tests/trace-runner.js'
 import { queryCollectionOptions } from '../src/query.js'
 import type { Collection, SyncMetadataApi } from '@tanstack/db'
@@ -27,7 +28,7 @@ type MetadataRecorder = {
 
 type OwnershipFixtureOptions = {
   id: string
-  results: Array<Array<Item>>
+  results: Array<Array<Item> | Promise<Array<Item>>>
   syncMode?: `eager` | `on-demand`
   metadataRecorder?: MetadataRecorder
   setupMetadata?: (metadata: SyncMetadataApi<string | number>) => void
@@ -174,7 +175,9 @@ function createOwnershipFixture({
 }: OwnershipFixtureOptions): OwnershipFixture {
   const queryClient = createQueryClient()
   const queryFn = vi.fn<() => Promise<Array<Item>>>()
-  results.forEach((result) => queryFn.mockResolvedValueOnce(result))
+  results.forEach((result) =>
+    queryFn.mockImplementationOnce(() => Promise.resolve(result)),
+  )
   queryFn.mockRejectedValue(new Error(`Unexpected ownership-oracle refetch`))
   const baseOptions = queryCollectionOptions<Item>({
     id,
@@ -187,6 +190,7 @@ function createOwnershipFixture({
   })
   const maps = inspectOwnershipMaps(baseOptions)
   const originalSync = baseOptions.sync
+  let pendingSetupMetadata = setupMetadata
   const collection = createCollection(
     metadataRecorder || setupMetadata
       ? {
@@ -196,10 +200,11 @@ function createOwnershipFixture({
               if (!params.metadata) {
                 throw new Error(`Sync metadata API is unavailable`)
               }
-              if (setupMetadata) {
+              if (pendingSetupMetadata) {
                 params.begin()
-                setupMetadata(params.metadata)
+                pendingSetupMetadata(params.metadata)
                 params.commit()
+                pendingSetupMetadata = undefined
               }
               return originalSync.sync({
                 ...params,
@@ -649,10 +654,11 @@ describe(`query collection ownership lifecycle oracle`, () => {
   it(`restages an existing persisted owner when its absent row is inserted`, async () => {
     const id = `ownership-existing-metadata-before-insert`
     const queryHash = hashKey([id])
-    const { collection, maps } = createOwnershipFixture({
+    const result = createDeferred<Array<Item>>()
+    const { collection, maps, queryFn } = createOwnershipFixture({
       id,
       syncMode: `eager`,
-      results: [[shared]],
+      results: [result.promise],
       setupMetadata: (metadata) => {
         metadata.row.set(shared.id, {
           queryCollection: { owners: { [queryHash]: true } },
@@ -660,9 +666,28 @@ describe(`query collection ownership lifecycle oracle`, () => {
       },
     })
 
-    await collection.stateWhenReady()
+    expect(queryFn).toHaveBeenCalledTimes(1)
     assertCheckpoint(
       0,
+      {
+        rows: collectionRows(collection),
+        liveOwners: ownersOf(maps, shared.id),
+        persistedOwners: persistedOwners(
+          collection._state.syncedMetadata,
+          shared.id,
+        ),
+      },
+      {
+        rows: [],
+        liveOwners: [],
+        persistedOwners: [queryHash],
+      },
+    )
+
+    result.resolve([shared])
+    await collection.stateWhenReady()
+    assertCheckpoint(
+      1,
       {
         rows: collectionRows(collection),
         liveOwners: ownersOf(maps, shared.id),
