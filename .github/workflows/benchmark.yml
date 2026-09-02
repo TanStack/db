@@ -1,0 +1,95 @@
+name: Benchmark
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'packages/db/**'
+      - 'packages/db-ivm/**'
+      - 'scripts/bench/**'
+      - '.github/workflows/benchmark.yml'
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: Incremental Update Benchmark
+    # Skip draft PRs; the benchmark runs once a PR is marked ready for review
+    # (and on subsequent pushes to it).
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Setup Tools
+        uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
+      - name: Run benchmark on PR
+        run: |
+          pnpm --filter @tanstack/db-ivm build
+          pnpm exec tsx scripts/bench/incremental-update.ts \
+            --iterations=100 --warmup=20 \
+            --outFile="$RUNNER_TEMP/candidate.json"
+      - name: Run benchmark on base
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
+        run: |
+          HEAD_SHA=$(git rev-parse HEAD)
+          BASE_SHA=$(git merge-base "origin/$BASE_REF" HEAD)
+          echo "Benchmarking base commit $BASE_SHA"
+          git checkout --force "$BASE_SHA"
+          # Run the exact same benchmark code on both sides
+          git checkout "$HEAD_SHA" -- scripts/bench
+          pnpm install --frozen-lockfile
+          pnpm --filter @tanstack/db-ivm build
+          pnpm exec tsx scripts/bench/incremental-update.ts \
+            --iterations=100 --warmup=20 \
+            --outFile="$RUNNER_TEMP/base.json"
+      - name: Compare results
+        run: |
+          pnpm exec tsx scripts/bench/compare-incremental-update.ts \
+            --base="$RUNNER_TEMP/base.json" \
+            --candidate="$RUNNER_TEMP/candidate.json" \
+            --outFile="$RUNNER_TEMP/comparison.md"
+          cat "$RUNNER_TEMP/comparison.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload reports
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: benchmark-reports
+          path: |
+            ${{ runner.temp }}/base.json
+            ${{ runner.temp }}/candidate.json
+            ${{ runner.temp }}/comparison.md
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        # PRs from forks get a read-only token; the job summary and artifacts
+        # still carry the results.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          MARKER='<!-- incremental-update-benchmark -->'
+          BODY_FILE="$RUNNER_TEMP/comment.md"
+          { echo "$MARKER"; cat "$RUNNER_TEMP/comparison.md"; } > "$BODY_FILE"
+          COMMENT_ID=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate \
+            --jq ".[] | select(.body | startswith(\"$MARKER\")) | .id" | head -n1)
+          if [ -n "$COMMENT_ID" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$COMMENT_ID" -F body=@"$BODY_FILE" > /dev/null
+          else
+            gh api "repos/$REPO/issues/$PR_NUMBER/comments" -F body=@"$BODY_FILE" > /dev/null
+          fi
