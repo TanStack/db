@@ -4,6 +4,7 @@ import { createLiveQueryCollection, eq, isNull } from '../../src/query/index.js'
 import { createTransaction } from '../../src/transactions.js'
 import { createOptimisticAction } from '../../src/optimistic-action.js'
 import {
+  Scheduler,
   getActivePublicationContext,
   transactionScopedScheduler,
   withPublicationContext,
@@ -166,6 +167,79 @@ describe(`Collection publication scheduler context`, () => {
     expect(didThrow).toBe(true)
     expect(thrown).toBeUndefined()
   })
+
+  it(`attempts every clear listener and preserves its first failure`, () => {
+    const scheduler = new Scheduler()
+    const firstFailure = new Error(`first clear listener failed`)
+    const laterFailure = new Error(`later clear listener failed`)
+    const calls: Array<string> = []
+    let firstClear = true
+    let removeAdded: (() => void) | undefined
+    scheduler.onClear(() => {
+      calls.push(`first`)
+      if (!firstClear) return
+      removeSecond()
+      removeAdded ??= scheduler.onClear(() => calls.push(`added`))
+      throw firstFailure
+    })
+    const removeSecond = scheduler.onClear(() => {
+      calls.push(`second`)
+      if (firstClear) throw laterFailure
+    })
+
+    let thrown: unknown
+    try {
+      scheduler.clear(`context`)
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(thrown).toBe(firstFailure)
+    expect(calls).toEqual([`first`, `second`])
+
+    firstClear = false
+    expect(() => scheduler.clear(`next context`)).not.toThrow()
+    expect(calls).toEqual([`first`, `second`, `first`, `added`])
+    removeAdded?.()
+  })
+
+  it.each([`publication`, `graph`] as const)(
+    `does not replace a $source failure with a clear-listener failure`,
+    (source) => {
+      const primaryFailure = new Error(`${source} failed`)
+      const clearFailure = new Error(`clear listener failed`)
+      const laterClear = vi.fn()
+      const removeThrowingClear = transactionScopedScheduler.onClear(() => {
+        throw clearFailure
+      })
+      const removeLaterClear = transactionScopedScheduler.onClear(laterClear)
+
+      try {
+        let thrown: unknown
+        try {
+          withPublicationContext(() => {
+            if (source === `publication`) throw primaryFailure
+            const contextId = getActivePublicationContext()
+            transactionScopedScheduler.schedule({
+              contextId,
+              jobId: `failing graph`,
+              run: () => {
+                throw primaryFailure
+              },
+            })
+          })
+        } catch (error) {
+          thrown = error
+        }
+
+        expect(thrown).toBe(primaryFailure)
+        expect(laterClear).toHaveBeenCalledOnce()
+      } finally {
+        removeThrowingClear()
+        removeLaterClear()
+      }
+    },
+  )
 })
 
 describe(`live query scheduler`, () => {

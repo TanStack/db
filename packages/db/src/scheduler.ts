@@ -1,3 +1,5 @@
+import { runAllCallbacks } from './utils/callbacks.js'
+
 /**
  * Identifier used to scope scheduled work. Maps to a transaction id for live queries.
  */
@@ -187,8 +189,9 @@ export class Scheduler {
   /** Clear all scheduled jobs for a context. */
   clear(contextId: SchedulerContextId): void {
     this.contexts.delete(contextId)
-    // Notify listeners that this context was cleared
-    this.clearListeners.forEach((listener) => listener(contextId))
+    runAllCallbacks(
+      [...this.clearListeners].map((listener) => () => listener(contextId)),
+    )
   }
 
   /** Register a listener to be notified when a context is cleared. */
@@ -274,7 +277,12 @@ export function withPublicationContext<T>(publish: () => T): T {
     if (graphFailure) throw graphFailure.error
     return result
   } catch (error) {
-    transactionScopedScheduler.clear(contextId)
+    try {
+      transactionScopedScheduler.clear(contextId)
+    } catch {
+      // Clearing is cleanup for an already failed publication. Its own failure
+      // cannot replace the exact publication or graph failure that caused it.
+    }
     throw error
   } finally {
     activePublication = undefined

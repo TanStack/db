@@ -1241,8 +1241,10 @@ callback failure stays on the shared publication context, including when it
 came from a nested readiness transition. Later callback failures cannot replace
 it. Core runs the dependent graph turn queued by the batch before rethrowing the
 retained failure. A graph failure stops that turn and clears its remaining
-work; scheduler dependencies are not a complete proof that two jobs can commit
-or roll back independently.
+work. Scheduler context cleanup attempts every clear listener, but a cleanup
+failure cannot replace the publication or graph failure that caused the clear.
+Scheduler dependencies are not a complete proof that two jobs can commit or
+roll back independently.
 
 Each ordinary Collection batch is a keyed diff and names an affected row key at
 most once. Row operations and row-metadata writes use one shared affected-key
