@@ -9,6 +9,6 @@ title: Txid
 type Txid = number;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:92](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L92)
+Defined in: [packages/electric-db-collection/src/electric.ts:93](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L93)
 
 Type representing a transaction ID in ElectricSQL

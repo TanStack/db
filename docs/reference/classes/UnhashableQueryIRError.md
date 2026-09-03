@@ -5,7 +5,7 @@ title: UnhashableQueryIRError
 
 # Class: UnhashableQueryIRError
 
-Defined in: [packages/db/src/query/ir-stable-identity.ts:26](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir-stable-identity.ts#L26)
+Defined in: [packages/db/src/query/ir-stable-identity.ts:53](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir-stable-identity.ts#L53)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: [packages/db/src/query/ir-stable-identity.ts:26](https://github.com/
 new UnhashableQueryIRError(path, reason): UnhashableQueryIRError;
 ```
 
-Defined in: [packages/db/src/query/ir-stable-identity.ts:27](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir-stable-identity.ts#L27)
+Defined in: [packages/db/src/query/ir-stable-identity.ts:54](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir-stable-identity.ts#L54)
 
 #### Parameters
 
@@ -97,7 +97,7 @@ Error.name
 readonly path: string;
 ```
 
-Defined in: [packages/db/src/query/ir-stable-identity.ts:28](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir-stable-identity.ts#L28)
+Defined in: [packages/db/src/query/ir-stable-identity.ts:55](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir-stable-identity.ts#L55)
 
 ***
 
@@ -107,7 +107,7 @@ Defined in: [packages/db/src/query/ir-stable-identity.ts:28](https://github.com/
 readonly reason: string;
 ```
 
-Defined in: [packages/db/src/query/ir-stable-identity.ts:29](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir-stable-identity.ts#L29)
+Defined in: [packages/db/src/query/ir-stable-identity.ts:56](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir-stable-identity.ts#L56)
 
 ***
 

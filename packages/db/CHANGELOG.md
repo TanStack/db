@@ -1,5 +1,17 @@
 # @tanstack/db
 
+## 0.8.7
+
+### Patch Changes
+
+- Match index collation options by their effective values so indexes remain reusable when optional locale fields are omitted, set to `undefined`, or use equivalent locale identifiers. ([#1788](https://github.com/TanStack/db/pull/1788))
+
+## 0.8.6
+
+### Patch Changes
+
+- Lazily initialize runtime reference identities to avoid generating random values during Cloudflare Worker module evaluation. ([#1782](https://github.com/TanStack/db/pull/1782))
+
 ## 0.8.5
 
 ### Patch Changes

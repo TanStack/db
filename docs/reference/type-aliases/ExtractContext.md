@@ -9,7 +9,7 @@ title: ExtractContext
 type ExtractContext<T> = T extends BaseQueryBuilder<infer TContext> ? TContext : T extends QueryBuilder<infer TContext> ? TContext : never;
 ```
 
-Defined in: [packages/db/src/query/builder/index.ts:1489](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L1489)
+Defined in: [packages/db/src/query/builder/index.ts:1642](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L1642)
 
 ## Type Parameters
 

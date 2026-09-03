@@ -5,7 +5,7 @@ title: IndexStats
 
 # Interface: IndexStats
 
-Defined in: [packages/db/src/indexes/base-index.ts:22](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L22)
+Defined in: [packages/db/src/indexes/base-index.ts:44](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L44)
 
 Statistics about index usage and performance
 
@@ -17,7 +17,7 @@ Statistics about index usage and performance
 readonly averageLookupTime: number;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:25](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L25)
+Defined in: [packages/db/src/indexes/base-index.ts:47](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L47)
 
 ***
 
@@ -27,7 +27,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:25](https://github.com/TanSta
 readonly entryCount: number;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:23](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L23)
+Defined in: [packages/db/src/indexes/base-index.ts:45](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L45)
 
 ***
 
@@ -37,7 +37,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:23](https://github.com/TanSta
 readonly lastUpdated: Date;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:26](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L26)
+Defined in: [packages/db/src/indexes/base-index.ts:48](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L48)
 
 ***
 
@@ -47,4 +47,4 @@ Defined in: [packages/db/src/indexes/base-index.ts:26](https://github.com/TanSta
 readonly lookupCount: number;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:24](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L24)
+Defined in: [packages/db/src/indexes/base-index.ts:46](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L46)

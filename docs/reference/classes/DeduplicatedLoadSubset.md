@@ -5,7 +5,7 @@ title: DeduplicatedLoadSubset
 
 # Class: DeduplicatedLoadSubset
 
-Defined in: [packages/db/src/query/subset-dedupe.ts:47](https://github.com/TanStack/db/blob/main/packages/db/src/query/subset-dedupe.ts#L47)
+Defined in: [packages/db/src/query/subset-dedupe.ts:48](https://github.com/TanStack/db/blob/main/packages/db/src/query/subset-dedupe.ts#L48)
 
 Deduplicated wrapper for a loadSubset function.
 Tracks what data has been loaded and avoids redundant calls by applying
@@ -50,7 +50,7 @@ dedupe.reset()
 new DeduplicatedLoadSubset(opts): DeduplicatedLoadSubset;
 ```
 
-Defined in: [packages/db/src/query/subset-dedupe.ts:77](https://github.com/TanStack/db/blob/main/packages/db/src/query/subset-dedupe.ts#L77)
+Defined in: [packages/db/src/query/subset-dedupe.ts:78](https://github.com/TanStack/db/blob/main/packages/db/src/query/subset-dedupe.ts#L78)
 
 #### Parameters
 
@@ -76,7 +76,7 @@ Defined in: [packages/db/src/query/subset-dedupe.ts:77](https://github.com/TanSt
 loadSubset(options): true | Promise<void>;
 ```
 
-Defined in: [packages/db/src/query/subset-dedupe.ts:95](https://github.com/TanStack/db/blob/main/packages/db/src/query/subset-dedupe.ts#L95)
+Defined in: [packages/db/src/query/subset-dedupe.ts:96](https://github.com/TanStack/db/blob/main/packages/db/src/query/subset-dedupe.ts#L96)
 
 Load a subset of data, with automatic deduplication based on previously
 loaded predicates and in-flight requests.
@@ -106,7 +106,7 @@ true if data is already loaded, or a Promise that resolves when data is loaded
 reset(): void;
 ```
 
-Defined in: [packages/db/src/query/subset-dedupe.ts:221](https://github.com/TanStack/db/blob/main/packages/db/src/query/subset-dedupe.ts#L221)
+Defined in: [packages/db/src/query/subset-dedupe.ts:227](https://github.com/TanStack/db/blob/main/packages/db/src/query/subset-dedupe.ts#L227)
 
 Reset all tracking state.
 Clears the history of loaded predicates and in-flight calls.

@@ -9,7 +9,7 @@ title: MaybeSingleResult
 type MaybeSingleResult = object;
 ```
 
-Defined in: [packages/db/src/types.ts:793](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L793)
+Defined in: [packages/db/src/types.ts:834](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L834)
 
 ## Properties
 
@@ -19,6 +19,6 @@ Defined in: [packages/db/src/types.ts:793](https://github.com/TanStack/db/blob/m
 optional singleResult: true;
 ```
 
-Defined in: [packages/db/src/types.ts:797](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L797)
+Defined in: [packages/db/src/types.ts:838](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L838)
 
 If enabled the collection will return a single object instead of an array

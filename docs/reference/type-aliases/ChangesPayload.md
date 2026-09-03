@@ -9,7 +9,7 @@ title: ChangesPayload
 type ChangesPayload<T, TKey> = ChangeMessage<WithVirtualProps<T, TKey>, TKey>[];
 ```
 
-Defined in: [packages/db/src/types.ts:808](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L808)
+Defined in: [packages/db/src/types.ts:849](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L849)
 
 ## Type Parameters
 
