@@ -101,7 +101,6 @@ describe(`Uint8Array ID comparison (user reproduction)`, () => {
       }),
     )
 
-    // The same reference works.
     const queryWithSameRef = createLiveQueryCollection((q) =>
       q
         .from({ item: collection })
@@ -115,7 +114,6 @@ describe(`Uint8Array ID comparison (user reproduction)`, () => {
     expect(resultWithSameRef).toBeDefined()
     expect(resultWithSameRef?.name).toBe(`Large Item`)
 
-    // A different instance with the same bytes has the same value.
     const differentInstance = new Uint8Array(200).fill(42)
     const queryWithDifferentRef = createLiveQueryCollection((q) =>
       q

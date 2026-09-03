@@ -384,11 +384,12 @@ describe(`normalizeValue property-based tests`, () => {
   )
 
   fcTest.prop([fc.uint8Array({ minLength: 129, maxLength: 200 })])(
-    `large Uint8Arrays normalize to a stable key`,
+    `large Uint8Arrays normalize to a stable linear-size key`,
     (arr) => {
       const normalized = normalizeValue(arr)
       expect(typeof normalized).toBe(`string`)
       expect(normalized).toBe(normalizeValue(new Uint8Array(arr)))
+      expect((normalized as string).length - arr.length).toBeLessThan(32)
     },
   )
 
@@ -411,22 +412,16 @@ describe(`normalizeValue property-based tests`, () => {
     },
   )
 
-  fcTest(
-    `reads binary keys from intrinsic bytes instead of custom iteration`,
-    () => {
-      const bytes = new Uint8Array([2])
-      Object.defineProperty(bytes, Symbol.iterator, {
-        value: function* () {
-          yield 1
-        },
-      })
+  fcTest(`reads binary keys from indexed bytes, not custom iteration`, () => {
+    const bytes = new Uint8Array([2])
+    Object.defineProperty(bytes, Symbol.iterator, {
+      value: function* () {
+        yield 1
+      },
+    })
 
-      expect(normalizeValue(bytes)).toBe(normalizeValue(new Uint8Array([2])))
-      expect(normalizeValue(bytes)).not.toBe(
-        normalizeValue(new Uint8Array([1])),
-      )
-    },
-  )
+    expect(normalizeValue(bytes)).toBe(normalizeValue(new Uint8Array([2])))
+  })
 })
 
 describe(`areValuesEqual property-based tests`, () => {

@@ -157,20 +157,26 @@ function areUint8ArraysEqual(a: Uint8Array, b: Uint8Array): boolean {
   return true
 }
 
-/**
- * Threshold for normalizing Uint8Arrays to string representations.
- * Arrays larger than this will use reference equality to avoid memory overhead.
- * 128 bytes is enough for common ID formats (ULIDs are 16 bytes, UUIDs are 16 bytes)
- * while avoiding excessive string allocation for large binary data.
- */
-const UINT8ARRAY_NORMALIZE_THRESHOLD = 128
+const NORMALIZED_KEY_PREFIX = `\u0000tanstack-db:`
+
+function normalizedKey(kind: string, value: string): string {
+  return `${NORMALIZED_KEY_PREFIX}${kind}:${value}`
+}
+
+function normalizeBinary(value: Uint8Array): string {
+  let bytes = ``
+  for (let index = 0; index < value.byteLength; index++) {
+    bytes += String.fromCharCode(value[index]!)
+  }
+  return normalizedKey(`binary`, bytes)
+}
 
 /**
  * Sentinel value representing undefined in normalized form.
  * This allows distinguishing between "start from beginning" (undefined parameter)
  * and "start from the key undefined" (actual undefined value in the tree).
  */
-export const UNDEFINED_SENTINEL = `__TS_DB_BTREE_UNDEFINED_VALUE__`
+export const UNDEFINED_SENTINEL = normalizedKey(`undefined`, ``)
 
 /**
  * Normalize a value for comparison and Map key usage
@@ -181,6 +187,12 @@ export const UNDEFINED_SENTINEL = `__TS_DB_BTREE_UNDEFINED_VALUE__`
  * for BTree index operations that need to distinguish undefined values.
  */
 export function normalizeValue(value: any): any {
+  if (typeof value === `string`) {
+    return value.startsWith(NORMALIZED_KEY_PREFIX)
+      ? normalizedKey(`string`, value)
+      : value
+  }
+
   if (typeof value !== `object` || value === null) {
     return value
   }
@@ -190,7 +202,10 @@ export function normalizeValue(value: any): any {
   }
 
   if (isTemporal(value)) {
-    return `__temporal__${value[Symbol.toStringTag]}__${value.toString()}`
+    return normalizedKey(
+      `temporal`,
+      `${value[Symbol.toStringTag]}:${value.toString()}`,
+    )
   }
 
   // Normalize Uint8Arrays/Buffers to a string representation for Map key usage
@@ -200,14 +215,7 @@ export function normalizeValue(value: any): any {
     value instanceof Uint8Array
 
   if (isUint8Array) {
-    // Only normalize small arrays to avoid memory overhead for large binary data
-    if (value.byteLength <= UINT8ARRAY_NORMALIZE_THRESHOLD) {
-      // Convert to a string representation that can be used as a Map key
-      // Use a special prefix to avoid collisions with user strings
-      return `__u8__${Array.from(value).join(`,`)}`
-    }
-    // For large arrays, fall back to reference equality
-    // Users working with large binary data should use a derived key if needed
+    return normalizeBinary(value)
   }
 
   return value

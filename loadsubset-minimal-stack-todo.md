@@ -344,6 +344,12 @@ explicitly removed.
       fixing the generic adapter receipt type.
 - [x] The focused pagination, ordering, stable-identity, comparison, cursor,
       and binary-value suite is 323/323 green (6 skipped) with no type errors.
+- [x] Preserved value identity for large binary keys without restoring the old
+      comma-decimal allocation cost. Binary keys now use one code unit per byte
+      inside a collision-proof namespace, read indexed bytes rather than a
+      custom iterator, and remain content-equal at every size. The comparison,
+      binary-ID integration, index, and stable-identity suites are 160/160
+      green with no type errors.
 - [x] Restored Electric's public settlement and resource-lifetime laws instead
       of retaining the deleted applied-commit-capture helper. The external
       signal cleanup law red-tested a real listener leak; cleanup now removes
