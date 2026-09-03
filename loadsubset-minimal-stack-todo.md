@@ -134,9 +134,9 @@ helper that production uses.
       - seed an ordered cursor from an unrelated local row -> `does not derive
         an ordered boundary from another demand's local row` rejects the
         foreign cursor.
-- [ ] Add one shared on-demand source fixture only if a third current test
-      needs the same adapter protocol. Do not create a helper merely to hide
-      two readable fixtures.
+- [x] Do not add a shared on-demand source fixture: only two current tests need
+      the protocol, and their local fixtures remain clearer than a premature
+      helper.
 - [x] Run a focused mutation audit after the oracle surface is stable. Every
       required fault above was killed by its named retained assertion; all
       deliberate source edits were then removed.
@@ -161,7 +161,11 @@ fixed with red/green evidence, preserved by a named test, removed by a named
 contract decision, refuted with evidence, deferred with an issue, or open.
 
 - [x] Reconcile all production findings.
-- [ ] Reconcile every oracle/maintenance recommendation.
+- [x] Reconcile every oracle/maintenance recommendation. The final loss audit
+      found no runtime gap. It recovered only final naming/docs work and one
+      omitted deleted-suite entry. The pre-existing public `getRunCount`
+      remains because non-oracle scheduler tests use it to enforce the requested
+      no-over-render contract; this branch adds no production-only test hook.
 - [x] Map every public law from deleted full-flow/lifecycle/model files.
 - [x] Confirm no production-only oracle counters or test hooks remain. The
       Query DB ownership-map hook is gone; the live-query run counter and
@@ -176,6 +180,11 @@ contract decision, refuted with evidence, deferred with an issue, or open.
 
 Audit each removed stack-only suite by test title, not only by file. A checked
 row means every distinct public law has a named destination and has been run.
+
+- [x] `load-subset-projection-oracle.property.test.ts` was removed
+      deliberately. Every law depended on the discarded outcome/coverage
+      projection API (`getLoadSubsetOutcome`, `hasMore`, `appliedRowKeys`, and
+      evidence selection); exact settlement makes none of those claims.
 
 - [x] `load-subset-outcome.test.ts`: retain exact sharing, release retry,
       mutable-demand snapshots, source scoping, stale settlement, and cleanup
@@ -602,7 +611,7 @@ explicitly removed.
       runtime-identity initialization and this branch's object/function/symbol
       identity domains; the focused identity suite is 70/70 green.
 - [x] Run typecheck and the full package suite. The standalone package
-      typecheck passes, and the full DB run is 3,503/3,503 green (6 skipped)
+      typecheck passes, and the full DB run is 3,507/3,507 green (6 skipped)
       across 139 files with no type errors. The same full run passes after the
       main merge, and every package in the monorepo builds successfully.
 - [x] Run the 100x fixed/random campaign. The demand, replay, ordered-work,
@@ -613,16 +622,29 @@ explicitly removed.
       passed, even with one worker, coverage disabled, and all test logs
       silenced; treat that non-assertion runner failure as a harness limit.
 - [x] Run the focused mutation audit.
+- [x] Close the graph-replay boundary missed by the direct subscription model.
+      A delayed full-source load created from the replay start hook was not part
+      of the replay barrier, so an ordered query could expose a partial window.
+      Reopening the graph after a rejected replay was also unsafe: later source
+      changes could mix the old graph baseline with a partly replayed source.
+      Both bugs failed first through public live-query assertions. Loads started
+      during replay now join its barrier; synchronous recovery throws are
+      contained; and failure keeps the old public result while partial graph
+      state stays private until a later authoritative replay succeeds.
+      Releasing a demand removes its barrier and loading-status participants
+      even when its adapter promise never settles. The direct replay oracle
+      cannot see the graph boundary, so the retained live-query regressions
+      remain in the ordered-work and graph replay suites.
 - [x] Measure source and compressed bundle size against both `origin/main` and
       the large RFC stack. Across all package `src` trees, the old stack was
-      +10,545/-1,692 lines (net +8,853) while this tree is +1,797/-1,252
-      (net +545, including the architecture document). Executable source alone
-      falls from net +7,835 to net +529, reclaiming 93.2% of its growth. A
-      common minified ESM
-      build is 555,200 raw / 134,182 gzip bytes here versus 545,014 / 131,984
-      on main and 676,084 / 161,461 in the old stack. The retained cost is
-      10,186 raw bytes (1.9%) or 2,198 gzip bytes (1.7%) over main, and the
-      simplification recovers about 92.5% of the old compressed growth.
+      +10,545/-1,692 lines (net +8,853) while this tree is +1,895/-1,287
+      (net +608, including the architecture document). Executable source alone
+      falls from net +7,835 to net +595, reclaiming 92.4% of its growth. A
+      tree-shaken minified ESM build of the public DB entry is 348,772 raw /
+      98,406 gzip bytes here versus 339,394 / 96,043 on main and 431,323 /
+      118,297 in the old stack. The retained cost is 9,378 raw bytes (2.8%) or
+      2,363 gzip bytes (2.5%) over main. The simplification recovers 89.8% of
+      the old raw bundle growth and 89.4% of its compressed growth.
 - [ ] Ask multiple fresh reviewers for final coherence, hostile-assay, and
       loss-audit passes.
 - [ ] Update RFC/PR text and changeset to match the final design.

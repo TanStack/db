@@ -480,6 +480,15 @@ writes were applied. It does not prove source exhaustion or broader coverage.
 Ordered loading reaches a fixed point from public rows and exact request
 identity; it must not invent source extent from a requested limit.
 
+A truncate replay is one publication barrier. Every acquisition started while
+that replay is active, including ordered full-source recovery, belongs to the
+barrier. Success publishes only after all current acquisitions settle. A
+released demand stops participating even if its canceled transport promise
+never settles. Failure keeps the last complete result visible and the graph's
+partly replayed source state private. Ordinary source deltas do not reopen that
+gate because they cannot prove the source complete; only a later successful
+truncate replay provides the authoritative replacement.
+
 A transaction `mutationFn` must not start or await collection or live-query
 preloads. User persistence owns the causal queue while that function runs, so a
 preload that waits for a queued sync commit can wait on the mutation that is
@@ -581,7 +590,10 @@ create recursive Collection machinery.
 8. **Nested propagation:** every materialized relation consumes the fully
    materialized output relation of its children.
 9. **Publication:** reads, events, and downstream queries observe the same
-   complete graph result.
+   complete graph result. A truncate replacement stays private until all work
+   started by its active replay demands settles; failure keeps the prior public
+   result and later partial source changes private until an authoritative replay
+   succeeds.
 10. **Initial demand:** preload completes when every initially reachable demand
     is covered; obsolete demand does not block it.
 11. **Ownership:** a query-db row exists exactly while an explicit owner
