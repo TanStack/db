@@ -208,7 +208,7 @@ export function filterDuplicateInserts(
  *
  * @param changes   - changes to process (deletes are skipped)
  * @param current   - the current biggest value (or undefined if none)
- * @param sentKeys  - set of keys already sent to D2 (for new-key detection)
+ * @param sentRows  - keys already sent to D2 (for new-key detection)
  * @param comparator - orderBy comparator
  * @returns `{ biggest, shouldResetLoadKey }` — the new biggest value and
  *          whether the caller should clear its last-load-request-key
@@ -216,7 +216,7 @@ export function filterDuplicateInserts(
 export function trackBiggestSentValue(
   changes: Array<ChangeMessage<any, string | number>>,
   current: unknown | undefined,
-  sentKeys: Set<string | number>,
+  sentRows: { has(key: string | number): boolean },
   comparator: (a: any, b: any) => number,
 ): { biggest: unknown; shouldResetLoadKey: boolean } {
   if (
@@ -242,7 +242,7 @@ export function trackBiggestSentValue(
   for (const change of changes) {
     if (change.type === `delete`) continue
 
-    const isNewKey = !sentKeys.has(change.key)
+    const isNewKey = !sentRows.has(change.key)
 
     if (biggest === undefined) {
       biggest = change.value
