@@ -501,8 +501,11 @@ explicitly removed.
 - [x] Collapsed PowerSync's demand lifecycle to the two states that can exist
       in its map: provisional and active. Released and failed entries are
       removed immediately; stopped plus the tracking revision already fence
-      cleanup, so the mirrored lifecycle generation is gone. PowerSync remains
-      105/105 green.
+      cleanup, so the mirrored lifecycle generation is gone. A post-commit
+      loss audit found that terminal cleanup still needed to remove each record
+      before invoking its hook: a later hook could otherwise reentrantly unload
+      and clean an earlier demand twice. The new public resource-lifetime law
+      red-tested that bug; PowerSync is 106/106 green.
 - [x] Derived replay-publication control from the subscription's existing
       options and centralized unknown-value error normalization. The focused
       subscription, replay, live-query, and error suites are 144/144 green.

@@ -881,6 +881,7 @@ function createPowerSyncCollectionConfig<
             )
             abortController.abort()
             for (const demand of demands.values()) {
+              demands.delete(demand.options)
               try {
                 demand.cleanup?.()
               } catch (error) {
@@ -890,7 +891,6 @@ function createPowerSyncCollectionConfig<
                 )
               }
             }
-            demands.clear()
             pendingReleases.length = 0
           },
           loadSubset: (options: LoadSubsetOptions) => loadSubset(options),

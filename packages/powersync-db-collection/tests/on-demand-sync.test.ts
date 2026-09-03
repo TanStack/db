@@ -2513,6 +2513,30 @@ describe(`On-Demand Sync Mode`, () => {
       expect(createDiffTrigger).not.toHaveBeenCalled()
     })
 
+    it(`cleans each acquired subset at most once during reentrant cleanup`, async () => {
+      const db = await createDatabase()
+      vi.spyOn(db.triggers, `createDiffTrigger`).mockResolvedValue(vi.fn())
+      const first = { where: eq(`category`, `electronics`) }
+      const second = { where: eq(`category`, `clothing`) }
+      const firstCleanup = vi.fn()
+      let unloadSubset!: (options: LoadSubsetOptions) => void
+      const secondCleanup = vi.fn(() => unloadSubset(first))
+      const onLoadSubset = vi.fn((options: LoadSubsetOptions) =>
+        options === first ? firstCleanup : secondCleanup,
+      )
+      const started = startOnDemandSync(db, { onLoadSubset })
+      unloadSubset = started.unloadSubset
+
+      await Promise.all([
+        started.loadSubset(first),
+        started.loadSubset(second),
+      ])
+      started.sync.cleanup?.()
+
+      expect(firstCleanup).toHaveBeenCalledOnce()
+      expect(secondCleanup).toHaveBeenCalledOnce()
+    })
+
     it(`does not create tracking when change observation cannot start`, async () => {
       const db = await createDatabase()
       const startupError = new Error(`change observation failed`)
