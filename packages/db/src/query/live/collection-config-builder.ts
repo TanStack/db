@@ -411,28 +411,31 @@ export class CollectionConfigBuilder<
   failDemand(planId: string, generation: number, error: unknown): void {
     const demand = this.activeDemands.get(planId)
     if (!demand || demand.generation !== generation) return
-    this.recordSubsetError(error)
+    const normalized = this.recordSubsetError(error)
     if (this.activeWindowOperation) {
       this.activeWindowOperation.failed = true
-      this.activeWindowOperation.error = error
+      this.activeWindowOperation.error = normalized
     }
-    const message = error instanceof Error ? error.message : String(error)
     this.transitionToError(
-      `Subset demand '${planId}' failed: ${message}`,
-      error,
+      `Subset demand '${planId}' failed: ${normalized.message}`,
+      normalized,
     )
   }
 
-  recordSubsetError(error: unknown, fatalBeforeReady = false): void {
-    this.lastSubsetError = error
+  recordSubsetError(error: unknown, fatalBeforeReady = false): Error {
+    const normalized = normalizeError(error)
+    this.lastSubsetError = normalized
     if (this.activeWindowOperation) {
       this.activeWindowOperation.failed = true
-      this.activeWindowOperation.error = error
+      this.activeWindowOperation.error = normalized
     }
     if (fatalBeforeReady) {
-      const message = error instanceof Error ? error.message : String(error)
-      this.transitionToError(`Initial subset load failed: ${message}`, error)
+      this.transitionToError(
+        `Initial subset load failed: ${normalized.message}`,
+        normalized,
+      )
     }
+    return normalized
   }
 
   trackSubsetLoadPromise(promise: Promise<unknown>): void {
@@ -779,18 +782,17 @@ export class CollectionConfigBuilder<
     let tornDown = false
     const teardown = () => {
       if (tornDown) return
-      tornDown = true
       if (this.syncSession === syncSession) this.syncSession++
 
       let firstCleanupError: unknown
       for (const unsubscribe of syncState.unsubscribeCallbacks) {
         try {
           unsubscribe()
+          syncState.unsubscribeCallbacks.delete(unsubscribe)
         } catch (error) {
           firstCleanupError ??= error
         }
       }
-      syncState.unsubscribeCallbacks.clear()
 
       // Clear current sync session state
       this.currentSyncConfig = undefined
@@ -834,6 +836,7 @@ export class CollectionConfigBuilder<
       this.unsubscribeFromSchedulerClears = undefined
 
       if (firstCleanupError !== undefined) throw firstCleanupError
+      tornDown = true
     }
 
     try {
@@ -1331,6 +1334,10 @@ export class CollectionConfigBuilder<
 
     return loadSubsetDataCallbacks
   }
+}
+
+function normalizeError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error))
 }
 
 function createOrderByComparator<T extends object>(

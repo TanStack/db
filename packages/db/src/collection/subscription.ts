@@ -585,8 +585,9 @@ export class CollectionSubscription
     try {
       return this.collection._sync.loadSubset(options)
     } catch (error) {
-      if (shouldReportError()) this.recordLoadSubsetError(options, error)
-      throw error
+      const normalized = normalizeError(error)
+      if (shouldReportError()) this.recordLoadSubsetError(options, normalized)
+      throw normalized
     }
   }
 
@@ -639,7 +640,12 @@ export class CollectionSubscription
       demand.releaseFailed = false
     } catch (error) {
       demand.releaseFailed = true
-      throw error
+      const normalized = this.recordLoadSubsetError(
+        demand.options,
+        normalizeError(error),
+        true,
+      )
+      throw normalized
     } finally {
       demand.removeRequestAbortListener?.()
     }
@@ -680,18 +686,20 @@ export class CollectionSubscription
     options: LoadSubsetOptions,
     error: unknown,
     reportAborted = false,
-  ): void {
+  ): Error {
+    const normalized = normalizeError(error)
     // Aborted subset requests are obsolete demand, not load failures. The
     // request may reject after its route has already been released.
-    if (options.signal?.aborted && !reportAborted) return
+    if (options.signal?.aborted && !reportAborted) return normalized
 
-    this._lastError = error
+    this._lastError = normalized
     this.emitInner(`loadSubset:error`, {
       type: `loadSubset:error`,
       subscription: this,
       options,
-      error,
+      error: normalized,
     })
+    return normalized
   }
 
   hasLoadedInitialState() {
@@ -1242,4 +1250,8 @@ export class CollectionSubscription
 
     if (firstCleanupError !== undefined) throw firstCleanupError
   }
+}
+
+function normalizeError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error))
 }

@@ -721,7 +721,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       // The subscription error event already reports adapter failures and
       // disposes this effect. Do not let that query-local failure escape the
       // source commit, but keep unrelated graph errors visible.
-      if (subscription.lastError !== error) throw error
+      if (!Object.is(subscription.lastError, error)) throw error
       if (this.starting) throw error
       return
     }
@@ -938,8 +938,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       } catch (error) {
         if (
           !this.disposed &&
-          !Object.values(this.subscriptions).some(
-            (subscription) => subscription.lastError === error,
+          !Object.values(this.subscriptions).some((subscription) =>
+            Object.is(subscription.lastError, error),
           )
         )
           throw error

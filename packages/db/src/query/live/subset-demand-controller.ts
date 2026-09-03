@@ -65,7 +65,13 @@ export class SubsetDemandController {
       }
 
       segment.abortController.abort()
-      subscription.releaseSnapshot(segment.where)
+      try {
+        subscription.releaseSnapshot(segment.where)
+      } catch {
+        // The subscription reports adapter cleanup failures and keeps the
+        // physical acquisition for a later unsubscribe retry. Demand changes
+        // must still reach the graph instead of escaping the source commit.
+      }
     }
 
     const coveredKeys = new Set(

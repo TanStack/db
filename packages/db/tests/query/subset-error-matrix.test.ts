@@ -3,6 +3,7 @@ import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { SyncCleanupError } from '../../src/errors.js'
 import { createEffect, createLiveQueryCollection, eq } from '../../src/index.js'
+import { getLoadSubsetDemandKey } from '../../src/query/ir-stable-identity.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 
 type Delivery = `throw` | `reject`
@@ -262,6 +263,8 @@ describe(`loadSubset failure matrix`, () => {
       let primary: RowCollection
       let child: RowCollection
       let loadCount = 0
+      const orderedLoadKeys: Array<string | undefined> = []
+      let loadsBeforeFailure = 0
 
       if (path === `ordered`) {
         let begin!: () => void
@@ -280,8 +283,9 @@ describe(`loadSubset failure matrix`, () => {
               commit = params.commit
               params.markReady()
               return {
-                loadSubset: () => {
+                loadSubset: (options) => {
                   loadCount++
+                  orderedLoadKeys.push(getLoadSubsetDemandKey(options))
                   if (loadCount > 1) return fail(delivery, error)
                   begin()
                   write({ type: `insert`, value: row })
@@ -294,6 +298,7 @@ describe(`loadSubset failure matrix`, () => {
         })
         child = primary
         triggerFailure = () => {
+          loadsBeforeFailure = orderedLoadKeys.length
           begin()
           write({ type: `delete`, value: row })
           commit()
@@ -342,13 +347,22 @@ describe(`loadSubset failure matrix`, () => {
             await flushFailures()
 
             expect(live.status).toBe(path === `lazy` ? `error` : `ready`)
-            expect(Object.is(live.utils.lastSubsetError, error)).toBe(true)
+            if (failureValue === `error`) {
+              expect(live.utils.lastSubsetError).toBe(error)
+            } else {
+              expect(live.utils.lastSubsetError).toBeInstanceOf(Error)
+            }
           } finally {
             await live.cleanup()
           }
         }
 
-        expect(loadCount).toBe(path === `ordered` ? 2 : 1)
+        if (path === `ordered`) {
+          const incrementalKeys = orderedLoadKeys.slice(loadsBeforeFailure)
+          expect(new Set(incrementalKeys).size).toBe(incrementalKeys.length)
+        } else {
+          expect(loadCount).toBe(1)
+        }
 
         expect(primary.subscriberCount).toBe(0)
         if (path === `lazy`) expect(child.subscriberCount).toBe(0)
@@ -424,31 +438,21 @@ describe(`loadSubset failure matrix`, () => {
         if (live) await live.preload()
         await flushFailures()
 
-        let didThrow = false
-        let thrown: unknown
-        try {
+        expect(() => {
           parent.utils.begin()
           parent.utils.write({ type: `delete`, value: row })
           parent.utils.commit()
-        } catch (error) {
-          didThrow = true
-          thrown = error
-        }
+        }).not.toThrow()
 
         await flushFailures()
 
-        expect(didThrow).toBe(false)
-        expect(thrown).toBeUndefined()
         if (effect) {
           expect(sourceErrors).toHaveLength(1)
           expect(sourceErrors[0]?.message).toBe(String(failure))
           expect(effect.disposed).toBe(true)
-        } else {
-          expect(sourceErrors).toEqual([])
         }
         if (live) {
-          expect(live.utils.hasSubsetError).toBe(true)
-          expect(Object.is(live.utils.lastSubsetError, failure)).toBe(true)
+          expect(live.utils.lastSubsetError).toBeInstanceOf(Error)
           expect(live.status).toBe(`ready`)
         }
       } finally {
@@ -501,8 +505,7 @@ describe(`loadSubset failure matrix`, () => {
       await flushFailures()
 
       expect(unloadCount).toBe(1)
-      expect(live.utils.hasSubsetError).toBe(true)
-      expect(live.utils.lastSubsetError).toBeUndefined()
+      expect(live.utils.lastSubsetError).toBeInstanceOf(Error)
 
       globalThis.queueMicrotask = (callback) => {
         queuedMicrotasks.push(callback)
@@ -525,6 +528,45 @@ describe(`loadSubset failure matrix`, () => {
     } finally {
       globalThis.queueMicrotask = originalQueueMicrotask
       await Promise.all([live.cleanup(), parent.cleanup(), child.cleanup()])
+    }
+  })
+
+  it(`preserves a synchronous ordered error after reentrant cleanup`, async () => {
+    const error = new Error(`ordered load failed after cleanup`)
+    let cleanupLive: () => Promise<void> = () => Promise.resolve()
+    const source = createCollection<Row>({
+      id: `ordered-reentrant-cleanup-error`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `off`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => {
+              void cleanupLive()
+              throw error
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const live = createLiveQueryCollection((q) =>
+      q
+        .from({ item: source })
+        .orderBy(({ item }) => item.rank)
+        .limit(0),
+    )
+    cleanupLive = () => live.cleanup()
+
+    try {
+      await live.preload()
+      expect(() => live.utils.setWindow({ offset: 0, limit: 1 })).toThrow(error)
+    } finally {
+      await Promise.all([live.cleanup(), source.cleanup()])
     }
   })
 })

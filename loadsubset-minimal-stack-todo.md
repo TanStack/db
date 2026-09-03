@@ -32,6 +32,20 @@ after their public laws have a destination.
 
 ## Oracle design from the reviews
 
+The compact suite must keep four layers distinct:
+
+1. an independent denotational model computes the right public rows from
+   authoritative source truth;
+2. a public event-trace model records rows, errors, liveness, adapter requests
+   and releases, and publication boundaries without copying production maps;
+3. generated commands exercise demand, settlement, source mutation, replay,
+   cleanup/restart, failure, and observation in legal orders;
+4. metamorphic laws compare consumers and equivalent histories, while fixed
+   regressions pin every bug that shaped the implementation.
+
+No layer may use a production-only counter or infer correctness from the same
+helper that production uses.
+
 - [x] Keep full recomputation from authoritative source truth structurally
       independent of production helpers.
 - [x] Add an exhaustive micro-domain plus fixed-seed and random-seed runs.
@@ -77,6 +91,17 @@ after their public laws have a destination.
       per-consumer prefix and monotonic-publication assertions because live
       collections may publish progressive bootstrap prefixes while Effects
       publish the same result in one batch.
+- [ ] Complete the public lifecycle trace: generated histories must observe
+      demand/release, settlement, source mutation, replay, cleanup/restart,
+      failure, and public snapshots at intermediate points.
+- [ ] Complete the atomic-publication observer for root rows and
+      collection-valued children so no callback can observe a mixed epoch.
+- [ ] Add or name the metamorphic laws for consumer equivalence, stale-event
+      erasure, replay equivalence, independent-history commutation, and exact
+      sharing. Split/merge acquisition equivalence is deliberately absent
+      because the product no longer promises subset algebra.
+- [ ] List each deliberate mutation in the focused audit and name the exact
+      oracle assertion that kills it.
 - [ ] Add one shared on-demand source fixture only if a third current test
       needs the same adapter protocol. Do not create a helper merely to hide
       two readable fixtures.
@@ -126,6 +151,9 @@ explicitly removed.
 | Optimistic rows remain above a private replay and converge after settlement                                | `collection-subscription-replay-oracle.property.test.ts`; collection metadata/state oracles                                            | covered                                                                               |
 | Cleanup fences pending replay and ordered continuation work                                                | collection replay oracle; D2 source reconciliation oracle; focused subscription/Effect tests                                           | covered; audit exact old variants                                                     |
 | Failed adapter release remains retryable for exact and in-flight replay acquisitions                       | `collection-subscription.test.ts` exact-release and replay-release regressions                                                         | restored and covered                                                                  |
+| Ownership exists before reentrant release for direct/deferred and sync/async adapter starts                | `collection-subscription.test.ts` Cartesian reentrant ownership matrix                                                                 | restored and covered                                                                  |
+| A caught or escaped reentrant release failure keeps the exact acquisition retryable                        | `collection-subscription.test.ts` Cartesian failed-release matrix                                                                      | restored and covered                                                                  |
+| A synchronous replay that drops its demand releases each physical acquisition exactly once                 | `collection-subscription.test.ts` synchronous replay-release regression                                                                | restored and covered                                                                  |
 | Load errors preserve the exact error, do not hang readiness, and allow a later retry                       | `subset-error-matrix.test.ts`; source-readiness and replay-refinement suites                                                           | covered                                                                               |
 | Abort before apply cancels; abort after publication begins cannot undo committed rows                      | `load-subset-transaction-refinement-oracle.test.ts`                                                                                    | covered                                                                               |
 | Source truth survives D2 graph teardown/restart and exact prior rows drive retractions                     | `d2-source-reconciliation-oracle.property.test.ts`                                                                                     | covered                                                                               |
@@ -228,6 +256,19 @@ explicitly removed.
 - [x] Restored exact adapter-release retry for ordinary and pending replay
       acquisitions. These test the adapter trace and logical ownership, not
       the removed coverage registry.
+- [x] Consolidated the old reentrant ownership cases into Cartesian public
+      adapter-trace matrices. They cover direct/deferred start, sync/async
+      completion, caught/escaped release failure, and replay-time release;
+      removed coverage-registry assertions were not retained.
+- [x] Restored the full adapter failure-value matrix. It red-tested raw
+      non-`Error` throws escaping graph commits, release failures turning a
+      healthy live query fatal, and failed teardown becoming impossible to
+      retry. The adapter boundary now normalizes failure values, demand changes
+      keep flowing after cleanup failure, and teardown retains only failed
+      callbacks for the next cleanup pass. All 44 cases are green.
+- [x] Replaced the old exact ordered-load count with the stronger public law:
+      after a source change, a synchronous failure cannot trigger the same
+      semantic request twice. Distinct refinement requests remain allowed.
 - [x] Existing includes, subquery-order, and union tests now model the adapter
       contract and inspect the whole request trace. No useful regression test
       was removed to accommodate the new boundary work.
