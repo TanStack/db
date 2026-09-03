@@ -480,6 +480,13 @@ explicitly removed.
       reference. Entropy is now allocated lazily, symbol identity uses a small
       runtime map, and query/demand identity remains stable and collision-free.
       Identity and exact-dedupe suites are 70/70 green with no type errors.
+- [x] Derived cross-source replay gating from each subscription's pending
+      replacement instead of mirroring source IDs in the query builder. The
+      focused ownership test also exposed a false-green assertion and a real
+      handoff bug: reentrant release during synchronous replay unloaded the old
+      acquisition twice and leaked the new one. The test now compares exact
+      acquisition identities, the replay retires each once, and the focused
+      replay/publication run is 184/184 green.
 - [x] Mapped the removed pending-derived-mutation matrix to the independent
       collection metadata and state-retention oracles, then verified both
       through the layered-query publication oracle. The old Cartesian matrix

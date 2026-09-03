@@ -1,9 +1,9 @@
 import { ensureIndexForExpression } from '../indexes/auto-index.js'
-import { and, eq, gte, lt } from '../query/builder/functions.js'
+import { and, eq } from '../query/builder/functions.js'
 import { PropRef, Value } from '../query/ir.js'
 import { EventEmitter } from '../event-emitter.js'
 import { compileExpression } from '../query/compiler/evaluators.js'
-import { buildCursor } from '../utils/cursor.js'
+import { buildCursor, buildCursorCurrent } from '../utils/cursor.js'
 import { deepEquals } from '../utils.js'
 import {
   createFilterFunctionFromExpression,
@@ -155,6 +155,7 @@ export class CollectionSubscription
   // One replay session owns the publication baseline, overlapping attempts,
   // and buffered changes until every attempt settles.
   private truncateReplaySession: TruncateReplaySession | undefined
+  private truncateReplacementPending = false
   private unsubscribed = false
 
   public get status(): SubscriptionStatus {
@@ -236,7 +237,10 @@ export class CollectionSubscription
       return
     }
 
-    this.truncateReplayPublication?.start()
+    if (this.truncateReplayPublication) {
+      this.truncateReplacementPending = true
+      this.truncateReplayPublication.start()
+    }
 
     const attempt: TruncateReplayAttempt = {
       pending: new Set(),
@@ -335,6 +339,17 @@ export class CollectionSubscription
           )
         }
 
+        if (!this.subsetDemands.includes(demand)) {
+          Object.assign(demand, nextAcquisition, { releaseFailed: false })
+          try {
+            this.releaseSubsetDemand(demand)
+          } catch {
+            this.subsetDemands.push(demand)
+            attempt.failed = true
+          }
+          continue
+        }
+
         try {
           this.replaceSubsetAcquisition(demand, nextAcquisition)
         } catch (error) {
@@ -423,6 +438,7 @@ export class CollectionSubscription
         )
         this.lastSentKey = orderedSentKeys.at(-1)
       }
+      this.truncateReplacementPending = false
       this.truncateReplayPublication.succeed()
       return
     }
@@ -505,8 +521,8 @@ export class CollectionSubscription
     return this.truncateReplaySession !== undefined
   }
 
-  public get isTruncateReplayActive(): boolean {
-    return this.truncateReplaySession !== undefined
+  public get hasPendingTruncateReplacement(): boolean {
+    return this.truncateReplacementPending
   }
 
   setOrderByIndex(index: IndexInterface<any>) {
@@ -1042,27 +1058,13 @@ export class CollectionSubscription
       const whereFromCursor = buildCursor(orderBy, minValues)
 
       if (whereFromCursor) {
-        const { expression } = orderBy[0]!
-        const cursorMinValue = minValues[0]
-
-        // Build the whereCurrent expression for the first orderBy column
-        // For Date values, we need to handle precision differences between JS (ms) and backends (μs)
-        // A JS Date represents a 1ms range, so we query for all values within that range
-        let whereCurrentCursor: BasicExpression<boolean>
-        if (cursorMinValue instanceof Date) {
-          const cursorMinValuePlus1ms = new Date(cursorMinValue.getTime() + 1)
-          whereCurrentCursor = and(
-            gte(expression, new Value(cursorMinValue)),
-            lt(expression, new Value(cursorMinValuePlus1ms)),
-          )
-        } else {
-          whereCurrentCursor = eq(expression, new Value(cursorMinValue))
-        }
-
-        cursorExpressions = {
-          whereFrom: whereFromCursor,
-          whereCurrent: whereCurrentCursor,
-          lastKey: this.lastSentKey,
+        const whereCurrentCursor = buildCursorCurrent(orderBy, minValues)
+        if (whereCurrentCursor) {
+          cursorExpressions = {
+            whereFrom: whereFromCursor,
+            whereCurrent: whereCurrentCursor,
+            lastKey: this.lastSentKey,
+          }
         }
       }
     }
@@ -1252,6 +1254,7 @@ export class CollectionSubscription
 
     // Stop any buffered replay from publishing after unsubscription.
     this.truncateReplaySession = undefined
+    this.truncateReplacementPending = false
     this.stalePublishedRows.clear()
 
     // Release the current adapter acquisition for each logical subset demand.

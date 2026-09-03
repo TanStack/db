@@ -250,7 +250,7 @@ export class CollectionSubscriber<
     // otherwise we end up in an infinite loop trying to load more data
     const dataLoader =
       sentChanges > 0 &&
-      !this.collectionConfigBuilder.isSourceRecoveryPending(this.sourceId)
+      !this.collectionConfigBuilder.hasPendingSourceRecovery()
         ? callback
         : undefined
 
@@ -372,11 +372,10 @@ export class CollectionSubscriber<
   ): TruncateReplayPublicationControl {
     return {
       start: () => {
-        this.collectionConfigBuilder.beginSourceRecovery(this.sourceId)
         onStart?.()
       },
       succeed: () =>
-        this.collectionConfigBuilder.completeSourceRecovery(this.sourceId),
+        queueMicrotask(() => this.collectionConfigBuilder.scheduleGraphRun()),
     }
   }
 
@@ -384,7 +383,7 @@ export class CollectionSubscriber<
   // after each iteration of the query pipeline
   // to ensure that the orderBy operator has enough data to work with
   loadMoreIfNeeded(subscription: CollectionSubscription) {
-    if (this.collectionConfigBuilder.isSourceRecoveryPending(this.sourceId)) {
+    if (this.collectionConfigBuilder.hasPendingSourceRecovery()) {
       return true
     }
 

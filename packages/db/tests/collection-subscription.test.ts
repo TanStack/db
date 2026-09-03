@@ -686,7 +686,9 @@ describe(`CollectionSubscription status tracking`, () => {
       await flushPromises()
 
       expect(loads).toHaveLength(2)
-      expect(unloads).toEqual([loads[1], loads[0]])
+      expect(unloads.map((options) => loads.indexOf(options)).sort()).toEqual([
+        0, 1,
+      ])
     } finally {
       subscription.unsubscribe()
       await collection.cleanup()

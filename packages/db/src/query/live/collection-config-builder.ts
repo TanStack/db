@@ -131,8 +131,6 @@ export class CollectionConfigBuilder<
     | undefined
 
   private maybeRunGraphFn: (() => void) | undefined
-  private recoveringSources: Set<string> | undefined
-
   private readonly sourceDependencies: Record<
     string,
     Array<CollectionConfigBuilder<any, any>>
@@ -450,26 +448,9 @@ export class CollectionConfigBuilder<
     this.activeDemands.delete(planId)
   }
 
-  beginSourceRecovery(sourceId: string): void {
-    ;(this.recoveringSources ??= new Set()).add(sourceId)
-  }
-
-  completeSourceRecovery(sourceId: string): void {
-    this.recoveringSources?.delete(sourceId)
-    queueMicrotask(() => this.maybeRunGraphFn?.())
-  }
-
-  isSourceRecoveryPending(sourceId: string): boolean {
-    return this.recoveringSources?.has(sourceId) ?? false
-  }
-
-  private canPublishRecovery(): boolean {
-    return (
-      !this.isInErrorState &&
-      this.allRequiredSourcesReady() &&
-      this.recoveringSources?.size === 0 &&
-      [...this.activeDemands.values()].every((demand) => demand.settled) &&
-      !this.liveQueryCollection?.isLoadingSubset
+  hasPendingSourceRecovery(): boolean {
+    return Object.values(this.subscriptions).some(
+      (subscription) => subscription.hasPendingTruncateReplacement,
     )
   }
 
@@ -819,7 +800,6 @@ export class CollectionConfigBuilder<
       this.lazySources.clear()
       this.demandGenerations.clear()
       this.activeDemands.clear()
-      this.recoveringSources = undefined
       this.optimizableOrderByCollections = {}
       this.lazySourcesCallbacks = {}
 
@@ -865,7 +845,7 @@ export class CollectionConfigBuilder<
           if (!event.isLoadingSubset) {
             // Subset loading finished, check if we can now mark ready
             this.updateLiveQueryStatus(config)
-            if (this.recoveringSources) this.maybeRunGraphFn?.()
+            if (this.hasPendingSourceRecovery()) this.maybeRunGraphFn?.()
           }
         },
       )
@@ -993,14 +973,10 @@ export class CollectionConfigBuilder<
       const hasChildChanges = bucketFacades.hasPendingChanges()
 
       if (!hasParentChanges && !hasChildChanges) {
-        if (this.recoveringSources && this.canPublishRecovery()) {
-          this.recoveringSources = undefined
-        }
         return
       }
 
-      const publishesRecovery = this.canPublishRecovery()
-      if (this.recoveringSources && !publishesRecovery) return
+      if (this.hasPendingSourceRecovery()) return
 
       let facadePublication:
         | ReturnType<BucketFacadeAdapter[`flush`]>
@@ -1060,7 +1036,6 @@ export class CollectionConfigBuilder<
         }
       }
       if (publicationError !== undefined) throw publicationError
-      if (publishesRecovery) this.recoveringSources = undefined
     }
 
     graph.finalize()
