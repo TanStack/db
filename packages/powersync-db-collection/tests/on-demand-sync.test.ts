@@ -2537,6 +2537,43 @@ describe(`On-Demand Sync Mode`, () => {
       expect(secondCleanup).toHaveBeenCalledOnce()
     })
 
+    it(`does not repeat release work started by a reentrant cleanup`, async () => {
+      const db = await createDatabase()
+      vi.spyOn(db.triggers, `createDiffTrigger`).mockResolvedValue(vi.fn())
+      const getAll = vi.spyOn(db, `getAll`).mockResolvedValue([])
+      const first = { where: eq(`category`, `electronics`) }
+      const second = { where: eq(`category`, `clothing`) }
+      let unloadSubset!: (options: LoadSubsetOptions) => void
+      const onLoadSubset = vi.fn((options: LoadSubsetOptions) =>
+        options === first ? () => unloadSubset(second) : undefined,
+      )
+      const started = startOnDemandSync(db, { onLoadSubset })
+      unloadSubset = started.unloadSubset
+
+      try {
+        await Promise.all([
+          started.loadSubset(first),
+          started.loadSubset(second),
+        ])
+        unloadSubset(first)
+        await vi.waitFor(() =>
+          expect(
+            getAll.mock.calls.some(([sql]) =>
+              String(sql).includes(`electronics`),
+            ),
+          ).toBe(true),
+        )
+
+        expect(
+          getAll.mock.calls.filter(([sql]) =>
+            String(sql).includes(`clothing`),
+          ),
+        ).toHaveLength(1)
+      } finally {
+        started.sync.cleanup?.()
+      }
+    })
+
     it(`does not create tracking when change observation cannot start`, async () => {
       const db = await createDatabase()
       const startupError = new Error(`change observation failed`)

@@ -864,8 +864,8 @@ function createPowerSyncCollectionConfig<
           if (!demand) return
 
           const wasActive = demand.active
-          cleanupDemand(demand)
           if (wasActive) trackingRevision++
+          cleanupDemand(demand)
 
           if (wasActive) {
             pendingReleases.push({ options, failures: 0 })
