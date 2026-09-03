@@ -103,16 +103,43 @@ helper that production uses.
       collection-valued children so no callback can observe a mixed epoch.
       The replay oracle checks each public batch and callback snapshot; the
       includes publication suites check matching root/facade snapshots.
-- [ ] Add or name the metamorphic laws for consumer equivalence, stale-event
-      erasure, replay equivalence, independent-history commutation, and exact
-      sharing. Split/merge acquisition equivalence is deliberately absent
-      because the product no longer promises subset algebra.
-- [ ] List each deliberate mutation in the focused audit and name the exact
-      oracle assertion that kills it.
+- [x] Name the retained metamorphic laws: ordered-work consumer parity proves
+      consumer equivalence; cleanup/restart and obsolete-replay cases prove
+      stale-event erasure; the replay model proves replay equivalence; the
+      independent-history property proves commutation; and the demand oracle
+      plus `DeduplicatedLoadSubset` tests prove exact sharing. Split/merge
+      acquisition equivalence is deliberately absent because the product no
+      longer promises subset algebra.
+- [x] List each deliberate mutation and the assertion that kills it:
+      - count an aborted obsolete replay as failed and let any attempt choose
+        the final outcome -> `lets the newest successful replay replace an
+        older failed replay` rejects the missing publication;
+      - remove identical page/boundary suppression -> `settles an underfilled
+        source without repeating one continuation forever` exceeds its finite
+        request bound;
+      - page a joined source instead of taking the conservative full-source
+        path -> `refills a joined result window through a contract-compliant
+        source` rejects the extra limited requests;
+      - unload the same physical acquisition twice -> `releases every
+        successful overlapping replay acquisition` rejects the release count;
+      - flush a truncate replay before its pending demands settle -> `uses the
+        newest complete multi-demand replay` observes a partial empty snapshot;
+      - disable sync-session epoch checks -> the fixed-seed cleanup/restart
+        property observes an old session row in its replacement;
+      - cache an asynchronously completed request after owner abort -> `does
+        not cache work that settles after its owner aborts` rejects the skipped
+        retry;
+      - cache a rejected request -> `retries an exact demand after rejection`
+        rejects the skipped retry;
+      - seed an ordered cursor from an unrelated local row -> `does not derive
+        an ordered boundary from another demand's local row` rejects the
+        foreign cursor.
 - [ ] Add one shared on-demand source fixture only if a third current test
       needs the same adapter protocol. Do not create a helper merely to hide
       two readable fixtures.
-- [ ] Run a focused mutation audit after the oracle surface is stable.
+- [x] Run a focused mutation audit after the oracle surface is stable. Every
+      required fault above was killed by its named retained assertion; all
+      deliberate source edits were then removed.
 
 The mutation audit must prove that the retained oracle surface kills at least
 these faults:
@@ -585,7 +612,7 @@ explicitly removed.
       `[vitest-worker]: Timeout calling "onTaskUpdate"` after the file has
       passed, even with one worker, coverage disabled, and all test logs
       silenced; treat that non-assertion runner failure as a harness limit.
-- [ ] Run the focused mutation audit.
+- [x] Run the focused mutation audit.
 - [ ] Measure source and compressed bundle size against both `origin/main` and
       the large RFC stack; keep simplifying if the result is not compelling.
 - [ ] Ask multiple fresh reviewers for final coherence, hostile-assay, and
