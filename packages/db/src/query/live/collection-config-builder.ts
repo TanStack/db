@@ -7,6 +7,7 @@ import {
 import {
   getActivePublicationContext,
   transactionScopedScheduler,
+  withPublicationContext,
 } from '../../scheduler.js'
 import { getActiveTransaction } from '../../transactions.js'
 import { deepEquals } from '../../utils.js'
@@ -292,10 +293,12 @@ export class CollectionConfigBuilder<
   }
 
   setWindow(options: WindowOptions): true | Promise<void> {
-    if (!this.windowFn) {
+    const windowFn = this.windowFn
+    if (!windowFn) {
       throw new SetWindowRequiresOrderByError()
     }
 
+    const syncSession = this.syncSession
     const previousWindowOperationGeneration = this.windowOperationGeneration
     const windowOperationGeneration = ++this.windowOperationGeneration
     const loadOperation =
@@ -305,18 +308,33 @@ export class CollectionConfigBuilder<
     const operation: { failed: boolean; error?: unknown } = { failed: false }
     this.activeWindowOperation = operation
     try {
-      this.windowFn(options)
-      this.maybeRunGraphFn?.()
-      if (operation.failed) throw operation.error
+      // The window and all source work it causes form one synchronous
+      // publication. This makes operation tracking see requests scheduled by
+      // the graph rather than declaring the window settled too early.
       this.currentWindow = options
+      withPublicationContext(() => {
+        windowFn(options)
+        this.maybeRunGraphFn?.()
+      })
+      if (operation.failed) throw operation.error
+      if (windowOperationGeneration === this.windowOperationGeneration) {
+        this.currentWindow = options
+      }
     } catch (error) {
+      // Restore the outer operation before rollback work can register loads.
+      loadOperation?.cancel()
       if (
         previousWindow &&
+        syncSession === this.syncSession &&
+        this.currentSyncConfig !== undefined &&
         windowOperationGeneration === this.windowOperationGeneration
       ) {
         try {
-          this.windowFn(previousWindow)
-          this.maybeRunGraphFn?.()
+          this.currentWindow = previousWindow
+          withPublicationContext(() => {
+            windowFn(previousWindow)
+            this.maybeRunGraphFn?.()
+          })
           if (windowOperationGeneration === this.windowOperationGeneration) {
             this.windowOperationGeneration = previousWindowOperationGeneration
           }
@@ -325,7 +343,6 @@ export class CollectionConfigBuilder<
           // window rather than replacing it with a rollback failure.
         }
       }
-      loadOperation?.cancel()
       throw error
     } finally {
       this.activeWindowOperation = previousOperation
@@ -705,18 +722,20 @@ export class CollectionConfigBuilder<
 
     const combinedLoader = () => {
       let allDone = true
+      let failed = false
       let firstError: unknown
       pending.loadCallbacks.forEach((loader) => {
         try {
           allDone = loader() && allDone
         } catch (error) {
           allDone = false
-          firstError ??= error
+          if (!failed) {
+            failed = true
+            firstError = error
+          }
         }
       })
-      if (firstError) {
-        throw firstError
-      }
+      if (failed) throw firstError
       // Returning false signals that callers should schedule another pass.
       return allDone
     }
@@ -1285,7 +1304,19 @@ export class CollectionConfigBuilder<
     // from any source that needs it. Returns true once all loaders have been called,
     // but the actual async loading may still be in progress.
     const loadSubsetDataCallbacks = () => {
-      loaders.map((loader) => loader())
+      let failed = false
+      let firstError: unknown
+      for (const loader of loaders) {
+        try {
+          loader()
+        } catch (error) {
+          if (!failed) {
+            failed = true
+            firstError = error
+          }
+        }
+      }
+      if (failed) throw firstError
       return true
     }
 

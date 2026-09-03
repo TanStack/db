@@ -226,9 +226,16 @@ export function processOrderBy(
         collection,
       )!
       const sourceOrderBy = resolveOrderBy(
-        [firstClause],
+        orderByClause,
         collection.compareOptions,
       )
+      const sourceOrderIsDirect = orderByClause.every(({ expression }) => {
+        if (expression.type !== `ref`) return false
+        return (
+          followRef(rawQuery, expression, collection)?.sourceId ===
+          orderBySourceId
+        )
+      })
       const extract = compileExpression(
         new PropRef(followed.path),
         true,
@@ -249,7 +256,7 @@ export function processOrderBy(
         index,
         orderBy: sourceOrderBy,
         requiresFullSource:
-          orderByClause.length !== 1 ||
+          !sourceOrderIsDirect ||
           rawQuery.from.type !== `collectionRef` ||
           rawQuery.from.sourceId !== orderBySourceId ||
           (rawQuery.join?.some(

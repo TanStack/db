@@ -50,6 +50,9 @@ after their public laws have a destination.
       replay model, fixed stale/newest cases, and same-tick scheduled races.
 - [x] Add fixed/random independent-history commutation for disjoint source
       keys at the D2 reconciliation boundary.
+- [x] Require fixed and generated adapter fixtures to honor every requested
+      predicate and window. Invalid boundary fixtures had hidden real page
+      loads and produced false failures in the window-controller suite.
 - [x] Compare the same generated demand through live collections and Effects,
       including rows, errors, liveness, semantic request traces, and batches.
 - [ ] Audit alpha-renaming coverage in the query-identity suite.
@@ -137,6 +140,12 @@ explicitly removed.
       scheduler-error-priority, and already-aborted request regressions. The
       restored tests red-tested real gaps; the focused seven-file run is
       279/279 green.
+- [x] Window operations now synchronously drain the graph work they create and
+      wait for both the page request and tie-boundary refinement. Contract-valid
+      controller fixtures red/green async rejection and superseding reset.
+- [x] Kept the existing includes oracle replay API working while adding named
+      replay coordinates. The six includes oracle suites plus utility tests are
+      278/278 green.
 
 ## Remaining execution
 

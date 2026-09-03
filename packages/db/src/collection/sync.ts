@@ -651,6 +651,7 @@ export class CollectionSyncManager<
     wait: () => true | Promise<void>
     cancel: () => void
   } {
+    const previousOperation = this.activeLoadSubsetOperation
     const operation: LoadSubsetOperation = {
       pending: new Set(),
       waiting: false,
@@ -668,7 +669,9 @@ export class CollectionSyncManager<
         operation.completed = true
         this.loadSubsetOperations.delete(operation)
         if (this.activeLoadSubsetOperation === operation) {
-          this.activeLoadSubsetOperation = undefined
+          this.activeLoadSubsetOperation = previousOperation?.completed
+            ? undefined
+            : previousOperation
         }
       },
     }

@@ -457,8 +457,11 @@ describe(`createLiveQueryWindowController`, () => {
         sync: ({ begin, write, commit, markReady }) => {
           markReady()
           return {
-            loadSubset: (options) =>
-              new Promise<void>((resolve, reject) => {
+            loadSubset: (options) => {
+              // Boundary refinement asks only for the last loaded tie class.
+              // The source has already supplied that row.
+              if (options.where) return Promise.resolve()
+              return new Promise<void>((resolve, reject) => {
                 queueMicrotask(() => {
                   if (rejectLoads) {
                     reject(failure)
@@ -471,7 +474,8 @@ describe(`createLiveQueryWindowController`, () => {
                   commit()
                   resolve()
                 })
-              }),
+              })
+            },
           }
         },
       },
@@ -556,6 +560,9 @@ describe(`createLiveQueryWindowController`, () => {
           markReady()
           return {
             loadSubset: (options) => {
+              // Keep the fixture contract-valid: a boundary request must not
+              // be mistaken for the later page expansion.
+              if (options.where) return Promise.resolve()
               loadCount++
               if (loadCount === 2) {
                 return new Promise<void>((_resolve, reject) => {

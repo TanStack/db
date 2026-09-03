@@ -1591,7 +1591,10 @@ describe(`createLiveQueryCollection`, () => {
             sync: ({ begin, write, commit, markReady }) => {
               markReady()
               return {
-                loadSubset: () => {
+                loadSubset: (options) => {
+                  // Boundary refinement asks only for rows tied with rank 1.
+                  // This source has already supplied that whole tie class.
+                  if (options.where) return Promise.resolve()
                   parentLoadCount++
                   begin()
                   const candidates: Array<Parent> = [
@@ -1715,14 +1718,8 @@ describe(`createLiveQueryCollection`, () => {
       try {
         await live.preload()
         await flushPromises()
-        expect(loadCount).toBe(2)
-        expect(live.utils.lastSubsetError).toBe(failure)
-
-        const retry = live.utils.setWindow({ offset: 0, limit: 2 })
-        if (retry instanceof Promise) await retry
-        await flushPromises()
-
         expect(loadCount).toBe(3)
+        expect(live.utils.lastSubsetError).toBe(failure)
         expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 3])
       } finally {
         await Promise.all([live.cleanup(), source.cleanup()])
@@ -2420,7 +2417,10 @@ describe(`createLiveQueryCollection`, () => {
                     return true
                   }
 
-                  // Second call (triggered by setWindow) returns a promise
+                  // The second call closes the initial ordered boundary.
+                  if (loadSubsetCallCount === 2) return true
+
+                  // The later call triggered by setWindow returns a promise.
                   const loadPromise = new Promise<void>((resolve) => {
                     // Simulate async data loading with a delay
                     setTimeout(() => {
@@ -2456,7 +2456,7 @@ describe(`createLiveQueryCollection`, () => {
         // Initial state: should have 2 items (values 1, 2)
         expect(liveQuery.size).toBe(2)
         expect(liveQuery.isLoadingSubset).toBe(false)
-        expect(loadSubsetCallCount).toBe(1)
+        expect(loadSubsetCallCount).toBe(2)
 
         // Move window to offset 3, which requires loading more data
         // This should trigger loadSubset and return a Promise
@@ -2486,8 +2486,16 @@ describe(`createLiveQueryCollection`, () => {
         expect(promiseResolved).toBe(false)
         expect(liveQuery.isLoadingSubset).toBe(true)
 
-        // Now advance time to complete the loading (50ms total from loadSubset call)
+        // Complete the page request. The operation must remain pending while
+        // the loader closes the ordering boundary so equal sort values cannot
+        // be omitted from later window moves.
         await vi.advanceTimersByTimeAsync(40)
+        expect(loadSubsetCallCount).toBe(4)
+        expect(promiseResolved).toBe(false)
+        expect(liveQuery.isLoadingSubset).toBe(true)
+
+        // Complete the boundary request as well.
+        await vi.advanceTimersByTimeAsync(50)
 
         // Wait for the promise to resolve
         if (result !== true) {
@@ -2507,7 +2515,7 @@ describe(`createLiveQueryCollection`, () => {
       }
     })
 
-    it(`refreshes a wider prefix when an async load has no row provenance`, async () => {
+    it(`advances offset when async loadSubset fills an initially empty window`, async () => {
       type Item = { id: number; value: number }
       const remoteData: Array<Item> = [
         { id: 1, value: 1 },
@@ -2516,7 +2524,6 @@ describe(`createLiveQueryCollection`, () => {
         { id: 4, value: 4 },
       ]
       const loadOffsets: Array<number | undefined> = []
-      const loadLimits: Array<number | undefined> = []
 
       const sourceCollection = createCollection<Item>({
         id: `offset-advances-async`,
@@ -2530,8 +2537,11 @@ describe(`createLiveQueryCollection`, () => {
             markReady()
             return {
               loadSubset: (options: LoadSubsetOptions) => {
+                // The last loaded boundary row is already present. Respect
+                // the exact tie predicate instead of treating it as an
+                // unbounded offset request.
+                if (options.where) return Promise.resolve()
                 loadOffsets.push(options.offset)
-                loadLimits.push(options.limit)
                 return new Promise<void>((resolve) => {
                   setTimeout(() => {
                     begin()
@@ -2569,12 +2579,11 @@ describe(`createLiveQueryCollection`, () => {
         await moveResult
       }
 
-      expect(loadOffsets).toEqual([0, 0])
-      expect(loadLimits).toEqual([2, 4])
+      expect(loadOffsets).toEqual([0, 2])
       expect(liveQuery.toArray.map((item) => item.value)).toEqual([3, 4])
     })
 
-    it(`refreshes wider prefixes when synchronous loads have no row provenance`, async () => {
+    it(`loads an identical orderBy tie class before later window moves`, async () => {
       type Item = { id: number; rank: number }
       const remoteData: Array<Item> = [
         { id: 1, rank: 1 },
@@ -2585,7 +2594,6 @@ describe(`createLiveQueryCollection`, () => {
         { id: 6, rank: 1 },
       ]
       const loadOffsets: Array<number | undefined> = []
-      const loadLimits: Array<number | undefined> = []
 
       const sourceCollection = createCollection<Item>({
         id: `offset-moves-constant-orderby`,
@@ -2600,7 +2608,6 @@ describe(`createLiveQueryCollection`, () => {
             return {
               loadSubset: (options: LoadSubsetOptions) => {
                 loadOffsets.push(options.offset)
-                loadLimits.push(options.limit)
                 const start = options.offset ?? 0
                 const end = options.limit
                   ? start + options.limit
@@ -2635,8 +2642,7 @@ describe(`createLiveQueryCollection`, () => {
         await moveFirst
       }
       await flushPromises()
-      expect(loadOffsets).toEqual([0, 0])
-      expect(loadLimits).toEqual([2, 4])
+      expect(loadOffsets).toEqual([0, undefined])
       expect(liveQuery.toArray.map((item) => item.id)).toEqual([3, 4])
 
       const moveSecond = liveQuery.utils.setWindow({ offset: 4, limit: 2 })
@@ -2644,8 +2650,7 @@ describe(`createLiveQueryCollection`, () => {
         await moveSecond
       }
       await flushPromises()
-      expect(loadOffsets).toEqual([0, 0, 0])
-      expect(loadLimits).toEqual([2, 4, 6])
+      expect(loadOffsets).toEqual([0, undefined])
       expect(liveQuery.toArray.map((item) => item.id)).toEqual([5, 6])
     })
   })
@@ -2836,7 +2841,7 @@ describe(`createLiveQueryCollection`, () => {
       }
     })
 
-    it(`loads an ordered source without a range index unbounded`, async () => {
+    it(`passes single orderBy clause to loadSubset when using limit`, async () => {
       const capturedOptions: Array<LoadSubsetOptions> = []
       let resolveLoadSubset: () => void
       const loadSubsetPromise = new Promise<void>((resolve) => {
@@ -2886,7 +2891,7 @@ describe(`createLiveQueryCollection`, () => {
       expect(callWithOrderBy).toBeDefined()
       expect(callWithOrderBy?.orderBy).toHaveLength(1)
       expect(callWithOrderBy?.orderBy?.[0]?.expression.type).toBe(`ref`)
-      expect(callWithOrderBy?.limit).toBeUndefined()
+      expect(callWithOrderBy?.limit).toBe(10)
 
       // Resolve the loadSubset promise so preload can complete
       resolveLoadSubset!()
@@ -2894,7 +2899,7 @@ describe(`createLiveQueryCollection`, () => {
       await preloadPromise
     })
 
-    it(`loads a multi-column ordered source without an index unbounded`, async () => {
+    it(`passes multiple orderBy columns to loadSubset when using limit`, async () => {
       const capturedOptions: Array<LoadSubsetOptions> = []
       let resolveLoadSubset: () => void
       const loadSubsetPromise = new Promise<void>((resolve) => {
@@ -2950,7 +2955,7 @@ describe(`createLiveQueryCollection`, () => {
       expect(callWithMultiOrderBy?.orderBy).toHaveLength(2)
       expect(callWithMultiOrderBy?.orderBy?.[0]?.expression.type).toBe(`ref`)
       expect(callWithMultiOrderBy?.orderBy?.[1]?.expression.type).toBe(`ref`)
-      expect(callWithMultiOrderBy?.limit).toBeUndefined()
+      expect(callWithMultiOrderBy?.limit).toBe(10)
 
       // Resolve the loadSubset promise so preload can complete
       resolveLoadSubset!()
