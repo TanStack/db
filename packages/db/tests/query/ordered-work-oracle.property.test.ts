@@ -1097,7 +1097,13 @@ describe(`ordered source work oracle`, () => {
     }
   })
 
-  it(`keeps an ordered snapshot unchanged until full-source recovery settles`, async () => {
+  it.each([
+    { name: `until full-source recovery settles`, failure: undefined },
+    {
+      name: `when full-source recovery throws synchronously`,
+      failure: new Error(`full-source recovery failed`),
+    },
+  ])(`keeps an ordered snapshot unchanged $name`, async ({ failure }) => {
     const makeRows = (ranks: ReadonlyArray<number>): Array<Row> =>
       ranks.map((rank, index) => ({
         id: index + 1,
@@ -1108,9 +1114,23 @@ describe(`ordered source work oracle`, () => {
     let truth = makeRows([1, 2, 3, 4, 5])
     let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
     let recovering = false
+    let fullSourceRequests = 0
     const fullSource = createDeferred<void>()
     const installed = new Set<number>()
     const publications: Array<Array<number>> = []
+    const escapedErrors: Array<unknown> = []
+    const enqueueMicrotask = globalThis.queueMicrotask.bind(globalThis)
+    const queueMicrotaskSpy = failure
+      ? vi.spyOn(globalThis, `queueMicrotask`).mockImplementation((callback) =>
+          enqueueMicrotask(() => {
+            try {
+              callback()
+            } catch (error) {
+              escapedErrors.push(error)
+            }
+          }),
+        )
+      : undefined
 
     const source = createCollection<Row, number>({
       id: `delayed-full-source-recovery`,
@@ -1124,43 +1144,51 @@ describe(`ordered source work oracle`, () => {
           sync = operations
           operations.markReady()
           return {
-            loadSubset: async (options) => {
+            loadSubset: (options) => {
               const isFullSource =
                 options.where === undefined && options.limit === undefined
-              if (recovering && isFullSource) await fullSource.promise
+              if (recovering && isFullSource) {
+                fullSourceRequests++
+                if (failure) throw failure
+              }
 
-              let selected = options.where
-                ? truth.filter(
+              return (async () => {
+                if (recovering && isFullSource) await fullSource.promise
+
+                let selected = options.where
+                  ? truth.filter(
+                      (row) =>
+                        evaluateReferenceExpression(options.where!, row) ===
+                        true,
+                    )
+                  : [...truth]
+                if (options.cursor) {
+                  selected = selected.filter(
                     (row) =>
-                      evaluateReferenceExpression(options.where!, row) === true,
+                      evaluateReferenceExpression(
+                        options.cursor!.whereFrom,
+                        row,
+                      ) === true,
                   )
-                : [...truth]
-              if (options.cursor) {
-                selected = selected.filter(
-                  (row) =>
-                    evaluateReferenceExpression(
-                      options.cursor!.whereFrom,
-                      row,
-                    ) === true,
-                )
-              }
-              selected.sort((left, right) => left.rank - right.rank)
-              if (!options.cursor && options.offset) {
-                selected = selected.slice(options.offset)
-              }
-              if (options.limit !== undefined) {
-                selected = selected.slice(0, options.limit)
-              }
+                }
+                selected.sort((left, right) => left.rank - right.rank)
+                if (!options.cursor && options.offset) {
+                  selected = selected.slice(options.offset)
+                }
+                if (options.limit !== undefined) {
+                  selected = selected.slice(0, options.limit)
+                }
 
-              const fresh = selected.filter(({ id }) => !installed.has(id))
-              if (fresh.length === 0) return
-              sync.begin()
-              for (const row of fresh) {
-                installed.add(row.id)
-                sync.write({ type: `insert`, value: row })
-              }
-              const receipt = sync.commit()
-              if (receipt !== true) await receipt
+                const fresh = selected.filter(({ id }) => !installed.has(id))
+                if (fresh.length === 0) return
+                sync.begin()
+                for (const row of fresh) {
+                  installed.add(row.id)
+                  sync.write({ type: `insert`, value: row })
+                }
+                const receipt = sync.commit()
+                if (receipt !== true) await receipt
+              })()
             },
             unloadSubset: () => {},
           }
@@ -1182,6 +1210,7 @@ describe(`ordered source work oracle`, () => {
       await live.utils.setWindow({ offset: 0, limit: 4 })
       await flushPromises()
       expect(live.toArray.map(({ rank }) => rank)).toEqual([1, 2, 3, 4])
+      const publicationCount = publications.length
 
       truth = makeRows([0, 0.5, 1, 1.5, 2, 3])
       installed.clear()
@@ -1190,15 +1219,24 @@ describe(`ordered source work oracle`, () => {
       sync.truncate()
       const receipt = sync.commit()
       if (receipt !== true) await receipt
-      await flushPromises()
+      await vi.waitFor(() => expect(fullSourceRequests).toBe(1))
+      await flushPromises(4)
 
       expect(live.toArray.map(({ rank }) => rank)).toEqual([1, 2, 3, 4])
-      expect(publications).not.toContainEqual([0, 0.5, 2, 3])
+      expect(publications).toHaveLength(publicationCount)
 
-      fullSource.resolve()
-      await flushPromises()
-      expect(live.toArray.map(({ rank }) => rank)).toEqual([0, 0.5, 1, 1.5])
+      if (failure) {
+        expect(live.utils.lastSubsetError).toBe(failure)
+        expect(escapedErrors).toEqual([])
+      } else {
+        fullSource.resolve()
+        await flushPromises()
+        expect(live.toArray.map(({ rank }) => rank)).toEqual([
+          0, 0.5, 1, 1.5,
+        ])
+      }
     } finally {
+      queueMicrotaskSpy?.mockRestore()
       fullSource.resolve()
       subscription.unsubscribe()
       await Promise.all([live.cleanup(), source.cleanup()])

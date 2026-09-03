@@ -173,7 +173,7 @@ describe(`loadSubset replay refinement`, () => {
     }
   })
 
-  it(`does not remain ready and stale after replay failure`, async () => {
+  it(`keeps a failed replay private until a later authoritative replay`, async () => {
     const sourceId = `replay-refinement-failure-liveness`
     const row = (version: number) => ({ sourceId, rowKey: `row`, version })
     const harness = createHarness(sourceId)
@@ -194,12 +194,21 @@ describe(`loadSubset replay refinement`, () => {
       harness.updateCore(2, 3)
       await flushPromises()
 
-      expect(harness.visibleRows()).toEqual([row(3)])
+      expect(harness.visibleRows()).toEqual([row(1)])
+      expect(harness.batches).toEqual([[{ type: `insert`, row: row(1) }]])
+      expect(harness.callbackReads).toEqual([[row(1)]])
+
+      await harness.startReplay()
+      harness.replaceCore(4)
+      harness.pending[1]!.deferred.resolve()
+      await flushPromises()
+
+      expect(harness.visibleRows()).toEqual([row(4)])
       expect(harness.batches).toEqual([
         [{ type: `insert`, row: row(1) }],
-        [{ type: `update`, row: row(3), previousVersion: 1 }],
+        [{ type: `update`, row: row(4), previousVersion: 1 }],
       ])
-      expect(harness.callbackReads).toEqual([[row(1)], [row(3)]])
+      expect(harness.callbackReads).toEqual([[row(1)], [row(4)]])
     } finally {
       for (const replay of harness.pending) replay.deferred.resolve()
       harness.subscription.unsubscribe()

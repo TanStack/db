@@ -611,9 +611,10 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
 
     const settleReplay = async (replayIndex: number) => {
       const pending = pendingReplays[replayIndex]!
-      const session = modelSession!
+      const session = modelSession
       const load = pending.load
       const isCurrent =
+        session !== undefined &&
         pending.attemptIndex === session.currentAttemptIndex &&
         activeDemandIds.has(load.demandId)
       pending.settled = true
@@ -628,11 +629,18 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
         }
         pending.deferred.reject(pending.error)
       }
-      session.pending.delete(replayIndex)
+      session?.pending.delete(replayIndex)
       await flushPromises()
       assertSource()
 
-      const hasPendingReplay = pendingReplays.some(({ settled }) => !settled)
+      if (!session) {
+        expect(subscription.status).toBe(`ready`)
+        assertPublished(expectedPublished)
+        expect(subscription.lastError).toBe(lastReportedError)
+        return
+      }
+
+      const hasPendingReplay = session.pending.size > 0
       expect(subscription.status).toBe(
         hasPendingReplay ? `loadingSubset` : `ready`,
       )
@@ -720,6 +728,11 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
         const previous = expectedPublished.get(releasedDemand)
         subscription.releaseSnapshot(demandWheres.get(releasedDemand)!)
         activeDemandIds.delete(releasedDemand)
+        for (const replayIndex of modelSession.pending) {
+          if (pendingReplays[replayIndex]?.load.demandId === releasedDemand) {
+            modelSession.pending.delete(replayIndex)
+          }
+        }
         expectedPublished.delete(releasedDemand)
         modelSession.baseline.delete(releasedDemand)
         if (previous) {
@@ -733,12 +746,22 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
             },
           ])
         }
+        if (modelSession.pending.size === 0) {
+          expectedPublicationCount = publicationCount
+          modelSession = undefined
+        }
       }
       assertSource()
       assertPublished(expectedPublished)
-      expect(publicationCount).toBe(modelSession.publicationCount)
+      expect(publicationCount).toBe(
+        modelSession?.publicationCount ?? expectedPublicationCount,
+      )
       expect(subscription.lastError).toBe(lastReportedError)
-      expect(subscription.status).toBe(`loadingSubset`)
+      expect(subscription.status).toBe(
+        modelSession && modelSession.pending.size > 0
+          ? `loadingSubset`
+          : `ready`,
+      )
 
       for (const replayIndex of scenario.settlementOrder) {
         const replay = pendingReplays[replayIndex]
@@ -1706,7 +1729,6 @@ describe(`CollectionSubscription replay oracle`, () => {
 
       subscription.releaseSnapshot(demandOne)
       expect(replays[0]?.options.signal?.aborted).toBe(true)
-      replays[0]?.deferred.reject(new DOMException(`obsolete`, `AbortError`))
       begin()
       write({ type: `insert`, value: { id: `two`, value: 2 } })
       commit()
@@ -1714,6 +1736,7 @@ describe(`CollectionSubscription replay oracle`, () => {
       await flushPromises()
 
       expect(sortedRows(visible)).toEqual([{ id: `two`, value: 2 }])
+      expect(subscription.status).toBe(`ready`)
       expect(subscription.lastError).toBeUndefined()
     } finally {
       subscription.unsubscribe()

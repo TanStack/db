@@ -333,7 +333,11 @@ export class CollectionSubscriber<
         // fragile cursor. The retained full-source demand is replayed on later
         // truncates, so this adds at most one demand per subscription.
         queueMicrotask(() => {
-          this.orderedLoader?.loadFullSource()
+          try {
+            this.orderedLoader?.loadFullSource()
+          } catch {
+            // requestSnapshot already records the subscription-scoped error.
+          }
         })
       }),
     })
@@ -375,8 +379,6 @@ export class CollectionSubscriber<
         onStart?.()
       },
       succeed: () =>
-        queueMicrotask(() => this.collectionConfigBuilder.scheduleGraphRun()),
-      fail: () =>
         queueMicrotask(() => this.collectionConfigBuilder.scheduleGraphRun()),
     }
   }

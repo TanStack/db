@@ -66,7 +66,6 @@ type CollectionSubscriptionOptions = {
 type TruncateReplayPublicationControl = Readonly<{
   start: () => void
   succeed: () => void
-  fail: () => void
 }>
 
 type TruncatePublicationState = {
@@ -90,7 +89,7 @@ type SubsetDemand = SubsetAcquisition & {
 }
 
 type TruncateReplayAttempt = {
-  pending: Set<{ promise: Promise<unknown> }>
+  pending: Set<{ demand: SubsetDemand; promise: Promise<unknown> }>
   failed: boolean
   setupComplete: boolean
 }
@@ -145,7 +144,10 @@ export class CollectionSubscription
   // Status tracking
   private _status: SubscriptionStatus = `ready`
   private _lastError: unknown | undefined
-  private pendingLoadSubsetPromises: Set<Promise<unknown>> = new Set()
+  private pendingLoadSubsetParticipants = new Set<{
+    demand: SubsetDemand
+    promise: Promise<unknown>
+  }>()
 
   // Cleanup function for truncate event listener
   private truncateCleanup: (() => void) | undefined
@@ -214,8 +216,8 @@ export class CollectionSubscription
    *
    * To prevent a flash of missing content, we buffer all changes (deletes from truncate
    * and inserts from refetch) until all loadSubset calls succeed, then emit them together.
-   * A failed replay keeps the last published snapshot, resumes ordinary deltas,
-   * and retains subset ownership so a later truncate can retry the replay.
+   * A failed replay keeps the last published snapshot private until a later
+   * authoritative replay succeeds.
    */
   private handleTruncate() {
     const demandsToReload = [...this.subsetDemands]
@@ -306,8 +308,9 @@ export class CollectionSubscription
           continue
         }
 
-        this.observeLoadSubsetResult(
+        const statusParticipant = this.observeLoadSubsetResult(
           syncResult,
+          demand,
           nextAcquisition.options,
           true,
           () => isCurrentAttempt() && !nextAcquisition.options.signal?.aborted,
@@ -345,6 +348,7 @@ export class CollectionSubscription
             // old acquisition so normal cleanup can retry that release.
           }
           this.recordLoadSubsetError(demand.options, error, true)
+          this.stopStatusParticipant(statusParticipant)
           attempt.failed = true
         }
       }
@@ -357,7 +361,7 @@ export class CollectionSubscription
   private settleTruncateReplay(
     session: TruncateReplaySession,
     attempt: TruncateReplayAttempt,
-    pending: { promise: Promise<unknown> },
+    pending: { demand: SubsetDemand; promise: Promise<unknown> },
   ): void {
     if (this.truncateReplaySession !== session) return
     attempt.pending.delete(pending)
@@ -376,7 +380,7 @@ export class CollectionSubscription
 
     // A transport promise may be shared by several logical demands. Track each
     // acquisition separately so one observer cannot complete the attempt early.
-    const pending = { promise: result }
+    const pending = { demand, promise: result }
     attempt.pending.add(pending)
     void result.then(
       () => this.settleTruncateReplay(session, attempt, pending),
@@ -389,6 +393,23 @@ export class CollectionSubscription
         this.settleTruncateReplay(session, attempt, pending)
       },
     )
+  }
+
+  /** Stop obsolete logical demand from pinning a replay barrier. */
+  private removeTruncateReplayParticipant(demand: SubsetDemand): void {
+    const session = this.truncateReplaySession
+    if (!session) return
+    for (const attempt of session.attempts) {
+      for (const pending of attempt.pending) {
+        if (pending.demand === demand) attempt.pending.delete(pending)
+      }
+    }
+    this.checkTruncateReplayComplete(session)
+  }
+
+  private failCurrentTruncateReplay(): void {
+    const attempt = this.truncateReplaySession?.currentAttempt
+    if (attempt) attempt.failed = true
   }
 
   /** Publish only after every overlapping replay attempt has settled. */
@@ -406,18 +427,12 @@ export class CollectionSubscription
   }
 
   /**
-   * Discard an incomplete current replay and restore the last publication.
-   * Rows in that publication remain stale until a later source delta or replay
-   * reconciles them with the source collection.
+   * Keep an incomplete replay private. The source no longer proves a complete
+   * state, so only a later successful truncate replay may reopen publication.
    */
   private abandonTruncateReplay(session: TruncateReplaySession): void {
     if (this.truncateReplaySession !== session) return
     if (this.options.truncateReplayPublication) {
-      this.restoreGraphReplayBaseline(session.publicationState)
-      this.truncateReplaySession = undefined
-      this.truncateReplacementPending = false
-      this.stalePublishedRows.clear()
-      this.options.truncateReplayPublication.fail()
       return
     }
     const publicationState = session.publicationState
@@ -429,22 +444,6 @@ export class CollectionSubscription
     this.limitedSnapshotRowCount = publicationState.limitedSnapshotRowCount
     this.lastSentKey = publicationState.lastSentKey
     this.truncateReplaySession = undefined
-  }
-
-  /** Roll a failed private replay back before graph publication resumes. */
-  private restoreGraphReplayBaseline(state: TruncatePublicationState): void {
-    const changes = this.createStateDiff(
-      this.publishedRows,
-      state.publishedRows,
-    )
-    if (changes.length > 0) this.filteredCallback(changes)
-
-    this.loadedInitialState = state.loadedInitialState
-    this.snapshotSent = state.snapshotSent
-    this.sentKeys = new Set(state.sentKeys)
-    this.publishedRows = new Map(state.publishedRows)
-    this.limitedSnapshotRowCount = state.limitedSnapshotRowCount
-    this.lastSentKey = state.lastSentKey
   }
 
   /** Publish the complete buffered replacement as one subscriber batch. */
@@ -600,21 +599,24 @@ export class CollectionSubscription
   /** Observe an asynchronous subset load and restore status on settlement. */
   private observeLoadSubsetResult(
     syncResult: LoadSubsetRequestResult,
+    demand: SubsetDemand,
     options: LoadSubsetOptions,
     trackStatus: boolean,
     shouldReportError: () => boolean = () => true,
-  ) {
+  ): { demand: SubsetDemand; promise: Promise<unknown> } | undefined {
     if (!(syncResult instanceof Promise)) return
 
+    const participant = { demand, promise: syncResult }
+
     if (trackStatus) {
-      this.pendingLoadSubsetPromises.add(syncResult)
+      this.pendingLoadSubsetParticipants.add(participant)
       this.setStatus(`loadingSubset`)
     }
 
     const finish = () => {
       if (trackStatus) {
-        this.pendingLoadSubsetPromises.delete(syncResult)
-        if (this.pendingLoadSubsetPromises.size === 0) {
+        this.pendingLoadSubsetParticipants.delete(participant)
+        if (this.pendingLoadSubsetParticipants.size === 0) {
           this.setStatus(`ready`)
         }
       }
@@ -624,6 +626,26 @@ export class CollectionSubscription
       if (shouldReportError()) this.recordLoadSubsetError(options, error)
       finish()
     })
+    return trackStatus ? participant : undefined
+  }
+
+  private stopStatusParticipant(
+    participant:
+      | { demand: SubsetDemand; promise: Promise<unknown> }
+      | undefined,
+  ): void {
+    if (!participant) return
+    this.pendingLoadSubsetParticipants.delete(participant)
+    if (this.pendingLoadSubsetParticipants.size === 0) this.setStatus(`ready`)
+  }
+
+  private stopDemandStatusParticipants(demand: SubsetDemand): void {
+    for (const participant of this.pendingLoadSubsetParticipants) {
+      if (participant.demand === demand) {
+        this.pendingLoadSubsetParticipants.delete(participant)
+      }
+    }
+    if (this.pendingLoadSubsetParticipants.size === 0) this.setStatus(`ready`)
   }
 
   private loadSubset(
@@ -686,6 +708,7 @@ export class CollectionSubscription
     try {
       this.collection._sync.unloadSubset(demand.options)
       demand.releaseFailed = false
+      this.stopDemandStatusParticipants(demand)
     } catch (error) {
       demand.releaseFailed = true
       const normalized = this.recordLoadSubsetError(
@@ -721,6 +744,7 @@ export class CollectionSubscription
       this.trackTruncateReplayParticipant(demand, acquisition.options, result)
       return { demand, result }
     } catch (error) {
+      this.failCurrentTruncateReplay()
       const demandIndex = this.subsetDemands.indexOf(demand)
       if (demandIndex !== -1 && !demand.releaseFailed) {
         this.subsetDemands.splice(demandIndex, 1)
@@ -836,6 +860,7 @@ export class CollectionSubscription
 
     this.observeLoadSubsetResult(
       syncResult,
+      demand,
       demand.options,
       opts?.trackLoadSubsetPromise ?? true,
     )
@@ -893,6 +918,7 @@ export class CollectionSubscription
     if (!demand) return
     this.releaseSubsetDemand(demand)
     this.subsetDemands.splice(index, 1)
+    this.removeTruncateReplayParticipant(demand)
     this.pruneReleasedReplayRows()
   }
 
@@ -1121,6 +1147,7 @@ export class CollectionSubscription
     onLoadSubsetResult?.(syncResult)
     this.observeLoadSubsetResult(
       syncResult,
+      demand,
       demand.options,
       shouldTrackLoadSubsetPromise,
     )
