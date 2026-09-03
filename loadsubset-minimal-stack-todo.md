@@ -567,12 +567,15 @@ explicitly removed.
 - [x] Run focused core, pagination, replay, includes, Effect, identity, and
       transaction suites after each coherent change. The final recovered-law
       pass is 172/172 green with no type errors.
-- [ ] Run Electric, PowerSync, Query DB, and persistence adapter suites.
+- [x] Run Electric, PowerSync, Query DB, and persistence adapter suites.
+      Electric is 504/504 green, PowerSync 108/108, Query DB 336/336
+      (1 skipped), and SQLite persistence core 122/122; all typechecks pass.
 - [ ] Merge current `origin/main` with a normal merge commit; never rewrite the
       published branch history.
-- [ ] Run typecheck/build and the full package suite. The standalone package
-      typecheck is green; rerun the full package suite after this final fixture
-      correction.
+- [x] Run typecheck and the full package suite. The standalone package
+      typecheck passes, and the full DB run is 3,503/3,503 green (6 skipped)
+      across 139 files with no type errors. The repository build remains after
+      merging current main.
 - [ ] Run the 100x fixed/random campaign.
 - [ ] Run the focused mutation audit.
 - [ ] Measure source and compressed bundle size against both `origin/main` and
