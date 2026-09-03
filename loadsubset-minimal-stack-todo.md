@@ -513,6 +513,11 @@ explicitly removed.
       before invoking its hook: a later hook could otherwise reentrantly unload
       and clean an earlier demand twice. The new public resource-lifetime law
       red-tested that bug; PowerSync is 106/106 green.
+- [x] Kept PowerSync's tracking revision ahead of user cleanup hooks. A loss
+      audit found that extracting the shared cleanup helper had moved the
+      revision bump after the hook, so a reentrant unload could repeat the
+      same physical release query. The public reentrancy test failed first;
+      the full PowerSync suite is now 107/107 green.
 - [x] Derived replay-publication control from the subscription's existing
       options and centralized unknown-value error normalization. The focused
       subscription, replay, live-query, and error suites are 144/144 green.
@@ -531,6 +536,14 @@ explicitly removed.
       not claimed: Electric exposes neither a request signal nor request IDs on
       streamed rows, so the adapter cannot safely retract one overlapping
       request. The source documents that upstream boundary.
+- [x] Reduced Effect cleanup to failed-callback debt without weakening
+      reentrancy. A loss audit found that nested disposal could remove a
+      callback whose outer invocation then failed. Cleanup now iterates a
+      snapshot and restores that failed release; the public test failed first
+      and all 69 Effect tests pass.
+- [x] Derived scheduler publication failure from the presence of the active
+      context instead of storing a second boolean. Scheduler, lifecycle, and
+      change-event suites are 124/124 green.
 
 ## Remaining execution
 
