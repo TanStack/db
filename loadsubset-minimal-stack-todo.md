@@ -553,7 +553,11 @@ explicitly removed.
       authority law. A mutation that retained provisional hydration authority
       failed the restored public assertion; all 38 DbClient tests pass.
 - [ ] Restore ordered multi-source late and out-of-order settlement laws.
-- [ ] Restore the `Effect × autoIndex: off × joined limit(0)` no-work law.
+- [x] Restore the `Effect × autoIndex: off × joined limit(0)` no-work law and
+      its live-collection peer. The test red-tested a real child-source fetch:
+      a zero window suppressed the ordered source but still eagerly loaded an
+      unindexed join source. Both runtimes now suppress every initial source
+      load for a zero window; the eager/off × collection/Effect matrix passes.
 - [x] Finish the behavioral-law map before accepting test deletions.
 - [ ] Run focused core, pagination, replay, includes, Effect, identity, and
       transaction suites after each coherent change.

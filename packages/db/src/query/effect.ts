@@ -907,6 +907,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     orderBy?: any
     limit?: number
   } {
+    if (this.query.limit === 0) {
+      return { includeInitialState: false, whereExpression }
+    }
+
     // Ordered aliases explicitly disable initial state — data is loaded
     // via requestLimitedSnapshot/requestSnapshot after subscription setup.
     if (orderByInfo) {

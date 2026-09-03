@@ -462,6 +462,78 @@ describe(`ordered source work oracle`, () => {
     },
   )
 
+  it.each(
+    ([`collection`, `effect`] as const).flatMap((consumer) =>
+      ([`eager`, `off`] as const).map((autoIndex) => ({
+        consumer,
+        autoIndex,
+      })),
+    ),
+  )(
+    `does no source work for a joined $consumer with a zero-sized $autoIndex window`,
+    async ({ consumer, autoIndex }) => {
+    let rowLoads = 0
+    let markerLoads = 0
+    const source = createCollection<Row, number>({
+      id: `ordered-zero-window-unindexed-${consumer}-source`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex,
+      defaultIndexType: autoIndex === `eager` ? BTreeIndex : undefined,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return { loadSubset: () => void rowLoads++ }
+        },
+      },
+    })
+    const markers = createCollection<Marker, number>({
+      id: `ordered-zero-window-unindexed-${consumer}-marker`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex,
+      defaultIndexType: autoIndex === `eager` ? BTreeIndex : undefined,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return { loadSubset: () => void markerLoads++ }
+        },
+      },
+    })
+    const query = (q: Parameters<typeof createLiveQueryCollection>[0]) =>
+        q
+          .from({ row: source })
+          .innerJoin({ marker: markers }, ({ row, marker }) =>
+            eq(row.id, marker.rowId),
+          )
+          .orderBy(({ row }) => row.rank)
+          .limit(0)
+    const live =
+      consumer === `collection`
+        ? createLiveQueryCollection({ query, startSync: true })
+        : undefined
+    const effect =
+      consumer === `effect`
+        ? createEffect({ query, onBatch: () => {} })
+        : undefined
+
+    try {
+      if (live) await live.preload()
+      else await flushPromises()
+      expect({ rowLoads, markerLoads }).toEqual({
+        rowLoads: 0,
+        markerLoads: 0,
+      })
+    } finally {
+      if (effect) await effect.dispose()
+      if (live) await live.cleanup()
+      await Promise.all([source.cleanup(), markers.cleanup()])
+    }
+    },
+  )
+
   it(`does not refetch when a visible row changes outside the ordering key`, async () => {
     let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
     let loads = 0
