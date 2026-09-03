@@ -1028,6 +1028,10 @@ export class CollectionConfigBuilder<
           }),
         )
 
+        // New facades are not reachable until their root row is installed, so
+        // make them ready first. A facade failure then leaves the root intact,
+        // and the root commit is the final state change before publication.
+        facadePublication.prepare()
         if (hasParentChanges) {
           begin()
           changesToApply.forEach(this.applyChanges.bind(this, config))
@@ -1036,7 +1040,6 @@ export class CollectionConfigBuilder<
           }
           commit()
         }
-        facadePublication.prepare()
       } catch (error) {
         rootPublication?.discard()
         facadePublication?.rollback()

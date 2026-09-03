@@ -229,6 +229,8 @@ explicitly removed.
 | Cleanup during a root/facade publication suppresses callbacks from the cleaned facade                         | `includes-collection-oracle.property.test.ts`                                                                                          | restored as a public observation                                                      |
 | Internal order-only swaps propagate through root, Collection, array, scalar, and materialized consumers       | generated adjacent swaps in `includes-collection-oracle.property.test.ts`                                                              | restored without private revision counters                                            |
 | Pending optimistic work never exposes a mixed source/query publication, including same-key confirmation       | collection metadata/state oracles plus the layered-query publication oracle                                                           | retained through independent public-state models                                      |
+| Canceling one metadata owner cannot cancel a retained owner or publish a row change                            | `collection-metadata-publication-oracle.property.test.ts` fixed/generated public adapter traces                                        | rewritten without private transaction/snapshot topology and covered                    |
+| Root and facade state cannot diverge when either side rejects a publication                                    | includes root/facade failure regressions plus `bucket-facade-adapter.test.ts` rollback laws                                             | child preparation now precedes the final root commit; covered                          |
 
 ### Main-branch test audit
 
@@ -437,6 +439,14 @@ explicitly removed.
       root/facade publication and generated internal order-only swaps across
       every materialization. The five-file includes/publication run is 106/106
       green with no type errors.
+- [x] Replaced the metadata oracle's deleted private snapshot contract with
+      public adapter behavior. Cancellation now uses the public abort signal
+      and observes rows, batches, receipts, and `metadata.row.get`; the
+      fixed/generated suite is 6/6 green. Child facades are prepared before
+      the root commit, so a child failure cannot require a whole-collection
+      rollback. Existing root-failure and facade-rollback tests cover the two
+      real publication boundaries; the combined five-file run is 224/224
+      green.
 - [x] Mapped the removed pending-derived-mutation matrix to the independent
       collection metadata and state-retention oracles, then verified both
       through the layered-query publication oracle. The old Cartesian matrix

@@ -112,27 +112,6 @@ const metadataCancellationArbitrary = fc.record({
   }),
 })
 
-const metadataRollbackCaseArbitrary = fc.record({
-  initialMetadata: metadataEntryStateArbitrary,
-  pendingOperation: metadataOperationArbitrary,
-})
-
-const metadataRollbackArbitrary = fc
-  .record({
-    sourceKey: fc.integer({ min: 0, max: 2 }),
-    metadataKeyOffset: fc.constantFrom(1, 2),
-    sourceDelta: fc.integer({ min: 1, max: 10 }),
-    metadataCase: metadataRollbackCaseArbitrary,
-  })
-  .map(({ sourceKey, metadataKeyOffset, sourceDelta, metadataCase }) => ({
-    ...metadataCase,
-    sourceKey,
-    metadataKey: (sourceKey + metadataKeyOffset) % 3,
-    sourceDelta,
-  }))
-
-let nextMetadataRollbackHarnessId = 0
-
 async function createPublicationHarness(): Promise<PublicationHarness> {
   let sync!: SyncActions
   const rows = createCollection<PublicationRow, number>({
@@ -219,6 +198,21 @@ function expectPublishedRows(
 
   expect(selectBaseRows(harness.rows)).toEqual(expected)
   expect(selectBaseRows(harness.liveRows)).toEqual(expected)
+}
+
+function readMetadata(
+  harness: PublicationHarness,
+  keys: Iterable<number>,
+): Map<number, unknown> {
+  const metadata = harness.getSync().metadata!.row
+  return new Map([...keys].map((key) => [key, metadata.get(key)]))
+}
+
+function observableMetadata(
+  model: ReadonlyMap<number, unknown>,
+  keys: Iterable<number>,
+): Map<number, unknown> {
+  return new Map([...keys].map((key) => [key, model.get(key)]))
 }
 
 async function applyRound(
@@ -320,12 +314,8 @@ async function applyRound(
   ])
   expectUniqueBatchKeys(harness.batches)
   expectPublishedRows(harness, model)
-  const byKey = (
-    [a]: readonly [number, unknown],
-    [b]: readonly [number, unknown],
-  ) => a - b
-  expect([...harness.rows._state.syncedMetadata.entries()].sort(byKey)).toEqual(
-    [...metadataModel.entries()].sort(byKey),
+  expect(readMetadata(harness, [0, 1, 2])).toEqual(
+    observableMetadata(metadataModel, [0, 1, 2]),
   )
   expect(harness.rows._state.preSyncVisibleState.size).toBe(0)
   expect(harness.rows._state.preSyncVirtualState.size).toBe(0)
@@ -383,6 +373,7 @@ async function expectMetadataCancellationOwnership(
   const stageMetadata = (
     keys: ReadonlyArray<number>,
     operation: MetadataOperation,
+    signal?: AbortSignal,
   ) => {
     const sync = harness.getSync()
     sync.begin()
@@ -393,272 +384,64 @@ async function expectMetadataCancellationOwnership(
         sync.metadata!.row.delete(key)
       }
     }
-    const receipt = sync.commit()
+    const receipt = sync.commit(signal)
     if (receipt === true) {
       throw new Error(`Persisting optimistic work did not hold metadata sync`)
     }
-    const transaction = harness.rows._state.pendingSyncedTransactions.at(-1)!
     void receipt.catch(() => undefined)
-    return { receipt, transaction }
+    return receipt
   }
 
+  const canceledController = new AbortController()
   const first = canceledFirst
-    ? stageMetadata(canceledKeys, canceledOperation)
+    ? stageMetadata(canceledKeys, canceledOperation, canceledController.signal)
     : stageMetadata(retainedKeys, retainedOperation)
   const second = canceledFirst
     ? stageMetadata(retainedKeys, retainedOperation)
-    : stageMetadata(canceledKeys, canceledOperation)
+    : stageMetadata(canceledKeys, canceledOperation, canceledController.signal)
   const canceled = canceledFirst ? first : second
   const retained = canceledFirst ? second : first
-  const expectedVirtualSnapshots = (keys: ReadonlyArray<number>) =>
-    new Map(
-      [...new Set(keys)].map((key) => [
-        key,
-        {
-          $collectionId: harness.rows.id,
-          $key: key,
-          $origin: `remote`,
-          $synced: true,
-        },
-      ]),
-    )
+  const expectedMetadata = new Map(initialMetadata)
+  for (const key of retainedKeys) {
+    if (retainedOperation.type === `set`) {
+      expectedMetadata.set(key, retainedOperation.value)
+    } else {
+      expectedMetadata.delete(key)
+    }
+  }
 
   try {
-    harness.rows._state.capturePreSyncVisibleState()
-    const expectedBefore = new Set([...canceledKeys, ...retainedKeys])
-    expect(harness.rows._state.recentlySyncedKeys).toEqual(expectedBefore)
-    expect(new Set(harness.rows._state.preSyncVisibleState.keys())).toEqual(
-      expectedBefore,
-    )
-    expect(harness.rows._state.preSyncVirtualState).toEqual(
-      expectedVirtualSnapshots([...canceledKeys, ...retainedKeys]),
-    )
     const batchCountBefore = harness.batches.length
+    const rowsBefore = [...harness.rows.values()]
 
-    harness.rows._state.cancelPendingSyncedTransaction(canceled.transaction)
+    canceledController.abort()
 
-    const expectedAfter = new Set(retainedKeys)
-    expect(harness.rows._state.pendingSyncedTransactions).toEqual([
-      retained.transaction,
-    ])
-    expect(retained.transaction.rowMetadataWrites).toEqual(
-      new Map(retainedKeys.map((key) => [key, retainedOperation])),
-    )
-    expect(harness.rows._state.recentlySyncedKeys).toEqual(expectedAfter)
-    expect(new Set(harness.rows._state.preSyncVisibleState.keys())).toEqual(
-      expectedAfter,
-    )
-    expect(harness.rows._state.preSyncVirtualState).toEqual(
-      expectedVirtualSnapshots(retainedKeys),
-    )
+    await expect(canceled).rejects.toBeInstanceOf(SyncTransactionAbortedError)
     expect(harness.batches).toHaveLength(batchCountBefore)
-    expect(harness.rows._state.syncedMetadata).toEqual(initialMetadata)
-    await expect(canceled.receipt).rejects.toBeInstanceOf(
-      SyncTransactionAbortedError,
+    expect([...harness.rows.values()]).toEqual(rowsBefore)
+    expect(readMetadata(harness, [0, 1, 2])).toEqual(
+      observableMetadata(expectedMetadata, [0, 1, 2]),
     )
 
     persistence.resolve()
     await heldTransaction.isPersisted.promise
-    await expect(retained.receipt).resolves.toBeUndefined()
-    expect(harness.rows._state.preSyncVisibleState.size).toBe(0)
-    expect(harness.rows._state.preSyncVirtualState.size).toBe(0)
-    expect(harness.rows._state.recentlySyncedKeys.size).toBe(0)
-    const expectedMetadata = new Map(initialMetadata)
-    for (const key of retainedKeys) {
-      if (retainedOperation.type === `set`) {
-        expectedMetadata.set(key, retainedOperation.value)
-      } else {
-        expectedMetadata.delete(key)
-      }
-    }
-    expect(harness.rows._state.syncedMetadata).toEqual(expectedMetadata)
+    await expect(retained).resolves.toBeUndefined()
+    expect(readMetadata(harness, [0, 1, 2])).toEqual(
+      observableMetadata(expectedMetadata, [0, 1, 2]),
+    )
+    expectPublishedRows(
+      harness,
+      new Map([0, 1, 2].map((id) => [id, { id, position: id }] as const)),
+    )
   } finally {
-    if (retained.transaction.applied.isPending()) {
-      harness.rows._state.cancelPendingSyncedTransaction(retained.transaction)
-      await retained.receipt.catch(() => undefined)
-    }
     persistence.resolve()
     await heldTransaction.isPersisted.promise.catch(() => undefined)
+    await Promise.all([
+      canceled.catch(() => undefined),
+      retained.catch(() => undefined),
+    ])
     harness.unsubscribe()
     await Promise.all([harness.liveRows.cleanup(), harness.rows.cleanup()])
-  }
-}
-
-async function expectMetadataRollbackRecovery({
-  sourceKey,
-  metadataKey,
-  sourceDelta,
-  initialMetadata,
-  pendingOperation,
-  additionalMetadata = [],
-  separatePendingTransactions = false,
-}: {
-  sourceKey: number
-  metadataKey: number
-  sourceDelta: number
-  initialMetadata: MetadataEntryState
-  pendingOperation: MetadataOperation
-  additionalMetadata?: ReadonlyArray<{
-    key: number
-    initialMetadata: MetadataEntryState
-    pendingOperation: MetadataOperation
-  }>
-  separatePendingTransactions?: boolean
-}): Promise<void> {
-  const harnessId = nextMetadataRollbackHarnessId++
-  const source = await createPublicationHarness()
-  const { rows, getSync } = source
-  const derived = createLiveQueryCollection({
-    id: `metadata-rollback-derived-${harnessId}`,
-    query: (query) =>
-      query.from({ row: rows }).select(({ row }) => ({
-        id: row.id,
-        position: row.position,
-      })),
-    getKey: (row) => row.id,
-  })
-  await derived.preload()
-
-  const metadataCases = [
-    { key: metadataKey, initialMetadata, pendingOperation },
-    ...additionalMetadata,
-  ]
-  const stageMetadata = (
-    writes: ReadonlyArray<{ key: number; operation: MetadataOperation }>,
-  ) => {
-    const applied = createDeferred<void>()
-    void applied.promise.catch(() => undefined)
-    const transaction = {
-      committed: true,
-      applicationStarted: false,
-      layoutChanged: false,
-      operations: [],
-      deletedKeys: new Set<string | number>(),
-      rowMetadataWrites: new Map(
-        writes.map(({ key, operation }) => [key, operation]),
-      ),
-      collectionMetadataWrites: new Map(),
-      applied,
-    }
-    derived._state.pendingSyncedTransactions.push(transaction)
-    return transaction
-  }
-
-  const initialWrites = metadataCases.flatMap(
-    ({ key, initialMetadata: state }) =>
-      state.present
-        ? [
-            {
-              key,
-              operation: {
-                type: `set` as const,
-                value: state.value,
-              },
-            },
-          ]
-        : [],
-  )
-  if (initialWrites.length > 0) {
-    stageMetadata(initialWrites)
-    derived._state.commitPendingTransactions()
-  }
-
-  const pendingWrites = metadataCases.map(
-    ({ key, pendingOperation: operation }) => ({ key, operation }),
-  )
-  const pendingTransactions = separatePendingTransactions
-    ? pendingWrites.map((write) => stageMetadata([write]))
-    : [stageMetadata(pendingWrites)]
-  const sourceRowsBefore = [...rows.values()].map((row) => ({ ...row }))
-  const rowsBefore = [...derived.values()].map((row) => ({ ...row }))
-  const originBefore = new Map(derived._state.rowOrigins)
-  const hydrationSeedsBefore = new Set(derived._state.hydrationSeedKeys)
-  const hydratedBefore = new Set(derived._state.hydratedKeys)
-  const syncedBefore = new Set(derived._state.syncedKeys)
-  const preSyncBefore = new Map(derived._state.preSyncVisibleState)
-  const preSyncVirtualBefore = new Map(derived._state.preSyncVirtualState)
-  const recentlySyncedBefore = new Set(derived._state.recentlySyncedKeys)
-  const published: Array<
-    ReadonlyArray<ChangeMessage<PublicationRow, string | number>>
-  > = []
-  const subscription = derived.subscribeChanges((changes) => {
-    published.push(changes)
-  })
-
-  const publicationFailure = new Error(`metadata rollback publication failed`)
-  const commitPendingTransactions = derived._state.commitPendingTransactions
-  let shouldFail = true
-  derived._state.commitPendingTransactions = () => {
-    commitPendingTransactions()
-    if (shouldFail) {
-      shouldFail = false
-      throw publicationFailure
-    }
-  }
-
-  try {
-    const previousSourceRow = rows.get(sourceKey)!
-    let thrown: unknown
-    try {
-      getSync().begin()
-      getSync().write({
-        type: `update`,
-        value: {
-          ...previousSourceRow,
-          position: previousSourceRow.position + sourceDelta,
-        },
-      })
-      getSync().commit()
-    } catch (error) {
-      thrown = error
-    }
-    expect(thrown).toBe(publicationFailure)
-
-    expect(rows.get(sourceKey)?.position).toBe(
-      previousSourceRow.position + sourceDelta,
-    )
-    expect([...rows.values()].map((row) => ({ ...row }))).toEqual(
-      sourceRowsBefore.map((row) =>
-        row.id === sourceKey
-          ? { ...row, position: row.position + sourceDelta }
-          : row,
-      ),
-    )
-    expect([...derived.values()].map((row) => ({ ...row }))).toEqual(rowsBefore)
-    expect(derived._state.syncedMetadata).toEqual(
-      new Map(
-        metadataCases.flatMap(({ key, initialMetadata: state }) =>
-          state.present ? [[key, state.value]] : [],
-        ),
-      ),
-    )
-    expect(derived._state.pendingSyncedTransactions).toEqual(
-      pendingTransactions,
-    )
-    for (const pending of pendingTransactions) {
-      expect(pending.applicationStarted).toBe(false)
-      expect(pending.applied.isPending()).toBe(true)
-    }
-    expect(derived._state.rowOrigins).toEqual(originBefore)
-    expect(derived._state.hydrationSeedKeys).toEqual(hydrationSeedsBefore)
-    expect(derived._state.hydratedKeys).toEqual(hydratedBefore)
-    expect(derived._state.syncedKeys).toEqual(syncedBefore)
-    expect(derived._state.preSyncVisibleState).toEqual(preSyncBefore)
-    expect(derived._state.preSyncVirtualState).toEqual(preSyncVirtualBefore)
-    expect(derived._state.recentlySyncedKeys).toEqual(recentlySyncedBefore)
-    expect(published).toEqual([])
-  } finally {
-    derived._state.commitPendingTransactions = commitPendingTransactions
-    for (const pending of pendingTransactions) {
-      derived._state.cancelPendingSyncedTransaction(pending)
-    }
-    subscription.unsubscribe()
-    source.unsubscribe()
-    await Promise.all([
-      derived.cleanup(),
-      source.liveRows.cleanup(),
-      rows.cleanup(),
-    ])
   }
 }
 
@@ -677,37 +460,6 @@ it(`publishes one event per key when metadata-only sync retires optimistic work`
       outcome: `commit`,
     },
   ])
-})
-
-it(`includes metadata-only keys in a publication snapshot`, async () => {
-  const harness = await createPublicationHarness()
-  const applied = createDeferred<void>()
-  void applied.promise.catch(() => undefined)
-  const transaction = {
-    committed: true,
-    applicationStarted: false,
-    layoutChanged: false,
-    operations: [],
-    deletedKeys: new Set<string | number>(),
-    rowMetadataWrites: new Map([[1, { type: `set` as const, value: false }]]),
-    collectionMetadataWrites: new Map(),
-    applied,
-  }
-  harness.rows._state.pendingSyncedTransactions.push(transaction)
-
-  try {
-    const snapshot = harness.rows._state.snapshotPublicationState([])
-    expect([...snapshot.keys.keys()]).toEqual([1])
-    expect(snapshot.keys.get(1)?.syncedMetadata).toEqual({
-      present: false,
-      value: undefined,
-    })
-    expect(snapshot.pendingSyncedTransactions).toEqual([transaction])
-  } finally {
-    harness.rows._state.cancelPendingSyncedTransaction(transaction)
-    harness.unsubscribe()
-    await Promise.all([harness.liveRows.cleanup(), harness.rows.cleanup()])
-  }
 })
 
 it(`releases only canceled metadata keys while another sync remains pending`, async () => {
@@ -751,44 +503,6 @@ it(`settles an older metadata owner after canceling the newer owner`, async () =
   )
 })
 
-it(`restores pending metadata when a derived publication fails`, async () => {
-  await expectMetadataRollbackRecovery({
-    sourceKey: 0,
-    metadataKey: 1,
-    sourceDelta: 1,
-    initialMetadata: { present: true, value: false },
-    pendingOperation: { type: `delete` },
-  })
-})
-
-it(`restores an existing metadata value after a failed replacement`, async () => {
-  await expectMetadataRollbackRecovery({
-    sourceKey: 0,
-    metadataKey: 1,
-    sourceDelta: 1,
-    initialMetadata: { present: true, value: `before` },
-    pendingOperation: { type: `set`, value: `after` },
-  })
-})
-
-it(`restores every metadata key after one failed publication`, async () => {
-  await expectMetadataRollbackRecovery({
-    sourceKey: 0,
-    metadataKey: 1,
-    sourceDelta: 1,
-    initialMetadata: { present: true, value: `before` },
-    pendingOperation: { type: `set`, value: `after` },
-    separatePendingTransactions: true,
-    additionalMetadata: [
-      {
-        key: 2,
-        initialMetadata: { present: true, value: false },
-        pendingOperation: { type: `delete` },
-      },
-    ],
-  })
-})
-
 fcTest.prop(
   [fc.array(publicationRoundArbitrary, { minLength: 1, maxLength: 8 })],
   oraclePropertyOptions(50, `collection-publication.metadata-only`),
@@ -818,11 +532,4 @@ fcTest.prop(
       canceledFirst,
       initialMetadata,
     ),
-)
-fcTest.prop(
-  [metadataRollbackArbitrary],
-  oraclePropertyOptions(30, `collection-publication.metadata-rollback`),
-)(
-  `restores metadata-only state after failed derived publications`,
-  expectMetadataRollbackRecovery,
 )
