@@ -225,7 +225,7 @@ export class Scheduler {
 export const transactionScopedScheduler = new Scheduler()
 
 let activePublicationContext: SchedulerContextId | undefined
-let activePublicationFailure: { failed: boolean; error: unknown } | undefined
+let activePublicationFailure: { error: unknown } | undefined
 
 /**
  * Returns the Collection publication that currently owns synchronous change
@@ -238,11 +238,8 @@ export function getActivePublicationContext(): SchedulerContextId | undefined {
 
 /** Report a listener failure after the whole publication graph has drained. */
 export function recordPublicationError(error: unknown): void {
-  if (!activePublicationFailure) throw error
-  if (!activePublicationFailure.failed) {
-    activePublicationFailure.failed = true
-    activePublicationFailure.error = error
-  }
+  if (activePublicationContext === undefined) throw error
+  activePublicationFailure ??= { error }
 }
 
 /**
@@ -255,22 +252,20 @@ export function withPublicationContext<T>(publish: () => T): T {
 
   const contextId = Symbol(`collection-publication`)
   activePublicationContext = contextId
-  activePublicationFailure = { failed: false, error: undefined }
+  activePublicationFailure = undefined
   let result!: T
-  let listenerFailed = false
-  let listenerError: unknown
+  let listenerFailure: { error: unknown } | undefined
   try {
     result = publish()
     transactionScopedScheduler.flush(contextId)
-    listenerFailed = activePublicationFailure.failed
-    listenerError = activePublicationFailure.error
+    listenerFailure = activePublicationFailure
   } catch (error) {
     try {
       transactionScopedScheduler.clear(contextId)
     } catch {
       // Keep the earlier publication or graph failure.
     }
-    if (activePublicationFailure.failed) {
+    if (activePublicationFailure) {
       throw activePublicationFailure.error
     }
     throw error
@@ -278,6 +273,6 @@ export function withPublicationContext<T>(publish: () => T): T {
     activePublicationContext = undefined
     activePublicationFailure = undefined
   }
-  if (listenerFailed) throw listenerError
+  if (listenerFailure) throw listenerFailure.error
   return result
 }
