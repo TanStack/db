@@ -215,7 +215,7 @@ export class CollectionChangesManager<
     const layoutListeners = [...this.layoutChangeListeners]
     const subscriptions = [...this.changeSubscriptions]
     withPublicationContext(() => {
-      const callbacks = subscriptions.map(
+      const callbacks: Array<() => void> = subscriptions.map(
         (subscription) => () => subscription.emitEvents(enrichedEvents),
       )
       if (rawEvents.length === 0) {
