@@ -549,8 +549,9 @@ explicitly removed.
       duplicate terms, and nested `NOT`/range expressions; fix the false-green
       syntax-only assertion and stack overflow. All 145 predicate utility
       tests pass.
-- [ ] Restore the end-to-end hydration → adapter replacement → late hydration
-      authority law.
+- [x] Restore the end-to-end hydration → adapter replacement → late hydration
+      authority law. A mutation that retained provisional hydration authority
+      failed the restored public assertion; all 38 DbClient tests pass.
 - [ ] Restore ordered multi-source late and out-of-order settlement laws.
 - [ ] Restore the `Effect × autoIndex: off × joined limit(0)` no-work law.
 - [x] Finish the behavioral-law map before accepting test deletions.
