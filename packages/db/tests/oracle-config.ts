@@ -9,6 +9,7 @@ const staticOracleProperties = [
   `coverage-registry.claim-churn`,
   `coverage-registry.state-machine`,
   `d2-source.exact-retractions`,
+  `d2-source.disjoint-commutation`,
   `includes-collection.layout-swap`,
   `includes-collection.optimistic-child-history`,
   `includes-collection.public-key-order`,
@@ -59,6 +60,7 @@ const staticOracleProperties = [
   `ordered-work.reverse-exhaustion`,
   `ordered-work.reverse-prefix`,
   `ordered-work.snapshot-reuse`,
+  `ordered-work.consumer-parity`,
   `pagination.async-cursor`,
   `pagination.multi-order`,
   `pagination.nullable-cursor`,
@@ -75,6 +77,7 @@ const staticOracleProperties = [
   `subscription-replay.restart`,
   `subscription-replay.sequential`,
   `subscription-replay.shared`,
+  `subscription-replay.same-tick`,
 ] as const
 
 const publicationProperties = [

@@ -8,7 +8,7 @@ import {
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { createEffect } from '../src/query/effect.js'
 import { reconcileChangesForD2 } from '../src/query/live/utils.js'
-import { oraclePropertyOptions } from './oracle-config.js'
+import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
 import { flushPromises } from './utils.js'
 import type { ChangeMessage, SyncConfig } from '../src/types.js'
 
@@ -102,6 +102,46 @@ const reconciliationHistoryArbitrary = fc.array(reconciliationStepArbitrary, {
   minLength: 1,
   maxLength: 30,
 })
+
+function sourceOperationForKeyArbitrary(
+  key: SourceKey,
+): fc.Arbitrary<SourceOperation> {
+  return fc.oneof(
+    fc
+      .tuple(sourceRowArbitrary, sourceRowArbitrary)
+      .map(([row, reportedPreviousValue]) => ({
+        type: `upsert` as const,
+        key,
+        row,
+        reportedPreviousValue,
+      })),
+    fc
+      .tuple(sourceRowArbitrary, sourceRowArbitrary)
+      .map(([row, reportedPreviousValue]) => ({
+        type: `rawUpdate` as const,
+        key,
+        row,
+        reportedPreviousValue,
+      })),
+    fc.constant({ type: `replay` as const, key }),
+    sourceRowArbitrary.map((reportedValue) => ({
+      type: `delete` as const,
+      key,
+      reportedValue,
+    })),
+  )
+}
+
+const disjointHistoriesArbitrary = fc.tuple(
+  fc.array(sourceOperationForKeyArbitrary(0), {
+    minLength: 1,
+    maxLength: 8,
+  }),
+  fc.array(sourceOperationForKeyArbitrary(`other`), {
+    minLength: 1,
+    maxLength: 8,
+  }),
+)
 
 function rowIdentity(row: SourceRow): string {
   return `${row.id}:${row.revision}:${row.value}`
@@ -222,6 +262,27 @@ function createReconciliationModel(): ReconciliationModel {
   }
 }
 
+function snapshotModel(model: ReconciliationModel): {
+  source: Array<string>
+  sent: Array<string>
+  relation: Array<readonly [string, number]>
+} {
+  const rows = (entries: ReadonlyMap<SourceKey, SourceRow>) =>
+    [...entries]
+      .map(
+        ([key, row]) =>
+          `${typeof key}:${String(key)}|${row.id}:${row.revision}:${row.value}`,
+      )
+      .sort()
+  return {
+    source: rows(model.sourceRows),
+    sent: rows(model.sentRows),
+    relation: [...model.relation].sort(([left], [right]) =>
+      left.localeCompare(right),
+    ),
+  }
+}
+
 function applyReconciliationStep(
   model: ReconciliationModel,
   step: ReconciliationStep,
@@ -277,9 +338,7 @@ function upsert(
 function createOrderedSourceHarness(id: string) {
   let sync!: SourceSyncActions
   let loadSubsetCalls = 0
-  const replayResolvers: Array<
-    (result: { hasMore: false; appliedRowKeys: ReadonlyArray<number> }) => void
-  > = []
+  const replayResolvers: Array<() => void> = []
   const contributed = { id: 1, revision: 1, value: 1 }
   const staleDelete = { id: 1, revision: 2, value: 1 }
   const replacement = { id: 1, revision: 3, value: 2 }
@@ -295,15 +354,14 @@ function createOrderedSourceHarness(id: string) {
         sync = actions
         actions.markReady()
         return {
-          loadSubset: async () => {
+          loadSubset: () => {
             loadSubsetCalls++
-            if (loadSubsetCalls > 1) {
+            // Initial page and its exact tie-boundary refinement are immediate;
+            // later calls are truncate replays controlled by the test.
+            if (loadSubsetCalls > 2) {
               return new Promise((resolve) => replayResolvers.push(resolve))
             }
-            return {
-              hasMore: false as const,
-              appliedRowKeys: [contributed.id],
-            }
+            return true
           },
         }
       },
@@ -345,10 +403,14 @@ function createOrderedSourceHarness(id: string) {
       sync.truncate()
       expect(sync.commit()).toBe(true)
     },
-    resolveReplay: (appliedRowKeys: ReadonlyArray<number>) => {
-      const resolve = replayResolvers.shift()
-      if (!resolve) throw new Error(`No truncate replay is pending`)
-      resolve({ hasMore: false, appliedRowKeys })
+    resolveReplay: async () => {
+      if (replayResolvers.length === 0) {
+        throw new Error(`No truncate replay is pending`)
+      }
+      while (replayResolvers.length > 0) {
+        for (const resolve of replayResolvers.splice(0)) resolve()
+        await flushPromises()
+      }
     },
   }
 }
@@ -456,8 +518,7 @@ it(`retracts the exact live-query source row after ordered replay settles`, asyn
     await flushPromises()
     expect(live.get(contributed.id)).toMatchObject(contributed)
 
-    harness.resolveReplay([])
-    await flushPromises()
+    await harness.resolveReplay()
     expect(live.get(contributed.id)).toBeUndefined()
   } finally {
     await live.cleanup()
@@ -568,8 +629,7 @@ it(`replaces the retained live-query source row after ordered replay settles`, a
     expect(batches).toEqual([])
     expect(live.get(contributed.id)).toBe(publishedValue)
 
-    harness.resolveReplay([replacement.id])
-    await flushPromises()
+    await harness.resolveReplay()
     expect(batches).toHaveLength(1)
     expect(batches[0]).toHaveLength(1)
     expect(batches[0]![0]).toMatchObject({
@@ -731,4 +791,34 @@ fcTest.prop(
       applyReconciliationStep(model, step)
     }
   },
+)
+
+const assertDisjointHistoriesCommute = (
+  [left, right]: [Array<SourceOperation>, Array<SourceOperation>],
+) => {
+  const leftThenRight = createReconciliationModel()
+  applyReconciliationStep(leftThenRight, { type: `batch`, operations: left })
+  applyReconciliationStep(leftThenRight, { type: `batch`, operations: right })
+
+  const rightThenLeft = createReconciliationModel()
+  applyReconciliationStep(rightThenLeft, { type: `batch`, operations: right })
+  applyReconciliationStep(rightThenLeft, { type: `batch`, operations: left })
+
+  expect(snapshotModel(rightThenLeft)).toEqual(snapshotModel(leftThenRight))
+}
+
+fcTest.prop([disjointHistoriesArbitrary], {
+  numRuns: oracleRuns(100),
+  seed: 1781,
+})(
+  `commutes independent source histories for a fixed seed`,
+  assertDisjointHistoriesCommute,
+)
+
+fcTest.prop(
+  [disjointHistoriesArbitrary],
+  oraclePropertyOptions(100, `d2-source.disjoint-commutation`),
+)(
+  `commutes independent source histories for a random or replayed seed`,
+  assertDisjointHistoriesCommute,
 )
