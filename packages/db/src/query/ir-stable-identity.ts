@@ -999,7 +999,11 @@ function canonicalizeExactOutputRuntimeValue(
   path: string,
   seen: WeakSet<object>,
 ): StableIdentityValue {
-  if (typeof value === `object` && value !== null) {
+  if (
+    (typeof value === `object` && value !== null) ||
+    typeof value === `function` ||
+    typeof value === `symbol`
+  ) {
     return getRuntimeReferenceIdentity(value)
   }
 
@@ -1040,7 +1044,11 @@ function canonicalizeEqualityRuntimeValue(
     return canonicalizeRuntimeValue(normalized, path, seen)
   }
 
-  if (typeof value === `object` && value !== null) {
+  if (
+    (typeof value === `object` && value !== null) ||
+    typeof value === `function` ||
+    typeof value === `symbol`
+  ) {
     return getRuntimeReferenceIdentity(value)
   }
 

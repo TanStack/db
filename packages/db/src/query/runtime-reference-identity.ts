@@ -5,17 +5,21 @@ export type RuntimeReferenceIdentity = [
 ]
 
 export function createRuntimeReferenceIdentityFactory(): (
-  value: object,
+  value: object | symbol,
 ) => RuntimeReferenceIdentity {
-  const namespace = createRuntimeReferenceNamespace()
   const referenceIds = new WeakMap<object, number>()
+  const symbolIds = new Map<symbol, number>()
+  let namespace: string | undefined
   let sequence = 0
 
   return (value) => {
-    let referenceId = referenceIds.get(value)
+    namespace ??= createRuntimeReferenceNamespace()
+    let referenceId =
+      typeof value === `symbol` ? symbolIds.get(value) : referenceIds.get(value)
     if (referenceId === undefined) {
       referenceId = ++sequence
-      referenceIds.set(value, referenceId)
+      if (typeof value === `symbol`) symbolIds.set(value, referenceId)
+      else referenceIds.set(value, referenceId)
     }
     return [`runtimeReference`, namespace, referenceId]
   }
@@ -26,7 +30,7 @@ let runtimeReferenceIdentityFactory:
   | undefined
 
 export function getRuntimeReferenceIdentity(
-  value: object,
+  value: object | symbol,
 ): RuntimeReferenceIdentity {
   runtimeReferenceIdentityFactory ??= createRuntimeReferenceIdentityFactory()
 

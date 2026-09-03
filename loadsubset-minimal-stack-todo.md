@@ -247,6 +247,22 @@ explicitly removed.
   inferred coverage, or shared cancellation ownership describe the rejected
   algebra. Their still-valid exact-demand, error, and mutation laws remain in
   the compact suites above.
+- The five removed `db-client.test.ts` cases are covered by the direct/deferred
+  ownership Cartesian matrix: adapter-option identity, reentrant release,
+  failed-release retry, and failed-acquisition cleanup. The deleted private
+  `deferredAdapterOptions` size check described the old implementation, not a
+  separate public contract.
+- The parked order-only move test replaces the old claim that source order may
+  publish through an unrelated persisting mutation. The crossed-peer case is
+  subsumed because all source sync stays private until that mutation settles.
+- Exact prior-row retraction moved from one helper example to the generated D2
+  source-reconciliation law, which covers batches, truncate, teardown, and
+  restart. The older duplicate-insert integration tests remain unchanged.
+- Demand-value cloning moved from the stable-query identity file to the compact
+  exact-dedupe suite. It retains mutable Date/binary snapshots, intrinsic and
+  cross-realm bytes, nested ordering arrays, wrapped IN candidates, observable
+  accessor rejection, and opaque identity. Fake Temporal-branded objects are
+  deliberately outside the contract; genuine Temporal values are immutable.
 - Tests added by the large RFC stack are not disposable merely because their
   production topology is gone. Each deterministic regression in the deleted
   full-flow, lifecycle, outcome, total-order, and window-state files must map
@@ -447,6 +463,12 @@ explicitly removed.
       rollback. Existing root-failure and facade-rollback tests cover the two
       real publication boundaries; the combined five-file run is 224/224
       green.
+- [x] Restored runtime reference identity for function and symbol equality
+      values. The preservation audit caught that the reduced factory accepted
+      only objects even though the evaluator can compare all three domains by
+      reference. Entropy is now allocated lazily, symbol identity uses a small
+      runtime map, and query/demand identity remains stable and collision-free.
+      Identity and exact-dedupe suites are 70/70 green with no type errors.
 - [x] Mapped the removed pending-derived-mutation matrix to the independent
       collection metadata and state-retention oracles, then verified both
       through the layered-query publication oracle. The old Cartesian matrix
