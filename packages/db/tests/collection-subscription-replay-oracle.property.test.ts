@@ -640,18 +640,10 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
         return
       }
 
-      const isCurrentAttempt =
-        pending.attemptIndex === session.currentAttemptIndex
       const hasPendingReplay = session.pending.size > 0
       expect(subscription.status).toBe(
         hasPendingReplay ? `loadingSubset` : `ready`,
       )
-
-      if (!isCurrentAttempt) {
-        assertPublished(expectedPublished)
-        expect(subscription.lastError).toBe(lastReportedError)
-        return
-      }
 
       if (session.pending.size === 0) {
         const currentAttempt = scenario.attempts[session.currentAttemptIndex]!
@@ -707,7 +699,6 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
         publicationCount: expectedPublicationCount,
       }
       modelSession.currentAttemptIndex = attemptIndex
-      modelSession.pending.clear()
 
       for (const load of attempt.loads) {
         queuedLoads.push({ attemptIndex, load })

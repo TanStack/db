@@ -96,6 +96,7 @@ type TruncateReplayAttempt = {
 type TruncateReplaySession = {
   publicationState: TruncatePublicationState
   privateRows: Map<string | number, object>
+  attempts: Set<TruncateReplayAttempt>
   currentAttempt: TruncateReplayAttempt
 }
 
@@ -253,13 +254,17 @@ export class CollectionSubscription
           lastSentKey: this.lastSentKey,
         },
         privateRows: new Map(this.publishedRows),
+        attempts: new Set(),
         currentAttempt: attempt,
       }
       this.truncateReplaySession = session
     }
-    // A later truncate supersedes every earlier attempt. The source contract
-    // forbids an aborted acquisition from installing more rows, so obsolete
-    // work cannot gate the current authoritative replacement.
+    for (const previous of session.attempts) {
+      if (previous.setupComplete && previous.pending.size === 0) {
+        session.attempts.delete(previous)
+      }
+    }
+    session.attempts.add(attempt)
     session.currentAttempt = attempt
 
     if (this.options.truncateReplayPublication) {
@@ -324,8 +329,6 @@ export class CollectionSubscription
           true,
           () => isCurrentAttempt() && !nextAcquisition.options.signal?.aborted,
         )
-        this.stopDemandStatusParticipants(demand, statusParticipant)
-
         this.trackTruncateReplayParticipant(
           demand,
           nextAcquisition.options,
@@ -374,6 +377,13 @@ export class CollectionSubscription
   ): void {
     if (this.truncateReplaySession !== session) return
     attempt.pending.delete(pending)
+    if (
+      attempt !== session.currentAttempt &&
+      attempt.setupComplete &&
+      attempt.pending.size === 0
+    ) {
+      session.attempts.delete(attempt)
+    }
     this.checkTruncateReplayComplete(session)
   }
 
@@ -408,9 +418,16 @@ export class CollectionSubscription
   private removeTruncateReplayParticipant(demand: SubsetDemand): void {
     const session = this.truncateReplaySession
     if (!session) return
-    for (const pending of session.currentAttempt.pending) {
-      if (pending.demand === demand) {
-        session.currentAttempt.pending.delete(pending)
+    for (const attempt of session.attempts) {
+      for (const pending of attempt.pending) {
+        if (pending.demand === demand) attempt.pending.delete(pending)
+      }
+      if (
+        attempt !== session.currentAttempt &&
+        attempt.setupComplete &&
+        attempt.pending.size === 0
+      ) {
+        session.attempts.delete(attempt)
       }
     }
     this.checkTruncateReplayComplete(session)
@@ -424,10 +441,11 @@ export class CollectionSubscription
   /** Publish only after every overlapping replay attempt has settled. */
   private checkTruncateReplayComplete(session: TruncateReplaySession): void {
     if (this.truncateReplaySession !== session) return
-    const attempt = session.currentAttempt
-    if (!attempt.setupComplete || attempt.pending.size > 0) return
+    for (const attempt of session.attempts) {
+      if (!attempt.setupComplete || attempt.pending.size > 0) return
+    }
 
-    if (attempt.failed) {
+    if (session.currentAttempt.failed) {
       this.abandonTruncateReplay(session)
     } else {
       this.flushTruncateReplay(session)
@@ -645,12 +663,9 @@ export class CollectionSubscription
     if (this.pendingLoadSubsetParticipants.size === 0) this.setStatus(`ready`)
   }
 
-  private stopDemandStatusParticipants(
-    demand: SubsetDemand,
-    current?: { demand: SubsetDemand; promise: Promise<unknown> },
-  ): void {
+  private stopDemandStatusParticipants(demand: SubsetDemand): void {
     for (const participant of this.pendingLoadSubsetParticipants) {
-      if (participant.demand === demand && participant !== current) {
+      if (participant.demand === demand) {
         this.pendingLoadSubsetParticipants.delete(participant)
       }
     }
@@ -869,6 +884,7 @@ export class CollectionSubscription
    * or, the entire state was already loaded.
    */
   requestSnapshot(opts?: RequestSnapshotOptions): boolean {
+    if (this.unsubscribed) return false
     if (this.loadedInitialState) {
       // Subscription was deoptimized so we already sent the entire initial state
       return false
@@ -1051,6 +1067,7 @@ export class CollectionSubscription
     trackLoadSubsetPromise: shouldTrackLoadSubsetPromise = true,
     onLoadSubsetResult,
   }: RequestLimitedSnapshotOptions) {
+    if (this.unsubscribed) return
     if (!limit) throw new Error(`limit is required`)
 
     if (!this.orderByIndex) {

@@ -454,11 +454,13 @@ The source contract stays abstract: a demand request eventually establishes
 one coherent baseline and identifies when that baseline is complete. Each
 request receives an `AbortSignal`. Cancellation is cooperative at this source
 boundary. Core guarantees that an obsolete request cannot settle current
-readiness; the source must honor the signal immediately before installing a
-baseline or later request-scoped result. Core cannot prevent an arbitrary
-adapter from writing after it ignores that signal. Buffering, snapshot tokens,
-shape offsets, Collection transactions, and local indexes are source-specific
-ways to satisfy that contract; they are not materializer state.
+readiness. A source that can cancel request-scoped work must honor the signal
+before installing more rows. A source that cannot cancel an in-flight baseline
+must settle that work; core keeps overlapping replay private until then. Core
+cannot prevent an arbitrary adapter from writing after it ignores both parts
+of that contract. Buffering, snapshot tokens, shape offsets, Collection
+transactions, and local indexes are source-specific ways to satisfy it; they
+are not materializer state.
 
 Every sync `commit()` returns an applied receipt: `true` when that
 transaction's writes and events are already visible, or a promise when the
@@ -473,8 +475,9 @@ priority merely to make a subset load settle.
 Existing immediate bootstrap and persistence-hydration paths, plus truncate,
 retain their queue-bypass contract; if one applies a parked subset transaction
 as part of that prefix, the subset receipt settles only after the writes are
-visible. Rejected, canceled, and obsolete acquisitions establish no result.
-Sources must honor cancellation before publishing request-scoped rows.
+visible. Rejected acquisitions establish no result. Canceled or obsolete
+acquisitions either stop before publishing more request-scoped rows or settle
+behind the active replay barrier.
 
 Successful settlement proves only that the exact request finished and that its
 writes were applied. It does not prove source exhaustion or broader coverage.
@@ -494,9 +497,10 @@ A truncate replay is one publication barrier. Every acquisition started while
 that replay is active, including ordered full-source recovery, belongs to the
 barrier. Success publishes only after all current acquisitions settle. A
 released demand stops participating even if its canceled transport promise
-never settles. A newer truncate likewise supersedes the prior attempt: the old
-acquisitions are aborted and cannot gate the current replacement. This relies
-on the source contract that aborted request-scoped work installs no later rows.
+never settles. A newer truncate aborts prior acquisitions, but publication
+still waits for overlapping work that had already started because some sources
+cannot cancel an in-flight snapshot. Such work must settle and must not install
+rows after observing cancellation. Settled historical attempts are discarded.
 Failure keeps the last complete result visible and partly replayed source state
 private for both direct subscribers and query graphs. Ordinary source deltas or
 snapshot requests do not reopen that gate because they cannot prove the source
@@ -619,7 +623,8 @@ create recursive Collection machinery.
     routes when an applicable index exists.
 13. **Space:** state scales with retained D2 relation/index rows, active demands,
     materialization cells, visible rows, the current private replay state, and
-    required Collection facades—not with historical replay attempts or deltas.
+    required Collection facades—not with settled historical replay attempts or
+    raw delta history.
 
 ## Glossary
 

@@ -709,15 +709,18 @@ explicitly removed.
       adapter settlement, and nested cleanup; an in-flight exact acquisition
       can no longer be released twice by reentrant unsubscribe. All 81 focused
       ownership and replay tests pass with no type errors.
-- [x] Make replay authority generation-safe and bounded. A newer successful
-      replay now publishes without waiting for an aborted predecessor that may
-      never settle, and obsolete participants no longer hold loading status.
-      Failed direct subscriptions keep ordinary deltas and snapshot requests
-      private until a later authoritative replay, so they cannot expose a
-      mixed generation. Private direct state is folded into one row map and
-      replay bookkeeping retains only the current attempt, so space is bounded
-      by current state rather than failed history. The updated reference model
-      and 82 focused replay tests pass with no type errors.
+- [x] Make replay authority generation-safe and bounded. Failed direct
+      subscriptions keep ordinary deltas and snapshot requests private until a
+      later authoritative replay, so they cannot expose a mixed generation.
+      Private direct state is folded into one row map and settled historical
+      attempts are pruned. Overlapping attempts still gate publication until
+      they settle because Electric cannot cancel an in-flight shape snapshot;
+      dropping that barrier would allow late stale rows from a supported
+      adapter. A final cross-adapter audit rejected the never-settling
+      predecessor law: `loadSubset` must settle, and Electric's in-flight
+      snapshots cannot be canceled safely. The bounded form retains only
+      unsettled overlap and passes all 86 replay-focused assertions with no
+      type errors.
 - [x] Measure source and compressed bundle size against both `origin/main` and
       the large RFC stack. Across all package `src` trees, the old stack was
       +10,545/-1,692 lines (net +8,853) while this tree is +2,006/-1,302

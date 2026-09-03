@@ -836,6 +836,10 @@ describe(`CollectionSubscription status tracking`, () => {
       expect(callbacks).toEqual([])
       expect(loads).toHaveLength(1)
       expect(unloads).toEqual([loads[0]])
+
+      subscription.requestSnapshot({ optimizedOnly: false })
+      expect(callbacks).toEqual([])
+      expect(loads).toHaveLength(1)
     } finally {
       subscription.unsubscribe()
       await collection.cleanup()
@@ -955,6 +959,17 @@ describe(`CollectionSubscription status tracking`, () => {
 
       expect(loads).toEqual([])
       expect(unloads).toEqual([])
+
+      subscription.requestLimitedSnapshot({
+        orderBy: [
+          {
+            expression: new PropRef([`rank`]),
+            compareOptions: { direction: `asc`, nulls: `first` },
+          },
+        ],
+        limit: 1,
+      })
+      expect(loads).toEqual([])
     } finally {
       subscription.unsubscribe()
       await collection.cleanup()
@@ -1566,7 +1581,7 @@ describe(`CollectionSubscription status tracking`, () => {
 
     resolveReplays[1]!()
     await flushPromises()
-    expect([...visible.keys()]).toEqual([`new`])
+    expect([...visible.keys()]).toEqual([`old`])
 
     resolveReplays[0]!()
     await flushPromises()

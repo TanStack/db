@@ -321,8 +321,10 @@ export type LoadSubsetOptions = {
   offset?: number
   /**
    * Aborted when this exact subset request is no longer current. Cancellation
-   * is cooperative: async sync adapters must check the signal immediately
-   * before installing a baseline or later request-scoped rows.
+   * is cooperative: async adapters should stop before installing more
+   * request-scoped rows. If an in-flight baseline cannot be canceled, the
+   * returned load promise must settle after those writes become visible so
+   * core can keep overlapping replay private until then.
    */
   signal?: AbortSignal
   /**
