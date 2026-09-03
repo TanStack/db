@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
-import packageJson from '../package.json'
 import { deepEquals } from '../src/utils'
 import { isPromiseLike } from '../src/utils/type-guards'
 import {
@@ -10,25 +9,19 @@ import {
 } from './oracle-config'
 
 describe(`oracle run configuration`, () => {
-  it(`runs the predicate subtraction oracle in the oracle campaign`, () => {
-    expect(packageJson.scripts[`test:oracles`]).toContain(
-      `tests/query/predicate-subtraction-oracle.property.test.ts`,
-    )
-  })
-
   it(`reads the multiplier and replay coordinates from an explicit environment`, () => {
     expect(
       readOracleRunConfig({
         TANSTACK_DB_ORACLE_RUNS_MULTIPLIER: `100`,
         TANSTACK_DB_ORACLE_SEED: `-42`,
         TANSTACK_DB_ORACLE_PATH: `1:0:2`,
-        TANSTACK_DB_ORACLE_PROPERTY: `coverage-registry.claim-churn`,
+        TANSTACK_DB_ORACLE_PROPERTY: `includes.incremental-history`,
       }),
     ).toEqual({
       multiplier: 100,
       replaySeed: -42,
       replayPath: `1:0:2`,
-      replayProperty: `coverage-registry.claim-churn`,
+      replayProperty: `includes.incremental-history`,
     })
   })
 
@@ -49,16 +42,14 @@ describe(`oracle run configuration`, () => {
     [{ TANSTACK_DB_ORACLE_SEED: ` ` }, `must be an integer`],
     [{ TANSTACK_DB_ORACLE_PATH: `1:0` }, `requires TANSTACK_DB_ORACLE_SEED`],
     [
-      {
-        TANSTACK_DB_ORACLE_PROPERTY: `coverage-registry.claim-churn`,
-      },
+      { TANSTACK_DB_ORACLE_PROPERTY: `includes.incremental-history` },
       `requires TANSTACK_DB_ORACLE_PATH`,
     ],
     [
       {
         TANSTACK_DB_ORACLE_SEED: `42`,
         TANSTACK_DB_ORACLE_PATH: ` `,
-        TANSTACK_DB_ORACLE_PROPERTY: `coverage-registry.claim-churn`,
+        TANSTACK_DB_ORACLE_PROPERTY: `includes.incremental-history`,
       },
       `must be non-empty`,
     ],
@@ -66,7 +57,7 @@ describe(`oracle run configuration`, () => {
       {
         TANSTACK_DB_ORACLE_SEED: `42`,
         TANSTACK_DB_ORACLE_PATH: `1:-1`,
-        TANSTACK_DB_ORACLE_PROPERTY: `coverage-registry.claim-churn`,
+        TANSTACK_DB_ORACLE_PROPERTY: `includes.incremental-history`,
       },
       `colon-separated nonnegative integers`,
     ],
@@ -81,14 +72,14 @@ describe(`oracle run configuration`, () => {
       {
         TANSTACK_DB_ORACLE_SEED: `42`,
         TANSTACK_DB_ORACLE_PATH: `1:0`,
-        TANSTACK_DB_ORACLE_PROPERTY: `coverage-registry.typo`,
+        TANSTACK_DB_ORACLE_PROPERTY: `includes.typo`,
       },
       `unknown oracle property`,
     ],
     [
       {
         TANSTACK_DB_ORACLE_SEED: `42`,
-        TANSTACK_DB_ORACLE_PROPERTY: `coverage-registry.claim-churn`,
+        TANSTACK_DB_ORACLE_PROPERTY: `includes.incremental-history`,
       },
       `requires TANSTACK_DB_ORACLE_PATH`,
     ],
@@ -114,25 +105,21 @@ describe(`oracle run configuration`, () => {
     const replayRun = {
       replaySeed: -42,
       replayPath: `1:0:2`,
-      replayProperty: `coverage-registry.claim-churn`,
+      replayProperty: `includes.incremental-history`,
     }
 
     expect(
-      oracleRandomParameters(40, ordinaryRun, `coverage-registry.claim-churn`),
+      oracleRandomParameters(40, ordinaryRun, `includes.incremental-history`),
     ).toEqual({ numRuns: 40 })
     expect(
-      oracleRandomParameters(40, replayRun, `coverage-registry.state-machine`),
+      oracleRandomParameters(40, replayRun, `includes.alpha-renaming`),
     ).toEqual({
       numRuns: 40,
       seed: -42,
     })
     expect(
-      oracleRandomParameters(40, replayRun, `coverage-registry.claim-churn`),
-    ).toEqual({
-      numRuns: 40,
-      seed: -42,
-      path: `1:0:2`,
-    })
+      oracleRandomParameters(40, replayRun, `includes.incremental-history`),
+    ).toEqual({ numRuns: 40, seed: -42, path: `1:0:2` })
   })
 })
 

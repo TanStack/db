@@ -1,4 +1,3 @@
-import { runInNewContext } from 'node:vm'
 import { expect } from 'vitest'
 import { BTreeIndex } from '../src/indexes/btree-index'
 import { withCollectionConfigFactory } from '../src/client'
@@ -10,14 +9,6 @@ import type {
 } from '../src/index.js'
 import type { IndexConstructor } from '../src/indexes/base-index'
 import type { WithVirtualProps } from '../src/virtual-props.js'
-
-export function createCrossRealmUint8Array(
-  values: ReadonlyArray<number>,
-): Uint8Array {
-  return runInNewContext(`new Uint8Array(values)`, {
-    values: Array.from(values),
-  }) as Uint8Array
-}
 
 export type OutputWithVirtual<
   T extends object,

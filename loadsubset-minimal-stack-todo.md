@@ -49,6 +49,10 @@ helper that production uses.
 - [x] Keep full recomputation from authoritative source truth structurally
       independent of production helpers.
 - [x] Add an exhaustive micro-domain plus fixed-seed and random-seed runs.
+- [x] Preserve named-property shrink replay (`seed + path + property`) while
+      pruning the large topology-bound suites. A simplification attempt that
+      kept only the seed was rejected because it made failures in a broad
+      oracle campaign harder to reproduce.
 - [x] Compare live collections and Effects over the same generated query,
       source truth, and adapter contract.
 - [x] Compare final rows, error/liveness state, semantic request traces, and
@@ -203,7 +207,7 @@ explicitly removed.
 | Abort before apply cancels; abort after publication begins cannot undo committed rows                         | `load-subset-transaction-refinement-oracle.test.ts`                                                                                    | covered                                                                               |
 | Source truth survives D2 graph teardown/restart and exact prior rows drive retractions                        | `d2-source-reconciliation-oracle.property.test.ts`                                                                                     | covered                                                                               |
 | Independent source histories commute                                                                          | `d2-source-reconciliation-oracle.property.test.ts`                                                                                     | covered                                                                               |
-| Predicate subtraction behavior outside loadSubset                                                             | existing `predicate-utils.test.ts` unit matrix                                                                                         | retained; generated algebra oracle removed after exposing unrelated pre-existing gaps |
+| Predicate subtraction behavior outside loadSubset                                                             | origin/main `predicate-utils.test.ts` unit matrix                                                                                     | retained at its prior contract; stack-only null-safe algebra cases removed with request refinement |
 | Binary, Date, Temporal, opaque-reference, and invalid-value identity match evaluator semantics                | comparison, cursor, and `ir-stable-identity.test.ts`                                                                                   | covered; focused suite 323/323 green (6 skipped)                                      |
 | Temporal and opaque sortable range operands cross the public subscription boundary unchanged                  | Cartesian adapter-boundary cases in `collection-subscription.test.ts`                                                                 | restored and covered                                                                  |
 | PowerSync publishes only active demand, fences startup/cleanup, settles current tracking, and retries release | compact public trigger/request/release tests in PowerSync on-demand and load-hook suites                                               | restored; red/green; adapter suite 105/105 green                                      |
@@ -255,9 +259,10 @@ explicitly removed.
 - Exact request deduplication does not promise split/merge equivalence across
   different demands. Those demands may each load and must still produce the
   same final public rows.
-- The generated predicate-subtraction oracle existed to justify algebraic
-  request refinement. That path is gone. Its fixed unit tests remain; its
-  broader failures are not a prerequisite for this RFC.
+- The generated predicate-subtraction oracle and its stack-only null-safe unit
+  cases existed to justify algebraic request refinement. That path is gone.
+  The utility's prior origin/main tests remain; strengthening an otherwise
+  unused exported helper is not part of this RFC.
 
 ## Current red/green results
 

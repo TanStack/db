@@ -333,7 +333,10 @@ const exhaustiveActions: ReadonlyArray<CollectionAction> = [
 ]
 
 describe(`Collection-valued includes oracle`, () => {
-  fcTest.prop([collectionScenarioArbitrary], oraclePropertyOptions(30))(
+  fcTest.prop(
+    [collectionScenarioArbitrary],
+    oraclePropertyOptions(30, `includes-collection.relationship-history`),
+  )(
     `keeps Collection, toArray, and materialize equivalent across generated relationship histories`,
     ({ parentGroup, childValue, actions }) =>
       runTrace({
@@ -1183,7 +1186,7 @@ describe(`Collection-valued includes oracle`, () => {
         wideId: fc.integer({ min: 10, max: 19 }),
       }),
     ],
-    oraclePropertyOptions(20),
+    oraclePropertyOptions(20, `includes-collection.public-key-order`),
   )(
     `uses one raw public-key order across Collection and inline materializations`,
     async ({ smallId, wideId }) => {
@@ -1243,7 +1246,10 @@ describe(`Collection-valued includes oracle`, () => {
     },
   )
 
-  fcTest.prop([orderSwapArbitrary], oraclePropertyOptions(20))(
+  fcTest.prop(
+    [orderSwapArbitrary],
+    oraclePropertyOptions(20, `includes-collection.layout-swap`),
+  )(
     `propagates generated order-only child swaps through every materialization`,
     async ({ length, swapIndex }) => {
       type OrderedChild = ChildRow & { position: number; label: string }
@@ -1856,7 +1862,7 @@ describe(`Collection-valued includes oracle`, () => {
         value: fc.integer({ min: -10, max: 10 }),
       }),
     ],
-    oraclePropertyOptions(20),
+    oraclePropertyOptions(20, `includes-collection.optimistic-child-history`),
   )(
     `matches recomputation through optimistic child insert and delete confirmation and rollback`,
     async ({ group, insertedId, confirmedId, value }) => {
