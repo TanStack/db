@@ -100,6 +100,16 @@ describe(`loadSubset replay refinement`, () => {
       write({ type: `insert`, value: { id: `row`, version } })
       commit()
     }
+    const updateCore = (previousVersion: number, version: number) => {
+      begin()
+      write({
+        type: `update`,
+        key: `row`,
+        value: { id: `row`, version },
+        previousValue: { id: `row`, version: previousVersion },
+      })
+      commit()
+    }
     const startReplay = async () => {
       begin()
       truncate()
@@ -127,6 +137,7 @@ describe(`loadSubset replay refinement`, () => {
       batches,
       callbackReads,
       replaceCore,
+      updateCore,
       startReplay,
       coreRows,
       visibleRows,
@@ -155,6 +166,43 @@ describe(`loadSubset replay refinement`, () => {
       expect(harness.batches).toEqual([[{ type: `insert`, row: row(1) }]])
       expect(harness.callbackReads).toEqual([[row(1)]])
     } finally {
+      harness.subscription.unsubscribe()
+      await Promise.all([
+        harness.downstream.cleanup(),
+        harness.source.cleanup(),
+      ])
+    }
+  })
+
+  it(`does not remain ready and stale after replay failure`, async () => {
+    const sourceId = `replay-refinement-failure-liveness`
+    const row = (version: number) => ({ sourceId, rowKey: `row`, version })
+    const harness = createHarness(sourceId)
+
+    try {
+      await harness.downstream.preload()
+      expect(harness.visibleRows().map(({ version }) => version)).toEqual([1])
+
+      await harness.startReplay()
+      harness.replaceCore(2)
+      harness.pending[0]!.deferred.reject(new Error(`replay failed`))
+      await flushPromises()
+
+      expect(harness.visibleRows()).toEqual([row(1)])
+      expect(harness.downstream.status).toBe(`ready`)
+      expect(harness.batches).toEqual([[{ type: `insert`, row: row(1) }]])
+
+      harness.updateCore(2, 3)
+      await flushPromises()
+
+      expect(harness.visibleRows()).toEqual([row(3)])
+      expect(harness.batches).toEqual([
+        [{ type: `insert`, row: row(1) }],
+        [{ type: `update`, row: row(3), previousVersion: 1 }],
+      ])
+      expect(harness.callbackReads).toEqual([[row(1)], [row(3)]])
+    } finally {
+      for (const replay of harness.pending) replay.deferred.resolve()
       harness.subscription.unsubscribe()
       await Promise.all([
         harness.downstream.cleanup(),

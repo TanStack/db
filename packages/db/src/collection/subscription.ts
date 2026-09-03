@@ -66,7 +66,7 @@ type CollectionSubscriptionOptions = {
 type TruncateReplayPublicationControl = Readonly<{
   start: () => void
   succeed: () => void
-  fail?: () => void
+  fail: () => void
 }>
 
 type TruncatePublicationState = {
@@ -234,11 +234,6 @@ export class CollectionSubscription
       return
     }
 
-    if (this.options.truncateReplayPublication) {
-      this.truncateReplacementPending = true
-      this.options.truncateReplayPublication.start()
-    }
-
     const attempt: TruncateReplayAttempt = {
       pending: new Set(),
       failed: false,
@@ -263,6 +258,11 @@ export class CollectionSubscription
     }
     session.attempts.add(attempt)
     session.currentAttempt = attempt
+
+    if (this.options.truncateReplayPublication) {
+      this.truncateReplacementPending = true
+      this.options.truncateReplayPublication.start()
+    }
 
     // A newer replay replaces every prior acquisition for these demands. Abort
     // the old work before it can install rows into the new generation.
@@ -313,28 +313,11 @@ export class CollectionSubscription
           () => isCurrentAttempt() && !nextAcquisition.options.signal?.aborted,
         )
 
-        if (syncResult instanceof Promise) {
-          // A transport promise may be shared by several deduplicated logical
-          // demands. Track each demand separately so one settlement observer
-          // cannot complete the attempt before the others apply their result.
-          const pending = { promise: syncResult }
-          attempt.pending.add(pending)
-          void syncResult.then(
-            () => this.settleTruncateReplay(session, attempt, pending),
-            () => {
-              // A released demand no longer participates in the current
-              // replacement. Its cooperative AbortError must not discard the
-              // successful rows from demands that are still active.
-              if (
-                this.subsetDemands.includes(demand) &&
-                !nextAcquisition.options.signal?.aborted
-              ) {
-                attempt.failed = true
-              }
-              this.settleTruncateReplay(session, attempt, pending)
-            },
-          )
-        }
+        this.trackTruncateReplayParticipant(
+          demand,
+          nextAcquisition.options,
+          syncResult,
+        )
 
         if (!this.subsetDemands.includes(demand)) {
           Object.assign(demand, nextAcquisition, { releaseFailed: false })
@@ -381,6 +364,33 @@ export class CollectionSubscription
     this.checkTruncateReplayComplete(session)
   }
 
+  /** Keep every acquisition begun during recovery inside its publication barrier. */
+  private trackTruncateReplayParticipant(
+    demand: SubsetDemand,
+    options: LoadSubsetOptions,
+    result: LoadSubsetRequestResult,
+  ): void {
+    const session = this.truncateReplaySession
+    const attempt = session?.currentAttempt
+    if (!session || !attempt || !(result instanceof Promise)) return
+
+    // A transport promise may be shared by several logical demands. Track each
+    // acquisition separately so one observer cannot complete the attempt early.
+    const pending = { promise: result }
+    attempt.pending.add(pending)
+    void result.then(
+      () => this.settleTruncateReplay(session, attempt, pending),
+      () => {
+        // A released demand no longer participates in this replacement. Its
+        // cooperative AbortError must not discard rows from active demands.
+        if (this.subsetDemands.includes(demand) && !options.signal?.aborted) {
+          attempt.failed = true
+        }
+        this.settleTruncateReplay(session, attempt, pending)
+      },
+    )
+  }
+
   /** Publish only after every overlapping replay attempt has settled. */
   private checkTruncateReplayComplete(session: TruncateReplaySession): void {
     if (this.truncateReplaySession !== session) return
@@ -403,9 +413,11 @@ export class CollectionSubscription
   private abandonTruncateReplay(session: TruncateReplaySession): void {
     if (this.truncateReplaySession !== session) return
     if (this.options.truncateReplayPublication) {
+      this.restoreGraphReplayBaseline(session.publicationState)
       this.truncateReplaySession = undefined
+      this.truncateReplacementPending = false
       this.stalePublishedRows.clear()
-      this.options.truncateReplayPublication.fail?.()
+      this.options.truncateReplayPublication.fail()
       return
     }
     const publicationState = session.publicationState
@@ -417,6 +429,22 @@ export class CollectionSubscription
     this.limitedSnapshotRowCount = publicationState.limitedSnapshotRowCount
     this.lastSentKey = publicationState.lastSentKey
     this.truncateReplaySession = undefined
+  }
+
+  /** Roll a failed private replay back before graph publication resumes. */
+  private restoreGraphReplayBaseline(state: TruncatePublicationState): void {
+    const changes = this.createStateDiff(
+      this.publishedRows,
+      state.publishedRows,
+    )
+    if (changes.length > 0) this.filteredCallback(changes)
+
+    this.loadedInitialState = state.loadedInitialState
+    this.snapshotSent = state.snapshotSent
+    this.sentKeys = new Set(state.sentKeys)
+    this.publishedRows = new Map(state.publishedRows)
+    this.limitedSnapshotRowCount = state.limitedSnapshotRowCount
+    this.lastSentKey = state.lastSentKey
   }
 
   /** Publish the complete buffered replacement as one subscriber batch. */
@@ -490,6 +518,13 @@ export class CollectionSubscription
       if (!isCoveredByActiveDemand(value)) finalRows.delete(key)
     }
 
+    return this.createStateDiff(baseline, finalRows)
+  }
+
+  private createStateDiff(
+    baseline: ReadonlyMap<string | number, object>,
+    finalRows: ReadonlyMap<string | number, object>,
+  ): Array<ChangeMessage<any, any>> {
     const replacement: Array<ChangeMessage<any, any>> = []
     for (const [key, previousValue] of baseline) {
       const value = finalRows.get(key)
@@ -683,6 +718,7 @@ export class CollectionSubscription
     this.subsetDemands.push(demand)
     try {
       const result = this.loadSubset(acquisition.options)
+      this.trackTruncateReplayParticipant(demand, acquisition.options, result)
       return { demand, result }
     } catch (error) {
       const demandIndex = this.subsetDemands.indexOf(demand)

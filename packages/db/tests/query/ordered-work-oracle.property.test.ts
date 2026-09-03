@@ -1097,6 +1097,114 @@ describe(`ordered source work oracle`, () => {
     }
   })
 
+  it(`keeps an ordered snapshot unchanged until full-source recovery settles`, async () => {
+    const makeRows = (ranks: ReadonlyArray<number>): Array<Row> =>
+      ranks.map((rank, index) => ({
+        id: index + 1,
+        rank,
+        eligible: true,
+        label: `row-${rank}`,
+      }))
+    let truth = makeRows([1, 2, 3, 4, 5])
+    let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
+    let recovering = false
+    const fullSource = createDeferred<void>()
+    const installed = new Set<number>()
+    const publications: Array<Array<number>> = []
+
+    const source = createCollection<Row, number>({
+      id: `delayed-full-source-recovery`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (operations) => {
+          sync = operations
+          operations.markReady()
+          return {
+            loadSubset: async (options) => {
+              const isFullSource =
+                options.where === undefined && options.limit === undefined
+              if (recovering && isFullSource) await fullSource.promise
+
+              let selected = options.where
+                ? truth.filter(
+                    (row) =>
+                      evaluateReferenceExpression(options.where!, row) === true,
+                  )
+                : [...truth]
+              if (options.cursor) {
+                selected = selected.filter(
+                  (row) =>
+                    evaluateReferenceExpression(
+                      options.cursor!.whereFrom,
+                      row,
+                    ) === true,
+                )
+              }
+              selected.sort((left, right) => left.rank - right.rank)
+              if (!options.cursor && options.offset) {
+                selected = selected.slice(options.offset)
+              }
+              if (options.limit !== undefined) {
+                selected = selected.slice(0, options.limit)
+              }
+
+              const fresh = selected.filter(({ id }) => !installed.has(id))
+              if (fresh.length === 0) return
+              sync.begin()
+              for (const row of fresh) {
+                installed.add(row.id)
+                sync.write({ type: `insert`, value: row })
+              }
+              const receipt = sync.commit()
+              if (receipt !== true) await receipt
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const live = createLiveQueryCollection((q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(2),
+    )
+    const subscription = live.subscribeChanges(() => {
+      publications.push(live.toArray.map(({ rank }) => rank))
+    })
+
+    try {
+      await live.preload()
+      await live.utils.setWindow({ offset: 0, limit: 4 })
+      await flushPromises()
+      expect(live.toArray.map(({ rank }) => rank)).toEqual([1, 2, 3, 4])
+
+      truth = makeRows([0, 0.5, 1, 1.5, 2, 3])
+      installed.clear()
+      recovering = true
+      sync.begin()
+      sync.truncate()
+      const receipt = sync.commit()
+      if (receipt !== true) await receipt
+      await flushPromises()
+
+      expect(live.toArray.map(({ rank }) => rank)).toEqual([1, 2, 3, 4])
+      expect(publications).not.toContainEqual([0, 0.5, 2, 3])
+
+      fullSource.resolve()
+      await flushPromises()
+      expect(live.toArray.map(({ rank }) => rank)).toEqual([0, 0.5, 1, 1.5])
+    } finally {
+      fullSource.resolve()
+      subscription.unsubscribe()
+      await Promise.all([live.cleanup(), source.cleanup()])
+    }
+  })
+
   const { multiplier, ...replay } = readOracleRunConfig()
   const runs = 20 * multiplier
 

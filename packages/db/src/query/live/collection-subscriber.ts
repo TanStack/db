@@ -376,6 +376,8 @@ export class CollectionSubscriber<
       },
       succeed: () =>
         queueMicrotask(() => this.collectionConfigBuilder.scheduleGraphRun()),
+      fail: () =>
+        queueMicrotask(() => this.collectionConfigBuilder.scheduleGraphRun()),
     }
   }
 

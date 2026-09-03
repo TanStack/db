@@ -952,7 +952,7 @@ export interface SubscribeChangesOptions<
   truncateReplayPublication?: {
     readonly start: () => void
     readonly succeed: () => void
-    readonly fail?: () => void
+    readonly fail: () => void
   }
 }
 
