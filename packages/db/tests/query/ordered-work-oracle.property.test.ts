@@ -11,7 +11,7 @@ import {
 } from '../oracle-config.js'
 import { evaluateReferenceExpression } from '../reference-expression.js'
 import { flushPromises } from '../utils.js'
-import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
+import type { SyncConfig } from '../../src/types.js'
 
 type Row = {
   id: number
@@ -323,7 +323,12 @@ describe(`ordered source work oracle`, () => {
       sync: {
         sync: ({ markReady }) => {
           markReady()
-          return { loadSubset: () => void loads++ }
+          return {
+            loadSubset: () => {
+              loads++
+              return true
+            },
+          }
         },
       },
     })

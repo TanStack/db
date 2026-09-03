@@ -13,7 +13,12 @@ import {
   readOracleRunConfig,
 } from '../oracle-config.js'
 import { TraceAssertionError } from '../trace-runner.js'
-import type { LoadSubsetOptions, SyncAppliedReceipt } from '../../src/types.js'
+import type {
+  LoadSubsetOptions,
+  LoadSubsetRequestResult,
+  LoadSubsetResult,
+  SyncAppliedReceipt,
+} from '../../src/types.js'
 
 type PersistedLoadRow = {
   id: string
@@ -45,8 +50,8 @@ const rankRef = new PropRef<number>([`rank`])
 const scoreRef = new PropRef<number>([`score`])
 
 function requirePendingAppliedReceipt(
-  receipt: SyncAppliedReceipt,
-): Promise<void> {
+  receipt: LoadSubsetRequestResult,
+): Promise<void | LoadSubsetResult> {
   if (receipt === true) {
     throw new Error(`Expected an asynchronous subset load`)
   }
@@ -59,10 +64,10 @@ const exactDemandArbitrary: fc.Arbitrary<ExactDemand> = fc
       minLength: 1,
       maxLength: 5,
     }),
-    orderField: fc.constantFrom(`rank`, `score`),
-    direction: fc.constantFrom(`asc`, `desc`),
-    nulls: fc.constantFrom(`first`, `last`),
-    stringSort: fc.constantFrom(`lexical`, `locale`),
+    orderField: fc.constantFrom(`rank` as const, `score` as const),
+    direction: fc.constantFrom(`asc` as const, `desc` as const),
+    nulls: fc.constantFrom(`first` as const, `last` as const),
+    stringSort: fc.constantFrom(`lexical` as const, `locale` as const),
     offset: fc.integer({ min: 0, max: 4 }),
     limit: fc.option(fc.integer({ min: 0, max: 5 }), { nil: undefined }),
     cursorBoundary: fc.option(fc.integer({ min: -3, max: 3 }), {
@@ -165,7 +170,7 @@ async function assertConcurrentExactDemandTrace({
     deferred: ReturnType<typeof createDeferred<void>>
     promise: Promise<void>
   }> = []
-  const promisesByDemand = new Map<string, Promise<void>>()
+  const promisesByDemand = new Map<string, Promise<void | LoadSubsetResult>>()
   const dedupe = new DeduplicatedLoadSubset({
     loadSubset: () => {
       const deferred = createDeferred<void>()

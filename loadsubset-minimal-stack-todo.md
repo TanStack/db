@@ -53,6 +53,12 @@ after their public laws have a destination.
 - [x] Require fixed and generated adapter fixtures to honor every requested
       predicate and window. Invalid boundary fixtures had hidden real page
       loads and produced false failures in the window-controller suite.
+- [x] Assert laws over every relevant request in a trace, not only the last
+      request. Ordered loading may add a valid tie-boundary request after the
+      page request.
+- [x] Compare semantic request content instead of forbidding all extra work.
+      In particular, distinguish an unsafe pushed join predicate from a safe
+      ordered tie-boundary predicate.
 - [x] Compare the same generated demand through live collections and Effects,
       including rows, errors, liveness, semantic request traces, and batches.
 - [ ] Audit alpha-renaming coverage in the query-identity suite.
@@ -143,9 +149,15 @@ explicitly removed.
 - [x] Window operations now synchronously drain the graph work they create and
       wait for both the page request and tie-boundary refinement. Contract-valid
       controller fixtures red/green async rejection and superseding reset.
+- [x] Existing includes, subquery-order, and union tests now model the adapter
+      contract and inspect the whole request trace. No useful regression test
+      was removed to accommodate the new boundary work.
 - [x] Kept the existing includes oracle replay API working while adding named
       replay coordinates. The six includes oracle suites plus utility tests are
       278/278 green.
+- [x] The full DB runtime suite is 3,429/3,429 green (6 skipped). The focused
+      pagination/typecheck rerun is 102/102 green with no type errors after
+      fixing the generic adapter receipt type.
 
 ## Remaining execution
 

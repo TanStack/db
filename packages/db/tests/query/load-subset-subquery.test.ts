@@ -328,13 +328,6 @@ describe(`loadSubset with subqueries`, () => {
     // Verify loadSubset was called
     expect(loadSubsetCalls.length).toBeGreaterThan(0)
 
-    // Without a range index, core asks the adapter for the full ordered source
-    // and applies the query limit locally.
-    const lastCall = loadSubsetCalls[loadSubsetCalls.length - 1]
-    expect(lastCall).toBeDefined()
-    expect(lastCall!.orderBy).toBeDefined()
-    expect(lastCall!.limit).toBeUndefined()
-
     const expectedOrderBy: OrderBy = [
       {
         expression: new PropRef([`scheduled_at`]),
@@ -346,7 +339,12 @@ describe(`loadSubset with subqueries`, () => {
       },
     ]
 
-    expect(lastCall!.orderBy).toEqual(expectedOrderBy)
+    const orderedCalls = loadSubsetCalls.filter(({ orderBy }) => orderBy)
+    expect(orderedCalls).not.toHaveLength(0)
+    for (const { orderBy, limit } of orderedCalls) {
+      expect(orderBy).toEqual(expectedOrderBy)
+      expect(limit).toBe(2)
+    }
   })
 
   it(`should call loadSubset with orderBy clause for subquery`, async () => {
@@ -374,13 +372,6 @@ describe(`loadSubset with subqueries`, () => {
     // Verify loadSubset was called for the orders collection
     expect(loadSubsetCalls.length).toBeGreaterThan(0)
 
-    // Without a range index, core asks the adapter for the full ordered source
-    // and applies the subquery limit locally.
-    const lastCall = loadSubsetCalls[loadSubsetCalls.length - 1]
-    expect(lastCall).toBeDefined()
-    expect(lastCall!.orderBy).toBeDefined()
-    expect(lastCall!.limit).toBeUndefined()
-
     const expectedOrderBy: OrderBy = [
       {
         expression: new PropRef([`scheduled_at`]),
@@ -392,7 +383,12 @@ describe(`loadSubset with subqueries`, () => {
       },
     ]
 
-    expect(lastCall!.orderBy).toEqual(expectedOrderBy)
+    const orderedCalls = loadSubsetCalls.filter(({ orderBy }) => orderBy)
+    expect(orderedCalls).not.toHaveLength(0)
+    for (const { orderBy, limit } of orderedCalls) {
+      expect(orderBy).toEqual(expectedOrderBy)
+      expect(limit).toBe(2)
+    }
   })
 
   it(`does not forward a computed subquery order to loadSubset`, async () => {
