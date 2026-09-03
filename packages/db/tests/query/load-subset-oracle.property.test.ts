@@ -8,6 +8,7 @@ import { Func, PropRef, Value } from '../../src/query/ir.js'
 import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import { createTransaction } from '../../src/transactions.js'
 import { expectAssertionFailure } from '../expected-failure.js'
+import { evaluateReferenceExpression } from '../reference-expression.js'
 import {
   oracleRandomParameters,
   readOracleRunConfig,
@@ -1069,6 +1070,20 @@ async function expectDerivedSyncDuringOptimisticMutation(): Promise<void> {
 }
 
 describe(`exact loadSubset demand oracle`, () => {
+  it(`treats a missing reference path as nullish in the independent model`, () => {
+    const missing = new PropRef<number | null>([`missing`])
+
+    expect(
+      evaluateReferenceExpression(
+        new Func(`lte`, [missing, new Value(null)]),
+        {},
+      ),
+    ).toBe(true)
+    expect(
+      evaluateReferenceExpression(new Func(`lt`, [missing, new Value(0)]), {}),
+    ).toBe(true)
+  })
+
   it(`generates repeated, cursor, empty, and unbounded exact demands`, () => {
     const traces = fc.sample(exactDemandTraceArbitrary, {
       seed: 1656,

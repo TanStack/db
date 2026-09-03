@@ -61,7 +61,9 @@ after their public laws have a destination.
       ordered tie-boundary predicate.
 - [x] Compare the same generated demand through live collections and Effects,
       including rows, errors, liveness, semantic request traces, and batches.
-- [ ] Audit alpha-renaming coverage in the query-identity suite.
+- [x] Audit alpha-renaming coverage in the query-identity suite. Explicit
+      projections erase lexical aliases, while implicit joined, union, and
+      grouped result shapes retain observable aliases.
 - [x] Add explicit generator-reach checks for exact-demand repetition and
       window shapes plus shared, failed, stale, released, and post-replay
       histories. Pagination's exhaustive fixtures cover beyond-end, tied, and
@@ -112,6 +114,22 @@ explicitly removed.
 | Generated histories visibly reach failure, sharing, restart, tied/null, and beyond-end regimes             | explicit reach checks plus pagination's exhaustive fixtures                                                                            | covered                               |
 | Ready transitions survive callback failure, stop when superseded, and restart as a fresh cycle             | `collection-lifecycle.test.ts`; `collection-events.test.ts`; `query/scheduler.test.ts`                                                  | restored and covered                  |
 | An already-aborted demand starts no eager, deferred, or adapter work and rejects with `AbortError`         | `collection.test.ts`                                                                                                                    | restored and covered                  |
+
+### Main-branch test audit
+
+- No test file that exists on `origin/main` is deleted.
+- The tied-order offset test remains under the clearer name “loads an identical
+  orderBy tie class before later window moves.”
+- Independent-model nullish reference ordering is restored in the compact
+  exact-demand oracle.
+- Mutable Date cursor identity and nested order-option snapshots remain as
+  compact exact-dedupe regressions.
+- Deterministic pagination regressions for settled rank updates, rejected
+  cursors, and multi-column tie expansion remain in the pagination oracle.
+- Removed main-branch cases that asserted predicate union, subtraction,
+  inferred coverage, or shared cancellation ownership describe the rejected
+  algebra. Their still-valid exact-demand, error, and mutation laws remain in
+  the compact suites above.
 
 ### Deliberately removed contracts
 
