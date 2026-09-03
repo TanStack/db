@@ -570,12 +570,14 @@ explicitly removed.
 - [x] Run Electric, PowerSync, Query DB, and persistence adapter suites.
       Electric is 504/504 green, PowerSync 108/108, Query DB 336/336
       (1 skipped), and SQLite persistence core 122/122; all typechecks pass.
-- [ ] Merge current `origin/main` with a normal merge commit; never rewrite the
-      published branch history.
+- [x] Merge current `origin/main` with a normal merge commit; never rewrite the
+      published branch history. The only conflict preserved main's lazy
+      runtime-identity initialization and this branch's object/function/symbol
+      identity domains; the focused identity suite is 70/70 green.
 - [x] Run typecheck and the full package suite. The standalone package
       typecheck passes, and the full DB run is 3,503/3,503 green (6 skipped)
-      across 139 files with no type errors. The repository build remains after
-      merging current main.
+      across 139 files with no type errors. The same full run passes after the
+      main merge, and every package in the monorepo builds successfully.
 - [ ] Run the 100x fixed/random campaign.
 - [ ] Run the focused mutation audit.
 - [ ] Measure source and compressed bundle size against both `origin/main` and
