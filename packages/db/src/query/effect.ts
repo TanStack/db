@@ -13,8 +13,8 @@ import {
   computeSubscriptionOrderByHints,
   extractCollectionSources,
   extractCollectionsFromQuery,
-  filterDuplicateInserts,
   OrderedSourceLoader,
+  reconcileChangesForD2,
   sendChangesToInput,
   splitUpdates,
   trackBiggestSentValue,
@@ -384,10 +384,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   // Subscription management
   private readonly unsubscribeCallbacks = new Set<() => void>()
-  // Duplicate insert prevention per lexical source
-  private readonly sentToD2KeysBySource = new Map<
+  // Exact row last contributed to D2 per lexical source key.
+  private readonly sentToD2RowsBySource = new Map<
     string,
-    Set<string | number>
+    Map<string | number, Record<string, unknown>>
   >()
 
   // Output accumulator
@@ -509,8 +509,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       const { sourceId, alias, collection } = source
       const collectionId = collection.id
 
-      // Initialise per-source duplicate tracking
-      this.sentToD2KeysBySource.set(sourceId, new Set())
+      this.sentToD2RowsBySource.set(sourceId, new Map())
 
       // Discover dependencies: if source collection is itself a live query
       // collection, its builder must run first during transaction flushes.
@@ -804,11 +803,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     const input = this.inputs[sourceId]
     if (!input) return 0
 
-    // Filter duplicates per lexical source
-    const sentKeys = this.sentToD2KeysBySource.get(sourceId)!
-    const filtered = filterDuplicateInserts(changes, sentKeys)
+    const sentRows = this.sentToD2RowsBySource.get(sourceId)!
+    const reconciled = reconcileChangesForD2(changes, sentRows)
 
-    return sendChangesToInput(input, filtered)
+    return sendChangesToInput(input, reconciled)
   }
 
   /**
@@ -939,6 +937,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         loader.loadMore()
       } catch (error) {
         if (
+          !this.disposed &&
           !Object.values(this.subscriptions).some(
             (subscription) => subscription.lastError === error,
           )
@@ -957,16 +956,16 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     changes: Array<ChangeMessage<any, string | number>>,
     comparator: (a: any, b: any) => number,
   ): void {
-    const sentKeys = this.sentToD2KeysBySource.get(sourceId) ?? new Set()
+    const sentRows = this.sentToD2RowsBySource.get(sourceId) ?? new Map()
     const result = trackBiggestSentValue(
       changes,
       this.biggestSentValue.get(sourceId),
-      sentKeys,
+      sentRows,
       comparator,
     )
     this.biggestSentValue.set(sourceId, result.biggest)
     if (result.shouldResetLoadKey) {
-      this.orderedLoaders.get(sourceId)?.resetCursor()
+      this.orderedLoaders.get(sourceId)?.invalidateCursor()
     }
   }
 
@@ -986,7 +985,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       }
     }
     this.unsubscribeCallbacks.clear()
-    this.sentToD2KeysBySource.clear()
+    this.sentToD2RowsBySource.clear()
     this.pendingChanges.clear()
     this.lazySources.clear()
     this.demand.clear()

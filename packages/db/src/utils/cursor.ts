@@ -1,4 +1,4 @@
-import { and, eq, gt, lt, or } from '../query/builder/functions.js'
+import { and, eq, gt, gte, lt, or } from '../query/builder/functions.js'
 import { Value } from '../query/ir.js'
 import type { BasicExpression, OrderBy } from '../query/ir.js'
 
@@ -74,6 +74,25 @@ export function buildCursor(
   }
   // Use reduce to combine with or() which expects exactly 2 args
   return clauses.reduce((acc, clause) => or(acc, clause))
+}
+
+/** Build the equality range that closes the first ordered boundary term. */
+export function buildCursorCurrent(
+  orderBy: OrderBy,
+  values: ReadonlyArray<unknown>,
+): BasicExpression<boolean> | undefined {
+  const { expression } = orderBy[0] ?? {}
+  if (!expression || values.length === 0) return undefined
+  const value = values[0]
+  if (value instanceof Date) {
+    if (!Number.isFinite(value.getTime())) return undefined
+    return and(
+      gte(expression, new Value(value)),
+      lt(expression, new Value(new Date(value.getTime() + 1))),
+    )
+  }
+  if (typeof value === `object` && value !== null) return undefined
+  return eq(expression, new Value(value))
 }
 
 /**

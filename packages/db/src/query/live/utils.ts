@@ -1,6 +1,9 @@
 import { MultiSet } from '@tanstack/db-ivm'
 import { UnsupportedRootScalarSelectError } from '../../errors.js'
-import { canExpressCursorOrder } from '../../utils/cursor.js'
+import {
+  buildCursorCurrent,
+  canExpressCursorOrder,
+} from '../../utils/cursor.js'
 import { normalizeOrderByPaths } from '../compiler/expressions.js'
 import { buildQuery, getQueryIR } from '../builder/index.js'
 import { collectCollectionSources, isExpressionLike } from '../ir.js'
@@ -141,6 +144,37 @@ export function* splitUpdates<
   }
 }
 
+/** Keep each source key at one exact D2 contribution. */
+export function reconcileChangesForD2<
+  T extends object,
+  TKey extends string | number,
+>(
+  changes: Array<ChangeMessage<T, TKey>>,
+  sentRows: Map<TKey, T>,
+): Array<ChangeMessage<T, TKey>> {
+  const reconciled: Array<ChangeMessage<T, TKey>> = []
+  for (const change of changes) {
+    const previousValue = sentRows.get(change.key)
+    if (change.type === `insert`) {
+      if (previousValue !== undefined) continue
+      sentRows.set(change.key, change.value)
+      reconciled.push(change)
+    } else if (change.type === `delete`) {
+      if (previousValue === undefined) continue
+      sentRows.delete(change.key)
+      reconciled.push({ ...change, value: previousValue })
+    } else {
+      sentRows.set(change.key, change.value)
+      reconciled.push(
+        previousValue === undefined
+          ? { type: `insert`, key: change.key, value: change.value }
+          : { ...change, previousValue },
+      )
+    }
+  }
+  return reconciled
+}
+
 /**
  * Filter changes to prevent duplicate inserts to a D2 pipeline.
  * Maintains D2 multiplicity at 1 for visible items so that deletes
@@ -185,6 +219,23 @@ export function trackBiggestSentValue(
   sentKeys: Set<string | number>,
   comparator: (a: any, b: any) => number,
 ): { biggest: unknown; shouldResetLoadKey: boolean } {
+  if (
+    current !== undefined &&
+    changes.some((change) => {
+      const previous =
+        change.type === `update` ? change.previousValue : change.value
+      return (
+        change.type !== `insert` && comparator(current, previous) === 0
+      )
+    })
+  ) {
+    // Once the last emitted order boundary is deleted or updated, the next
+    // request must start from the beginning. This also covers equal-order
+    // ties, where the tracked row itself is not distinguishable by the source
+    // comparator.
+    return { biggest: undefined, shouldResetLoadKey: true }
+  }
+
   let biggest = current
   let shouldResetLoadKey = false
 
@@ -249,6 +300,8 @@ export class OrderedSourceLoader {
   private failed = false
   private active = true
   private generation = 0
+  private lastPage: { count: number; boundary: unknown } | undefined
+  private lastPrefixCount: number | undefined
 
   constructor(
     private readonly info: OrderByOptimizationInfo,
@@ -267,8 +320,12 @@ export class OrderedSourceLoader {
   start(): void {
     const { index, limit, offset, orderBy, requiresFullSource } = this.info
     if (limit === 0) return
-    if (!index || orderBy.length !== 1 || requiresFullSource) {
+    if (requiresFullSource) {
       this.loadFullSource()
+      return
+    }
+    if (!index || orderBy.length !== 1) {
+      this.loadPrefix(offset + limit, true)
       return
     }
     this.subscription.setOrderByIndex(index)
@@ -277,19 +334,20 @@ export class OrderedSourceLoader {
 
   loadMore(): Promise<unknown> | undefined {
     if (!this.active || this.info.limit === 0) return
-    if (
-      !this.info.index ||
-      this.info.orderBy.length !== 1 ||
-      this.info.requiresFullSource
-    ) {
+    if (this.info.requiresFullSource) {
       this.loadFullSource()
       return this.pending
     }
-    if (this.pending || !this.info.dataNeeded) return this.pending
+    if (!this.info.index || this.info.orderBy.length !== 1) {
+      this.loadPrefix(this.info.offset + this.info.limit, true)
+      return this.pending
+    }
+    if (!this.info.dataNeeded) return this.pending
     const count = Math.max(
       this.info.dataNeeded(),
       this.failed ? this.info.offset + this.info.limit : 0,
     )
+    if (this.pending) return count > 0 ? this.pending : undefined
     if (count > 0) this.loadPage(count, true)
     return this.pending
   }
@@ -315,10 +373,27 @@ export class OrderedSourceLoader {
     }
   }
 
+  private loadPrefix(count: number, refine: boolean): void {
+    if (!this.active || this.pending || this.lastPrefixCount === count) return
+    this.subscription.requestSnapshot({
+      orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
+      limit: count,
+      trackLoadSubsetPromise: false,
+      onLoadSubsetResult: (result) => this.observe(result, refine),
+    })
+    this.lastPrefixCount = count
+  }
+
   resetCursor(): void {
     this.generation++
     this.pending = undefined
+    this.invalidateCursor()
+  }
+
+  invalidateCursor(): void {
     this.failed = false
+    this.lastPage = undefined
+    this.lastPrefixCount = undefined
   }
 
   dispose(): void {
@@ -334,10 +409,17 @@ export class OrderedSourceLoader {
         biggest as Record<string, unknown>,
       )
       if (!canExpressCursorOrder(this.info.orderBy, [value])) {
-        this.loadFullSource()
+        this.loadPrefix(this.info.offset + this.info.limit, true)
         return
       }
       minValues = [value]
+    }
+    const boundary = minValues?.[0]
+    if (
+      this.lastPage?.count === count &&
+      Object.is(this.lastPage.boundary, boundary)
+    ) {
+      return
     }
     try {
       this.subscription.requestLimitedSnapshot({
@@ -347,8 +429,10 @@ export class OrderedSourceLoader {
         trackLoadSubsetPromise: false,
         onLoadSubsetResult: (result) => this.observe(result, refine),
       })
+      this.lastPage = { count, boundary }
     } catch (error) {
       this.failed = true
+      this.lastPage = undefined
       throw error
     }
   }
@@ -359,7 +443,20 @@ export class OrderedSourceLoader {
     const complete = () => {
       if (!this.active || generation !== this.generation) return
       this.failed = false
-      if (refine) this.loadPage(1, false)
+      try {
+        if (refine) {
+          this.loadBoundary()
+        } else {
+          // A boundary request may add tied rows without filling the query's
+          // window. Resume forward loading once it settles.
+          this.loadMore()
+        }
+      } catch {
+        // The subscription reports adapter failures. Refinement starts after
+        // the primary request has settled, so a synchronous throw is an
+        // incremental source error, not one the original caller can catch.
+        this.failed = true
+      }
     }
     if (!(result instanceof Promise)) {
       queueMicrotask(complete)
@@ -376,7 +473,28 @@ export class OrderedSourceLoader {
         if (this.pending === result) this.pending = undefined
         if (!this.active || generation !== this.generation) return
         this.failed = true
+        this.lastPage = undefined
+        this.lastPrefixCount = undefined
       },
     )
+  }
+
+  private loadBoundary(): void {
+    const biggest = this.getBiggest()
+    if (biggest === undefined) return
+    const value = this.info.valueExtractorForRawRow(
+      biggest as Record<string, unknown>,
+    )
+    const orderBy = normalizeOrderByPaths(this.info.orderBy, this.alias)
+    const where = buildCursorCurrent(orderBy, [value])
+    if (!where) {
+      this.loadFullSource()
+      return
+    }
+    this.subscription.requestSnapshot({
+      where,
+      trackLoadSubsetPromise: false,
+      onLoadSubsetResult: (result) => this.observe(result, false),
+    })
   }
 }
