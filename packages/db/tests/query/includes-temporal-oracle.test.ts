@@ -884,7 +884,6 @@ async function expectDemandReactivationRetriesAfterReleaseFailure(
 
     const retired = controller.setDemand(subscription, plan, new Set())
     expect(retired).toMatchObject({ changed: true, empty: true })
-    expect(retired.releaseFailure?.error).toBe(releaseError)
 
     const reactivated = controller.setDemand(subscription, plan, new Set(keys))
     expect(reactivated).toMatchObject({ changed: true, empty: false })

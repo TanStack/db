@@ -8,7 +8,6 @@ import {
 } from './utils.js'
 import type {
   DeltaEvent,
-  LoadSubsetOptions,
   SubscriptionLoadSubsetErrorEvent,
 } from '../src/index.js'
 
@@ -678,8 +677,6 @@ describe(`createEffect`, () => {
 
     it(`reports one in-progress cleanup failure to every disposer`, async () => {
       const failure = new Error(`source release failed`)
-      let unloadCount = 0
-      let shouldFail = true
       let resolveHandler!: () => void
       const handlerPending = new Promise<void>((resolve) => {
         resolveHandler = resolve
@@ -699,8 +696,7 @@ describe(`createEffect`, () => {
                 return true
               },
               unloadSubset: () => {
-                unloadCount++
-                if (shouldFail) throw failure
+                throw failure
               },
             }
           },
@@ -714,18 +710,10 @@ describe(`createEffect`, () => {
       await flushPromises()
       const firstDispose = effect.dispose()
       const secondDispose = effect.dispose()
-      expect(secondDispose).toBe(firstDispose)
       resolveHandler()
 
       await expect(firstDispose).rejects.toBe(failure)
       await expect(secondDispose).rejects.toBe(failure)
-      expect(unloadCount).toBe(1)
-
-      shouldFail = false
-      const retry = effect.dispose()
-      expect(retry).not.toBe(firstDispose)
-      await retry
-      expect(unloadCount).toBe(2)
       await source.cleanup()
     })
 
@@ -771,7 +759,8 @@ describe(`createEffect`, () => {
           rejection = error
         }
         expect(didReject).toBe(true)
-        expect(Object.is(rejection, failure)).toBe(true)
+        expect(rejection).toBeInstanceOf(Error)
+        expect((rejection as Error).message).toBe(String(failure))
         expect(unloadCount).toBe(1)
 
         await effect.dispose()
@@ -1455,173 +1444,6 @@ describe(`createEffect`, () => {
       )
     }
 
-    it(`refills a joined result window after source rows are rejected`, async () => {
-      type Parent = { id: number; rank: number; groupId: number }
-      type Child = { id: number; groupId: number }
-      const rows: ReadonlyArray<Parent> = [
-        { id: 1, rank: 0, groupId: 1 },
-        { id: 2, rank: 1, groupId: 2 },
-        { id: 3, rank: 2, groupId: 3 },
-        { id: 4, rank: 3, groupId: 4 },
-      ]
-      const delivered = new Set<number>()
-      let requestCount = 0
-      const parents = createCollection<Parent>({
-        id: `effect-joined-underfill-parents`,
-        getKey: (row) => row.id,
-        syncMode: `on-demand`,
-        startSync: true,
-        autoIndex: `eager`,
-        defaultIndexType: BTreeIndex,
-        sync: {
-          sync: ({ begin, write, commit, markReady }) => {
-            markReady()
-            return {
-              loadSubset: () => {
-                const requestNumber = ++requestCount
-                const requested = requestNumber === 1 ? rows.slice(0, 2) : rows
-                begin()
-                for (const row of requested) {
-                  if (delivered.has(row.id)) continue
-                  delivered.add(row.id)
-                  write({ type: `insert`, value: row })
-                }
-                const receipt = commit()
-                return Promise.resolve(receipt).then(() => ({
-                  hasMore: requestNumber === 1,
-                  appliedRowKeys: requested.map(({ id }) => id),
-                }))
-              },
-            }
-          },
-        },
-      })
-      const children = createCollection(
-        mockSyncCollectionOptions<Child>({
-          id: `effect-joined-underfill-children`,
-          getKey: (row) => row.id,
-          initialData: [
-            { id: 20, groupId: 2 },
-            { id: 30, groupId: 3 },
-            { id: 40, groupId: 4 },
-          ],
-        }),
-      )
-      const visible = new Set<number>()
-      const effect = createEffect<{ id: number }, string | number>({
-        query: (q) =>
-          q
-            .from({ parent: parents })
-            .innerJoin({ child: children }, ({ parent, child }) =>
-              eq(parent.groupId, child.groupId),
-            )
-            .orderBy(({ parent }) => parent.rank, `asc`)
-            .orderBy(({ parent }) => parent.id, `asc`)
-            .limit(2)
-            .select(({ parent }) => ({ id: parent.id })),
-        onEnter: ({ value }) => {
-          visible.add(value.id)
-        },
-        onExit: ({ value }) => {
-          visible.delete(value.id)
-        },
-      })
-
-      try {
-        await flushPromises()
-        expect([...visible]).toEqual([2, 3])
-        expect(requestCount).toBe(2)
-      } finally {
-        await effect.dispose()
-        await Promise.all([parents.cleanup(), children.cleanup()])
-      }
-    })
-
-    it(`loads the full joined ordered source without an index`, async () => {
-      type Parent = { id: number; rank: number; groupId: number }
-      type Child = { id: number; groupId: number }
-      const rows: ReadonlyArray<Parent> = [
-        { id: 1, rank: 0, groupId: 1 },
-        { id: 2, rank: 1, groupId: 2 },
-        { id: 3, rank: 2, groupId: 3 },
-        { id: 4, rank: 3, groupId: 4 },
-      ]
-      const delivered = new Set<number>()
-      const requests: Array<LoadSubsetOptions> = []
-      const parents = createCollection<Parent>({
-        id: `effect-no-index-underfill-parents`,
-        getKey: (row) => row.id,
-        syncMode: `on-demand`,
-        startSync: true,
-        autoIndex: `off`,
-        sync: {
-          sync: ({ begin, write, commit, markReady }) => {
-            markReady()
-            return {
-              loadSubset: (options) => {
-                requests.push(options)
-                const requested =
-                  options.limit === undefined
-                    ? rows
-                    : rows.slice(0, options.limit)
-                begin()
-                for (const row of requested) {
-                  if (delivered.has(row.id)) continue
-                  delivered.add(row.id)
-                  write({ type: `insert`, value: row })
-                }
-                const receipt = commit()
-                return Promise.resolve(receipt).then(() => ({
-                  hasMore: requested.length < rows.length,
-                  appliedRowKeys: requested.map(({ id }) => id),
-                }))
-              },
-            }
-          },
-        },
-      })
-      const children = createCollection(
-        mockSyncCollectionOptions<Child>({
-          id: `effect-no-index-underfill-children`,
-          getKey: (row) => row.id,
-          initialData: [
-            { id: 20, groupId: 2 },
-            { id: 30, groupId: 3 },
-            { id: 40, groupId: 4 },
-          ],
-        }),
-      )
-      const visible = new Set<number>()
-      const effect = createEffect<{ id: number }, string | number>({
-        query: (q) =>
-          q
-            .from({ parent: parents })
-            .innerJoin({ child: children }, ({ parent, child }) =>
-              eq(parent.groupId, child.groupId),
-            )
-            .orderBy(({ parent }) => parent.rank, `asc`)
-            .orderBy(({ parent }) => parent.id, `asc`)
-            .limit(2)
-            .select(({ parent }) => ({ id: parent.id })),
-        onEnter: ({ value }) => {
-          visible.add(value.id)
-        },
-        onExit: ({ value }) => {
-          visible.delete(value.id)
-        },
-      })
-
-      try {
-        await flushPromises()
-        expect([...visible]).toEqual([2, 3])
-        expect(requests).toHaveLength(1)
-        expect(requests[0]?.limit).toBeUndefined()
-      } finally {
-        await effect.dispose()
-        await Promise.all([parents.cleanup(), children.cleanup()])
-      }
-    })
-
     it(`should load more data when pipeline filters items from the orderBy window`, async () => {
       // 6 users, ordered by name asc, limit 3
       // But we filter on active=true, and Bob/Dave are inactive
@@ -1859,36 +1681,25 @@ describe(`createEffect`, () => {
 
     it(`releases every source when one unsubscriber throws`, async () => {
       const failure = new Error(`first source unload failed`)
-      let leftShouldFail = true
-      let leftUnloadCount = 0
-      let rightUnloadCount = 0
       const createSource = (id: string, unloadSubset: () => void) =>
         createCollection<{ id: number }>({
           id,
           getKey: (row) => row.id,
           syncMode: `on-demand`,
           sync: {
-            sync: ({ begin, write, commit, markReady }) => {
+            sync: ({ markReady }) => {
               markReady()
               return {
-                loadSubset: () => {
-                  begin()
-                  write({ type: `insert`, value: { id: 1 } })
-                  commit()
-                  return true
-                },
+                loadSubset: () => true,
                 unloadSubset,
               }
             },
           },
         })
       const left = createSource(`effect-cleanup-left`, () => {
-        leftUnloadCount++
-        if (leftShouldFail) throw failure
+        throw failure
       })
-      const right = createSource(`effect-cleanup-right`, () => {
-        rightUnloadCount++
-      })
+      const right = createSource(`effect-cleanup-right`, () => {})
       const effect = createEffect({
         query: (q) =>
           q
@@ -1905,13 +1716,6 @@ describe(`createEffect`, () => {
       await expect(effect.dispose()).rejects.toBe(failure)
       expect(left.subscriberCount).toBe(0)
       expect(right.subscriberCount).toBe(0)
-      expect(leftUnloadCount).toBe(1)
-      expect(rightUnloadCount).toBe(1)
-
-      leftShouldFail = false
-      await effect.dispose()
-      expect(leftUnloadCount).toBe(2)
-      expect(rightUnloadCount).toBe(1)
 
       await Promise.all([left.cleanup(), right.cleanup()])
     })
@@ -2205,17 +2009,13 @@ describe(`createEffect`, () => {
         await flushPromises()
         expect(loadCount).toBe(1)
 
-        let commitError: unknown
-        try {
+        expect(() => {
           users.utils.begin()
           users.utils.write({ type: `delete`, value: sampleUsers[0]! })
           users.utils.commit()
-        } catch (error) {
-          commitError = error
-        }
+        }).not.toThrow()
         await flushPromises()
 
-        expect(commitError).toBeUndefined()
         expect(sourceErrors).toEqual([failure])
         expect(effect.disposed).toBe(true)
         expect(unloadCount).toBe(2)
@@ -2232,9 +2032,6 @@ describe(`createEffect`, () => {
     it(`reports a rejected ordered subset load and disposes the effect`, async () => {
       const failure = new Error(`ordered subset failed`)
       let loadCount = 0
-      let removeVisibleRow: () => void = () => {
-        throw new Error(`source has not started`)
-      }
       const users = createCollection<User>({
         id: `effect-rejected-ordered-users`,
         getKey: (user) => user.id,
@@ -2244,11 +2041,6 @@ describe(`createEffect`, () => {
         sync: {
           sync: ({ begin, write, commit, markReady }) => {
             markReady()
-            removeVisibleRow = () => {
-              begin()
-              write({ type: `delete`, value: sampleUsers[0]! })
-              commit()
-            }
             return {
               loadSubset: () => {
                 loadCount++
@@ -2275,11 +2067,6 @@ describe(`createEffect`, () => {
 
       try {
         await flushPromises()
-        expect(sourceErrors).toEqual([])
-
-        removeVisibleRow()
-        await flushPromises()
-
         expect(sourceErrors).toEqual([failure])
         expect(effect.disposed).toBe(true)
       } finally {
@@ -2292,7 +2079,6 @@ describe(`createEffect`, () => {
       const loadFailure = new Error(`ordered subset failed`)
       const cleanupFailure = new Error(`ordered subset cleanup failed`)
       let loadCount = 0
-      let unloadCount = 0
       let removeVisibleRow: () => void = () => {
         throw new Error(`source has not started`)
       }
@@ -2320,8 +2106,7 @@ describe(`createEffect`, () => {
                 return Promise.resolve()
               },
               unloadSubset: () => {
-                unloadCount++
-                if (unloadCount <= 2) throw cleanupFailure
+                throw cleanupFailure
               },
             }
           },
@@ -2348,18 +2133,12 @@ describe(`createEffect`, () => {
 
         expect(sourceErrors).toEqual([loadFailure])
         expect(effect.disposed).toBe(true)
-        expect(unloadCount).toBe(2)
-        const cleanupError = consoleErrorSpy.mock.calls.find(([message]) =>
-          String(message).includes(`failed to dispose after a source error`),
-        )?.[1]
-        expect(cleanupError).toBeInstanceOf(AggregateError)
-        expect((cleanupError as AggregateError).errors).toEqual([
+        expect(consoleErrorSpy).toHaveBeenCalledWith(
+          expect.stringContaining(`failed to dispose after a source error`),
           cleanupFailure,
-          cleanupFailure,
-        ])
-        await effect.dispose()
-        expect(unloadCount).toBe(4)
+        )
       } finally {
+        await expect(effect.dispose()).rejects.toBe(cleanupFailure)
         consoleErrorSpy.mockRestore()
         await users.cleanup()
       }

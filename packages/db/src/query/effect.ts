@@ -255,12 +255,15 @@ export function createEffect<
     // Abort signal for in-flight handlers
     abortController.abort()
 
-    disposalPromise = (async () => {
+    let attempt!: Promise<void>
+    attempt = (async () => {
       // Tear down the pipeline (unsubscribe from sources, etc.)
+      let cleanupFailed = false
       let cleanupError: unknown
       try {
         runner.dispose()
       } catch (error) {
+        cleanupFailed = true
         cleanupError = error
       }
 
@@ -269,9 +272,16 @@ export function createEffect<
         await Promise.allSettled([...inFlightHandlers])
       }
 
-      if (cleanupError !== undefined) throw cleanupError
+      if (cleanupFailed) throw cleanupError
     })()
-    return disposalPromise
+    disposalPromise = attempt
+    void attempt.then(
+      () => {},
+      () => {
+        if (disposalPromise === attempt) disposalPromise = undefined
+      },
+    )
+    return attempt
   }
 
   // Create and start the pipeline
@@ -971,20 +981,36 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   /** Tear down subscriptions and clear state */
   dispose(): void {
-    if (this.disposed) return
+    if (this.disposed && this.unsubscribeCallbacks.size === 0) return
+    const firstAttempt = !this.disposed
     this.disposed = true
     this.subscribedToAllCollections = false
 
     // Immediately unsubscribe from every source, even if one release fails.
+    let cleanupFailed = false
     let firstCleanupError: unknown
+    const failedUnsubscribes: Array<() => void> = []
     for (const unsubscribe of this.unsubscribeCallbacks) {
       try {
         unsubscribe()
       } catch (error) {
-        firstCleanupError ??= error
+        if (!cleanupFailed) {
+          cleanupFailed = true
+          firstCleanupError = error
+        }
+        failedUnsubscribes.push(unsubscribe)
       }
     }
     this.unsubscribeCallbacks.clear()
+    for (const unsubscribe of failedUnsubscribes) {
+      this.unsubscribeCallbacks.add(unsubscribe)
+    }
+
+    if (!firstAttempt) {
+      if (cleanupFailed) throw firstCleanupError
+      return
+    }
+
     this.sentToD2RowsBySource.clear()
     this.pendingChanges.clear()
     this.lazySources.clear()
@@ -1013,7 +1039,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       this.finalCleanup()
     }
 
-    if (firstCleanupError !== undefined) throw firstCleanupError
+    if (cleanupFailed) throw firstCleanupError
   }
 
   /** Clear graph references — called after graph run completes or immediately from dispose */
