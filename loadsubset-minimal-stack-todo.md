@@ -225,7 +225,7 @@ explicitly removed.
 | Abort before apply cancels; abort after publication begins cannot undo committed rows                         | `load-subset-transaction-refinement-oracle.test.ts`                                                                                    | covered                                                                               |
 | Source truth survives D2 graph teardown/restart and exact prior rows drive retractions                        | `d2-source-reconciliation-oracle.property.test.ts`                                                                                     | covered                                                                               |
 | Independent source histories commute                                                                          | `d2-source-reconciliation-oracle.property.test.ts`                                                                                     | covered                                                                               |
-| Predicate subtraction behavior outside loadSubset                                                             | origin/main `predicate-utils.test.ts` unit matrix                                                                                     | retained at its prior contract; stack-only null-safe algebra cases removed with request refinement |
+| Predicate subtraction behavior outside loadSubset                                                             | `predicate-utils.test.ts` semantic unit matrix                                                                                        | restored; null, duplicate-term, and nested-expression laws red/greened                   |
 | Binary, Date, Temporal, opaque-reference, and invalid-value identity match evaluator semantics                | comparison, cursor, and `ir-stable-identity.test.ts`                                                                                   | covered; focused suite 323/323 green (6 skipped)                                      |
 | Temporal and opaque sortable range operands cross the public subscription boundary unchanged                  | Cartesian adapter-boundary cases in `collection-subscription.test.ts`                                                                 | restored and covered                                                                  |
 | PowerSync publishes only active demand, fences startup/cleanup, settles current tracking, and retries release | compact public trigger/request/release tests in PowerSync on-demand and load-hook suites                                               | restored; red/green; adapter suite 105/105 green                                      |
@@ -297,10 +297,8 @@ explicitly removed.
 - Exact request deduplication does not promise split/merge equivalence across
   different demands. Those demands may each load and must still produce the
   same final public rows.
-- The generated predicate-subtraction oracle and its stack-only null-safe unit
-  cases existed to justify algebraic request refinement. That path is gone.
-  The utility's prior origin/main tests remain; strengthening an otherwise
-  unused exported helper is not part of this RFC.
+- The generated predicate-subtraction request-refinement oracle is gone. The
+  exported helper still keeps its independent public semantic laws.
 
 ## Current red/green results
 
@@ -547,6 +545,14 @@ explicitly removed.
 
 ## Remaining execution
 
+- [x] Restore the exported `minusWherePredicates` laws for SQL nulls,
+      duplicate terms, and nested `NOT`/range expressions; fix the false-green
+      syntax-only assertion and stack overflow. All 145 predicate utility
+      tests pass.
+- [ ] Restore the end-to-end hydration → adapter replacement → late hydration
+      authority law.
+- [ ] Restore ordered multi-source late and out-of-order settlement laws.
+- [ ] Restore the `Effect × autoIndex: off × joined limit(0)` no-work law.
 - [x] Finish the behavioral-law map before accepting test deletions.
 - [ ] Run focused core, pagination, replay, includes, Effect, identity, and
       transaction suites after each coherent change.

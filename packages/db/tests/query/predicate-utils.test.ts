@@ -10,6 +10,7 @@ import {
   unionWherePredicates,
 } from '../../src/query/predicate-utils'
 import { Func, PropRef, Value } from '../../src/query/ir'
+import { evaluateReferenceExpression } from '../reference-expression'
 import type {
   BasicExpression,
   OrderBy,
@@ -56,6 +57,10 @@ function and(...args: Array<BasicExpression>): Func {
 
 function or(...args: Array<BasicExpression>): Func {
   return func(`or`, ...args)
+}
+
+function not(arg: BasicExpression): Func {
+  return func(`not`, arg)
 }
 
 function inOp(left: BasicExpression, values: Array<any>): Func {
@@ -1190,15 +1195,11 @@ describe(`minusWherePredicates`, () => {
       expect(result).toEqual(pred)
     })
 
-    it(`should return null when from is undefined (can't simplify NOT(B))`, () => {
+    it(`falls back when subtracting from all rows could exclude SQL nulls`, () => {
       const subtract = gt(ref(`age`), val(10))
       const result = minusWherePredicates(undefined, subtract)
 
-      expect(result).toEqual({
-        type: `func`,
-        name: `not`,
-        args: [subtract],
-      })
+      expect(result).toBeNull()
     })
 
     it(`should return empty set when from is subset of subtract`, () => {
@@ -1215,6 +1216,46 @@ describe(`minusWherePredicates`, () => {
       const result = minusWherePredicates(from, subtract)
 
       expect(result).toBeNull()
+    })
+  })
+
+  describe(`common conditions`, () => {
+    it(`removes one matching occurrence for each common condition`, () => {
+      const score = ref(`score`)
+      const requested = and(
+        gt(score, val(0)),
+        or(eq(score, val(null)), eq(score, val(1))),
+        inOp(score, [1, 0]),
+        gt(score, val(-1)),
+      )
+      const loaded = and(
+        gt(score, val(0)),
+        or(eq(score, val(null)), eq(score, val(1))),
+        inOp(score, [1, 0]),
+        gt(score, val(0)),
+      )
+
+      const result = minusWherePredicates(requested, loaded)
+
+      expect(result).not.toBeNull()
+      for (const value of [-1, 0, 1, null]) {
+        const row = { score: value }
+        const expected =
+          evaluateReferenceExpression(requested, row) === true &&
+          evaluateReferenceExpression(loaded, row) !== true
+        expect(evaluateReferenceExpression(result!, row)).toBe(expected)
+      }
+    })
+
+    it(`falls back for a nested NOT and range residual`, () => {
+      const score = ref(`score`)
+      const requested = eq(score, val(0))
+      const loaded = and(
+        not(eq(score, val(-1))),
+        and(eq(score, val(0)), lt(score, val(1))),
+      )
+
+      expect(minusWherePredicates(requested, loaded)).toBeNull()
     })
   })
 

@@ -380,15 +380,10 @@ export function minusWherePredicates(
     )
   }
 
-  // If from is undefined then we are asking for all data
-  // so we need to load all data minus what we already loaded
-  // i.e. we need to load NOT(subtractPredicate)
+  // SQL NOT preserves UNKNOWN, so negating a predicate could omit null rows
+  // that belong to the unconstrained source.
   if (fromPredicate === undefined) {
-    return {
-      type: `func`,
-      name: `not`,
-      args: [subtractPredicate],
-    } as BasicExpression<boolean>
+    return null
   }
 
   // Check if fromPredicate is entirely contained in subtractPredicate
@@ -1043,29 +1038,15 @@ function removeConditions(
   predicate: BasicExpression<boolean>,
   conditionsToRemove: Array<BasicExpression<boolean>>,
 ): BasicExpression<boolean> | undefined {
-  if (predicate.type === `func` && predicate.name === `and`) {
-    const remainingArgs = predicate.args.filter(
-      (arg) =>
-        !conditionsToRemove.some((cond) =>
-          areExpressionsEqual(arg as BasicExpression<boolean>, cond),
-        ),
+  const remaining = extractAllConditions(predicate)
+  for (const condition of conditionsToRemove) {
+    const index = remaining.findIndex((candidate) =>
+      areExpressionsEqual(candidate, condition),
     )
-
-    if (remainingArgs.length === 0) {
-      return undefined
-    } else if (remainingArgs.length === 1) {
-      return remainingArgs[0]!
-    } else {
-      return {
-        type: `func`,
-        name: `and`,
-        args: remainingArgs,
-      } as BasicExpression<boolean>
-    }
+    if (index >= 0) remaining.splice(index, 1)
   }
-
-  // For non-AND predicates, don't remove anything
-  return predicate
+  if (remaining.length === 0) return undefined
+  return combineConditions(remaining)
 }
 
 /**
