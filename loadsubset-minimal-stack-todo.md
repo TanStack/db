@@ -93,9 +93,9 @@ work bound when row correctness is proved independently.
       adapter contract, an empty page is a valid settled underfilled result;
       neither consumer may invent broader source exhaustion.
 - [x] Compare normalized semantic request histories across consumers. Keep
-      per-consumer prefix and monotonic-publication assertions because live
-      collections may publish progressive bootstrap prefixes while Effects
-      publish the same result in one batch.
+      per-consumer request and batch assertions: Effects may expose progressive
+      source work, while an ordered live Collection keeps bootstrap and
+      imperative-window refinement private until the chosen window is complete.
 - [x] Complete the public lifecycle trace: generated histories observe
       demand/release, settlement, source mutation, replay, cleanup/restart,
       failure, and public snapshots at intermediate points. The release path
@@ -728,6 +728,10 @@ explicitly removed.
       imperative window publishes one completed snapshot even when a
       contract-valid source returns one row per request. The audit also found
       and removed redundant prefix loads after a full-source fallback.
+- [x] Close the ordered-settlement audit gaps. A failed page/boundary chain now
+      rolls private D2 output back to the last settled window without a public
+      batch. A superseding window waits for any older refinement that still
+      gates publication, even when the new window needs no new source rows.
 - [x] Measure source and compressed bundle size against both `origin/main` and
       the large RFC stack. Across all package `src` trees, the old stack was
       +10,545/-1,692 lines (net +8,853) while this tree is +2,006/-1,302

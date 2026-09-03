@@ -128,6 +128,7 @@ export class CollectionConfigBuilder<
   private windowFn: ((options: WindowOptions) => void) | undefined
   private readonly initialWindow: WindowOptions | undefined
   private currentWindow: WindowOptions | undefined
+  private settledWindow: WindowOptions | undefined
   private activeWindowOperation:
     | { failed: boolean; error?: unknown }
     | undefined
@@ -180,6 +181,7 @@ export class CollectionConfigBuilder<
   >()
   private readonly demandGenerations = new Map<string, number>()
   private readonly pendingOrderedLoads = new Set<Promise<unknown>>()
+  private orderedLoadFailed = false
   private syncSession = 0
   private windowOperationGeneration = 0
   // Map of lexical source IDs to optimizable ORDER BY state
@@ -201,6 +203,7 @@ export class CollectionConfigBuilder<
           limit: this.query.limit ?? Infinity,
         }
       : undefined
+    this.settledWindow = this.initialWindow
     this.collections = extractCollectionsFromQuery(this.query)
     this.collectionSources = extractCollectionSources(this.query)
     this.collectionByAlias = Object.fromEntries(
@@ -304,22 +307,10 @@ export class CollectionConfigBuilder<
     const windowOperationGeneration = ++this.windowOperationGeneration
     const loadOperation =
       this.liveQueryCollection?._sync.beginLoadSubsetOperation()
-    const previousWindow = this.currentWindow ?? this.initialWindow
+    const previousWindow = this.settledWindow
     const previousOperation = this.activeWindowOperation
     const operation: { failed: boolean; error?: unknown } = { failed: false }
-    this.activeWindowOperation = operation
-    try {
-      // The window and all source work it causes form one synchronous
-      // publication. This makes operation tracking see requests scheduled by
-      // the graph rather than declaring the window settled too early.
-      this.currentWindow = options
-      withPublicationContext(() => {
-        windowFn(options)
-        this.maybeRunGraphFn?.()
-      })
-      if (operation.failed) throw operation.error
-    } catch (error) {
-      // Restore the outer operation before rollback work can register loads.
+    const rollback = () => {
       loadOperation?.cancel()
       if (
         previousWindow &&
@@ -327,6 +318,8 @@ export class CollectionConfigBuilder<
         this.currentSyncConfig !== undefined &&
         windowOperationGeneration === this.windowOperationGeneration
       ) {
+        const activeOperation = this.activeWindowOperation
+        this.activeWindowOperation = previousOperation
         try {
           this.currentWindow = previousWindow
           withPublicationContext(() => {
@@ -339,14 +332,45 @@ export class CollectionConfigBuilder<
         } catch {
           // Recovery is best-effort; preserve the error from the requested
           // window rather than replacing it with a rollback failure.
+        } finally {
+          this.activeWindowOperation = activeOperation
         }
       }
+    }
+    this.activeWindowOperation = operation
+    try {
+      // The window and all source work it causes form one synchronous
+      // publication. This makes operation tracking see requests scheduled by
+      // the graph rather than declaring the window settled too early.
+      this.currentWindow = options
+      withPublicationContext(() => {
+        windowFn(options)
+        this.maybeRunGraphFn?.()
+      })
+      if (operation.failed) throw operation.error
+    } catch (error) {
+      rollback()
       throw error
     } finally {
       this.activeWindowOperation = previousOperation
     }
 
-    return loadOperation?.wait() ?? true
+    const settlement = loadOperation?.wait() ?? true
+    if (settlement === true) {
+      this.settledWindow = options
+      return true
+    }
+    return settlement.then(
+      () => {
+        if (windowOperationGeneration === this.windowOperationGeneration) {
+          this.settledWindow = options
+        }
+      },
+      (error) => {
+        rollback()
+        throw error
+      },
+    )
   }
 
   getWindow(): { offset: number; limit: number } | undefined {
@@ -450,10 +474,13 @@ export class CollectionConfigBuilder<
       return
     }
     const syncSession = this.syncSession
+    if (this.pendingOrderedLoads.size === 0) this.orderedLoadFailed = false
     this.pendingOrderedLoads.add(promise)
-    const finish = () => {
+    const finish = (succeeded: boolean) => {
+      if (!succeeded) this.orderedLoadFailed = true
       if (!this.pendingOrderedLoads.delete(promise)) return
       if (
+        !this.orderedLoadFailed &&
         this.pendingOrderedLoads.size === 0 &&
         syncSession === this.syncSession
       ) {
@@ -461,8 +488,12 @@ export class CollectionConfigBuilder<
         // Flush the retained result without invoking the source loaders again.
         this.scheduleGraphRun()
       }
+      if (this.pendingOrderedLoads.size === 0) this.orderedLoadFailed = false
     }
-    void promise.then(finish, finish)
+    void promise.then(
+      () => finish(true),
+      () => finish(false),
+    )
   }
 
   retireDemand(planId: string): void {
@@ -822,6 +853,7 @@ export class CollectionConfigBuilder<
       this.demandGenerations.clear()
       this.activeDemands.clear()
       this.pendingOrderedLoads.clear()
+      this.orderedLoadFailed = false
       this.optimizableOrderByCollections = {}
       this.lazySourcesCallbacks = {}
 

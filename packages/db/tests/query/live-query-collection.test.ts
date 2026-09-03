@@ -1732,6 +1732,120 @@ describe(`createLiveQueryCollection`, () => {
       }
     })
 
+    it(`keeps the last complete window when a required tie boundary rejects`, async () => {
+      type Row = { id: number; rank: number }
+      const failure = new Error(`ordered boundary failed`)
+      let loadCount = 0
+      const source = createCollection<Row>({
+        id: `ordered-boundary-rollback-source`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options) => {
+                loadCount++
+                if (loadCount === 1) {
+                  begin()
+                  write({ type: `insert`, value: { id: 1, rank: 1 } })
+                  commit(options.signal)
+                  return true
+                }
+                if (loadCount === 2) return true
+                if (loadCount === 3) {
+                  begin()
+                  write({ type: `insert`, value: { id: 3, rank: 2 } })
+                  commit(options.signal)
+                  return Promise.resolve()
+                }
+                if (loadCount === 4) return Promise.reject(failure)
+                return true
+              },
+            }
+          },
+        },
+      })
+      const live = createLiveQueryCollection((q) =>
+        q.from({ row: source }).orderBy(({ row }) => row.rank).limit(1),
+      )
+
+      try {
+        await live.preload()
+        const publications: Array<Array<number>> = []
+        const subscription = live.subscribeChanges(() => {
+          publications.push(Array.from(live.values(), ({ id }) => id))
+        })
+
+        const result = live.utils.setWindow({ offset: 0, limit: 2 })
+        expect(result).toBeInstanceOf(Promise)
+        await expect(result).rejects.toBe(failure)
+        await flushPromises()
+
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
+        expect(publications).toEqual([])
+        subscription.unsubscribe()
+      } finally {
+        await Promise.all([live.cleanup(), source.cleanup()])
+      }
+    })
+
+    it(`settles a superseding window only after that window is visible`, async () => {
+      type Row = { id: number; rank: number }
+      const gate = createDeferred<void>()
+      let loadCount = 0
+      const source = createCollection<Row>({
+        id: `ordered-superseding-window-source`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: 1, rank: 1 } })
+            write({ type: `insert`, value: { id: 2, rank: 2 } })
+            commit()
+            markReady()
+            return {
+              loadSubset: () => {
+                loadCount++
+                return loadCount <= 2 ? true : gate.promise
+              },
+            }
+          },
+        },
+      })
+      const live = createLiveQueryCollection((q) =>
+        q.from({ row: source }).orderBy(({ row }) => row.rank).limit(1),
+      )
+
+      try {
+        await live.preload()
+        const first = live.utils.setWindow({ offset: 0, limit: 3 })
+        expect(first).toBeInstanceOf(Promise)
+        const second = live.utils.setWindow({ offset: 1, limit: 1 })
+        expect(second).toBeInstanceOf(Promise)
+
+        let secondSettled = false
+        void Promise.resolve(second).then(() => {
+          secondSettled = true
+        })
+        await flushPromises()
+        expect(secondSettled).toBe(false)
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
+
+        gate.resolve()
+        await Promise.all([first, second])
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual([2])
+      } finally {
+        gate.resolve()
+        await Promise.all([live.cleanup(), source.cleanup()])
+      }
+    })
+
     it(`concurrent live queries should each track loading state independently`, async () => {
       // This tests the fix for the !wasLoadingBefore bug:
       // When multiple live queries subscribe to the same source collection,

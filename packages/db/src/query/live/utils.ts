@@ -322,7 +322,7 @@ export class OrderedSourceLoader {
       this.info.dataNeeded(),
       this.failed ? this.info.offset + this.info.limit : 0,
     )
-    if (this.pending) return count > 0 ? this.pending : undefined
+    if (this.pending) return this.pending
     if (count > 0) this.loadPage(count, true)
     return this.pending
   }
