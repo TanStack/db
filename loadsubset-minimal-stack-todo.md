@@ -150,9 +150,16 @@ row means every distinct public law has a named destination and has been run.
       no-reuse-after-release, stale settlement, source scoping, and final-owner
       lifetime; reject registry topology, claims, antichains, and row-coverage
       bookkeeping.
-- [ ] `load-subset-full-flow-oracle.property.test.ts`: map every deterministic
-      ordered, join, replay, cleanup, identity, release, and publication bug
-      regression to the compact public oracles.
+- [x] `load-subset-full-flow-oracle.property.test.ts`: mapped every
+      deterministic case by public law. Ordered result and request cases move
+      to the pagination and cross-consumer oracles; initial multi-source
+      settlement moves to the source-readiness suite; replay, cleanup,
+      optimistic overlay, and publication cases move to the public replay
+      oracle and focused replay refinements; abort and error cases move to the
+      transaction and error matrices; identity and release cases move to exact
+      dedupe and subscription ownership tests. The old applied-outcome,
+      inferred-coverage, boundary-provenance, and request-refinement cases
+      describe the rejected state machine and have no surviving contract.
 - [x] `load-subset-lifecycle-oracle.property.test.ts`: retain durable release,
       retry debt, and stale/provisional settlement laws through adapter traces.
 - [x] `load-subset-refinement-model.property.test.ts`: retain only laws that
@@ -174,8 +181,12 @@ row means every distinct public law has a named destination and has been run.
       cleanup, progressive snapshot cancellation, and listener lifetime. Core
       cancellation tests do not replace proof that Electric maps its protocol
       to those contracts.
-- [ ] Audit every other test file reduced by more than 20% against its prior
-      test-title inventory before accepting the reduction.
+- [x] Audited every other test file reduced by more than 20% against its prior
+      title inventory. The `db-client`, order-only move, persistence,
+      predicate, stable-identity, and duplicate-insert reductions have exact
+      destinations below. The includes optimistic rewrite retains every test
+      title and removes only repeated setup; the collection-index reduction
+      removes no test.
 
 ## Behavioral-law preservation map
 
