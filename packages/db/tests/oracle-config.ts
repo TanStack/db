@@ -203,16 +203,25 @@ export function readOracleRunConfig(
 
 export function oracleRandomParameters(
   numRuns: number,
-  replay: OracleReplayConfig,
-  property: string,
+  replay: OracleReplayConfig | number | undefined,
+  property?: string,
 ): { numRuns: number; seed?: number; path?: string } {
-  assertRegisteredOracleProperty(property)
-  const { replaySeed, replayPath, replayProperty } = replay
+  if (property !== undefined) assertRegisteredOracleProperty(property)
+  const { replaySeed, replayPath, replayProperty } =
+    typeof replay === `object`
+      ? replay
+      : {
+          replaySeed: replay,
+          replayPath: undefined,
+          replayProperty: undefined,
+        }
   if (replaySeed === undefined) return { numRuns }
   return {
     numRuns,
     seed: replaySeed,
-    ...(replayPath !== undefined && replayProperty === property
+    ...(property !== undefined &&
+    replayPath !== undefined &&
+    replayProperty === property
       ? { path: replayPath }
       : {}),
   }
@@ -228,7 +237,7 @@ export function oracleRuns(baseRuns: number): number {
 /** Replays broad randomized properties when a campaign seed is supplied. */
 export function oraclePropertyOptions(
   baseRuns: number,
-  property: string,
+  property?: string,
 ): {
   numRuns: number
   seed?: number
