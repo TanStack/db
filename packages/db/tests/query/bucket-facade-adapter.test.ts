@@ -398,7 +398,7 @@ describe(`BucketFacadeAdapter`, () => {
     await adapter.cleanup()
   })
 
-  it(`closes publication state when facade index restore fails`, async () => {
+  it(`restores indexed facade state without rebuilding the index`, async () => {
     const graph = new D2()
     const rows = graph.newInput<[string, BucketRow]>()
     const activeBuckets = graph.newInput<[string, true]>()
@@ -491,7 +491,7 @@ describe(`BucketFacadeAdapter`, () => {
     graph.run()
 
     expect(() => adapter.flush()).toThrow(`facade flush failed`)
-    expect(facade.status).toBe(`error`)
+    expect(facade.status).toBe(`ready`)
     expect(facade._state.syncedData.get(original.id)).toMatchObject(original)
     expect(publications).toEqual([])
     expect(facade._stateRevision).toBe(revision)
@@ -517,18 +517,11 @@ describe(`BucketFacadeAdapter`, () => {
       ]),
     )
     graph.run()
-    expect(() => adapter.flush()).toThrow(`facade index rebuild failed`)
-    expect(facade.status).toBe(`error`)
-    expect(facade._state.syncedData.get(original.id)).toMatchObject(original)
-    expect(publications).toEqual([])
-
-    index.throwBeforeBuild = false
     adapter.flush().publish()
     expect(facade.status).toBe(`ready`)
     expect(facade.toArray.map(stripVirtualProps)).toEqual([final])
-    expect(publications).toHaveLength(2)
-    expect(publications[0]).toEqual([])
-    expect(publications[1]).toHaveLength(1)
+    expect(publications).toHaveLength(1)
+    expect(publications[0]).toHaveLength(1)
     expect(facade._stateRevision).toBe(revision + 1)
     expect(index.lookup(`eq`, `original`)).toEqual(new Set())
     expect(index.lookup(`eq`, `replacement`)).toEqual(new Set())

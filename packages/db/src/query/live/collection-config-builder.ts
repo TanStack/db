@@ -1036,8 +1036,8 @@ export class CollectionConfigBuilder<
           }
           commit()
         }
+        facadePublication.prepare()
       } catch (error) {
-        pendingChanges = new Map()
         rootPublication?.discard()
         facadePublication?.rollback()
         throw error

@@ -357,6 +357,14 @@ explicitly removed.
       intrinsic value state, propagates operator context through wrappers, and
       rejects observable membership/order accessors. The focused identity and
       dedupe suites are 65/65 green with no type errors.
+- [x] Rejected the reduced facade tests that had changed retry into data loss.
+      Restoring the five public laws red-tested pending parent loss, duplicate
+      order entries, a rollback-visible truncate/revision, and early readiness.
+      Failed facade installs now retain their root delta, restore by exact diff
+      without rebuilding indexes, roll back deferred revisions, and mark new
+      facades ready only after every child and root state is installed. The
+      facade suite is 5/5 green and the four related publication suites are
+      34/34 green with no type errors.
 - [x] Ported the full-flow void-result truncate failure into the compact
       ordered oracle. The public regression proves that a live query replaces
       its retained ordered snapshot and reaches a bounded fixed point instead

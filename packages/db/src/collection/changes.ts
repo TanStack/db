@@ -1,8 +1,5 @@
 import { NegativeActiveSubscribersError } from '../errors'
-import {
-  recordPublicationError,
-  withPublicationContext,
-} from '../scheduler.js'
+import { recordPublicationError, withPublicationContext } from '../scheduler.js'
 import {
   createSingleRowRefProxy,
   toExpression,
@@ -40,6 +37,8 @@ export class CollectionChangesManager<
   public shouldBatchEvents = false
   private publicationDeferralDepth = 0
   private discardDeferredPublications = false
+  private deferredStateRevision = 0
+  private deferredLayoutRevision = 0
   private deferredPublications: Array<{
     changes: Array<ChangeMessage<TOutput, TKey>>
     layoutChanged: boolean
@@ -160,6 +159,10 @@ export class CollectionChangesManager<
    * normal transaction boundaries.
    */
   public deferPublication(): PublicationDeferral {
+    if (this.publicationDeferralDepth === 0) {
+      this.deferredStateRevision = this.stateRevision
+      this.deferredLayoutRevision = this.layoutRevision
+    }
     this.publicationDeferralDepth++
     let closed = false
 
@@ -176,6 +179,8 @@ export class CollectionChangesManager<
       this.deferredPublications = []
       if (this.discardDeferredPublications) {
         this.discardDeferredPublications = false
+        this.stateRevision = this.deferredStateRevision
+        this.layoutRevision = this.deferredLayoutRevision
         return
       }
       this.publishEvents(
