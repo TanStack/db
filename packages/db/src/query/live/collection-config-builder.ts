@@ -304,9 +304,11 @@ export class CollectionConfigBuilder<
 
     // Keep caller-owned objects out of the long-lived query state. A caller may
     // reuse and mutate its options object after this operation settles.
+    const baseWindow =
+      this.currentWindow ?? this.settledWindow ?? this.initialWindow
     const requestedWindow: WindowOptions = {
-      offset: options.offset,
-      limit: options.limit,
+      offset: options.offset ?? baseWindow?.offset,
+      limit: options.limit ?? baseWindow?.limit,
     }
     const windowOperationGeneration = ++this.windowOperationGeneration
     const loadOperation =
@@ -325,6 +327,9 @@ export class CollectionConfigBuilder<
       })
       if (operation.failed) throw operation.error
     } catch (error) {
+      if (windowOperationGeneration === this.windowOperationGeneration) {
+        this.currentWindow = this.settledWindow
+      }
       loadOperation?.cancel()
       throw error
     } finally {
@@ -343,6 +348,9 @@ export class CollectionConfigBuilder<
         }
       },
       (error) => {
+        if (windowOperationGeneration === this.windowOperationGeneration) {
+          this.currentWindow = this.settledWindow
+        }
         throw error
       },
     )
@@ -439,6 +447,10 @@ export class CollectionConfigBuilder<
 
   trackSubsetLoadOperationPromise(promise: Promise<unknown>): void {
     this.liveQueryCollection!._sync.trackLoadSubsetOperationPromise(promise)
+  }
+
+  hasActiveWindowOperation(): boolean {
+    return this.activeWindowOperation !== undefined
   }
 
   trackOrderedLoadPromise(promise: Promise<unknown>): void {

@@ -269,6 +269,7 @@ export function computeSubscriptionOrderByHints(
 export class OrderedSourceLoader {
   private pending: Promise<unknown> | undefined
   private fullSource = false
+  private fullSourceFailed = false
   private failed = false
   private active = true
   private generation = 0
@@ -306,9 +307,14 @@ export class OrderedSourceLoader {
     this.loadPage(offset + limit, true)
   }
 
-  loadMore(): Promise<unknown> | undefined {
+  loadMore(retryFailedFullSource = false): Promise<unknown> | undefined {
     if (!this.active || this.info.limit === 0) return
+    if (this.fullSourceFailed && retryFailedFullSource) {
+      this.fullSource = false
+      this.fullSourceFailed = false
+    }
     if (this.fullSource) return this.pending
+    if (this.fullSourceFailed && !retryFailedFullSource) return this.pending
     if (this.info.requiresFullSource) {
       this.loadFullSource()
       return this.pending
@@ -329,16 +335,18 @@ export class OrderedSourceLoader {
 
   loadFullSource(): void {
     if (!this.active || this.fullSource) return
+    this.fullSourceFailed = false
     this.fullSource = true
     try {
       this.subscription.requestSnapshot({
         trackLoadSubsetPromise: false,
         onLoadSubsetResult: (result) => {
-          this.observe(result, false)
+          this.observe(result, false, true)
         },
       })
     } catch (error) {
       this.fullSource = false
+      this.fullSourceFailed = true
       throw error
     }
   }
@@ -362,6 +370,10 @@ export class OrderedSourceLoader {
     this.generation++
     this.pending = undefined
     this.invalidateCursor()
+  }
+
+  settleFullSourceReplay(): void {
+    if (this.fullSource) this.fullSourceFailed = false
   }
 
   invalidateCursor(): void {
@@ -416,6 +428,7 @@ export class OrderedSourceLoader {
   private observe(
     result: LoadSubsetRequestResult,
     refine: boolean,
+    isFullSource = false,
   ): Promise<void> {
     const generation = this.generation
     let tracked: Promise<void>
@@ -423,6 +436,7 @@ export class OrderedSourceLoader {
       if (this.pending === tracked) this.pending = undefined
       if (!this.active || generation !== this.generation) return
       this.failed = false
+      if (isFullSource) this.fullSourceFailed = false
       if (refine) {
         this.loadBoundary()
         return
@@ -438,6 +452,12 @@ export class OrderedSourceLoader {
       .catch((error: unknown) => {
         if (this.pending === tracked) this.pending = undefined
         if (!this.active || generation !== this.generation) return
+        if (isFullSource) {
+          // A failed request proves no full-source coverage. An explicit
+          // window move or later replay may retry it, but an ordinary graph
+          // pass must not start an eager retry loop.
+          this.fullSourceFailed = true
+        }
         this.failed = true
         this.lastPage = undefined
         this.lastPrefixCount = undefined

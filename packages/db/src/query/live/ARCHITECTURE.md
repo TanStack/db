@@ -491,7 +491,8 @@ string order, refinement loads the full source instead of treating boundary
 equality as an ordered continuation. An asynchronous failure of that
 full-source acquisition does not start duplicate recovery work. It keeps the
 logical demand so a later truncate replay can retry one authoritative
-replacement.
+replacement, and clears the loader's completion marker so an explicit retry
+of the window can issue the request again.
 
 An initial ordered load or imperative window move includes every page,
 tie-boundary request, and forward refill needed to reach its fixed point. Its
@@ -504,6 +505,10 @@ have advanced, so core does not try to reconstruct the old window over that
 new state. A later successful retry publishes the coherent replacement. A
 superseding window also waits for older source work that still gates
 publication; it does not report success until its own chosen window is visible.
+Partial window options inherit omitted fields from the active requested window,
+or from the last settled window when no move is active. Collection cleanup
+rejects a pending window operation with `AbortError`; it cannot report success
+after discarding the graph and requested window.
 Ordinary source mutations stay synchronous except while an initial ordered
 load or imperative window move owns this publication barrier. Mutations that
 arrive during that interval join the private state and publish with the

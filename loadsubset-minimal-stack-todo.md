@@ -742,6 +742,13 @@ explicitly removed.
       ancestor alive. The audit also corrected the architecture: ordinary
       source mutations that arrive during a window rebuild join its private
       state and publish with the completed replacement.
+- [x] Close the frozen-window loss-audit gaps. An asynchronously rejected
+      full-source refinement clears its completion marker so the same window
+      can retry. Partial window moves inherit omitted fields from the active
+      request or last settled window. Cleanup rejects an abandoned imperative
+      move with `AbortError` instead of falsely reporting that its discarded
+      result became visible. All three public regressions failed before the
+      fixes and passed after them.
 - [x] Measure source and compressed bundle size against both `origin/main` and
       the large RFC stack. Across all package `src` trees, the old stack was
       +10,545/-1,692 lines (net +8,853) while this tree is +2,006/-1,302

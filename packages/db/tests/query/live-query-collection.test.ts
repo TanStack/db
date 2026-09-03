@@ -1732,6 +1732,145 @@ describe(`createLiveQueryCollection`, () => {
       }
     })
 
+    it(`retries a failed full-source window refinement`, async () => {
+      type Row = { id: number; rank: number }
+      const failure = new Error(`full-source refinement failed`)
+      let loadCount = 0
+      const source = createCollection<Row>({
+        id: `ordered-full-source-retry-source`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options) => {
+                loadCount++
+                begin()
+                write({
+                  type: `insert`,
+                  value: { id: loadCount, rank: loadCount },
+                })
+                commit(options.signal)
+                return loadCount === 1
+                  ? Promise.reject(failure)
+                  : Promise.resolve()
+              },
+            }
+          },
+        },
+      })
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank)
+          .limit(0)
+          .select(({ row }) => ({ id: row.id, rank: row.rank }))
+          .distinct(),
+      )
+
+      try {
+        await live.preload()
+        await expect(
+          live.utils.setWindow({ offset: 0, limit: 2 }),
+        ).rejects.toBe(failure)
+        expect(Array.from(live.values())).toEqual([])
+
+        await live.utils.setWindow({ offset: 0, limit: 2 })
+        expect(loadCount).toBe(2)
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2])
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
+      } finally {
+        await Promise.all([live.cleanup(), source.cleanup()])
+      }
+    })
+
+    it(`resolves omitted window fields from the last requested window`, async () => {
+      type Row = { id: number; rank: number }
+      const source = createCollection<Row>({
+        id: `ordered-partial-window-source`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            for (let id = 1; id <= 5; id++) {
+              write({ type: `insert`, value: { id, rank: id } })
+            }
+            commit()
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+      })
+      const live = createLiveQueryCollection((q) =>
+        q.from({ row: source }).orderBy(({ row }) => row.rank).limit(2),
+      )
+
+      try {
+        await live.preload()
+        const requestedWindow = { offset: 2 }
+        await live.utils.setWindow(requestedWindow)
+        requestedWindow.offset = 4
+
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual([3, 4])
+        expect(live.utils.getWindow()).toEqual({ offset: 2, limit: 2 })
+      } finally {
+        await Promise.all([live.cleanup(), source.cleanup()])
+      }
+    })
+
+    it(`rejects a pending window move when cleanup abandons it`, async () => {
+      type Row = { id: number; rank: number }
+      const gate = createDeferred<void>()
+      let loadCount = 0
+      const source = createCollection<Row>({
+        id: `ordered-cleanup-window-source`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: 1, rank: 1 } })
+            commit()
+            markReady()
+            return {
+              loadSubset: () => {
+                loadCount++
+                return loadCount === 3 ? gate.promise : true
+              },
+            }
+          },
+        },
+      })
+      const live = createLiveQueryCollection((q) =>
+        q.from({ row: source }).orderBy(({ row }) => row.rank).limit(1),
+      )
+
+      try {
+        await live.preload()
+        const move = live.utils.setWindow({ offset: 0, limit: 2 })
+        expect(move).toBeInstanceOf(Promise)
+        const rejection = expect(move).rejects.toMatchObject({
+          name: `AbortError`,
+        })
+
+        await live.cleanup()
+        await rejection
+        expect(live.status).toBe(`cleaned-up`)
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
+      } finally {
+        gate.resolve()
+        await source.cleanup()
+      }
+    })
+
     it(`keeps the last complete window when a required tie boundary rejects`, async () => {
       type Row = { id: number; rank: number }
       const failure = new Error(`ordered boundary failed`)

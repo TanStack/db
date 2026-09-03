@@ -2,6 +2,7 @@ import {
   CollectionConfigurationError,
   CollectionIsInErrorStateError,
   DuplicateKeySyncError,
+  LoadSubsetOperationAbortedError,
   NoPendingSyncTransactionCommitError,
   NoPendingSyncTransactionWriteError,
   SyncCleanupError,
@@ -894,7 +895,7 @@ export class CollectionSyncManager<
       if (!operation.completed) {
         operation.completed = true
         operation.pending.clear()
-        operation.deferred?.resolve()
+        operation.deferred?.reject(new LoadSubsetOperationAbortedError())
       }
     }
     this.loadSubsetOperations.clear()

@@ -384,7 +384,10 @@ export class CollectionSubscriber<
         onStart?.()
       },
       succeed: () =>
-        queueMicrotask(() => this.collectionConfigBuilder.scheduleGraphRun()),
+        queueMicrotask(() => {
+          this.orderedLoader?.settleFullSourceReplay()
+          this.collectionConfigBuilder.scheduleGraphRun()
+        }),
     }
   }
 
@@ -405,7 +408,9 @@ export class CollectionSubscriber<
     }
 
     try {
-      const pending = this.orderedLoader?.loadMore()
+      const pending = this.orderedLoader?.loadMore(
+        this.collectionConfigBuilder.hasActiveWindowOperation(),
+      )
       if (pending) {
         this.collectionConfigBuilder.trackSubsetLoadOperationPromise(pending)
       }

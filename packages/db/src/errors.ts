@@ -737,6 +737,14 @@ export class SyncTransactionAbortedError extends Error {
   }
 }
 
+/** A subset operation was canceled before its result became visible. */
+export class LoadSubsetOperationAbortedError extends Error {
+  constructor() {
+    super(`Load subset operation was abandoned during collection cleanup`)
+    this.name = `AbortError`
+  }
+}
+
 // Query Optimizer Errors
 export class QueryOptimizerError extends TanStackDBError {
   constructor(message: string) {
