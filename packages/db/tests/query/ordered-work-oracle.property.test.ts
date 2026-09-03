@@ -1061,6 +1061,7 @@ describe(`ordered source work oracle`, () => {
     const batches: Array<Array<number>> = []
     const callbackReads: Array<Array<number>> = []
     let loads = 0
+    const delivered = new Set<number>()
     let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
     const source = createCollection<Row, number>({
       id: `ordered-atomic-indexed-window`,
@@ -1074,9 +1075,17 @@ describe(`ordered source work oracle`, () => {
           sync = operations
           operations.markReady()
           return {
-            loadSubset: () => {
-              const row = remoteRows[loads++]
+            loadSubset: (options) => {
+              loads++
+              const row = remoteRows.find(
+                (candidate) =>
+                  !delivered.has(candidate.id) &&
+                  (!options.where ||
+                    evaluateReferenceExpression(options.where, candidate) ===
+                      true),
+              )
               if (!row) return true
+              delivered.add(row.id)
               sync.begin()
               sync.write({ type: `insert`, value: row })
               const receipt = sync.commit()
@@ -1109,9 +1118,9 @@ describe(`ordered source work oracle`, () => {
       await live.utils.setWindow({ offset: 0, limit: 2 })
       await flushPromises()
 
-      // Two page turns produce rows; one final tie-boundary request proves
-      // there is no unseen row at rank 2.
-      expect(loads).toBe(3)
+      // Each page turn is followed by a tie-boundary request. The source
+      // returns one row at a time while honoring both predicates.
+      expect(loads).toBe(4)
       expect(readIds()).toEqual([1, 2])
       expect(batches).toEqual([[1, 2]])
       expect(callbackReads).toEqual([[1, 2]])

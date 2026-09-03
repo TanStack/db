@@ -308,6 +308,7 @@ export class OrderedSourceLoader {
 
   loadMore(): Promise<unknown> | undefined {
     if (!this.active || this.info.limit === 0) return
+    if (this.fullSource) return this.pending
     if (this.info.requiresFullSource) {
       this.loadFullSource()
       return this.pending
@@ -412,51 +413,47 @@ export class OrderedSourceLoader {
     }
   }
 
-  private observe(result: LoadSubsetRequestResult, refine: boolean): void {
-    this.onResult(result)
+  private observe(
+    result: LoadSubsetRequestResult,
+    refine: boolean,
+  ): Promise<void> {
     const generation = this.generation
-    const complete = () => {
+    let tracked: Promise<void>
+    const complete = (): Promise<unknown> | undefined => {
+      if (this.pending === tracked) this.pending = undefined
       if (!this.active || generation !== this.generation) return
       this.failed = false
-      try {
-        if (refine) {
-          this.loadBoundary()
-        } else {
-          // A boundary request may add tied rows without filling the query's
-          // window. Resume forward loading once it settles.
-          this.loadMore()
-        }
-      } catch {
-        // The subscription reports adapter failures. Refinement starts after
-        // the primary request has settled, so a synchronous throw is an
-        // incremental source error, not one the original caller can catch.
-        this.failed = true
+      if (refine) {
+        return this.loadBoundary()
       }
+      // A boundary request may add tied rows without filling the query's
+      // window. Resume forward loading once it settles.
+      return this.loadMore()
     }
-    if (!(result instanceof Promise)) {
-      queueMicrotask(complete)
-      return
-    }
-
-    this.pending = result
-    void result.then(
-      () => {
-        if (this.pending === result) this.pending = undefined
-        complete()
-      },
-      () => {
-        if (this.pending === result) this.pending = undefined
+    const request = result instanceof Promise ? result : Promise.resolve()
+    tracked = request
+      .then(complete)
+      .then(() => undefined)
+      .catch((error: unknown) => {
+        if (this.pending === tracked) this.pending = undefined
         if (!this.active || generation !== this.generation) return
         this.failed = true
         this.lastPage = undefined
         this.lastPrefixCount = undefined
         this.hasLastBoundary = false
         this.lastBoundary = undefined
-      },
-    )
+        throw error
+      })
+    this.pending = tracked
+    // Track the whole ordered refinement chain, not merely the adapter call
+    // that began it. This keeps readiness and imperative window settlement
+    // pending until any required tie boundary and forward refill also settle.
+    this.onResult(tracked)
+    void tracked.catch(() => {})
+    return tracked
   }
 
-  private loadBoundary(): void {
+  private loadBoundary(): Promise<unknown> | undefined {
     const biggest = this.getBiggest()
     if (biggest === undefined) return
     const value = this.info.valueExtractorForRawRow(
@@ -465,26 +462,30 @@ export class OrderedSourceLoader {
     const orderBy = normalizeOrderByPaths(this.info.orderBy, this.alias)
     if (!canExpressCursorOrder(orderBy.slice(0, 1), [value])) {
       this.loadFullSource()
-      return
+      return this.pending
     }
     if (this.hasLastBoundary && Object.is(this.lastBoundary, value)) return
     const where = buildCursorCurrent(orderBy, [value])
     if (!where) {
       this.loadFullSource()
-      return
+      return this.pending
     }
     this.hasLastBoundary = true
     this.lastBoundary = value
+    let tracked: Promise<void> | undefined
     try {
       this.subscription.requestSnapshot({
         where,
         trackLoadSubsetPromise: false,
-        onLoadSubsetResult: (result) => this.observe(result, false),
+        onLoadSubsetResult: (result) => {
+          tracked = this.observe(result, false)
+        },
       })
     } catch (error) {
       this.hasLastBoundary = false
       this.lastBoundary = undefined
       throw error
     }
+    return tracked
   }
 }

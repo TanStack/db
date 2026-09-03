@@ -179,6 +179,7 @@ export class CollectionConfigBuilder<
     }
   >()
   private readonly demandGenerations = new Map<string, number>()
+  private readonly pendingOrderedLoads = new Set<Promise<unknown>>()
   private syncSession = 0
   private windowOperationGeneration = 0
   // Map of lexical source IDs to optimizable ORDER BY state
@@ -436,6 +437,32 @@ export class CollectionConfigBuilder<
 
   trackSubsetLoadOperationPromise(promise: Promise<unknown>): void {
     this.liveQueryCollection!._sync.trackLoadSubsetOperationPromise(promise)
+  }
+
+  trackOrderedLoadPromise(promise: Promise<unknown>): void {
+    // Hold a public snapshot only for an initial load or an imperative window
+    // move. Incremental source changes must remain synchronous to their source
+    // transaction; their follow-up refill may publish separately.
+    if (
+      !this.activeWindowOperation &&
+      this.liveQueryCollection?.status !== `loading`
+    ) {
+      return
+    }
+    const syncSession = this.syncSession
+    this.pendingOrderedLoads.add(promise)
+    const finish = () => {
+      if (!this.pendingOrderedLoads.delete(promise)) return
+      if (
+        this.pendingOrderedLoads.size === 0 &&
+        syncSession === this.syncSession
+      ) {
+        // The ordered chain already drove its source graph to quiescence.
+        // Flush the retained result without invoking the source loaders again.
+        this.scheduleGraphRun()
+      }
+    }
+    void promise.then(finish, finish)
   }
 
   retireDemand(planId: string): void {
@@ -794,6 +821,7 @@ export class CollectionConfigBuilder<
       this.lazySources.clear()
       this.demandGenerations.clear()
       this.activeDemands.clear()
+      this.pendingOrderedLoads.clear()
       this.optimizableOrderByCollections = {}
       this.lazySourcesCallbacks = {}
 
@@ -970,7 +998,12 @@ export class CollectionConfigBuilder<
         return
       }
 
-      if (this.hasPendingSourceRecovery()) return
+      if (
+        this.hasPendingSourceRecovery() ||
+        this.pendingOrderedLoads.size > 0
+      ) {
+        return
+      }
 
       let facadePublication:
         | ReturnType<BucketFacadeAdapter[`flush`]>

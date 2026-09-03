@@ -18,6 +18,7 @@ import {
 } from '../utils.js'
 import { createDeferred } from '../../src/deferred'
 import { BTreeIndex } from '../../src/indexes/btree-index'
+import { createFilterFunctionFromExpression } from '../../src/collection/change-events'
 import { Func, Value } from '../../src/query/ir.js'
 import type { ChangeMessage, LoadSubsetOptions } from '../../src/types.js'
 
@@ -1687,22 +1688,20 @@ describe(`createLiveQueryCollection`, () => {
           sync: ({ begin, write, commit, markReady }) => {
             markReady()
             return {
-              loadSubset: () => {
+              loadSubset: (options) => {
                 loadCount++
-                if (loadCount === 2) return Promise.reject(failure)
-                const deliver = () => {
+                if (loadCount === 3) return Promise.reject(failure)
+                const deliver = (row: Row) => {
                   begin()
-                  write({
-                    type: `insert`,
-                    value: { id: loadCount, rank: loadCount },
-                  })
+                  write({ type: `insert`, value: row })
                   commit()
                 }
                 if (loadCount === 1) {
-                  deliver()
+                  deliver({ id: 1, rank: 1 })
                   return true
                 }
-                return Promise.resolve().then(deliver)
+                if (loadCount === 2 || options.where) return true
+                return Promise.resolve().then(() => deliver({ id: 2, rank: 2 }))
               },
             }
           },
@@ -1712,15 +1711,22 @@ describe(`createLiveQueryCollection`, () => {
         q
           .from({ row: source })
           .orderBy(({ row }) => row.rank, `asc`)
-          .limit(2),
+          .limit(1),
       )
 
       try {
         await live.preload()
-        await flushPromises()
-        expect(loadCount).toBe(3)
+        expect(loadCount).toBe(2)
+
+        const failedWindow = live.utils.setWindow({ offset: 0, limit: 2 })
+        expect(failedWindow).toBeInstanceOf(Promise)
+        await expect(failedWindow).rejects.toBe(failure)
         expect(live.utils.lastSubsetError).toBe(failure)
-        expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 3])
+
+        const retry = live.utils.setWindow({ offset: 0, limit: 2 })
+        if (retry !== true) await retry
+        expect(loadCount).toBe(5)
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2])
       } finally {
         await Promise.all([live.cleanup(), source.cleanup()])
       }
@@ -2514,6 +2520,139 @@ describe(`createLiveQueryCollection`, () => {
         vi.useRealTimers()
       }
     })
+
+    it(`does not settle a synchronous ordered window before loading its tie boundary`, async () => {
+      type Row = { id: number; rank: number }
+
+      const remote: Array<Row> = [
+        { id: 1, rank: 0 },
+        { id: 2, rank: 0 },
+        { id: 3, rank: 1 },
+        { id: 4, rank: 1 },
+      ]
+      const delivered = new Set<number>()
+      let calls = 0
+
+      const source = createCollection<Row>({
+        id: `sync-ordered-boundary-settlement`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options: LoadSubsetOptions) => {
+                calls++
+                const filter = options.where
+                  ? createFilterFunctionFromExpression(options.where)
+                  : () => true
+                const candidates = remote
+                  .filter(filter)
+                  .filter(({ id }) => !delivered.has(id))
+                  .sort(
+                    (left, right) =>
+                      left.rank - right.rank || right.id - left.id,
+                  )
+                const selected =
+                  options.limit === undefined
+                    ? candidates
+                    : candidates.slice(0, options.limit)
+
+                if (selected.length > 0) {
+                  begin()
+                  for (const row of selected) {
+                    delivered.add(row.id)
+                    write({ type: `insert`, value: row })
+                  }
+                  commit(options.signal)
+                }
+                return true
+              },
+              unloadSubset: () => {},
+            }
+          },
+        },
+      })
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank, `asc`)
+          .limit(1),
+      )
+
+      try {
+        await live.preload()
+        expect(calls).toBe(2)
+        expect(live.toArray.map(({ id }) => id)).toEqual([1])
+
+        const settled = live.utils.setWindow({ offset: 2, limit: 1 })
+        if (settled !== true) await settled
+
+        expect(calls).toBe(4)
+        expect(live.toArray.map(({ id }) => id)).toEqual([3])
+      } finally {
+        await Promise.all([live.cleanup(), source.cleanup()])
+      }
+    })
+
+    it.each([
+      { primary: `sync`, boundary: `sync` },
+      { primary: `sync`, boundary: `async` },
+      { primary: `async`, boundary: `sync` },
+      { primary: `async`, boundary: `async` },
+    ] as const)(
+      `rejects initial preload when a required $boundary tie-boundary load fails after a $primary primary load`,
+      async ({ primary, boundary }) => {
+        type Row = { id: number; rank: number }
+
+        const failure = new Error(`ordered boundary failed`)
+        let calls = 0
+        const source = createCollection<Row>({
+          id: `initial-${primary}-${boundary}-ordered-boundary-failure`,
+          getKey: ({ id }) => id,
+          syncMode: `on-demand`,
+          autoIndex: `eager`,
+          defaultIndexType: BTreeIndex,
+          sync: {
+            sync: ({ begin, write, commit, markReady }) => {
+              markReady()
+              return {
+                loadSubset: (options: LoadSubsetOptions) => {
+                  calls++
+                  if (options.where) {
+                    if (boundary === `async`) return Promise.reject(failure)
+                    throw failure
+                  }
+
+                  begin()
+                  write({ type: `insert`, value: { id: 2, rank: 0 } })
+                  commit(options.signal)
+                  return primary === `async` ? Promise.resolve() : true
+                },
+                unloadSubset: () => {},
+              }
+            },
+          },
+        })
+        const live = createLiveQueryCollection((q) =>
+          q
+            .from({ row: source })
+            .orderBy(({ row }) => row.rank, `asc`)
+            .limit(1),
+        )
+
+        try {
+          await expect(live.preload()).rejects.toBe(failure)
+          expect(calls).toBe(2)
+          expect(live.status).toBe(`error`)
+          expect(live.utils.lastSubsetError).toBe(failure)
+        } finally {
+          await Promise.all([live.cleanup(), source.cleanup()])
+        }
+      },
+    )
 
     it(`advances offset when async loadSubset fills an initially empty window`, async () => {
       type Item = { id: number; value: number }

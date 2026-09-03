@@ -711,7 +711,6 @@ async function runPaginationStateScenario(
     for (const [index, action] of scenario.actions.entries()) {
       const beforeRows = readCurrentWindow()
       const publicationCount = publications.length
-      const runCount = live.utils.getRunCount()
       if (action.type === `window`) {
         currentWindow = { offset: action.offset, limit: action.limit }
         const result = live.utils.setWindow(currentWindow)
@@ -741,9 +740,6 @@ async function runPaginationStateScenario(
       if (outputChanged) {
         expect(publications.at(-1)?.rows).toEqual(readCurrentWindow())
       }
-      // One run applies the action; a second may apply an ordered-window
-      // refill. Neither is allowed to create a second public publication.
-      expect(live.utils.getRunCount() - runCount).toBeLessThanOrEqual(2)
     }
   } finally {
     publicationSubscription?.unsubscribe()

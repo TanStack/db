@@ -364,7 +364,12 @@ export class CollectionSubscriber<
       subscription,
       this.alias,
       () => this.biggest,
-      onLoadSubsetResult,
+      (result) => {
+        if (result instanceof Promise) {
+          this.collectionConfigBuilder.trackOrderedLoadPromise(result)
+        }
+        onLoadSubsetResult(result)
+      },
     )
     this.orderedLoader.start()
 

@@ -721,6 +721,13 @@ explicitly removed.
       snapshots cannot be canceled safely. The bounded form retains only
       unsettled overlap and passes all 86 replay-focused assertions with no
       type errors.
+- [x] Make ordered settlement include synchronous adapter refinements. A
+      prefix result no longer lets initial preload or `setWindow()` settle
+      before its required tie-boundary and forward-refill chain. Initial
+      boundary failure is fatal, incremental retry remains possible, and an
+      imperative window publishes one completed snapshot even when a
+      contract-valid source returns one row per request. The audit also found
+      and removed redundant prefix loads after a full-source fallback.
 - [x] Measure source and compressed bundle size against both `origin/main` and
       the large RFC stack. Across all package `src` trees, the old stack was
       +10,545/-1,692 lines (net +8,853) while this tree is +2,006/-1,302
