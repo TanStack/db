@@ -120,6 +120,7 @@ export class CollectionSubscription
    */
   private subsetDemands: Array<SubsetDemand> = []
   private releaseDebts: Array<SubsetAcquisition> = []
+  private releasingAcquisitions = new Set<SubsetAcquisition>()
   private readonly requestedSubsetWhere = new WeakMap<
     LoadSubsetOptions,
     BasicExpression<boolean>
@@ -752,9 +753,15 @@ export class CollectionSubscription
     if (!this.releaseDebts.includes(acquisition)) {
       this.releaseDebts.push(acquisition)
     }
-    this.releaseSubsetAcquisition(acquisition)
-    const index = this.releaseDebts.indexOf(acquisition)
-    if (index !== -1) this.releaseDebts.splice(index, 1)
+    if (this.releasingAcquisitions.has(acquisition)) return
+    this.releasingAcquisitions.add(acquisition)
+    try {
+      this.releaseSubsetAcquisition(acquisition)
+      const index = this.releaseDebts.indexOf(acquisition)
+      if (index !== -1) this.releaseDebts.splice(index, 1)
+    } finally {
+      this.releasingAcquisitions.delete(acquisition)
+    }
   }
 
   /** Start and retain the first acquisition for one logical subset demand. */
@@ -906,6 +913,7 @@ export class CollectionSubscription
 
     // Pass the raw loadSubset result to the caller for external tracking
     opts?.onLoadSubsetResult?.(syncResult)
+    if (this.unsubscribed) return false
 
     this.observeLoadSubsetResult(
       syncResult,
@@ -913,6 +921,7 @@ export class CollectionSubscription
       demand.options,
       opts?.trackLoadSubsetPromise ?? true,
     )
+    if (this.unsubscribed) return false
 
     // Also load data immediately from the collection
     let snapshot: Array<ChangeMessage<any, any>> | void
@@ -923,6 +932,7 @@ export class CollectionSubscription
       })
       if (snapshot === undefined) {
         opts.onUnoptimized()
+        if (this.unsubscribed) return false
         snapshot = this.collection.currentStateAsChanges({
           ...stateOpts,
           optimizedOnly: false,
@@ -931,6 +941,7 @@ export class CollectionSubscription
     } else {
       snapshot = this.collection.currentStateAsChanges(stateOpts)
     }
+    if (this.unsubscribed) return false
 
     if (snapshot === undefined) {
       // Couldn't load from indexes
@@ -1211,9 +1222,11 @@ export class CollectionSubscription
     }
 
     const { demand, result: syncResult } = this.startSubsetDemand(loadOptions)
+    if (this.unsubscribed) return
 
     // Pass the raw loadSubset result to the caller for external tracking
     onLoadSubsetResult?.(syncResult)
+    if (this.unsubscribed) return
     this.observeLoadSubsetResult(
       syncResult,
       demand,

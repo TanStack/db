@@ -704,8 +704,11 @@ explicitly removed.
       limited snapshot cannot start adapter work after its local callback
       unsubscribes. If an old replay lease release both retires the logical
       demand reentrantly and throws, cleanup retains that exact old lease as
-      debt without releasing the replacement twice. All 77 focused ownership
-      and replay tests pass with no type errors.
+      debt without releasing the replacement twice. The follow-up loss audit
+      expanded that fence through result hooks, unoptimized fallback, async
+      adapter settlement, and nested cleanup; an in-flight exact acquisition
+      can no longer be released twice by reentrant unsubscribe. All 81 focused
+      ownership and replay tests pass with no type errors.
 - [x] Make replay authority generation-safe and bounded. A newer successful
       replay now publishes without waiting for an aborted predecessor that may
       never settle, and obsolete participants no longer hold loading status.

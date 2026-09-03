@@ -842,6 +842,75 @@ describe(`CollectionSubscription status tracking`, () => {
     }
   })
 
+  it(`does not continue a direct snapshot after its result hook unsubscribes`, async () => {
+    type Row = { id: string }
+    const callbacks: Array<Array<string>> = []
+    const collection = createCollection<Row>({
+      id: `direct-result-hook-unsubscribe`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({ type: `insert`, value: { id: `row` } })
+          commit()
+          markReady()
+          return { loadSubset: () => true }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges((changes) => {
+      callbacks.push(changes.map(({ value }) => value.id))
+    })
+
+    try {
+      subscription.requestSnapshot({
+        optimizedOnly: false,
+        onLoadSubsetResult: () => subscription.unsubscribe(),
+      })
+
+      expect(callbacks).toEqual([])
+      expect(subscription.status).toBe(`ready`)
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`does not continue an unoptimized snapshot after its hook unsubscribes`, async () => {
+    type Row = { id: string }
+    const callbacks: Array<Array<string>> = []
+    const collection = createCollection<Row>({
+      id: `direct-unoptimized-hook-unsubscribe`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({ type: `insert`, value: { id: `row` } })
+          commit()
+          markReady()
+          return { loadSubset: () => true }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges((changes) => {
+      callbacks.push(changes.map(({ value }) => value.id))
+    })
+
+    try {
+      subscription.requestSnapshot({
+        where: new Func(`eq`, [new PropRef([`id`]), new Value(`row`)]),
+        onUnoptimized: () => subscription.unsubscribe(),
+      })
+
+      expect(callbacks).toEqual([])
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   it(`does not start limited adapter work after local delivery unsubscribes`, async () => {
     type Row = { id: string; rank: number }
     const loads: Array<LoadSubsetOptions> = []
@@ -886,6 +955,97 @@ describe(`CollectionSubscription status tracking`, () => {
 
       expect(loads).toEqual([])
       expect(unloads).toEqual([])
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`does not observe limited adapter work after it unsubscribes`, async () => {
+    type Row = { id: string; rank: number }
+    const pending = createDeferred<void>()
+    let resultCallbacks = 0
+    let subscription!: ReturnType<
+      ReturnType<typeof createCollection<Row>>[`subscribeChanges`]
+    >
+    const collection = createCollection<Row>({
+      id: `limited-adapter-unsubscribe`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => {
+              subscription.unsubscribe()
+              return pending.promise
+            },
+          }
+        },
+      },
+    })
+    const index = collection.createIndex((row) => row.rank, {
+      indexType: BTreeIndex,
+    })
+    subscription = collection.subscribeChanges(() => {})
+    subscription.setOrderByIndex(index)
+
+    try {
+      subscription.requestLimitedSnapshot({
+        orderBy: [
+          {
+            expression: new PropRef([`rank`]),
+            compareOptions: { direction: `asc`, nulls: `first` },
+          },
+        ],
+        limit: 1,
+        onLoadSubsetResult: () => resultCallbacks++,
+      })
+
+      expect(resultCallbacks).toBe(0)
+      expect(subscription.status).toBe(`ready`)
+    } finally {
+      pending.resolve()
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`does not release one acquisition twice during nested unsubscribe`, async () => {
+    const unloads: Array<LoadSubsetOptions> = []
+    let subscription!: ReturnType<
+      ReturnType<typeof createCollection<{ id: string }>>[`subscribeChanges`]
+    >
+    let reentered = false
+    const collection = createCollection<{ id: string }>({
+      id: `nested-unsubscribe-release`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => true,
+            unloadSubset: (options) => {
+              unloads.push(options)
+              if (!reentered) {
+                reentered = true
+                subscription.unsubscribe()
+              }
+            },
+          }
+        },
+      },
+    })
+    subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+
+    try {
+      subscription.requestSnapshot({ optimizedOnly: false })
+      subscription.unsubscribe()
+
+      expect(unloads).toHaveLength(1)
     } finally {
       subscription.unsubscribe()
       await collection.cleanup()
