@@ -564,6 +564,9 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   const compileOptions = encodeColumnName ? { encodeColumnName } : undefined
   const logPrefix = collectionId ? `[${collectionId}] ` : ``
 
+  const abortReason = (abortedSignal: AbortSignal): unknown =>
+    abortedSignal.reason ?? new DOMException(`The operation was aborted`, `AbortError`)
+
   /**
    * Handles errors from snapshot operations. Returns true if the error was
    * handled (signal aborted during cleanup), false if it should be re-thrown.
@@ -579,7 +582,8 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
 
   const loadSubset = async (opts: LoadSubsetOptions) => {
     const commitCursor = getCommitCursor()
-    if (opts.signal?.aborted) return
+    if (signal.aborted) throw abortReason(signal)
+    if (opts.signal?.aborted) throw abortReason(opts.signal)
 
     if (isBufferingInitialSync()) {
       const snapshotParams = compileSQL<T>(opts, compileOptions)
@@ -628,6 +632,18 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
     // still works.
     if (stream.isUpToDate) {
       let timeoutId: ReturnType<typeof setTimeout> | undefined
+      const abortSignals = [signal, opts.signal].filter(
+        (candidate): candidate is AbortSignal => candidate !== undefined,
+      )
+      let rejectAbort: (reason: unknown) => void = () => {}
+      const aborted = new Promise<never>((_resolve, reject) => {
+        rejectAbort = reject
+      })
+      const abort = (event: Event) =>
+        rejectAbort(abortReason(event.currentTarget as AbortSignal))
+      for (const abortSignal of abortSignals) {
+        abortSignal.addEventListener(`abort`, abort, { once: true })
+      }
       try {
         await Promise.race([
           stream.forceDisconnectAndRefresh(),
@@ -637,8 +653,10 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
               FORCE_DISCONNECT_AND_REFRESH_TIMEOUT_MS,
             )
           }),
+          aborted,
         ])
       } catch (error) {
+        if (signal.aborted || opts.signal?.aborted) throw error
         if (handleSnapshotError(error, `forceDisconnectAndRefresh`)) {
           return
         }
@@ -648,10 +666,14 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
         )
       } finally {
         clearTimeout(timeoutId)
+        for (const abortSignal of abortSignals) {
+          abortSignal.removeEventListener(`abort`, abort)
+        }
       }
     }
 
-    if (opts.signal?.aborted) return
+    if (signal.aborted) throw abortReason(signal)
+    if (opts.signal?.aborted) throw abortReason(opts.signal)
 
     // Upstream limitation: ShapeStream.requestSnapshot() publishes its rows
     // through the stream callback before its Promise resolves. It accepts no

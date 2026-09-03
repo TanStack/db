@@ -165,7 +165,7 @@ row means every distinct public law has a named destination and has been run.
       public test names the same law.
 - [x] `includes-publication-oracle.test.ts`: retain pending-derived-mutation
       source publication through the collection state/publication oracles.
-- [ ] `electric.test.ts`: retain adapter-specific applied-commit waiting,
+- [x] `electric.test.ts`: retain adapter-specific applied-commit waiting,
       cancellation/error priority, two-request cursor settlement, refresh
       cleanup, progressive snapshot cancellation, and listener lifetime. Core
       cancellation tests do not replace proof that Electric maps its protocol
@@ -209,7 +209,8 @@ explicitly removed.
 | PowerSync publishes only active demand, fences startup/cleanup, settles current tracking, and retries release | compact public trigger/request/release tests in PowerSync on-demand and load-hook suites                                               | restored; red/green; adapter suite 105/105 green                                      |
 | Persistence keeps replacement ownership and preserves reject/abort semantics                                  | persistence adapter suite                                                                                                              | retained; run adapter suite                                                           |
 | Query DB keeps exact owners, idles after eager cache GC, restarts on remount, and clears retained metadata    | Query DB ownership lifecycle suite plus public cache/metadata cleanup tests                                                            | restored; red/green; adapter suite 336/337 green (1 skipped)                          |
-| Electric waits for public commit application, waits for both cursor requests, and removes session listeners   | focused Electric sync-mode tests                                                                                                       | restored and covered; adapter suite 495/495 green                                     |
+| Electric waits for public commit application, waits for both cursor requests, and removes session listeners   | focused Electric sync-mode tests                                                                                                       | restored and covered; compact adapter suite 219/219 green                             |
+| Electric starts no work for an already-aborted request/session and cancels a pending refresh on cleanup       | Cartesian abort-source cases and pending-refresh cleanup in `electric.test.ts`                                                         | restored; red/green found two adapter regressions                                      |
 | The same public demand path yields the same rows and lifecycle state across entry points                      | live collection/Effect parity in `ordered-work-oracle.property.test.ts`                                                                | covered                                                                               |
 | Out-of-order settlements and same-tick cleanup/restart preserve the recomputed result                         | replay settlement-order model and scheduler property; pagination multi-source recomputation                                            | covered                                                                               |
 | Generated histories visibly reach failure, sharing, restart, tied/null, and beyond-end regimes                | explicit reach checks plus pagination's exhaustive fixtures                                                                            | covered                                                                               |
@@ -386,6 +387,16 @@ explicitly removed.
       through the layered-query publication oracle. The old Cartesian matrix
       repeated the same collection law at each query shape; the retained tests
       keep the collection law and the graph transport law separate.
+- [x] Audited the removed Electric settlement matrix. Retained public commit
+      application, both physical cursor requests, progressive pre-application
+      cancellation, refresh cleanup, retry, and listener lifetime. The compact
+      abort-source and refresh-cleanup cases red-tested two regressions: an
+      already-aborted session resolved successfully, and cleanup left a load
+      parked on the refresh timeout. Electric is 219/219 green with no type
+      errors. Request-scoped cancellation after `requestSnapshot()` begins is
+      not claimed: Electric exposes neither a request signal nor request IDs on
+      streamed rows, so the adapter cannot safely retract one overlapping
+      request. The source documents that upstream boundary.
 
 ## Remaining execution
 
