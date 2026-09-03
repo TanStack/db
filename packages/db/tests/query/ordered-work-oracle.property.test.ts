@@ -1,6 +1,7 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
+import { createDeferred } from '../../src/deferred.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createEffect } from '../../src/query/effect.js'
 import { getLoadSubsetDemandKey } from '../../src/query/ir-stable-identity.js'
@@ -12,7 +13,7 @@ import {
 } from '../oracle-config.js'
 import { evaluateReferenceExpression } from '../reference-expression.js'
 import { flushPromises } from '../utils.js'
-import type { SyncConfig } from '../../src/types.js'
+import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
 
 type Row = {
   id: number
@@ -592,6 +593,279 @@ describe(`ordered source work oracle`, () => {
     } finally {
       await live.cleanup()
       await source.cleanup()
+    }
+  })
+
+  it(`waits for a late joined source after exhausting tied ordered rows`, async () => {
+    type Primary = { id: string; rank: number; joinKey: string }
+    type Secondary = { id: string; joinKey: string }
+    const primaryRows: Array<Primary> = [`a`, `b`, `c`, `d`].map((id) => ({
+      id,
+      rank: 0,
+      joinKey: id,
+    }))
+    const secondaryRows: Array<Secondary> = [
+      { id: `c-child`, joinKey: `c` },
+      { id: `d-child`, joinKey: `d` },
+    ]
+    const deliveredPrimary = new Set<string>()
+    const deliveredSecondary = new Set<string>()
+    const secondaryLoads: Array<{
+      options: LoadSubsetOptions
+      gate: ReturnType<typeof createDeferred<void>>
+    }> = []
+    let primaryExhausted = false
+
+    const primary = createCollection<Primary>({
+      id: `ordered-late-join-primary`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          markReady()
+          return {
+            loadSubset: async (options) => {
+              const rows = options.orderBy
+                ? [
+                    primaryRows[
+                      options.cursor?.lastKey
+                        ? primaryRows.findIndex(
+                            ({ id }) => id === options.cursor?.lastKey,
+                          ) + 1
+                        : 0
+                    ],
+                  ].filter((row): row is Primary => row !== undefined)
+                : primaryRows.filter(
+                    (row) =>
+                      !options.where ||
+                      evaluateReferenceExpression(options.where, row) ===
+                        true,
+                  )
+              const fresh = rows.filter(
+                ({ id }) => !deliveredPrimary.has(id),
+              )
+              if (fresh.length > 0) {
+                begin()
+                for (const row of fresh) {
+                  deliveredPrimary.add(row.id)
+                  write({ type: `insert`, value: row })
+                }
+                const receipt = commit(options.signal)
+                if (receipt !== true) await receipt
+              }
+              primaryExhausted = deliveredPrimary.size === primaryRows.length
+            },
+          }
+        },
+      },
+    })
+    const secondary = createCollection<Secondary>({
+      id: `ordered-late-join-secondary`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          markReady()
+          return {
+            loadSubset: async (options) => {
+              const gate = createDeferred<void>()
+              secondaryLoads.push({ options, gate })
+              await gate.promise
+              const fresh = secondaryRows.filter(
+                (row) =>
+                  !deliveredSecondary.has(row.id) &&
+                  (!options.where ||
+                    evaluateReferenceExpression(options.where, row) === true),
+              )
+              for (const row of fresh) {
+                deliveredSecondary.add(row.id)
+                begin()
+                write({ type: `insert`, value: row })
+                const receipt = commit(options.signal)
+                if (receipt !== true) await receipt
+              }
+              return { hasMore: false }
+            },
+          }
+        },
+      },
+    })
+    const live = createLiveQueryCollection((q) =>
+      q
+        .from({ primaryRow: primary })
+        .innerJoin(
+          { secondaryRow: secondary },
+          ({ primaryRow, secondaryRow }) =>
+            eq(primaryRow.joinKey, secondaryRow.joinKey),
+        )
+        .orderBy(({ primaryRow }) => primaryRow.rank)
+        .limit(2),
+    )
+
+    try {
+      const preload = live.preload()
+      let settled = false
+      void preload.finally(() => {
+        settled = true
+      })
+      await vi.waitFor(() =>
+        expect(
+          primaryExhausted,
+          JSON.stringify({
+            deliveredPrimary: [...deliveredPrimary],
+            secondaryLoads: secondaryLoads.length,
+          }),
+        ).toBe(true),
+      )
+      expect(secondaryLoads.length).toBeGreaterThan(0)
+      expect(settled).toBe(false)
+
+      for (const load of [...secondaryLoads].reverse()) {
+        load.gate.resolve()
+        await flushPromises()
+      }
+      await preload
+
+      expect(
+        live.toArray
+          .map(
+            ({ primaryRow, secondaryRow }) =>
+              `${primaryRow.id}:${secondaryRow.id}`,
+          )
+          .sort(),
+      ).toEqual([`c:c-child`, `d:d-child`])
+      expect(live.isLoadingSubset).toBe(false)
+      expect(live.utils.lastSubsetError).toBeUndefined()
+    } finally {
+      for (const { gate } of secondaryLoads) gate.resolve()
+      await Promise.all([live.cleanup(), primary.cleanup(), secondary.cleanup()])
+    }
+  })
+
+  it(`keeps independent joined loads isolated when they settle in reverse`, async () => {
+    type Primary = { id: string; joinKey: string }
+    type Secondary = { id: string; joinKey: string }
+    const pending: Array<{
+      options: LoadSubsetOptions
+      gate: ReturnType<typeof createDeferred<void>>
+    }> = []
+    const completionOrder: Array<number> = []
+    const primary = createCollection<Primary>({
+      id: `ordered-independent-primary`,
+      getKey: ({ id }) => id,
+      syncMode: `eager`,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({ type: `insert`, value: { id: `a`, joinKey: `a` } })
+          write({ type: `insert`, value: { id: `b`, joinKey: `b` } })
+          commit()
+          markReady()
+        },
+      },
+    })
+    const secondaryRows: Array<Secondary> = [
+      { id: `a-child`, joinKey: `a` },
+      { id: `b-child`, joinKey: `b` },
+    ]
+    const delivered = new Set<string>()
+    const secondary = createCollection<Secondary>({
+      id: `ordered-independent-secondary`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          markReady()
+          return {
+            loadSubset: async (options) => {
+              const index = pending.length
+              const gate = createDeferred<void>()
+              pending.push({ options, gate })
+              await gate.promise
+              const rows = secondaryRows.filter(
+                (candidate) =>
+                  !delivered.has(candidate.id) &&
+                  (!options.where ||
+                    evaluateReferenceExpression(options.where, candidate) ===
+                      true),
+              )
+              for (const row of rows) {
+                delivered.add(row.id)
+                begin()
+                write({ type: `insert`, value: row })
+                const receipt = commit(options.signal)
+                if (receipt !== true) await receipt
+              }
+              completionOrder.push(index)
+            },
+          }
+        },
+      },
+    })
+    const createJoined = (id: `a` | `b`) =>
+      createLiveQueryCollection((q) =>
+        q
+          .from({ primaryRow: primary })
+          .where(({ primaryRow }) => eq(primaryRow.id, id))
+          .innerJoin(
+            { secondaryRow: secondary },
+            ({ primaryRow, secondaryRow }) =>
+              eq(primaryRow.joinKey, secondaryRow.joinKey),
+          ),
+      )
+    const first = createJoined(`a`)
+    const second = createJoined(`b`)
+
+    try {
+      const firstPreload = first.preload()
+      await vi.waitFor(() => expect(pending).toHaveLength(1))
+      const secondPreload = second.preload()
+      await vi.waitFor(() => expect(pending).toHaveLength(2))
+      let firstSettled = false
+      void firstPreload.finally(() => {
+        firstSettled = true
+      })
+
+      pending[1]!.gate.resolve()
+      await secondPreload
+      await flushPromises()
+      expect(firstSettled).toBe(false)
+      expect(
+        second.toArray.map(
+          ({ primaryRow, secondaryRow }) =>
+            `${primaryRow.id}:${secondaryRow.id}`,
+        ),
+      ).toEqual([`b:b-child`])
+
+      pending[0]!.gate.resolve()
+      await firstPreload
+      expect(completionOrder).toEqual([1, 0])
+      expect(
+        first.toArray.map(
+          ({ primaryRow, secondaryRow }) =>
+            `${primaryRow.id}:${secondaryRow.id}`,
+        ),
+      ).toEqual([`a:a-child`])
+      expect(first.utils.lastSubsetError).toBeUndefined()
+      expect(second.utils.lastSubsetError).toBeUndefined()
+    } finally {
+      for (const { gate } of pending) gate.resolve()
+      await Promise.all([
+        first.cleanup(),
+        second.cleanup(),
+        primary.cleanup(),
+        secondary.cleanup(),
+      ])
     }
   })
 

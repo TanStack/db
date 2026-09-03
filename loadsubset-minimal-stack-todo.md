@@ -236,7 +236,7 @@ explicitly removed.
 | A failed include-demand release cannot suppress a later incarnation or poison a valid source commit          | `includes-temporal-oracle.test.ts` fixed/generated release-reentry laws                                                               | restored and covered                                                                  |
 | Effect cleanup reports release failure, retains only failed cleanup debt, and retries on the next dispose     | `effect.test.ts` Error and falsy-throw cleanup cases plus obsolete-demand release                                                     | restored; red/green found retry loss                                                   |
 | The same public demand path yields the same rows and lifecycle state across entry points                      | live collection/Effect parity in `ordered-work-oracle.property.test.ts`                                                                | covered                                                                               |
-| Out-of-order settlements and same-tick cleanup/restart preserve the recomputed result                         | replay settlement-order model and scheduler property; pagination multi-source recomputation                                            | covered                                                                               |
+| Out-of-order settlements and same-tick cleanup/restart preserve the recomputed result                         | replay settlement-order model and scheduler property; ordered multi-source public traces                                               | restored and covered                                                                  |
 | Generated histories visibly reach failure, sharing, restart, tied/null, and beyond-end regimes                | explicit reach checks plus pagination's exhaustive fixtures                                                                            | covered                                                                               |
 | No-progress ordered loads stop without false exhaustion, hidden diagnostics, or an identical request loop     | `ordered-work-oracle.property.test.ts`; focused live/Effect no-progress script                                                         | covered                                                                               |
 | A filtered join starts one exact demand per source rather than repeating graph work                           | `ordered-work-oracle.property.test.ts` “loads each source of a filtered join once”                                                     | restored and covered                                                                  |
@@ -552,7 +552,11 @@ explicitly removed.
 - [x] Restore the end-to-end hydration → adapter replacement → late hydration
       authority law. A mutation that retained provisional hydration authority
       failed the restored public assertion; all 38 DbClient tests pass.
-- [ ] Restore ordered multi-source late and out-of-order settlement laws.
+- [x] Restore ordered multi-source late and out-of-order settlement laws. Two
+      compact public traces replace the topology model: a tied primary exhausts
+      before a delayed child publishes, and two independent child loads settle
+      in reverse order without sharing readiness. All 16 ordered-work tests
+      pass.
 - [x] Restore the `Effect × autoIndex: off × joined limit(0)` no-work law and
       its live-collection peer. The test red-tested a real child-source fetch:
       a zero window suppressed the ordered source but still eagerly loaded an
