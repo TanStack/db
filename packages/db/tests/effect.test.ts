@@ -8,6 +8,7 @@ import {
 } from './utils.js'
 import type {
   DeltaEvent,
+  Effect,
   SubscriptionLoadSubsetErrorEvent,
 } from '../src/index.js'
 
@@ -765,6 +766,48 @@ describe(`createEffect`, () => {
 
         await effect.dispose()
         expect(unloadCount).toBe(2)
+      } finally {
+        await effect.dispose()
+        await source.cleanup()
+      }
+    })
+
+    it(`retains a failed source release across reentrant disposal`, async () => {
+      const failure = new Error(`outer source release failed`)
+      let unloadCount = 0
+      let effect!: Effect
+      const source = createCollection<{ id: number }>({
+        id: `effect-reentrant-cleanup-error`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => true,
+              unloadSubset: () => {
+                unloadCount++
+                if (unloadCount === 1) {
+                  void effect.dispose()
+                  throw failure
+                }
+              },
+            }
+          },
+        },
+      })
+      effect = createEffect({
+        query: (q) => q.from({ source }),
+        onBatch: () => {},
+      })
+
+      try {
+        await flushPromises()
+        await expect(effect.dispose()).rejects.toBe(failure)
+        expect(unloadCount).toBe(2)
+
+        await effect.dispose()
+        expect(unloadCount).toBe(3)
       } finally {
         await effect.dispose()
         await source.cleanup()

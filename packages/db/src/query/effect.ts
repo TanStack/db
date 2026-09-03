@@ -989,11 +989,14 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
     // Immediately unsubscribe from every source, even if one release fails.
     let firstCleanupFailure: { error: unknown } | undefined
-    for (const unsubscribe of this.unsubscribeCallbacks) {
+    for (const unsubscribe of [...this.unsubscribeCallbacks]) {
       try {
         unsubscribe()
         this.unsubscribeCallbacks.delete(unsubscribe)
       } catch (error) {
+        // A reentrant dispose can remove this callback while the outer call is
+        // still running. The failing attempt still owns the release.
+        this.unsubscribeCallbacks.add(unsubscribe)
         firstCleanupFailure ??= { error }
       }
     }
