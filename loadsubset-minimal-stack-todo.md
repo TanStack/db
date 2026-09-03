@@ -159,11 +159,11 @@ row means every distinct public law has a named destination and has been run.
 - [x] `window-state.test.ts`: retain live-row admission, stale-boundary fencing,
       replay recovery, and shrink/regrow behavior through public rows and
       requests. Reject inferred-coverage state transitions.
-- [ ] `includes-collection-oracle.property.test.ts`: retain recovery retry,
+- [x] `includes-collection-oracle.property.test.ts`: retain recovery retry,
       cleanup during publication, callback-created work, nested-window failure
       recovery, order-only moves, and root/facade atomicity unless a stronger
       public test names the same law.
-- [ ] `includes-publication-oracle.test.ts`: retain pending-derived-mutation
+- [x] `includes-publication-oracle.test.ts`: retain pending-derived-mutation
       source publication through the collection state/publication oracles.
 - [ ] `electric.test.ts`: retain adapter-specific applied-commit waiting,
       cancellation/error priority, two-request cursor settlement, refresh
@@ -219,6 +219,9 @@ explicitly removed.
 | Reentrant cleanup cannot erase the exact synchronous ordered-load error                                       | `subset-error-matrix.test.ts` “preserves a synchronous ordered error…”                                                                 | restored and covered                                                                  |
 | Ready transitions survive callback failure, stop when superseded, and restart as a fresh cycle                | `collection-lifecycle.test.ts`; `collection-events.test.ts`; `query/scheduler.test.ts`                                                 | restored and covered                                                                  |
 | An already-aborted demand starts no eager, deferred, or adapter work and rejects with `AbortError`            | `collection.test.ts`                                                                                                                   | restored and covered                                                                  |
+| Cleanup during a root/facade publication suppresses callbacks from the cleaned facade                         | `includes-collection-oracle.property.test.ts`                                                                                          | restored as a public observation                                                      |
+| Internal order-only swaps propagate through root, Collection, array, scalar, and materialized consumers       | generated adjacent swaps in `includes-collection-oracle.property.test.ts`                                                              | restored without private revision counters                                            |
+| Pending optimistic work never exposes a mixed source/query publication, including same-key confirmation       | collection metadata/state oracles plus the layered-query publication oracle                                                           | retained through independent public-state models                                      |
 
 ### Main-branch test audit
 
@@ -370,6 +373,19 @@ explicitly removed.
       covers both consumer entry points, and Temporal plus opaque sortable
       operands are observed at the adapter boundary. The three focused files
       are 145/145 green with no type errors.
+- [x] Audited every removed includes-collection case. Combined recovery is
+      covered by the retained root and facade failure/retry tests; nested
+      window rollback is covered at the public window-controller boundary;
+      callback-created work and deferral cleanup are covered by the sync
+      reentrancy suite. Restored the two unique public laws: cleanup during a
+      root/facade publication and generated internal order-only swaps across
+      every materialization. The five-file includes/publication run is 106/106
+      green with no type errors.
+- [x] Mapped the removed pending-derived-mutation matrix to the independent
+      collection metadata and state-retention oracles, then verified both
+      through the layered-query publication oracle. The old Cartesian matrix
+      repeated the same collection law at each query shape; the retained tests
+      keep the collection law and the graph transport law separate.
 
 ## Remaining execution
 
