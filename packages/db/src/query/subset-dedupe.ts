@@ -1,19 +1,12 @@
 import { getLoadSubsetDemandKey } from './ir-stable-identity.js'
 import { Func, PropRef, Value } from './ir.js'
 import type { BasicExpression } from './ir.js'
-import type {
-  LoadSubsetFn,
-  LoadSubsetOptions,
-  LoadSubsetResult,
-} from '../types.js'
+import type { LoadSubsetFn, LoadSubsetOptions } from '../types.js'
 
 /** Deduplicates exact canonical demands without inferring broader coverage. */
 export class DeduplicatedLoadSubset {
   private readonly completed = new Set<string | undefined>()
-  private readonly inflight = new Map<
-    string | undefined,
-    Promise<void | LoadSubsetResult>
-  >()
+  private readonly inflight = new Map<string | undefined, Promise<void>>()
   private generation = 0
 
   constructor(
@@ -23,9 +16,7 @@ export class DeduplicatedLoadSubset {
     },
   ) {}
 
-  loadSubset = (
-    options: LoadSubsetOptions,
-  ): true | Promise<void | LoadSubsetResult> => {
+  loadSubset = (options: LoadSubsetOptions): true | Promise<void> => {
     const request = cloneOptions(options)
     const key = getLoadSubsetDemandKey(request)
     if (this.completed.has(key)) {

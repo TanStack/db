@@ -3,4 +3,4 @@
 '@tanstack/db-sqlite-persistence-core': patch
 ---
 
-Allow `loadSubset` adapters to report whether more rows exist and preserve applied, request-scoped outcomes through live-query demand, persistence, and window coordination.
+Settle `loadSubset` only after its sync writes are visible, and harden ordered loading, replay, cancellation, and adapter ownership without inferring broader source coverage.

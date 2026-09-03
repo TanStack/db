@@ -356,6 +356,12 @@ explicitly removed.
       of staying stale while scheduling requests forever. Also aligned the
       ready-listener test with terminal unsubscribe. Both focused suites are
       51/51 green with no type errors.
+- [x] Removed the unused source-outcome API and its stale architecture claim.
+      `loadSubset` again exposes only exact successful settlement; `hasMore`
+      never becomes inferred coverage. This deletes the unsafe outcome-free
+      state distinction while keeping old `true` and `Promise<void>` adapters
+      source-compatible. The four focused core suites are 67/67 green and the
+      persistence package is 122/122 green, both with no type errors.
 - [x] Restored Electric's public settlement and resource-lifetime laws instead
       of retaining the deleted applied-commit-capture helper. The external
       signal cleanup law red-tested a real listener leak; cleanup now removes

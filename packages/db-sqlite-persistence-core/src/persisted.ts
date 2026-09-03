@@ -23,7 +23,6 @@ import type {
   InsertMutationFnParams,
   LoadSubsetFn,
   LoadSubsetOptions,
-  LoadSubsetResult,
   PendingMutation,
   SyncAppliedReceipt,
   SyncConfig,
@@ -1018,7 +1017,7 @@ class PersistedCollectionRuntime<
   async loadSubset(
     options: LoadSubsetOptions,
     upstreamLoadSubset?: LoadSubsetFn,
-  ): Promise<void | LoadSubsetResult> {
+  ): Promise<void> {
     this.activeSubsets.set(this.getSubsetKey(options), options)
 
     const appliedCursor = this.appliedReceiptSequence
@@ -1033,7 +1032,7 @@ class PersistedCollectionRuntime<
       try {
         const maybePromise = upstreamLoadSubset(options)
         if (maybePromise instanceof Promise) {
-          return await maybePromise.catch((error) => {
+          await maybePromise.catch((error) => {
             console.warn(
               `Failed to load remote subset in persisted wrapper:`,
               error,

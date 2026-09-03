@@ -4,10 +4,7 @@ import { PropRef } from '../ir.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
 import type { LazyDemandPlan } from '../compiler/joins.js'
 import type { BasicExpression } from '../ir.js'
-import type {
-  LoadSubsetRequestResult,
-  LoadSubsetResult,
-} from '../../types.js'
+import type { LoadSubsetRequestResult } from '../../types.js'
 
 type DemandSegment = {
   keys: Map<string, unknown>
@@ -99,10 +96,7 @@ export class SubsetDemandController {
     )
     const pending = activeSegments
       .map((segment) => segment.ready)
-      .filter(
-        (ready): ready is Promise<void | LoadSubsetResult> =>
-          ready instanceof Promise,
-      )
+      .filter((ready): ready is Promise<void> => ready instanceof Promise)
     return {
       changed: true,
       empty: nextKeys.size === 0,

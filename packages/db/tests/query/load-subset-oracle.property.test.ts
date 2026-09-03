@@ -17,7 +17,6 @@ import { TraceAssertionError } from '../trace-runner.js'
 import type {
   LoadSubsetOptions,
   LoadSubsetRequestResult,
-  LoadSubsetResult,
   SyncAppliedReceipt,
 } from '../../src/types.js'
 
@@ -52,7 +51,7 @@ const scoreRef = new PropRef<number>([`score`])
 
 function requirePendingAppliedReceipt(
   receipt: LoadSubsetRequestResult,
-): Promise<void | LoadSubsetResult> {
+): Promise<void> {
   if (receipt === true) {
     throw new Error(`Expected an asynchronous subset load`)
   }
@@ -171,7 +170,7 @@ async function assertConcurrentExactDemandTrace({
     deferred: ReturnType<typeof createDeferred<void>>
     promise: Promise<void>
   }> = []
-  const promisesByDemand = new Map<string, Promise<void | LoadSubsetResult>>()
+  const promisesByDemand = new Map<string, Promise<void>>()
   const dedupe = new DeduplicatedLoadSubset({
     loadSubset: () => {
       const deferred = createDeferred<void>()

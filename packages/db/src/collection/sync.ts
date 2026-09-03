@@ -21,7 +21,6 @@ import type {
   LoadSubsetFn,
   LoadSubsetOptions,
   LoadSubsetRequestResult,
-  LoadSubsetResult,
   OptimisticChangeMessage,
   SyncConfigRes,
   SyncMetadataApi,
@@ -35,7 +34,7 @@ import type { Deferred } from '../deferred'
 
 type DeferredLoadSubset = {
   options: LoadSubsetOptions
-  deferred: Deferred<void | LoadSubsetResult>
+  deferred: Deferred<void>
 }
 
 type LoadSubsetOperation = {
@@ -805,7 +804,7 @@ export class CollectionSyncManager<
 
     if (this.syncStartDeferred) {
       this.syncStartRequested = true
-      const deferred = createDeferred<void | LoadSubsetResult>()
+      const deferred = createDeferred<void>()
       const loadOptions = cloneOptions(options)
       // This object is an internal acquisition identity. Snapshot mutable
       // predicate values in place so the later adapter call and unload retain

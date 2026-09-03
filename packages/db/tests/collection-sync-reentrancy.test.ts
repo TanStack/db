@@ -222,7 +222,8 @@ describe(`sync publication reentrancy`, () => {
   it(`publishes nested deferrals as one coherent batch`, async () => {
     const harness = createSyncHarness(`nested-publication-cycle`)
     const { collection } = harness
-    const callbacks: Array<{ changes: Array<string>; visibleValue: string }> = []
+    const callbacks: Array<{ changes: Array<string>; visibleValue: string }> =
+      []
     const subscription = collection.subscribeChanges(
       (changes) => {
         callbacks.push({
@@ -299,7 +300,11 @@ describe(`sync publication reentrancy`, () => {
 
     try {
       const discarded = collection._deferPublication()
-      stageInsert(harness.sync, { id: 1, value: `discarded` }, { immediate: true })
+      stageInsert(
+        harness.sync,
+        { id: 1, value: `discarded` },
+        { immediate: true },
+      )
       harness.sync.commit()
       discarded.discard()
       expect(callbacks).toEqual([])
@@ -1297,7 +1302,7 @@ describe(`sync publication reentrancy`, () => {
               stageInsert(ops, { id: 2, value: `owned` })
               const receipt = ops.commit()
               if (receipt !== true) await receipt
-              return { hasMore: false, appliedRowKeys: [2] }
+              return
             },
             unloadSubset,
           }

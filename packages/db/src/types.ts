@@ -336,18 +336,8 @@ export type LoadSubsetOptions = {
   subscription?: Subscription
 }
 
-/** Optional source facts established by a successful subset load. */
-export interface LoadSubsetResult {
-  /**
-   * Whether the source authoritatively knows that more rows exist beyond this
-   * exact request. Return `undefined` when the source cannot prove either
-   * direction.
-   */
-  hasMore?: boolean
-}
-
 /** @internal Result returned by the collection's normalized subset boundary. */
-export type LoadSubsetRequestResult = true | Promise<void | LoadSubsetResult>
+export type LoadSubsetRequestResult = true | Promise<void>
 
 /**
  * Loads one subset and transfers its ongoing resource ownership only after
@@ -357,9 +347,7 @@ export type LoadSubsetRequestResult = true | Promise<void | LoadSubsetResult>
  * `commit()` calls that establish the loaded subset. A result describes only
  * the exact `options` passed to this call.
  */
-export type LoadSubsetFn = (
-  options: LoadSubsetOptions,
-) => true | Promise<void | LoadSubsetResult>
+export type LoadSubsetFn = (options: LoadSubsetOptions) => true | Promise<void>
 
 /**
  * Confirms whether a committed sync transaction is visible or is waiting for

@@ -476,15 +476,10 @@ as part of that prefix, the subset receipt settles only after the writes are
 visible. Rejected, canceled, and obsolete acquisitions establish no coverage.
 Sources must honor cancellation before publishing request-scoped rows.
 
-After those writes are applied, `loadSubset` may resolve with
-`{ hasMore: boolean | undefined }`. Core normalizes that source fact to
-`continues`, `exhausted`, or `unknown` and binds it to the exact collection
-demand and attempt generation; an omitted result also remains `unknown`. A
-request reused for a narrower demand may
-settle that demand, but its raw extent does not become a fact about the narrower
-demand. Live-query plumbing preserves these outcomes through lazy demand and
-window coordination. Only the root paginated source may use them to replace a
-peek-based pagination decision.
+Successful settlement proves only that the exact request finished and that its
+writes were applied. It does not prove source exhaustion or broader coverage.
+Ordered loading reaches a fixed point from public rows and exact request
+identity; it must not invent source extent from a requested limit.
 
 A transaction `mutationFn` must not start or await collection or live-query
 preloads. User persistence owns the causal queue while that function runs, so a
@@ -582,8 +577,8 @@ create recursive Collection machinery.
    rows after cancellation.
 7. **Applied settlement:** a successful subset load settles only after its
    establishing sync transactions are visible; a source must not add queue
-   priority merely to force the load to settle. Any reported source extent is
-   scoped to that exact demand and attempt.
+   priority merely to force the load to settle. Settlement proves no broader
+   source extent than the exact request.
 8. **Nested propagation:** every materialized relation consumes the fully
    materialized output relation of its children.
 9. **Publication:** reads, events, and downstream queries observe the same

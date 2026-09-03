@@ -8,9 +8,7 @@ import {
   eq,
   toArray,
 } from '../../src/query/index.js'
-import { projectSourceReadiness } from '../load-subset-full-flow-model.js'
 import { flushPromises } from '../utils.js'
-import type { LoadSubsetFullFlowEvent } from '../load-subset-full-flow-model.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 
 type Row = { id: string; group: string }
@@ -29,12 +27,9 @@ it.each([
       options: LoadSubsetOptions
       rows: ReturnType<typeof createDeferred<ReadonlyArray<Child>>>
     }
-    const sessionId = `session`
     const caseId = `${oldOutcome}-${settlementOrder}`
     const parentId = `readiness-generation-parent-${caseId}`
     const childId = `readiness-generation-child-${caseId}`
-    const oldAttemptId = `old-attempt`
-    const freshAttemptId = `fresh-attempt`
     let parentBegin!: () => void
     let parentWrite!: (message: {
       type: `update`
@@ -93,10 +88,7 @@ it.each([
                   const applied = childCommit()
                   if (applied !== true) await applied
                 }
-                return {
-                  hasMore: false,
-                  appliedRowKeys: acquiredRows.map((row) => row.id),
-                }
+                return
               })
             },
             unloadSubset: (options) => {
@@ -124,15 +116,6 @@ it.each([
         })),
       startSync: true,
     })
-    const history: Array<LoadSubsetFullFlowEvent> = [
-      {
-        type: `registerSourceDemand`,
-        sessionId,
-        sourceId: childId,
-        demandId: `children`,
-        attemptId: oldAttemptId,
-      },
-    ]
     let preloadState: `pending` | `resolved` | `rejected` = `pending`
     const preload = live.preload()
     void preload.then(
@@ -171,7 +154,7 @@ it.each([
       await flushPromises()
       expect(pending).toHaveLength(1)
       expect(requestedGroups(pending[0]!.options)).toEqual([`old`])
-      expect(live.status).toBe(projectSourceReadiness(history).status)
+      expect(live.status).toBe(`loading`)
       expect(preloadState).toBe(`pending`)
 
       parentBegin()
@@ -190,54 +173,24 @@ it.each([
       expect(pending[0]!.options.signal?.aborted).toBe(true)
       expect(pending[1]!.options.signal?.aborted).toBe(false)
       expectUnloads(pending[0]!.options)
-      history.push(
-        {
-          type: `retireSourceDemand`,
-          sessionId,
-          sourceId: childId,
-          demandId: `children`,
-          attemptId: oldAttemptId,
-        },
-        {
-          type: `registerSourceDemand`,
-          sessionId,
-          sourceId: childId,
-          demandId: `children`,
-          attemptId: freshAttemptId,
-        },
-      )
-      expect(live.status).toBe(projectSourceReadiness(history).status)
+      expect(live.status).toBe(`loading`)
       expect(preloadState).toBe(`pending`)
 
       const freshChild: Child = { id: `fresh-child`, group: `fresh` }
+      let freshHasSettled = false
       const settleOld = async () => {
         if (oldOutcome === `resolve`) {
           pending[0]!.rows.resolve([])
         } else {
           pending[0]!.rows.reject(new Error(`retired source demand failed`))
         }
-        history.push({
-          type: `settleSourceDemand`,
-          sessionId,
-          sourceId: childId,
-          demandId: `children`,
-          attemptId: oldAttemptId,
-          outcome: oldOutcome,
-        })
         await flushPromises()
       }
       const settleFresh = async () => {
         expect(child.get(freshChild.id)).toBeUndefined()
         pending[1]!.rows.resolve([freshChild])
-        history.push({
-          type: `settleSourceDemand`,
-          sessionId,
-          sourceId: childId,
-          demandId: `children`,
-          attemptId: freshAttemptId,
-          outcome: `resolve`,
-        })
         await flushPromises()
+        freshHasSettled = true
       }
       const settlements =
         settlementOrder === `old-first`
@@ -245,19 +198,15 @@ it.each([
           : [settleFresh, settleOld]
       for (const settle of settlements) {
         await settle()
-        expect(live.status).toBe(projectSourceReadiness(history).status)
-        expect(preloadState).toBe(
-          projectSourceReadiness(history).status === `ready`
-            ? `resolved`
-            : `pending`,
-        )
+        expect(live.status).toBe(freshHasSettled ? `ready` : `loading`)
+        expect(preloadState).toBe(freshHasSettled ? `resolved` : `pending`)
         expect(live.utils.lastSubsetError).toBeUndefined()
       }
 
       await preload
       await flushPromises()
 
-      expect(live.status).toBe(projectSourceReadiness(history).status)
+      expect(live.status).toBe(`ready`)
       expect(preloadState).toBe(`resolved`)
       expect(live.utils.lastSubsetError).toBeUndefined()
       expect(child.get(freshChild.id)).toEqual(
@@ -292,27 +241,10 @@ it.each([
 it.each([`resolve`, `reject`, `cleanup`] as const)(
   `matches cross-source initial readiness through %s`,
   async (secondOutcome) => {
-    const sessionId = `session-1`
     const leftId = `readiness-left-${secondOutcome}`
     const rightId = `readiness-right-${secondOutcome}`
     const leftDelivery = createDeferred<void>()
     const rightDelivery = createDeferred<void>()
-    const history: Array<LoadSubsetFullFlowEvent> = [
-      {
-        type: `registerSourceDemand`,
-        sessionId,
-        sourceId: leftId,
-        demandId: `all`,
-        attemptId: `left-attempt`,
-      },
-      {
-        type: `registerSourceDemand`,
-        sessionId,
-        sourceId: rightId,
-        demandId: `all`,
-        attemptId: `right-attempt`,
-      },
-    ]
     const createSource = (
       id: string,
       row: Row,
@@ -335,7 +267,7 @@ it.each([`resolve`, `reject`, `cleanup`] as const)(
                   write({ type: `insert`, value: row })
                   const applied = commit()
                   if (applied !== true) await applied
-                  return { hasMore: false, appliedRowKeys: [row.id] }
+                  return
                 }),
               unloadSubset: () => {},
             }
@@ -370,39 +302,22 @@ it.each([`resolve`, `reject`, `cleanup`] as const)(
     void preload.catch(() => undefined)
 
     try {
-      expect(live.status).toBe(projectSourceReadiness(history).status)
+      expect(live.status).toBe(`loading`)
 
       leftDelivery.resolve()
-      history.push({
-        type: `settleSourceDemand`,
-        sessionId,
-        sourceId: leftId,
-        demandId: `all`,
-        attemptId: `left-attempt`,
-        outcome: `resolve`,
-      })
       await flushPromises()
 
-      expect(live.status).toBe(projectSourceReadiness(history).status)
+      expect(live.status).toBe(`loading`)
       expect(live.toArray).toEqual([])
 
       if (secondOutcome === `cleanup`) {
         await live.cleanup()
-        history.push({ type: `cleanupSession`, sessionId })
-        expect(live.status).toBe(projectSourceReadiness(history).status)
+        expect(live.status).toBe(`cleaned-up`)
 
         rightDelivery.resolve()
-        history.push({
-          type: `settleSourceDemand`,
-          sessionId,
-          sourceId: rightId,
-          demandId: `all`,
-          attemptId: `right-attempt`,
-          outcome: `resolve`,
-        })
         await flushPromises()
 
-        expect(live.status).toBe(projectSourceReadiness(history).status)
+        expect(live.status).toBe(`cleaned-up`)
         expect(live.toArray).toEqual([])
         return
       } else if (secondOutcome === `resolve`) {
@@ -410,18 +325,9 @@ it.each([`resolve`, `reject`, `cleanup`] as const)(
       } else {
         rightDelivery.reject(new Error(`right source failed`))
       }
-      history.push({
-        type: `settleSourceDemand`,
-        sessionId,
-        sourceId: rightId,
-        demandId: `all`,
-        attemptId: `right-attempt`,
-        outcome: secondOutcome,
-      })
       await flushPromises()
 
-      const expected = projectSourceReadiness(history)
-      expect(live.status).toBe(expected.status)
+      expect(live.status).toBe(secondOutcome === `resolve` ? `ready` : `error`)
       if (secondOutcome === `resolve`) {
         await expect(preload).resolves.toBeUndefined()
         expect(live.toArray).toEqual([
@@ -429,7 +335,6 @@ it.each([`resolve`, `reject`, `cleanup`] as const)(
         ])
       } else {
         await expect(preload).rejects.toThrow(`right source failed`)
-        expect(expected.failedSources).toEqual([rightId])
       }
     } finally {
       leftDelivery.resolve()
