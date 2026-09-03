@@ -498,6 +498,11 @@ explicitly removed.
       run-all/throw-first callback law for source loaders. Window rollback and
       nested failure behavior remain unchanged; the focused builder, ordered,
       error, and window-controller suites are 279/279 green (6 skipped).
+- [x] Collapsed PowerSync's demand lifecycle to the two states that can exist
+      in its map: provisional and active. Released and failed entries are
+      removed immediately; stopped plus the tracking revision already fence
+      cleanup, so the mirrored lifecycle generation is gone. PowerSync remains
+      105/105 green.
 - [x] Mapped the removed pending-derived-mutation matrix to the independent
       collection metadata and state-retention oracles, then verified both
       through the layered-query publication oracle. The old Cartesian matrix

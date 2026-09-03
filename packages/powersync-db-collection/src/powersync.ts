@@ -607,7 +607,7 @@ function createPowerSyncCollectionConfig<
       function runOnDemandSync() {
         type DemandRecord = {
           options: LoadSubsetOptions
-          state: `provisional` | `active` | `released` | `failed`
+          active: boolean
           cleanup?: CleanupFn
         }
         type PendingRelease = {
@@ -619,14 +619,11 @@ function createPowerSyncCollectionConfig<
         const releasedSubsets = new WeakSet<LoadSubsetOptions>()
         const pendingReleases: Array<PendingRelease> = []
         let stopped = false
-        let lifecycleGeneration = 0
         let trackingRevision = 0
         let reconciledTrackingRevision = 0
         let rebuildPromise: Promise<void> | null = null
         let drainingReleases = false
         let releaseRetryTimer: ReturnType<typeof setTimeout> | undefined
-        const hasStopped = () => stopped
-
         const startup = start()
         void startup.catch((error) =>
           database.logger.error(
@@ -637,22 +634,18 @@ function createPowerSyncCollectionConfig<
 
         const activeWhereExpressions = () =>
           Array.from(demands.values())
-            .filter((demand) => demand.state === `active`)
+            .filter((demand) => demand.active)
             .map((demand) => demand.options.where)
 
         // One reconciliation owns every queued revision so callers cannot
         // settle against a stale trigger configuration.
         const reconcileTracking = async (): Promise<void> => {
           while (
-            !hasStopped() &&
+            !stopped &&
             reconciledTrackingRevision !== trackingRevision
           ) {
-            const generation = lifecycleGeneration
             const revision = trackingRevision
-            const isCurrent = () =>
-              !hasStopped() &&
-              lifecycleGeneration === generation &&
-              trackingRevision === revision
+            const isCurrent = () => !stopped && trackingRevision === revision
             const appliedReceipts: Array<SyncAppliedReceipt> = []
 
             await database.writeLock(async (ctx) => {
@@ -722,41 +715,39 @@ function createPowerSyncCollectionConfig<
         const loadSubset = async (
           options: LoadSubsetOptions,
         ): Promise<void> => {
-          if (hasStopped()) return
+          if (stopped) return
           // Never create a trigger that has no observer to drain its diff table.
           await startup
           if (
-            hasStopped() ||
+            stopped ||
             releasedSubsets.has(options) ||
             options.signal?.aborted
           ) {
             return
           }
 
-          const demand: DemandRecord = { options, state: `provisional` }
+          const demand: DemandRecord = { options, active: false }
           demands.set(options, demand)
           try {
             const cleanup = await restConfig.onLoadSubset?.(options)
             if (cleanup) demand.cleanup = cleanup
           } catch (error) {
-            demand.state = `failed`
             demands.delete(options)
             throw error
           }
 
           if (
-            hasStopped() ||
+            stopped ||
             releasedSubsets.has(options) ||
             options.signal?.aborted ||
             demands.get(options) !== demand
           ) {
-            demand.state = `released`
             demands.delete(options)
             demand.cleanup?.()
             return
           }
 
-          demand.state = `active`
+          demand.active = true
           trackingRevision++
           await rebuildTracking()
         }
@@ -780,7 +771,7 @@ function createPowerSyncCollectionConfig<
           const departingWhereSQL = toInlinedWhereClause(compiledDeparting)
           let rowsToEvict: Array<{ id: string }>
           for (;;) {
-            if (hasStopped()) return
+            if (stopped) return
             const revision = trackingRevision
             const active = activeWhereExpressions()
             let evictionSQL: string
@@ -799,7 +790,7 @@ function createPowerSyncCollectionConfig<
             }
 
             rowsToEvict = await database.getAll<{ id: string }>(evictionSQL)
-            if (hasStopped()) return
+            if (stopped) return
             if (trackingRevision === revision) break
           }
           if (rowsToEvict.length > 0) {
@@ -813,7 +804,7 @@ function createPowerSyncCollectionConfig<
         }
 
         function scheduleReleaseDrain(delay = 0): void {
-          if (hasStopped() || drainingReleases || releaseRetryTimer) return
+          if (stopped || drainingReleases || releaseRetryTimer) return
           if (delay > 0) {
             releaseRetryTimer = setTimeout(() => {
               releaseRetryTimer = undefined
@@ -825,12 +816,12 @@ function createPowerSyncCollectionConfig<
         }
 
         async function drainReleases(): Promise<void> {
-          if (hasStopped() || drainingReleases) return
+          if (stopped || drainingReleases) return
           drainingReleases = true
           let retryDelay = 0
           try {
             const attempts = pendingReleases.length
-            for (let index = 0; !hasStopped() && index < attempts; index++) {
+            for (let index = 0; !stopped && index < attempts; index++) {
               const pending = pendingReleases.shift()!
               try {
                 await performPhysicalRelease(pending.options)
@@ -858,16 +849,9 @@ function createPowerSyncCollectionConfig<
         const unloadSubset = (options: LoadSubsetOptions): void => {
           releasedSubsets.add(options)
           const demand = demands.get(options)
-          if (
-            !demand ||
-            demand.state === `released` ||
-            demand.state === `failed`
-          ) {
-            return
-          }
+          if (!demand) return
 
-          const wasActive = demand.state === `active`
-          demand.state = `released`
+          const wasActive = demand.active
           demands.delete(options)
           if (wasActive) trackingRevision++
           try {
@@ -890,8 +874,6 @@ function createPowerSyncCollectionConfig<
         return {
           cleanup: () => {
             stopped = true
-            lifecycleGeneration++
-            trackingRevision++
             clearTimeout(releaseRetryTimer)
             releaseRetryTimer = undefined
             database.logger.info(
@@ -907,7 +889,6 @@ function createPowerSyncCollectionConfig<
                   error,
                 )
               }
-              demand.state = `released`
             }
             demands.clear()
             pendingReleases.length = 0
