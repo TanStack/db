@@ -165,7 +165,7 @@ explicitly removed.
 | Binary, Date, Temporal, opaque-reference, and invalid-value identity match evaluator semantics                | comparison, cursor, and `ir-stable-identity.test.ts`                                                                                   | covered; focused suite 323/323 green (6 skipped)                                      |
 | PowerSync publishes only active demand, fences startup/cleanup, settles current tracking, and retries release | compact public trigger/request/release tests in PowerSync on-demand and load-hook suites                                               | restored; red/green; adapter suite 105/105 green                                      |
 | Persistence keeps replacement ownership and preserves reject/abort semantics                                  | persistence adapter suite                                                                                                              | retained; run adapter suite                                                           |
-| Query DB releases idle ownership without recreating work                                                      | Query DB ownership lifecycle suite                                                                                                     | retained; run adapter suite                                                           |
+| Query DB keeps exact owners, idles after eager cache GC, restarts on remount, and clears retained metadata    | Query DB ownership lifecycle suite plus public cache/metadata cleanup tests                                                             | restored; red/green; adapter suite 336/337 green (1 skipped)                          |
 | Electric waits for public commit application, waits for both cursor requests, and removes session listeners   | focused Electric sync-mode tests                                                                                                       | restored and covered; adapter suite 495/495 green                                     |
 | The same public demand path yields the same rows and lifecycle state across entry points                      | live collection/Effect parity in `ordered-work-oracle.property.test.ts`                                                                | covered                                                                               |
 | Out-of-order settlements and same-tick cleanup/restart preserve the recomputed result                         | replay settlement-order model and scheduler property; pagination multi-source recomputation                                            | covered                                                                               |
@@ -309,6 +309,13 @@ explicitly removed.
       failure, superseded-trigger disposal, and cleanup-after-trigger-creation.
       PowerSync is 105/105 green
       with no type errors.
+- [x] Replaced Query DB's private ownership-map inspection with six public row,
+      cache, request, and metadata laws. The new idle-GC law red-tested an eager
+      refetch loop. The retained-metadata law then found that explicit cleanup
+      left a GC marker behind, and the restart law found that async cleanup could
+      remove the next sync session's Query. Cleanup is now synchronous at the
+      adapter boundary, eager cache GC stays idle until remount, and the full
+      adapter suite is 336/337 green (1 skipped) with no type errors.
 
 ## Remaining execution
 

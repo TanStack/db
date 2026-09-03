@@ -821,6 +821,11 @@ export function queryCollectionOptions(
   // 3. Decrements refcount and GCs rows where count reaches 0
   const queryRefCounts = new Map<string, number>()
 
+  // Eager mode owns its base query for the collection's whole lifetime. Query
+  // cache GC may remove the idle cache entry, but that is not a release of the
+  // collection's ownership or its materialized rows.
+  let collectionLifetimeQuery: string | undefined
+
   const addRowOwner = (rowKey: string | number, hashedQueryKey: string) => {
     const owners = rowToQueries.get(rowKey) || new Set<string>()
     owners.add(hashedQueryKey)
@@ -1570,13 +1575,19 @@ export function queryCollectionOptions(
 
         newItemsMap.forEach((newItem, key) => {
           const owners = getPersistedOwners(key)
-          if (!owners.has(hashedQueryKey)) {
+          const addsOwner = !owners.has(hashedQueryKey)
+          const insertsRow = !currentSyncedItems.has(key)
+          if (addsOwner) {
             owners.add(hashedQueryKey)
-            setPersistedOwners(key, owners)
           }
           addRowOwner(key, hashedQueryKey)
-          if (!currentSyncedItems.has(key)) {
+          if (insertsRow) {
             write({ type: `insert`, value: newItem })
+          }
+          if (addsOwner || insertsRow) {
+            // An insert clears stale metadata for its key. Stage ownership
+            // afterward so rows and ownership commit as one state change.
+            setPersistedOwners(key, owners)
           }
         })
 
@@ -1805,6 +1816,22 @@ export function queryCollectionOptions(
       unsubscribes.clear()
     }
 
+    const ensureCollectionLifetimeQuery = () => {
+      if (
+        collectionLifetimeQuery === undefined ||
+        state.observers.has(collectionLifetimeQuery)
+      ) {
+        return
+      }
+
+      const result = createQueryFromOpts({})
+      if (result instanceof Promise) {
+        result.catch(() => {
+          // Errors are handled by the query result handler.
+        })
+      }
+    }
+
     // Mark that sync has started
     syncStarted = true
 
@@ -1813,6 +1840,7 @@ export function queryCollectionOptions(
       `subscribers:change`,
       ({ subscriberCount }) => {
         if (subscriberCount > 0) {
+          ensureCollectionLifetimeQuery()
           subscribeToQueries()
         } else if (subscriberCount === 0) {
           unsubscribeFromQueries()
@@ -1822,13 +1850,8 @@ export function queryCollectionOptions(
 
     // If syncMode is eager, create the initial query without any predicates
     if (syncMode === `eager`) {
-      // Catch any errors to prevent unhandled rejections
-      const initialResult = createQueryFromOpts({})
-      if (initialResult instanceof Promise) {
-        initialResult.catch(() => {
-          // Errors are already handled by the query result handler
-        })
-      }
+      collectionLifetimeQuery = hashKey(generateQueryKeyFromOptions({}))
+      ensureCollectionLifetimeQuery()
     } else {
       if (startupRetentionSettled) {
         markReady()
@@ -1884,7 +1907,11 @@ export function queryCollectionOptions(
 
       const shouldWriteMetadata =
         metadata !== undefined && nextOwnersByRow.size > 0
-      const needsTransaction = shouldWriteMetadata || rowsToDelete.length > 0
+      const retentionKey = `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`
+      const hasRetentionMarker =
+        metadata?.collection.get(retentionKey) !== undefined
+      const needsTransaction =
+        shouldWriteMetadata || rowsToDelete.length > 0 || hasRetentionMarker
       if (needsTransaction) {
         begin()
       }
@@ -1907,6 +1934,10 @@ export function queryCollectionOptions(
         })
       }
 
+      if (hasRetentionMarker) {
+        metadata.collection.delete(retentionKey)
+      }
+
       if (needsTransaction) {
         commit()
       }
@@ -1915,6 +1946,9 @@ export function queryCollectionOptions(
       queryToRows.delete(hashedQueryKey)
       hashToQueryKey.delete(hashedQueryKey)
       queryRefCounts.delete(hashedQueryKey)
+      if (collectionLifetimeQuery === hashedQueryKey) {
+        collectionLifetimeQuery = undefined
+      }
       effectivePersistedGcTimes.delete(hashedQueryKey)
     }
 
@@ -1928,11 +1962,21 @@ export function queryCollectionOptions(
       const effectivePersistedGcTime =
         effectivePersistedGcTimes.get(hashedQueryKey)
 
+      if (collectionLifetimeQuery === hashedQueryKey) {
+        return
+      }
+
       if (refcount <= 0) {
         // Drop our subscription so hasListeners reflects only active consumers
         unsubscribes.get(hashedQueryKey)?.()
         unsubscribes.delete(hashedQueryKey)
         unsubscribePendingReadyListeners(hashedQueryKey)
+      }
+
+      // Refcounts are explicit ownership tokens. A cache event can remove the
+      // observer while an active acquisition still owns this query.
+      if (refcount > 0) {
+        return
       }
 
       const hasListeners = observer?.hasListeners() ?? false
@@ -1942,16 +1986,6 @@ export function queryCollectionOptions(
         // Leave refcount at 0 but keep observer so it can resubscribe.
         queryRefCounts.set(hashedQueryKey, 0)
         return
-      }
-
-      // No listeners means the query is truly idle.
-      // Even if refcount > 0, we treat hasListeners as authoritative to prevent leaks.
-      // This can happen if subscriptions are GC'd without calling unloadSubset.
-      if (refcount > 0) {
-        console.warn(
-          `[cleanupQueryIfIdle] Invariant violation: refcount=${refcount} but no listeners. Cleaning up to prevent leak.`,
-          { hashedQueryKey },
-        )
       }
 
       if (
@@ -2009,6 +2043,19 @@ export function queryCollectionOptions(
         if (event.type === `removed`) {
           // Only cleanup if this is OUR query (we track it)
           if (hashToQueryKey.has(hashedKey)) {
+            if (collectionLifetimeQuery === hashedKey) {
+              // Cache removal detaches the old observer. Eager mode still owns
+              // this query, so replace that observer without retiring its rows.
+              unsubscribes.get(hashedKey)?.()
+              unsubscribes.delete(hashedKey)
+              unsubscribePendingReadyListeners(hashedKey)
+              state.observers.delete(hashedKey)
+              queryRefCounts.set(hashedKey, 0)
+              if (collection.subscriberCount > 0) {
+                ensureCollectionLifetimeQuery()
+              }
+              return
+            }
             // TanStack Query GC'd this query after gcTime expired.
             // Use the guarded cleanup path to avoid deleting rows for active queries.
             cleanupQueryIfIdle(hashedKey)
@@ -2016,7 +2063,7 @@ export function queryCollectionOptions(
         }
       })
 
-    const cleanup = async () => {
+    const cleanup = () => {
       unsubscribeFromCollectionEvents()
       unsubscribeFromQueries()
       persistedRetentionTimers.forEach((timer) => {
@@ -2024,7 +2071,6 @@ export function queryCollectionOptions(
       })
       persistedRetentionTimers.clear()
 
-      const allQueryKeys = [...hashToQueryKey.values()]
       const allHashedKeys = new Set([
         ...state.observers.keys(),
         ...queryToRows.keys(),
@@ -2039,13 +2085,11 @@ export function queryCollectionOptions(
       // Unsubscribe from cache events (cleanup already happened above)
       unsubscribeQueryCache()
 
-      // Remove queries from TanStack Query cache
-      await Promise.all(
-        allQueryKeys.map(async (qKey) => {
-          await queryClient.cancelQueries({ queryKey: qKey, exact: true })
-          queryClient.removeQueries({ queryKey: qKey, exact: true })
-        }),
-      )
+      // Removing a Query destroys it and synchronously cancels its retryer.
+      // Finish this before a later collection sync can create a replacement.
+      queryClient.removeQueries({
+        predicate: (query) => allHashedKeys.has(query.queryHash),
+      })
     }
 
     /**
@@ -2294,15 +2338,6 @@ export function queryCollectionOptions(
         }
       },
     }
-  }
-
-  if (typeof process !== `undefined` && process.env.NODE_ENV === `test`) {
-    Object.defineProperty(enhancedInternalSync, `__getOwnershipMapsForTests`, {
-      value: () => ({
-        rowToQueries,
-        queryToRows,
-      }),
-    })
   }
 
   // Create write utils using the manual-sync module
