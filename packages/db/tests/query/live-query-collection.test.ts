@@ -20,7 +20,11 @@ import { createDeferred } from '../../src/deferred'
 import { BTreeIndex } from '../../src/indexes/btree-index'
 import { createFilterFunctionFromExpression } from '../../src/collection/change-events'
 import { Func, Value } from '../../src/query/ir.js'
-import type { ChangeMessage, LoadSubsetOptions } from '../../src/types.js'
+import type {
+  ChangeMessage,
+  LoadSubsetOptions,
+  SyncConfig,
+} from '../../src/types.js'
 
 // Sample user type for tests
 type User = {
@@ -1736,6 +1740,9 @@ describe(`createLiveQueryCollection`, () => {
       type Row = { id: number; rank: number }
       const failure = new Error(`full-source refinement failed`)
       let loadCount = 0
+      let syncOps!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
+      const acquisitions: Array<LoadSubsetOptions> = []
+      const releases: Array<LoadSubsetOptions> = []
       const source = createCollection<Row>({
         id: `ordered-full-source-retry-source`,
         getKey: (row) => row.id,
@@ -1743,11 +1750,14 @@ describe(`createLiveQueryCollection`, () => {
         autoIndex: `eager`,
         defaultIndexType: BTreeIndex,
         sync: {
-          sync: ({ begin, write, commit, markReady }) => {
+          sync: (operations) => {
+            syncOps = operations
+            const { begin, write, commit, markReady } = operations
             markReady()
             return {
               loadSubset: (options) => {
                 loadCount++
+                acquisitions.push(options)
                 begin()
                 write({
                   type: `insert`,
@@ -1757,6 +1767,9 @@ describe(`createLiveQueryCollection`, () => {
                 return loadCount === 1
                   ? Promise.reject(failure)
                   : Promise.resolve()
+              },
+              unloadSubset: (options) => {
+                releases.push(options)
               },
             }
           },
@@ -1782,7 +1795,97 @@ describe(`createLiveQueryCollection`, () => {
         expect(loadCount).toBe(2)
         expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2])
         expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
+
+        syncOps.begin()
+        syncOps.truncate()
+        const replayReceipt = syncOps.commit()
+        if (replayReceipt !== true) await replayReceipt
+        await flushPromises()
+        await flushPromises()
+        expect(loadCount).toBe(3)
+
+        await live.cleanup()
+        expect(releases).toHaveLength(acquisitions.length)
+        for (const [index, acquisition] of acquisitions.entries()) {
+          expect(releases[index]).toBe(acquisition)
+        }
       } finally {
+        await Promise.all([live.cleanup(), source.cleanup()])
+      }
+    })
+
+    it(`publishes a window after its failed full-source demand replays successfully`, async () => {
+      type Row = { id: number; rank: number }
+      const failure = new Error(`full-source refinement failed`)
+      let loadCount = 0
+      let syncOps!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
+      const publications: Array<Array<number>> = []
+      const source = createCollection<Row>({
+        id: `ordered-full-source-replay-recovery-source`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: (operations) => {
+            syncOps = operations
+            operations.markReady()
+            return {
+              loadSubset: (options) => {
+                loadCount++
+                operations.begin()
+                operations.write({
+                  type: `insert`,
+                  value: { id: 1, rank: 1 },
+                })
+                if (loadCount > 1) {
+                  operations.write({
+                    type: `insert`,
+                    value: { id: 2, rank: 2 },
+                  })
+                }
+                operations.commit(options.signal)
+                return loadCount === 1
+                  ? Promise.reject(failure)
+                  : Promise.resolve()
+              },
+            }
+          },
+        },
+      })
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank)
+          .limit(0)
+          .select(({ row }) => ({ id: row.id, rank: row.rank }))
+          .distinct(),
+      )
+      const subscription = live.subscribeChanges(() => {
+        publications.push(Array.from(live.values(), ({ id }) => id))
+      })
+
+      try {
+        await live.preload()
+        await expect(
+          live.utils.setWindow({ offset: 0, limit: 2 }),
+        ).rejects.toBe(failure)
+        expect(Array.from(live.values())).toEqual([])
+
+        syncOps.begin()
+        syncOps.truncate()
+        const replayReceipt = syncOps.commit()
+        if (replayReceipt !== true) await replayReceipt
+        await flushPromises()
+        await flushPromises()
+        expect(loadCount).toBe(2)
+
+        await live.utils.setWindow({ offset: 0, limit: 2 })
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2])
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
+        expect(publications).toEqual([[1, 2]])
+      } finally {
+        subscription.unsubscribe()
         await Promise.all([live.cleanup(), source.cleanup()])
       }
     })
@@ -1868,6 +1971,73 @@ describe(`createLiveQueryCollection`, () => {
       } finally {
         gate.resolve()
         await source.cleanup()
+      }
+    })
+
+    it(`keeps window generations distinct across immediate cleanup and restart`, async () => {
+      type Row = { id: number; rank: number }
+      const oldGate = createDeferred<void>()
+      const newGate = createDeferred<void>()
+      let limitFourCalls = 0
+      const source = createCollection<Row>({
+        id: `ordered-window-restart-generation-source`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: (operations) => {
+            operations.begin()
+            for (let id = 1; id <= 6; id++) {
+              operations.write({ type: `insert`, value: { id, rank: id } })
+            }
+            operations.commit()
+            operations.markReady()
+            return {
+              loadSubset: (options) => {
+                if (options.where || options.limit !== 4) return true
+                limitFourCalls++
+                if (limitFourCalls === 1) {
+                  options.signal?.addEventListener(
+                    `abort`,
+                    () =>
+                      oldGate.reject(new DOMException(`aborted`, `AbortError`)),
+                    { once: true },
+                  )
+                  return oldGate.promise
+                }
+                return newGate.promise
+              },
+            }
+          },
+        },
+      })
+      const live = createLiveQueryCollection((q) =>
+        q.from({ row: source }).orderBy(({ row }) => row.rank).limit(1),
+      )
+
+      try {
+        await live.preload()
+        const abandoned = live.utils.setWindow({ offset: 2, limit: 2 })
+        expect(abandoned).toBeInstanceOf(Promise)
+        const abandonedRejection = expect(abandoned).rejects.toMatchObject({
+          name: `AbortError`,
+        })
+
+        const cleanup = live.cleanup()
+        const preload = live.preload()
+        const replacement = live.utils.setWindow({ offset: 2, limit: 2 })
+        expect(replacement).toBeInstanceOf(Promise)
+        await Promise.all([cleanup, preload, abandonedRejection])
+
+        newGate.resolve()
+        await replacement
+        await live.utils.setWindow({ limit: 1 })
+        expect(live.utils.getWindow()).toEqual({ offset: 2, limit: 1 })
+      } finally {
+        oldGate.resolve()
+        newGate.resolve()
+        await Promise.all([live.cleanup(), source.cleanup()])
       }
     })
 

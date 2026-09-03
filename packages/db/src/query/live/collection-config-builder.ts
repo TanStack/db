@@ -453,6 +453,11 @@ export class CollectionConfigBuilder<
     return this.activeWindowOperation !== undefined
   }
 
+  settleOrderedSourceRecovery(): void {
+    this.orderedLoadFailed = false
+    this.scheduleGraphRun()
+  }
+
   trackOrderedLoadPromise(promise: Promise<unknown>): void {
     // Hold the last complete public snapshot during an initial load or an
     // imperative window move. Source changes that arrive during the move join
@@ -823,7 +828,6 @@ export class CollectionConfigBuilder<
       this.maybeRunGraphFn = undefined
       this.currentWindow = undefined
       this.settledWindow = this.initialWindow
-      this.windowOperationGeneration = 0
       this.isInErrorState = false
       this.fatalQueryError = false
       this.erroredSourceIds.clear()

@@ -309,6 +309,8 @@ export class OrderedSourceLoader {
 
   loadMore(retryFailedFullSource = false): Promise<unknown> | undefined {
     if (!this.active || this.info.limit === 0) return
+    const replaceFailedFullSource =
+      this.fullSourceFailed && retryFailedFullSource
     if (this.fullSourceFailed && retryFailedFullSource) {
       this.fullSource = false
       this.fullSourceFailed = false
@@ -316,7 +318,7 @@ export class OrderedSourceLoader {
     if (this.fullSource) return this.pending
     if (this.fullSourceFailed && !retryFailedFullSource) return this.pending
     if (this.info.requiresFullSource) {
-      this.loadFullSource()
+      this.loadFullSource(replaceFailedFullSource)
       return this.pending
     }
     if (!this.info.index || this.info.orderBy.length !== 1) {
@@ -333,13 +335,14 @@ export class OrderedSourceLoader {
     return this.pending
   }
 
-  loadFullSource(): void {
+  loadFullSource(replaceExistingDemand = false): void {
     if (!this.active || this.fullSource) return
     this.fullSourceFailed = false
     this.fullSource = true
     try {
       this.subscription.requestSnapshot({
         trackLoadSubsetPromise: false,
+        replaceExistingDemand,
         onLoadSubsetResult: (result) => {
           this.observe(result, false, true)
         },

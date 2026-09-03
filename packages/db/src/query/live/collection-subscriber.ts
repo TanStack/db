@@ -386,7 +386,7 @@ export class CollectionSubscriber<
       succeed: () =>
         queueMicrotask(() => {
           this.orderedLoader?.settleFullSourceReplay()
-          this.collectionConfigBuilder.scheduleGraphRun()
+          this.collectionConfigBuilder.settleOrderedSourceRecovery()
         }),
     }
   }

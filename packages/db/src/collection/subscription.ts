@@ -6,6 +6,7 @@ import { compileExpression } from '../query/compiler/evaluators.js'
 import { buildCursor, buildCursorCurrent } from '../utils/cursor.js'
 import { deepEquals } from '../utils.js'
 import { normalizeError } from '../utils/error.js'
+import { getLoadSubsetDemandKey } from '../query/ir-stable-identity.js'
 import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
@@ -37,6 +38,8 @@ type RequestSnapshotOptions = {
   onLoadSubsetResult?: (result: LoadSubsetRequestResult) => void
   /** Called when the local snapshot must fall back from an index to a scan. */
   onUnoptimized?: () => void
+  /** Replace an earlier exact acquisition before retrying it. */
+  replaceExistingDemand?: boolean
 }
 
 type RequestLimitedSnapshotOptions = {
@@ -923,6 +926,10 @@ export class CollectionSubscription
       limit: opts?.limit,
     }
 
+    if (opts?.replaceExistingDemand) {
+      this.releaseMatchingDemand(loadOptions)
+    }
+
     const { demand, result: syncResult } = this.startSubsetDemand(loadOptions)
     if (this.unsubscribed) return false
     if (opts?.where) this.requestedSubsetWhere.set(loadOptions, opts.where)
@@ -990,6 +997,18 @@ export class CollectionSubscription
     )
     if (index === -1) return
 
+    this.releaseDemandAt(index)
+  }
+
+  private releaseMatchingDemand(options: LoadSubsetOptions): void {
+    const key = getLoadSubsetDemandKey(options)
+    const index = this.subsetDemands.findIndex(
+      (demand) => getLoadSubsetDemandKey(demand.requestOptions) === key,
+    )
+    if (index !== -1) this.releaseDemandAt(index)
+  }
+
+  private releaseDemandAt(index: number): void {
     const demand = this.subsetDemands[index]
     if (!demand) return
     this.subsetDemands.splice(index, 1)

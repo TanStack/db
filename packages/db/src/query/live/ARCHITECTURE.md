@@ -492,7 +492,10 @@ equality as an ordered continuation. An asynchronous failure of that
 full-source acquisition does not start duplicate recovery work. It keeps the
 logical demand so a later truncate replay can retry one authoritative
 replacement, and clears the loader's completion marker so an explicit retry
-of the window can issue the request again.
+of the window can issue the request again. That explicit retry retires and
+releases the earlier failed acquisition before installing its replacement, so
+a later truncate replays one logical demand rather than both attempts. A
+successful authoritative replay clears the failed publication gate.
 
 An initial ordered load or imperative window move includes every page,
 tie-boundary request, and forward refill needed to reach its fixed point. Its
@@ -509,6 +512,9 @@ Partial window options inherit omitted fields from the active requested window,
 or from the last settled window when no move is active. Collection cleanup
 rejects a pending window operation with `AbortError`; it cannot report success
 after discarding the graph and requested window.
+Window-operation generations stay monotonic across cleanup and restart, so a
+late rejection from an abandoned session cannot reset the replacement
+session's requested window.
 Ordinary source mutations stay synchronous except while an initial ordered
 load or imperative window move owns this publication barrier. Mutations that
 arrive during that interval join the private state and publish with the

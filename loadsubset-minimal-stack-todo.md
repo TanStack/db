@@ -749,6 +749,13 @@ explicitly removed.
       move with `AbortError` instead of falsely reporting that its discarded
       result became visible. All three public regressions failed before the
       fixes and passed after them.
+- [x] Close the recovery follow-up audit. An explicit full-source retry now
+      replaces its failed logical demand, so later replay and cleanup acquire
+      and release each exact lease once. A successful authoritative replay
+      clears the ordered publication latch and emits one complete window.
+      Window-operation generations remain monotonic across cleanup/restart,
+      preventing an abandoned rejection from corrupting the new session's
+      partial-window base. All three public traces failed before the fixes.
 - [x] Measure source and compressed bundle size against both `origin/main` and
       the large RFC stack. Across all package `src` trees, the old stack was
       +10,545/-1,692 lines (net +8,853) while this tree is +2,006/-1,302
