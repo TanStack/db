@@ -110,30 +110,21 @@ helper that production uses.
       plus `DeduplicatedLoadSubset` tests prove exact sharing. Split/merge
       acquisition equivalence is deliberately absent because the product no
       longer promises subset algebra.
-- [x] List each deliberate mutation and the assertion that kills it:
-      - count an aborted obsolete replay as failed and let any attempt choose
-        the final outcome -> `lets the newest successful replay replace an
-        older failed replay` rejects the missing publication;
-      - remove identical page/boundary suppression -> `settles an underfilled
-        source without repeating one continuation forever` exceeds its finite
-        request bound;
-      - page a joined source instead of taking the conservative full-source
-        path -> `refills a joined result window through a contract-compliant
-        source` rejects the extra limited requests;
-      - unload the same physical acquisition twice -> `releases every
-        successful overlapping replay acquisition` rejects the release count;
-      - flush a truncate replay before its pending demands settle -> `uses the
-        newest complete multi-demand replay` observes a partial empty snapshot;
-      - disable sync-session epoch checks -> the fixed-seed cleanup/restart
-        property observes an old session row in its replacement;
-      - cache an asynchronously completed request after owner abort -> `does
-        not cache work that settles after its owner aborts` rejects the skipped
-        retry;
-      - cache a rejected request -> `retries an exact demand after rejection`
-        rejects the skipped retry;
-      - seed an ordered cursor from an unrelated local row -> `does not derive
-        an ordered boundary from another demand's local row` rejects the
-        foreign cursor.
+- [x] List each deliberate mutation and the assertion that kills it: - count an aborted obsolete replay as failed and let any attempt choose
+      the final outcome -> `lets the newest successful replay replace an
+      older failed replay` rejects the missing publication; - remove identical page/boundary suppression -> `settles an underfilled
+      source without repeating one continuation forever` exceeds its finite
+      request bound; - page a joined source instead of taking the conservative full-source
+      path -> `refills a joined result window through a contract-compliant
+      source` rejects the extra limited requests; - unload the same physical acquisition twice -> `releases every
+      successful overlapping replay acquisition` rejects the release count; - flush a truncate replay before its pending demands settle -> `uses the
+      newest complete multi-demand replay` observes a partial empty snapshot; - disable sync-session epoch checks -> the fixed-seed cleanup/restart
+      property observes an old session row in its replacement; - cache an asynchronously completed request after owner abort -> `does
+      not cache work that settles after its owner aborts` rejects the skipped
+      retry; - cache a rejected request -> `retries an exact demand after rejection`
+      rejects the skipped retry; - seed an ordered cursor from an unrelated local row -> `does not derive
+      an ordered boundary from another demand's local row` rejects the
+      foreign cursor.
 - [x] Do not add a shared on-demand source fixture: only two current tests need
       the protocol, and their local fixtures remain clearer than a premature
       helper.
@@ -638,6 +629,27 @@ explicitly removed.
       even when its adapter promise never settles. The direct replay oracle
       cannot see the graph boundary, so the retained live-query regressions
       remain in the ordered-work and graph replay suites.
+- [x] Retire the graph replay gate when its last logical demand leaves after a
+      failure. A public include trace first proved that an unrelated parent
+      deletion stayed hidden forever; it now publishes as soon as the failed
+      child route retires.
+- [x] Keep one ordered full-source demand across an asynchronous recovery
+      failure. The next truncate now replays that exact demand once, restores
+      the authoritative source, and publishes one complete top-K replacement.
+- [x] Separate retired cleanup leases from active logical demands. A failed
+      unload remains retryable at cleanup but no longer joins later truncate
+      replay or contributes to loading status.
+- [x] Make the ordered-provider oracle apply ordinary predicates before its
+      window. This red-tested a locale-collation hole: boundary equality was
+      mistaken for a safe refinement even when provider and local ordering can
+      disagree. Unsupported string order now falls back to one unbounded load.
+- [x] Use the same conforming provider model for ordinary boundary loads. It
+      exposed another false green: multi-column prefix loading did not
+      revalidate after a non-boundary delete because the prior prefix request
+      stayed deduped. Collection and Effect loaders now invalidate finite
+      prefix work whenever a delete or update can change its membership.
+- [ ] Make every RFC oracle reachable from the package oracle script and add
+      publication-count assertions to generated pagination histories.
 - [x] Measure source and compressed bundle size against both `origin/main` and
       the large RFC stack. Across all package `src` trees, the old stack was
       +10,545/-1,692 lines (net +8,853) while this tree is +1,912/-1,288

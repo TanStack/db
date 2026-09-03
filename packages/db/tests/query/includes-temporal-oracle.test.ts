@@ -947,6 +947,78 @@ async function expectRetiredDemandStaysNonfatalAfterReleaseFailure(): Promise<vo
   }
 }
 
+async function expectFailedReplayStopsGatingAfterLastDemandRetires(): Promise<void> {
+  const post = { id: 1, authorId: `selected`, title: `one` }
+  const posts = createMutablePosts([post])
+  const replay = createDeferred<void>()
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: Comment }) => void
+  let commit!: () => true | Promise<void>
+  let truncate!: () => void
+  let loadCount = 0
+  const comments = createCollection<Comment>({
+    id: nextCollectionId(`temporal-retired-replay-comments`),
+    getKey: (comment) => comment.id,
+    syncMode: `on-demand`,
+    autoIndex: `eager`,
+    defaultIndexType: BasicIndex,
+    sync: {
+      sync: (operations) => {
+        begin = operations.begin
+        write = operations.write
+        commit = operations.commit
+        truncate = operations.truncate
+        operations.markReady()
+        return {
+          loadSubset: () => {
+            loadCount += 1
+            if (loadCount === 1) {
+              begin()
+              write({
+                type: `insert`,
+                value: { id: 10, postId: post.id, body: `old` },
+              })
+              commit()
+              return true
+            }
+            return replay.promise
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const live = createPostsWithCommentsLive(posts.collection, comments)
+  const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+
+  try {
+    await live.preload()
+    expect(live.get(post.id)?.comments.map(({ id }) => id)).toEqual([10])
+
+    begin()
+    truncate()
+    commit()
+    await flushPromises()
+    expect(loadCount).toBe(2)
+
+    replay.reject(new Error(`replacement failed`))
+    await flushPromises()
+    expect(live.get(post.id)?.comments.map(({ id }) => id)).toEqual([10])
+
+    posts.write(`delete`, post)
+    await flushPromises()
+
+    // Once the parent retires the last child demand, its failed replay can no
+    // longer gate unrelated parent changes in the shared graph.
+    expect(live.size).toBe(0)
+  } finally {
+    replay.resolve()
+    await live.cleanup()
+    await Promise.all([posts.collection.cleanup(), comments.cleanup()])
+    consoleError.mockRestore()
+  }
+}
+
 async function expectSynchronousEmptyDemandIsReady(): Promise<void> {
   const posts = createMutablePosts([
     { id: 1, authorId: `selected`, title: `one` },
@@ -1348,6 +1420,11 @@ describe(`includes temporal oracle`, () => {
   it(
     `failed release retires an empty live-query demand without poisoning reentry`,
     expectRetiredDemandStaysNonfatalAfterReleaseFailure,
+  )
+
+  it(
+    `failed replay stops gating after its last demand retires`,
+    expectFailedReplayStopsGatingAfterLastDemandRetires,
   )
 
   it(

@@ -1101,7 +1101,17 @@ describe(`ordered source work oracle`, () => {
     { name: `until full-source recovery settles`, failure: undefined },
     {
       name: `when full-source recovery throws synchronously`,
-      failure: new Error(`full-source recovery failed`),
+      failure: {
+        mode: `sync` as const,
+        error: new Error(`full-source recovery failed`),
+      },
+    },
+    {
+      name: `after asynchronous full-source recovery retries`,
+      failure: {
+        mode: `async` as const,
+        error: new Error(`full-source recovery rejected`),
+      },
     },
   ])(`keeps an ordered snapshot unchanged $name`, async ({ failure }) => {
     const makeRows = (ranks: ReadonlyArray<number>): Array<Row> =>
@@ -1120,17 +1130,20 @@ describe(`ordered source work oracle`, () => {
     const publications: Array<Array<number>> = []
     const escapedErrors: Array<unknown> = []
     const enqueueMicrotask = globalThis.queueMicrotask.bind(globalThis)
-    const queueMicrotaskSpy = failure
-      ? vi.spyOn(globalThis, `queueMicrotask`).mockImplementation((callback) =>
-          enqueueMicrotask(() => {
-            try {
-              callback()
-            } catch (error) {
-              escapedErrors.push(error)
-            }
-          }),
-        )
-      : undefined
+    const queueMicrotaskSpy =
+      failure?.mode === `sync`
+        ? vi
+            .spyOn(globalThis, `queueMicrotask`)
+            .mockImplementation((callback) =>
+              enqueueMicrotask(() => {
+                try {
+                  callback()
+                } catch (error) {
+                  escapedErrors.push(error)
+                }
+              }),
+            )
+        : undefined
 
     const source = createCollection<Row, number>({
       id: `delayed-full-source-recovery`,
@@ -1149,11 +1162,21 @@ describe(`ordered source work oracle`, () => {
                 options.where === undefined && options.limit === undefined
               if (recovering && isFullSource) {
                 fullSourceRequests++
-                if (failure) throw failure
+                if (failure?.mode === `sync`) throw failure.error
+                if (failure?.mode === `async` && fullSourceRequests === 1) {
+                  return Promise.reject(failure.error)
+                }
               }
 
               return (async () => {
-                if (recovering && isFullSource) await fullSource.promise
+                if (
+                  recovering &&
+                  isFullSource &&
+                  (!failure ||
+                    (failure.mode === `async` && fullSourceRequests === 1))
+                ) {
+                  await fullSource.promise
+                }
 
                 let selected = options.where
                   ? truth.filter(
@@ -1226,14 +1249,30 @@ describe(`ordered source work oracle`, () => {
       expect(publications).toHaveLength(publicationCount)
 
       if (failure) {
-        expect(live.utils.lastSubsetError).toBe(failure)
+        expect(live.utils.lastSubsetError).toBe(failure.error)
         expect(escapedErrors).toEqual([])
+        if (failure.mode === `async`) {
+          installed.clear()
+          sync.begin()
+          sync.truncate()
+          const retryReceipt = sync.commit()
+          if (retryReceipt !== true) await retryReceipt
+          await vi.waitFor(() =>
+            expect(source.toArray.map(({ rank }) => rank).sort()).toEqual([
+              0, 0.5, 1, 1.5, 2, 3,
+            ]),
+          )
+          await vi.waitFor(() =>
+            expect(live.toArray.map(({ rank }) => rank)).toEqual([
+              0, 0.5, 1, 1.5,
+            ]),
+          )
+          expect(fullSourceRequests).toBe(2)
+        }
       } else {
         fullSource.resolve()
         await flushPromises()
-        expect(live.toArray.map(({ rank }) => rank)).toEqual([
-          0, 0.5, 1, 1.5,
-        ])
+        expect(live.toArray.map(({ rank }) => rank)).toEqual([0, 0.5, 1, 1.5])
       }
     } finally {
       queueMicrotaskSpy?.mockRestore()

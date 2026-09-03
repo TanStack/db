@@ -334,11 +334,6 @@ export class OrderedSourceLoader {
         trackLoadSubsetPromise: false,
         onLoadSubsetResult: (result) => {
           this.observe(result, false)
-          if (result instanceof Promise) {
-            void result.catch(() => {
-              this.fullSource = false
-            })
-          }
         },
       })
     } catch (error) {
@@ -463,8 +458,12 @@ export class OrderedSourceLoader {
     const value = this.info.valueExtractorForRawRow(
       biggest as Record<string, unknown>,
     )
-    if (this.hasLastBoundary && Object.is(this.lastBoundary, value)) return
     const orderBy = normalizeOrderByPaths(this.info.orderBy, this.alias)
+    if (!canExpressCursorOrder(orderBy.slice(0, 1), [value])) {
+      this.loadFullSource()
+      return
+    }
+    if (this.hasLastBoundary && Object.is(this.lastBoundary, value)) return
     const where = buildCursorCurrent(orderBy, [value])
     if (!where) {
       this.loadFullSource()

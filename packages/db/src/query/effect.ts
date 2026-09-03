@@ -979,7 +979,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       comparator,
     )
     this.biggestSentValue.set(sourceId, result.biggest)
-    if (result.shouldResetLoadKey) {
+    const prefixMayHaveChanged =
+      this.optimizableOrderByCollections[sourceId]?.orderBy.length !== 1 &&
+      changes.some(({ type }) => type !== `insert`)
+    if (result.shouldResetLoadKey || prefixMayHaveChanged) {
       this.orderedLoaders.get(sourceId)?.invalidateCursor()
     }
   }

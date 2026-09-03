@@ -456,6 +456,77 @@ describe(`CollectionSubscription status tracking`, () => {
     },
   )
 
+  it(`does not replay a logically retired demand after its unload fails`, async () => {
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const releaseError = new Error(`release failed`)
+    let allowUnload = false
+    let begin!: () => void
+    let commit!: () => void
+    let truncate!: () => void
+    const collection = createCollection<{ id: string }>({
+      id: `failed-release-is-not-replayed`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (operations) => {
+          begin = operations.begin
+          commit = operations.commit
+          truncate = operations.truncate
+          operations.markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return Promise.resolve()
+            },
+            unloadSubset: (options) => {
+              unloads.push(options)
+              if (!allowUnload && options === loads[0]) throw releaseError
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const firstWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`first`)])
+    const secondWhere = new Func(`eq`, [
+      new PropRef([`id`]),
+      new Value(`second`),
+    ])
+
+    try {
+      subscription.requestSnapshot({
+        where: firstWhere,
+        optimizedOnly: false,
+      })
+      subscription.requestSnapshot({
+        where: secondWhere,
+        optimizedOnly: false,
+      })
+      await flushPromises()
+
+      expect(() => subscription.releaseSnapshot(firstWhere)).toThrow(
+        releaseError,
+      )
+
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+
+      // The failed physical release is retried during cleanup, but its logical
+      // demand retired at releaseSnapshot and must not join later replays.
+      expect(loads).toHaveLength(3)
+      expect(loads[2]?.where).toBe(secondWhere)
+    } finally {
+      allowUnload = true
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   it(`retries the exact in-flight replay release`, async () => {
     const replay = createDeferred<void>()
     const loads: Array<LoadSubsetOptions> = []

@@ -807,7 +807,9 @@ describe(`createEffect`, () => {
         expect(unloadCount).toBe(2)
 
         await effect.dispose()
-        expect(unloadCount).toBe(3)
+        // The nested attempt released the exact lease. The retained outer
+        // cleanup callback may run again, but must not unload that lease twice.
+        expect(unloadCount).toBe(2)
       } finally {
         await effect.dispose()
         await source.cleanup()

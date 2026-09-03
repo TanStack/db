@@ -375,17 +375,22 @@ function rowsForLoadSubset<TRow extends { id: number }>(
   rows: ReadonlyArray<TRow>,
   options: LoadSubsetOptions,
 ): Array<TRow> {
+  const matchingRows = options.where
+    ? rows.filter(
+        (row) => evaluateReferenceExpression(options.where!, row) === true,
+      )
+    : rows
   if (!options.cursor) {
     const start = options.offset ?? 0
     const end =
-      options.limit === undefined ? rows.length : start + options.limit
-    return rows.slice(start, end)
+      options.limit === undefined ? matchingRows.length : start + options.limit
+    return matchingRows.slice(start, end)
   }
 
-  const current = rows.filter((row) =>
+  const current = matchingRows.filter((row) =>
     Boolean(evaluateReferenceExpression(options.cursor!.whereCurrent, row)),
   )
-  const from = rows.filter((row) =>
+  const from = matchingRows.filter((row) =>
     Boolean(evaluateReferenceExpression(options.cursor!.whereFrom, row)),
   )
   const limitedFrom =
@@ -963,8 +968,15 @@ async function runAdversarialOrderedProviderScenario(options: {
                 )}`,
               )
             }
+            const providerRows = loadOptions.where
+              ? options.providerRows.filter(
+                  (row) =>
+                    evaluateReferenceExpression(loadOptions.where!, row) ===
+                    true,
+                )
+              : options.providerRows
             const providerMatch = options.useOffsetWhenAvailable
-              ? options.providerRows.slice(
+              ? providerRows.slice(
                   loadOptions.offset ?? 0,
                   loadOptions.limit === undefined
                     ? undefined
@@ -2049,14 +2061,11 @@ describe(`pagination recomputation oracle`, () => {
       expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
       expect(pending.length).toBeLessThanOrEqual(rows.length * 2)
       expect(
-        pending.every(
+        pending.some(
           ({ options }) =>
-            options.limit !== undefined || options.where !== undefined,
+            options.limit === undefined && options.where === undefined,
         ),
       ).toBe(true)
-      expect(pending.some(({ options }) => options.where !== undefined)).toBe(
-        true,
-      )
 
       const transportCount = pending.length
       const widened = live.utils.setWindow({ offset: 0, limit: 2 })
