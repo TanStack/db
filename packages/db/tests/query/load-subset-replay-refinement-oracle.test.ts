@@ -12,7 +12,10 @@ type Row = { id: string; version: number }
 type ObservedRow = { sourceId: string; rowKey: string; version: number }
 
 describe(`loadSubset replay refinement`, () => {
-  function createHarness(sourceId: string) {
+  function createHarness(
+    sourceId: string,
+    initialRows: ReadonlyArray<Row> = [{ id: `row`, version: 1 }],
+  ) {
     let begin!: () => void
     let write!: (message: ChangeMessageOrDeleteKeyMessage<Row, string>) => void
     let commit!: () => void
@@ -45,7 +48,9 @@ describe(`loadSubset replay refinement`, () => {
               loadCount++
               if (loadCount === 1) {
                 begin()
-                write({ type: `insert`, value: { id: `row`, version: 1 } })
+                for (const value of initialRows) {
+                  write({ type: `insert`, value })
+                }
                 commit()
                 return true
               }
@@ -109,6 +114,13 @@ describe(`loadSubset replay refinement`, () => {
       })
       commit()
     }
+    const applyCore = (
+      changes: ReadonlyArray<ChangeMessageOrDeleteKeyMessage<Row, string>>,
+    ) => {
+      begin()
+      for (const change of changes) write(change)
+      commit()
+    }
     const startReplay = async () => {
       begin()
       truncate()
@@ -137,6 +149,7 @@ describe(`loadSubset replay refinement`, () => {
       callbackReads,
       replaceCore,
       updateCore,
+      applyCore,
       startReplay,
       coreRows,
       visibleRows,
@@ -209,6 +222,94 @@ describe(`loadSubset replay refinement`, () => {
         [{ type: `update`, row: row(4), previousVersion: 1 }],
       ])
       expect(harness.callbackReads).toEqual([[row(1)], [row(4)]])
+    } finally {
+      for (const replay of harness.pending) replay.deferred.resolve()
+      harness.subscription.unsubscribe()
+      await Promise.all([
+        harness.downstream.cleanup(),
+        harness.source.cleanup(),
+      ])
+    }
+  })
+
+  it(`replaces a multi-row failed replay only with later authoritative state`, async () => {
+    const sourceId = `replay-refinement-multi-row-failure`
+    const observed = (id: string, version: number) => ({
+      sourceId,
+      rowKey: id,
+      version,
+    })
+    const harness = createHarness(sourceId, [
+      { id: `a`, version: 1 },
+      { id: `b`, version: 1 },
+      { id: `c`, version: 1 },
+    ])
+    const sortedVisible = () =>
+      harness.visibleRows().sort((left, right) =>
+        left.rowKey.localeCompare(right.rowKey),
+      )
+
+    try {
+      await harness.downstream.preload()
+      expect(sortedVisible()).toEqual([
+        observed(`a`, 1),
+        observed(`b`, 1),
+        observed(`c`, 1),
+      ])
+      const publishedBatches = harness.batches.length
+
+      await harness.startReplay()
+      harness.applyCore([
+        { type: `insert`, value: { id: `a`, version: 2 } },
+        { type: `insert`, value: { id: `d`, version: 1 } },
+      ])
+      harness.pending[0]!.deferred.reject(new Error(`partial replay failed`))
+      await flushPromises()
+
+      harness.applyCore([
+        {
+          type: `update`,
+          value: { id: `a`, version: 3 },
+          previousValue: { id: `a`, version: 2 },
+        },
+        { type: `delete`, key: `d` },
+        { type: `insert`, value: { id: `e`, version: 1 } },
+      ])
+      await flushPromises()
+
+      expect(sortedVisible()).toEqual([
+        observed(`a`, 1),
+        observed(`b`, 1),
+        observed(`c`, 1),
+      ])
+      expect(harness.batches).toHaveLength(publishedBatches)
+
+      await harness.startReplay()
+      harness.applyCore([
+        { type: `insert`, value: { id: `a`, version: 4 } },
+        { type: `insert`, value: { id: `b`, version: 1 } },
+        { type: `insert`, value: { id: `e`, version: 2 } },
+      ])
+      harness.pending[1]!.deferred.resolve()
+      await flushPromises()
+
+      expect(sortedVisible()).toEqual([
+        observed(`a`, 4),
+        observed(`b`, 1),
+        observed(`e`, 2),
+      ])
+      expect(harness.batches).toHaveLength(publishedBatches + 1)
+      expect(
+        harness.batches.at(-1)?.map(({ type, row }) => [
+          type,
+          row.rowKey,
+          row.version,
+        ]),
+      ).toEqual([
+        [`update`, `a`, 4],
+        [`delete`, `c`, 1],
+        [`insert`, `e`, 2],
+      ])
     } finally {
       for (const replay of harness.pending) replay.deferred.resolve()
       harness.subscription.unsubscribe()

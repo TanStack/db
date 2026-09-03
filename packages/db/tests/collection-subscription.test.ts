@@ -870,7 +870,7 @@ describe(`CollectionSubscription status tracking`, () => {
       await flushPromises()
 
       expect(loads).toHaveLength(2)
-      expect(subscription.status).toBe(`loadingSubset`)
+      expect(subscription.status).toBe(`ready`)
 
       replay.reject(new DOMException(`replacement abandoned`, `AbortError`))
       await flushPromises()
