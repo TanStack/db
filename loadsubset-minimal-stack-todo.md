@@ -681,16 +681,28 @@ explicitly removed.
       and bounded work without requiring identical graph schedules. The full
       core oracle gate is 514/514 green; Query DB adds 42/42 green (1 skipped),
       with no type errors.
+- [x] Recover the two laws found by the post-fix loss audit. A tied primary
+      order now mutates a later order term and proves the same rows and demand
+      forms through live collections and Effects, while allowing their bounded
+      refinement schedules to differ. Full-source recovery now fails twice
+      before succeeding and proves every established acquisition is released
+      exactly once. Both additions pass without another runtime change.
+- [x] Reconcile the Query DB ownership test with shared physical acquisition.
+      An ordered window may retain an already-complete broader acquisition so
+      it can refill locally; releasing the first consumer must not discard the
+      extra cached row while the ordered consumer still owns that acquisition.
+      The final consumer release still empties the collection. The complete
+      Query DB suite is 336/336 green (1 skipped).
 - [x] Measure source and compressed bundle size against both `origin/main` and
       the large RFC stack. Across all package `src` trees, the old stack was
-      +10,545/-1,692 lines (net +8,853) while this tree is +1,912/-1,288
-      (net +624, including the architecture document). Executable source alone
-      falls from net +7,835 to net +599, reclaiming 92.4% of its growth. A
-      tree-shaken minified ESM build of the public DB entry is 348,772 raw /
-      98,406 gzip bytes here versus 339,394 / 96,043 on main and 431,323 /
-      118,297 in the old stack. The retained cost is 9,378 raw bytes (2.8%) or
-      2,363 gzip bytes (2.5%) over main. The simplification recovers 89.8% of
-      the old raw bundle growth and 89.4% of its compressed growth.
+      +10,545/-1,692 lines (net +8,853) while this tree is +2,006/-1,302
+      (net +704, including the architecture document). Executable source alone
+      falls from net +7,835 to net +666, reclaiming 91.5% of its growth. A
+      tree-shaken minified ESM build of the public DB entry is 349,824 raw /
+      98,651 gzip bytes here versus 339,394 / 96,043 on main and 431,323 /
+      118,297 in the old stack. The retained cost is 10,430 raw bytes (3.1%) or
+      2,608 gzip bytes (2.7%) over main. The simplification recovers 88.7% of
+      the old raw bundle growth and 88.3% of its compressed growth.
 - [ ] Ask multiple fresh reviewers for final coherence, hostile-assay, and
       loss-audit passes.
 - [ ] Update RFC/PR text and changeset to match the final design.

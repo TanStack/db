@@ -6053,8 +6053,9 @@ describe(`QueryCollection`, () => {
 
       await flushPromises()
 
-      // The ordered demand adds one exact request for its boundary tie.
-      expect(queryFn).toHaveBeenCalledTimes(3)
+      // The initial complete category load already proves that no unseen row
+      // ties the ordered boundary, so the second demand needs only its prefix.
+      expect(queryFn).toHaveBeenCalledTimes(2)
 
       // Collection should still have all 3 items (deduplication doesn't remove data)
       expect(collection.size).toBe(3)
@@ -6067,13 +6068,15 @@ describe(`QueryCollection`, () => {
 
       // Wait for async GC to complete
       await vi.waitFor(() => {
-        expect(collection.size).toBe(2) // Should only have items 1 and 2 because they are still referenced by query 2
+        // Query 2 shares the already-complete category acquisition so it can
+        // refill locally. It may retain row 3 even though its visible window
+        // contains only rows 1 and 2.
+        expect(collection.size).toBe(3)
       })
 
-      // Verify that only row 3 is removed (it was only referenced by query 1)
-      expect(collection.has(`1`)).toBe(true) // Still present (referenced by query 2)
-      expect(collection.has(`2`)).toBe(true) // Still present (referenced by query 2)
-      expect(collection.has(`3`)).toBe(false) // Removed (only referenced by query 1)
+      expect(collection.has(`1`)).toBe(true)
+      expect(collection.has(`2`)).toBe(true)
+      expect(collection.has(`3`)).toBe(true)
 
       // GC the second query (category A with limit 2)
       await query2.cleanup()

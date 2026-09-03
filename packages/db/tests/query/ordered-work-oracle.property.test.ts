@@ -350,7 +350,138 @@ async function assertConsumerParity(scenario: Scenario): Promise<void> {
   }
 }
 
+async function observeLaterOrderTermMutation(
+  kind: `collection` | `effect`,
+): Promise<{ rows: Array<number>; requests: Array<string | undefined> }> {
+  const truth: Array<Row> = [
+    { id: 1, rank: 0, eligible: true, label: `a` },
+    { id: 2, rank: 0, eligible: true, label: `b` },
+    { id: 3, rank: 0, eligible: true, label: `c` },
+  ]
+  const delivered = new Set<number>()
+  const requests: Array<string | undefined> = []
+  const effectRows = new Map<number, Row>()
+  let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
+
+  const source = createCollection<Row, number>({
+    id: `ordered-later-term-${kind}-${harnessId++}`,
+    getKey: ({ id }) => id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (operations) => {
+        sync = operations
+        operations.markReady()
+        return {
+          loadSubset: async (options) => {
+            requests.push(getLoadSubsetDemandKey(options))
+            let selected = options.where
+              ? truth.filter(
+                  (row) =>
+                    evaluateReferenceExpression(options.where!, row) === true,
+                )
+              : [...truth]
+            selected.sort(
+              (left, right) =>
+                left.rank - right.rank ||
+                left.label.localeCompare(right.label) ||
+                left.id - right.id,
+            )
+            if (options.cursor) {
+              selected = selected.filter(
+                (row) =>
+                  evaluateReferenceExpression(
+                    options.cursor!.whereFrom,
+                    row,
+                  ) === true,
+              )
+            } else if (options.offset) {
+              selected = selected.slice(options.offset)
+            }
+            if (options.limit !== undefined) {
+              selected = selected.slice(0, options.limit)
+            }
+            const fresh = selected.filter(({ id }) => !delivered.has(id))
+            if (fresh.length === 0) return
+            operations.begin()
+            for (const row of fresh) {
+              delivered.add(row.id)
+              operations.write({ type: `insert`, value: { ...row } })
+            }
+            const receipt = operations.commit()
+            if (receipt !== true) await receipt
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const query = (q: InitialQueryBuilder) =>
+    q
+      .from({ row: source })
+      .orderBy(({ row }) => row.rank)
+      .orderBy(({ row }) => row.label)
+      .limit(2)
+  const live =
+    kind === `collection` ? createLiveQueryCollection({ query }) : undefined
+  const effect =
+    kind === `effect`
+      ? createEffect<Row, number>({
+          query,
+          onBatch: (events) => {
+            for (const event of events) {
+              if (event.type === `exit`) effectRows.delete(event.key)
+              else effectRows.set(event.key, { ...event.value })
+            }
+          },
+        })
+      : undefined
+
+  const visibleIds = () =>
+    (live ? live.toArray : [...effectRows.values()])
+      .sort(
+        (left, right) =>
+          left.rank - right.rank ||
+          left.label.localeCompare(right.label) ||
+          left.id - right.id,
+      )
+      .map(({ id }) => id)
+
+  try {
+    if (live) await live.preload()
+    else await vi.waitFor(() => expect(visibleIds()).toEqual([1, 2]))
+    expect(visibleIds()).toEqual([1, 2])
+
+    const first = { ...source.get(1)!, label: `z` }
+    sync.begin({ immediate: true })
+    sync.write({ type: `update`, value: { ...first } })
+    const receipt = sync.commit()
+    if (receipt !== true) await receipt
+    await vi.waitFor(() => expect(visibleIds()).toEqual([2, 3]))
+
+    expect(requests.length).toBeLessThanOrEqual(6)
+    return { rows: visibleIds(), requests }
+  } finally {
+    if (effect) await effect.dispose()
+    if (live) await live.cleanup()
+    await source.cleanup()
+  }
+}
+
 describe(`ordered source work oracle`, () => {
+  it(`keeps later order-term invalidation equal across consumers`, async () => {
+    const [collection, effect] = await Promise.all([
+      observeLaterOrderTermMutation(`collection`),
+      observeLaterOrderTermMutation(`effect`),
+    ])
+    expect(effect.rows).toEqual(collection.rows)
+    // The two graph entry points may take a different bounded number of
+    // refinement passes, but they must exercise the same demand forms.
+    expect(new Set(effect.requests)).toEqual(new Set(collection.requests))
+  })
+
   it(`loads each source of a filtered join once`, async () => {
     type Order = {
       id: number
@@ -1131,6 +1262,13 @@ describe(`ordered source work oracle`, () => {
         error: new Error(`full-source recovery rejected`),
       },
     },
+    {
+      name: `after two asynchronous full-source recovery failures`,
+      failure: {
+        mode: `async-twice` as const,
+        error: new Error(`full-source recovery rejected twice`),
+      },
+    },
   ])(`keeps an ordered snapshot unchanged $name`, async ({ failure }) => {
     const makeRows = (ranks: ReadonlyArray<number>): Array<Row> =>
       ranks.map((rank, index) => ({
@@ -1147,6 +1285,8 @@ describe(`ordered source work oracle`, () => {
     const installed = new Set<number>()
     const publications: Array<Array<number>> = []
     const escapedErrors: Array<unknown> = []
+    const acquisitions: Array<LoadSubsetOptions> = []
+    const releases: Array<LoadSubsetOptions> = []
     const enqueueMicrotask = globalThis.queueMicrotask.bind(globalThis)
     const queueMicrotaskSpy =
       failure?.mode === `sync`
@@ -1181,18 +1321,21 @@ describe(`ordered source work oracle`, () => {
               if (recovering && isFullSource) {
                 fullSourceRequests++
                 if (failure?.mode === `sync`) throw failure.error
-                if (failure?.mode === `async` && fullSourceRequests === 1) {
+                const failuresBeforeSuccess =
+                  failure?.mode === `async-twice` ? 2 : 1
+                if (
+                  (failure?.mode === `async` ||
+                    failure?.mode === `async-twice`) &&
+                  fullSourceRequests <= failuresBeforeSuccess
+                ) {
+                  acquisitions.push(options)
                   return Promise.reject(failure.error)
                 }
               }
+              acquisitions.push(options)
 
               return (async () => {
-                if (
-                  recovering &&
-                  isFullSource &&
-                  (!failure ||
-                    (failure.mode === `async` && fullSourceRequests === 1))
-                ) {
+                if (recovering && isFullSource && !failure) {
                   await fullSource.promise
                 }
 
@@ -1231,7 +1374,9 @@ describe(`ordered source work oracle`, () => {
                 if (receipt !== true) await receipt
               })()
             },
-            unloadSubset: () => {},
+            unloadSubset: (options) => {
+              releases.push(options)
+            },
           }
         },
       },
@@ -1269,12 +1414,16 @@ describe(`ordered source work oracle`, () => {
       if (failure) {
         expect(live.utils.lastSubsetError).toBe(failure.error)
         expect(escapedErrors).toEqual([])
-        if (failure.mode === `async`) {
-          installed.clear()
-          sync.begin()
-          sync.truncate()
-          const retryReceipt = sync.commit()
-          if (retryReceipt !== true) await retryReceipt
+        if (failure.mode === `async` || failure.mode === `async-twice`) {
+          const retryCount = failure.mode === `async-twice` ? 2 : 1
+          for (let retry = 0; retry < retryCount; retry++) {
+            installed.clear()
+            sync.begin()
+            sync.truncate()
+            const retryReceipt = sync.commit()
+            if (retryReceipt !== true) await retryReceipt
+            await vi.waitFor(() => expect(fullSourceRequests).toBe(retry + 2))
+          }
           await vi.waitFor(() =>
             expect(source.toArray.map(({ rank }) => rank).sort()).toEqual([
               0, 0.5, 1, 1.5, 2, 3,
@@ -1285,14 +1434,14 @@ describe(`ordered source work oracle`, () => {
               0, 0.5, 1, 1.5,
             ]),
           )
-          expect(fullSourceRequests).toBe(2)
+          expect(fullSourceRequests).toBe(retryCount + 1)
         }
       } else {
         fullSource.resolve()
         await flushPromises()
         expect(live.toArray.map(({ rank }) => rank)).toEqual([0, 0.5, 1, 1.5])
       }
-      if (!failure || failure.mode === `async`) {
+      if (!failure || failure.mode !== `sync`) {
         expect(publications.slice(publicationCount)).toEqual([[0, 0.5, 1, 1.5]])
       }
     } finally {
@@ -1300,6 +1449,12 @@ describe(`ordered source work oracle`, () => {
       fullSource.resolve()
       subscription.unsubscribe()
       await Promise.all([live.cleanup(), source.cleanup()])
+    }
+    expect(releases).toHaveLength(acquisitions.length)
+    for (const acquisition of acquisitions) {
+      expect(
+        releases.filter((release) => release === acquisition),
+      ).toHaveLength(1)
     }
   })
 
