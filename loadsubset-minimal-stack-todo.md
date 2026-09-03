@@ -368,6 +368,10 @@ explicitly removed.
       application oracle now states that rule directly instead of consulting
       the deleted event-model projection; the two transaction suites are
       34/34 green with no type errors.
+- [x] Preserved terminal-cleanup cost as a public law: clearing a 100-row
+      collection emits no synthetic delete batch. Cleanup clears retained
+      state directly and reports only the lifecycle transition. The lifecycle
+      suite is 42/42 green with no type errors.
 - [x] Restored Electric's public settlement and resource-lifetime laws instead
       of retaining the deleted applied-commit-capture helper. The external
       signal cleanup law red-tested a real listener leak; cleanup now removes

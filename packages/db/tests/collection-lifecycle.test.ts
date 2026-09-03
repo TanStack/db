@@ -149,6 +149,38 @@ describe(`Collection Lifecycle Management`, () => {
       expect(collection.status).toBe(`cleaned-up`)
     })
 
+    it(`clears terminal state without publishing one delete per row`, async () => {
+      const collection = createCollection<{ id: number; name: string }>({
+        id: `cleanup-without-row-publication`,
+        getKey: (item) => item.id,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            for (let id = 0; id < 100; id++) {
+              write({ type: `insert`, value: { id, name: `row-${id}` } })
+            }
+            commit()
+            markReady()
+          },
+        },
+      })
+      const onChanges = vi.fn()
+      const subscription = collection.subscribeChanges(onChanges, {
+        includeInitialState: false,
+      })
+
+      try {
+        await collection.cleanup()
+
+        expect(collection.toArray).toEqual([])
+        expect(onChanges).not.toHaveBeenCalled()
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    })
+
     it(`should transition when subscribing to changes`, () => {
       let beginCallback: (() => void) | undefined
       let commitCallback: (() => void) | undefined
