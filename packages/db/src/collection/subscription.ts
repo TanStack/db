@@ -95,8 +95,7 @@ type TruncateReplayAttempt = {
 
 type TruncateReplaySession = {
   publicationState: TruncatePublicationState
-  buffer: Array<Array<ChangeMessage<any, any>>>
-  attempts: Set<TruncateReplayAttempt>
+  privateRows: Map<string | number, object>
   currentAttempt: TruncateReplayAttempt
 }
 
@@ -252,13 +251,14 @@ export class CollectionSubscription
           limitedSnapshotRowCount: this.limitedSnapshotRowCount,
           lastSentKey: this.lastSentKey,
         },
-        buffer: [],
-        attempts: new Set(),
+        privateRows: new Map(this.publishedRows),
         currentAttempt: attempt,
       }
       this.truncateReplaySession = session
     }
-    session.attempts.add(attempt)
+    // A later truncate supersedes every earlier attempt. The source contract
+    // forbids an aborted acquisition from installing more rows, so obsolete
+    // work cannot gate the current authoritative replacement.
     session.currentAttempt = attempt
 
     if (this.options.truncateReplayPublication) {
@@ -323,6 +323,7 @@ export class CollectionSubscription
           true,
           () => isCurrentAttempt() && !nextAcquisition.options.signal?.aborted,
         )
+        this.stopDemandStatusParticipants(demand, statusParticipant)
 
         this.trackTruncateReplayParticipant(
           demand,
@@ -406,9 +407,9 @@ export class CollectionSubscription
   private removeTruncateReplayParticipant(demand: SubsetDemand): void {
     const session = this.truncateReplaySession
     if (!session) return
-    for (const attempt of session.attempts) {
-      for (const pending of attempt.pending) {
-        if (pending.demand === demand) attempt.pending.delete(pending)
+    for (const pending of session.currentAttempt.pending) {
+      if (pending.demand === demand) {
+        session.currentAttempt.pending.delete(pending)
       }
     }
     this.checkTruncateReplayComplete(session)
@@ -422,11 +423,10 @@ export class CollectionSubscription
   /** Publish only after every overlapping replay attempt has settled. */
   private checkTruncateReplayComplete(session: TruncateReplaySession): void {
     if (this.truncateReplaySession !== session) return
-    for (const attempt of session.attempts) {
-      if (!attempt.setupComplete || attempt.pending.size > 0) return
-    }
+    const attempt = session.currentAttempt
+    if (!attempt.setupComplete || attempt.pending.size > 0) return
 
-    if (session.currentAttempt.failed) {
+    if (attempt.failed) {
       this.abandonTruncateReplay(session)
     } else {
       this.flushTruncateReplay(session)
@@ -450,7 +450,7 @@ export class CollectionSubscription
     this.stalePublishedRows = new Map(publicationState.publishedRows)
     this.limitedSnapshotRowCount = publicationState.limitedSnapshotRowCount
     this.lastSentKey = publicationState.lastSentKey
-    this.truncateReplaySession = undefined
+    session.privateRows = new Map(publicationState.publishedRows)
   }
 
   /** Publish the complete buffered replacement as one subscriber batch. */
@@ -483,16 +483,21 @@ export class CollectionSubscription
     )
     this.stalePublishedRows.clear()
 
-    const merged = [...session.buffer.flat(), ...retainedDeletes]
+    this.applyPrivateChanges(session, retainedDeletes)
     const activeDemandFilters = this.subsetDemands.map((demand) =>
       demand.requestOptions.where
         ? createFilterFunctionFromExpression(demand.requestOptions.where)
         : undefined,
     )
-    const replacement = this.createPublicationDiff(
+    const finalRows = new Map(session.privateRows)
+    for (const [key, value] of finalRows) {
+      if (!activeDemandFilters.some((filter) => filter?.(value) ?? true)) {
+        finalRows.delete(key)
+      }
+    }
+    const replacement = this.createStateDiff(
       session.publicationState.publishedRows,
-      merged,
-      (value) => activeDemandFilters.some((filter) => filter?.(value) ?? true),
+      finalRows,
     )
     if (replacement.length > 0) this.filteredCallback(replacement)
     // Buffering records every source key before active-demand filtering. Reset
@@ -509,22 +514,15 @@ export class CollectionSubscription
     }
   }
 
-  /** Reduce a replay's raw delete/insert stream to one exact semantic delta. */
-  private createPublicationDiff(
-    baseline: ReadonlyMap<string | number, object>,
+  /** Fold private replay changes into bounded state, not an event history. */
+  private applyPrivateChanges(
+    session: TruncateReplaySession,
     changes: ReadonlyArray<ChangeMessage<any, any>>,
-    isCoveredByActiveDemand: (value: object) => boolean,
-  ): Array<ChangeMessage<any, any>> {
-    const finalRows = new Map(baseline)
+  ): void {
     for (const change of changes) {
-      if (change.type === `delete`) finalRows.delete(change.key)
-      else finalRows.set(change.key, change.value)
+      if (change.type === `delete`) session.privateRows.delete(change.key)
+      else session.privateRows.set(change.key, change.value)
     }
-    for (const [key, value] of finalRows) {
-      if (!isCoveredByActiveDemand(value)) finalRows.delete(key)
-    }
-
-    return this.createStateDiff(baseline, finalRows)
   }
 
   private createStateDiff(
@@ -646,9 +644,12 @@ export class CollectionSubscription
     if (this.pendingLoadSubsetParticipants.size === 0) this.setStatus(`ready`)
   }
 
-  private stopDemandStatusParticipants(demand: SubsetDemand): void {
+  private stopDemandStatusParticipants(
+    demand: SubsetDemand,
+    current?: { demand: SubsetDemand; promise: Promise<unknown> },
+  ): void {
     for (const participant of this.pendingLoadSubsetParticipants) {
-      if (participant.demand === demand) {
+      if (participant.demand === demand && participant !== current) {
         this.pendingLoadSubsetParticipants.delete(participant)
       }
     }
@@ -831,12 +832,26 @@ export class CollectionSubscription
       // Buffer the changes instead of emitting immediately
       // This prevents a flash of missing content during truncate/refetch
       if (newChanges.length > 0) {
-        this.truncateReplaySession!.buffer.push(newChanges)
+        this.applyPrivateChanges(this.truncateReplaySession!, newChanges)
       }
       return false
     } else {
       return this.filteredCallback(newChanges)
     }
+  }
+
+  /** Keep direct snapshot reads private while an authoritative replay is open. */
+  private publishSnapshot(changes: Array<ChangeMessage<any, any>>): void {
+    if (
+      this.isBufferingForTruncate &&
+      !this.options.truncateReplayPublication
+    ) {
+      if (changes.length > 0) {
+        this.applyPrivateChanges(this.truncateReplaySession!, changes)
+      }
+      return
+    }
+    this.callback(changes)
   }
 
   /**
@@ -935,7 +950,7 @@ export class CollectionSubscription
     }
 
     this.snapshotSent = true
-    this.callback(filteredSnapshot)
+    this.publishSnapshot(filteredSnapshot)
     return true
   }
 
@@ -954,7 +969,7 @@ export class CollectionSubscription
     this.removeTruncateReplayParticipant(demand)
     this.pruneReleasedReplayRows()
     this.stopDemandStatusParticipants(demand)
-    this.retireEmptyGraphReplay()
+    this.retireEmptyReplay()
 
     const acquisition: SubsetAcquisition = {
       options: demand.options,
@@ -964,19 +979,15 @@ export class CollectionSubscription
     this.releaseOrRetainAcquisition(acquisition)
   }
 
-  /** A replay with no remaining logical demand must not gate other graph work. */
-  private retireEmptyGraphReplay(): void {
-    if (
-      this.subsetDemands.length !== 0 ||
-      !this.truncateReplaySession ||
-      !this.options.truncateReplayPublication
-    ) {
+  /** A replay with no remaining logical demand cannot establish more rows. */
+  private retireEmptyReplay(): void {
+    if (this.subsetDemands.length !== 0 || !this.truncateReplaySession) {
       return
     }
     this.truncateReplaySession = undefined
     this.truncateReplacementPending = false
     this.stalePublishedRows.clear()
-    this.options.truncateReplayPublication.succeed()
+    this.options.truncateReplayPublication?.succeed()
   }
 
   /** Remove rows owned only by a demand released during private replay. */
@@ -1148,7 +1159,7 @@ export class CollectionSubscription
       this.sentKeys.add(change.key)
     }
 
-    this.callback(changes)
+    this.publishSnapshot(changes)
     if (this.unsubscribed) return
 
     // Update the row count and last key after sending (for next call's offset/cursor)

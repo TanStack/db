@@ -1322,7 +1322,9 @@ describe(`CollectionSubscription status tracking`, () => {
       commit()
       await flushPromises()
 
-      expect([...visible.keys()].sort()).toEqual([`one`, `two`])
+      // Ordinary source changes do not establish a complete replacement.
+      // Keep the last coherent generation until a later replay succeeds.
+      expect([...visible.keys()]).toEqual([`one`])
 
       failReplay = false
       begin()
@@ -1404,7 +1406,7 @@ describe(`CollectionSubscription status tracking`, () => {
 
     resolveReplays[1]!()
     await flushPromises()
-    expect([...visible.keys()]).toEqual([`old`])
+    expect([...visible.keys()]).toEqual([`new`])
 
     resolveReplays[0]!()
     await flushPromises()

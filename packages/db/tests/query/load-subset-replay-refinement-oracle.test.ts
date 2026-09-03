@@ -245,13 +245,13 @@ describe(`loadSubset replay refinement`, () => {
       { id: `c`, version: 1 },
     ])
     const sortedVisible = () =>
-      harness.visibleRows().sort((left, right) =>
-        left.rowKey.localeCompare(right.rowKey),
-      )
+      harness
+        .visibleRows()
+        .sort((left, right) => left.rowKey.localeCompare(right.rowKey))
     const sortedCore = () =>
-      harness.coreRows().sort((left, right) =>
-        left.rowKey.localeCompare(right.rowKey),
-      )
+      harness
+        .coreRows()
+        .sort((left, right) => left.rowKey.localeCompare(right.rowKey))
 
     try {
       await harness.downstream.preload()
@@ -328,7 +328,7 @@ describe(`loadSubset replay refinement`, () => {
     }
   })
 
-  it(`waits for every overlapping replay before publishing the newest success`, async () => {
+  it(`does not let an obsolete replay block the newest success`, async () => {
     const sourceId = `replay-refinement-overlap`
     const row = (version: number) => ({
       sourceId,
@@ -347,9 +347,12 @@ describe(`loadSubset replay refinement`, () => {
       harness.pending[1]?.deferred.resolve()
       await flushPromises()
 
-      expect(harness.visibleRows()).toEqual([row(1)])
-      expect(harness.batches).toEqual([[{ type: `insert`, row: row(1) }]])
-      expect(harness.callbackReads).toEqual([[row(1)]])
+      expect(harness.visibleRows()).toEqual([row(3)])
+      expect(harness.batches).toEqual([
+        [{ type: `insert`, row: row(1) }],
+        [{ type: `update`, row: row(3), previousVersion: 1 }],
+      ])
+      expect(harness.callbackReads).toEqual([[row(1)], [row(3)]])
 
       harness.pending[0]?.deferred.reject(
         new DOMException(`obsolete`, `AbortError`),

@@ -640,10 +640,18 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
         return
       }
 
+      const isCurrentAttempt =
+        pending.attemptIndex === session.currentAttemptIndex
       const hasPendingReplay = session.pending.size > 0
       expect(subscription.status).toBe(
         hasPendingReplay ? `loadingSubset` : `ready`,
       )
+
+      if (!isCurrentAttempt) {
+        assertPublished(expectedPublished)
+        expect(subscription.lastError).toBe(lastReportedError)
+        return
+      }
 
       if (session.pending.size === 0) {
         const currentAttempt = scenario.attempts[session.currentAttemptIndex]!
@@ -677,11 +685,11 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
               sortedChanges(expectedBatch),
             )
           }
+          modelSession = undefined
         } else {
           expect(publicationCount).toBe(session.publicationCount)
         }
         expectedPublicationCount = publicationCount
-        modelSession = undefined
       } else {
         expect(publicationCount).toBe(session.publicationCount)
       }
@@ -699,6 +707,7 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
         publicationCount: expectedPublicationCount,
       }
       modelSession.currentAttemptIndex = attemptIndex
+      modelSession.pending.clear()
 
       for (const load of attempt.loads) {
         queuedLoads.push({ attemptIndex, load })
@@ -746,7 +755,7 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
             },
           ])
         }
-        if (modelSession.pending.size === 0) {
+        if (modelSession.pending.size === 0 && activeDemandIds.size === 0) {
           expectedPublicationCount = publicationCount
           modelSession = undefined
         }
@@ -775,7 +784,7 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
       }
     }
 
-    expect(modelSession).toBeUndefined()
+    expect(modelSession?.pending.size ?? 0).toBe(0)
 
     for (const action of scenario.afterSettlement) {
       const countBeforeAction = publicationCount
@@ -788,15 +797,19 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
           where: demandWheres.get(action.demandId),
         })
         const row = sourceRows.get(action.demandId)
-        if (row) expectedPublished.set(action.demandId, { ...row })
+        if (!modelSession && row) {
+          expectedPublished.set(action.demandId, { ...row })
+        }
       }
       const applied = applySourceAction(action)
       if (applied && action.type === `delete`) {
-        expectedPublished.delete(action.id)
+        if (!modelSession) expectedPublished.delete(action.id)
       } else if (applied && action.type === `put`) {
         recordExpectedSourceWrite([action.row], { type: `ordinary` }, true)
         assertSourceWrites()
-        expectedPublished.set(action.row.id, { ...action.row })
+        if (!modelSession) {
+          expectedPublished.set(action.row.id, { ...action.row })
+        }
       }
       assertSource()
       assertPublished(expectedPublished)
@@ -804,11 +817,12 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
         previousPublication,
         expectedPublished,
       )
+      const expectsPublication =
+        !modelSession && (action.type === `request` || expectedBatch.length > 0)
       expect(publicationCount).toBe(
-        countBeforeAction +
-          Number(action.type === `request` || expectedBatch.length > 0),
+        countBeforeAction + Number(expectsPublication),
       )
-      if (action.type === `request` || expectedBatch.length > 0) {
+      if (expectsPublication) {
         expect(sortedChanges(publicationBatches.at(-1)!)).toEqual(
           sortedChanges(expectedBatch),
         )
@@ -1574,7 +1588,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
-  it(`uses the published replacement as the baseline of a reentrant replay`, async () => {
+  it(`keeps the published replacement after a reentrant replay fails`, async () => {
     let begin!: () => void
     let write!: (
       message: ChangeMessageOrDeleteKeyMessage<ReplayRow, string>,
@@ -1653,7 +1667,7 @@ describe(`CollectionSubscription replay oracle`, () => {
       write({ type: `insert`, value: { id: `one`, value: 1 } })
       commit()
 
-      expect(sortedRows(visible)).toEqual([{ id: `one`, value: 1 }])
+      expect(sortedRows(visible)).toEqual([{ id: `one`, value: 2 }])
     } finally {
       subscription.unsubscribe()
       await collection.cleanup()
@@ -1903,6 +1917,7 @@ describe(`CollectionSubscription replay oracle`, () => {
           succeeds ? [...expectedIds].sort() : [],
         )
 
+        const batchCount = batches.length
         subscription.requestLimitedSnapshot({
           orderBy,
           limit: 1,
@@ -1914,7 +1929,8 @@ describe(`CollectionSubscription replay oracle`, () => {
             lastKey: succeeds ? expectedIds[1] : initialIds[1],
           },
         })
-        expect(batches.at(-1)).toEqual([])
+        if (succeeds) expect(batches.at(-1)).toEqual([])
+        else expect(batches).toHaveLength(batchCount)
       } finally {
         subscription.unsubscribe()
         await collection.cleanup()
@@ -1922,7 +1938,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     },
   )
 
-  it(`publishes a same-key replacement after a failed replay`, async () => {
+  it(`keeps a same-key source replacement private after a failed replay`, async () => {
     await runReplayScenario({
       initialRows: [{ id: `one`, value: 1 }],
       demandIds: [`one`],

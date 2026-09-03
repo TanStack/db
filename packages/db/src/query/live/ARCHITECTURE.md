@@ -494,12 +494,16 @@ A truncate replay is one publication barrier. Every acquisition started while
 that replay is active, including ordered full-source recovery, belongs to the
 barrier. Success publishes only after all current acquisitions settle. A
 released demand stops participating even if its canceled transport promise
-never settles. Failure keeps the last complete result visible and the graph's
-partly replayed source state private. Ordinary source deltas do not reopen that
-gate because they cannot prove the source complete; only a later successful
-truncate replay provides the authoritative replacement. If the last logical
-demand retires, the now-unreachable source replay stops gating the shared graph;
-unrelated parent or sibling changes may then publish.
+never settles. A newer truncate likewise supersedes the prior attempt: the old
+acquisitions are aborted and cannot gate the current replacement. This relies
+on the source contract that aborted request-scoped work installs no later rows.
+Failure keeps the last complete result visible and partly replayed source state
+private for both direct subscribers and query graphs. Ordinary source deltas or
+snapshot requests do not reopen that gate because they cannot prove the source
+complete; only a later successful truncate replay provides the authoritative
+replacement. If the last logical demand retires, the now-unreachable source
+replay stops gating the shared graph; unrelated parent or sibling changes may
+then publish.
 
 A transaction `mutationFn` must not start or await collection or live-query
 preloads. User persistence owns the causal queue while that function runs, so a
@@ -614,7 +618,8 @@ create recursive Collection machinery.
 12. **Work:** irrelevant rows do not cause unrelated scans or activate unrelated
     routes when an applicable index exists.
 13. **Space:** state scales with retained D2 relation/index rows, active demands,
-    materialization cells, visible rows, and required Collection facades.
+    materialization cells, visible rows, the current private replay state, and
+    required Collection facades—not with historical replay attempts or deltas.
 
 ## Glossary
 
