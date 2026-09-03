@@ -343,7 +343,11 @@ export class OrderedSourceLoader {
   }
 
   private loadPrefix(count: number, refine: boolean): void {
-    if (!this.active || this.pending || this.lastPrefixCount === count) return
+    if (!this.active || this.pending) return
+    if (this.lastPrefixCount === count) {
+      if ((this.info.dataNeeded?.() ?? 0) > 0) this.loadFullSource()
+      return
+    }
     this.subscription.requestSnapshot({
       orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
       limit: count,

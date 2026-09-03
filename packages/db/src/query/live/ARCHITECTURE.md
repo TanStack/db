@@ -480,13 +480,14 @@ Successful settlement proves only that the exact request finished and that its
 writes were applied. It does not prove source exhaustion or broader coverage.
 Ordered loading reaches a fixed point from public rows and exact request
 identity; it must not invent source extent from a requested limit. A finite
-multi-column prefix is conservatively invalidated after any delete or update,
-because a later order term can change membership without moving the first-term
-boundary. If the provider predicate cannot express the local order relation,
-such as locale string order, refinement loads the full source instead of
-treating boundary equality as an ordered continuation. An asynchronous failure
-of that full-source acquisition does not start duplicate recovery work. It
-keeps the logical demand so a later truncate replay can retry one authoritative
+prefix that still cannot fill the local window falls back once to a full-source
+load rather than repeating the same request or inferring exhaustion. This also
+lets multi-column windows revalidate after a non-boundary row leaves. If the
+provider predicate cannot express the local order relation, such as locale
+string order, refinement loads the full source instead of treating boundary
+equality as an ordered continuation. An asynchronous failure of that
+full-source acquisition does not start duplicate recovery work. It keeps the
+logical demand so a later truncate replay can retry one authoritative
 replacement.
 
 A truncate replay is one publication barrier. Every acquisition started while

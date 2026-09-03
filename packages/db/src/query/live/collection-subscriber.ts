@@ -467,10 +467,7 @@ export class CollectionSubscriber<
       comparator,
     )
     this.biggest = result.biggest
-    const prefixMayHaveChanged =
-      this.getOrderByInfo()?.orderBy.length !== 1 &&
-      changes.some(({ type }) => type !== `insert`)
-    if (result.shouldResetLoadKey || prefixMayHaveChanged) {
+    if (result.shouldResetLoadKey) {
       this.orderedLoader?.invalidateCursor()
     }
   }

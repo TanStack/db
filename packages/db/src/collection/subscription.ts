@@ -287,6 +287,14 @@ export class CollectionSubscription
     // buffer before a synchronous adapter can publish replacement rows.
     queueMicrotask(() => {
       if (this.truncateReplaySession !== session) return
+      if (session.currentAttempt !== attempt) {
+        // A newer truncate arrived before this attempt began source work. It
+        // already captured the active demands, so starting this obsolete
+        // acquisition now would place it outside the newer abort sweep.
+        attempt.setupComplete = true
+        this.checkTruncateReplayComplete(session)
+        return
+      }
 
       for (const demand of demandsToReload) {
         if (!this.subsetDemands.includes(demand)) continue
@@ -339,11 +347,13 @@ export class CollectionSubscription
           // from a non-cooperative adapter cannot escape the replay buffer.
           nextAcquisition.abortController.abort()
           nextAcquisition.removeRequestAbortListener?.()
-          try {
-            this.collection._sync.unloadSubset(nextAcquisition.options)
-          } catch {
-            // Preserve the first ownership error. The demand still retains the
-            // old acquisition so normal cleanup can retry that release.
+          if (this.subsetDemands.includes(demand)) {
+            try {
+              this.collection._sync.unloadSubset(nextAcquisition.options)
+            } catch {
+              // Preserve the first ownership error. The demand still retains
+              // the old acquisition so normal cleanup can retry that release.
+            }
           }
           this.recordLoadSubsetError(demand.options, error, true)
           this.stopStatusParticipant(statusParticipant)
@@ -692,12 +702,26 @@ export class CollectionSubscription
     next: SubsetAcquisition & { abortController: AbortController },
   ): void {
     const previousOptions = demand.options
+    const previousAbortController = demand.abortController
     const removePreviousAbortListener = demand.removeRequestAbortListener
-    this.collection._sync.unloadSubset(previousOptions)
-    removePreviousAbortListener?.()
+
+    // Publish the replacement ownership before releasing the old lease. An
+    // adapter may synchronously release the logical demand from unloadSubset;
+    // that reentrant release must then see and release the new acquisition.
     demand.options = next.options
     demand.abortController = next.abortController
     demand.removeRequestAbortListener = next.removeRequestAbortListener
+    try {
+      this.collection._sync.unloadSubset(previousOptions)
+    } catch (error) {
+      if (this.subsetDemands.includes(demand)) {
+        demand.options = previousOptions
+        demand.abortController = previousAbortController
+        demand.removeRequestAbortListener = removePreviousAbortListener
+      }
+      throw error
+    }
+    removePreviousAbortListener?.()
   }
 
   /** Abort and release one exact adapter acquisition. */

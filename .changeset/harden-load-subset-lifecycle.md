@@ -18,6 +18,7 @@ graph work. Failed unloads remain retryable cleanup debt without reviving
 demand, while preserving the exact acquisition identity for later release.
 Unsafe ordered boundaries fall back to full-source loading; an asynchronous
 failure waits for a later truncate replay instead of starting duplicate work.
-Finite multi-column prefixes revalidate after membership-changing updates.
+An underfilled finite prefix also falls back once to the full source, so
+multi-column windows recover without repeated exact requests.
 Ready callbacks keep readiness established when a callback throws, and key
 identity remains exact for NaN, binary, reference, function, and symbol values.

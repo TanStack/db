@@ -45,6 +45,7 @@ type RequestObservation = {
 type ConsumerObservation = {
   rows: Array<Row>
   requests: Array<RequestObservation>
+  compareRequestTrace: boolean
   publications: Array<Array<Row>>
   errors: Array<string>
   live: boolean
@@ -109,6 +110,13 @@ async function observeConsumer(
 ): Promise<ConsumerObservation> {
   type Sync = Parameters<SyncConfig<Row, number>[`sync`]>[0]
   const truth = rowsForScenario(scenario).sort(compareRows(scenario.direction))
+  const sourceSize = truth.length
+  const eligibleTruth = truth.filter(({ eligible }) => eligible)
+  const rowToDelete =
+    eligibleTruth.length >= 3 &&
+    eligibleTruth[0]!.rank !== eligibleTruth[1]!.rank
+      ? eligibleTruth[0]
+      : undefined
   const delivered = new Set<number>()
   const requests: Array<RequestObservation> = []
   const errors: Array<string> = []
@@ -209,6 +217,23 @@ async function observeConsumer(
   let live: ReturnType<typeof createLiveQueryCollection> | undefined
   let effect: ReturnType<typeof createEffect> | undefined
   const publications: Array<Array<Row>> = []
+  const query = (q: InitialQueryBuilder) => {
+    const ordered = q
+      .from({ row: source })
+      .leftJoin({ marker: markerSource }, ({ row, marker }) =>
+        eq(row.id, marker.rowId),
+      )
+      .where(({ row, marker }) => eq(row.id, marker!.rowId))
+      .orderBy(({ row }) => row.rank, scenario.direction)
+    return (rowToDelete ? ordered.orderBy(({ row }) => row.id, `asc`) : ordered)
+      .limit(2)
+      .select(({ row }) => ({
+        id: row.id,
+        rank: row.rank,
+        eligible: row.eligible,
+        label: row.label,
+      }))
+  }
 
   const visibleRows = () =>
     (live ? [...live.values()] : [...effectRows.values()])
@@ -217,43 +242,14 @@ async function observeConsumer(
 
   try {
     if (kind === `collection`) {
-      live = createLiveQueryCollection((q) =>
-        q
-          .from({ row: source })
-          .leftJoin({ marker: markerSource }, ({ row, marker }) =>
-            eq(row.id, marker.rowId),
-          )
-          .where(({ row, marker }) => eq(row.id, marker!.rowId))
-          .orderBy(({ row }) => row.rank, scenario.direction)
-          .limit(2)
-          .select(({ row }) => ({
-            id: row.id,
-            rank: row.rank,
-            eligible: row.eligible,
-            label: row.label,
-          })),
-      )
+      live = createLiveQueryCollection(query)
       live.subscribeChanges(() => {
         publications.push(visibleRows())
       })
       await live.preload()
     } else {
       effect = createEffect<Row, number>({
-        query: (q) =>
-          q
-            .from({ row: source })
-            .leftJoin({ marker: markerSource }, ({ row, marker }) =>
-              eq(row.id, marker.rowId),
-            )
-            .where(({ row, marker }) => eq(row.id, marker!.rowId))
-            .orderBy(({ row }) => row.rank, scenario.direction)
-            .limit(2)
-            .select(({ row }) => ({
-              id: row.id,
-              rank: row.rank,
-              eligible: row.eligible,
-              label: row.label,
-            })),
+        query,
         onBatch: (events) => {
           for (const event of events) {
             if (event.type === `exit`) effectRows.delete(event.key)
@@ -270,7 +266,7 @@ async function observeConsumer(
     }
 
     const rows = visibleRows()
-    const expected = truth.filter(({ eligible }) => eligible).slice(0, 2)
+    const expected = eligibleTruth.slice(0, 2)
     expect(rows, JSON.stringify({ kind, scenario, requests })).toEqual(expected)
     for (const publication of publications) {
       expect(publication).toEqual(expected.slice(0, publication.length))
@@ -285,9 +281,28 @@ async function observeConsumer(
         semanticPublications[index - 1]!.length,
       )
     }
-    expect(publications.at(-1) ?? []).toEqual(rows)
+    // Single-term bootstrap demand should be identical across entry points.
+    // Multi-term loading may schedule a different bounded number of prefix
+    // and tie refinements, so compare that path by rows and work bounds.
+    let finalRows = rows
+    if (rowToDelete) {
+      truth.splice(truth.indexOf(rowToDelete), 1)
+      delivered.delete(rowToDelete.id)
+      sync.begin({ immediate: true })
+      sync.write({ type: `delete`, value: { ...rowToDelete } })
+      const receipt = sync.commit()
+      if (receipt !== true) await receipt
+      for (let turn = 0; turn < sourceSize * 3 + 6; turn++) {
+        await flushPromises()
+      }
+      finalRows = visibleRows()
+      expect(finalRows, JSON.stringify({ kind, scenario, requests })).toEqual(
+        truth.filter(({ eligible }) => eligible).slice(0, 2),
+      )
+    }
+    expect(publications.at(-1) ?? []).toEqual(finalRows)
     expect(publications.length).toBeLessThanOrEqual(requests.length + 1)
-    expect(requests.length).toBeLessThanOrEqual(truth.length * 3 + 2)
+    expect(requests.length).toBeLessThanOrEqual(sourceSize * 3 + 2)
     expect(
       requests.every(
         (request) => request.kind === `boundary` || request.limit !== undefined,
@@ -295,8 +310,9 @@ async function observeConsumer(
     ).toBe(true)
 
     return {
-      rows,
+      rows: finalRows,
       requests,
+      compareRequestTrace: rowToDelete === undefined,
       publications,
       errors,
       live: live ? live.status === `ready` : effect?.disposed === false,
@@ -327,9 +343,11 @@ async function assertConsumerParity(scenario: Scenario): Promise<void> {
       // Effects omit it, so compare the adapter-visible operation instead.
       offset: hasCursor ? 0 : offset,
     }))
-  expect(semanticRequests(effect.requests)).toEqual(
-    semanticRequests(collection.requests),
-  )
+  if (effect.compareRequestTrace && collection.compareRequestTrace) {
+    expect(semanticRequests(effect.requests)).toEqual(
+      semanticRequests(collection.requests),
+    )
+  }
 }
 
 describe(`ordered source work oracle`, () => {

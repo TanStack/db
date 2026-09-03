@@ -868,10 +868,16 @@ async function runOnDemandPaginationScenario(
     for (const load of loads) {
       if (load.orderBy) {
         expect(load.orderBy).toMatchObject(expectedOrderBy)
-      } else {
+      } else if (load.where) {
         // Boundary refinement asks for the complete tie class with an exact
         // predicate. Prefix and cursor requests still carry the source order.
-        expect(load.where).toBeDefined()
+        expect(load.limit).toBeUndefined()
+      } else {
+        // If the same finite prefix cannot fill the local window, one
+        // unbounded request safely establishes the remaining source rows.
+        expect(load.cursor).toBeUndefined()
+        expect(load.limit).toBeUndefined()
+        expect(load.offset).toBeUndefined()
       }
     }
     for (const publication of publications) {
@@ -881,6 +887,15 @@ async function runOnDemandPaginationScenario(
         publication.window,
       )
       expect(publication.ids).toEqual(expected.slice(0, publication.ids.length))
+    }
+    if (
+      scenario.windows.some(
+        (window) =>
+          referenceWindow(authoritativeRows, scenario.direction, window)
+            .length > 0,
+      )
+    ) {
+      expect(publications.length).toBeGreaterThan(0)
     }
     if (publications.length > 0) {
       expect(publications.at(-1)?.ids).toEqual(

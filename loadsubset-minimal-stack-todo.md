@@ -113,18 +113,18 @@ work bound when row correctness is proved independently.
       longer promises subset algebra.
 - [x] List each deliberate mutation and the assertion that kills it: - count an aborted obsolete replay as failed and let any attempt choose
       the final outcome -> `lets the newest successful replay replace an
-  older failed replay` rejects the missing publication; - remove identical page/boundary suppression -> `settles an underfilled
-  source without repeating one continuation forever` exceeds its finite
+older failed replay` rejects the missing publication; - remove identical page/boundary suppression -> `settles an underfilled
+source without repeating one continuation forever` exceeds its finite
       request bound; - page a joined source instead of taking the conservative full-source
       path -> `refills a joined result window through a contract-compliant
-  source` rejects the extra limited requests; - unload the same physical acquisition twice -> `releases every
-  successful overlapping replay acquisition` rejects the release count; - flush a truncate replay before its pending demands settle -> `uses the
-  newest complete multi-demand replay` observes a partial empty snapshot; - disable sync-session epoch checks -> the fixed-seed cleanup/restart
+source` rejects the extra limited requests; - unload the same physical acquisition twice -> `releases every
+successful overlapping replay acquisition` rejects the release count; - flush a truncate replay before its pending demands settle -> `uses the
+newest complete multi-demand replay` observes a partial empty snapshot; - disable sync-session epoch checks -> the fixed-seed cleanup/restart
       property observes an old session row in its replacement; - cache an asynchronously completed request after owner abort -> `does
-  not cache work that settles after its owner aborts` rejects the skipped
+not cache work that settles after its owner aborts` rejects the skipped
       retry; - cache a rejected request -> `retries an exact demand after rejection`
       rejects the skipped retry; - seed an ordered cursor from an unrelated local row -> `does not derive
-  an ordered boundary from another demand's local row` rejects the
+an ordered boundary from another demand's local row` rejects the
       foreign cursor.
 - [x] Do not add a shared on-demand source fixture: only two current tests need
       the protocol, and their local fixtures remain clearer than a premature
@@ -603,7 +603,7 @@ explicitly removed.
       runtime-identity initialization and this branch's object/function/symbol
       identity domains; the focused identity suite is 70/70 green.
 - [x] Run typecheck and the full package suite. The standalone package
-      typecheck passes, and the full DB run is 3,507/3,507 green (6 skipped)
+      typecheck passes, and the full DB run is 3,515/3,515 green (6 skipped)
       across 139 files with no type errors. The same full run passes after the
       main merge, and every package in the monorepo builds successfully.
 - [x] Run the 100x fixed/random campaign. The demand, replay, ordered-work,
@@ -647,8 +647,10 @@ explicitly removed.
 - [x] Use the same conforming provider model for ordinary boundary loads. It
       exposed another false green: multi-column prefix loading did not
       revalidate after a non-boundary delete because the prior prefix request
-      stayed deduped. Collection and Effect loaders now invalidate finite
-      prefix work whenever a delete or update can change its membership.
+      stayed deduped. If the same finite prefix still underfills the local
+      window, Collection and Effect now fall back once to a full-source load.
+      This removes their duplicated broad invalidation rule while preserving
+      exact rows and bounded source work.
 - [x] Make every RFC oracle reachable from the package oracle script. Generated
       pagination histories now also assert ready/error state, bounded graph
       work, and exactly one public publication per semantic result change (zero
@@ -663,7 +665,22 @@ explicitly removed.
       Ordered recovery asserts one complete public replacement. The root
       `test:oracles` command now includes both core and Query DB oracle suites.
       The architecture and changeset record the exact cleanup lease,
-      multi-column invalidation scope, and deferred full-source retry policy.
+      underfilled-prefix fallback, and deferred full-source retry policy.
+- [x] Close the queued and reentrant replay setup races. Back-to-back truncates
+      in one turn first proved that a superseded microtask could start work
+      outside the newer attempt's abort sweep. Exact option-identity assertions
+      then proved that reentrant old-lease cleanup unloaded the old acquisition
+      twice and leaked its replacement. Obsolete setup now exits before source
+      work, and replacement ownership becomes visible before the old lease is
+      released so each physical acquisition retires once.
+- [x] Extend the live collection/Effect oracle through a multi-column ordered
+      delete. It found an underfilled residual-join window that a repeated
+      finite prefix could not repair. Both entry points now use the shared
+      one-time full-source fallback; the existing pagination oracle killed the
+      old behavior, and the cross-consumer oracle proves final rows, liveness,
+      and bounded work without requiring identical graph schedules. The full
+      core oracle gate is 514/514 green; Query DB adds 42/42 green (1 skipped),
+      with no type errors.
 - [x] Measure source and compressed bundle size against both `origin/main` and
       the large RFC stack. Across all package `src` trees, the old stack was
       +10,545/-1,692 lines (net +8,853) while this tree is +1,912/-1,288

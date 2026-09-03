@@ -2123,6 +2123,116 @@ describe(`CollectionSubscription replay oracle`, () => {
     })
   })
 
+  it(`does not start a queued replay after a newer truncate supersedes it`, async () => {
+    let begin!: () => void
+    let commit!: () => void
+    let truncate!: () => void
+    const replay = createDeferred<void>()
+    const loadSignals: Array<AbortSignal | undefined> = []
+    const collection = createCollection<ReplayRow>({
+      id: `superseded-before-replay-setup`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (operations) => {
+          begin = operations.begin
+          commit = operations.commit
+          truncate = operations.truncate
+          operations.markReady()
+          return {
+            loadSubset: ({ signal }) => {
+              loadSignals.push(signal)
+              return loadSignals.length === 1 ? true : replay.promise
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+
+    try {
+      subscription.requestSnapshot({ optimizedOnly: false })
+
+      begin()
+      truncate()
+      commit()
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+
+      expect(loadSignals).toHaveLength(2)
+      expect(loadSignals[0]?.aborted).toBe(true)
+      expect(loadSignals[1]?.aborted).toBe(false)
+    } finally {
+      replay.resolve()
+      await flushPromises()
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`releases a replay acquisition when old-lease cleanup retires its demand`, async () => {
+    let begin!: () => void
+    let commit!: () => void
+    let truncate!: () => void
+    let subscription!: ReturnType<Collection<ReplayRow>[`subscribeChanges`]>
+    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    let reentered = false
+    const collection = createCollection<ReplayRow>({
+      id: `reentrant-replay-lease-replacement`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (operations) => {
+          begin = operations.begin
+          commit = operations.commit
+          truncate = operations.truncate
+          operations.markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return true
+            },
+            unloadSubset: (options) => {
+              unloads.push(options)
+              if (options === loads[0] && !reentered) {
+                reentered = true
+                subscription.releaseSnapshot(where)
+              }
+            },
+          }
+        },
+      },
+    })
+    subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+
+    try {
+      subscription.requestSnapshot({ where, optimizedOnly: false })
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+
+      expect(loads).toHaveLength(2)
+      expect(unloads).toHaveLength(2)
+      expect(unloads[0]).toBe(loads[0])
+      expect(unloads[1]).toBe(loads[1])
+      subscription.unsubscribe()
+      expect(unloads).toHaveLength(2)
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   fcTest.prop([replayScenarioArbitrary], {
     numRuns: generatedRuns,
     seed: 1756,

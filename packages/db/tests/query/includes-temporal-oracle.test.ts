@@ -981,6 +981,12 @@ async function expectFailedReplayStopsGatingAfterLastDemandRetires(): Promise<vo
               commit()
               return true
             }
+            begin()
+            write({
+              type: `insert`,
+              value: { id: 20, postId: post.id, body: `private replacement` },
+            })
+            commit()
             return replay.promise
           },
           unloadSubset: () => {},
@@ -989,11 +995,17 @@ async function expectFailedReplayStopsGatingAfterLastDemandRetires(): Promise<vo
     },
   })
   const live = createPostsWithCommentsLive(posts.collection, comments)
+  const publications: Array<Array<number>> = []
+  const subscription = live.subscribeChanges(
+    () => publications.push(live.toArray.map(({ id }) => id)),
+    { includeInitialState: false },
+  )
   const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
 
   try {
     await live.preload()
     expect(live.get(post.id)?.comments.map(({ id }) => id)).toEqual([10])
+    publications.length = 0
 
     begin()
     truncate()
@@ -1004,6 +1016,7 @@ async function expectFailedReplayStopsGatingAfterLastDemandRetires(): Promise<vo
     replay.reject(new Error(`replacement failed`))
     await flushPromises()
     expect(live.get(post.id)?.comments.map(({ id }) => id)).toEqual([10])
+    expect(publications).toEqual([])
 
     posts.write(`delete`, post)
     await flushPromises()
@@ -1011,8 +1024,10 @@ async function expectFailedReplayStopsGatingAfterLastDemandRetires(): Promise<vo
     // Once the parent retires the last child demand, its failed replay can no
     // longer gate unrelated parent changes in the shared graph.
     expect(live.size).toBe(0)
+    expect(publications).toEqual([[]])
   } finally {
     replay.resolve()
+    subscription.unsubscribe()
     await live.cleanup()
     await Promise.all([posts.collection.cleanup(), comments.cleanup()])
     consoleError.mockRestore()
