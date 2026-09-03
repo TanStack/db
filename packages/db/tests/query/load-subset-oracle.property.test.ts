@@ -1070,7 +1070,7 @@ async function expectDerivedSyncDuringOptimisticMutation(): Promise<void> {
 }
 
 describe(`exact loadSubset demand oracle`, () => {
-  it(`treats a missing reference path as nullish in the independent model`, () => {
+  it(`uses SQL unknown for nullish comparisons in the independent model`, () => {
     const missing = new PropRef<number | null>([`missing`])
 
     expect(
@@ -1078,10 +1078,10 @@ describe(`exact loadSubset demand oracle`, () => {
         new Func(`lte`, [missing, new Value(null)]),
         {},
       ),
-    ).toBe(true)
+    ).toBeNull()
     expect(
       evaluateReferenceExpression(new Func(`lt`, [missing, new Value(0)]), {}),
-    ).toBe(true)
+    ).toBeNull()
   })
 
   it(`generates repeated, cursor, empty, and unbounded exact demands`, () => {

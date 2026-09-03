@@ -1,6 +1,49 @@
-import { and, eq, gt, gte, lt, or } from '../query/builder/functions.js'
+import {
+  and,
+  eq,
+  gt,
+  gte,
+  isNull,
+  isUndefined,
+  lt,
+  not,
+  or,
+} from '../query/builder/functions.js'
 import { Value } from '../query/ir.js'
-import type { BasicExpression, OrderBy } from '../query/ir.js'
+import type { BasicExpression, OrderBy, OrderByClause } from '../query/ir.js'
+
+function isNullish(
+  expression: OrderByClause[`expression`],
+): BasicExpression<boolean> {
+  return or(isNull(expression), isUndefined(expression))
+}
+
+function equalsBoundary(
+  clause: OrderByClause,
+  value: unknown,
+): BasicExpression<boolean> {
+  return value == null
+    ? isNullish(clause.expression)
+    : eq(clause.expression, new Value(value))
+}
+
+function followsBoundary(
+  clause: OrderByClause,
+  value: unknown,
+): BasicExpression<boolean> {
+  const nullish = isNullish(clause.expression)
+  if (value == null) {
+    return clause.compareOptions.nulls === `first`
+      ? not(nullish)
+      : new Value(false)
+  }
+
+  const operator = clause.compareOptions.direction === `asc` ? gt : lt
+  const comparison = operator(clause.expression, new Value(value))
+  return clause.compareOptions.nulls === `last`
+    ? or(comparison, nullish)
+    : comparison
+}
 
 /**
  * Builds a cursor expression for paginating through ordered results.
@@ -27,9 +70,7 @@ export function buildCursor(
   }
 
   if (orderBy.length === 1) {
-    const { expression, compareOptions } = orderBy[0]!
-    const operator = compareOptions.direction === `asc` ? gt : lt
-    return operator(expression, new Value(values[0]))
+    return followsBoundary(orderBy[0]!, values[0])
   }
 
   // For multi-column, build the composite cursor:
@@ -50,12 +91,11 @@ export function buildCursor(
     for (let j = 0; j < i; j++) {
       const prevClause = orderBy[j]!
       const prevValue = values[j]
-      eqConditions.push(eq(prevClause.expression, new Value(prevValue)))
+      eqConditions.push(equalsBoundary(prevClause, prevValue))
     }
 
     // Add the comparison for the current column (respecting direction)
-    const operator = clause.compareOptions.direction === `asc` ? gt : lt
-    const comparison = operator(clause.expression, new Value(value))
+    const comparison = followsBoundary(clause, value)
 
     if (eqConditions.length === 0) {
       // First column: just the comparison
@@ -84,6 +124,7 @@ export function buildCursorCurrent(
   const { expression } = orderBy[0] ?? {}
   if (!expression || values.length === 0) return undefined
   const value = values[0]
+  if (value == null) return isNullish(expression)
   if (value instanceof Date) {
     if (!Number.isFinite(value.getTime())) return undefined
     return and(

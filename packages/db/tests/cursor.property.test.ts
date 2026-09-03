@@ -19,15 +19,6 @@ const valueArbitrary = fc.oneof(
   fc.constant(null),
   fc.constant(undefined),
 )
-const cursorCaseArbitrary = fc
-  .integer({ min: 1, max: 4 })
-  .chain((length) =>
-    fc.tuple(
-      fc.array(termArbitrary, { minLength: length, maxLength: length }),
-      fc.array(valueArbitrary, { minLength: length, maxLength: length }),
-      fc.array(valueArbitrary, { minLength: length, maxLength: length }),
-    ),
-  )
 
 function compareValue(left: unknown, right: unknown, term: Term): number {
   if (left == null && right == null) return 0
@@ -49,18 +40,51 @@ function compareTuple(
   return 0
 }
 
-function row(values: ReadonlyArray<unknown>): Record<string, unknown> {
-  return Object.fromEntries(
-    values.map((value, index) => [`column${index}`, value]),
-  )
-}
-
 function orderBy(terms: ReadonlyArray<Term>): OrderBy {
   return terms.map((compareOptions, index) => ({
     expression: new PropRef([`column${index}`]),
     compareOptions,
   }))
 }
+
+function row(values: ReadonlyArray<unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    values.map((value, index) => [`column${index}`, value]),
+  )
+}
+
+function expectCursorDenotation(
+  terms: ReadonlyArray<Term>,
+  boundary: ReadonlyArray<unknown>,
+  candidate: ReadonlyArray<unknown>,
+): void {
+  const length = Math.min(terms.length, boundary.length)
+  const usedTerms = terms.slice(0, length)
+  const usedBoundary = boundary.slice(0, length)
+  const cursor = buildCursor(orderBy(terms), [...boundary])
+  expect(cursor).toBeDefined()
+  expect(Boolean(evaluateReferenceExpression(cursor!, row(candidate)))).toBe(
+    compareTuple(candidate, usedBoundary, usedTerms) > 0,
+  )
+}
+
+const exactCursorArbitrary = fc
+  .integer({ min: 1, max: 4 })
+  .chain((length) =>
+    fc.tuple(
+      fc.array(termArbitrary, { minLength: length, maxLength: length }),
+      fc.array(valueArbitrary, { minLength: length, maxLength: length }),
+      fc.array(valueArbitrary, { minLength: length, maxLength: length }),
+    ),
+  )
+
+const partialCursorArbitrary = fc
+  .tuple(
+    fc.array(termArbitrary, { minLength: 1, maxLength: 4 }),
+    fc.array(valueArbitrary, { minLength: 1, maxLength: 4 }),
+    fc.array(valueArbitrary, { minLength: 4, maxLength: 4 }),
+  )
+  .filter(([terms, boundary]) => terms.length !== boundary.length)
 
 describe(`buildCursor properties`, () => {
   it(`returns no cursor without terms or boundary values`, () => {
@@ -70,21 +94,21 @@ describe(`buildCursor properties`, () => {
     ).toBeUndefined()
   })
 
-  fcTest.prop([cursorCaseArbitrary], { numRuns: 300 })(
-    `selects exactly the tuples after a nullable mixed-direction boundary`,
+  fcTest.prop([exactCursorArbitrary], { numRuns: 300 })(
+    `cursor denotation matches nullable mixed-direction tuple order`,
     ([terms, boundary, candidate]) => {
-      const cursor = buildCursor(orderBy(terms), [...boundary])
-      expect(cursor).toBeDefined()
-
-      const actual = Boolean(
-        evaluateReferenceExpression(cursor!, row(candidate)),
-      )
-      const expected = compareTuple(candidate, boundary, terms) > 0
-      expect(actual).toBe(expected)
+      expectCursorDenotation(terms, boundary, candidate)
     },
   )
 
-  fcTest.prop([cursorCaseArbitrary], { numRuns: 100 })(
+  fcTest.prop([partialCursorArbitrary], { numRuns: 200 })(
+    `uses the shared prefix when term and boundary lengths differ`,
+    ([terms, boundary, candidate]) => {
+      expectCursorDenotation(terms, boundary, candidate)
+    },
+  )
+
+  fcTest.prop([exactCursorArbitrary], { numRuns: 100 })(
     `is deterministic`,
     ([terms, boundary]) => {
       expect(buildCursor(orderBy(terms), [...boundary])).toEqual(

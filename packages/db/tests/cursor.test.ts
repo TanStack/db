@@ -64,7 +64,7 @@ describe(`buildCursor`, () => {
     expect(matches(order, [1], { first: 1, second: 100 })).toBe(false)
   })
 
-  it(`rejects cursor pushdown when predicate comparison cannot express the total order`, () => {
+  it(`rejects cursor pushdown when predicates cannot express the order`, () => {
     const localeOrder: OrderBy = [
       {
         expression: new PropRef([`label`]),
