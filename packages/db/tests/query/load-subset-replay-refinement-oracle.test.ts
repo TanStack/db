@@ -1,19 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
-import { createLiveQueryCollection } from '../../src/query/index.js'
-import { projectReplayPublication } from '../load-subset-full-flow-model.js'
+import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { flushPromises } from '../utils.js'
-import type {
-  FullFlowVersionedRow,
-  LoadSubsetFullFlowEvent,
-} from '../load-subset-full-flow-model.js'
 import type {
   ChangeMessageOrDeleteKeyMessage,
   LoadSubsetOptions,
 } from '../../src/types.js'
 
 type Row = { id: string; version: number }
+type ObservedRow = { sourceId: string; rowKey: string; version: number }
 
 describe(`loadSubset replay refinement`, () => {
   function createHarness(sourceId: string) {
@@ -71,7 +67,7 @@ describe(`loadSubset replay refinement`, () => {
         })),
       startSync: true,
     })
-    const callbackReads: Array<Array<FullFlowVersionedRow>> = []
+    const callbackReads: Array<Array<ObservedRow>> = []
     const subscription = downstream.subscribeChanges(
       (changes) => {
         const batch = changes.map((change) => ({
@@ -144,36 +140,20 @@ describe(`loadSubset replay refinement`, () => {
       rowKey: `row`,
       version,
     })
-    const history: Array<LoadSubsetFullFlowEvent> = [
-      { type: `establishPublication`, sourceId, rows: [row(1)] },
-    ]
     const harness = createHarness(sourceId)
 
     try {
       await harness.downstream.preload()
       await harness.startReplay()
-      history.push({ type: `startReplay`, attemptId: `replay-1`, sourceId })
 
       harness.replaceCore(2)
-      history.push({
-        type: `writeReplayRows`,
-        attemptId: `replay-1`,
-        rows: [row(2)],
-        acceptedByCore: true,
-      })
       harness.pending[0]?.deferred.reject(new Error(`replay failed`))
-      history.push({
-        type: `settleReplay`,
-        attemptId: `replay-1`,
-        outcome: `reject`,
-      })
       await flushPromises()
 
-      const expected = projectReplayPublication(history)
-      expect(harness.coreRows()).toEqual(expected.coreRows)
-      expect(harness.visibleRows()).toEqual(expected.visibleRows)
-      expect(harness.batches).toEqual(expected.publishedBatches)
-      expect(harness.callbackReads).toEqual(expected.callbackReads)
+      expect(harness.coreRows()).toEqual([row(2)])
+      expect(harness.visibleRows()).toEqual([row(1)])
+      expect(harness.batches).toEqual([[{ type: `insert`, row: row(1) }]])
+      expect(harness.callbackReads).toEqual([[row(1)]])
     } finally {
       harness.subscription.unsubscribe()
       await Promise.all([
@@ -190,64 +170,211 @@ describe(`loadSubset replay refinement`, () => {
       rowKey: `row`,
       version,
     })
-    const history: Array<LoadSubsetFullFlowEvent> = [
-      { type: `establishPublication`, sourceId, rows: [row(1)] },
-    ]
     const harness = createHarness(sourceId)
 
     try {
       await harness.downstream.preload()
       await harness.startReplay()
-      history.push({ type: `startReplay`, attemptId: `replay-1`, sourceId })
       await harness.startReplay()
-      history.push({ type: `startReplay`, attemptId: `replay-2`, sourceId })
 
       expect(harness.pending[0]?.options.signal?.aborted).toBe(true)
       harness.replaceCore(3)
-      history.push({
-        type: `writeReplayRows`,
-        attemptId: `replay-2`,
-        rows: [row(3)],
-        acceptedByCore: true,
-      })
       harness.pending[1]?.deferred.resolve()
-      history.push({
-        type: `settleReplay`,
-        attemptId: `replay-2`,
-        outcome: `resolve`,
-      })
       await flushPromises()
 
-      const beforeObsoleteSettlement = projectReplayPublication(history)
-      expect(harness.visibleRows()).toEqual(
-        beforeObsoleteSettlement.visibleRows,
-      )
-      expect(harness.batches).toEqual(beforeObsoleteSettlement.publishedBatches)
-      expect(harness.callbackReads).toEqual(
-        beforeObsoleteSettlement.callbackReads,
-      )
+      expect(harness.visibleRows()).toEqual([row(1)])
+      expect(harness.batches).toEqual([[{ type: `insert`, row: row(1) }]])
+      expect(harness.callbackReads).toEqual([[row(1)]])
 
       harness.pending[0]?.deferred.reject(
         new DOMException(`obsolete`, `AbortError`),
       )
-      history.push({
-        type: `settleReplay`,
-        attemptId: `replay-1`,
-        outcome: `reject`,
-      })
       await flushPromises()
 
-      const expected = projectReplayPublication(history)
-      expect(harness.coreRows()).toEqual(expected.coreRows)
-      expect(harness.visibleRows()).toEqual(expected.visibleRows)
-      expect(harness.batches).toEqual(expected.publishedBatches)
-      expect(harness.callbackReads).toEqual(expected.callbackReads)
+      expect(harness.coreRows()).toEqual([row(3)])
+      expect(harness.visibleRows()).toEqual([row(3)])
+      expect(harness.batches).toEqual([
+        [{ type: `insert`, row: row(1) }],
+        [{ type: `update`, row: row(3), previousVersion: 1 }],
+      ])
+      expect(harness.callbackReads).toEqual([[row(1)], [row(3)]])
     } finally {
       for (const replay of harness.pending) replay.deferred.resolve()
       harness.subscription.unsubscribe()
       await Promise.all([
         harness.downstream.cleanup(),
         harness.source.cleanup(),
+      ])
+    }
+  })
+
+  it(`waits for every recovering source before publishing a joined replacement`, async () => {
+    type Primary = { id: string; joinKey: string; version: number }
+    type Secondary = { id: string; joinKey: string; version: number }
+
+    const createSource = <T extends { id: string }>(id: string) => {
+      let begin!: () => void
+      let write!: (message: { type: `insert`; value: T }) => void
+      let commit!: () => true | Promise<void>
+      let truncate!: () => void
+      const pending: Array<ReturnType<typeof createDeferred<void>>> = []
+      const collection = createCollection<T>({
+        id,
+        getKey: ({ id: key }) => key,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (operations) => {
+            begin = operations.begin
+            write = operations.write
+            commit = operations.commit
+            truncate = operations.truncate
+            operations.markReady()
+            return {
+              loadSubset: () => {
+                const request = createDeferred<void>()
+                pending.push(request)
+                return request.promise
+              },
+              unloadSubset: () => {},
+            }
+          },
+        },
+      })
+      return {
+        collection,
+        pending,
+        async apply(row: T) {
+          begin()
+          write({ type: `insert`, value: row })
+          const receipt = commit()
+          if (receipt !== true) await receipt
+        },
+        replay() {
+          begin()
+          truncate()
+          return commit()
+        },
+      }
+    }
+
+    const primary = createSource<Primary>(`joined-replay-primary`)
+    const secondary = createSource<Secondary>(`joined-replay-secondary`)
+    const live = createLiveQueryCollection((q) =>
+      q
+        .from({ primary: primary.collection })
+        .innerJoin(
+          { secondary: secondary.collection },
+          ({ primary: left, secondary: right }) =>
+            eq(left.joinKey, right.joinKey),
+        )
+        .orderBy(({ primary: row }) => row.version)
+        .limit(1)
+        .select(({ primary: left, secondary: right }) => ({
+          id: left.id,
+          secondaryId: right.id,
+          primaryVersion: left.version,
+          secondaryVersion: right.version,
+        })),
+    )
+    const read = () =>
+      live.toArray.map(
+        ({ id, secondaryId, primaryVersion, secondaryVersion }) => ({
+          id,
+          secondaryId,
+          primaryVersion,
+          secondaryVersion,
+        }),
+      )
+    const publications: Array<ReturnType<typeof read>> = []
+    let subscription: ReturnType<typeof live.subscribeChanges> | undefined
+    let primaryReplay: true | Promise<void> = true
+    let secondaryReplay: true | Promise<void> = true
+
+    try {
+      const preload = live.preload()
+      await flushPromises()
+      expect(primary.pending).toHaveLength(1)
+      await primary.apply({ id: `p`, joinKey: `shared`, version: 1 })
+      primary.pending[0]!.resolve()
+      await flushPromises()
+      expect(secondary.pending).toHaveLength(1)
+      await secondary.apply({ id: `s`, joinKey: `shared`, version: 1 })
+      secondary.pending[0]!.resolve()
+      await flushPromises()
+      for (const request of primary.pending.slice(1)) request.resolve()
+      await preload
+      expect(read()).toEqual([
+        {
+          id: `p`,
+          secondaryId: `s`,
+          primaryVersion: 1,
+          secondaryVersion: 1,
+        },
+      ])
+
+      subscription = live.subscribeChanges(() => publications.push(read()), {
+        includeInitialState: false,
+      })
+      const initialPrimaryLoads = primary.pending.length
+      const initialSecondaryLoads = secondary.pending.length
+      primaryReplay = primary.replay()
+      secondaryReplay = secondary.replay()
+      await flushPromises()
+      expect(primary.pending.length).toBeGreaterThan(initialPrimaryLoads)
+      expect(secondary.pending.length).toBeGreaterThan(initialSecondaryLoads)
+
+      await primary.apply({ id: `p`, joinKey: `shared`, version: 2 })
+      await secondary.apply({ id: `s`, joinKey: `shared`, version: 2 })
+      for (const request of primary.pending.slice(initialPrimaryLoads)) {
+        request.resolve()
+      }
+      await flushPromises()
+
+      expect(read()).toEqual([
+        {
+          id: `p`,
+          secondaryId: `s`,
+          primaryVersion: 1,
+          secondaryVersion: 1,
+        },
+      ])
+      expect(publications).toEqual([])
+
+      for (const request of secondary.pending.slice(initialSecondaryLoads)) {
+        request.resolve()
+      }
+      await Promise.all([primaryReplay, secondaryReplay])
+      await flushPromises()
+
+      expect(read()).toEqual([
+        {
+          id: `p`,
+          secondaryId: `s`,
+          primaryVersion: 2,
+          secondaryVersion: 2,
+        },
+      ])
+      expect(publications).toEqual([
+        [
+          {
+            id: `p`,
+            secondaryId: `s`,
+            primaryVersion: 2,
+            secondaryVersion: 2,
+          },
+        ],
+      ])
+    } finally {
+      for (const request of [...primary.pending, ...secondary.pending]) {
+        request.resolve()
+      }
+      subscription?.unsubscribe()
+      await Promise.all([
+        Promise.resolve(primaryReplay).catch(() => undefined),
+        Promise.resolve(secondaryReplay).catch(() => undefined),
+        live.cleanup(),
+        primary.collection.cleanup(),
+        secondary.collection.cleanup(),
       ])
     }
   })
