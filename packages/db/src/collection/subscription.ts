@@ -345,11 +345,10 @@ export class CollectionSubscription
           // The old lease is still owned because its release failed. Abort and
           // release the new acquisition, but keep observing its work so rows
           // from a non-cooperative adapter cannot escape the replay buffer.
-          nextAcquisition.abortController.abort()
-          nextAcquisition.removeRequestAbortListener?.()
           if (this.subsetDemands.includes(demand)) {
+            nextAcquisition.abortController.abort()
             try {
-              this.collection._sync.unloadSubset(nextAcquisition.options)
+              this.releaseOrRetainAcquisition(nextAcquisition)
             } catch {
               // Preserve the first ownership error. The demand still retains
               // the old acquisition so normal cleanup can retry that release.
@@ -701,9 +700,11 @@ export class CollectionSubscription
     demand: SubsetDemand,
     next: SubsetAcquisition & { abortController: AbortController },
   ): void {
-    const previousOptions = demand.options
-    const previousAbortController = demand.abortController
-    const removePreviousAbortListener = demand.removeRequestAbortListener
+    const previous: SubsetAcquisition = {
+      options: demand.options,
+      abortController: demand.abortController,
+      removeRequestAbortListener: demand.removeRequestAbortListener,
+    }
 
     // Publish the replacement ownership before releasing the old lease. An
     // adapter may synchronously release the logical demand from unloadSubset;
@@ -712,16 +713,20 @@ export class CollectionSubscription
     demand.abortController = next.abortController
     demand.removeRequestAbortListener = next.removeRequestAbortListener
     try {
-      this.collection._sync.unloadSubset(previousOptions)
+      this.collection._sync.unloadSubset(previous.options)
     } catch (error) {
       if (this.subsetDemands.includes(demand)) {
-        demand.options = previousOptions
-        demand.abortController = previousAbortController
-        demand.removeRequestAbortListener = removePreviousAbortListener
+        demand.options = previous.options
+        demand.abortController = previous.abortController
+        demand.removeRequestAbortListener = previous.removeRequestAbortListener
+      } else if (!this.releaseDebts.includes(previous)) {
+        // Reentrant logical release already retired the replacement. Preserve
+        // the old physical lease so teardown can retry its failed release.
+        this.releaseDebts.push(previous)
       }
       throw error
     }
-    removePreviousAbortListener?.()
+    previous.removeRequestAbortListener?.()
   }
 
   /** Abort and release one exact adapter acquisition. */
@@ -881,6 +886,7 @@ export class CollectionSubscription
     }
 
     const { demand, result: syncResult } = this.startSubsetDemand(loadOptions)
+    if (this.unsubscribed) return false
     if (opts?.where) this.requestedSubsetWhere.set(loadOptions, opts.where)
 
     // Pass the raw loadSubset result to the caller for external tracking
@@ -1143,6 +1149,7 @@ export class CollectionSubscription
     }
 
     this.callback(changes)
+    if (this.unsubscribed) return
 
     // Update the row count and last key after sending (for next call's offset/cursor)
     this.limitedSnapshotRowCount = Math.max(

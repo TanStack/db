@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
+import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
 import { DeduplicatedLoadSubset } from '../src/query/subset-dedupe.js'
 import { flushPromises } from './utils'
@@ -796,6 +797,100 @@ describe(`CollectionSubscription status tracking`, () => {
       }
     },
   )
+
+  it(`does not deliver a direct snapshot after adapter work unsubscribes`, async () => {
+    type Row = { id: string; rank: number }
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const callbacks: Array<Array<string>> = []
+    let unsubscribeDuringLoad = () => {}
+    const collection = createCollection<Row>({
+      id: `direct-snapshot-reentrant-unsubscribe`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({ type: `insert`, value: { id: `row`, rank: 1 } })
+          commit()
+          markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              unsubscribeDuringLoad()
+              return true
+            },
+            unloadSubset: (options) => unloads.push(options),
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges((changes) => {
+      callbacks.push(changes.map(({ value }) => value.id))
+    })
+    unsubscribeDuringLoad = () => subscription.unsubscribe()
+
+    try {
+      subscription.requestSnapshot({ optimizedOnly: false })
+
+      expect(callbacks).toEqual([])
+      expect(loads).toHaveLength(1)
+      expect(unloads).toEqual([loads[0]])
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`does not start limited adapter work after local delivery unsubscribes`, async () => {
+    type Row = { id: string; rank: number }
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const collection = createCollection<Row>({
+      id: `limited-snapshot-reentrant-unsubscribe`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({ type: `insert`, value: { id: `row`, rank: 1 } })
+          commit()
+          markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return true
+            },
+            unloadSubset: (options) => unloads.push(options),
+          }
+        },
+      },
+    })
+    const index = collection.createIndex((row) => row.rank, {
+      indexType: BTreeIndex,
+    })
+    let subscription!: ReturnType<typeof collection.subscribeChanges>
+    subscription = collection.subscribeChanges(() => subscription.unsubscribe())
+    subscription.setOrderByIndex(index)
+
+    try {
+      subscription.requestLimitedSnapshot({
+        orderBy: [
+          {
+            expression: new PropRef([`rank`]),
+            compareOptions: { direction: `asc`, nulls: `first` },
+          },
+        ],
+        limit: 1,
+      })
+
+      expect(loads).toEqual([])
+      expect(unloads).toEqual([])
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
 
   it.each(
     ([false, true] as const).flatMap((adapterCatches) =>

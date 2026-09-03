@@ -610,7 +610,12 @@ explicitly removed.
       pagination, and includes suites pass every fixed and random property.
       After the fail-closed replay repair, the affected demand, replay,
       ordered-work, and pagination suites passed another 100x campaign with an
-      extended per-property timeout.
+      extended per-property timeout. After the final loss-audit additions, the
+      ordered suite passed 4,000 more generated histories (2,000 fixed-seed
+      and 2,000 random-seed) plus its full deterministic matrix. The final
+      replay pass covered 30,000 multiplier-controlled histories and the
+      pagination pass covered 6,400 histories across nullable cursors, pending
+      mutations, multi-action races, and window transitions.
       The long includes oracle passes 133/133 assertions with no type errors
       in two isolated runs. Vitest 3.2 then reports its own
       `[vitest-worker]: Timeout calling "onTaskUpdate"` after the file has
@@ -693,6 +698,14 @@ explicitly removed.
       extra cached row while the ordered consumer still owns that acquisition.
       The final consumer release still empties the collection. The complete
       Query DB suite is 336/336 green (1 skipped).
+- [x] Close snapshot reentrancy and exact replay-release gaps from the final
+      hostile review. Unsubscription is now a terminal observation fence: a
+      direct snapshot cannot deliver after adapter work unsubscribes, and a
+      limited snapshot cannot start adapter work after its local callback
+      unsubscribes. If an old replay lease release both retires the logical
+      demand reentrantly and throws, cleanup retains that exact old lease as
+      debt without releasing the replacement twice. All 77 focused ownership
+      and replay tests pass with no type errors.
 - [x] Measure source and compressed bundle size against both `origin/main` and
       the large RFC stack. Across all package `src` trees, the old stack was
       +10,545/-1,692 lines (net +8,853) while this tree is +2,006/-1,302

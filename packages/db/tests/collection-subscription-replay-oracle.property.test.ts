@@ -2175,7 +2175,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
-  it(`releases a replay acquisition when old-lease cleanup retires its demand`, async () => {
+  it(`retries an old replay lease when its reentrant release fails`, async () => {
     let begin!: () => void
     let commit!: () => void
     let truncate!: () => void
@@ -2184,6 +2184,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     const loads: Array<LoadSubsetOptions> = []
     const unloads: Array<LoadSubsetOptions> = []
     let reentered = false
+    const releaseFailure = new Error(`old replay lease release failed`)
     const collection = createCollection<ReplayRow>({
       id: `reentrant-replay-lease-replacement`,
       getKey: ({ id }) => id,
@@ -2204,6 +2205,7 @@ describe(`CollectionSubscription replay oracle`, () => {
               if (options === loads[0] && !reentered) {
                 reentered = true
                 subscription.releaseSnapshot(where)
+                throw releaseFailure
               }
             },
           }
@@ -2226,7 +2228,7 @@ describe(`CollectionSubscription replay oracle`, () => {
       expect(unloads[0]).toBe(loads[0])
       expect(unloads[1]).toBe(loads[1])
       subscription.unsubscribe()
-      expect(unloads).toHaveLength(2)
+      expect(unloads).toEqual([loads[0], loads[1], loads[0]])
     } finally {
       subscription.unsubscribe()
       await collection.cleanup()
