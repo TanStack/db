@@ -13,6 +13,9 @@ without inferring wider source coverage; ordered queries make bounded progress;
 and truncate replay, cancellation, cleanup, and adapter ownership preserve the
 last coherent result. Live-query truncate recovery now waits for work started
 during the replay and keeps partial graph state private after failure until a
-later complete replay succeeds. Ready callbacks keep
+later complete replay succeeds, while retired demand cannot block unrelated
+graph work. Failed unloads remain retryable cleanup debt without reviving
+demand. Unsafe ordered boundaries fall back to full-source loading, and finite
+prefixes revalidate after membership-changing updates. Ready callbacks keep
 readiness established when a callback throws, and key identity remains exact
 for NaN, binary, reference, function, and symbol values.

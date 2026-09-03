@@ -436,8 +436,9 @@ A Collection subscription installs each logical subset owner before it calls
 the source adapter. Reentrant release during `loadSubset` must therefore see and
 release that exact acquisition. A synchronous `loadSubset` throw that did not
 follow a failed release rolls the tentative owner back without calling
-`unloadSubset`; a failed release keeps the owner so a later cleanup can retry the
-same acquisition identity.
+`unloadSubset`. Logical demand retires even when `unloadSubset` fails. The exact
+physical acquisition then remains as cleanup debt so teardown can retry it
+without letting a retired demand join readiness or a later replay.
 
 Its semantic contract is:
 
@@ -478,7 +479,11 @@ Sources must honor cancellation before publishing request-scoped rows.
 Successful settlement proves only that the exact request finished and that its
 writes were applied. It does not prove source exhaustion or broader coverage.
 Ordered loading reaches a fixed point from public rows and exact request
-identity; it must not invent source extent from a requested limit.
+identity; it must not invent source extent from a requested limit. A finite
+prefix is revalidated after a delete or update can change its membership. If
+the provider predicate cannot express the local order relation, such as locale
+string order, refinement loads the full source instead of treating boundary
+equality as an ordered continuation.
 
 A truncate replay is one publication barrier. Every acquisition started while
 that replay is active, including ordered full-source recovery, belongs to the
@@ -487,7 +492,9 @@ released demand stops participating even if its canceled transport promise
 never settles. Failure keeps the last complete result visible and the graph's
 partly replayed source state private. Ordinary source deltas do not reopen that
 gate because they cannot prove the source complete; only a later successful
-truncate replay provides the authoritative replacement.
+truncate replay provides the authoritative replacement. If the last logical
+demand retires, the now-unreachable source replay stops gating the shared graph;
+unrelated parent or sibling changes may then publish.
 
 A transaction `mutationFn` must not start or await collection or live-query
 preloads. User persistence owns the causal queue while that function runs, so a
@@ -593,7 +600,8 @@ create recursive Collection machinery.
    complete graph result. A truncate replacement stays private until all work
    started by its active replay demands settles; failure keeps the prior public
    result and later partial source changes private until an authoritative replay
-   succeeds.
+   succeeds. A failed replay with no remaining logical demand cannot gate other
+   graph work.
 10. **Initial demand:** preload completes when every initially reachable demand
     is covered; obsolete demand does not block it.
 11. **Ownership:** a query-db row exists exactly while an explicit owner
