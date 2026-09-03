@@ -46,14 +46,17 @@ after their public laws have a destination.
       recomputation and the final publication is exact.
 - [x] Add same-tick obsolete/current replay settlements with `fc.scheduler`;
       release/restart combinations remain in the law map audit.
-- [ ] Add stale-settlement erasure and replay-equivalence laws.
+- [x] Prove stale-settlement erasure and replay equivalence with the public
+      replay model, fixed stale/newest cases, and same-tick scheduled races.
 - [x] Add fixed/random independent-history commutation for disjoint source
       keys at the D2 reconciliation boundary.
-- [ ] Add demand-path equivalence where the same demand can enter through two
-      public consumer paths.
+- [x] Compare the same generated demand through live collections and Effects,
+      including rows, errors, liveness, semantic request traces, and batches.
 - [ ] Audit alpha-renaming coverage in the query-identity suite.
-- [ ] Add generator reach/statistics for beyond-end exhaustion, failures,
-      shared demand, restarts, and tied/null windows.
+- [x] Add explicit generator-reach checks for exact-demand repetition and
+      window shapes plus shared, failed, stale, released, and post-replay
+      histories. Pagination's exhaustive fixtures cover beyond-end, tied, and
+      null windows.
 - [ ] Run a focused mutation audit after the oracle surface is stable.
 
 ## Review-loss audit
@@ -83,7 +86,7 @@ explicitly removed.
 | Locale, nullable, reverse-index, multi-column, public-key-tie, offset, and beyond-end windows stay correct | `pagination-oracle.property.test.ts`; focused `order-by.test.ts` cases                                                                 | covered                               |
 | A non-ordering visible-row update does not cause new ordered source work                                   | `ordered-work-oracle.property.test.ts`                                                                                                 | covered                               |
 | Truncate/replay retains the last complete snapshot and publishes one atomic replacement                    | `collection-subscription-replay-oracle.property.test.ts`; `load-subset-replay-refinement-oracle.test.ts`; includes publication oracles | covered                               |
-| Stale or released replay settlements cannot overwrite the current generation                               | `collection-subscription-replay-oracle.property.test.ts` fixed cases and restart histories                                             | covered; add explicit metamorphic law |
+| Stale or released replay settlements cannot overwrite the current generation                               | replay model, fixed stale/newest cases, restart histories, and same-tick scheduler property                                             | covered                               |
 | Optimistic rows remain above a private replay and converge after settlement                                | `collection-subscription-replay-oracle.property.test.ts`; collection metadata/state oracles                                            | covered                               |
 | Cleanup fences pending replay and ordered continuation work                                                | collection replay oracle; D2 source reconciliation oracle; focused subscription/Effect tests                                           | covered; audit exact old variants     |
 | Load errors preserve the exact error, do not hang readiness, and allow a later retry                       | `subset-error-matrix.test.ts`; source-readiness and replay-refinement suites                                                           | covered                               |
@@ -95,9 +98,9 @@ explicitly removed.
 | PowerSync tracks the latest demand revision and isolates load/release failures                             | PowerSync on-demand and load-hook suites                                                                                               | retained; run adapter suite           |
 | Persistence keeps replacement ownership and preserves reject/abort semantics                               | persistence adapter suite                                                                                                              | retained; run adapter suite           |
 | Query DB releases idle ownership without recreating work                                                   | Query DB ownership lifecycle suite                                                                                                     | retained; run adapter suite           |
-| The same public demand path yields the same rows and lifecycle state across entry points                   | new demand-path equivalence law                                                                                                        | open                                  |
-| Out-of-order multi-source settlements and same-tick cleanup/restart preserve the recomputed result         | extend ordered/replay scheduler properties                                                                                             | open                                  |
-| Generated histories visibly reach failure, sharing, restart, tied/null, and beyond-end regimes             | `fc.statistics`/coverage assertions in compact oracles                                                                                 | open                                  |
+| The same public demand path yields the same rows and lifecycle state across entry points                   | live collection/Effect parity in `ordered-work-oracle.property.test.ts`                                                                | covered                               |
+| Out-of-order settlements and same-tick cleanup/restart preserve the recomputed result                      | replay settlement-order model and scheduler property; pagination multi-source recomputation                                            | covered                               |
+| Generated histories visibly reach failure, sharing, restart, tied/null, and beyond-end regimes             | explicit reach checks plus pagination's exhaustive fixtures                                                                            | covered                               |
 
 ### Deliberately removed contracts
 

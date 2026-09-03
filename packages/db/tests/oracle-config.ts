@@ -45,7 +45,6 @@ const staticOracleProperties = [
   `load-subset-full-flow.multi-source-statistics`,
   `load-subset-full-flow.truncate-evidence`,
   `load-subset-lifecycle.state-machine`,
-  `load-subset-projection.state-equivalence`,
   `load-subset.async-settlement`,
   `load-subset.changing-predicate`,
   `load-subset.concurrent-dedupe`,

@@ -1408,6 +1408,43 @@ const { multiplier, ...replay } = readOracleRunConfig()
 const generatedRuns = 30 * multiplier
 
 describe(`CollectionSubscription replay oracle`, () => {
+  it(`generates shared, failed, stale, released, and post-replay histories`, () => {
+    const scenarios = fc.sample(replayScenarioArbitrary, {
+      seed: 1755,
+      numRuns: 300,
+    })
+
+    expect(scenarios.some(({ demandIds }) => demandIds.length > 1)).toBe(true)
+    expect(scenarios.some(({ attempts }) => attempts.length > 1)).toBe(true)
+    expect(
+      scenarios.some(({ attempts }) =>
+        attempts.some(({ loads }) =>
+          loads.some(({ outcome }) => outcome === `reject`),
+        ),
+      ),
+    ).toBe(true)
+    expect(
+      scenarios.some(({ attempts }) =>
+        attempts.some(({ loads }) =>
+          loads.some(({ writeBeforeSettlement }) => writeBeforeSettlement),
+        ),
+      ),
+    ).toBe(true)
+    expect(
+      scenarios.some(({ settlementOrder }) =>
+        settlementOrder.some((value, index) => value !== index),
+      ),
+    ).toBe(true)
+    expect(
+      scenarios.some(({ releaseOnLastAttempt }) =>
+        Boolean(releaseOnLastAttempt),
+      ),
+    ).toBe(true)
+    expect(
+      scenarios.some(({ afterSettlement }) => afterSettlement.length > 0),
+    ).toBe(true)
+  })
+
   it(`aborts an in-flight initial acquisition before its replay replaces it`, async () => {
     let begin!: () => void
     let write!: (
@@ -2109,11 +2146,7 @@ describe(`CollectionSubscription replay oracle`, () => {
 
   fcTest.prop(
     [sharedSubscriptionScenarioArbitrary],
-    oracleRandomParameters(
-      generatedRuns,
-      replay,
-      `subscription-replay.shared`,
-    ),
+    oracleRandomParameters(generatedRuns, replay, `subscription-replay.shared`),
   )(
     `keeps independent transport and logical ownership aligned for a random or replayed seed`,
     runSharedSubscriptionScenario,

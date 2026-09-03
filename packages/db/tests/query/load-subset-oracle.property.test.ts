@@ -1064,6 +1064,27 @@ async function expectDerivedSyncDuringOptimisticMutation(): Promise<void> {
 }
 
 describe(`exact loadSubset demand oracle`, () => {
+  it(`generates repeated, cursor, empty, and unbounded exact demands`, () => {
+    const traces = fc.sample(exactDemandTraceArbitrary, {
+      seed: 1656,
+      numRuns: 200,
+    })
+    const demands = traces.flat()
+
+    expect(
+      traces.some(
+        (trace) =>
+          new Set(trace.map(exactDemandFingerprint)).size < trace.length,
+      ),
+    ).toBe(true)
+    expect(
+      demands.some(({ cursorBoundary }) => cursorBoundary !== undefined),
+    ).toBe(true)
+    expect(demands.some(({ limit }) => limit === 0)).toBe(true)
+    expect(demands.some(({ limit }) => limit === undefined)).toBe(true)
+    expect(new Set(demands.map(({ offset }) => offset)).size).toBeGreaterThan(1)
+  })
+
   fcTest.prop([exactDemandTraceArbitrary], {
     numRuns: exactScenarioRuns,
     seed: 1657,
