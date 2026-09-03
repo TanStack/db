@@ -1,5 +1,8 @@
 import { NegativeActiveSubscribersError } from '../errors'
-import { withPublicationContext } from '../scheduler.js'
+import {
+  recordPublicationError,
+  withPublicationContext,
+} from '../scheduler.js'
 import {
   createSingleRowRefProxy,
   toExpression,
@@ -83,9 +86,15 @@ export class CollectionChangesManager<
    */
   public emitEmptyReadyEvent(): void {
     withPublicationContext(() => {
-      for (const subscription of this.changeSubscriptions) {
-        subscription.emitEvents([])
-      }
+      let failed = false
+      let firstError: unknown
+      this.notifySubscriptions([], (error) => {
+        if (!failed) {
+          failed = true
+          firstError = error
+        }
+      })
+      if (failed) recordPublicationError(firstError)
     })
   }
 
@@ -127,7 +136,11 @@ export class CollectionChangesManager<
       // buffered optimistic events with the final changes so subscribers see the
       // whole picture, even if the sync diff is empty.
       if (this.batchedEvents.length > 0) {
-        rawEvents = [...this.batchedEvents, ...changes]
+        const finalKeys = new Set(changes.map((change) => change.key))
+        rawEvents = [
+          ...this.batchedEvents.filter((change) => !finalKeys.has(change.key)),
+          ...changes,
+        ]
       }
       this.batchedEvents = []
       this.shouldBatchEvents = false
@@ -193,18 +206,60 @@ export class CollectionChangesManager<
 
     // Every subscriber sees one committed source batch before dependent query
     // graphs run. This keeps repeated aliases and sibling subqueries coherent.
+    const layoutListeners = [...this.layoutChangeListeners]
+    const subscriptions = [...this.changeSubscriptions]
     withPublicationContext(() => {
+      let failed = false
+      let firstError: unknown
+      const recordError = (error: unknown) => {
+        if (!failed) {
+          failed = true
+          firstError = error
+        }
+      }
       // Notify both internal layout consumers and the public subscription API.
       // Public subscribers historically receive an empty batch for order-only
       // moves because there is no row-value ChangeMessage to publish.
       if (rawEvents.length === 0) {
-        for (const listener of this.layoutChangeListeners) listener()
+        this.notifyListeners(
+          layoutListeners,
+          (listener) => listener(),
+          recordError,
+        )
       }
 
-      for (const subscription of this.changeSubscriptions) {
-        subscription.emitEvents(enrichedEvents)
-      }
+      this.notifyListeners(
+        subscriptions,
+        (subscription) => subscription.emitEvents(enrichedEvents),
+        recordError,
+      )
+      if (failed) recordPublicationError(firstError)
     })
+  }
+
+  private notifySubscriptions(
+    changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>>,
+    onError: (error: unknown) => void,
+  ): void {
+    this.notifyListeners(
+      [...this.changeSubscriptions],
+      (subscription) => subscription.emitEvents(changes),
+      onError,
+    )
+  }
+
+  private notifyListeners<T>(
+    listeners: ReadonlyArray<T>,
+    notify: (x: T) => void,
+    onError: (error: unknown) => void,
+  ): void {
+    for (const listener of listeners) {
+      try {
+        notify(listener)
+      } catch (error) {
+        onError(error)
+      }
+    }
   }
 
   /** Subscribe to layout-only publications. Internal observer channel. */

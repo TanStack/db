@@ -187,8 +187,19 @@ export class Scheduler {
   /** Clear all scheduled jobs for a context. */
   clear(contextId: SchedulerContextId): void {
     this.contexts.delete(contextId)
-    // Notify listeners that this context was cleared
-    this.clearListeners.forEach((listener) => listener(contextId))
+    let failed = false
+    let firstError: unknown
+    for (const listener of [...this.clearListeners]) {
+      try {
+        listener(contextId)
+      } catch (error) {
+        if (!failed) {
+          failed = true
+          firstError = error
+        }
+      }
+    }
+    if (failed) throw firstError
   }
 
   /** Register a listener to be notified when a context is cleared. */
@@ -222,6 +233,9 @@ export class Scheduler {
 export const transactionScopedScheduler = new Scheduler()
 
 let activePublicationContext: SchedulerContextId | undefined
+let activePublicationFailure:
+  | { failed: boolean; error: unknown }
+  | undefined
 
 /**
  * Returns the Collection publication that currently owns synchronous change
@@ -230,6 +244,15 @@ let activePublicationContext: SchedulerContextId | undefined
  */
 export function getActivePublicationContext(): SchedulerContextId | undefined {
   return activePublicationContext
+}
+
+/** Report a listener failure after the whole publication graph has drained. */
+export function recordPublicationError(error: unknown): void {
+  if (!activePublicationFailure) throw error
+  if (!activePublicationFailure.failed) {
+    activePublicationFailure.failed = true
+    activePublicationFailure.error = error
+  }
 }
 
 /**
@@ -242,14 +265,29 @@ export function withPublicationContext<T>(publish: () => T): T {
 
   const contextId = Symbol(`collection-publication`)
   activePublicationContext = contextId
+  activePublicationFailure = { failed: false, error: undefined }
+  let result!: T
+  let listenerFailed = false
+  let listenerError: unknown
   try {
-    const result = publish()
+    result = publish()
     transactionScopedScheduler.flush(contextId)
-    return result
+    listenerFailed = activePublicationFailure.failed
+    listenerError = activePublicationFailure.error
   } catch (error) {
-    transactionScopedScheduler.clear(contextId)
+    try {
+      transactionScopedScheduler.clear(contextId)
+    } catch {
+      // Keep the earlier publication or graph failure.
+    }
+    if (activePublicationFailure.failed) {
+      throw activePublicationFailure.error
+    }
     throw error
   } finally {
     activePublicationContext = undefined
+    activePublicationFailure = undefined
   }
+  if (listenerFailed) throw listenerError
+  return result
 }

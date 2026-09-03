@@ -5,6 +5,7 @@ import {
   NoPendingSyncTransactionCommitError,
   NoPendingSyncTransactionWriteError,
   SyncCleanupError,
+  SyncTransactionAbortedError,
   SyncTransactionAlreadyCommittedError,
   SyncTransactionAlreadyCommittedWriteError,
 } from '../errors'
@@ -121,6 +122,8 @@ export class CollectionSyncManager<
     const syncEpoch = ++this.syncEpoch
     const isCurrentSync = () => syncEpoch === this.syncEpoch
     this.lifecycle.setStatus(`loading`)
+    let syncEntryActive = true
+    let readyEffectFailure: { error: unknown } | undefined
 
     try {
       const syncRes = normalizeSyncFnResult(
@@ -281,7 +284,12 @@ export class CollectionSyncManager<
             return receipt
           },
           markReady: () => {
-            if (isCurrentSync()) this.lifecycle.markReady()
+            if (!isCurrentSync()) return
+            if (syncEntryActive) {
+              readyEffectFailure ??= this.lifecycle.markReadyDuringSyncStart()
+            } else {
+              this.lifecycle.markReady()
+            }
           },
           markError: (error?: unknown) => {
             if (isCurrentSync()) this.lifecycle.markError(error)
@@ -325,6 +333,7 @@ export class CollectionSyncManager<
           metadata: this.createSyncMetadataApi(isCurrentSync),
         }),
       )
+      syncEntryActive = false
 
       // Store cleanup function if provided
       this.syncCleanupFn = syncRes?.cleanup ?? null
@@ -343,9 +352,11 @@ export class CollectionSyncManager<
         )
       }
     } catch (error) {
+      syncEntryActive = false
       this.lifecycle.markError(error)
       throw error
     }
+    if (readyEffectFailure) throw readyEffectFailure.error
   }
 
   public deferStart(): boolean {
@@ -548,10 +559,14 @@ export class CollectionSyncManager<
       }
 
       let settled = false
-      let startingSync = false
+      const syncStartState = { active: false, ready: false }
       let unsubscribeError = () => {}
       let unsubscribeReady = () => {}
       const resolveReady = () => {
+        if (syncStartState.active) {
+          syncStartState.ready = true
+          return
+        }
         if (settled) return
         settled = true
         unsubscribeError()
@@ -569,7 +584,7 @@ export class CollectionSyncManager<
       // Register callback BEFORE starting sync to avoid race condition
       unsubscribeReady = this.lifecycle.onFirstReady(resolveReady)
       unsubscribeError = this.collection.on(`status:error`, () => {
-        if (startingSync) {
+        if (syncStartState.active) {
           return
         }
         rejectError(this.getPreloadError())
@@ -580,17 +595,24 @@ export class CollectionSyncManager<
         this.lifecycle.status === `idle` ||
         this.lifecycle.status === `cleaned-up`
       ) {
-        startingSync = true
+        syncStartState.active = true
+        let startFailure: { error: unknown } | undefined
         try {
           this.startSync()
         } catch (error) {
-          rejectError(error)
-          return
+          startFailure = { error }
         } finally {
-          startingSync = false
+          syncStartState.active = false
         }
         if (this.collection.status === `error`) {
           rejectError(this.getPreloadError())
+        } else if (syncStartState.ready) {
+          // A first-ready listener can throw after readiness is established.
+          // That failure still escapes direct startSync(), but preload follows
+          // the final collection state after synchronous adapter entry.
+          resolveReady()
+        } else if (startFailure) {
+          rejectError(startFailure.error)
         }
       }
     })
@@ -770,7 +792,7 @@ export class CollectionSyncManager<
    */
   public loadSubset(options: LoadSubsetOptions): LoadSubsetRequestResult {
     if (options.signal?.aborted) {
-      return true
+      return Promise.reject(new SyncTransactionAbortedError())
     }
 
     // Bypass loadSubset when syncMode is 'eager'

@@ -101,6 +101,8 @@ explicitly removed.
 | The same public demand path yields the same rows and lifecycle state across entry points                   | live collection/Effect parity in `ordered-work-oracle.property.test.ts`                                                                | covered                               |
 | Out-of-order settlements and same-tick cleanup/restart preserve the recomputed result                      | replay settlement-order model and scheduler property; pagination multi-source recomputation                                            | covered                               |
 | Generated histories visibly reach failure, sharing, restart, tied/null, and beyond-end regimes             | explicit reach checks plus pagination's exhaustive fixtures                                                                            | covered                               |
+| Ready transitions survive callback failure, stop when superseded, and restart as a fresh cycle             | `collection-lifecycle.test.ts`; `collection-events.test.ts`; `query/scheduler.test.ts`                                                  | restored and covered                  |
+| An already-aborted demand starts no eager, deferred, or adapter work and rejects with `AbortError`         | `collection.test.ts`                                                                                                                    | restored and covered                  |
 
 ### Deliberately removed contracts
 
@@ -131,6 +133,10 @@ explicitly removed.
       after a boundary request.
 - [x] Rows from an active tie request invalidate the next cursor without
       cancelling that request's settlement continuation.
+- [x] Restored the public EventEmitter, first-ready, preload, reentrant-ready,
+      scheduler-error-priority, and already-aborted request regressions. The
+      restored tests red-tested real gaps; the focused seven-file run is
+      279/279 green.
 
 ## Remaining execution
 

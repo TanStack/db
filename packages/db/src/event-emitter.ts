@@ -38,10 +38,15 @@ export class EventEmitter<TEvents extends Record<string, any>> {
     event: T,
     callback: (event: TEvents[T]) => void,
   ): () => void {
-    const unsubscribe = this.on(event, (eventPayload) => {
-      callback(eventPayload)
+    let unsubscribe = () => {}
+    const listener = ((eventPayload: TEvents[T]) => {
       unsubscribe()
-    })
+      callback(eventPayload)
+    }) as ((event: TEvents[T]) => void) & {
+      onceCallback?: (event: TEvents[T]) => void
+    }
+    listener.onceCallback = callback
+    unsubscribe = this.on(event, listener)
     return unsubscribe
   }
 
@@ -54,7 +59,16 @@ export class EventEmitter<TEvents extends Record<string, any>> {
     event: T,
     callback: (event: TEvents[T]) => void,
   ): void {
-    this.listeners.get(event)?.delete(callback as (event: any) => void)
+    const listeners = this.listeners.get(event)
+    if (!listeners) return
+    for (const listener of listeners) {
+      const registered = listener as typeof listener & {
+        onceCallback?: (event: TEvents[T]) => void
+      }
+      if (listener === callback || registered.onceCallback === callback) {
+        listeners.delete(listener)
+      }
+    }
   }
 
   /**
