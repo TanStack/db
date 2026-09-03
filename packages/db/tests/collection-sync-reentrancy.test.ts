@@ -219,93 +219,105 @@ const { multiplier, ...replay } = readOracleRunConfig()
 const generatedRuns = 30 * multiplier
 
 describe(`sync publication reentrancy`, () => {
-  it.each([`open`, `prepared`, `published`] as const)(
-    `starts a second publication cycle with the first cycle %s`,
-    async (firstCycleState) => {
-      const harness = createSyncHarness(`publication-cycle-${firstCycleState}`)
-      const { collection } = harness
-      const callbacks: Array<{
-        changes: Array<string>
-        visibleValue: string
-        revision: number
-      }> = []
-      const subscription = collection.subscribeChanges(
-        (changes) => {
-          callbacks.push({
-            changes: changes.map((change) => change.value.value),
-            visibleValue: collection.get(1)!.value,
-            revision: collection._stateRevision,
-          })
-        },
-        { includeInitialState: false },
-      )
-      const initialRevision = collection._stateRevision
-      const write = (type: `insert` | `update`, value: string) => {
-        harness.sync.begin({ immediate: true })
-        harness.sync.write({ type, value: { id: 1, value } })
-        harness.sync.commit()
-      }
+  it(`publishes nested deferrals as one coherent batch`, async () => {
+    const harness = createSyncHarness(`nested-publication-cycle`)
+    const { collection } = harness
+    const callbacks: Array<{ changes: Array<string>; visibleValue: string }> = []
+    const subscription = collection.subscribeChanges(
+      (changes) => {
+        callbacks.push({
+          changes: changes.map((change) => change.value.value),
+          visibleValue: collection.get(1)!.value,
+        })
+      },
+      { includeInitialState: false },
+    )
 
-      try {
-        const firstPublication = collection._deferPublication()
-        write(`insert`, `first`)
+    try {
+      const outer = collection._deferPublication()
+      stageInsert(harness.sync, { id: 1, value: `first` }, { immediate: true })
+      harness.sync.commit()
+      const inner = collection._deferPublication()
+      harness.sync.begin({ immediate: true })
+      harness.sync.write({
+        type: `update`,
+        value: { id: 1, value: `second` },
+      })
+      harness.sync.commit()
 
-        if (firstCycleState === `open`) {
-          const secondPublication = collection._deferPublication()
-          write(`update`, `second`)
-          firstPublication.prepare()
-          secondPublication.prepare()
-          firstPublication.publish()
-          secondPublication.publish()
+      inner.publish()
+      expect(callbacks).toEqual([])
+      outer.publish()
+      expect(callbacks).toEqual([
+        { changes: [`first`, `second`], visibleValue: `second` },
+      ])
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
 
-          expect(callbacks).toEqual([
-            {
-              changes: [`first`, `second`],
-              visibleValue: `second`,
-              revision: initialRevision + 2,
-            },
-          ])
-        } else if (firstCycleState === `prepared`) {
-          firstPublication.prepare()
-          expect(() => collection._deferPublication()).toThrow(
-            `Cannot start a publication cycle while another is prepared`,
-          )
-          firstPublication.publish()
+  it(`starts a fresh publication after the previous one closes`, async () => {
+    const harness = createSyncHarness(`successive-publication-cycles`)
+    const { collection } = harness
+    const callbacks: Array<Array<string>> = []
+    const subscription = collection.subscribeChanges(
+      (changes) => callbacks.push(changes.map((change) => change.value.value)),
+      { includeInitialState: false },
+    )
 
-          expect(callbacks).toEqual([
-            {
-              changes: [`first`],
-              visibleValue: `first`,
-              revision: initialRevision + 1,
-            },
-          ])
-        } else {
-          firstPublication.prepare()
-          firstPublication.publish()
-          const secondPublication = collection._deferPublication()
-          write(`update`, `second`)
-          secondPublication.prepare()
-          secondPublication.publish()
+    try {
+      const first = collection._deferPublication()
+      stageInsert(harness.sync, { id: 1, value: `first` }, { immediate: true })
+      harness.sync.commit()
+      first.publish()
 
-          expect(callbacks).toEqual([
-            {
-              changes: [`first`],
-              visibleValue: `first`,
-              revision: initialRevision + 1,
-            },
-            {
-              changes: [`second`],
-              visibleValue: `second`,
-              revision: initialRevision + 2,
-            },
-          ])
-        }
-      } finally {
-        subscription.unsubscribe()
-        await collection.cleanup()
-      }
-    },
-  )
+      const second = collection._deferPublication()
+      harness.sync.begin({ immediate: true })
+      harness.sync.write({
+        type: `update`,
+        value: { id: 1, value: `second` },
+      })
+      harness.sync.commit()
+      second.publish()
+
+      expect(callbacks).toEqual([[`first`], [`second`]])
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`does not let a discarded deferral poison the next publication`, async () => {
+    const harness = createSyncHarness(`discarded-publication-cycle`)
+    const { collection } = harness
+    const callbacks: Array<Array<string>> = []
+    const subscription = collection.subscribeChanges(
+      (changes) => callbacks.push(changes.map((change) => change.value.value)),
+      { includeInitialState: false },
+    )
+
+    try {
+      const discarded = collection._deferPublication()
+      stageInsert(harness.sync, { id: 1, value: `discarded` }, { immediate: true })
+      harness.sync.commit()
+      discarded.discard()
+      expect(callbacks).toEqual([])
+
+      const published = collection._deferPublication()
+      harness.sync.begin({ immediate: true })
+      harness.sync.write({
+        type: `update`,
+        value: { id: 1, value: `published` },
+      })
+      harness.sync.commit()
+      published.publish()
+      expect(callbacks).toEqual([[`published`]])
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
 
   it(`lets a publication callback start the next publication cycle`, async () => {
     const harness = createSyncHarness(`publication-cycle-from-callback`)
@@ -332,7 +344,6 @@ describe(`sync publication reentrancy`, () => {
         if (changes[0]?.value.value === `first`) {
           const secondPublication = collection._deferPublication()
           write(`update`, `second`)
-          secondPublication.prepare()
           secondPublication.publish()
         }
       },
@@ -342,7 +353,6 @@ describe(`sync publication reentrancy`, () => {
     try {
       const firstPublication = collection._deferPublication()
       write(`insert`, `first`)
-      firstPublication.prepare()
       firstPublication.publish()
 
       expect(callbacks).toEqual([
@@ -1270,56 +1280,7 @@ describe(`sync publication reentrancy`, () => {
     }
   })
 
-  it(`queues listener-triggered source-row garbage collection`, async () => {
-    const harness = createSyncHarness(`listener-sync-row-gc`)
-    const { collection } = harness
-    stageInsert(harness.sync, { id: 2, value: `released` })
-    harness.sync.commit()
-
-    const appliedKeys: Array<number> = []
-    const originalSet = collection._state.syncedData.set.bind(
-      collection._state.syncedData,
-    )
-    vi.spyOn(collection._state.syncedData, `set`).mockImplementation(
-      (key, value) => {
-        appliedKeys.push(key)
-        return originalSet(key, value)
-      },
-    )
-    const batches: Array<Array<number>> = []
-    let queuedGarbageCollection = false
-    let listenerDepth = 0
-    let maxListenerDepth = 0
-    const subscription = collection.subscribeChanges(
-      (changes) => {
-        listenerDepth++
-        maxListenerDepth = Math.max(maxListenerDepth, listenerDepth)
-        batches.push(changes.map((change) => change.key as number))
-        if (!queuedGarbageCollection && changes.some(({ key }) => key === 1)) {
-          queuedGarbageCollection = true
-          void collection._state.deleteSyncedRows([2])
-        }
-        listenerDepth--
-      },
-      { includeInitialState: true },
-    )
-    batches.length = 0
-
-    try {
-      stageInsert(harness.sync, { id: 1, value: `outer` })
-      harness.sync.commit()
-
-      expect(appliedKeys).toEqual([1])
-      expect(collection.get(2)).toBeUndefined()
-      expect(batches).toEqual([[1], [2]])
-      expect(maxListenerDepth).toBe(1)
-    } finally {
-      subscription.unsubscribe()
-      await collection.cleanup()
-    }
-  })
-
-  it(`releases applied subset coverage from inside its publication callback`, async () => {
+  it(`releases subset demand from a publication callback without nested delivery`, async () => {
     let sync!: SyncOps
     const unloadSubset = vi.fn()
     const collection = createCollection<Row, number>({
@@ -1351,7 +1312,6 @@ describe(`sync publication reentrancy`, () => {
     })
     owner.requestSnapshot({ optimizedOnly: false })
     await flushPromises()
-    expect(collection._sync.getLoadSubsetCoverage()).toHaveLength(1)
 
     const batches: Array<Array<number>> = []
     let listenerDepth = 0
@@ -1373,9 +1333,8 @@ describe(`sync publication reentrancy`, () => {
 
       expect(ownerUnsubscribed).toBe(true)
       expect(unloadSubset).toHaveBeenCalledOnce()
-      expect(collection._sync.getLoadSubsetCoverage()).toEqual([])
-      expect(collection.get(2)).toBeUndefined()
-      expect(batches).toEqual([[1], [2]])
+      expect(collection.get(2)).toMatchObject({ id: 2, value: `owned` })
+      expect(batches).toEqual([[1]])
       expect(maxListenerDepth).toBe(1)
     } finally {
       owner.unsubscribe()

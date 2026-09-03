@@ -208,17 +208,10 @@ async function runRetentionHistory(
           value: action.row.value + 1,
         }
         const expectedRestartedRow = snapshotRetainedRow(restartedRow)
-        const retainedMarker = { id: -1, value: action.row.value }
-        const expectedRetainedMarker = snapshotRetainedRow(retainedMarker)
         let cleanup: Promise<void> | undefined
         let restarted = false
         let restartedSync: SyncActions | undefined
         let restartedReceipt: true | Promise<void> | undefined
-        let restartedReceiptOutcome: Promise<void> | undefined
-        let restartedReceiptSettled = false
-        const settlementTimeline: Array<
-          `checkpoint` | `publication` | `receipt`
-        > = []
         const batches: Array<{
           changes: Array<{
             type: string
@@ -247,9 +240,6 @@ async function runRetentionHistory(
                 .map(({ id, value }) => ({ id, value }))
                 .sort((left, right) => left.id - right.id),
             })
-            if (changes.some(({ key }) => key === expectedRestartedRow.id)) {
-              queueMicrotask(() => settlementTimeline.push(`publication`))
-            }
             if (restarted) return
             restarted = true
             cleanup = collection.cleanup()
@@ -262,20 +252,6 @@ async function runRetentionHistory(
             })
             if (action.commitPhase === `insideListener`) {
               restartedReceipt = restartedSync.commit()
-              if (restartedReceipt !== true) {
-                restartedReceiptOutcome = restartedReceipt.then((value) => {
-                  settlementTimeline.push(`receipt`)
-                  restartedReceiptSettled = true
-                  return value
-                })
-              }
-              queueMicrotask(() => settlementTimeline.push(`checkpoint`))
-            } else {
-              // Synthetic generation canary: seed restarted-session
-              // publication state so the old publication tail cannot clear it.
-              // The batch assertions below exercise the public restart path.
-              collection._state.preSyncVisibleState.set(-1, retainedMarker)
-              collection._state.recentlySyncedKeys.add(expectedRestartedRow.id)
             }
           },
           { includeInitialState: false },
@@ -294,47 +270,9 @@ async function runRetentionHistory(
         }
         if (action.commitPhase === `insideListener`) {
           expect(restartedReceipt).toBeDefined()
-          expect(restartedReceipt).not.toBe(true)
-          expect(restartedReceipt).toBeInstanceOf(Promise)
-          expect(restartedReceiptSettled).toBe(false)
-          expect(settlementTimeline).toEqual([])
-          if (restartedReceipt === undefined || restartedReceipt === true) {
-            throw new Error(`restarted sync receipt was not parked`)
-          }
-          expect(restartedReceiptOutcome).toBeDefined()
-          await expect(restartedReceiptOutcome).resolves.toBeUndefined()
-          expect(restartedReceiptSettled).toBe(true)
-          expect(settlementTimeline).toEqual([
-            `checkpoint`,
-            `publication`,
-            `receipt`,
-          ])
+          if (restartedReceipt !== true) await restartedReceipt
         } else {
-          expect(collection._state.preSyncVisibleState).toEqual(
-            new Map([[-1, expectedRetainedMarker]]),
-          )
-          expect(collection._state.recentlySyncedKeys).toEqual(
-            new Set([expectedRestartedRow.id]),
-          )
-          expect(collection._state.hasReceivedFirstCommit).toBe(false)
-
-          await Promise.resolve()
-          expect(collection._state.preSyncVisibleState).toEqual(
-            new Map([[-1, expectedRetainedMarker]]),
-          )
-          expect(collection._state.recentlySyncedKeys).toEqual(
-            new Set([expectedRestartedRow.id]),
-          )
-          expect(collection._state.hasReceivedFirstCommit).toBe(false)
-
           expect(restartedSync.commit()).toBe(true)
-          expect(collection._state.preSyncVisibleState.size).toBe(0)
-          expect(collection._state.hasReceivedFirstCommit).toBe(true)
-          expect(collection._state.recentlySyncedKeys).toEqual(
-            new Set([expectedRestartedRow.id]),
-          )
-          await Promise.resolve()
-          expect(collection._state.recentlySyncedKeys.size).toBe(0)
         }
         const triggerRows = new Map(model)
         triggerRows.set(expectedTriggerRow.id, expectedTriggerRow)

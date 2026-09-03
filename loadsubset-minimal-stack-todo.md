@@ -200,6 +200,11 @@ explicitly removed.
       was recorded. The shared ordered loader now records each request before
       adapter entry; its exhaustive domain includes underfilled source truth
       and rejects repeated exact requests.
+- [x] An authoritative truncate row now replaces a completed same-key direct
+      mutation instead of restoring the stale client value from the optimistic
+      snapshot. Active optimistic work still survives the same rebuild. The
+      focused truncate, retained-state, and reentrant-publication suites are
+      82/82 green.
 - [x] Existing includes, subquery-order, and union tests now model the adapter
       contract and inspect the whole request trace. No useful regression test
       was removed to accommodate the new boundary work.
