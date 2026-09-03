@@ -133,10 +133,13 @@ Every item A01-A37, AO01-AO09, B01-B08, and BO01-BO16 needs one final state:
 fixed with red/green evidence, preserved by a named test, removed by a named
 contract decision, refuted with evidence, deferred with an issue, or open.
 
-- [ ] Reconcile all production findings.
+- [x] Reconcile all production findings.
 - [ ] Reconcile every oracle/maintenance recommendation.
-- [ ] Map every public law from deleted full-flow/lifecycle/model files.
-- [ ] Confirm no production-only oracle counters or test hooks remain.
+- [x] Map every public law from deleted full-flow/lifecycle/model files.
+- [x] Confirm no production-only oracle counters or test hooks remain. The
+      Query DB ownership-map hook is gone; the live-query run counter and
+      Electric hook both predate this stack and serve existing non-oracle
+      suites.
 
 ### Deleted-suite audit
 
@@ -527,7 +530,7 @@ explicitly removed.
 
 ## Remaining execution
 
-- [ ] Finish the behavioral-law map before accepting test deletions.
+- [x] Finish the behavioral-law map before accepting test deletions.
 - [ ] Run focused core, pagination, replay, includes, Effect, identity, and
       transaction suites after each coherent change.
 - [ ] Run Electric, PowerSync, Query DB, and persistence adapter suites.
