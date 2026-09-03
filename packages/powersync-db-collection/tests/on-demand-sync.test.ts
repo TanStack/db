@@ -2628,6 +2628,42 @@ describe(`On-Demand Sync Mode`, () => {
       }
     })
 
+    it(`does not let one failed release block another`, async () => {
+      vi.useFakeTimers()
+      const db = await createDatabase()
+      vi.spyOn(db.logger, `error`).mockImplementation(() => {})
+      vi.spyOn(db.triggers, `createDiffTrigger`).mockResolvedValue(vi.fn())
+      const getAll = vi
+        .spyOn(db, `getAll`)
+        .mockImplementation((sql) =>
+          String(sql).includes(`electronics`)
+            ? Promise.reject(new Error(`persistent eviction failure`))
+            : Promise.resolve([]),
+        )
+      const { sync, loadSubset, unloadSubset } = startOnDemandSync(db)
+      const failing = { where: eq(`category`, `electronics`) }
+      const succeeding = { where: eq(`category`, `clothing`) }
+
+      try {
+        await Promise.all([loadSubset(failing), loadSubset(succeeding)])
+        unloadSubset(failing)
+        unloadSubset(succeeding)
+        await vi.waitFor(() => expect(getAll).toHaveBeenCalled())
+        await vi.advanceTimersByTimeAsync(1_000)
+
+        expect(
+          getAll.mock.calls.some(([sql]) => {
+            const query = String(sql)
+            return query.includes(`clothing`) && !query.includes(`electronics`)
+          }),
+        ).toBe(true)
+      } finally {
+        sync.cleanup?.()
+        await vi.runOnlyPendingTimersAsync()
+        vi.useRealTimers()
+      }
+    })
+
     it(`rechecks active demand before evicting released rows`, async () => {
       const db = await createDatabase()
       vi.spyOn(db.triggers, `createDiffTrigger`).mockResolvedValue(vi.fn())

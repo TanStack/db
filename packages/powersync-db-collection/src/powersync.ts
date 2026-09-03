@@ -829,19 +829,24 @@ function createPowerSyncCollectionConfig<
           drainingReleases = true
           let retryDelay = 0
           try {
-            while (!hasStopped() && pendingReleases.length > 0) {
-              const pending = pendingReleases[0]!
+            const attempts = pendingReleases.length
+            for (let index = 0; !hasStopped() && index < attempts; index++) {
+              const pending = pendingReleases.shift()!
               try {
                 await performPhysicalRelease(pending.options)
-                pendingReleases.shift()
               } catch (error) {
                 pending.failures++
-                retryDelay = Math.min(1000 * 2 ** (pending.failures - 1), 30000)
+                pendingReleases.push(pending)
+                const delay = Math.min(
+                  1000 * 2 ** (pending.failures - 1),
+                  30000,
+                )
+                retryDelay =
+                  retryDelay === 0 ? delay : Math.min(retryDelay, delay)
                 database.logger.error(
                   `Could not release subset tracking for ${viewName}; retrying`,
                   error,
                 )
-                break
               }
             }
           } finally {

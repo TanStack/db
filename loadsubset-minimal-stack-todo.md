@@ -487,6 +487,13 @@ explicitly removed.
       acquisition twice and leaked the new one. The test now compares exact
       acquisition identities, the replay retires each once, and the focused
       replay/publication run is 184/184 green.
+- [x] Strengthened the PowerSync release oracle from “one transient failure
+      retries” to “one permanently failing release cannot block an independent
+      release.” The first assertion draft was itself false-green because the
+      first release's SQL mentioned the second active predicate; the corrected
+      assertion identifies the departing predicate. It red-tested the queue's
+      head-of-line blocking, and the drain now tries every queued release once
+      before backing off. All three focused retry/revalidation cases are green.
 - [x] Mapped the removed pending-derived-mutation matrix to the independent
       collection metadata and state-retention oracles, then verified both
       through the layered-query publication oracle. The old Cartesian matrix
