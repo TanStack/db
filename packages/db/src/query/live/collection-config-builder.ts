@@ -12,6 +12,7 @@ import {
 import { getActiveTransaction } from '../../transactions.js'
 import { deepEquals } from '../../utils.js'
 import { runAllCallbacks } from '../../utils/callbacks.js'
+import { normalizeError } from '../../utils/error.js'
 import { CollectionSubscriber } from './collection-subscriber.js'
 import { getCollectionBuilder } from './collection-registry.js'
 import { LIVE_QUERY_INTERNAL } from './internal.js'
@@ -1293,10 +1294,6 @@ export class CollectionConfigBuilder<
 
     return loadSubsetDataCallbacks
   }
-}
-
-function normalizeError(error: unknown): Error {
-  return error instanceof Error ? error : new Error(String(error))
 }
 
 function createOrderByComparator<T extends object>(

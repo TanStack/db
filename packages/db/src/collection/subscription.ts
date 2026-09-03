@@ -5,6 +5,7 @@ import { EventEmitter } from '../event-emitter.js'
 import { compileExpression } from '../query/compiler/evaluators.js'
 import { buildCursor, buildCursorCurrent } from '../utils/cursor.js'
 import { deepEquals } from '../utils.js'
+import { normalizeError } from '../utils/error.js'
 import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
@@ -105,9 +106,6 @@ export class CollectionSubscription
   extends EventEmitter<SubscriptionEvents>
   implements Subscription
 {
-  private readonly truncateReplayPublication:
-    | TruncateReplayPublicationControl
-    | undefined
   private loadedInitialState = false
 
   // Flag to skip filtering in filterAndFlipChanges.
@@ -172,7 +170,6 @@ export class CollectionSubscription
     private options: CollectionSubscriptionOptions,
   ) {
     super()
-    this.truncateReplayPublication = options.truncateReplayPublication
     if (options.onUnsubscribe) {
       this.on(`unsubscribed`, options.onUnsubscribe)
     }
@@ -237,9 +234,9 @@ export class CollectionSubscription
       return
     }
 
-    if (this.truncateReplayPublication) {
+    if (this.options.truncateReplayPublication) {
       this.truncateReplacementPending = true
-      this.truncateReplayPublication.start()
+      this.options.truncateReplayPublication.start()
     }
 
     const attempt: TruncateReplayAttempt = {
@@ -405,10 +402,10 @@ export class CollectionSubscription
    */
   private abandonTruncateReplay(session: TruncateReplaySession): void {
     if (this.truncateReplaySession !== session) return
-    if (this.truncateReplayPublication) {
+    if (this.options.truncateReplayPublication) {
       this.truncateReplaySession = undefined
       this.stalePublishedRows.clear()
-      this.truncateReplayPublication.fail?.()
+      this.options.truncateReplayPublication.fail?.()
       return
     }
     const publicationState = session.publicationState
@@ -427,7 +424,7 @@ export class CollectionSubscription
     if (this.truncateReplaySession !== session) return
     this.truncateReplaySession = undefined
 
-    if (this.truncateReplayPublication) {
+    if (this.options.truncateReplayPublication) {
       this.stalePublishedRows.clear()
       this.sentKeys = new Set(this.publishedRows.keys())
       if (this.orderByIndex) {
@@ -439,7 +436,7 @@ export class CollectionSubscription
         this.lastSentKey = orderedSentKeys.at(-1)
       }
       this.truncateReplacementPending = false
-      this.truncateReplayPublication.succeed()
+      this.options.truncateReplayPublication.succeed()
       return
     }
 
@@ -735,7 +732,7 @@ export class CollectionSubscription
     if (changes.length > 0 && newChanges.length === 0) return false
 
     if (this.isBufferingForTruncate) {
-      if (this.truncateReplayPublication) {
+      if (this.options.truncateReplayPublication) {
         return this.filteredCallback(newChanges)
       }
       // Buffer the changes instead of emitting immediately
@@ -1283,8 +1280,4 @@ export class CollectionSubscription
 
     if (firstCleanupError !== undefined) throw firstCleanupError
   }
-}
-
-function normalizeError(error: unknown): Error {
-  return error instanceof Error ? error : new Error(String(error))
 }

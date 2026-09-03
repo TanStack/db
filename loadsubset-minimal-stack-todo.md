@@ -503,6 +503,9 @@ explicitly removed.
       removed immediately; stopped plus the tracking revision already fence
       cleanup, so the mirrored lifecycle generation is gone. PowerSync remains
       105/105 green.
+- [x] Derived replay-publication control from the subscription's existing
+      options and centralized unknown-value error normalization. The focused
+      subscription, replay, live-query, and error suites are 144/144 green.
 - [x] Mapped the removed pending-derived-mutation matrix to the independent
       collection metadata and state-retention oracles, then verified both
       through the layered-query publication oracle. The old Cartesian matrix

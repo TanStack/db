@@ -4,6 +4,7 @@ import {
   transactionScopedScheduler,
 } from '../scheduler.js'
 import { getActiveTransaction } from '../transactions.js'
+import { normalizeError } from '../utils/error.js'
 import { compileQuery } from './compiler/index.js'
 import { normalizeExpressionPaths } from './compiler/expressions.js'
 import { getCollectionBuilder } from './live/collection-registry.js'
@@ -579,7 +580,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
           whereExpression,
         ),
         onLoadSubsetError: ({ error }) => {
-          this.onSourceError(normaliseError(error))
+          this.onSourceError(normalizeError(error))
         },
       })
 
@@ -1152,7 +1153,7 @@ function reportError<TRow extends object, TKey extends string | number>(
   event: DeltaEvent<TRow, TKey>,
   onError?: (error: Error, event: DeltaEvent<TRow, TKey>) => void,
 ): void {
-  const normalised = normaliseError(error)
+  const normalised = normalizeError(error)
   if (onError) {
     try {
       onError(normalised, event)
@@ -1164,8 +1165,4 @@ function reportError<TRow extends object, TKey extends string | number>(
   } else {
     console.error(`[Effect] Unhandled error in handler:`, normalised)
   }
-}
-
-function normaliseError(error: unknown): Error {
-  return error instanceof Error ? error : new Error(String(error))
 }
