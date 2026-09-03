@@ -764,6 +764,18 @@ function createPowerSyncCollectionConfig<
           )
         }
 
+        const cleanupDemand = (demand: DemandRecord): void => {
+          demands.delete(demand.options)
+          try {
+            demand.cleanup?.()
+          } catch (error) {
+            database.logger.error(
+              `Could not clean up subset hook for ${viewName}`,
+              error,
+            )
+          }
+        }
+
         const performPhysicalRelease = async (
           options: LoadSubsetOptions,
         ): Promise<void> => {
@@ -852,16 +864,8 @@ function createPowerSyncCollectionConfig<
           if (!demand) return
 
           const wasActive = demand.active
-          demands.delete(options)
+          cleanupDemand(demand)
           if (wasActive) trackingRevision++
-          try {
-            demand.cleanup?.()
-          } catch (error) {
-            database.logger.error(
-              `Could not clean up subset hook for ${viewName}`,
-              error,
-            )
-          }
 
           if (wasActive) {
             pendingReleases.push({ options, failures: 0 })
@@ -881,15 +885,7 @@ function createPowerSyncCollectionConfig<
             )
             abortController.abort()
             for (const demand of demands.values()) {
-              demands.delete(demand.options)
-              try {
-                demand.cleanup?.()
-              } catch (error) {
-                database.logger.error(
-                  `Could not clean up subset hook for ${viewName}`,
-                  error,
-                )
-              }
+              cleanupDemand(demand)
             }
             pendingReleases.length = 0
           },
