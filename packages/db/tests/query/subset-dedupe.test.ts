@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { runInNewContext } from 'node:vm'
 import {
   DeduplicatedLoadSubset,
   cloneOptions,
@@ -114,8 +115,8 @@ describe(`DeduplicatedLoadSubset`, () => {
     let resolve!: () => void
     const loadSubset = vi
       .fn<LoadSubsetFn>()
-      .mockImplementationOnce(() =>
-        new Promise<void>((done) => (resolve = done)),
+      .mockImplementationOnce(
+        () => new Promise<void>((done) => (resolve = done)),
       )
       .mockResolvedValue(undefined)
     const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
@@ -215,21 +216,24 @@ describe(`DeduplicatedLoadSubset`, () => {
       read: (value: Uint8Array) => value[0],
       expected: 1,
     },
-  ])(`snapshots a mutable $name equality value`, ({ value, mutate, read, expected }) => {
-    let request: LoadSubsetOptions | undefined
-    const deduplicated = new DeduplicatedLoadSubset({
-      loadSubset: (options) => {
-        request = options
-        return true
-      },
-    })
+  ])(
+    `snapshots a mutable $name equality value`,
+    ({ value, mutate, read, expected }) => {
+      let request: LoadSubsetOptions | undefined
+      const deduplicated = new DeduplicatedLoadSubset({
+        loadSubset: (options) => {
+          request = options
+          return true
+        },
+      })
 
-    deduplicated.loadSubset({ where: eq(ref(`key`), val(value)) })
-    mutate(value as never)
+      deduplicated.loadSubset({ where: eq(ref(`key`), val(value)) })
+      mutate(value as never)
 
-    const stored = (request!.where as Func).args[1] as Value<never>
-    expect(read(stored.value)).toBe(expected)
-  })
+      const stored = (request!.where as Func).args[1] as Value<never>
+      expect(read(stored.value)).toBe(expected)
+    },
+  )
 
   it(`clones order and cursor structure without changing opaque identity`, () => {
     const opaque = Object.freeze({ id: 1 })
@@ -291,5 +295,90 @@ describe(`DeduplicatedLoadSubset`, () => {
     })
 
     expect(loadSubset).toHaveBeenCalledTimes(2)
+  })
+
+  it(`snapshots comparison values without calling mutable instance methods`, () => {
+    const date = new Date(2)
+    Object.defineProperty(date, `getTime`, { value: () => 1 })
+    const bytes = new Uint8Array([1, 2, 3])
+    Object.defineProperty(bytes, `slice`, { value: () => bytes })
+
+    const cloned = cloneOptions({
+      where: new Func(`and`, [
+        eq(ref(`date`), val(date)),
+        eq(ref(`bytes`), val(bytes)),
+      ]),
+    })
+    const [dateComparison, byteComparison] = (cloned.where as Func).args as [
+      Func,
+      Func,
+    ]
+    const clonedDate = (dateComparison.args[1] as Value<Date>).value
+    const clonedBytes = (byteComparison.args[1] as Value<Uint8Array>).value
+
+    expect(clonedDate.getTime()).toBe(2)
+    expect(clonedBytes).not.toBe(bytes)
+    expect(clonedBytes).toEqual(new Uint8Array([1, 2, 3]))
+  })
+
+  it(`snapshots cross-realm binary comparison values`, () => {
+    const bytes = runInNewContext(`new Uint8Array([1, 2, 3])`) as Uint8Array
+    const cloned = cloneOptions({ where: eq(ref(`bytes`), val(bytes)) })
+    const clonedBytes = ((cloned.where as Func).args[1] as Value<Uint8Array>)
+      .value
+
+    bytes[0] = 9
+    expect(clonedBytes).not.toBe(bytes)
+    expect(clonedBytes).toEqual(new Uint8Array([1, 2, 3]))
+  })
+
+  it.each([`coalesce`, `caseWhen`] as const)(
+    `snapshots membership candidates returned by %s`,
+    (wrapper) => {
+      const candidates = [new Uint8Array([1])]
+      const candidateExpression =
+        wrapper === `coalesce`
+          ? new Func(`coalesce`, [new Value(candidates)])
+          : new Func(`caseWhen`, [
+              new Value(true),
+              new Value(candidates),
+              new Value([]),
+            ])
+      const cloned = cloneOptions({
+        where: new Func(`in`, [ref(`token`), candidateExpression]),
+      })
+
+      candidates[0]![0] = 2
+      candidates.push(new Uint8Array([3]))
+
+      const clonedCandidates = (
+        ((cloned.where as Func).args[1] as Func).args[
+          wrapper === `coalesce` ? 0 : 1
+        ] as Value<Array<Uint8Array>>
+      ).value
+      expect(clonedCandidates).toEqual([new Uint8Array([1])])
+    },
+  )
+
+  it(`snapshots array ordering operands by value`, () => {
+    const boundary = [1, [2]]
+    const cloned = cloneOptions({ where: gt(ref(`tuple`), val(boundary)) })
+    boundary[0] = 9
+    boundary[1]![0] = 9
+
+    expect(((cloned.where as Func).args[1] as Value).value).toEqual([1, [2]])
+  })
+
+  it(`rejects observable membership accessors`, () => {
+    const candidates: Array<number> = []
+    Object.defineProperty(candidates, 0, {
+      enumerable: true,
+      get: () => 1,
+    })
+    candidates.length = 1
+
+    expect(() =>
+      cloneOptions({ where: new Func(`in`, [ref(`id`), val(candidates)]) }),
+    ).toThrow(`Cannot snapshot membership candidate accessor`)
   })
 })

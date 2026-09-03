@@ -350,6 +350,13 @@ explicitly removed.
       custom iterator, and remain content-equal at every size. The comparison,
       binary-ID integration, index, and stable-identity suites are 160/160
       green with no type errors.
+- [x] Restored the retained-demand snapshot boundary as a compact unit matrix.
+      The reduced suite red-tested four gaps left by the first simplification:
+      overridden Date and typed-array methods, cross-realm bytes, computed IN
+      candidates, and nested array ordering operands. `cloneOptions` now reads
+      intrinsic value state, propagates operator context through wrappers, and
+      rejects observable membership/order accessors. The focused identity and
+      dedupe suites are 65/65 green with no type errors.
 - [x] Ported the full-flow void-result truncate failure into the compact
       ordered oracle. The public regression proves that a live query replaces
       its retained ordered snapshot and reaches a bounded fixed point instead
@@ -372,6 +379,11 @@ explicitly removed.
       collection emits no synthetic delete batch. Cleanup clears retained
       state directly and reports only the lifecycle transition. The lifecycle
       suite is 42/42 green with no type errors.
+- [x] Reconciled the remaining ownership findings from the reviews. Inferred
+      coverage no longer exists, so releasing an exact peer cannot erase
+      another request's proof. Release retries keep the same acquisition,
+      skip no successful external release, and stop after success; the direct,
+      deferred, replay, and failure matrices remain in the focused suites.
 - [x] Restored Electric's public settlement and resource-lifetime laws instead
       of retaining the deleted applied-commit-capture helper. The external
       signal cleanup law red-tested a real listener leak; cleanup now removes

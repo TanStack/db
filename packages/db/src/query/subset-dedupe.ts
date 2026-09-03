@@ -72,7 +72,7 @@ export class DeduplicatedLoadSubset {
 export function cloneOptions(options: LoadSubsetOptions): LoadSubsetOptions {
   return {
     ...options,
-    where: options.where ? cloneExpression(options.where, true) : undefined,
+    where: options.where ? cloneExpression(options.where) : undefined,
     orderBy: options.orderBy?.map((clause) => ({
       ...clause,
       expression: cloneExpression(clause.expression),
@@ -89,8 +89,8 @@ export function cloneOptions(options: LoadSubsetOptions): LoadSubsetOptions {
     cursor: options.cursor
       ? {
           ...options.cursor,
-          whereFrom: cloneExpression(options.cursor.whereFrom, true),
-          whereCurrent: cloneExpression(options.cursor.whereCurrent, true),
+          whereFrom: cloneExpression(options.cursor.whereFrom),
+          whereCurrent: cloneExpression(options.cursor.whereCurrent),
         }
       : undefined,
   }
@@ -98,52 +98,106 @@ export function cloneOptions(options: LoadSubsetOptions): LoadSubsetOptions {
 
 function cloneExpression<T>(
   expression: BasicExpression<T>,
-  predicate = false,
+  context: `exact` | `equality` | `ordering` | `membership` = `exact`,
 ): BasicExpression<T> {
   switch (expression.type) {
     case `ref`:
       return new PropRef<T>([...expression.path])
     case `val`:
       return new Value<T>(
-        predicate ? snapshotComparable(expression.value) : expression.value,
+        context === `membership`
+          ? snapshotMembership(expression.value)
+          : context === `ordering`
+            ? snapshotOrdering(expression.value)
+            : context === `equality`
+              ? snapshotComparable(expression.value)
+              : expression.value,
       )
     case `func`: {
-      const compares = predicate && isComparison(expression.name)
       return new Func<T>(
         expression.name,
-        expression.args.map((arg, index) => {
-          if (
-            predicate &&
-            expression.name === `in` &&
-            index === 1 &&
-            arg.type === `val` &&
-            Array.isArray(arg.value)
-          ) {
-            return new Value(arg.value.map(snapshotComparable))
-          }
-          return cloneExpression(arg, compares)
-        }),
+        expression.args.map((arg, index) =>
+          cloneExpression(
+            arg,
+            expression.name === `in` && index === 1
+              ? `membership`
+              : isEquality(expression.name)
+                ? `equality`
+                : isOrdering(expression.name)
+                  ? `ordering`
+                  : context,
+          ),
+        ),
       )
     }
   }
 }
 
-function isComparison(name: string): boolean {
-  return (
-    name === `eq` ||
-    name === `gt` ||
-    name === `gte` ||
-    name === `lt` ||
-    name === `lte`
-  )
+function isEquality(name: string): boolean {
+  return name === `eq`
+}
+
+function isOrdering(name: string): boolean {
+  return name === `gt` || name === `gte` || name === `lt` || name === `lte`
 }
 
 function snapshotComparable<T>(value: T): T {
-  if (value instanceof Date) return new Date(value.getTime()) as T
-  if (typeof Buffer !== `undefined` && value instanceof Buffer) {
-    return Buffer.from(value) as T
+  if (typeof value === `object` && value !== null) {
+    try {
+      return new Date(Reflect.apply(Date.prototype.getTime, value, [])) as T
+    } catch {
+      // Not a Date; continue with the other comparison domains.
+    }
   }
-  if (value instanceof Uint8Array) return value.slice() as T
+  if (isUint8Array(value)) {
+    const bytes = new Uint8Array(value)
+    return (
+      typeof Buffer !== `undefined` && value instanceof Buffer
+        ? Buffer.from(bytes)
+        : bytes
+    ) as T
+  }
   // Opaque values compare by reference, so cloning them would change meaning.
   return value
+}
+
+function snapshotMembership<T>(value: T): T {
+  if (!Array.isArray(value)) return value
+  const result = new Array(value.length)
+  for (let index = 0; index < value.length; index++) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, index)
+    if (!descriptor) continue
+    if (!(`value` in descriptor)) {
+      throw new TypeError(`Cannot snapshot membership candidate accessor`)
+    }
+    result[index] = snapshotComparable(descriptor.value)
+  }
+  return result as T
+}
+
+function snapshotOrdering<T>(value: T): T {
+  if (!Array.isArray(value)) return snapshotComparable(value)
+  const result = new Array(value.length)
+  for (let index = 0; index < value.length; index++) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, index)
+    if (!descriptor) continue
+    if (!(`value` in descriptor)) {
+      throw new TypeError(`Cannot snapshot ordering operand accessor`)
+    }
+    result[index] = snapshotOrdering(descriptor.value)
+  }
+  return result as T
+}
+
+const typedArrayTag = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Uint8Array.prototype),
+  Symbol.toStringTag,
+)?.get
+
+function isUint8Array(value: unknown): value is Uint8Array {
+  return (
+    ArrayBuffer.isView(value) &&
+    typedArrayTag !== undefined &&
+    Reflect.apply(typedArrayTag, value, []) === `Uint8Array`
+  )
 }
