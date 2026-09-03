@@ -362,6 +362,12 @@ explicitly removed.
       state distinction while keeping old `true` and `Promise<void>` adapters
       source-compatible. The four focused core suites are 67/67 green and the
       persistence package is 122/122 green, both with no type errors.
+- [x] Kept transaction rollback terminal. Once rollback has rejected the
+      public persistence promise, a later adapter settlement is obsolete and
+      cannot complete or fail the transaction a second time. The abort/public
+      application oracle now states that rule directly instead of consulting
+      the deleted event-model projection; the two transaction suites are
+      34/34 green with no type errors.
 - [x] Restored Electric's public settlement and resource-lifetime laws instead
       of retaining the deleted applied-commit-capture helper. The external
       signal cleanup law red-tested a real listener leak; cleanup now removes

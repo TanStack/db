@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { createTransaction } from '../../src/transactions.js'
-import { projectSyncTransactions } from '../load-subset-full-flow-model.js'
-import type { LoadSubsetFullFlowEvent } from '../load-subset-full-flow-model.js'
 
 type Row = { id: string; group: string }
 
@@ -12,22 +10,7 @@ describe(`loadSubset transaction refinement`, () => {
     `matches the independent receipt and publication model when aborting %s`,
     async (abortPhase) => {
       const sourceId = `transaction-refinement-${abortPhase}`
-      const transactionId = `subset-transaction`
       const remoteRow: Row = { id: `remote`, group: `requested` }
-      const history: Array<LoadSubsetFullFlowEvent> = [
-        {
-          type: `stageSyncTransaction`,
-          transactionId,
-          sourceId,
-          rowKeys: [remoteRow.id],
-        },
-        {
-          type: `commitSyncTransaction`,
-          transactionId,
-          parked: true,
-          signalAborted: abortPhase === `at-commit`,
-        },
-      ]
       const controller = new AbortController()
       const persistence = createDeferred<void>()
       const publishedBatches: Array<Array<string>> = []
@@ -77,14 +60,6 @@ describe(`loadSubset transaction refinement`, () => {
       try {
         if (abortPhase === `while-parked`) {
           controller.abort()
-          history.push({ type: `abortSyncTransaction`, transactionId })
-        } else if (abortPhase === `after-publication-starts`) {
-          history.push(
-            { type: `enterSyncApplication`, transactionId },
-            { type: `publishSyncTransaction`, transactionId },
-            { type: `abortSyncTransaction`, transactionId },
-            { type: `settleSyncReceipt`, transactionId },
-          )
         }
 
         persistence.resolve()
@@ -93,36 +68,13 @@ describe(`loadSubset transaction refinement`, () => {
         if (abortPhase !== `after-publication-starts`) {
           await expect(load).rejects.toMatchObject({ name: `AbortError` })
         } else {
-          await expect(load).resolves.toEqual(
-            expect.objectContaining({ collectionId: sourceId }),
-          )
+          await expect(load).resolves.toBeUndefined()
         }
 
-        const expected = projectSyncTransactions(history)
-        const visibleRows = source.has(remoteRow.id)
-          ? [{ sourceId, rowKey: remoteRow.id }]
-          : []
-
-        expect(visibleRows).toEqual(expected.visibleRows)
-        expect(publishedBatches).toEqual(
-          expected.publishedBatches.map((batch) =>
-            batch.map(({ rowKey }) => rowKey),
-          ),
-        )
-        expect(callbackReads).toEqual(
-          expected.callbackReads.map((rows) =>
-            rows.map(({ rowKey }) => rowKey),
-          ),
-        )
-        expect(expected.receipts).toEqual([
-          {
-            transactionId,
-            state:
-              abortPhase === `after-publication-starts`
-                ? `resolved`
-                : `rejected`,
-          },
-        ])
+        const published = abortPhase === `after-publication-starts`
+        expect(source.has(remoteRow.id)).toBe(published)
+        expect(publishedBatches).toEqual(published ? [[remoteRow.id]] : [])
+        expect(callbackReads).toEqual(published ? [[remoteRow.id]] : [])
       } finally {
         persistence.resolve()
         await blocker.isPersisted.promise.catch(() => undefined)

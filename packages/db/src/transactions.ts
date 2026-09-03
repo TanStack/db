@@ -535,6 +535,7 @@ class Transaction<T extends object = Record<string, unknown>> {
     if (this.state === `completed`) {
       throw new TransactionAlreadyCompletedRollbackError()
     }
+    if (this.state === `failed`) return this
 
     this.setState(`failed`)
 
@@ -636,11 +637,15 @@ class Transaction<T extends object = Record<string, unknown>> {
         transaction: this as unknown as TransactionWithMutations<T>,
       })
 
+      if ((this.state as TransactionState) !== `persisting`) return this
+
       this.setState(`completed`)
       this.touchCollection()
 
       this.isPersisted.resolve(this)
     } catch (error) {
+      if ((this.state as TransactionState) !== `persisting`) return this
+
       // Preserve the original error for rethrowing
       const originalError =
         error instanceof Error ? error : new Error(String(error))
