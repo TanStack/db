@@ -350,6 +350,12 @@ explicitly removed.
       custom iterator, and remain content-equal at every size. The comparison,
       binary-ID integration, index, and stable-identity suites are 160/160
       green with no type errors.
+- [x] Ported the full-flow void-result truncate failure into the compact
+      ordered oracle. The public regression proves that a live query replaces
+      its retained ordered snapshot and reaches a bounded fixed point instead
+      of staying stale while scheduling requests forever. Also aligned the
+      ready-listener test with terminal unsubscribe. Both focused suites are
+      51/51 green with no type errors.
 - [x] Restored Electric's public settlement and resource-lifetime laws instead
       of retaining the deleted applied-commit-capture helper. The external
       signal cleanup law red-tested a real listener leak; cleanup now removes

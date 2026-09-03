@@ -1329,7 +1329,7 @@ describe(`Collection Lifecycle Management`, () => {
       }
     })
 
-    it(`delivers ready to the subscription snapshot when one listener unsubscribes another`, async () => {
+    it(`skips a ready listener unsubscribed during the same delivery`, async () => {
       let markReadyCallback: (() => void) | undefined
       const calls: Array<string> = []
       const collection = createCollection<{ id: string; name: string }>({
@@ -1351,7 +1351,7 @@ describe(`Collection Lifecycle Management`, () => {
 
       try {
         markReadyCallback!()
-        expect(calls).toEqual([`first`, `second`])
+        expect(calls).toEqual([`first`])
       } finally {
         first.unsubscribe()
         second.unsubscribe()

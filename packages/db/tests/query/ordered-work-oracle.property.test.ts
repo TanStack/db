@@ -629,6 +629,91 @@ describe(`ordered source work oracle`, () => {
     }
   })
 
+  it(`replaces an ordered snapshot after truncate without repeating void loads`, async () => {
+    const initial: ReadonlyArray<Row> = [
+      { id: 1, rank: 1, eligible: true, label: `old-one` },
+      { id: 2, rank: 2, eligible: true, label: `old-two` },
+    ]
+    const replacement: ReadonlyArray<Row> = [
+      { id: 3, rank: 3, eligible: true, label: `new-three` },
+      { id: 4, rank: 4, eligible: true, label: `new-four` },
+    ]
+    let truth = initial
+    let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
+    let loads = 0
+    const installed = new Set<number>()
+    const source = createCollection<Row, number>({
+      id: `ordered-void-truncate`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (operations) => {
+          sync = operations
+          operations.markReady()
+          return {
+            loadSubset: async (options) => {
+              loads++
+              if (loads > 12) {
+                throw new Error(`ordered void loading did not reach a fixed point`)
+              }
+              const matching = options.where
+                ? truth.filter(
+                    (row) =>
+                      evaluateReferenceExpression(options.where!, row) ===
+                      true,
+                  )
+                : truth
+              const rows = matching
+                .slice(
+                  options.offset ?? 0,
+                  options.limit === undefined
+                    ? undefined
+                    : (options.offset ?? 0) + options.limit,
+                )
+                .filter(({ id }) => !installed.has(id))
+              if (rows.length === 0) return
+              sync.begin()
+              for (const row of rows) {
+                installed.add(row.id)
+                sync.write({ type: `insert`, value: row })
+              }
+              const receipt = sync.commit()
+              if (receipt !== true) await receipt
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const live = createLiveQueryCollection((q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(2),
+    )
+
+    try {
+      await live.preload()
+      expect(live.toArray.map(({ id }) => id)).toEqual([1, 2])
+
+      truth = replacement
+      installed.clear()
+      sync.begin()
+      sync.truncate()
+      const receipt = sync.commit()
+      if (receipt !== true) await receipt
+      await flushPromises()
+
+      expect(live.toArray.map(({ id }) => id)).toEqual([3, 4])
+      expect(loads).toBeLessThanOrEqual(8)
+    } finally {
+      await Promise.all([live.cleanup(), source.cleanup()])
+    }
+  })
+
   const { multiplier, ...replay } = readOracleRunConfig()
   const runs = 20 * multiplier
 
