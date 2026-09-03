@@ -1,3 +1,5 @@
+import { runAllCallbacks } from './utils/callbacks.js'
+
 /**
  * Identifier used to scope scheduled work. Maps to a transaction id for live queries.
  */
@@ -187,19 +189,9 @@ export class Scheduler {
   /** Clear all scheduled jobs for a context. */
   clear(contextId: SchedulerContextId): void {
     this.contexts.delete(contextId)
-    let failed = false
-    let firstError: unknown
-    for (const listener of [...this.clearListeners]) {
-      try {
-        listener(contextId)
-      } catch (error) {
-        if (!failed) {
-          failed = true
-          firstError = error
-        }
-      }
-    }
-    if (failed) throw firstError
+    runAllCallbacks(
+      [...this.clearListeners].map((listener) => () => listener(contextId)),
+    )
   }
 
   /** Register a listener to be notified when a context is cleared. */
@@ -233,9 +225,7 @@ export class Scheduler {
 export const transactionScopedScheduler = new Scheduler()
 
 let activePublicationContext: SchedulerContextId | undefined
-let activePublicationFailure:
-  | { failed: boolean; error: unknown }
-  | undefined
+let activePublicationFailure: { failed: boolean; error: unknown } | undefined
 
 /**
  * Returns the Collection publication that currently owns synchronous change

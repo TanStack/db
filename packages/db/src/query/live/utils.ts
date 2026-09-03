@@ -176,32 +176,6 @@ export function reconcileChangesForD2<
 }
 
 /**
- * Filter changes to prevent duplicate inserts to a D2 pipeline.
- * Maintains D2 multiplicity at 1 for visible items so that deletes
- * properly reduce multiplicity to 0.
- *
- * Mutates `sentKeys` in place: adds keys on insert, removes on delete.
- */
-export function filterDuplicateInserts(
-  changes: Array<ChangeMessage<any, string | number>>,
-  sentKeys: Set<string | number>,
-): Array<ChangeMessage<any, string | number>> {
-  const filtered: Array<ChangeMessage<any, string | number>> = []
-  for (const change of changes) {
-    if (change.type === `insert`) {
-      if (sentKeys.has(change.key)) {
-        continue // Skip duplicate
-      }
-      sentKeys.add(change.key)
-    } else if (change.type === `delete`) {
-      sentKeys.delete(change.key)
-    }
-    filtered.push(change)
-  }
-  return filtered
-}
-
-/**
  * Track the biggest value seen in a stream of changes, used for cursor-based
  * pagination in ordered subscriptions. Returns whether the load request key
  * should be reset (allowing another load).
@@ -224,9 +198,7 @@ export function trackBiggestSentValue(
     changes.some((change) => {
       const previous =
         change.type === `update` ? change.previousValue : change.value
-      return (
-        change.type !== `insert` && comparator(current, previous) === 0
-      )
+      return change.type !== `insert` && comparator(current, previous) === 0
     })
   ) {
     // Once the last emitted order boundary is deleted or updated, the next

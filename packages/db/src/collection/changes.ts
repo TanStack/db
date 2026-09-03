@@ -1,5 +1,6 @@
 import { NegativeActiveSubscribersError } from '../errors'
 import { recordPublicationError, withPublicationContext } from '../scheduler.js'
+import { runAllCallbacks } from '../utils/callbacks.js'
 import {
   createSingleRowRefProxy,
   toExpression,
@@ -85,15 +86,15 @@ export class CollectionChangesManager<
    */
   public emitEmptyReadyEvent(): void {
     withPublicationContext(() => {
-      let failed = false
-      let firstError: unknown
-      this.notifySubscriptions([], (error) => {
-        if (!failed) {
-          failed = true
-          firstError = error
-        }
-      })
-      if (failed) recordPublicationError(firstError)
+      try {
+        runAllCallbacks(
+          [...this.changeSubscriptions].map(
+            (subscription) => () => subscription.emitEvents([]),
+          ),
+        )
+      } catch (error) {
+        recordPublicationError(error)
+      }
     })
   }
 
@@ -214,57 +215,18 @@ export class CollectionChangesManager<
     const layoutListeners = [...this.layoutChangeListeners]
     const subscriptions = [...this.changeSubscriptions]
     withPublicationContext(() => {
-      let failed = false
-      let firstError: unknown
-      const recordError = (error: unknown) => {
-        if (!failed) {
-          failed = true
-          firstError = error
-        }
-      }
-      // Notify both internal layout consumers and the public subscription API.
-      // Public subscribers historically receive an empty batch for order-only
-      // moves because there is no row-value ChangeMessage to publish.
-      if (rawEvents.length === 0) {
-        this.notifyListeners(
-          layoutListeners,
-          (listener) => listener(),
-          recordError,
-        )
-      }
-
-      this.notifyListeners(
-        subscriptions,
-        (subscription) => subscription.emitEvents(enrichedEvents),
-        recordError,
+      const callbacks = subscriptions.map(
+        (subscription) => () => subscription.emitEvents(enrichedEvents),
       )
-      if (failed) recordPublicationError(firstError)
-    })
-  }
-
-  private notifySubscriptions(
-    changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>>,
-    onError: (error: unknown) => void,
-  ): void {
-    this.notifyListeners(
-      [...this.changeSubscriptions],
-      (subscription) => subscription.emitEvents(changes),
-      onError,
-    )
-  }
-
-  private notifyListeners<T>(
-    listeners: ReadonlyArray<T>,
-    notify: (x: T) => void,
-    onError: (error: unknown) => void,
-  ): void {
-    for (const listener of listeners) {
-      try {
-        notify(listener)
-      } catch (error) {
-        onError(error)
+      if (rawEvents.length === 0) {
+        callbacks.unshift(...layoutListeners)
       }
-    }
+      try {
+        runAllCallbacks(callbacks)
+      } catch (error) {
+        recordPublicationError(error)
+      }
+    })
   }
 
   /** Subscribe to layout-only publications. Internal observer channel. */
