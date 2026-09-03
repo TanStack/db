@@ -616,6 +616,9 @@ explicitly removed.
       main merge, and every package in the monorepo builds successfully.
 - [x] Run the 100x fixed/random campaign. The demand, replay, ordered-work,
       pagination, and includes suites pass every fixed and random property.
+      After the fail-closed replay repair, the affected demand, replay,
+      ordered-work, and pagination suites passed another 100x campaign with an
+      extended per-property timeout.
       The long includes oracle passes 133/133 assertions with no type errors
       in two isolated runs. Vitest 3.2 then reports its own
       `[vitest-worker]: Timeout calling "onTaskUpdate"` after the file has
@@ -637,9 +640,9 @@ explicitly removed.
       remain in the ordered-work and graph replay suites.
 - [x] Measure source and compressed bundle size against both `origin/main` and
       the large RFC stack. Across all package `src` trees, the old stack was
-      +10,545/-1,692 lines (net +8,853) while this tree is +1,895/-1,287
-      (net +608, including the architecture document). Executable source alone
-      falls from net +7,835 to net +595, reclaiming 92.4% of its growth. A
+      +10,545/-1,692 lines (net +8,853) while this tree is +1,912/-1,288
+      (net +624, including the architecture document). Executable source alone
+      falls from net +7,835 to net +599, reclaiming 92.4% of its growth. A
       tree-shaken minified ESM build of the public DB entry is 348,772 raw /
       98,406 gzip bytes here versus 339,394 / 96,043 on main and 431,323 /
       118,297 in the old stack. The retained cost is 9,378 raw bytes (2.8%) or

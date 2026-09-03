@@ -457,8 +457,10 @@ export class CollectionImpl<
   /**
    * Register a callback to be executed when the collection first becomes ready
    * Useful for preloading collections
-   * All callbacks registered for that transition run. If one throws, the
-   * collection remains ready; direct sync startup rethrows the first failure.
+   * All callbacks present when the transition starts run; callbacks added
+   * during delivery wait for a later transition. If one throws, the collection
+   * remains ready. Direct sync startup rethrows the first failure, while
+   * preload resolves from the established ready state.
    * @param callback Function to call when the collection first becomes ready
    * @example
    * collection.onFirstReady(() => {
