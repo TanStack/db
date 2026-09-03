@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createEffect } from '../../src/query/effect.js'
+import { getLoadSubsetDemandKey } from '../../src/query/ir-stable-identity.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import { eq } from '../../src/query/builder/functions.js'
 import {
@@ -25,12 +26,14 @@ type Marker = { id: number; rowId: number }
 type Scenario = {
   middleCount: 0 | 1 | 2 | 3
   middleEligible: boolean
+  lastEligible: boolean
   tied: boolean
   direction: `asc` | `desc`
 }
 
 type RequestObservation = {
   kind: `page` | `boundary`
+  key: string | undefined
   limit: number | undefined
   offset: number | undefined
   lastKey: string | number | undefined
@@ -47,6 +50,7 @@ type ConsumerObservation = {
 const scenarioArbitrary: fc.Arbitrary<Scenario> = fc.record({
   middleCount: fc.constantFrom(0 as const, 1 as const, 2 as const, 3 as const),
   middleEligible: fc.boolean(),
+  lastEligible: fc.boolean(),
   tied: fc.boolean(),
   direction: fc.constantFrom(`asc` as const, `desc` as const),
 })
@@ -54,13 +58,16 @@ const scenarioArbitrary: fc.Arbitrary<Scenario> = fc.record({
 const exhaustiveScenarios: ReadonlyArray<Scenario> = ([0, 1, 2, 3] as const)
   .flatMap((middleCount) =>
     [false, true].flatMap((middleEligible) =>
-      [false, true].flatMap((tied) =>
-        ([`asc`, `desc`] as const).map((direction) => ({
-          middleCount,
-          middleEligible,
-          tied,
-          direction,
-        })),
+      [false, true].flatMap((lastEligible) =>
+        [false, true].flatMap((tied) =>
+          ([`asc`, `desc`] as const).map((direction) => ({
+            middleCount,
+            middleEligible,
+            lastEligible,
+            tied,
+            direction,
+          })),
+        ),
       ),
     ),
   )
@@ -84,7 +91,7 @@ function rowsForScenario(scenario: Scenario): Array<Row> {
     {
       id: 2,
       rank: scenario.middleCount + 1,
-      eligible: true,
+      eligible: scenario.lastEligible,
       label: `last`,
     },
   ]
@@ -132,6 +139,7 @@ async function observeConsumer(
             const isPage = options.orderBy !== undefined
             requests.push({
               kind: isPage ? `page` : `boundary`,
+              key: getLoadSubsetDemandKey(options),
               limit: options.limit,
               offset: options.offset,
               lastKey: options.cursor?.lastKey,
@@ -351,6 +359,7 @@ describe(`ordered source work oracle`, () => {
     const rows = rowsForScenario({
       middleCount: 1,
       middleEligible: true,
+      lastEligible: true,
       tied: false,
       direction: `asc`,
     })
@@ -405,6 +414,39 @@ describe(`ordered source work oracle`, () => {
   it(`keeps live collections and Effects equal across the exhaustive small domain`, async () => {
     for (const scenario of exhaustiveScenarios) {
       await assertConsumerParity(scenario)
+    }
+  })
+
+  it(`settles an underfilled source without repeating one continuation forever`, async () => {
+    const scenario: Scenario = {
+      middleCount: 3,
+      middleEligible: false,
+      lastEligible: false,
+      tied: false,
+      direction: `asc`,
+    }
+    const [collection, effect] = await Promise.all([
+      observeConsumer(`collection`, scenario),
+      observeConsumer(`effect`, scenario),
+    ])
+
+    expect(collection.rows.map(({ id }) => id)).toEqual([1])
+    expect(effect.rows).toEqual(collection.rows)
+    expect(effect.errors).toEqual(collection.errors)
+    expect(effect.live).toBe(collection.live)
+    for (const observation of [collection, effect]) {
+      expect(observation.errors).toEqual([])
+      expect(observation.live).toBe(true)
+      expect(
+        observation.requests.length,
+        JSON.stringify(observation.requests),
+      ).toBeLessThanOrEqual(8)
+      expect(
+        observation.requests.filter(({ kind }) => kind === `page`).length,
+      ).toBeLessThanOrEqual(rowsForScenario(scenario).length)
+      expect(new Set(observation.requests.map(({ key }) => key)).size).toBe(
+        observation.requests.length,
+      )
     }
   })
 

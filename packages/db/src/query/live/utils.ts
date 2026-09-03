@@ -302,6 +302,8 @@ export class OrderedSourceLoader {
   private generation = 0
   private lastPage: { count: number; boundary: unknown } | undefined
   private lastPrefixCount: number | undefined
+  private hasLastBoundary = false
+  private lastBoundary: unknown
 
   constructor(
     private readonly info: OrderByOptimizationInfo,
@@ -394,6 +396,8 @@ export class OrderedSourceLoader {
     this.failed = false
     this.lastPage = undefined
     this.lastPrefixCount = undefined
+    this.hasLastBoundary = false
+    this.lastBoundary = undefined
   }
 
   dispose(): void {
@@ -421,6 +425,7 @@ export class OrderedSourceLoader {
     ) {
       return
     }
+    this.lastPage = { count, boundary }
     try {
       this.subscription.requestLimitedSnapshot({
         orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
@@ -429,7 +434,6 @@ export class OrderedSourceLoader {
         trackLoadSubsetPromise: false,
         onLoadSubsetResult: (result) => this.observe(result, refine),
       })
-      this.lastPage = { count, boundary }
     } catch (error) {
       this.failed = true
       this.lastPage = undefined
@@ -475,6 +479,8 @@ export class OrderedSourceLoader {
         this.failed = true
         this.lastPage = undefined
         this.lastPrefixCount = undefined
+        this.hasLastBoundary = false
+        this.lastBoundary = undefined
       },
     )
   }
@@ -485,16 +491,25 @@ export class OrderedSourceLoader {
     const value = this.info.valueExtractorForRawRow(
       biggest as Record<string, unknown>,
     )
+    if (this.hasLastBoundary && Object.is(this.lastBoundary, value)) return
     const orderBy = normalizeOrderByPaths(this.info.orderBy, this.alias)
     const where = buildCursorCurrent(orderBy, [value])
     if (!where) {
       this.loadFullSource()
       return
     }
-    this.subscription.requestSnapshot({
-      where,
-      trackLoadSubsetPromise: false,
-      onLoadSubsetResult: (result) => this.observe(result, false),
-    })
+    this.hasLastBoundary = true
+    this.lastBoundary = value
+    try {
+      this.subscription.requestSnapshot({
+        where,
+        trackLoadSubsetPromise: false,
+        onLoadSubsetResult: (result) => this.observe(result, false),
+      })
+    } catch (error) {
+      this.hasLastBoundary = false
+      this.lastBoundary = undefined
+      throw error
+    }
   }
 }

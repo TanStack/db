@@ -68,7 +68,30 @@ after their public laws have a destination.
       window shapes plus shared, failed, stale, released, and post-replay
       histories. Pagination's exhaustive fixtures cover beyond-end, tied, and
       null windows.
+- [x] Add a fixed no-progress script to the cross-consumer oracle. It must
+      compare rows, error/liveness state, request traces, and the fact that no
+      identical continuation is scheduled forever. Under the exact-only
+      adapter contract, an empty page is a valid settled underfilled result;
+      neither consumer may invent broader source exhaustion.
+- [ ] Compare normalized public transaction histories across consumers where
+      the APIs expose the same boundary. Keep per-consumer prefix/atomicity
+      assertions where bootstrap delivery is intentionally different.
+- [ ] Add one shared on-demand source fixture only if a third current test
+      needs the same adapter protocol. Do not create a helper merely to hide
+      two readable fixtures.
 - [ ] Run a focused mutation audit after the oracle surface is stable.
+
+The mutation audit must prove that the retained oracle surface kills at least
+these faults:
+
+- accept a stale replay settlement;
+- repeat an identical ordered continuation forever;
+- stop after an underfilled joined page when eligible rows remain;
+- release one exact physical request twice;
+- publish a partial truncate replacement;
+- let a cleaned source session publish into its replacement;
+- treat a rejected or aborted request as completed work;
+- use a live row outside established source rows as a continuation boundary.
 
 ## Review-loss audit
 
@@ -112,6 +135,7 @@ explicitly removed.
 | The same public demand path yields the same rows and lifecycle state across entry points                   | live collection/Effect parity in `ordered-work-oracle.property.test.ts`                                                                | covered                               |
 | Out-of-order settlements and same-tick cleanup/restart preserve the recomputed result                      | replay settlement-order model and scheduler property; pagination multi-source recomputation                                            | covered                               |
 | Generated histories visibly reach failure, sharing, restart, tied/null, and beyond-end regimes             | explicit reach checks plus pagination's exhaustive fixtures                                                                            | covered                               |
+| No-progress ordered loads stop without false exhaustion, hidden diagnostics, or an identical request loop  | `ordered-work-oracle.property.test.ts`; focused live/Effect no-progress script                                                          | add fixed cross-consumer case         |
 | Ready transitions survive callback failure, stop when superseded, and restart as a fresh cycle             | `collection-lifecycle.test.ts`; `collection-events.test.ts`; `query/scheduler.test.ts`                                                  | restored and covered                  |
 | An already-aborted demand starts no eager, deferred, or adapter work and rejects with `AbortError`         | `collection.test.ts`                                                                                                                    | restored and covered                  |
 
@@ -130,6 +154,10 @@ explicitly removed.
   inferred coverage, or shared cancellation ownership describe the rejected
   algebra. Their still-valid exact-demand, error, and mutation laws remain in
   the compact suites above.
+- Tests added by the large RFC stack are not disposable merely because their
+  production topology is gone. Each deterministic regression in the deleted
+  full-flow, lifecycle, outcome, total-order, and window-state files must map
+  to a named public test or be rewritten before the file deletion is accepted.
 
 ### Deliberately removed contracts
 
@@ -167,6 +195,11 @@ explicitly removed.
 - [x] Window operations now synchronously drain the graph work they create and
       wait for both the page request and tie-boundary refinement. Contract-valid
       controller fixtures red/green async rejection and superseding reset.
+- [x] The cross-consumer no-progress case exposed duplicate page and boundary
+      requests caused by reentrant source publication before request identity
+      was recorded. The shared ordered loader now records each request before
+      adapter entry; its exhaustive domain includes underfilled source truth
+      and rejects repeated exact requests.
 - [x] Existing includes, subquery-order, and union tests now model the adapter
       contract and inspect the whole request trace. No useful regression test
       was removed to accommodate the new boundary work.
