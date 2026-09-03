@@ -616,7 +616,9 @@ explicitly removed.
 - [x] Measure source and compressed bundle size against both `origin/main` and
       the large RFC stack. Across all package `src` trees, the old stack was
       +10,545/-1,692 lines (net +8,853) while this tree is +1,797/-1,252
-      (net +545), reclaiming 93.8% of its net growth. A common minified ESM
+      (net +545, including the architecture document). Executable source alone
+      falls from net +7,835 to net +529, reclaiming 93.2% of its growth. A
+      common minified ESM
       build is 555,200 raw / 134,182 gzip bytes here versus 545,014 / 131,984
       on main and 676,084 / 161,461 in the old stack. The retained cost is
       10,186 raw bytes (1.9%) or 2,198 gzip bytes (1.7%) over main, and the

@@ -26,10 +26,9 @@ This architecture covers:
 - coherent publication to public Collections;
 - the boundaries with query-db ownership and physical query planning.
 
-The applied-settlement receipt and optional subset source result described
-below are its only new public boundary contracts. Optimistic transactions are
-another source of weighted input changes; they do not have a separate routing
-model.
+The applied-settlement receipt described below is its only new public boundary
+contract. Optimistic transactions are another source of weighted input changes;
+they do not have a separate routing model.
 
 ## One relational graph
 
@@ -416,7 +415,7 @@ ActiveBucket(bucket, demand parameters)
     -> source deltas return to D2 inputs
 ```
 
-The adapter treats demand as coverage, not as one request per bucket:
+The adapter groups demand into shared source work, not one request per bucket:
 
 ```ts
 type DemandPlanId = Brand<string, 'DemandPlanId'>
@@ -427,11 +426,11 @@ type DemandSet = readonly [
 ]
 ```
 
-One request may cover many buckets, and the adapter may coalesce or reuse
+One request may serve many buckets, and the adapter may coalesce or reuse
 requests according to the compiled demand plan. A coalesced request has one
 shared abort lease. If one owner releases its lease, the source request remains
-active while another owner still needs its coverage. The source signal aborts
-only after every attached owner has released it.
+active while another owner still needs that acquisition. The source signal
+aborts only after every attached owner has released it.
 
 A Collection subscription installs each logical subset owner before it calls
 the source adapter. Reentrant release during `loadSubset` must therefore see and
@@ -442,10 +441,10 @@ same acquisition identity.
 
 Its semantic contract is:
 
-> Every active, satisfiable bucket must be covered by a settled current demand
+> Every active, satisfiable bucket must be served by a settled current demand
 > request before initial preload completes.
 
-A request may remain in flight after some covered buckets become inactive.
+A request may remain in flight after some served buckets become inactive.
 Those buckets no longer participate in readiness and cannot receive rows
 through routes that no longer exist. Sharing source work never merges the route
 rows themselves.
@@ -473,7 +472,7 @@ priority merely to make a subset load settle.
 Existing immediate bootstrap and persistence-hydration paths, plus truncate,
 retain their queue-bypass contract; if one applies a parked subset transaction
 as part of that prefix, the subset receipt settles only after the writes are
-visible. Rejected, canceled, and obsolete acquisitions establish no coverage.
+visible. Rejected, canceled, and obsolete acquisitions establish no result.
 Sources must honor cancellation before publishing request-scoped rows.
 
 Successful settlement proves only that the exact request finished and that its
@@ -613,8 +612,6 @@ create recursive Collection machinery.
 - **Hydration:** establishing an initial snapshot before forwarding later
   changes.
 - **Generation:** a token that rejects obsolete asynchronous work.
-- **Source extent:** an authoritative source fact that more rows continue past
-  an exact demand, that the source is exhausted there, or that neither is known.
 - **Collection facade:** a stable public Collection view shared by the parents
   routed to one active bucket.
 - **Coherent commit:** one publication in which state, events, and consumers see
