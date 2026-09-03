@@ -3032,6 +3032,7 @@ describe(`pagination recomputation oracle`, () => {
                 write({ type: `insert`, value: row })
               }
               commit()
+              return true
             },
           }
         },

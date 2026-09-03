@@ -1203,6 +1203,7 @@ describe(`CollectionSubscription status tracking`, () => {
             return {
               loadSubset: (options) => {
                 received = options
+                return true
               },
             }
           },

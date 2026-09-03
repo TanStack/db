@@ -263,8 +263,22 @@ describe(`DeduplicatedLoadSubset`, () => {
       opaque,
     )
 
-    options.orderBy![0]!.compareOptions.localeOptions!.numeric = false
-    expect(cloned.orderBy![0]!.compareOptions.localeOptions?.numeric).toBe(true)
+    const originalCompareOptions = options.orderBy![0]!.compareOptions
+    const clonedCompareOptions = cloned.orderBy![0]!.compareOptions
+    if (
+      originalCompareOptions.stringSort !== `locale` ||
+      clonedCompareOptions.stringSort !== `locale`
+    ) {
+      throw new Error(`Expected locale comparison options`)
+    }
+    const originalLocaleOptions = originalCompareOptions.localeOptions as {
+      numeric?: boolean
+    }
+    const clonedLocaleOptions = clonedCompareOptions.localeOptions as {
+      numeric?: boolean
+    }
+    originalLocaleOptions.numeric = false
+    expect(clonedLocaleOptions.numeric).toBe(true)
   })
 
   it(`keeps a completed cursor identity stable after its Date is mutated`, async () => {
@@ -361,7 +375,7 @@ describe(`DeduplicatedLoadSubset`, () => {
   )
 
   it(`snapshots array ordering operands by value`, () => {
-    const boundary = [1, [2]]
+    const boundary: [number, Array<number>] = [1, [2]]
     const cloned = cloneOptions({ where: gt(ref(`tuple`), val(boundary)) })
     boundary[0] = 9
     boundary[1]![0] = 9

@@ -227,6 +227,10 @@ export const transactionScopedScheduler = new Scheduler()
 let activePublicationContext: SchedulerContextId | undefined
 let activePublicationFailure: { error: unknown } | undefined
 
+function getActivePublicationFailure(): { error: unknown } | undefined {
+  return activePublicationFailure
+}
+
 /**
  * Returns the Collection publication that currently owns synchronous change
  * delivery. Live-query jobs use it to coalesce all source subscriptions that
@@ -258,15 +262,16 @@ export function withPublicationContext<T>(publish: () => T): T {
   try {
     result = publish()
     transactionScopedScheduler.flush(contextId)
-    listenerFailure = activePublicationFailure
+    listenerFailure = getActivePublicationFailure()
   } catch (error) {
     try {
       transactionScopedScheduler.clear(contextId)
     } catch {
       // Keep the earlier publication or graph failure.
     }
-    if (activePublicationFailure) {
-      throw activePublicationFailure.error
+    const publicationFailure = getActivePublicationFailure()
+    if (publicationFailure) {
+      throw publicationFailure.error
     }
     throw error
   } finally {
