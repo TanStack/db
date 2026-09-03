@@ -844,6 +844,36 @@ export class CollectionSubscription
     if (!demand) return
     this.releaseSubsetDemand(demand)
     this.subsetDemands.splice(index, 1)
+    this.pruneReleasedReplayRows()
+  }
+
+  /** Remove rows owned only by a demand released during private replay. */
+  private pruneReleasedReplayRows(): void {
+    const session = this.truncateReplaySession
+    if (!session) return
+    const filters = this.subsetDemands.map((demand) =>
+      demand.requestOptions.where
+        ? createFilterFunctionFromExpression(demand.requestOptions.where)
+        : undefined,
+    )
+    const deletes = [...this.publishedRows]
+      .filter(([, value]) =>
+        filters.every((filter) => !(filter?.(value) ?? true)),
+      )
+      .map(
+        ([key, value]): ChangeMessage<any, any> => ({
+          type: `delete`,
+          key,
+          value,
+        }),
+      )
+    if (deletes.length === 0) return
+
+    for (const { key } of deletes) {
+      session.publicationState.publishedRows.delete(key)
+      session.publicationState.sentKeys.delete(key)
+    }
+    this.filteredCallback(deletes)
   }
 
   /**

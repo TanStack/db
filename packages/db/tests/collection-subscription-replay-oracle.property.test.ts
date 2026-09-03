@@ -185,7 +185,18 @@ const replayScenarioArbitrary: fc.Arbitrary<ReplayScenario> = fc
                     minLength: 0,
                     maxLength: 3,
                   })
-                : fc.constant<ReadonlyArray<SourceAction>>([]),
+                : fc
+                    .tuple(
+                      fc.constant<SourceAction>({
+                        type: `request`,
+                        demandId: releaseOnLastAttempt,
+                      }),
+                      fc.array(sourceActionArbitrary(demandIds), {
+                        minLength: 0,
+                        maxLength: 2,
+                      }),
+                    )
+                    .map(([request, actions]) => [request, ...actions]),
           })
           .map(({ settlementOrder, rawSettlementPhases, afterSettlement }) => ({
             initialRows,
@@ -705,10 +716,23 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
         attemptIndex === scenario.attempts.length - 1 &&
         scenario.releaseOnLastAttempt !== undefined
       ) {
-        subscription.releaseSnapshot(
-          demandWheres.get(scenario.releaseOnLastAttempt)!,
-        )
-        activeDemandIds.delete(scenario.releaseOnLastAttempt)
+        const releasedDemand = scenario.releaseOnLastAttempt
+        const previous = expectedPublished.get(releasedDemand)
+        subscription.releaseSnapshot(demandWheres.get(releasedDemand)!)
+        activeDemandIds.delete(releasedDemand)
+        expectedPublished.delete(releasedDemand)
+        modelSession.baseline.delete(releasedDemand)
+        if (previous) {
+          modelSession.publicationCount++
+          expectedPublicationCount++
+          expect(sortedChanges(publicationBatches.at(-1)!)).toEqual([
+            {
+              type: `delete`,
+              key: releasedDemand,
+              value: previous,
+            },
+          ])
+        }
       }
       assertSource()
       assertPublished(expectedPublished)
@@ -758,9 +782,10 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
         expectedPublished,
       )
       expect(publicationCount).toBe(
-        countBeforeAction + Number(expectedBatch.length > 0),
+        countBeforeAction +
+          Number(action.type === `request` || expectedBatch.length > 0),
       )
-      if (expectedBatch.length > 0) {
+      if (action.type === `request` || expectedBatch.length > 0) {
         expect(sortedChanges(publicationBatches.at(-1)!)).toEqual(
           sortedChanges(expectedBatch),
         )
@@ -1442,6 +1467,11 @@ describe(`CollectionSubscription replay oracle`, () => {
     ).toBe(true)
     expect(
       scenarios.some(({ afterSettlement }) => afterSettlement.length > 0),
+    ).toBe(true)
+    expect(
+      scenarios.some(({ afterSettlement }) =>
+        afterSettlement.some(({ type }) => type === `request`),
+      ),
     ).toBe(true)
   })
 

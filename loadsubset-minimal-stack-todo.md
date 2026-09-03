@@ -91,11 +91,14 @@ helper that production uses.
       per-consumer prefix and monotonic-publication assertions because live
       collections may publish progressive bootstrap prefixes while Effects
       publish the same result in one batch.
-- [ ] Complete the public lifecycle trace: generated histories must observe
+- [x] Complete the public lifecycle trace: generated histories observe
       demand/release, settlement, source mutation, replay, cleanup/restart,
-      failure, and public snapshots at intermediate points.
-- [ ] Complete the atomic-publication observer for root rows and
+      failure, and public snapshots at intermediate points. The release path
+      now generates a later reacquisition instead of ending the history.
+- [x] Complete the atomic-publication observer for root rows and
       collection-valued children so no callback can observe a mixed epoch.
+      The replay oracle checks each public batch and callback snapshot; the
+      includes publication suites check matching root/facade snapshots.
 - [ ] Add or name the metamorphic laws for consumer equivalence, stale-event
       erasure, replay equivalence, independent-history commutation, and exact
       sharing. Split/merge acquisition equivalence is deliberately absent
@@ -269,6 +272,12 @@ explicitly removed.
 - [x] Replaced the old exact ordered-load count with the stronger public law:
       after a source change, a synchronous failure cannot trigger the same
       semantic request twice. Distinct refinement requests remain allowed.
+- [x] Unfroze release/reacquire in generated replay histories. This red-tested
+      a released row leaking back through a failed peer replay: the stale
+      baseline still marked its key as sent, so reacquisition suppressed the
+      newer authoritative value. Release now prunes only rows no remaining
+      demand owns, updates the retained baseline, and publishes one exact
+      delete. The five affected suites are 150/150 green.
 - [x] Existing includes, subquery-order, and union tests now model the adapter
       contract and inspect the whole request trace. No useful regression test
       was removed to accommodate the new boundary work.
