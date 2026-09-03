@@ -673,7 +673,10 @@ async function runPaginationStateScenario(
       .limit(currentWindow.limit)
       .select(({ row }) => ({ id: row.id, rank: row.rank })),
   )
-  const publications: Array<ReadonlyArray<unknown>> = []
+  const publications: Array<{
+    changes: ReadonlyArray<unknown>
+    rows: Array<{ id: number; rank: number }>
+  }> = []
   let publicationSubscription:
     | ReturnType<typeof live.subscribeChanges>
     | undefined
@@ -701,7 +704,7 @@ async function runPaginationStateScenario(
     expect(live.status).toBe(`ready`)
     expect(live.utils.lastSubsetError).toBeUndefined()
     publicationSubscription = live.subscribeChanges(
-      (changes) => publications.push(changes),
+      (changes) => publications.push({ changes, rows: readCurrentWindow() }),
       { includeInitialState: false },
     )
 
@@ -735,6 +738,9 @@ async function runPaginationStateScenario(
       const outputChanged =
         JSON.stringify(readCurrentWindow()) !== JSON.stringify(beforeRows)
       expect(publications.length - publicationCount).toBe(outputChanged ? 1 : 0)
+      if (outputChanged) {
+        expect(publications.at(-1)?.rows).toEqual(readCurrentWindow())
+      }
       // One run applies the action; a second may apply an ordered-window
       // refill. Neither is allowed to create a second public publication.
       expect(live.utils.getRunCount() - runCount).toBeLessThanOrEqual(2)
@@ -760,6 +766,7 @@ async function runOnDemandPaginationScenario(
   const deliveredIds = new Set<number>()
   const loads: Array<LoadSubsetOptions> = []
   const initialWindow = scenario.windows[0]!
+  let currentWindow = initialWindow
 
   const source = createCollection<PageRow>({
     id: `pagination-on-demand-oracle-source-${collectionSequence++}`,
@@ -803,9 +810,24 @@ async function runOnDemandPaginationScenario(
       .limit(initialWindow.limit)
       .select(({ row }) => ({ id: row.id, rank: row.rank })),
   )
+  const publications: Array<{
+    window: PaginationWindow
+    ids: Array<number>
+  }> = []
+  const publicationSubscription = live.subscribeChanges(
+    () => {
+      publications.push({
+        window: { ...currentWindow },
+        ids: Array.from(live.values(), ({ id }) => id),
+      })
+    },
+    { includeInitialState: false },
+  )
 
   try {
     await live.preload()
+    expect(live.status).toBe(`ready`)
+    expect(live.utils.lastSubsetError).toBeUndefined()
     if (initialWindow.limit > 0) {
       expect(loads.length).toBeGreaterThan(0)
     }
@@ -818,8 +840,11 @@ async function runOnDemandPaginationScenario(
     }
 
     for (const [index, window] of scenario.windows.slice(1).entries()) {
+      currentWindow = window
       const result = live.utils.setWindow(window)
       if (result instanceof Promise) await result
+      expect(live.status).toBe(`ready`)
+      expect(live.utils.lastSubsetError).toBeUndefined()
 
       try {
         expect(Array.from(live.values(), ({ id }) => id)).toEqual(
@@ -849,7 +874,27 @@ async function runOnDemandPaginationScenario(
         expect(load.where).toBeDefined()
       }
     }
+    for (const publication of publications) {
+      const expected = referenceWindow(
+        authoritativeRows,
+        scenario.direction,
+        publication.window,
+      )
+      expect(publication.ids).toEqual(expected.slice(0, publication.ids.length))
+    }
+    if (publications.length > 0) {
+      expect(publications.at(-1)?.ids).toEqual(
+        referenceWindow(authoritativeRows, scenario.direction, currentWindow),
+      )
+    }
+    expect(loads.length).toBeLessThanOrEqual(
+      scenario.windows.length * (authoritativeRows.length + 2),
+    )
+    expect(publications.length).toBeLessThanOrEqual(
+      loads.length + scenario.windows.length,
+    )
   } finally {
+    publicationSubscription.unsubscribe()
     await cleanupAll(live, source)
   }
 }
@@ -1213,6 +1258,8 @@ async function runPendingMutationScenario(
       await flushPromises()
       await settlePending()
       expect(await observedFailure).toBe(cursorError)
+      expect(live.status).toBe(`ready`)
+      expect(live.utils.lastSubsetError).toBe(cursorError)
 
       const retry = live.utils.setWindow({ offset: 0, limit: finalLimit })
       const observedRetry =
@@ -1228,6 +1275,8 @@ async function runPendingMutationScenario(
         outstanding.push(observedRetry)
         await observedRetry
       }
+      expect(live.status).toBe(`ready`)
+      expect(live.utils.lastSubsetError).toBe(cursorError)
     }
 
     try {

@@ -527,6 +527,157 @@ describe(`CollectionSubscription status tracking`, () => {
     }
   })
 
+  it(`retires pending status per demand while exact cleanup debt retries`, async () => {
+    const firstLoad = createDeferred<void>()
+    const secondLoad = createDeferred<void>()
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const releaseError = new Error(`release failed`)
+    let firstReleaseAttempts = 0
+    const collection = createCollection<{ id: string }>({
+      id: `retired-pending-status-and-cleanup-debt`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return loads.length === 1 ? firstLoad.promise : secondLoad.promise
+            },
+            unloadSubset: (options) => {
+              unloads.push(options)
+              if (options === loads[0] && ++firstReleaseAttempts < 3) {
+                throw releaseError
+              }
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const firstWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`first`)])
+    const secondWhere = new Func(`eq`, [
+      new PropRef([`id`]),
+      new Value(`second`),
+    ])
+
+    try {
+      subscription.requestSnapshot({
+        where: firstWhere,
+        optimizedOnly: false,
+      })
+      subscription.requestSnapshot({
+        where: secondWhere,
+        optimizedOnly: false,
+      })
+      expect(subscription.status).toBe(`loadingSubset`)
+
+      expect(() => subscription.releaseSnapshot(firstWhere)).toThrow(
+        releaseError,
+      )
+      expect(subscription.status).toBe(`loadingSubset`)
+
+      secondLoad.resolve()
+      await flushPromises()
+      expect(subscription.status).toBe(`ready`)
+
+      expect(() => subscription.unsubscribe()).toThrow(releaseError)
+      expect(() => subscription.unsubscribe()).not.toThrow()
+      expect(unloads).toEqual([loads[0], loads[0], loads[1], loads[0]])
+    } finally {
+      firstLoad.resolve()
+      secondLoad.resolve()
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it.each([`sync`, `async`] as const)(
+    `reopens a failed %s replay only after its last logical demand retires`,
+    async (failureMode) => {
+      const failure = new Error(`replay failed`)
+      let begin!: () => void
+      let commit!: () => void
+      let truncate!: () => void
+      let loadCount = 0
+      let replayStarts = 0
+      let replaySuccesses = 0
+      const collection = createCollection<{ id: string }>({
+        id: `failed-replay-logical-demand-cardinality-${failureMode}`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (operations) => {
+            begin = operations.begin
+            commit = operations.commit
+            truncate = operations.truncate
+            operations.markReady()
+            return {
+              loadSubset: () => {
+                loadCount += 1
+                if (loadCount <= 2) return true
+                if (failureMode === `sync`) throw failure
+                return Promise.reject(failure)
+              },
+              unloadSubset: () => {},
+            }
+          },
+        },
+      })
+      const subscription = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+        truncateReplayPublication: {
+          start: () => {
+            replayStarts += 1
+          },
+          succeed: () => {
+            replaySuccesses += 1
+          },
+        },
+      })
+      const firstWhere = new Func(`eq`, [
+        new PropRef([`id`]),
+        new Value(`first`),
+      ])
+      const secondWhere = new Func(`eq`, [
+        new PropRef([`id`]),
+        new Value(`second`),
+      ])
+
+      try {
+        subscription.requestSnapshot({
+          where: firstWhere,
+          optimizedOnly: false,
+        })
+        subscription.requestSnapshot({
+          where: secondWhere,
+          optimizedOnly: false,
+        })
+
+        begin()
+        truncate()
+        commit()
+        await flushPromises()
+        expect(loadCount).toBe(4)
+        expect(replayStarts).toBe(1)
+        expect(replaySuccesses).toBe(0)
+
+        subscription.releaseSnapshot(firstWhere)
+        expect(replaySuccesses).toBe(0)
+
+        subscription.releaseSnapshot(secondWhere)
+        expect(replaySuccesses).toBe(1)
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
   it(`retries the exact in-flight replay release`, async () => {
     const replay = createDeferred<void>()
     const loads: Array<LoadSubsetOptions> = []

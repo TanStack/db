@@ -43,8 +43,9 @@ The compact suite must keep four layers distinct:
 4. metamorphic laws compare consumers and equivalent histories, while fixed
    regressions pin every bug that shaped the implementation.
 
-No layer may use a production-only counter or infer correctness from the same
-helper that production uses.
+No correctness comparison may use a production-only counter or infer results
+from the same helper that production uses. A counter may enforce an explicit
+work bound when row correctness is proved independently.
 
 - [x] Keep full recomputation from authoritative source truth structurally
       independent of production helpers.
@@ -112,18 +113,18 @@ helper that production uses.
       longer promises subset algebra.
 - [x] List each deliberate mutation and the assertion that kills it: - count an aborted obsolete replay as failed and let any attempt choose
       the final outcome -> `lets the newest successful replay replace an
-    older failed replay` rejects the missing publication; - remove identical page/boundary suppression -> `settles an underfilled
-    source without repeating one continuation forever` exceeds its finite
+  older failed replay` rejects the missing publication; - remove identical page/boundary suppression -> `settles an underfilled
+  source without repeating one continuation forever` exceeds its finite
       request bound; - page a joined source instead of taking the conservative full-source
       path -> `refills a joined result window through a contract-compliant
-    source` rejects the extra limited requests; - unload the same physical acquisition twice -> `releases every
-    successful overlapping replay acquisition` rejects the release count; - flush a truncate replay before its pending demands settle -> `uses the
-    newest complete multi-demand replay` observes a partial empty snapshot; - disable sync-session epoch checks -> the fixed-seed cleanup/restart
+  source` rejects the extra limited requests; - unload the same physical acquisition twice -> `releases every
+  successful overlapping replay acquisition` rejects the release count; - flush a truncate replay before its pending demands settle -> `uses the
+  newest complete multi-demand replay` observes a partial empty snapshot; - disable sync-session epoch checks -> the fixed-seed cleanup/restart
       property observes an old session row in its replacement; - cache an asynchronously completed request after owner abort -> `does
-    not cache work that settles after its owner aborts` rejects the skipped
+  not cache work that settles after its owner aborts` rejects the skipped
       retry; - cache a rejected request -> `retries an exact demand after rejection`
       rejects the skipped retry; - seed an ordered cursor from an unrelated local row -> `does not derive
-    an ordered boundary from another demand's local row` rejects the
+  an ordered boundary from another demand's local row` rejects the
       foreign cursor.
 - [x] Do not add a shared on-demand source fixture: only two current tests need
       the protocol, and their local fixtures remain clearer than a premature
@@ -653,6 +654,16 @@ explicitly removed.
       work, and exactly one public publication per semantic result change (zero
       for a no-op). A refill may require a second private graph run but cannot
       wake consumers twice.
+- [x] Close the final loss-audit gaps. Sync throws and async rejects now prove
+      that a failed replay reopens only after its last logical demand retires.
+      Pending-status tests separate retired demand from a surviving demand and
+      retry the same cleanup debt through two failures. Pagination histories
+      capture rows at callback time, cover error identity and liveness on the
+      rejecting cursor path, and bound async adapter work and publications.
+      Ordered recovery asserts one complete public replacement. The root
+      `test:oracles` command now includes both core and Query DB oracle suites.
+      The architecture and changeset record the exact cleanup lease,
+      multi-column invalidation scope, and deferred full-source retry policy.
 - [x] Measure source and compressed bundle size against both `origin/main` and
       the large RFC stack. Across all package `src` trees, the old stack was
       +10,545/-1,692 lines (net +8,853) while this tree is +1,912/-1,288

@@ -15,7 +15,9 @@ last coherent result. Live-query truncate recovery now waits for work started
 during the replay and keeps partial graph state private after failure until a
 later complete replay succeeds, while retired demand cannot block unrelated
 graph work. Failed unloads remain retryable cleanup debt without reviving
-demand. Unsafe ordered boundaries fall back to full-source loading, and finite
-prefixes revalidate after membership-changing updates. Ready callbacks keep
-readiness established when a callback throws, and key identity remains exact
-for NaN, binary, reference, function, and symbol values.
+demand, while preserving the exact acquisition identity for later release.
+Unsafe ordered boundaries fall back to full-source loading; an asynchronous
+failure waits for a later truncate replay instead of starting duplicate work.
+Finite multi-column prefixes revalidate after membership-changing updates.
+Ready callbacks keep readiness established when a callback throws, and key
+identity remains exact for NaN, binary, reference, function, and symbol values.

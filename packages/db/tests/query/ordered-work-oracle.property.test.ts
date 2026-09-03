@@ -1274,6 +1274,9 @@ describe(`ordered source work oracle`, () => {
         await flushPromises()
         expect(live.toArray.map(({ rank }) => rank)).toEqual([0, 0.5, 1, 1.5])
       }
+      if (!failure || failure.mode === `async`) {
+        expect(publications.slice(publicationCount)).toEqual([[0, 0.5, 1, 1.5]])
+      }
     } finally {
       queueMicrotaskSpy?.mockRestore()
       fullSource.resolve()
