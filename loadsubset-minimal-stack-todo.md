@@ -112,18 +112,18 @@ helper that production uses.
       longer promises subset algebra.
 - [x] List each deliberate mutation and the assertion that kills it: - count an aborted obsolete replay as failed and let any attempt choose
       the final outcome -> `lets the newest successful replay replace an
-      older failed replay` rejects the missing publication; - remove identical page/boundary suppression -> `settles an underfilled
-      source without repeating one continuation forever` exceeds its finite
+    older failed replay` rejects the missing publication; - remove identical page/boundary suppression -> `settles an underfilled
+    source without repeating one continuation forever` exceeds its finite
       request bound; - page a joined source instead of taking the conservative full-source
       path -> `refills a joined result window through a contract-compliant
-      source` rejects the extra limited requests; - unload the same physical acquisition twice -> `releases every
-      successful overlapping replay acquisition` rejects the release count; - flush a truncate replay before its pending demands settle -> `uses the
-      newest complete multi-demand replay` observes a partial empty snapshot; - disable sync-session epoch checks -> the fixed-seed cleanup/restart
+    source` rejects the extra limited requests; - unload the same physical acquisition twice -> `releases every
+    successful overlapping replay acquisition` rejects the release count; - flush a truncate replay before its pending demands settle -> `uses the
+    newest complete multi-demand replay` observes a partial empty snapshot; - disable sync-session epoch checks -> the fixed-seed cleanup/restart
       property observes an old session row in its replacement; - cache an asynchronously completed request after owner abort -> `does
-      not cache work that settles after its owner aborts` rejects the skipped
+    not cache work that settles after its owner aborts` rejects the skipped
       retry; - cache a rejected request -> `retries an exact demand after rejection`
       rejects the skipped retry; - seed an ordered cursor from an unrelated local row -> `does not derive
-      an ordered boundary from another demand's local row` rejects the
+    an ordered boundary from another demand's local row` rejects the
       foreign cursor.
 - [x] Do not add a shared on-demand source fixture: only two current tests need
       the protocol, and their local fixtures remain clearer than a premature
@@ -648,8 +648,11 @@ explicitly removed.
       revalidate after a non-boundary delete because the prior prefix request
       stayed deduped. Collection and Effect loaders now invalidate finite
       prefix work whenever a delete or update can change its membership.
-- [ ] Make every RFC oracle reachable from the package oracle script and add
-      publication-count assertions to generated pagination histories.
+- [x] Make every RFC oracle reachable from the package oracle script. Generated
+      pagination histories now also assert ready/error state, bounded graph
+      work, and exactly one public publication per semantic result change (zero
+      for a no-op). A refill may require a second private graph run but cannot
+      wake consumers twice.
 - [x] Measure source and compressed bundle size against both `origin/main` and
       the large RFC stack. Across all package `src` trees, the old stack was
       +10,545/-1,692 lines (net +8,853) while this tree is +1,912/-1,288

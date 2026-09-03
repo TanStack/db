@@ -673,12 +673,17 @@ async function runPaginationStateScenario(
       .limit(currentWindow.limit)
       .select(({ row }) => ({ id: row.id, rank: row.rank })),
   )
+  const publications: Array<ReadonlyArray<unknown>> = []
+  let publicationSubscription:
+    | ReturnType<typeof live.subscribeChanges>
+    | undefined
+
+  const readCurrentWindow = () =>
+    Array.from(live.values(), ({ id, rank }) => ({ id, rank }))
 
   const expectCurrentWindow = (checkpoint: number) => {
     try {
-      expect(
-        Array.from(live.values(), ({ id, rank }) => ({ id, rank })),
-      ).toEqual(
+      expect(readCurrentWindow()).toEqual(
         referenceWindowRows(
           [...rows.values()],
           scenario.direction,
@@ -693,8 +698,17 @@ async function runPaginationStateScenario(
   try {
     await live.preload()
     expectCurrentWindow(0)
+    expect(live.status).toBe(`ready`)
+    expect(live.utils.lastSubsetError).toBeUndefined()
+    publicationSubscription = live.subscribeChanges(
+      (changes) => publications.push(changes),
+      { includeInitialState: false },
+    )
 
     for (const [index, action] of scenario.actions.entries()) {
+      const beforeRows = readCurrentWindow()
+      const publicationCount = publications.length
+      const runCount = live.utils.getRunCount()
       if (action.type === `window`) {
         currentWindow = { offset: action.offset, limit: action.limit }
         const result = live.utils.setWindow(currentWindow)
@@ -716,8 +730,17 @@ async function runPaginationStateScenario(
         }
       }
       expectCurrentWindow(index + 1)
+      expect(live.status).toBe(`ready`)
+      expect(live.utils.lastSubsetError).toBeUndefined()
+      const outputChanged =
+        JSON.stringify(readCurrentWindow()) !== JSON.stringify(beforeRows)
+      expect(publications.length - publicationCount).toBe(outputChanged ? 1 : 0)
+      // One run applies the action; a second may apply an ordered-window
+      // refill. Neither is allowed to create a second public publication.
+      expect(live.utils.getRunCount() - runCount).toBeLessThanOrEqual(2)
     }
   } finally {
+    publicationSubscription?.unsubscribe()
     await cleanupAll(live, source)
   }
 }
