@@ -11,6 +11,7 @@ import {
 } from '../../scheduler.js'
 import { getActiveTransaction } from '../../transactions.js'
 import { deepEquals } from '../../utils.js'
+import { runAllCallbacks } from '../../utils/callbacks.js'
 import { CollectionSubscriber } from './collection-subscriber.js'
 import { getCollectionBuilder } from './collection-registry.js'
 import { LIVE_QUERY_INTERNAL } from './internal.js'
@@ -315,9 +316,6 @@ export class CollectionConfigBuilder<
         this.maybeRunGraphFn?.()
       })
       if (operation.failed) throw operation.error
-      if (windowOperationGeneration === this.windowOperationGeneration) {
-        this.currentWindow = options
-      }
     } catch (error) {
       // Restore the outer operation before rollback work can register loads.
       loadOperation?.cancel()
@@ -346,8 +344,7 @@ export class CollectionConfigBuilder<
       this.activeWindowOperation = previousOperation
     }
 
-    const ready = loadOperation?.wait() ?? true
-    return ready
+    return loadOperation?.wait() ?? true
   }
 
   getWindow(): { offset: number; limit: number } | undefined {
@@ -410,10 +407,6 @@ export class CollectionConfigBuilder<
     const demand = this.activeDemands.get(planId)
     if (!demand || demand.generation !== generation) return
     const normalized = this.recordSubsetError(error)
-    if (this.activeWindowOperation) {
-      this.activeWindowOperation.failed = true
-      this.activeWindowOperation.error = normalized
-    }
     this.transitionToError(
       `Subset demand '${planId}' failed: ${normalized.message}`,
       normalized,
@@ -1285,19 +1278,7 @@ export class CollectionConfigBuilder<
     // from any source that needs it. Returns true once all loaders have been called,
     // but the actual async loading may still be in progress.
     const loadSubsetDataCallbacks = () => {
-      let failed = false
-      let firstError: unknown
-      for (const loader of loaders) {
-        try {
-          loader()
-        } catch (error) {
-          if (!failed) {
-            failed = true
-            firstError = error
-          }
-        }
-      }
-      if (failed) throw firstError
+      runAllCallbacks(loaders)
       return true
     }
 

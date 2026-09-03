@@ -494,6 +494,10 @@ explicitly removed.
       assertion identifies the departing predicate. It red-tested the queue's
       head-of-line blocking, and the drain now tries every queued release once
       before backing off. All three focused retry/revalidation cases are green.
+- [x] Removed duplicate live-query builder bookkeeping and reused the shared
+      run-all/throw-first callback law for source loaders. Window rollback and
+      nested failure behavior remain unchanged; the focused builder, ordered,
+      error, and window-controller suites are 279/279 green (6 skipped).
 - [x] Mapped the removed pending-derived-mutation matrix to the independent
       collection metadata and state-retention oracles, then verified both
       through the layered-query publication oracle. The old Cartesian matrix
