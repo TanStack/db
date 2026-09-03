@@ -22,6 +22,7 @@ import {
   mockSyncCollectionOptions,
   stripVirtualProps,
 } from '../../db/tests/utils'
+import { evaluateReferenceExpression } from '../../db/tests/reference-expression'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { queryCollectionOptions } from '../src/query'
 import type { QueryFunctionContext } from '@tanstack/query-core'
@@ -6032,24 +6033,27 @@ describe(`QueryCollection`, () => {
     it(`should handle GC correctly when queries are ordered and have a LIMIT`, async () => {
       const baseQueryKey = [`deduplication-gc-test`]
 
-      // Mock queryFn to return different data based on predicates
+      const items = [
+        { id: `1`, name: `Item 1`, category: `A` },
+        { id: `2`, name: `Item 2`, category: `A` },
+        { id: `3`, name: `Item 3`, category: `A` },
+      ]
+      // Honor the complete pushed predicate so an exact tie request does not
+      // masquerade as another full category load.
       const queryFn = vi.fn().mockImplementation((context) => {
         const { meta } = context
         const loadSubsetOptions = meta?.loadSubsetOptions ?? {}
-        const { where, limit } = loadSubsetOptions
+        const { where, offset = 0, limit } = loadSubsetOptions
 
-        // Query 1: all items with category A (no limit)
-        if (isCategory(`A`, where)) {
-          const items = [
-            { id: `1`, name: `Item 1`, category: `A` },
-            { id: `2`, name: `Item 2`, category: `A` },
-            { id: `3`, name: `Item 3`, category: `A` },
-          ]
-          // Slice to limit if provided
-          return Promise.resolve(limit ? items.slice(0, limit) : items)
-        }
-
-        return Promise.resolve([])
+        const matching = where
+          ? items.filter((item) => evaluateReferenceExpression(where, item))
+          : items
+        return Promise.resolve(
+          matching.slice(
+            offset,
+            limit === undefined ? undefined : offset + limit,
+          ),
+        )
       })
 
       const config: QueryCollectionConfig<CategorisedItem> = {
@@ -6119,9 +6123,8 @@ describe(`QueryCollection`, () => {
 
       await flushPromises()
 
-      // queryFn should have been called twice
-      // because we do not dedupe the 2nd query
-      expect(queryFn).toHaveBeenCalledTimes(2)
+      // The ordered demand adds one exact request for its boundary tie.
+      expect(queryFn).toHaveBeenCalledTimes(3)
 
       // Collection should still have all 3 items (deduplication doesn't remove data)
       expect(collection.size).toBe(3)
@@ -7401,7 +7404,11 @@ describe(`QueryCollection`, () => {
       }
     })
 
-    it(`should reload a released subset without retaining a stale refcount`, async () => {
+    it(`should reset refcount after query GC and reload (stale refcount bug)`, async () => {
+      // This test catches Bug 2: stale refcounts after GC/remove
+      // When TanStack Query GCs a query, the refcount should be cleaned up
+      // Otherwise, reloading the same subset will start with a stale count
+
       const baseQueryKey = [`stale-refcount-test`]
       const items: Array<CategorisedItem> = [
         { id: `1`, name: `Item 1`, category: `A` },
@@ -7439,16 +7446,12 @@ describe(`QueryCollection`, () => {
         expect(collection.size).toBe(2)
       })
 
-      // Release the first acquisition before its cache entry is removed.
-      // Cache events do not revoke active collection ownership.
-      await query1.cleanup()
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(0)
-      })
-
-      // Force GC by calling removeQueries (simulates gcTime expiry).
+      // Force GC by calling removeQueries (simulates gcTime expiry)
       queryClient.removeQueries({ queryKey: baseQueryKey })
       await flushPromises()
+
+      // BUG: queryRefCounts still has stale count, wasn't cleaned up by cleanupQuery
+      // When we load again, the refcount will be wrong (starts at 1 instead of 0, or accumulates)
 
       // Reload the same query
       const query2 = createLiveQueryCollection({
@@ -7466,11 +7469,14 @@ describe(`QueryCollection`, () => {
         expect(collection.size).toBe(2)
       })
 
-      // Cleanup should decrement the new acquisition from one to zero.
+      // Cleanup - this should properly decrement from 1 to 0 and clean up
       await query2.cleanup()
       await vi.waitFor(() => {
-        expect(collection.size).toBe(0)
+        expect(collection.size).toBe(0) // Should be cleaned up
       })
+
+      // BUG SYMPTOM: If refcount was stale (e.g. was 2, decremented to 1),
+      // the observer won't be destroyed and data won't be cleaned up
     })
 
     it(`should handle mount/unmount/remount without breaking cache (destroyed observer bug)`, async () => {

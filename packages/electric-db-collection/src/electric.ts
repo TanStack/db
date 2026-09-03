@@ -1573,17 +1573,12 @@ function createElectricSync<T extends Row<unknown>>(
 
       // Abort controller for the stream - wraps the signal if provided
       const abortController = new AbortController()
+      const forwardExternalAbort = () => abortController.abort()
 
       if (shapeOptions.signal) {
-        shapeOptions.signal.addEventListener(
-          `abort`,
-          () => {
-            abortController.abort()
-          },
-          {
-            once: true,
-          },
-        )
+        shapeOptions.signal.addEventListener(`abort`, forwardExternalAbort, {
+          once: true,
+        })
         if (shapeOptions.signal.aborted) {
           abortController.abort()
         }
@@ -2065,6 +2060,10 @@ function createElectricSync<T extends Row<unknown>>(
       return {
         loadSubset: loadSubsetDedupe?.loadSubset,
         cleanup: () => {
+          shapeOptions.signal?.removeEventListener(
+            `abort`,
+            forwardExternalAbort,
+          )
           // Unsubscribe from the stream
           unsubscribeStream()
           // Abort the abort controller to stop the stream
