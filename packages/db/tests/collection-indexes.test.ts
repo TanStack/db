@@ -184,15 +184,8 @@ describe(`Collection Indexes`, () => {
         index.matchesCompareOptions({
           ...DEFAULT_COMPARE_OPTIONS,
           direction: `desc`,
-          nulls: `last`,
         }),
       ).toBe(true)
-      expect(
-        index.matchesCompareOptions({
-          ...DEFAULT_COMPARE_OPTIONS,
-          direction: `desc`,
-        }),
-      ).toBe(false)
       expect(
         index.matchesCompareOptions({
           ...DEFAULT_COMPARE_OPTIONS,

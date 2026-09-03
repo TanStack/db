@@ -140,6 +140,10 @@ contract decision, refuted with evidence, deferred with an issue, or open.
       Query DB ownership-map hook is gone; the live-query run counter and
       Electric hook both predate this stack and serve existing non-oracle
       suites.
+- [x] Verified the audited test reduction against the full DB runtime suite
+      (3,297 passed, 6 skipped) and the persistence package's runtime and type
+      suites (122 passed, no type errors). The first cross-package run caught
+      and fixed an inferred callback return-type mismatch.
 
 ### Deleted-suite audit
 

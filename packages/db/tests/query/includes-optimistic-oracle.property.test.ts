@@ -675,97 +675,103 @@ describe(`optimistic relationship-transition oracle`, () => {
   fcTest.prop(
     [routeValuesArbitrary],
     oraclePropertyOptions(12, `includes-optimistic.sibling-route-rollback`),
-  )(`restores a rekey after a sibling enters its old route`, async (routes) => {
-    await expectHistoryMatches(routes, [
-      {
-        type: `optimisticRollback`,
-        level: 1,
-        id: 11,
-        patch: { group: routes.optimistic },
-        beforeRollback: {
+  )(
+    `restores a rekey after a sibling enters its old route`,
+    async (routes) => {
+      await expectHistoryMatches(routes, [
+        {
+          type: `optimisticRollback`,
           level: 1,
+          id: 11,
+          patch: { group: routes.optimistic },
+          beforeRollback: {
+            level: 1,
+            changes: [
+              {
+                type: `insert`,
+                value: {
+                  id: 12,
+                  parentGroup: routes.rootA,
+                  group: routes.original,
+                  value: 120,
+                  position: 1,
+                },
+              },
+            ],
+          },
+        },
+        {
+          type: `sync`,
+          level: 2,
           changes: [
             {
-              type: `insert`,
+              type: `update`,
               value: {
-                id: 12,
-                parentGroup: routes.rootA,
-                group: routes.original,
-                value: 120,
-                position: 1,
+                id: 21,
+                parentGroup: routes.original,
+                group: routes.original + 1000,
+                value: 211,
+                position: 0,
               },
             },
           ],
         },
-      },
-      {
-        type: `sync`,
-        level: 2,
-        changes: [
-          {
-            type: `update`,
-            value: {
-              id: 21,
-              parentGroup: routes.original,
-              group: routes.original + 1000,
-              value: 211,
-              position: 0,
-            },
-          },
-        ],
-      },
-    ])
-  })
+      ])
+    },
+  )
 
   fcTest.prop(
     [routeValuesArbitrary],
     oraclePropertyOptions(12, `includes-optimistic.repeated-history`),
-  )(`supports repeated rollback and confirmation histories`, async (routes) => {
-    await expectHistoryMatches(routes, [
-      {
-        type: `optimistic`,
-        handle: `first`,
-        level: 1,
-        id: 11,
-        patch: { parentGroup: routes.rootB },
-      },
-      { type: `rollback`, handle: `first` },
-      {
-        type: `optimistic`,
-        handle: `second`,
-        level: 1,
-        id: 11,
-        patch: { parentGroup: routes.rootB },
-      },
-      {
-        type: `confirm`,
-        handle: `second`,
-        authoritative: firstChild(routes, {
-          parentGroup: routes.rootB,
-        }),
-      },
-      {
-        type: `optimisticRollback`,
-        level: 1,
-        id: 11,
-        patch: { group: routes.optimistic },
-      },
-      {
-        type: `sync`,
-        level: 2,
-        changes: [
-          {
-            type: `update`,
-            value: {
-              id: 21,
-              parentGroup: routes.original,
-              group: routes.original + 1000,
-              value: 212,
-              position: 0,
+  )(
+    `supports repeated rollback and confirmation histories`,
+    async (routes) => {
+      await expectHistoryMatches(routes, [
+        {
+          type: `optimistic`,
+          handle: `first`,
+          level: 1,
+          id: 11,
+          patch: { parentGroup: routes.rootB },
+        },
+        { type: `rollback`, handle: `first` },
+        {
+          type: `optimistic`,
+          handle: `second`,
+          level: 1,
+          id: 11,
+          patch: { parentGroup: routes.rootB },
+        },
+        {
+          type: `confirm`,
+          handle: `second`,
+          authoritative: firstChild(routes, {
+            parentGroup: routes.rootB,
+          }),
+        },
+        {
+          type: `optimisticRollback`,
+          level: 1,
+          id: 11,
+          patch: { group: routes.optimistic },
+        },
+        {
+          type: `sync`,
+          level: 2,
+          changes: [
+            {
+              type: `update`,
+              value: {
+                id: 21,
+                parentGroup: routes.original,
+                group: routes.original + 1000,
+                value: 212,
+                position: 0,
+              },
             },
-          },
-        ],
-      },
-    ])
-  })
+          ],
+        },
+      ])
+    },
+  )
 })
