@@ -5,7 +5,7 @@ import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createEffect } from '../../src/query/effect.js'
 import { getLoadSubsetDemandKey } from '../../src/query/ir-stable-identity.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
-import { eq } from '../../src/query/builder/functions.js'
+import { eq, gte } from '../../src/query/builder/functions.js'
 import {
   oracleRandomParameters,
   readOracleRunConfig,
@@ -34,6 +34,7 @@ type Scenario = {
 type RequestObservation = {
   kind: `page` | `boundary`
   key: string | undefined
+  hasCursor: boolean
   limit: number | undefined
   offset: number | undefined
   lastKey: string | number | undefined
@@ -140,6 +141,7 @@ async function observeConsumer(
             requests.push({
               kind: isPage ? `page` : `boundary`,
               key: getLoadSubsetDemandKey(options),
+              hasCursor: options.cursor !== undefined,
               limit: options.limit,
               offset: options.offset,
               lastKey: options.cursor?.lastKey,
@@ -270,6 +272,16 @@ async function observeConsumer(
     for (const publication of publications) {
       expect(publication).toEqual(expected.slice(0, publication.length))
     }
+    const semanticPublications = publications.filter(
+      (publication, index) =>
+        index === 0 ||
+        JSON.stringify(publication) !== JSON.stringify(publications[index - 1]),
+    )
+    for (let index = 1; index < semanticPublications.length; index++) {
+      expect(semanticPublications[index]!.length).toBeGreaterThan(
+        semanticPublications[index - 1]!.length,
+      )
+    }
     expect(publications.at(-1) ?? []).toEqual(rows)
     expect(publications.length).toBeLessThanOrEqual(requests.length + 1)
     expect(requests.length).toBeLessThanOrEqual(truth.length * 3 + 2)
@@ -303,22 +315,100 @@ async function assertConsumerParity(scenario: Scenario): Promise<void> {
   expect(effect.rows).toEqual(collection.rows)
   expect(effect.errors).toEqual(collection.errors)
   expect(effect.live).toBe(collection.live)
-  const effectPages = effect.requests.filter(({ kind }) => kind === `page`)
-  const collectionPages = collection.requests.filter(
-    ({ kind }) => kind === `page`,
+  const semanticRequests = (requests: ReadonlyArray<RequestObservation>) =>
+    requests.map(({ kind, hasCursor, limit, offset }) => ({
+      kind,
+      hasCursor,
+      limit,
+      // Once a cursor is present, the original offset no longer changes the
+      // provider slice. Live collections retain it in the exact demand while
+      // Effects omit it, so compare the adapter-visible operation instead.
+      offset: hasCursor ? 0 : offset,
+    }))
+  expect(semanticRequests(effect.requests)).toEqual(
+    semanticRequests(collection.requests),
   )
-  expect(effectPages.map(({ limit }) => limit)).toEqual(
-    collectionPages.map(({ limit }) => limit),
-  )
-  expect(
-    effect.requests.filter(({ kind }) => kind === `boundary`).length,
-  ).toBeLessThanOrEqual(effectPages.length)
-  expect(
-    collection.requests.filter(({ kind }) => kind === `boundary`).length,
-  ).toBeLessThanOrEqual(collectionPages.length)
 }
 
 describe(`ordered source work oracle`, () => {
+  it(`loads each source of a filtered join once`, async () => {
+    type Order = {
+      id: number
+      scheduledAt: string
+      status: string
+      addressId: number
+    }
+    type Charge = { id: number; addressId: number }
+    let orderLoads = 0
+    let chargeLoads = 0
+    const orders = createCollection<Order>({
+      id: `ordered-filtered-join-orders`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({
+            type: `insert`,
+            value: {
+              id: 1,
+              scheduledAt: `2024-01-15`,
+              status: `queued`,
+              addressId: 1,
+            },
+          })
+          write({
+            type: `insert`,
+            value: {
+              id: 2,
+              scheduledAt: `2024-01-10`,
+              status: `queued`,
+              addressId: 2,
+            },
+          })
+          commit()
+          markReady()
+          return { loadSubset: () => void orderLoads++ }
+        },
+      },
+    })
+    const charges = createCollection<Charge>({
+      id: `ordered-filtered-join-charges`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({ type: `insert`, value: { id: 10, addressId: 1 } })
+          write({ type: `insert`, value: { id: 20, addressId: 2 } })
+          commit()
+          markReady()
+          return { loadSubset: () => void chargeLoads++ }
+        },
+      },
+    })
+    const live = createLiveQueryCollection((q) =>
+      q
+        .from({ order: orders })
+        .where(({ order }) => gte(order.scheduledAt, `2024-01-12`))
+        .where(({ order }) => eq(order.status, `queued`))
+        .innerJoin({ charge: charges }, ({ order, charge }) =>
+          eq(order.addressId, charge.addressId),
+        ),
+    )
+
+    try {
+      await live.preload()
+      expect(
+        [...live.values()].map(({ order, charge }) => [order.id, charge.id]),
+      ).toEqual([[1, 10]])
+      expect(orderLoads).toBe(1)
+      expect(chargeLoads).toBe(1)
+    } finally {
+      await Promise.all([live.cleanup(), orders.cleanup(), charges.cleanup()])
+    }
+  })
+
   it(`does no source work for a zero-sized window`, async () => {
     let loads = 0
     const source = createCollection<Row, number>({
@@ -340,9 +430,12 @@ describe(`ordered source work oracle`, () => {
         },
       },
     })
-    const live = createLiveQueryCollection((q) =>
-      q.from({ row: source }).orderBy(({ row }) => row.rank).limit(0),
-    )
+    const live = createLiveQueryCollection({
+      id: `ordered-atomic-indexed-window-live`,
+      query: (q) =>
+        q.from({ row: source }).orderBy(({ row }) => row.rank).limit(0),
+      startSync: true,
+    })
 
     try {
       await live.preload()
@@ -408,6 +501,70 @@ describe(`ordered source work oracle`, () => {
     } finally {
       await live.cleanup()
       await source.cleanup()
+    }
+  })
+
+  it(`publishes one complete batch after an indexed loader fills a window`, async () => {
+    const remoteRows: ReadonlyArray<Row> = [
+      { id: 1, rank: 1, eligible: true, label: `one` },
+      { id: 2, rank: 2, eligible: true, label: `two` },
+    ]
+    const batches: Array<Array<number>> = []
+    const callbackReads: Array<Array<number>> = []
+    let loads = 0
+    let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
+    const source = createCollection<Row, number>({
+      id: `ordered-atomic-indexed-window`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (operations) => {
+          sync = operations
+          operations.markReady()
+          return {
+            loadSubset: () => {
+              const row = remoteRows[loads++]
+              if (!row) return
+              sync.begin()
+              sync.write({ type: `insert`, value: row })
+              const receipt = sync.commit()
+              if (receipt !== true) {
+                throw new Error(`Expected synchronous source application`)
+              }
+            },
+          }
+        },
+      },
+    })
+    const live = createLiveQueryCollection((q) =>
+      q.from({ row: source }).orderBy(({ row }) => row.rank).limit(0),
+    )
+    const readIds = () => live.toArray.map(({ id }) => id)
+    const subscription = live.subscribeChanges(
+      (changes) => {
+        batches.push(changes.map(({ key }) => Number(key)).sort())
+        callbackReads.push(readIds())
+      },
+      { includeInitialState: false },
+    )
+
+    try {
+      await live.preload()
+      await live.utils.setWindow({ offset: 0, limit: 2 })
+      await flushPromises()
+
+      // Two page turns produce rows; one final tie-boundary request proves
+      // there is no unseen row at rank 2.
+      expect(loads).toBe(3)
+      expect(readIds()).toEqual([1, 2])
+      expect(batches).toEqual([[1, 2]])
+      expect(callbackReads).toEqual([[1, 2]])
+    } finally {
+      subscription.unsubscribe()
+      await Promise.all([live.cleanup(), source.cleanup()])
     }
   })
 

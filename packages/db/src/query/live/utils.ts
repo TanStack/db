@@ -321,6 +321,7 @@ export class OrderedSourceLoader {
 
   start(): void {
     const { index, limit, offset, orderBy, requiresFullSource } = this.info
+    if (index) this.subscription.setOrderByIndex(index)
     if (limit === 0) return
     if (requiresFullSource) {
       this.loadFullSource()
@@ -330,7 +331,6 @@ export class OrderedSourceLoader {
       this.loadPrefix(offset + limit, true)
       return
     }
-    this.subscription.setOrderByIndex(index)
     this.loadPage(offset + limit, true)
   }
 

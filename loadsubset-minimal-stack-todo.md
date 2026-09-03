@@ -73,9 +73,10 @@ after their public laws have a destination.
       identical continuation is scheduled forever. Under the exact-only
       adapter contract, an empty page is a valid settled underfilled result;
       neither consumer may invent broader source exhaustion.
-- [ ] Compare normalized public transaction histories across consumers where
-      the APIs expose the same boundary. Keep per-consumer prefix/atomicity
-      assertions where bootstrap delivery is intentionally different.
+- [x] Compare normalized semantic request histories across consumers. Keep
+      per-consumer prefix and monotonic-publication assertions because live
+      collections may publish progressive bootstrap prefixes while Effects
+      publish the same result in one batch.
 - [ ] Add one shared on-demand source fixture only if a third current test
       needs the same adapter protocol. Do not create a helper merely to hide
       two readable fixtures.
@@ -135,7 +136,10 @@ explicitly removed.
 | The same public demand path yields the same rows and lifecycle state across entry points                   | live collection/Effect parity in `ordered-work-oracle.property.test.ts`                                                                | covered                               |
 | Out-of-order settlements and same-tick cleanup/restart preserve the recomputed result                      | replay settlement-order model and scheduler property; pagination multi-source recomputation                                            | covered                               |
 | Generated histories visibly reach failure, sharing, restart, tied/null, and beyond-end regimes             | explicit reach checks plus pagination's exhaustive fixtures                                                                            | covered                               |
-| No-progress ordered loads stop without false exhaustion, hidden diagnostics, or an identical request loop  | `ordered-work-oracle.property.test.ts`; focused live/Effect no-progress script                                                          | add fixed cross-consumer case         |
+| No-progress ordered loads stop without false exhaustion, hidden diagnostics, or an identical request loop  | `ordered-work-oracle.property.test.ts`; focused live/Effect no-progress script                                                          | covered                               |
+| A filtered join starts one exact demand per source rather than repeating graph work                         | `ordered-work-oracle.property.test.ts` “loads each source of a filtered join once”                                                      | restored and covered                  |
+| A zero-sized indexed query can widen later and publishes only its complete window                            | `ordered-work-oracle.property.test.ts` “publishes one complete batch…”                                                                 | restored; red/green found index setup bug |
+| Reentrant cleanup cannot erase the exact synchronous ordered-load error                                      | `subset-error-matrix.test.ts` “preserves a synchronous ordered error…”                                                                 | restored and covered                  |
 | Ready transitions survive callback failure, stop when superseded, and restart as a fresh cycle             | `collection-lifecycle.test.ts`; `collection-events.test.ts`; `query/scheduler.test.ts`                                                  | restored and covered                  |
 | An already-aborted demand starts no eager, deferred, or adapter work and rejects with `AbortError`         | `collection.test.ts`                                                                                                                    | restored and covered                  |
 
@@ -209,6 +213,13 @@ explicitly removed.
       snapshotted its listeners. Internal fan-out still uses a fixed snapshot
       so one callback cannot starve sibling graph work; `emitEvents` now skips
       only subscriptions explicitly closed during that fan-out.
+- [x] Cross-consumer comparisons now include the complete normalized request
+      trace. Each consumer must publish only monotone prefixes of independent
+      recomputation; batching itself may differ at bootstrap.
+- [x] Restoring the atomic zero-to-n indexed-window regression red-tested a
+      missing index: the ordered loader returned early for `limit(0)` before
+      installing its index. Index setup now precedes that early return, and the
+      loader publishes the two-row result in one public batch.
 - [x] Existing includes, subquery-order, and union tests now model the adapter
       contract and inspect the whole request trace. No useful regression test
       was removed to accommodate the new boundary work.
