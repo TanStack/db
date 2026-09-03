@@ -988,27 +988,18 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.subscribedToAllCollections = false
 
     // Immediately unsubscribe from every source, even if one release fails.
-    let cleanupFailed = false
-    let firstCleanupError: unknown
-    const failedUnsubscribes: Array<() => void> = []
+    let firstCleanupFailure: { error: unknown } | undefined
     for (const unsubscribe of this.unsubscribeCallbacks) {
       try {
         unsubscribe()
+        this.unsubscribeCallbacks.delete(unsubscribe)
       } catch (error) {
-        if (!cleanupFailed) {
-          cleanupFailed = true
-          firstCleanupError = error
-        }
-        failedUnsubscribes.push(unsubscribe)
+        firstCleanupFailure ??= { error }
       }
-    }
-    this.unsubscribeCallbacks.clear()
-    for (const unsubscribe of failedUnsubscribes) {
-      this.unsubscribeCallbacks.add(unsubscribe)
     }
 
     if (!firstAttempt) {
-      if (cleanupFailed) throw firstCleanupError
+      if (firstCleanupFailure) throw firstCleanupFailure.error
       return
     }
 
@@ -1040,7 +1031,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       this.finalCleanup()
     }
 
-    if (cleanupFailed) throw firstCleanupError
+    if (firstCleanupFailure) throw firstCleanupFailure.error
   }
 
   /** Clear graph references — called after graph run completes or immediately from dispose */
