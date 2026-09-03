@@ -56,22 +56,23 @@ const scenarioArbitrary: fc.Arbitrary<Scenario> = fc.record({
   direction: fc.constantFrom(`asc` as const, `desc` as const),
 })
 
-const exhaustiveScenarios: ReadonlyArray<Scenario> = ([0, 1, 2, 3] as const)
-  .flatMap((middleCount) =>
-    [false, true].flatMap((middleEligible) =>
-      [false, true].flatMap((lastEligible) =>
-        [false, true].flatMap((tied) =>
-          ([`asc`, `desc`] as const).map((direction) => ({
-            middleCount,
-            middleEligible,
-            lastEligible,
-            tied,
-            direction,
-          })),
-        ),
+const exhaustiveScenarios: ReadonlyArray<Scenario> = (
+  [0, 1, 2, 3] as const
+).flatMap((middleCount) =>
+  [false, true].flatMap((middleEligible) =>
+    [false, true].flatMap((lastEligible) =>
+      [false, true].flatMap((tied) =>
+        ([`asc`, `desc`] as const).map((direction) => ({
+          middleCount,
+          middleEligible,
+          lastEligible,
+          tied,
+          direction,
+        })),
       ),
     ),
-  )
+  ),
+)
 
 function compareRows(direction: Scenario[`direction`]) {
   return (left: Row, right: Row): number => {
@@ -287,8 +288,7 @@ async function observeConsumer(
     expect(requests.length).toBeLessThanOrEqual(truth.length * 3 + 2)
     expect(
       requests.every(
-        (request) =>
-          request.kind === `boundary` || request.limit !== undefined,
+        (request) => request.kind === `boundary` || request.limit !== undefined,
       ),
     ).toBe(true)
 
@@ -409,42 +409,58 @@ describe(`ordered source work oracle`, () => {
     }
   })
 
-  it(`does no source work for a zero-sized window`, async () => {
-    let loads = 0
-    const source = createCollection<Row, number>({
-      id: `ordered-zero-window`,
-      getKey: (row) => row.id,
-      syncMode: `on-demand`,
-      startSync: true,
-      autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
-      sync: {
-        sync: ({ markReady }) => {
-          markReady()
-          return {
-            loadSubset: () => {
-              loads++
-              return true
-            },
-          }
+  it.each([`collection`, `effect`] as const)(
+    `does no source work for a zero-sized %s window`,
+    async (consumer) => {
+      let loads = 0
+      const source = createCollection<Row, number>({
+        id: `ordered-zero-window`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                loads++
+                return true
+              },
+            }
+          },
         },
-      },
-    })
-    const live = createLiveQueryCollection({
-      id: `ordered-atomic-indexed-window-live`,
-      query: (q) =>
-        q.from({ row: source }).orderBy(({ row }) => row.rank).limit(0),
-      startSync: true,
-    })
+      })
+      const query = (q: Parameters<typeof createLiveQueryCollection>[0]) =>
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank)
+          .limit(0)
+      const live =
+        consumer === `collection`
+          ? createLiveQueryCollection({
+              id: `ordered-zero-window-live`,
+              query,
+              startSync: true,
+            })
+          : undefined
+      const effect =
+        consumer === `effect`
+          ? createEffect({ query, onBatch: () => {} })
+          : undefined
 
-    try {
-      await live.preload()
-      expect(loads).toBe(0)
-    } finally {
-      await live.cleanup()
-      await source.cleanup()
-    }
-  })
+      try {
+        if (live) await live.preload()
+        else await flushPromises()
+        expect(loads).toBe(0)
+      } finally {
+        if (effect) await effect.dispose()
+        if (live) await live.cleanup()
+        await source.cleanup()
+      }
+    },
+  )
 
   it(`does not refetch when a visible row changes outside the ordering key`, async () => {
     let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
@@ -483,7 +499,10 @@ describe(`ordered source work oracle`, () => {
       },
     })
     const live = createLiveQueryCollection((q) =>
-      q.from({ row: source }).orderBy(({ row }) => row.rank).limit(2),
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(2),
     )
 
     try {
@@ -540,7 +559,10 @@ describe(`ordered source work oracle`, () => {
       },
     })
     const live = createLiveQueryCollection((q) =>
-      q.from({ row: source }).orderBy(({ row }) => row.rank).limit(0),
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(0),
     )
     const readIds = () => live.toArray.map(({ id }) => id)
     const subscription = live.subscribeChanges(

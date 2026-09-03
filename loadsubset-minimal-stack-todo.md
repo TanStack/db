@@ -139,26 +139,39 @@ contract decision, refuted with evidence, deferred with an issue, or open.
 Audit each removed stack-only suite by test title, not only by file. A checked
 row means every distinct public law has a named destination and has been run.
 
-- [ ] `load-subset-outcome.test.ts`: retain exact sharing, release retry,
+- [x] `load-subset-outcome.test.ts`: retain exact sharing, release retry,
       mutable-demand snapshots, source scoping, stale settlement, and cleanup
       fencing; reject only applied-outcome and inferred-coverage contracts.
-- [ ] `coverage-registry-oracle.property.test.ts`: retain release retry,
+- [x] `coverage-registry-oracle.property.test.ts`: retain release retry,
       no-reuse-after-release, stale settlement, source scoping, and final-owner
       lifetime; reject registry topology, claims, antichains, and row-coverage
       bookkeeping.
 - [ ] `load-subset-full-flow-oracle.property.test.ts`: map every deterministic
       ordered, join, replay, cleanup, identity, release, and publication bug
       regression to the compact public oracles.
-- [ ] `load-subset-lifecycle-oracle.property.test.ts`: retain durable release,
+- [x] `load-subset-lifecycle-oracle.property.test.ts`: retain durable release,
       retry debt, and stale/provisional settlement laws through adapter traces.
-- [ ] `load-subset-refinement-model.property.test.ts`: retain only laws that
+- [x] `load-subset-refinement-model.property.test.ts`: retain only laws that
       execute production paths: exact sharing, source isolation, stale-event
       fencing, release, and readiness. Remove model-agrees-with-itself cases.
-- [ ] `total-order.test.ts`: retain public-key tie breaking, row/boundary
+- [x] `total-order.test.ts`: retain public-key tie breaking, row/boundary
       comparator agreement, and NaN ordering in semantic pagination tests.
-- [ ] `window-state.test.ts`: retain live-row admission, stale-boundary fencing,
+- [x] `window-state.test.ts`: retain live-row admission, stale-boundary fencing,
       replay recovery, and shrink/regrow behavior through public rows and
       requests. Reject inferred-coverage state transitions.
+- [ ] `includes-collection-oracle.property.test.ts`: retain recovery retry,
+      cleanup during publication, callback-created work, nested-window failure
+      recovery, order-only moves, and root/facade atomicity unless a stronger
+      public test names the same law.
+- [ ] `includes-publication-oracle.test.ts`: retain pending-derived-mutation
+      source publication through the collection state/publication oracles.
+- [ ] `electric.test.ts`: retain adapter-specific applied-commit waiting,
+      cancellation/error priority, two-request cursor settlement, refresh
+      cleanup, progressive snapshot cancellation, and listener lifetime. Core
+      cancellation tests do not replace proof that Electric maps its protocol
+      to those contracts.
+- [ ] Audit every other test file reduced by more than 20% against its prior
+      test-title inventory before accepting the reduction.
 
 ## Behavioral-law preservation map
 
@@ -173,8 +186,10 @@ explicitly removed.
 | Ordered windows equal independent full recomputation for live collections and Effects                         | `pagination-oracle.property.test.ts`; `ordered-work-oracle.property.test.ts`                                                           | covered                                                                               |
 | Multi-source residual filters refill an underfilled ordered window                                            | `ordered-work-oracle.property.test.ts` exhaustive and generated LEFT JOIN cases                                                        | covered                                                                               |
 | Locale, nullable, reverse-index, multi-column, public-key-tie, offset, and beyond-end windows stay correct    | `pagination-oracle.property.test.ts`; focused `order-by.test.ts` cases                                                                 | covered                                                                               |
+| Every locale continuation and reversed-index demand stays bounded by a limit or cursor predicate              | `pagination-oracle.property.test.ts` whole-trace bounded-load assertions                                                               | restored and covered                                                                  |
 | Cursor predicates denote the same nullable mixed-direction tuple order used by pagination                     | `cursor.property.test.ts`; compact semantic `cursor.test.ts`                                                                           | restored; red/green found null-placement bug                                          |
 | A non-ordering visible-row update does not cause new ordered source work                                      | `ordered-work-oracle.property.test.ts`                                                                                                 | covered                                                                               |
+| A zero-sized ordered demand starts no adapter work through either a live collection or an Effect              | Cartesian live collection/Effect cases in `ordered-work-oracle.property.test.ts`                                                       | restored and covered                                                                  |
 | Truncate/replay retains the last complete snapshot and publishes one atomic replacement                       | `collection-subscription-replay-oracle.property.test.ts`; `load-subset-replay-refinement-oracle.test.ts`; includes publication oracles | covered                                                                               |
 | A joined replacement stays private until every recovering source settles                                      | `load-subset-replay-refinement-oracle.test.ts` “waits for every recovering source…”                                                    | restored and covered                                                                  |
 | Stale or released replay settlements cannot overwrite the current generation                                  | replay model, fixed stale/newest cases, restart histories, and same-tick scheduler property                                            | covered                                                                               |
@@ -190,6 +205,7 @@ explicitly removed.
 | Independent source histories commute                                                                          | `d2-source-reconciliation-oracle.property.test.ts`                                                                                     | covered                                                                               |
 | Predicate subtraction behavior outside loadSubset                                                             | existing `predicate-utils.test.ts` unit matrix                                                                                         | retained; generated algebra oracle removed after exposing unrelated pre-existing gaps |
 | Binary, Date, Temporal, opaque-reference, and invalid-value identity match evaluator semantics                | comparison, cursor, and `ir-stable-identity.test.ts`                                                                                   | covered; focused suite 323/323 green (6 skipped)                                      |
+| Temporal and opaque sortable range operands cross the public subscription boundary unchanged                  | Cartesian adapter-boundary cases in `collection-subscription.test.ts`                                                                 | restored and covered                                                                  |
 | PowerSync publishes only active demand, fences startup/cleanup, settles current tracking, and retries release | compact public trigger/request/release tests in PowerSync on-demand and load-hook suites                                               | restored; red/green; adapter suite 105/105 green                                      |
 | Persistence keeps replacement ownership and preserves reject/abort semantics                                  | persistence adapter suite                                                                                                              | retained; run adapter suite                                                           |
 | Query DB keeps exact owners, idles after eager cache GC, restarts on remount, and clears retained metadata    | Query DB ownership lifecycle suite plus public cache/metadata cleanup tests                                                            | restored; red/green; adapter suite 336/337 green (1 skipped)                          |
@@ -349,6 +365,11 @@ explicitly removed.
       comparisons as null ordering; it now returns SQL unknown for nullish
       comparisons. The four focused DB suites are 144/144 green, and the
       Electric and PowerSync compiler suites are 88/88 and 30/30 green.
+- [x] Restored bounded-work regressions without pinning request counts. The
+      reversed-index case checks the whole adapter trace, the zero-window law
+      covers both consumer entry points, and Temporal plus opaque sortable
+      operands are observed at the adapter boundary. The three focused files
+      are 145/145 green with no type errors.
 
 ## Remaining execution
 

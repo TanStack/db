@@ -3000,19 +3000,43 @@ describe(`pagination recomputation oracle`, () => {
     },
   )
 
-  it(`keeps ascending public-key ties when reusing a descending index`, async () => {
+  it(`uses an ascending index for a bounded descending demand`, async () => {
     const rows: Array<PageRow> = [
       { id: 3, rank: 1 },
       { id: 1, rank: 0 },
       { id: 2, rank: 0 },
     ]
-    const source = createCollection(
-      mockSyncCollectionOptions({
-        id: `pagination-reversed-index-ties-${collectionSequence++}`,
-        initialData: rows,
-        getKey: (row: PageRow) => row.id,
-      }),
-    )
+    const loads: Array<LoadSubsetOptions> = []
+    const loaded = new Set<number>()
+    let begin!: () => void
+    let write!: (message: { type: `insert`; value: PageRow }) => void
+    let commit!: () => void
+    const source = createCollection<PageRow>({
+      id: `pagination-reversed-index-ties-${collectionSequence++}`,
+      getKey: (row: PageRow) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: (operations) => {
+          begin = operations.begin
+          write = operations.write
+          commit = operations.commit
+          operations.markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              begin()
+              for (const row of rowsForLoadSubset(rows, options)) {
+                if (loaded.has(row.id)) continue
+                loaded.add(row.id)
+                write({ type: `insert`, value: row })
+              }
+              commit()
+            },
+          }
+        },
+      },
+    })
     source.createIndex((row) => row.rank, {
       indexType: BTreeIndex,
       options: {
@@ -3033,6 +3057,21 @@ describe(`pagination recomputation oracle`, () => {
     try {
       await live.preload()
       expect(Array.from(live.values(), ({ id }) => id)).toEqual([3, 1])
+      expect(loads.length).toBeGreaterThan(0)
+      expect(
+        loads.every(
+          ({ limit, where }) => limit !== undefined || where !== undefined,
+        ),
+        JSON.stringify(
+          loads.map(({ limit, offset, cursor, orderBy, where }) => ({
+            limit,
+            offset,
+            cursor: cursor !== undefined,
+            orderBy: orderBy !== undefined,
+            where: where !== undefined,
+          })),
+        ),
+      ).toBe(true)
     } finally {
       await cleanupAll(live, source)
     }
