@@ -729,9 +729,19 @@ explicitly removed.
       contract-valid source returns one row per request. The audit also found
       and removed redundant prefix loads after a full-source fallback.
 - [x] Close the ordered-settlement audit gaps. A failed page/boundary chain now
-      rolls private D2 output back to the last settled window without a public
-      batch. A superseding window waits for any older refinement that still
-      gates publication, even when the new window needs no new source rows.
+      keeps its advanced source and D2 state private while the last complete
+      public snapshot remains visible; a later retry publishes one coherent
+      replacement instead of recomputing an old window over contaminated
+      source state. Failed offset moves emit no false leave/re-enter batch,
+      cleanup resets the settled window to the new sync session, and caller
+      mutation cannot rewrite stored window options. A superseding window
+      waits for any older refinement that still gates publication, even when
+      the new window needs no new source rows. Sequential page and boundary
+      requests settle their predecessor as soon as the next participant is
+      registered, bounding retained promise state instead of keeping every
+      ancestor alive. The audit also corrected the architecture: ordinary
+      source mutations that arrive during a window rebuild join its private
+      state and publish with the completed replacement.
 - [x] Measure source and compressed bundle size against both `origin/main` and
       the large RFC stack. Across all package `src` trees, the old stack was
       +10,545/-1,692 lines (net +8,853) while this tree is +2,006/-1,302

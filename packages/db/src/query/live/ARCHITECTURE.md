@@ -498,12 +498,18 @@ tie-boundary request, and forward refill needed to reach its fixed point. Its
 preload or window promise cannot settle before that chain, and a failure in any
 required step belongs to the same operation. Rows may enter the private D2
 result while the chain runs, but the public Collection publishes the completed
-window once. If refinement fails, the operation rejects and restores the last
-settled window without publishing its incomplete private result. A superseding
-window also waits for older source work that still gates publication; it does
-not report success until its own chosen window is visible. A later ordinary
-source mutation remains synchronous to its source transaction; any ordered
-refill it starts may publish as a later transaction.
+window once. If refinement fails, the operation rejects and leaves the last
+settled public snapshot visible. The private source and D2 state may already
+have advanced, so core does not try to reconstruct the old window over that
+new state. A later successful retry publishes the coherent replacement. A
+superseding window also waits for older source work that still gates
+publication; it does not report success until its own chosen window is visible.
+Ordinary source mutations stay synchronous except while an initial ordered
+load or imperative window move owns this publication barrier. Mutations that
+arrive during that interval join the private state and publish with the
+completed replacement; a failed move keeps them private until retry or
+restart. The loader tracks each sequential request as a bounded participant,
+not every recursive suffix of a long refinement chain.
 
 A truncate replay is one publication barrier. Every acquisition started while
 that replay is active, including ordered full-source recovery, belongs to the

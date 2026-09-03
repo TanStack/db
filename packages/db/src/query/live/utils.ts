@@ -419,16 +419,17 @@ export class OrderedSourceLoader {
   ): Promise<void> {
     const generation = this.generation
     let tracked: Promise<void>
-    const complete = (): Promise<unknown> | undefined => {
+    const complete = (): void => {
       if (this.pending === tracked) this.pending = undefined
       if (!this.active || generation !== this.generation) return
       this.failed = false
       if (refine) {
-        return this.loadBoundary()
+        this.loadBoundary()
+        return
       }
       // A boundary request may add tied rows without filling the query's
       // window. Resume forward loading once it settles.
-      return this.loadMore()
+      this.loadMore()
     }
     const request = result instanceof Promise ? result : Promise.resolve()
     tracked = request
@@ -445,9 +446,9 @@ export class OrderedSourceLoader {
         throw error
       })
     this.pending = tracked
-    // Track the whole ordered refinement chain, not merely the adapter call
-    // that began it. This keeps readiness and imperative window settlement
-    // pending until any required tie boundary and forward refill also settle.
+    // Register each request separately. The operation tracker observes the
+    // next request before this promise settles, so the logical chain remains
+    // pending without retaining every ancestor promise until the final page.
     this.onResult(tracked)
     void tracked.catch(() => {})
     return tracked

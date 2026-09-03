@@ -302,54 +302,30 @@ export class CollectionConfigBuilder<
       throw new SetWindowRequiresOrderByError()
     }
 
-    const syncSession = this.syncSession
-    const previousWindowOperationGeneration = this.windowOperationGeneration
+    // Keep caller-owned objects out of the long-lived query state. A caller may
+    // reuse and mutate its options object after this operation settles.
+    const requestedWindow: WindowOptions = {
+      offset: options.offset,
+      limit: options.limit,
+    }
     const windowOperationGeneration = ++this.windowOperationGeneration
     const loadOperation =
       this.liveQueryCollection?._sync.beginLoadSubsetOperation()
-    const previousWindow = this.settledWindow
     const previousOperation = this.activeWindowOperation
     const operation: { failed: boolean; error?: unknown } = { failed: false }
-    const rollback = () => {
-      loadOperation?.cancel()
-      if (
-        previousWindow &&
-        syncSession === this.syncSession &&
-        this.currentSyncConfig !== undefined &&
-        windowOperationGeneration === this.windowOperationGeneration
-      ) {
-        const activeOperation = this.activeWindowOperation
-        this.activeWindowOperation = previousOperation
-        try {
-          this.currentWindow = previousWindow
-          withPublicationContext(() => {
-            windowFn(previousWindow)
-            this.maybeRunGraphFn?.()
-          })
-          if (windowOperationGeneration === this.windowOperationGeneration) {
-            this.windowOperationGeneration = previousWindowOperationGeneration
-          }
-        } catch {
-          // Recovery is best-effort; preserve the error from the requested
-          // window rather than replacing it with a rollback failure.
-        } finally {
-          this.activeWindowOperation = activeOperation
-        }
-      }
-    }
     this.activeWindowOperation = operation
     try {
       // The window and all source work it causes form one synchronous
       // publication. This makes operation tracking see requests scheduled by
       // the graph rather than declaring the window settled too early.
-      this.currentWindow = options
+      this.currentWindow = requestedWindow
       withPublicationContext(() => {
-        windowFn(options)
+        windowFn(requestedWindow)
         this.maybeRunGraphFn?.()
       })
       if (operation.failed) throw operation.error
     } catch (error) {
-      rollback()
+      loadOperation?.cancel()
       throw error
     } finally {
       this.activeWindowOperation = previousOperation
@@ -357,17 +333,16 @@ export class CollectionConfigBuilder<
 
     const settlement = loadOperation?.wait() ?? true
     if (settlement === true) {
-      this.settledWindow = options
+      this.settledWindow = requestedWindow
       return true
     }
     return settlement.then(
       () => {
         if (windowOperationGeneration === this.windowOperationGeneration) {
-          this.settledWindow = options
+          this.settledWindow = requestedWindow
         }
       },
       (error) => {
-        rollback()
         throw error
       },
     )
@@ -375,7 +350,7 @@ export class CollectionConfigBuilder<
 
   getWindow(): { offset: number; limit: number } | undefined {
     // Only return window if this is a windowed query (has orderBy and windowFn)
-    const window = this.currentWindow ?? this.initialWindow
+    const window = this.settledWindow ?? this.initialWindow
     if (!this.windowFn || !window) {
       return undefined
     }
@@ -445,6 +420,9 @@ export class CollectionConfigBuilder<
     if (this.activeWindowOperation) {
       this.activeWindowOperation.failed = true
       this.activeWindowOperation.error = normalized
+      // A synchronous adapter failure can arrive before it returns a promise
+      // for the ordered-load tracker. Keep any private graph changes hidden.
+      this.orderedLoadFailed = true
     }
     if (fatalBeforeReady) {
       this.transitionToError(
@@ -464,12 +442,13 @@ export class CollectionConfigBuilder<
   }
 
   trackOrderedLoadPromise(promise: Promise<unknown>): void {
-    // Hold a public snapshot only for an initial load or an imperative window
-    // move. Incremental source changes must remain synchronous to their source
-    // transaction; their follow-up refill may publish separately.
+    // Hold the last complete public snapshot during an initial load or an
+    // imperative window move. Source changes that arrive during the move join
+    // its private graph state and publish with the completed replacement.
     if (
       !this.activeWindowOperation &&
-      this.liveQueryCollection?.status !== `loading`
+      this.liveQueryCollection?.status !== `loading` &&
+      this.pendingOrderedLoads.size === 0
     ) {
       return
     }
@@ -488,7 +467,6 @@ export class CollectionConfigBuilder<
         // Flush the retained result without invoking the source loaders again.
         this.scheduleGraphRun()
       }
-      if (this.pendingOrderedLoads.size === 0) this.orderedLoadFailed = false
     }
     void promise.then(
       () => finish(true),
@@ -832,6 +810,8 @@ export class CollectionConfigBuilder<
       this.currentSyncState = undefined
       this.maybeRunGraphFn = undefined
       this.currentWindow = undefined
+      this.settledWindow = this.initialWindow
+      this.windowOperationGeneration = 0
       this.isInErrorState = false
       this.fatalQueryError = false
       this.erroredSourceIds.clear()
@@ -1031,6 +1011,7 @@ export class CollectionConfigBuilder<
       }
 
       if (
+        this.orderedLoadFailed ||
         this.hasPendingSourceRecovery() ||
         this.pendingOrderedLoads.size > 0
       ) {
@@ -1062,7 +1043,6 @@ export class CollectionConfigBuilder<
             return [key, resolved]
           }),
         )
-
         // New facades are not reachable until their root row is installed, so
         // make them ready first. A facade failure then leaves the root intact,
         // and the root commit is the final state change before publication.
@@ -1096,7 +1076,6 @@ export class CollectionConfigBuilder<
       }
       if (publicationError !== undefined) throw publicationError
     }
-
     graph.finalize()
 
     // Extend the sync state with the graph, inputs, and pipeline

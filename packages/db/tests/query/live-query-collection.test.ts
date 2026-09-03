@@ -1846,6 +1846,222 @@ describe(`createLiveQueryCollection`, () => {
       }
     })
 
+    it(`keeps the restarted session's settled window after a failed move`, async () => {
+      type Row = { id: number; rank: number }
+      const failure = new Error(`restarted ordered page failed`)
+      let failPage = false
+      const source = createCollection<Row>({
+        id: `ordered-window-restart-source`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: 1, rank: 1 } })
+            write({ type: `insert`, value: { id: 2, rank: 2 } })
+            commit()
+            markReady()
+            return {
+              loadSubset: (options) => {
+                if (failPage && !options.where) throw failure
+                return true
+              },
+            }
+          },
+        },
+      })
+      const live = createLiveQueryCollection((q) =>
+        q.from({ row: source }).orderBy(({ row }) => row.rank).limit(1),
+      )
+
+      try {
+        await live.preload()
+        await live.utils.setWindow({ offset: 0, limit: 2 })
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2])
+
+        await live.cleanup()
+        await live.preload()
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
+
+        failPage = true
+        await expect(
+          Promise.resolve().then(() =>
+            live.utils.setWindow({ offset: 0, limit: 3 }),
+          ),
+        ).rejects.toBe(failure)
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
+      } finally {
+        await Promise.all([live.cleanup(), source.cleanup()])
+      }
+    })
+
+    it(`does not publish a row that leaves and re-enters during a failed window move`, async () => {
+      type Row = { id: number; rank: number }
+      const failure = new Error(`offset page failed`)
+      let failPage = false
+      const source = createCollection<Row>({
+        id: `ordered-window-offset-rollback-source`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: 1, rank: 1 } })
+            write({ type: `insert`, value: { id: 2, rank: 2 } })
+            commit()
+            markReady()
+            return {
+              loadSubset: (options) => {
+                if (failPage && !options.where) throw failure
+                return true
+              },
+            }
+          },
+        },
+      })
+      const live = createLiveQueryCollection((q) =>
+        q.from({ row: source }).orderBy(({ row }) => row.rank).limit(2),
+      )
+
+      try {
+        await live.preload()
+        const publications: Array<Array<{ type: string; key: unknown }>> = []
+        const subscription = live.subscribeChanges((changes) => {
+          publications.push(
+            changes.map(({ type, key }) => ({ type, key })),
+          )
+        })
+
+        failPage = true
+        await expect(
+          Promise.resolve().then(() =>
+            live.utils.setWindow({ offset: 1, limit: 2 }),
+          ),
+        ).rejects.toBe(failure)
+        await flushPromises()
+
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2])
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
+        expect(publications).toEqual([])
+        subscription.unsubscribe()
+      } finally {
+        await Promise.all([live.cleanup(), source.cleanup()])
+      }
+    })
+
+    it(`keeps partial ordered source work private when later refinement rejects`, async () => {
+      type Row = { id: number; rank: number }
+      const failure = new Error(`ordered boundary failed`)
+      let loadCount = 0
+      const source = createCollection<Row>({
+        id: `ordered-window-partial-source`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options) => {
+                loadCount++
+                if (loadCount === 1) {
+                  begin()
+                  write({ type: `insert`, value: { id: 1, rank: 1 } })
+                  commit(options.signal)
+                  return true
+                }
+                if (loadCount === 2) return true
+                if (loadCount === 3) {
+                  begin()
+                  // This valid row from the wider page would also replace the
+                  // row in the previously settled top-one window.
+                  write({ type: `insert`, value: { id: 0, rank: 0 } })
+                  commit(options.signal)
+                  return Promise.resolve()
+                }
+                if (loadCount === 4) return Promise.reject(failure)
+                return true
+              },
+            }
+          },
+        },
+      })
+      const live = createLiveQueryCollection((q) =>
+        q.from({ row: source }).orderBy(({ row }) => row.rank).limit(1),
+      )
+
+      try {
+        await live.preload()
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
+        const publications: Array<Array<{ type: string; key: unknown }>> = []
+        const subscription = live.subscribeChanges((changes) => {
+          publications.push(
+            changes.map(({ type, key }) => ({ type, key })),
+          )
+        })
+
+        await expect(
+          live.utils.setWindow({ offset: 0, limit: 2 }),
+        ).rejects.toBe(failure)
+        await flushPromises()
+
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
+        expect(publications).toEqual([])
+
+        await live.utils.setWindow({ offset: 0, limit: 2 })
+        await flushPromises()
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual([0, 1])
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
+        expect(publications).toHaveLength(1)
+        subscription.unsubscribe()
+      } finally {
+        await Promise.all([live.cleanup(), source.cleanup()])
+      }
+    })
+
+    it(`copies a settled window instead of retaining caller-owned options`, async () => {
+      type Row = { id: number; rank: number }
+      const source = createCollection<Row>({
+        id: `ordered-window-options-copy-source`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: 1, rank: 1 } })
+            write({ type: `insert`, value: { id: 2, rank: 2 } })
+            commit()
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+      })
+      const live = createLiveQueryCollection((q) =>
+        q.from({ row: source }).orderBy(({ row }) => row.rank).limit(1),
+      )
+
+      try {
+        await live.preload()
+        const requestedWindow = { offset: 0, limit: 2 }
+        await live.utils.setWindow(requestedWindow)
+        requestedWindow.limit = 1
+
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2])
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
+      } finally {
+        await Promise.all([live.cleanup(), source.cleanup()])
+      }
+    })
+
     it(`concurrent live queries should each track loading state independently`, async () => {
       // This tests the fix for the !wasLoadingBefore bug:
       // When multiple live queries subscribe to the same source collection,
