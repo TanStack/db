@@ -248,6 +248,10 @@ describe(`loadSubset replay refinement`, () => {
       harness.visibleRows().sort((left, right) =>
         left.rowKey.localeCompare(right.rowKey),
       )
+    const sortedCore = () =>
+      harness.coreRows().sort((left, right) =>
+        left.rowKey.localeCompare(right.rowKey),
+      )
 
     try {
       await harness.downstream.preload()
@@ -277,6 +281,7 @@ describe(`loadSubset replay refinement`, () => {
       ])
       await flushPromises()
 
+      expect(sortedCore()).toEqual([observed(`a`, 3), observed(`e`, 1)])
       expect(sortedVisible()).toEqual([
         observed(`a`, 1),
         observed(`b`, 1),
@@ -299,17 +304,20 @@ describe(`loadSubset replay refinement`, () => {
         observed(`e`, 2),
       ])
       expect(harness.batches).toHaveLength(publishedBatches + 1)
-      expect(
-        harness.batches.at(-1)?.map(({ type, row }) => [
-          type,
-          row.rowKey,
-          row.version,
-        ]),
-      ).toEqual([
-        [`update`, `a`, 4],
-        [`delete`, `c`, 1],
-        [`insert`, `e`, 2],
+      expect(harness.batches.at(-1)).toEqual([
+        {
+          type: `update`,
+          row: observed(`a`, 4),
+          previousVersion: 1,
+        },
+        { type: `delete`, row: observed(`c`, 1) },
+        { type: `insert`, row: observed(`e`, 2) },
       ])
+      expect(
+        harness.callbackReads
+          .at(-1)
+          ?.sort((left, right) => left.rowKey.localeCompare(right.rowKey)),
+      ).toEqual([observed(`a`, 4), observed(`b`, 1), observed(`e`, 2)])
     } finally {
       for (const replay of harness.pending) replay.deferred.resolve()
       harness.subscription.unsubscribe()

@@ -1220,7 +1220,7 @@ describe(`ordered source work oracle`, () => {
       const receipt = sync.commit()
       if (receipt !== true) await receipt
       await vi.waitFor(() => expect(fullSourceRequests).toBe(1))
-      await flushPromises(4)
+      for (let index = 0; index < 4; index++) await flushPromises()
 
       expect(live.toArray.map(({ rank }) => rank)).toEqual([1, 2, 3, 4])
       expect(publications).toHaveLength(publicationCount)
