@@ -51,6 +51,8 @@ const staticOracleProperties = [
   `load-subset.concurrent-dedupe`,
   `load-subset.coverage`,
   `load-subset.distinct-window-predicate`,
+  `load-subset.exact-completion`,
+  `load-subset.exact-inflight`,
   `load-subset.ordered-window`,
   `load-subset.rejected-waiter`,
   `ordered-work.forward-exhaustion`,

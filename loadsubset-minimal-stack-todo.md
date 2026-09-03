@@ -68,6 +68,52 @@ contract decision, refuted with evidence, deferred with an issue, or open.
 - [ ] Map every public law from deleted full-flow/lifecycle/model files.
 - [ ] Confirm no production-only oracle counters or test hooks remain.
 
+## Behavioral-law preservation map
+
+This map is the merge gate for the deleted topology-bound suites. A row is not
+complete until its destination proves public behavior or the old contract is
+explicitly removed.
+
+| Still-valid law from the large stack                                                                       | Public destination                                                                                                                     | State                                 |
+| ---------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| Exact demand identity includes predicate, order, cursor, offset, and limit but excludes owners             | `ir-stable-identity.test.ts`; `subset-dedupe.test.ts`                                                                                  | covered                               |
+| Exact unabortable peers share work; abortable owners do not; reject/reset/restart permit retry             | `subset-dedupe.test.ts`; `collection-subscription-replay-oracle.property.test.ts`                                                      | covered                               |
+| Ordered windows equal independent full recomputation for live collections and Effects                      | `pagination-oracle.property.test.ts`; `ordered-work-oracle.property.test.ts`                                                           | covered                               |
+| Multi-source residual filters refill an underfilled ordered window                                         | `ordered-work-oracle.property.test.ts` exhaustive and generated LEFT JOIN cases                                                        | covered                               |
+| Locale, nullable, reverse-index, multi-column, public-key-tie, offset, and beyond-end windows stay correct | `pagination-oracle.property.test.ts`; focused `order-by.test.ts` cases                                                                 | covered                               |
+| A non-ordering visible-row update does not cause new ordered source work                                   | `ordered-work-oracle.property.test.ts`                                                                                                 | covered                               |
+| Truncate/replay retains the last complete snapshot and publishes one atomic replacement                    | `collection-subscription-replay-oracle.property.test.ts`; `load-subset-replay-refinement-oracle.test.ts`; includes publication oracles | covered                               |
+| Stale or released replay settlements cannot overwrite the current generation                               | `collection-subscription-replay-oracle.property.test.ts` fixed cases and restart histories                                             | covered; add explicit metamorphic law |
+| Optimistic rows remain above a private replay and converge after settlement                                | `collection-subscription-replay-oracle.property.test.ts`; collection metadata/state oracles                                            | covered                               |
+| Cleanup fences pending replay and ordered continuation work                                                | collection replay oracle; D2 source reconciliation oracle; focused subscription/Effect tests                                           | covered; audit exact old variants     |
+| Load errors preserve the exact error, do not hang readiness, and allow a later retry                       | `subset-error-matrix.test.ts`; source-readiness and replay-refinement suites                                                           | covered                               |
+| Abort before apply cancels; abort after publication begins cannot undo committed rows                      | `load-subset-transaction-refinement-oracle.test.ts`                                                                                    | covered                               |
+| Source truth survives D2 graph teardown/restart and exact prior rows drive retractions                     | `d2-source-reconciliation-oracle.property.test.ts`                                                                                     | covered                               |
+| Independent source histories commute                                                                       | `d2-source-reconciliation-oracle.property.test.ts`                                                                                     | covered                               |
+| Predicate subtraction behavior outside loadSubset                                                          | existing `predicate-utils.test.ts` unit matrix                                                                                         | retained; generated algebra oracle removed after exposing unrelated pre-existing gaps |
+| Binary, Date, Temporal, opaque-reference, and invalid-value identity match evaluator semantics             | comparison, cursor, and `ir-stable-identity.test.ts`                                                                                   | covered; run focused suite            |
+| PowerSync tracks the latest demand revision and isolates load/release failures                             | PowerSync on-demand and load-hook suites                                                                                               | retained; run adapter suite           |
+| Persistence keeps replacement ownership and preserves reject/abort semantics                               | persistence adapter suite                                                                                                              | retained; run adapter suite           |
+| Query DB releases idle ownership without recreating work                                                   | Query DB ownership lifecycle suite                                                                                                     | retained; run adapter suite           |
+| The same public demand path yields the same rows and lifecycle state across entry points                   | new demand-path equivalence law                                                                                                        | open                                  |
+| Out-of-order multi-source settlements and same-tick cleanup/restart preserve the recomputed result         | extend ordered/replay scheduler properties                                                                                             | open                                  |
+| Generated histories visibly reach failure, sharing, restart, tied/null, and beyond-end regimes             | `fc.statistics`/coverage assertions in compact oracles                                                                                 | open                                  |
+
+### Deliberately removed contracts
+
+- Requested options do not prove broader coverage or source exhaustion. Tests
+  for `CoverageRegistry`, subset-union/subtraction reuse, `hasMore`, applied row
+  evidence, and inferred source extent describe the rejected design.
+- `WindowState` and `TotalOrder` are not public abstractions in the minimal
+  design. Their public row-order, boundary, truncate-generation, and refill laws
+  live in the pagination, ordered-work, cursor, and replay suites above.
+- Exact request deduplication does not promise split/merge equivalence across
+  different demands. Those demands may each load and must still produce the
+  same final public rows.
+- The generated predicate-subtraction oracle existed to justify algebraic
+  request refinement. That path is gone. Its fixed unit tests remain; its
+  broader failures are not a prerequisite for this RFC.
+
 ## Current red/green results
 
 - [x] Listener and scheduler failures attempt all callbacks and preserve the
