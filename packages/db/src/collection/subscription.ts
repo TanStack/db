@@ -155,6 +155,7 @@ export class CollectionSubscription
   // One replay session owns the publication baseline, overlapping attempts,
   // and buffered changes until every attempt settles.
   private truncateReplaySession: TruncateReplaySession | undefined
+  private unsubscribed = false
 
   public get status(): SubscriptionStatus {
     return this._status
@@ -702,6 +703,7 @@ export class CollectionSubscription
   }
 
   emitEvents(changes: Array<ChangeMessage<any, any>>): boolean {
+    if (this.unsubscribed) return false
     const newChanges = this.filterAndFlipChanges(changes)
 
     // Reconciliation can reduce a source delta to no visible change. Do not
@@ -1199,6 +1201,7 @@ export class CollectionSubscription
   }
 
   unsubscribe() {
+    this.unsubscribed = true
     let firstCleanupError: unknown
 
     // Clean up truncate event listener

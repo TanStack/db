@@ -205,6 +205,10 @@ explicitly removed.
       snapshot. Active optimistic work still survives the same rebuild. The
       focused truncate, retained-state, and reentrant-publication suites are
       82/82 green.
+- [x] Public unsubscription is terminal even when a publication has already
+      snapshotted its listeners. Internal fan-out still uses a fixed snapshot
+      so one callback cannot starve sibling graph work; `emitEvents` now skips
+      only subscriptions explicitly closed during that fan-out.
 - [x] Existing includes, subquery-order, and union tests now model the adapter
       contract and inspect the whole request trace. No useful regression test
       was removed to accommodate the new boundary work.

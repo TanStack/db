@@ -263,7 +263,7 @@ describe(`Collection publication scheduler context`, () => {
 })
 
 describe(`live query scheduler`, () => {
-  it(`delivers an ordinary source batch to its frozen listener snapshot`, async () => {
+  it(`does not deliver a source batch after a snapshotted listener unsubscribes`, async () => {
     let begin!: () => void
     let write!: (message: { type: `insert`; value: User }) => void
     let commit!: () => void
@@ -297,12 +297,12 @@ describe(`live query scheduler`, () => {
       begin()
       write({ type: `insert`, value: { id: 1, name: `Ada` } })
       commit()
-      expect(calls).toEqual([`first`, `second`])
+      expect(calls).toEqual([`first`])
 
       begin()
       write({ type: `insert`, value: { id: 2, name: `Grace` } })
       commit()
-      expect(calls).toEqual([`first`, `second`, `first`, `added`])
+      expect(calls).toEqual([`first`, `first`, `added`])
     } finally {
       first.unsubscribe()
       second.unsubscribe()
@@ -396,7 +396,6 @@ describe(`live query scheduler`, () => {
         `layout:first`,
         `layout:second`,
         `public:first`,
-        `public:second`,
         `graph`,
       ])
       expect(graphJob).toHaveBeenCalledOnce()
@@ -413,7 +412,6 @@ describe(`live query scheduler`, () => {
         `layout:first`,
         `layout:second`,
         `public:first`,
-        `public:second`,
         `graph`,
         `layout:first`,
         `layout:added`,
