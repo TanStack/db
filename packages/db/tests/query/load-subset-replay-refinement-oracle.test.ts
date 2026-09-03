@@ -104,7 +104,6 @@ describe(`loadSubset replay refinement`, () => {
       begin()
       write({
         type: `update`,
-        key: `row`,
         value: { id: `row`, version },
         previousValue: { id: `row`, version: previousVersion },
       })
