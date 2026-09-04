@@ -1040,12 +1040,17 @@ export class CollectionSubscription
     if (options.signal?.aborted && !reportAborted) return normalized
 
     this._lastError = normalized
-    this.emitInner(`loadSubset:error`, {
-      type: `loadSubset:error`,
-      subscription: this,
-      options,
-      error: normalized,
-    })
+    this.primaryFailureDeliveryDepth++
+    try {
+      this.emitInner(`loadSubset:error`, {
+        type: `loadSubset:error`,
+        subscription: this,
+        options,
+        error: normalized,
+      })
+    } finally {
+      this.primaryFailureDeliveryDepth--
+    }
     return normalized
   }
 
@@ -1230,7 +1235,7 @@ export class CollectionSubscription
     if (demand) {
       this.releaseDemand(demand, primaryFailure)
     } else if (primaryFailure) {
-      this.recordPrimaryLoadSubsetError(options, primaryFailure.error)
+      this.recordLoadSubsetError(options, primaryFailure.error, true)
     }
   }
 
@@ -1245,28 +1250,12 @@ export class CollectionSubscription
     }
 
     try {
-      this.recordPrimaryLoadSubsetError(
-        demand.options,
-        primaryFailure.error,
-      )
+      this.recordLoadSubsetError(demand.options, primaryFailure.error, true)
     } finally {
       // The failed request remains the public error. A release failure is
       // retained as cleanup debt and may be reported if that later retry fails.
       const index = this.subsetDemands.indexOf(demand)
       if (index !== -1) this.releaseDemandAt(index, false)
-    }
-  }
-
-  /** Keep nested cleanup errors from replacing the failure being delivered. */
-  private recordPrimaryLoadSubsetError(
-    options: LoadSubsetOptions,
-    error: unknown,
-  ): void {
-    this.primaryFailureDeliveryDepth++
-    try {
-      this.recordLoadSubsetError(options, error, true)
-    } finally {
-      this.primaryFailureDeliveryDepth--
     }
   }
 

@@ -735,6 +735,99 @@ describe(`CollectionSubscription status tracking`, () => {
     await collection.cleanup()
   })
 
+  it.each([`sync`, `async`, `replay`] as const)(
+    `preserves a %s adapter error across reentrant teardown failure`,
+    async (failureMode) => {
+      const primaryFailure = new Error(`${failureMode} load failed`)
+      const cleanupFailure = new Error(`teardown failed`)
+      const victimWhere = new Func(`eq`, [
+        new PropRef([`id`]),
+        new Value(`victim`),
+      ])
+      const failedWhere = new Func(`eq`, [
+        new PropRef([`id`]),
+        new Value(`failed`),
+      ])
+      const loads: Array<LoadSubsetOptions> = []
+      const reported: Array<unknown> = []
+      let truncateSource = () => {}
+      let cleanupAttempts = 0
+      let caughtCleanup: unknown
+      let deliveringPrimary = false
+      const collection = createCollection<{ id: string }>({
+        id: `primary-${failureMode}-reentrant-teardown`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ begin, commit, markReady, truncate }) => {
+            truncateSource = () => {
+              begin()
+              truncate()
+              commit()
+            }
+            markReady()
+            return {
+              loadSubset: (options) => {
+                loads.push(options)
+                const shouldFail =
+                  failureMode === `replay`
+                    ? loads.length === 4
+                    : loads.length === 2
+                if (!shouldFail) return true
+                if (failureMode === `sync`) throw primaryFailure
+                return Promise.reject(primaryFailure)
+              },
+              unloadSubset: () => {
+                if (deliveringPrimary && cleanupAttempts++ === 0) {
+                  throw cleanupFailure
+                }
+              },
+            }
+          },
+        },
+      })
+      const subscription = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      subscription.on(`loadSubset:error`, ({ error }) => {
+        reported.push(error)
+        if (error !== primaryFailure) return
+        deliveringPrimary = true
+        try {
+          subscription.releaseSnapshot(victimWhere)
+        } catch (cleanupError) {
+          caughtCleanup = cleanupError
+        } finally {
+          deliveringPrimary = false
+        }
+      })
+
+      try {
+        subscription.requestSnapshot({ where: victimWhere })
+        if (failureMode === `replay`) {
+          subscription.requestSnapshot({ where: failedWhere })
+          truncateSource()
+        } else {
+          const request = () =>
+            subscription.requestSnapshot({ where: failedWhere })
+          if (failureMode === `sync`) {
+            expect(request).toThrow(primaryFailure)
+          } else {
+            request()
+          }
+        }
+        await flushPromises()
+
+        expect(caughtCleanup).toBe(cleanupFailure)
+        expect(reported).toEqual([primaryFailure])
+        expect(subscription.lastError).toBe(primaryFailure)
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
   it(`does not replay a logically retired demand after its unload fails`, async () => {
     const loads: Array<LoadSubsetOptions> = []
     const unloads: Array<LoadSubsetOptions> = []

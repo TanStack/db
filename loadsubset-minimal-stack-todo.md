@@ -576,6 +576,13 @@ explicitly removed.
       pinned top-one, offset, and wider tie cases failed first. They now reuse
       the existing full-source recovery path; the pagination suite is 127/127
       green and its 10x transition campaign also passes.
+- [x] Preserve each real adapter failure while its public error callback
+      performs reentrant cleanup. A loss audit found that the first guard only
+      covered observer-release failures. The Cartesian regression failed for
+      synchronous load throws, asynchronous load rejections, and truncate
+      replay rejections; all error delivery now shares one scoped cleanup
+      barrier, so cleanup debt cannot emit a second error or replace
+      `lastError`.
 
 ## Remaining execution
 
@@ -1184,6 +1191,11 @@ explicitly removed.
   - [x] Do not register a subscription that unsubscribed reentrantly during
         automatic `includeInitialState` loading. The production witness checks
         exact acquisition release, live-set membership, and subscriber count.
+  - [x] Apply the primary-error delivery barrier to actual synchronous,
+        asynchronous, and truncate-replay adapter failures, not only failures
+        reported through an observer's release callback. Reentrant teardown
+        may still throw to its direct caller and retain cleanup debt, but it
+        cannot publish a second error or replace the active primary failure.
 - [ ] Close the replay-release follow-up audit:
   - [x] A synchronous delete callback that reacquires demand must not emit
         `ready` before its replacement row becomes public.
