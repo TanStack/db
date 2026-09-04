@@ -970,6 +970,14 @@ explicitly removed.
         one event with its own options.
   - [x] Cross shared rejection identity with releasing one of two distinct
         replay demands before the common promise rejects.
+  - [x] Reject replay completion with `AbortError` when releasing every demand
+        instead of letting participant removal resolve it first.
+  - [x] Cover `none | first | second | both` release sets for ordinary and
+        replay shared promises, and assert intended `where` provenance rather
+        than only matching the adapter's captured option objects.
+  - [x] Leave physical abort sharing to adapters that coalesce transports. Core
+        owns one signal per logical adapter call and cannot retroactively turn
+        two calls into one ref-counted transport lease.
 - [x] Prevent reentrant specific-status listeners from delivering a stale
       status event to later listeners. A loss audit found that status-label
       equality still admitted ABA reentry and that generic and Collection
@@ -979,6 +987,10 @@ explicitly removed.
 - [ ] Close the ordered-pagination oracle gaps found after its runtime fix.
   - [x] Pin the zero-window defect against a true on-demand source and assert
         that its first request has no cursor.
+  - [ ] After that first request rejects or is canceled, retry from offset zero
+        without a cursor; a started request is not established remote coverage.
+  - [ ] Cross the zero-window/local-row case with a nonzero target offset and
+        assert the exact finite-prefix request count and shape.
   - [x] Record every on-demand publication callback so an equal duplicate
         cannot hide behind snapshot deduplication. The oracle now checks each
         exact delta and post-callback row set, including the one empty readiness

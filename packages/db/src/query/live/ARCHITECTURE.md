@@ -639,8 +639,9 @@ private for both direct subscribers and query graphs. Ordinary source deltas or
 snapshot requests do not reopen that gate because they cannot prove the source
 complete; only a later successful truncate replay provides the authoritative
 replacement. If the last logical demand retires, the now-unreachable source
-replay stops gating the shared graph; unrelated parent or sibling changes may
-then publish. A genuine replay failure is normalized once by the subscription.
+replay rejects its completion with `AbortError` and stops gating the shared
+graph; unrelated parent or sibling changes may then publish. A genuine replay
+failure is normalized once by the subscription.
 The `loadSubset:error` event, `lastSubsetError`, and any window move waiting on
 that replay expose the same `Error` object.
 

@@ -546,7 +546,12 @@ export class CollectionSubscription
         session.attempts.delete(attempt)
       }
     }
-    this.checkTruncateReplayComplete(session)
+    // The final demand must retire the replay as aborted after its private
+    // rows are pruned. Completing it here would resolve an empty attempt as a
+    // successful replacement before releaseDemandAt can retire the session.
+    if (this.subsetDemands.length > 0) {
+      this.checkTruncateReplayComplete(session)
+    }
   }
 
   /** Publish only after every overlapping replay attempt has settled. */
@@ -593,15 +598,7 @@ export class CollectionSubscription
 
     if (this.options.truncateReplayPublication) {
       this.stalePublishedRows.clear()
-      this.sentKeys = new Set(this.publishedRows.keys())
-      if (this.orderByIndex) {
-        this.limitedSnapshotRowCount = this.sentKeys.size
-        const orderedSentKeys = this.orderByIndex.takeFromStart(
-          this.sentKeys.size,
-          (key) => this.sentKeys.has(key),
-        )
-        this.lastSentKey = orderedSentKeys.at(-1)
-      }
+      this.restorePublishedSnapshotTracking()
       this.truncateReplacementPending = false
       session.completion.resolve()
       this.options.truncateReplayPublication.succeed()
@@ -638,16 +635,20 @@ export class CollectionSubscription
     } finally {
       // Buffering records every source key before active-demand filtering.
       // Restore tracking even when a subscriber rejects the replacement.
-      this.sentKeys = new Set(this.publishedRows.keys())
-      if (this.orderByIndex) {
-        this.limitedSnapshotRowCount = this.sentKeys.size
-        const orderedSentKeys = this.orderByIndex.takeFromStart(
-          this.sentKeys.size,
-          (key) => this.sentKeys.has(key),
-        )
-        this.lastSentKey = orderedSentKeys.at(-1)
-      }
+      this.restorePublishedSnapshotTracking()
     }
+  }
+
+  private restorePublishedSnapshotTracking(): void {
+    this.sentKeys = new Set(this.publishedRows.keys())
+    if (!this.orderByIndex) return
+
+    this.limitedSnapshotRowCount = this.sentKeys.size
+    const orderedSentKeys = this.orderByIndex.takeFromStart(
+      this.sentKeys.size,
+      (key) => this.sentKeys.has(key),
+    )
+    this.lastSentKey = orderedSentKeys.at(-1)
   }
 
   /** Fold private replay changes into bounded state, not an event history. */
@@ -1231,6 +1232,7 @@ export class CollectionSubscription
     this.truncateReplaySession = undefined
     this.truncateReplacementPending = false
     this.stalePublishedRows.clear()
+    this.restorePublishedSnapshotTracking()
     this.options.truncateReplayPublication?.succeed()
   }
 
@@ -1259,6 +1261,10 @@ export class CollectionSubscription
     for (const { key } of deletes) {
       session.publicationState.publishedRows.delete(key)
       session.publicationState.sentKeys.delete(key)
+      // A fully loaded snapshot normally stops per-change sent-key tracking.
+      // Release still retires these keys, so a later demand must be able to
+      // publish them again from the retained source state.
+      this.sentKeys.delete(key)
     }
     this.filteredCallback(deletes)
   }
