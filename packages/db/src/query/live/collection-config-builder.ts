@@ -130,7 +130,7 @@ export class CollectionConfigBuilder<
   private currentWindow: WindowOptions | undefined
   private settledWindow: WindowOptions | undefined
   private activeWindowOperation:
-    | { failed: boolean; error?: unknown }
+    | { generation: number; failed: boolean; error?: unknown }
     | undefined
 
   private maybeRunGraphFn: (() => void) | undefined
@@ -326,7 +326,11 @@ export class CollectionConfigBuilder<
     const loadOperation =
       this.liveQueryCollection?._sync.beginLoadSubsetOperation()
     const previousOperation = this.activeWindowOperation
-    const operation: { failed: boolean; error?: unknown } = { failed: false }
+    const operation: {
+      generation: number
+      failed: boolean
+      error?: unknown
+    } = { generation: windowOperationGeneration, failed: false }
     this.activeWindowOperation = operation
     if (this.pendingOrderedLoads.size === 0) this.orderedLoadFailed = false
     try {
@@ -464,6 +468,10 @@ export class CollectionConfigBuilder<
 
   hasActiveWindowOperation(): boolean {
     return this.activeWindowOperation !== undefined
+  }
+
+  getActiveWindowOperationGeneration(): number | undefined {
+    return this.activeWindowOperation?.generation
   }
 
   scheduleGraphRunForSession(syncSession: number): void {

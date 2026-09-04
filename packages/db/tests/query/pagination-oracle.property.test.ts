@@ -2497,6 +2497,83 @@ describe(`pagination recomputation oracle`, () => {
     },
   )
 
+  it(`does not retry reentrantly when an ordered request writes and then throws`, async () => {
+    const authoritativeRows: Array<PageRow> = [
+      { id: 1, rank: 0 },
+      { id: 2, rank: 1 },
+      { id: 3, rank: 2 },
+    ]
+    const requests: Array<LoadSubsetOptions> = []
+    const deliveredIds = new Set<number>()
+    const failure = new Error(`ordered request threw after writing`)
+    let throwNextPage = false
+    let begin!: () => void
+    let write!: (message: { type: `insert`; value: PageRow }) => void
+    let commit!: () => void
+    const source = createCollection<PageRow>({
+      id: `pagination-synchronous-partial-page-${collectionSequence++}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (operations) => {
+          begin = operations.begin
+          write = operations.write
+          commit = operations.commit
+          operations.markReady()
+          return {
+            loadSubset: (options: LoadSubsetOptions) => {
+              requests.push(options)
+              if (throwNextPage) {
+                throwNextPage = false
+                begin()
+                deliveredIds.add(3)
+                write({ type: `insert`, value: { ...authoritativeRows[2]! } })
+                commit()
+                throw failure
+              }
+
+              begin()
+              for (const row of rowsForLoadSubset(authoritativeRows, options)) {
+                if (deliveredIds.has(row.id)) continue
+                deliveredIds.add(row.id)
+                write({ type: `insert`, value: { ...row } })
+              }
+              commit()
+              return true
+            },
+          }
+        },
+      },
+    })
+    const live = createLiveQueryCollection((query) =>
+      query
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank, `asc`)
+        .limit(1),
+    )
+
+    try {
+      await live.preload()
+      const initialRequestCount = requests.length
+      throwNextPage = true
+
+      expect(() => live.utils.setWindow({ offset: 0, limit: 2 })).toThrow(
+        failure,
+      )
+      expect(requests).toHaveLength(initialRequestCount + 1)
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
+
+      const retry = live.utils.setWindow({ offset: 0, limit: 2 })
+      if (retry instanceof Promise) await retry
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2])
+    } finally {
+      await cleanupAll(live, source)
+    }
+  })
+
   it(`tracks an asynchronous prefix refresh after synchronous satisfaction`, async () => {
     const rows: Array<PageRow> = [
       { id: 1, rank: 1 },

@@ -271,9 +271,11 @@ export class OrderedSourceLoader {
   private hasEstablishedSourceCoverage = false
   private recoveringPrefix = false
   private establishedPrefixCount = 0
+  private requesting = false
   private fullSource = false
   private fullSourceFailed = false
   private failed = false
+  private failedWindowOperationGeneration: number | undefined
   private active = true
   private generation = 0
   private lastPage: { count: number; boundary: unknown } | undefined
@@ -310,27 +312,34 @@ export class OrderedSourceLoader {
     this.loadPage(offset + limit, true)
   }
 
-  loadMore(retryFailedFullSource = false): Promise<unknown> | undefined {
-    if (!this.active || this.info.limit === 0) return
-    const replaceFailedFullSource =
-      this.fullSourceFailed && retryFailedFullSource
-    if (this.fullSourceFailed && retryFailedFullSource) {
+  loadMore(windowOperationGeneration?: number): Promise<unknown> | undefined {
+    if (!this.active || this.info.limit === 0 || this.requesting) return
+    const mayRetryFailure =
+      !this.failed ||
+      (windowOperationGeneration !== undefined &&
+        windowOperationGeneration !== this.failedWindowOperationGeneration)
+    if (!mayRetryFailure) return this.pending
+    const replaceFailedFullSource = this.fullSourceFailed
+    if (this.fullSourceFailed) {
       this.fullSource = false
       this.fullSourceFailed = false
     }
     if (this.fullSource) return this.pending
-    if (this.fullSourceFailed && !retryFailedFullSource) return this.pending
     if (this.info.requiresFullSource) {
-      this.loadFullSource(replaceFailedFullSource)
+      this.loadFullSource(replaceFailedFullSource, windowOperationGeneration)
       return this.pending
     }
     if (!this.info.index || this.info.orderBy.length !== 1) {
-      this.loadPrefix(this.info.offset + this.info.limit, true)
+      this.loadPrefix(
+        this.info.offset + this.info.limit,
+        true,
+        windowOperationGeneration,
+      )
       return this.pending
     }
     const requiredPrefix = this.info.offset + this.info.limit
     if (this.recoveringPrefix && this.establishedPrefixCount < requiredPrefix) {
-      this.loadPage(requiredPrefix, true, true)
+      this.loadPage(requiredPrefix, true, true, windowOperationGeneration)
       return this.pending
     }
     if (!this.info.dataNeeded) return this.pending
@@ -341,46 +350,79 @@ export class OrderedSourceLoader {
         : 0,
     )
     if (this.pending) return this.pending
-    if (count > 0) this.loadPage(count, true)
+    if (count > 0) {
+      this.loadPage(count, true, false, windowOperationGeneration)
+    }
     return this.pending
   }
 
-  loadFullSource(replaceExistingDemand = false): void {
+  loadFullSource(
+    replaceExistingDemand = false,
+    windowOperationGeneration?: number,
+  ): void {
     if (!this.active || this.fullSource) return
     this.fullSourceFailed = false
     this.fullSource = true
     try {
-      this.subscription.requestSnapshot({
-        trackLoadSubsetPromise: false,
-        replaceExistingDemand,
-        onLoadSubsetResult: (result) => {
-          this.observe(result, false, true, true)
-        },
+      this.runRequest(() => {
+        this.subscription.requestSnapshot({
+          trackLoadSubsetPromise: false,
+          replaceExistingDemand,
+          onLoadSubsetResult: (result) => {
+            this.observe(
+              result,
+              false,
+              true,
+              true,
+              undefined,
+              windowOperationGeneration,
+            )
+          },
+        })
       })
     } catch (error) {
       this.invalidateSourceCoverage()
       this.fullSource = false
       this.fullSourceFailed = true
+      this.failed = true
+      this.failedWindowOperationGeneration = windowOperationGeneration
       throw error
     }
   }
 
-  private loadPrefix(count: number, refine: boolean): void {
+  private loadPrefix(
+    count: number,
+    refine: boolean,
+    windowOperationGeneration?: number,
+  ): void {
     if (!this.active || this.pending) return
     if (this.lastPrefixCount === count) {
-      if ((this.info.dataNeeded?.() ?? 0) > 0) this.loadFullSource()
+      if ((this.info.dataNeeded?.() ?? 0) > 0) {
+        this.loadFullSource(false, windowOperationGeneration)
+      }
       return
     }
     try {
-      this.subscription.requestSnapshot({
-        orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
-        limit: count,
-        trackLoadSubsetPromise: false,
-        onLoadSubsetResult: (result) =>
-          this.observe(result, refine, false, true, count),
+      this.runRequest(() => {
+        this.subscription.requestSnapshot({
+          orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
+          limit: count,
+          trackLoadSubsetPromise: false,
+          onLoadSubsetResult: (result) =>
+            this.observe(
+              result,
+              refine,
+              false,
+              true,
+              count,
+              windowOperationGeneration,
+            ),
+        })
       })
     } catch (error) {
       this.invalidateSourceCoverage()
+      this.failed = true
+      this.failedWindowOperationGeneration = windowOperationGeneration
       throw error
     }
     this.lastPrefixCount = count
@@ -413,6 +455,7 @@ export class OrderedSourceLoader {
     count: number,
     refine: boolean,
     forceSourcePrefix = false,
+    windowOperationGeneration?: number,
   ): void {
     if (!this.active || this.pending) return
     // Rows observed before the first provider request do not prove ordered
@@ -427,7 +470,11 @@ export class OrderedSourceLoader {
         biggest as Record<string, unknown>,
       )
       if (!canExpressCursorOrder(this.info.orderBy, [value])) {
-        this.loadPrefix(this.info.offset + this.info.limit, true)
+        this.loadPrefix(
+          this.info.offset + this.info.limit,
+          true,
+          windowOperationGeneration,
+        )
         return
       }
       minValues = [value]
@@ -441,26 +488,30 @@ export class OrderedSourceLoader {
     }
     this.lastPage = { count, boundary }
     try {
-      this.subscription.requestLimitedSnapshot({
-        orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
-        limit: count,
-        minValues,
-        // Local rows seen before the first provider request prove neither a
-        // cursor nor a remote offset. Start the first acquisition at zero.
-        offset: startsFromSourcePrefix ? 0 : undefined,
-        trackLoadSubsetPromise: false,
-        onLoadSubsetResult: (result) =>
-          this.observe(
-            result,
-            refine,
-            false,
-            true,
-            startsFromSourcePrefix ? count : undefined,
-          ),
+      this.runRequest(() => {
+        this.subscription.requestLimitedSnapshot({
+          orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
+          limit: count,
+          minValues,
+          // Local rows seen before the first provider request prove neither a
+          // cursor nor a remote offset. Start the first acquisition at zero.
+          offset: startsFromSourcePrefix ? 0 : undefined,
+          trackLoadSubsetPromise: false,
+          onLoadSubsetResult: (result) =>
+            this.observe(
+              result,
+              refine,
+              false,
+              true,
+              startsFromSourcePrefix ? count : undefined,
+              windowOperationGeneration,
+            ),
+        })
       })
     } catch (error) {
       this.invalidateSourceCoverage()
       this.failed = true
+      this.failedWindowOperationGeneration = windowOperationGeneration
       this.lastPage = undefined
       throw error
     }
@@ -472,12 +523,14 @@ export class OrderedSourceLoader {
     isFullSource = false,
     establishesSourceCoverage = false,
     establishedPrefixCount?: number,
+    windowOperationGeneration?: number,
   ): Promise<void> {
     const generation = this.generation
     const complete = (): void => {
       if (this.pending === tracked) this.pending = undefined
       if (!this.active || generation !== this.generation) return
       this.failed = false
+      this.failedWindowOperationGeneration = undefined
       if (establishesSourceCoverage) {
         this.hasEstablishedSourceCoverage = true
       }
@@ -493,7 +546,7 @@ export class OrderedSourceLoader {
         this.establishedPrefixCount = Number.POSITIVE_INFINITY
       }
       if (refine) {
-        this.loadBoundary()
+        this.loadBoundary(windowOperationGeneration)
         return
       }
       // A boundary request may add tied rows without filling the query's
@@ -518,6 +571,7 @@ export class OrderedSourceLoader {
           this.fullSourceFailed = true
         }
         this.failed = true
+        this.failedWindowOperationGeneration = windowOperationGeneration
         this.lastPage = undefined
         this.lastPrefixCount = undefined
         this.hasLastBoundary = false
@@ -533,7 +587,9 @@ export class OrderedSourceLoader {
     return tracked
   }
 
-  private loadBoundary(): Promise<unknown> | undefined {
+  private loadBoundary(
+    windowOperationGeneration?: number,
+  ): Promise<unknown> | undefined {
     const biggest = this.getBiggest()
     if (biggest === undefined) return
     const value = this.info.valueExtractorForRawRow(
@@ -541,25 +597,34 @@ export class OrderedSourceLoader {
     )
     const orderBy = normalizeOrderByPaths(this.info.orderBy, this.alias)
     if (!canExpressCursorOrder(orderBy.slice(0, 1), [value])) {
-      this.loadFullSource()
+      this.loadFullSource(false, windowOperationGeneration)
       return this.pending
     }
     if (this.hasLastBoundary && Object.is(this.lastBoundary, value)) return
     const where = buildCursorCurrent(orderBy, [value])
     if (!where) {
-      this.loadFullSource()
+      this.loadFullSource(false, windowOperationGeneration)
       return this.pending
     }
     this.hasLastBoundary = true
     this.lastBoundary = value
     let tracked: Promise<void> | undefined
     try {
-      this.subscription.requestSnapshot({
-        where,
-        trackLoadSubsetPromise: false,
-        onLoadSubsetResult: (result) => {
-          tracked = this.observe(result, false)
-        },
+      this.runRequest(() => {
+        this.subscription.requestSnapshot({
+          where,
+          trackLoadSubsetPromise: false,
+          onLoadSubsetResult: (result) => {
+            tracked = this.observe(
+              result,
+              false,
+              false,
+              false,
+              undefined,
+              windowOperationGeneration,
+            )
+          },
+        })
       })
     } catch (error) {
       this.invalidateSourceCoverage()
@@ -574,5 +639,14 @@ export class OrderedSourceLoader {
     this.hasEstablishedSourceCoverage = false
     this.recoveringPrefix = true
     this.establishedPrefixCount = 0
+  }
+
+  private runRequest(request: () => void): void {
+    this.requesting = true
+    try {
+      request()
+    } finally {
+      this.requesting = false
+    }
   }
 }

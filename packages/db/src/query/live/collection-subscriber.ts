@@ -415,7 +415,7 @@ export class CollectionSubscriber<
 
     try {
       const pending = this.orderedLoader?.loadMore(
-        this.collectionConfigBuilder.hasActiveWindowOperation(),
+        this.collectionConfigBuilder.getActiveWindowOperationGeneration(),
       )
       if (pending) {
         this.collectionConfigBuilder.trackSubsetLoadOperationPromise(pending)

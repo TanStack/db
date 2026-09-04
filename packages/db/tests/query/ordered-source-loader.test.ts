@@ -12,6 +12,34 @@ function createDeferred() {
   return { promise, resolve }
 }
 
+function createOrderByInfo(
+  overrides: Partial<OrderByOptimizationInfo> = {},
+): OrderByOptimizationInfo {
+  return {
+    sourceId: `source`,
+    alias: `row`,
+    orderBy: [
+      {
+        expression: new PropRef([`row`, `rank`]),
+        compareOptions: {
+          direction: `asc`,
+          nulls: `first`,
+          stringSort: `lexical`,
+        },
+      },
+    ],
+    offset: 0,
+    limit: 1,
+    comparator: (left, right) =>
+      (left?.rank as number) - (right?.rank as number),
+    valueExtractorForRawRow: (row) => row.rank,
+    index: {} as NonNullable<OrderByOptimizationInfo[`index`]>,
+    dataNeeded: () => 1,
+    requiresFullSource: false,
+    ...overrides,
+  }
+}
+
 describe(`OrderedSourceLoader`, () => {
   it(`retains only bounded promise state during a long refinement chain`, async () => {
     let biggest: { rank: number } | undefined
@@ -29,28 +57,7 @@ describe(`OrderedSourceLoader`, () => {
       requestLimitedSnapshot: request,
       requestSnapshot: request,
     } as unknown as CollectionSubscription
-    const info: OrderByOptimizationInfo = {
-      sourceId: `source`,
-      alias: `row`,
-      orderBy: [
-        {
-          expression: new PropRef([`row`, `rank`]),
-          compareOptions: {
-            direction: `asc`,
-            nulls: `first`,
-            stringSort: `lexical`,
-          },
-        },
-      ],
-      offset: 0,
-      limit: 1,
-      comparator: (left, right) =>
-        (left?.rank as number) - (right?.rank as number),
-      valueExtractorForRawRow: (row) => row.rank,
-      index: {} as NonNullable<OrderByOptimizationInfo[`index`]>,
-      dataNeeded: () => 1,
-      requiresFullSource: false,
-    }
+    const info = createOrderByInfo()
     const loader = new OrderedSourceLoader(
       info,
       subscription,
@@ -86,6 +93,94 @@ describe(`OrderedSourceLoader`, () => {
     expect(
       tracked.filter(({ settled }) => !settled).length,
     ).toBeLessThanOrEqual(2)
+    loader.dispose()
+  })
+
+  it.each([
+    {
+      name: `page`,
+      info: createOrderByInfo(),
+      expectedMethod: `limited`,
+    },
+    {
+      name: `prefix`,
+      info: createOrderByInfo({ index: undefined }),
+      expectedMethod: `snapshot`,
+    },
+    {
+      name: `full source`,
+      info: createOrderByInfo({ requiresFullSource: true }),
+      expectedMethod: `snapshot`,
+    },
+  ])(
+    `blocks reentrant $name retries until a later operation`,
+    ({ info, expectedMethod }) => {
+      const failure = new Error(`${expectedMethod} request failed`)
+      const methods: Array<string> = []
+      let fail = true
+      const request = (method: string) => {
+        methods.push(method)
+        if (!fail) return
+        fail = false
+        loader.loadMore()
+        throw failure
+      }
+      const subscription = {
+        setOrderByIndex: () => {},
+        requestLimitedSnapshot: () => request(`limited`),
+        requestSnapshot: () => request(`snapshot`),
+      } as unknown as CollectionSubscription
+      const loader = new OrderedSourceLoader(
+        info,
+        subscription,
+        `row`,
+        () => undefined,
+      )
+
+      expect(() => loader.start()).toThrow(failure)
+      expect(methods).toEqual([expectedMethod])
+      expect(loader.loadMore()).toBeUndefined()
+      expect(methods).toEqual([expectedMethod])
+
+      loader.loadMore(1)
+      expect(methods).toEqual([expectedMethod, expectedMethod])
+      loader.dispose()
+    },
+  )
+
+  it(`blocks a reentrant boundary retry until a later operation`, async () => {
+    const failure = new Error(`boundary request failed`)
+    const methods: Array<string> = []
+    const subscription = {
+      setOrderByIndex: () => {},
+      requestLimitedSnapshot: (options: {
+        onLoadSubsetResult?: (result: true) => void
+      }) => {
+        methods.push(`limited`)
+        options.onLoadSubsetResult?.(true)
+      },
+      requestSnapshot: () => {
+        methods.push(`snapshot`)
+        loader.loadMore()
+        throw failure
+      },
+    } as unknown as CollectionSubscription
+    const loader = new OrderedSourceLoader(
+      createOrderByInfo(),
+      subscription,
+      `row`,
+      () => ({ rank: 1 }),
+    )
+
+    loader.start()
+    const initial = loader.pendingPromise
+    await expect(initial).rejects.toBe(failure)
+    expect(methods).toEqual([`limited`, `snapshot`])
+    expect(loader.loadMore()).toBeUndefined()
+    expect(methods).toEqual([`limited`, `snapshot`])
+
+    loader.loadMore(1)
+    expect(methods).toEqual([`limited`, `snapshot`, `limited`])
     loader.dispose()
   })
 })

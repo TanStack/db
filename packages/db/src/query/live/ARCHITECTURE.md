@@ -588,6 +588,12 @@ successful authoritative replay clears its source-recovery gate, but it does
 not clear an unrelated failed window operation. A later explicit window move
 revalidates that physical window before publishing it.
 
+An ordered request cannot start another ordered request through its own
+synchronous writes. If the adapter then throws, graph callbacks scheduled by
+those writes still belong to the failed window operation and cannot retry it.
+A later explicit window operation has a new generation and may retry from the
+safe source boundary.
+
 An initial ordered load or imperative window move includes every page,
 tie-boundary request, and forward refill needed to reach its fixed point. Its
 preload or window promise cannot settle before that chain, and a failure in any

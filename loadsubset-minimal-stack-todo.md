@@ -1032,9 +1032,11 @@ explicitly removed.
         ahead of missing authoritative rows. Recovery now records the exact
         successful prefix length and reloads every later widening from offset
         zero until a full-source acquisition succeeds.
-  - [ ] Cross partial writes with synchronous throws across page, prefix,
-        full-source, and boundary requests. No failed `setWindow()` may start
-        eager recovery before an explicit retry.
+- [x] Cross partial writes with synchronous throws across page, prefix,
+      full-source, and boundary requests. No failed `setWindow()` may start
+      eager recovery before an explicit retry. An integration witness covers
+      a page write followed by a throw; focused loader cells cover all four
+      request routes and prove only a later operation generation may retry.
   - [ ] Retire the failed physical ordered acquisition when its explicit retry
         replaces it. A later truncate must replay only current demand, and
         cleanup must release each live lease once.
@@ -1053,6 +1055,15 @@ explicitly removed.
         replacement must choose the lowest public key after an update.
 - [ ] Prevent a reentrant truncate started during synchronous replacement
       publication from letting the superseded attempt emit transient `ready`.
+- [ ] Close the subscription-teardown follow-up audit:
+  - [ ] Prevent a stale outer cleanup-debt snapshot from unloading an
+        acquisition again after a nested `unsubscribe()` already released it.
+        Cross multiple debts, repeated teardown, and reentrant cleanup.
+  - [ ] Give EventEmitter registrations their own identity. Removing and
+        re-adding the same pending callback during an emission must defer the
+        new registration until the next emission.
+  - [ ] Do not register a subscription that unsubscribed reentrantly during
+        automatic `includeInitialState` loading.
 - [x] Close the replay-release follow-up audit:
   - [x] A synchronous delete callback that reacquires demand must not emit
         `ready` before its replacement row becomes public.
