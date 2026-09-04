@@ -1235,6 +1235,23 @@ explicitly removed.
 - [ ] Reconcile the joined-recovery readiness wording with the public
       multi-source barrier: a single source can become ready before the joined
       replacement is public.
+
+### Lifecycle completion dashboard
+
+This is the bounded protocol census. Do not add another production patch until
+every row is either green or has a named red witness.
+
+| Protocol slice                                       | Executable coverage                                                                                 | Current result                                 |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| Logical demand start/release and synchronous reentry | 20 start cells, 10 failure-delivery cells, 8 release cells                                          | green                                          |
+| Sync acquisition availability                        | starting/installed/eager/deferred/retiring/unavailable phases × request entry                       | 9 named reds; 3 adjacent controls green        |
+| Cleanup/restart ownership                            | 20 restart cells plus fixed callback boundaries                                                     | green except the acquisition-availability reds |
+| Async session fencing                                | 2–4 sessions, 1–2 demands, mixed outcomes, obsolete/current/interleaved settlement                  | green                                          |
+| Replay phase transitions                             | setup/pending/settling/publishing crossed with release, reacquisition, supersession, abort, cleanup | three audit claims remain to reconcile below   |
+| Ordered route mechanics                              | page/prefix/boundary/full-source × return/throw/resolve/reject/abort/cleanup                        | green                                          |
+| Ordered consumer integration                         | Collection/Effect parity, source-local recovery, public-window reentry, sync-session settlement     | 5 named reds                                   |
+| Ordered generated histories                          | authority, route, barrier, settlement, and session reach                                            | not yet implemented                            |
+
 - [ ] Finish the subset-demand lifecycle oracle before accepting more local
       runtime patches. Treat these as one protocol, not separate regressions:
   - [x] Model the logical demand states `absent`, `starting`, `active`, and
@@ -1280,9 +1297,19 @@ explicitly removed.
         `markReady()` before the new loader is installed, demand reentered from
         the failed-start error callback, demand started by the retiring
         adapter's cleanup callback, and eager demand later sent to
-        `unloadSubset` despite never calling `loadSubset`. Replace the status
+        `unloadSubset` despite never calling `loadSubset`. The same census now
+        includes a fifth red: a request aborted before adapter entry also owns
+        no physical lease and must not call `unloadSubset`. Replace the status
         guesses with one explicit sync-session acquisition contract before
-        making these cells green.
+        making these cells green. The finite phase table also keeps three
+        adjacent controls green: an installed handler works both before and
+        after asynchronous readiness, a deferred acquisition reaches the
+        eventual adapter once, and release before resume creates neither load
+        nor unload. Four further red seams complete the table: `markReady`
+        followed by an invalid handler-less return, an obsolete sync result
+        returned after ready-callback cleanup, an installed loader used after
+        initial `markError`, and deferred resume continuing after reentrant
+        cleanup.
   - [ ] Keep the ordered-query layer as a consumer of the same protocol. Cross
         page, prefix, boundary, and full-source routes with cancellation,
         failure, retry, and reentrant `setWindow`; do not duplicate ownership

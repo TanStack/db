@@ -1223,18 +1223,19 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       sync: {
         sync: ({ markReady }) => {
           session++
+          const adapterSession = session
           markReady()
           return {
             loadSubset: (options) => {
               const demand = demandForWhere.get(options.where)
               if (!demand) throw new Error(`unknown restart demand`)
-              loads.push({ session, demand })
+              loads.push({ session: adapterSession, demand })
               return true
             },
             unloadSubset: (options) => {
               const demand = demandForWhere.get(options.where)
               if (!demand) throw new Error(`unknown restart demand`)
-              unloads.push({ session, demand })
+              unloads.push({ session: adapterSession, demand })
             },
           }
         },
@@ -1289,12 +1290,13 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       sync: {
         sync: ({ markReady }) => {
           session++
+          const adapterSession = session
           markReady()
           return {
             loadSubset: (options) => {
               const demand = demandForWhere.get(options.where)
               if (!demand) throw new Error(`unknown ready demand`)
-              loads.push({ session, demand })
+              loads.push({ session: adapterSession, demand })
               return true
             },
             unloadSubset: () => {},
@@ -1353,13 +1355,14 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       sync: {
         sync: ({ markReady }) => {
           session++
+          const adapterSession = session
           if (session === 1) throw syncFailure
           markReady()
           return {
             loadSubset: (options) => {
               const demand = demandForWhere.get(options.where)
               if (!demand) throw new Error(`unknown error demand`)
-              loads.push({ session, demand })
+              loads.push({ session: adapterSession, demand })
               return true
             },
             unloadSubset: () => {},
@@ -1384,6 +1387,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     requestOnError = true
     expect(() => collection.startSyncImmediate()).toThrow(syncFailure)
     expect(observed).toEqual([])
+    expect(collection.status).toBe(`error`)
+    expect(loads).toEqual([{ session: 0, demand: `old` }])
 
     await collection.cleanup()
     collection.startSyncImmediate()
@@ -1419,12 +1424,13 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       sync: {
         sync: ({ markReady }) => {
           session++
+          const adapterSession = session
           markReady()
           return {
             loadSubset: (options) => {
               const demand = demandForWhere.get(options.where)
               if (!demand) throw new Error(`unknown cleanup demand`)
-              loads.push({ session, demand })
+              loads.push({ session: adapterSession, demand })
               return true
             },
             unloadSubset: () => {},
@@ -1492,6 +1498,331 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
 
     expect(loads).toBe(0)
     expect(unloads).toBe(0)
+    await collection.cleanup()
+  })
+
+  it(`does not release a subset request aborted before adapter acquisition`, async () => {
+    const controller = new AbortController()
+    controller.abort()
+    let loads = 0
+    let unloads = 0
+    const errors: Array<unknown> = []
+    const collection = createCollection<{ id: string }>({
+      id: `pre-aborted-subset-ownership`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => {
+              loads++
+              return true
+            },
+            unloadSubset: () => {
+              unloads++
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    subscription.on(`loadSubset:error`, ({ error }) => errors.push(error))
+
+    subscription.requestSnapshot({ signal: controller.signal })
+    await flushPromises()
+    subscription.unsubscribe()
+
+    expect(loads).toBe(0)
+    expect(unloads).toBe(0)
+    expect(errors).toEqual([])
+    await collection.cleanup()
+  })
+
+  it(`acquires before and after ready once the on-demand loader is installed`, async () => {
+    const beforeReady = new Func(`eq`, [
+      new PropRef([`id`]),
+      new Value(`before`),
+    ])
+    const afterReady = new Func(`eq`, [new PropRef([`id`]), new Value(`after`)])
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    let markReady!: () => void
+    const collection = createCollection<{ id: string }>({
+      id: `installed-loader-before-ready`,
+      getKey: ({ id }) => id,
+      startSync: false,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (operations) => {
+          markReady = operations.markReady
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return true
+            },
+            unloadSubset: (options) => unloads.push(options),
+          }
+        },
+      },
+    })
+    collection.startSyncImmediate()
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const removeReadyListener = collection.on(`status:ready`, () => {
+      subscription.requestSnapshot({ where: afterReady })
+    })
+
+    subscription.requestSnapshot({ where: beforeReady })
+    expect(collection.status).toBe(`loading`)
+    expect(loads.map(({ where }) => where)).toEqual([beforeReady])
+
+    markReady()
+    await flushPromises()
+    expect(loads.map(({ where }) => where)).toEqual([beforeReady, afterReady])
+
+    removeReadyListener()
+    subscription.unsubscribe()
+    expect(unloads).toEqual(loads)
+    await collection.cleanup()
+  })
+
+  it.each([`resume`, `release-before-resume`] as const)(
+    `owns deferred-start acquisition only when it reaches the adapter: %s`,
+    async (action) => {
+      const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
+      const loads: Array<LoadSubsetOptions> = []
+      const unloads: Array<LoadSubsetOptions> = []
+      const collection = createCollection<{ id: string }>({
+        id: `deferred-start-${action}`,
+        getKey: ({ id }) => id,
+        startSync: false,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options) => {
+                loads.push(options)
+                return true
+              },
+              unloadSubset: (options) => unloads.push(options),
+            }
+          },
+        },
+      })
+      expect(collection._deferSyncStart()).toBe(true)
+      const subscription = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      subscription.requestSnapshot({ where })
+      expect(loads).toEqual([])
+
+      if (action === `release-before-resume`) {
+        subscription.releaseSnapshot(where)
+      }
+      collection._resumeSyncStart()
+      await flushPromises()
+
+      expect(loads).toHaveLength(action === `resume` ? 1 : 0)
+      subscription.unsubscribe()
+      expect(unloads).toHaveLength(action === `resume` ? 1 : 0)
+      if (action === `resume`) expect(unloads).toEqual(loads)
+      await collection.cleanup()
+    },
+  )
+
+  it(`does not settle ready-callback demand when on-demand sync returns no loader`, async () => {
+    const oldWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`old`)])
+    const newWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`new`)])
+    const loads: Array<LoadSubsetOptions> = []
+    const observed: Array<unknown> = []
+    let session = 0
+    let requestOnReady = false
+    let subscription!: ReturnType<typeof collection.subscribeChanges>
+    const collection = createCollection<{ id: string }>({
+      id: `ready-before-invalid-on-demand-return`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          const ownSession = session++
+          markReady()
+          if (ownSession === 1) return
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const removeReadyListener = collection.on(`status:ready`, () => {
+      if (!requestOnReady) return
+      requestOnReady = false
+      subscription.requestSnapshot({
+        where: newWhere,
+        onLoadSubsetResult: (result) => observed.push(result),
+      })
+    })
+    subscription.requestSnapshot({ where: oldWhere })
+
+    await collection.cleanup()
+    requestOnReady = true
+    expect(() => collection.startSyncImmediate()).toThrow(
+      /did not return a loadSubset handler/,
+    )
+
+    expect(observed).toEqual([])
+    expect(collection.status).toBe(`error`)
+    expect(loads.map(({ where }) => where)).toEqual([oldWhere])
+
+    removeReadyListener()
+    subscription.unsubscribe()
+    await collection.cleanup()
+  })
+
+  it(`retires resources returned after ready-callback cleanup invalidates sync`, async () => {
+    const cleanupSessions: Array<number> = []
+    let session = 0
+    let cleanOnReady = false
+    const collection = createCollection<{ id: string }>({
+      id: `obsolete-sync-return`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          const ownSession = session++
+          markReady()
+          return {
+            loadSubset: () => true,
+            unloadSubset: () => {},
+            cleanup: () => cleanupSessions.push(ownSession),
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const removeReadyListener = collection.on(`status:ready`, () => {
+      if (!cleanOnReady) return
+      cleanOnReady = false
+      void collection.cleanup()
+    })
+
+    await collection.cleanup()
+    cleanOnReady = true
+    collection.startSyncImmediate()
+
+    expect(collection.status).toBe(`cleaned-up`)
+    expect(cleanupSessions).toEqual([0, 1])
+
+    removeReadyListener()
+    subscription.unsubscribe()
+    await collection.cleanup()
+  })
+
+  it(`does not acquire after an installed loader marks initial sync as failed`, async () => {
+    const oldWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`old`)])
+    const newWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`new`)])
+    const loads: Array<LoadSubsetOptions> = []
+    let markError!: (error: unknown) => void
+    let requestError: unknown
+    const collection = createCollection<{ id: string }>({
+      id: `installed-loader-initial-error`,
+      getKey: ({ id }) => id,
+      startSync: false,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (operations) => {
+          markError = operations.markError
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    collection.startSyncImmediate()
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    subscription.requestSnapshot({ where: oldWhere })
+    const removeErrorListener = collection.on(`status:error`, () => {
+      try {
+        subscription.requestSnapshot({ where: newWhere })
+      } catch (error) {
+        requestError = error
+      }
+    })
+
+    markError(new Error(`initial sync failed`))
+
+    expect(collection.status).toBe(`error`)
+    expect(loads.map(({ where }) => where)).toEqual([oldWhere])
+    expect(requestError).toMatchObject({ name: `CollectionInErrorStateError` })
+
+    removeErrorListener()
+    subscription.unsubscribe()
+    await collection.cleanup()
+  })
+
+  it(`does not run a deferred acquisition after resume is cleaned up reentrantly`, async () => {
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
+    let cleanupOnReady = false
+    const collection = createCollection<{ id: string }>({
+      id: `deferred-resume-cleanup`,
+      getKey: ({ id }) => id,
+      startSync: false,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return true
+            },
+            unloadSubset: (options) => unloads.push(options),
+          }
+        },
+      },
+    })
+    expect(collection._deferSyncStart()).toBe(true)
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const removeReadyListener = collection.on(`status:ready`, () => {
+      if (!cleanupOnReady) return
+      cleanupOnReady = false
+      void collection.cleanup()
+    })
+    subscription.requestSnapshot({ where })
+
+    cleanupOnReady = true
+    collection._resumeSyncStart()
+    await flushPromises()
+
+    expect(collection.status).toBe(`cleaned-up`)
+    expect(loads).toEqual([])
+    expect(unloads).toEqual([])
+
+    removeReadyListener()
+    subscription.unsubscribe()
     await collection.cleanup()
   })
 
