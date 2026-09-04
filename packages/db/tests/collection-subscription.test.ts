@@ -669,6 +669,72 @@ describe(`CollectionSubscription status tracking`, () => {
     },
   )
 
+  it(`preserves a primary error across reentrant teardown failure`, async () => {
+    const primaryFailure = new Error(`request failed after acquisition`)
+    const cleanupFailure = new Error(`teardown failed`)
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const reported: Array<unknown> = []
+    let releaseFailedDemand:
+      | ((primaryFailure?: { error: unknown }) => void)
+      | undefined
+    let cleanupAttempts = 0
+    let caughtCleanup: unknown
+    const collection = createCollection<{ id: string }>({
+      id: `primary-error-reentrant-teardown`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return true
+            },
+            unloadSubset: (options) => {
+              unloads.push(options)
+              if (options === loads[0] && cleanupAttempts++ === 0) {
+                throw cleanupFailure
+              }
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    subscription.requestSnapshot({ where: new Value(true) })
+    subscription.requestSnapshot({
+      where: new Value(false),
+      onLoadSubsetResult: (_result, _options, release) => {
+        releaseFailedDemand = release
+      },
+    })
+    subscription.on(`loadSubset:error`, ({ error }) => {
+      reported.push(error)
+      if (error !== primaryFailure) return
+      try {
+        subscription.unsubscribe()
+      } catch (cleanupError) {
+        caughtCleanup = cleanupError
+      }
+    })
+
+    releaseFailedDemand!({ error: primaryFailure })
+
+    expect(caughtCleanup).toBe(cleanupFailure)
+    expect(reported).toEqual([primaryFailure])
+    expect(subscription.lastError).toBe(primaryFailure)
+    expect(unloads).toEqual([loads[0], loads[1]])
+
+    subscription.unsubscribe()
+    expect(unloads).toEqual([loads[0], loads[1], loads[0]])
+    expect(subscription.lastError).toBe(primaryFailure)
+    await collection.cleanup()
+  })
+
   it(`does not replay a logically retired demand after its unload fails`, async () => {
     const loads: Array<LoadSubsetOptions> = []
     const unloads: Array<LoadSubsetOptions> = []

@@ -1081,6 +1081,10 @@ explicitly removed.
         crosses whether the failed demand comes before or after the demand
         removed by the listener, and whether that nested release succeeds or
         becomes cleanup debt without replacing the primary public error.
+  - [x] Preserve the primary public error across every reentrant release
+        surface, including `unsubscribe()`. Cleanup still throws to its direct
+        caller and remains exact retry debt, but it cannot emit a second error
+        or replace `lastError` during primary-error delivery.
   - [x] Strengthen the provisional cleanup-debt witness: assert the exact
         options unload twice, no unrelated lease unloads, successful retry
         clears debt, and the primary stored error remains unchanged. The

@@ -948,7 +948,7 @@ export class CollectionSubscription
   /** Keep an exact lease visible until one release attempt succeeds. */
   private releaseOrRetainAcquisition(
     acquisition: SubsetAcquisition,
-    reportReleaseError = true,
+    reportReleaseError = this.primaryFailureDeliveryDepth === 0,
   ): void {
     if (!this.releaseDebts.includes(acquisition)) {
       this.releaseDebts.push(acquisition)
