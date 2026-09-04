@@ -1,12 +1,27 @@
 import { describe, expect, it } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
 import { deepEquals } from '../src/utils'
+import { normalizeError } from '../src/utils/error'
 import { isPromiseLike } from '../src/utils/type-guards'
 import {
   oracleRandomParameters,
   readOracleRunConfig,
   validateOraclePropertyRegistry,
 } from './oracle-config'
+
+describe(`normalizeError`, () => {
+  it.each([
+    Object.create(null),
+    {
+      [Symbol.toPrimitive]: () => {
+        throw new Error(`conversion failed`)
+      },
+    },
+  ])(`normalizes an unstringifiable thrown value`, (thrownValue) => {
+    expect(() => normalizeError(thrownValue)).not.toThrow()
+    expect(normalizeError(thrownValue)).toEqual(new Error(`Unknown error`))
+  })
+})
 
 describe(`oracle run configuration`, () => {
   it(`reads the multiplier and replay coordinates from an explicit environment`, () => {
