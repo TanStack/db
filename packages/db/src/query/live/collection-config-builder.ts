@@ -310,12 +310,25 @@ export class CollectionConfigBuilder<
       offset: options.offset ?? baseWindow?.offset,
       limit: options.limit ?? baseWindow?.limit,
     }
+    const sourceRecovery = this.pendingSourceRecovery()
+    if (sourceRecovery) {
+      return sourceRecovery.then(async () => {
+        const settlement = this.setWindow(requestedWindow)
+        if (settlement !== true) await settlement
+      })
+    }
+    if (this.hasFailedSourceRecovery()) {
+      return Promise.reject(
+        this.lastSubsetError ?? new Error(`Source recovery failed`),
+      )
+    }
     const windowOperationGeneration = ++this.windowOperationGeneration
     const loadOperation =
       this.liveQueryCollection?._sync.beginLoadSubsetOperation()
     const previousOperation = this.activeWindowOperation
     const operation: { failed: boolean; error?: unknown } = { failed: false }
     this.activeWindowOperation = operation
+    if (this.pendingOrderedLoads.size === 0) this.orderedLoadFailed = false
     try {
       // The window and all source work it causes form one synchronous
       // publication. This makes operation tracking see requests scheduled by
@@ -453,8 +466,14 @@ export class CollectionConfigBuilder<
     return this.activeWindowOperation !== undefined
   }
 
-  settleOrderedSourceRecovery(): void {
-    this.orderedLoadFailed = false
+  scheduleGraphRunForSession(syncSession: number): void {
+    if (
+      syncSession !== this.syncSession ||
+      !this.currentSyncConfig ||
+      !this.currentSyncState
+    ) {
+      return
+    }
     this.scheduleGraphRun()
   }
 
@@ -499,6 +518,27 @@ export class CollectionConfigBuilder<
     return Object.values(this.subscriptions).some(
       (subscription) => subscription.hasPendingTruncateReplacement,
     )
+  }
+
+  private pendingSourceRecovery(): Promise<void> | undefined {
+    const pending = Object.values(this.subscriptions).flatMap((subscription) =>
+      subscription.pendingTruncateReplacement
+        ? [subscription.pendingTruncateReplacement]
+        : [],
+    )
+    return pending.length > 0
+      ? Promise.all(pending).then(() => undefined)
+      : undefined
+  }
+
+  private hasFailedSourceRecovery(): boolean {
+    return Object.values(this.subscriptions).some(
+      (subscription) => subscription.hasFailedTruncateReplacement,
+    )
+  }
+
+  getSyncSession(): number {
+    return this.syncSession
   }
 
   // The callback function is called after the graph has run.

@@ -495,7 +495,9 @@ replacement, and clears the loader's completion marker so an explicit retry
 of the window can issue the request again. That explicit retry retires and
 releases the earlier failed acquisition before installing its replacement, so
 a later truncate replays one logical demand rather than both attempts. A
-successful authoritative replay clears the failed publication gate.
+successful authoritative replay clears its source-recovery gate, but it does
+not clear an unrelated failed window operation. A later explicit window move
+revalidates that physical window before publishing it.
 
 An initial ordered load or imperative window move includes every page,
 tie-boundary request, and forward refill needed to reach its fixed point. Its
@@ -515,6 +517,10 @@ after discarding the graph and requested window.
 Window-operation generations stay monotonic across cleanup and restart, so a
 late rejection from an abandoned session cannot reset the replacement
 session's requested window.
+A window move started during an active source replay waits for that replay and
+applies only after its replacement is complete. A failed replay rejects the
+move without advancing the reported window. Replay completion callbacks carry
+their sync-session identity and become no-ops after cleanup or restart.
 Ordinary source mutations stay synchronous except while an initial ordered
 load or imperative window move owns this publication barrier. Mutations that
 arrive during that interval join the private state and publish with the

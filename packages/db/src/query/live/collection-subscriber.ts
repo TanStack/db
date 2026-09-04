@@ -379,14 +379,18 @@ export class CollectionSubscriber<
   private truncateReplayPublicationControl(
     onStart?: () => void,
   ): TruncateReplayPublicationControl {
+    const syncSession = this.collectionConfigBuilder.getSyncSession()
     return {
       start: () => {
         onStart?.()
       },
       succeed: () =>
         queueMicrotask(() => {
+          if (syncSession !== this.collectionConfigBuilder.getSyncSession()) {
+            return
+          }
           this.orderedLoader?.settleFullSourceReplay()
-          this.collectionConfigBuilder.settleOrderedSourceRecovery()
+          this.collectionConfigBuilder.scheduleGraphRunForSession(syncSession)
         }),
     }
   }
@@ -395,7 +399,10 @@ export class CollectionSubscriber<
   // after each iteration of the query pipeline
   // to ensure that the orderBy operator has enough data to work with
   loadMoreIfNeeded(subscription: CollectionSubscription) {
-    if (this.collectionConfigBuilder.hasPendingSourceRecovery()) {
+    if (
+      this.collectionConfigBuilder.hasPendingSourceRecovery() &&
+      !this.collectionConfigBuilder.hasActiveWindowOperation()
+    ) {
       return true
     }
 

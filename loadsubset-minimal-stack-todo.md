@@ -756,6 +756,14 @@ explicitly removed.
       Window-operation generations remain monotonic across cleanup/restart,
       preventing an abandoned rejection from corrupting the new session's
       partial-window base. All three public traces failed before the fixes.
+- [x] Separate source-replay settlement from window-operation settlement. A
+      window move now waits for an active replay and rejects against a failed
+      replay without advancing `getWindow()`. Replay success removes only its
+      source barrier; it cannot publish a physical window abandoned by an
+      earlier failure or private rows from another joined source. Queued replay
+      callbacks carry the sync-session token and do nothing after cleanup or
+      restart. Pending, failed, same-source, publication, and cleanup traces
+      fail the prior implementation and pass the revised boundary.
 - [x] Measure source and compressed bundle size against both `origin/main` and
       the large RFC stack. Across all package `src` trees, the old stack was
       +10,545/-1,692 lines (net +8,853) while this tree is +2,006/-1,302
