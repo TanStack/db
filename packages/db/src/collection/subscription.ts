@@ -96,7 +96,7 @@ type SubsetDemand = SubsetAcquisition & {
 
 type TruncateReplayAttempt = {
   pending: Set<{ demand: SubsetDemand; promise: Promise<unknown> }>
-  failed: boolean
+  failedDemands: Set<SubsetDemand>
   setupComplete: boolean
 }
 
@@ -258,7 +258,7 @@ export class CollectionSubscription
 
     const attempt: TruncateReplayAttempt = {
       pending: new Set(),
-      failed: false,
+      failedDemands: new Set(),
       setupComplete: false,
     }
     let session = this.truncateReplaySession
@@ -386,7 +386,9 @@ export class CollectionSubscription
           // as cleanup debt without replacing it.
         }
       }
-      if (demandRemains && isCurrentAttempt()) attempt.failed = true
+      if (demandRemains && isCurrentAttempt()) {
+        attempt.failedDemands.add(demand)
+      }
       return
     }
 
@@ -396,7 +398,7 @@ export class CollectionSubscription
       try {
         this.releaseOrRetainAcquisition(previous)
       } catch {
-        attempt.failed = true
+        attempt.failedDemands.add(demand)
       }
       return
     }
@@ -424,7 +426,7 @@ export class CollectionSubscription
       try {
         this.releaseOrRetainAcquisition(previous)
       } catch {
-        attempt.failed = true
+        attempt.failedDemands.add(demand)
       }
       return
     }
@@ -437,7 +439,7 @@ export class CollectionSubscription
       try {
         this.releaseOrRetainAcquisition(next)
       } catch {
-        attempt.failed = true
+        attempt.failedDemands.add(demand)
       }
       return
     }
@@ -462,7 +464,7 @@ export class CollectionSubscription
       }
       this.recordLoadSubsetError(demand.options, error, true)
       this.stopStatusParticipant(statusParticipant)
-      attempt.failed = true
+      attempt.failedDemands.add(demand)
     }
   }
 
@@ -523,7 +525,7 @@ export class CollectionSubscription
           // so retain the exact normalized error for the completion barrier.
           // The status listener emits the public error event next.
           this._lastError = normalized
-          attempt.failed = true
+          attempt.failedDemands.add(demand)
         }
         this.settleTruncateReplay(session, attempt, pending)
       },
@@ -535,6 +537,7 @@ export class CollectionSubscription
     const session = this.truncateReplaySession
     if (!session) return
     for (const attempt of session.attempts) {
+      attempt.failedDemands.delete(demand)
       for (const pending of attempt.pending) {
         if (pending.demand === demand) attempt.pending.delete(pending)
       }
@@ -555,7 +558,10 @@ export class CollectionSubscription
       if (!attempt.setupComplete || attempt.pending.size > 0) return
     }
 
-    if (session.currentAttempt.failed) {
+    const activeFailure = [...session.currentAttempt.failedDemands].some(
+      (demand) => this.subsetDemands.includes(demand),
+    )
+    if (activeFailure) {
       this.abandonTruncateReplay(session)
     } else {
       this.flushTruncateReplay(session)
@@ -987,7 +993,7 @@ export class CollectionSubscription
           this.truncateReplaySession === replaySession &&
           replaySession.currentAttempt === replayAttempt
         ) {
-          replayAttempt.failed = true
+          replayAttempt.failedDemands.add(demand)
         }
         this.subsetDemands.splice(demandIndex, 1)
         acquisition.abortController.abort()
@@ -1210,14 +1216,15 @@ export class CollectionSubscription
     runAllCallbacks([
       () => this.removeTruncateReplayParticipant(demand),
       () => this.pruneReleasedReplayRows(),
-      () => this.stopDemandStatusParticipants(demand),
+      // Adapter release is a supported reentrancy boundary. A demand started
+      // from unload joins this replacement before completion is decided.
+      () => this.releaseOrRetainAcquisition(acquisition),
       () => this.retireEmptyReplay(),
-      // Decide replay completion only after release callbacks have had a
-      // chance to retire, replace, or synchronously reacquire demand.
       () => {
         if (replaySession) this.checkTruncateReplayComplete(replaySession)
       },
-      () => this.releaseOrRetainAcquisition(acquisition),
+      // Ready follows replacement publication, never the delete half of it.
+      () => this.stopDemandStatusParticipants(demand),
     ])
   }
 

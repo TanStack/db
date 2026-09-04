@@ -1011,8 +1011,10 @@ explicitly removed.
         that its first request has no cursor.
   - [x] After that first request rejects, retry from offset zero without a
         cursor; a started request is not established remote coverage.
-  - [x] Cross the same first-request law with cancellation at both zero and
-        nonzero offsets.
+  - [ ] Cross the same first-request law with real cancellation at both zero
+        and nonzero offsets. Rejecting with an `AbortError` value does not
+        exercise ownership-driven `options.signal.abort()` and must not count
+        as cancellation coverage.
   - [x] Cross the zero-window/local-row case with a nonzero target offset and
         assert the exact finite-prefix request count and shape.
   - [x] Record every on-demand publication callback so an equal duplicate
@@ -1025,6 +1027,15 @@ explicitly removed.
         rejects now red/greens the rule that the next explicit retry starts at
         offset zero with no cursor. The test also proves rejection does not
         start an eager retry.
+  - [ ] Keep a far-ahead row written by a failed request from becoming trusted
+        after a finite-prefix retry; a later widening must not publish that row
+        ahead of missing authoritative rows.
+  - [ ] Cross partial writes with synchronous throws across page, prefix,
+        full-source, and boundary requests. No failed `setWindow()` may start
+        eager recovery before an explicit retry.
+  - [ ] Retire the failed physical ordered acquisition when its explicit retry
+        replaces it. A later truncate must replay only current demand, and
+        cleanup must release each live lease once.
   - [ ] Derive the zero-window no-load and readiness-wake expectations from the
         requested semantics, not observed load count, and record callback-time
         status so a stray empty batch cannot impersonate the ready wake-up.
@@ -1040,12 +1051,12 @@ explicitly removed.
         replacement must choose the lowest public key after an update.
 - [ ] Prevent a reentrant truncate started during synchronous replacement
       publication from letting the superseded attempt emit transient `ready`.
-- [ ] Close the replay-release follow-up audit:
-  - [ ] A synchronous delete callback that reacquires demand must not emit
+- [x] Close the replay-release follow-up audit:
+  - [x] A synchronous delete callback that reacquires demand must not emit
         `ready` before its replacement row becomes public.
-  - [ ] A replay demand that rejects and then retires must not leave its
+  - [x] A replay demand that rejects and then retires must not leave its
         attempt-global failure poisoning surviving successful demand.
-  - [ ] A demand reacquired from reentrant adapter `unloadSubset` must join the
+  - [x] A demand reacquired from reentrant adapter `unloadSubset` must join the
         same private replay gate; completion cannot be decided before that
         release callback.
 - [ ] Reconcile the joined-recovery readiness wording with the public

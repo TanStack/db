@@ -3274,7 +3274,75 @@ describe(`CollectionSubscription replay oracle`, () => {
     },
   )
 
-  it.each([`after-release`, `during-delete`] as const)(
+  it(`ignores a retired demand's replay failure once surviving demand succeeds`, async () => {
+    let begin!: () => void
+    let commit!: () => void
+    let truncate!: () => void
+    const firstReplay = createDeferred<void>()
+    const secondReplay = createDeferred<void>()
+    const firstWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
+    const secondWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`two`)])
+    const loads: Array<LoadSubsetOptions> = []
+    const failure = new Error(`retired demand failed`)
+    let replaySuccesses = 0
+    const collection = createCollection<ReplayRow>({
+      id: `retired-replay-failure`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (operations) => {
+          begin = operations.begin
+          commit = operations.commit
+          truncate = operations.truncate
+          operations.markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              if (loads.length <= 2) return true
+              return loads.length === 3
+                ? firstReplay.promise
+                : secondReplay.promise
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+      truncateReplayPublication: {
+        start: () => {},
+        succeed: () => replaySuccesses++,
+      },
+    })
+
+    try {
+      subscription.requestSnapshot({ where: firstWhere })
+      subscription.requestSnapshot({ where: secondWhere })
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+      const replacement = subscription.pendingTruncateReplacement
+      expect(replacement).toBeInstanceOf(Promise)
+
+      firstReplay.reject(failure)
+      await flushPromises()
+      subscription.releaseSnapshot(firstWhere)
+      secondReplay.resolve()
+
+      await expect(replacement).resolves.toBeUndefined()
+      expect(replaySuccesses).toBe(1)
+      expect(subscription.status).toBe(`ready`)
+    } finally {
+      firstReplay.resolve()
+      secondReplay.resolve()
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it.each([`after-release`, `during-delete`, `during-unload`] as const)(
     `reacquires a final released replay demand %s without waiting for obsolete work`,
     async (reacquireTiming) => {
       let begin!: () => void
@@ -3284,10 +3352,12 @@ describe(`CollectionSubscription replay oracle`, () => {
       let commit!: () => void
       let truncate!: () => void
       const replayLoad = createDeferred<void>()
+      const reacquiredLoad = createDeferred<void>()
       const where = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
       const loads: Array<LoadSubsetOptions> = []
       const unloads: Array<LoadSubsetOptions> = []
       let reacquireInCallback = false
+      let reacquireInUnload = false
       const collection = createCollection<ReplayRow>({
         id: `final-replay-reacquire-${reacquireTiming}`,
         getKey: ({ id }) => id,
@@ -3314,9 +3384,17 @@ describe(`CollectionSubscription replay oracle`, () => {
                   commit()
                   return replayLoad.promise
                 }
-                return true
+                return reacquireTiming === `during-unload`
+                  ? reacquiredLoad.promise
+                  : true
               },
-              unloadSubset: (options) => unloads.push(options),
+              unloadSubset: (options) => {
+                unloads.push(options)
+                if (reacquireInUnload && options === loads[1]) {
+                  reacquireInUnload = false
+                  subscription.requestSnapshot({ where })
+                }
+              },
             }
           },
         },
@@ -3335,6 +3413,10 @@ describe(`CollectionSubscription replay oracle`, () => {
           }
         },
       )
+      const readyRows: Array<Array<ReplayRow>> = []
+      subscription.on(`status:ready`, () => {
+        readyRows.push(sortedRows(visible))
+      })
 
       try {
         subscription.requestSnapshot({ where })
@@ -3350,6 +3432,7 @@ describe(`CollectionSubscription replay oracle`, () => {
         )
 
         reacquireInCallback = reacquireTiming === `during-delete`
+        reacquireInUnload = reacquireTiming === `during-unload`
         subscription.releaseSnapshot(where)
         if (reacquireTiming === `after-release`) {
           await expect(settlement).resolves.toMatchObject({
@@ -3357,6 +3440,18 @@ describe(`CollectionSubscription replay oracle`, () => {
             error: { name: `AbortError` },
           })
           subscription.requestSnapshot({ where })
+        } else if (reacquireTiming === `during-unload`) {
+          let settled = false
+          void settlement.then(() => {
+            settled = true
+          })
+          await flushPromises()
+          expect(settled).toBe(false)
+          replayLoad.resolve()
+          await flushPromises()
+          expect(settled).toBe(false)
+          reacquiredLoad.resolve()
+          await expect(settlement).resolves.toEqual({ status: `resolved` })
         } else {
           expect(subscription.pendingTruncateReplacement).toBeUndefined()
           await expect(settlement).resolves.toEqual({ status: `resolved` })
@@ -3379,8 +3474,12 @@ describe(`CollectionSubscription replay oracle`, () => {
           where,
           where,
         ])
+        if (reacquireTiming !== `after-release`) {
+          expect(readyRows).toEqual([[{ id: `one`, value: 2 }]])
+        }
       } finally {
         replayLoad.resolve()
+        reacquiredLoad.resolve()
         await flushPromises()
         subscription.unsubscribe()
         await collection.cleanup()

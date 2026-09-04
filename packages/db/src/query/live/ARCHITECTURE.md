@@ -646,13 +646,15 @@ Failure keeps the last complete result visible and partly replayed source state
 private for both direct subscribers and query graphs. Ordinary source deltas or
 snapshot requests do not reopen that gate because they cannot prove the source
 complete; only a later successful truncate replay provides the authoritative
-replacement. If the last logical demand retires, the now-unreachable source
+replacement. Replay failure is scoped to the logical demand that failed. If
+that demand retires, its failure cannot poison a successful replacement for the
+remaining demand. If the last logical demand retires, the now-unreachable source
 replay rejects its completion with `AbortError` and stops gating the shared
 graph; unrelated parent or sibling changes may then publish. If release
-publication synchronously acquires new demand, core checks completion after
-that callback: the new demand joins the private replacement, while the retired
-transport can no longer gate it. A genuine replay failure is normalized once
-by the subscription.
+publication or adapter unload synchronously acquires new demand, core checks
+completion after that callback: the new demand joins the private replacement,
+while the retired transport can no longer gate it. A genuine replay failure is
+normalized once by the subscription.
 The `loadSubset:error` event, `lastSubsetError`, and any window move waiting on
 that replay expose the same `Error` object.
 
