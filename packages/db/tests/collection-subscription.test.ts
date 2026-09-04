@@ -2076,6 +2076,88 @@ describe(`CollectionSubscription status tracking`, () => {
     await collection.cleanup()
   })
 
+  it(`does not become ready between reentrant truncate replacements`, async () => {
+    type Row = { id: string; version: number }
+    const replays = [createDeferred<void>(), createDeferred<void>()]
+    const statusEvents: Array<string> = []
+    const visible = new Map<string | number, Row>()
+    let begin!: () => void
+    let write!: (message: { type: `insert`; value: Row }) => void
+    let commit!: () => void
+    let truncate!: () => void
+    let loadCount = 0
+    let startedNestedReplay = false
+    const collection = createCollection<Row>({
+      id: `reentrant-truncate-ready-barrier`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          truncate = params.truncate
+          params.markReady()
+          return {
+            loadSubset: () => {
+              const version = ++loadCount
+              begin()
+              write({ type: `insert`, value: { id: `row`, version } })
+              commit()
+              return version === 1 ? true : replays[version - 2]!.promise
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(
+      (changes) => {
+        for (const change of changes) {
+          if (change.type === `delete`) visible.delete(change.key)
+          else visible.set(change.key, change.value)
+        }
+        if (visible.get(`row`)?.version === 2 && !startedNestedReplay) {
+          startedNestedReplay = true
+          begin()
+          truncate()
+          commit()
+        }
+      },
+      { includeInitialState: false },
+    )
+    subscription.on(`status:change`, ({ status }) => {
+      statusEvents.push(status)
+    })
+
+    try {
+      subscription.requestSnapshot()
+      expect(visible.get(`row`)?.version).toBe(1)
+
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+      expect(subscription.status).toBe(`loadingSubset`)
+
+      replays[0]!.resolve()
+      await flushPromises()
+      expect(loadCount).toBe(3)
+      expect(visible.get(`row`)?.version).toBe(2)
+      expect(subscription.status).toBe(`loadingSubset`)
+      expect(statusEvents).toEqual([`loadingSubset`])
+
+      replays[1]!.resolve()
+      await flushPromises()
+      expect(visible.get(`row`)?.version).toBe(3)
+      expect(subscription.status).toBe(`ready`)
+      expect(statusEvents).toEqual([`loadingSubset`, `ready`])
+    } finally {
+      for (const replay of replays) replay.resolve()
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   it(`scopes a subset failure to the subscription that requested it`, async () => {
     const error = new Error(`first subscription failed`)
     let loadCount = 0

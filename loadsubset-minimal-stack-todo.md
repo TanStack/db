@@ -1164,8 +1164,13 @@ explicitly removed.
         descending tie witness covers the same missing-prefix class. A changed
         or deleted delivered row now invalidates finite source-order coverage
         and takes the conservative full-source recovery path.
-- [ ] Prevent a reentrant truncate started during synchronous replacement
+- [x] Prevent a reentrant truncate started during synchronous replacement
       publication from letting the superseded attempt emit transient `ready`.
+      Readiness now requires both zero tracked load participants and zero
+      replay attempts whose setup or Promise settlement is still pending. The
+      production regression starts a second truncate from the first replay's
+      synchronous replacement callback and proves the status trace contains no
+      intermediate `ready` event.
 - [ ] Close the public window-reentrancy follow-up audit:
   - [ ] Reject or defer `setWindow()` called synchronously from the initial
         ordered adapter load; it must not return `true` before the requested

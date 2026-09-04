@@ -574,10 +574,14 @@ export class CollectionSubscription
     const activeFailure = [...session.currentAttempt.failedDemands].some(
       (demand) => this.subsetDemands.includes(demand),
     )
-    if (activeFailure) {
-      this.abandonTruncateReplay(session)
-    } else {
-      this.flushTruncateReplay(session)
+    try {
+      if (activeFailure) {
+        this.abandonTruncateReplay(session)
+      } else {
+        this.flushTruncateReplay(session)
+      }
+    } finally {
+      this.setReadyIfIdle()
     }
   }
 
@@ -708,6 +712,17 @@ export class CollectionSubscription
     return this.truncateReplaySession !== undefined
   }
 
+  private setReadyIfIdle(): void {
+    const hasPendingReplayWork = [...(this.truncateReplaySession?.attempts ?? [])]
+      .some((attempt) => !attempt.setupComplete || attempt.pending.size > 0)
+    if (
+      this.pendingLoadSubsetParticipants.size === 0 &&
+      !hasPendingReplayWork
+    ) {
+      this.setStatus(`ready`)
+    }
+  }
+
   public get hasPendingTruncateReplacement(): boolean {
     return this.truncateReplacementPending
   }
@@ -800,9 +815,7 @@ export class CollectionSubscription
     const finish = () => {
       if (trackStatus) {
         this.pendingLoadSubsetParticipants.delete(participant)
-        if (this.pendingLoadSubsetParticipants.size === 0) {
-          this.setStatus(`ready`)
-        }
+        this.setReadyIfIdle()
       }
     }
 
