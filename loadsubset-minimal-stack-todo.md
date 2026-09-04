@@ -1085,11 +1085,11 @@ explicitly removed.
         production witness now checks object identity and a second idempotent
         unsubscribe.
   - [x] Retire a provisional acquisition when the ordered-loader result
-        observer throws. A throwing publication/listener callback must not
-        leave successful coverage behind or let the queued settlement clear
-        the failure gate. The red witness now checks exact release, blocks an
-        ordinary retry after the queued settlement, and permits only a later
-        explicit operation generation.
+        observer throws. This is a defensive internal seam, not a public event
+        listener path: event-listener throws are isolated by `EventEmitter`.
+        The witness checks exact release, blocks reentrant replacement during
+        retirement and ordinary retry after queued settlement, and permits
+        only a later explicit operation generation.
   - [ ] Replace the synthetic callback-before-throw page cell with a reachable
         production integration that throws after adapter startup during local
         read or publication. Keep direct route cells only for method-selection

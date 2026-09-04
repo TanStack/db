@@ -745,13 +745,18 @@ export class OrderedSourceLoader {
       )
     } catch (error) {
       const normalized = normalizeError(error)
-      this.retireProvisionalFailure(
-        observed,
-        normalized,
-        isFullSource,
-        windowOperationGeneration,
-        true,
-      )
+      this.requesting = true
+      try {
+        this.retireProvisionalFailure(
+          observed,
+          normalized,
+          isFullSource,
+          windowOperationGeneration,
+          true,
+        )
+      } finally {
+        this.requesting = false
+      }
       throw normalized
     }
   }

@@ -343,7 +343,7 @@ describe(`OrderedSourceLoader`, () => {
     },
   )
 
-  it(`retires an acquisition when its result observer throws`, async () => {
+  it(`retires an acquisition when its internal result observer throws`, async () => {
     const observerFailure = new Error(`ordered result observer failed`)
     const acquisition: LoadSubsetOptions = {}
     const methods: Array<string> = []
@@ -353,6 +353,7 @@ describe(`OrderedSourceLoader`, () => {
       setOrderByIndex: () => {},
       releaseLoadSubset: (options: LoadSubsetOptions) => {
         releases.push(options)
+        loader.loadMore(1)
       },
       requestSnapshot: (options: RequestOptions) => {
         methods.push(`snapshot`)
@@ -375,6 +376,7 @@ describe(`OrderedSourceLoader`, () => {
     await Promise.resolve()
     await Promise.resolve()
     expect(releases).toEqual([acquisition])
+    expect(methods).toEqual([`snapshot`])
 
     expect(loader.loadMore()).toBeUndefined()
     expect(methods).toEqual([`snapshot`])
