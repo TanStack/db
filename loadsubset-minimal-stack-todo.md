@@ -1167,7 +1167,9 @@ explicitly removed.
   - [x] Give EventEmitter registrations their own identity. Removing and
         re-adding the same pending callback during an emission must defer the
         new registration until the next emission. The red/green event test
-        proves both deferral and delivery on the following emission.
+        proves both deferral and delivery on the following emission. Once-only
+        callback identity now also lives in a private `WeakMap`; a user-owned
+        function property cannot impersonate an internal registration.
   - [x] Do not register a subscription that unsubscribed reentrantly during
         automatic `includeInitialState` loading. The production witness checks
         exact acquisition release, live-set membership, and subscriber count.

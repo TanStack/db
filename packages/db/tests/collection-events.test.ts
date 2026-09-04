@@ -413,6 +413,20 @@ describe(`Collection Events System`, () => {
       expect(onceListener).not.toHaveBeenCalled()
     })
 
+    it(`does not treat an ordinary callback property as a once registration`, () => {
+      const emitter = new TestEventEmitter()
+      const claimedOnceCallback = vi.fn()
+      const ordinaryListener = Object.assign(vi.fn(), {
+        onceCallback: claimedOnceCallback,
+      })
+      emitter.on(`event`, ordinaryListener)
+
+      emitter.off(`event`, claimedOnceCallback)
+      emitter.emit(1)
+
+      expect(ordinaryListener).toHaveBeenCalledOnce()
+    })
+
     it(`removes a once listener before a reentrant emission`, () => {
       const emitter = new TestEventEmitter()
       const observed: Array<number> = []

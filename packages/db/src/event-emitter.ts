@@ -7,6 +7,10 @@ export class EventEmitter<TEvents extends Record<string, any>> {
     keyof TEvents,
     Map<(event: TEvents[keyof TEvents]) => void, object>
   >()
+  private onceCallbacks = new WeakMap<
+    (event: TEvents[keyof TEvents]) => void,
+    (event: TEvents[keyof TEvents]) => void
+  >()
 
   /**
    * Subscribe to an event
@@ -48,13 +52,14 @@ export class EventEmitter<TEvents extends Record<string, any>> {
     callback: (event: TEvents[T]) => void,
   ): () => void {
     let unsubscribe = () => {}
-    const listener = ((eventPayload: TEvents[T]) => {
+    const listener = (eventPayload: TEvents[T]) => {
       unsubscribe()
       callback(eventPayload)
-    }) as ((event: TEvents[T]) => void) & {
-      onceCallback?: (event: TEvents[T]) => void
     }
-    listener.onceCallback = callback
+    this.onceCallbacks.set(
+      listener as (event: TEvents[keyof TEvents]) => void,
+      callback as (event: TEvents[keyof TEvents]) => void,
+    )
     unsubscribe = this.on(event, listener)
     return unsubscribe
   }
@@ -71,10 +76,10 @@ export class EventEmitter<TEvents extends Record<string, any>> {
     const listeners = this.listeners.get(event)
     if (!listeners) return
     for (const listener of listeners.keys()) {
-      const registered = listener as typeof listener & {
-        onceCallback?: (event: TEvents[T]) => void
-      }
-      if (listener === callback || registered.onceCallback === callback) {
+      if (
+        listener === callback ||
+        this.onceCallbacks.get(listener) === callback
+      ) {
         listeners.delete(listener)
       }
     }
