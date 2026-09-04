@@ -990,6 +990,7 @@ async function runOnDemandPaginationScenario(
   const publications: Array<{
     changes: Array<PublicPageChange>
     rows: Array<PublicPageRow>
+    status: string
   }> = []
   const publicationSubscription = live.subscribeChanges(
     (changes) => {
@@ -999,6 +1000,7 @@ async function runOnDemandPaginationScenario(
           changes as Array<ChangeMessage<PageRow, number>>,
         ),
         rows,
+        status: live.status,
       })
     },
     { includeInitialState: false },
@@ -1034,13 +1036,16 @@ async function runOnDemandPaginationScenario(
             {
               changes: expectedPageChanges([], initialExpected),
               rows: initialExpected,
+              status: `loading`,
             },
           ]
         : []),
       // A real source acquisition uses one empty batch to wake subscriptions
       // when the initial source set becomes ready, even if it produced no
       // visible rows. A zero window needs no acquisition or wake-up.
-      ...(loads.length > 0 ? [{ changes: [], rows: initialExpected }] : []),
+      ...(initialWindow.limit > 0
+        ? [{ changes: [], rows: initialExpected, status: `ready` }]
+        : []),
     ])
 
     if (scenario.localRowsBeforeFirstRequest) {
@@ -1084,7 +1089,7 @@ async function runOnDemandPaginationScenario(
       const expectedChanges = expectedPageChanges(before, after)
       expect(publications.slice(publicationCount)).toEqual(
         expectedChanges.length > 0
-          ? [{ changes: expectedChanges, rows: after }]
+          ? [{ changes: expectedChanges, rows: after, status: `ready` }]
           : [],
       )
     }

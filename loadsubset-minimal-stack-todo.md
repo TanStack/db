@@ -1074,9 +1074,10 @@ explicitly removed.
         identity back to the loader; replacement releases that lease before it
         starts. A later truncate replays no obsolete cursor, and cleanup
         releases each remaining live lease once.
-  - [ ] Derive the zero-window no-load and readiness-wake expectations from the
-        requested semantics, not observed load count, and record callback-time
-        status so a stray empty batch cannot impersonate the ready wake-up.
+  - [x] Derive the zero-window no-load and readiness-wake expectations from the
+        requested limit, not observed load count. Every publication now records
+        callback-time status, so only one empty `ready` batch can satisfy the
+        acquisition wake-up law and a zero window permits none.
   - [ ] Preserve or reject `previousValue` explicitly on every normalized
         public change; do not discard malformed insert/delete payload fields.
   - [ ] Compare the exact public change batch with the reference before/after
@@ -1087,6 +1088,10 @@ explicitly removed.
   - [ ] Pin and fix both implicit-public-key tie update failures found by the
         10x state campaign: top-1 equal-rank replacement and offset-1 equal-rank
         replacement must choose the lowest public key after an update.
+  - [ ] Ignore a rejection from an obsolete ordered-loader generation before it
+        invalidates source coverage. A truncate replacement can succeed before
+        an aborted older page rejects; that late rejection must not make the
+        next ordinary source turn start another full-source request.
 - [ ] Prevent a reentrant truncate started during synchronous replacement
       publication from letting the superseded attempt emit transient `ready`.
 - [ ] Close the subscription-teardown follow-up audit:
