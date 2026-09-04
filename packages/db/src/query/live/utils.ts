@@ -298,6 +298,7 @@ export class OrderedSourceLoader {
     private readonly getBiggest: () => unknown,
     private readonly onResult: (
       result: LoadSubsetRequestResult,
+      holdPublication: boolean,
     ) => void = () => {},
   ) {}
 
@@ -568,7 +569,8 @@ export class OrderedSourceLoader {
       // window. Resume forward loading once it settles.
       this.loadMore()
     }
-    const request = result instanceof Promise ? result : Promise.resolve()
+    const settlesAsync = result instanceof Promise
+    const request = settlesAsync ? result : Promise.resolve()
     const tracked = request.then(
       () => {
         complete()
@@ -601,7 +603,10 @@ export class OrderedSourceLoader {
     // Register each request separately. The operation tracker observes the
     // next request before this promise settles, so the logical chain remains
     // pending without retaining every ancestor promise until the final page.
-    this.onResult(tracked)
+    this.onResult(
+      tracked,
+      settlesAsync && isFullSource && this.needsFullSourceRecovery,
+    )
     return tracked
   }
 

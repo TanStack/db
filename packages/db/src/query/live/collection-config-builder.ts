@@ -489,11 +489,15 @@ export class CollectionConfigBuilder<
     this.scheduleGraphRun()
   }
 
-  trackOrderedLoadPromise(promise: Promise<unknown>): void {
+  trackOrderedLoadPromise(
+    promise: Promise<unknown>,
+    holdPublication = false,
+  ): void {
     // Hold the last complete public snapshot during an initial load or an
     // imperative window move. Source changes that arrive during the move join
     // its private graph state and publish with the completed replacement.
     if (
+      !holdPublication &&
       !this.activeWindowOperation &&
       this.liveQueryCollection?.status !== `loading` &&
       this.pendingOrderedLoads.size === 0

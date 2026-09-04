@@ -3686,6 +3686,193 @@ describe(`pagination recomputation oracle`, () => {
     })
   })
 
+  it.each([`resolve`, `reject`] as const)(
+    `keeps the last complete implicit window while background recovery %ss`,
+    async (settlement) => {
+      const authoritativeRows = new Map<number, PageRow>([
+        [1, { id: 1, rank: 0, keep: true }],
+        [2, { id: 2, rank: 1, keep: true }],
+      ])
+      const recovery = createDeferred<void>()
+      const recoveryError = new Error(`background recovery failed`)
+      const loads: Array<LoadSubsetOptions> = []
+      const delivered = new Set<number>()
+      let recovering = false
+      let begin!: () => void
+      let write!: (message: {
+        type: `insert` | `update`
+        value: PageRow
+      }) => void
+      let commit!: () => void
+      const source = createCollection<PageRow>({
+        id: `pagination-background-prefix-recovery-${collectionSequence++}`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: (operations) => {
+            begin = operations.begin
+            write = operations.write
+            commit = operations.commit
+            operations.markReady()
+            return {
+              loadSubset: (options: LoadSubsetOptions) => {
+                loads.push(options)
+                const isFullSource =
+                  options.where === undefined &&
+                  options.limit === undefined &&
+                  options.cursor === undefined
+                const applyRows = () => {
+                  const rows = rowsForLoadSubset(
+                    [...authoritativeRows.values()],
+                    options,
+                  )
+                  begin()
+                  for (const row of rows) {
+                    if (delivered.has(row.id)) continue
+                    delivered.add(row.id)
+                    write({ type: `insert`, value: { ...row } })
+                  }
+                  commit()
+                }
+                if (!recovering || !isFullSource) {
+                  applyRows()
+                  return true
+                }
+                return recovery.promise.then(() => {
+                  if (settlement === `reject`) throw recoveryError
+                  applyRows()
+                })
+              },
+            }
+          },
+        },
+      })
+      const live = createLiveQueryCollection((query) =>
+        query
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank, `asc`)
+          .limit(1)
+          .select(({ row }) => ({
+            id: row.id,
+            rank: row.rank,
+            keep: row.keep,
+          })),
+      )
+      const publications: Array<Array<PublicPageRow>> = []
+      const subscription = live.subscribeChanges(
+        () => publications.push(live.toArray.map(projectPageRow)),
+        { includeInitialState: false },
+      )
+
+      try {
+        await live.preload()
+        expect(live.toArray.map(projectPageRow)).toEqual([{ id: 1, rank: 0 }])
+        publications.length = 0
+        const loadsBeforeMutation = loads.length
+
+        recovering = true
+        const moved = { id: 1, rank: 10, keep: true }
+        authoritativeRows.set(1, moved)
+        begin()
+        write({ type: `update`, value: { ...moved } })
+        commit()
+        await flushPromises()
+
+        const recoveryLoads = loads.slice(loadsBeforeMutation)
+        expect(recoveryLoads).toHaveLength(1)
+        expect(recoveryLoads[0]?.where).toBeUndefined()
+        expect(recoveryLoads[0]?.limit).toBeUndefined()
+        expect(recoveryLoads[0]?.cursor).toBeUndefined()
+        expect(live.toArray.map(projectPageRow)).toEqual([{ id: 1, rank: 0 }])
+        expect(publications).toEqual([])
+
+        recovery.resolve()
+        await flushPromises()
+
+        if (settlement === `resolve`) {
+          expect(live.toArray.map(projectPageRow)).toEqual([
+            { id: 2, rank: 1 },
+          ])
+          expect(publications).toEqual([[{ id: 2, rank: 1 }]])
+          expect(live.utils.lastSubsetError).toBeUndefined()
+        } else {
+          expect(live.toArray.map(projectPageRow)).toEqual([
+            { id: 1, rank: 0 },
+          ])
+          expect(publications).toEqual([])
+          expect(live.utils.lastSubsetError).toBe(recoveryError)
+        }
+      } finally {
+        recovery.resolve()
+        subscription.unsubscribe()
+        await cleanupAll(live, source)
+      }
+    },
+  )
+
+  it(`does not recover the full source when a visible row keeps its order`, async () => {
+    const loads: Array<LoadSubsetOptions> = []
+    let begin!: () => void
+    let write!: (message: {
+      type: `insert` | `update`
+      value: PageRow
+    }) => void
+    let commit!: () => void
+    const source = createCollection<PageRow>({
+      id: `pagination-stable-order-update-${collectionSequence++}`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (operations) => {
+          begin = operations.begin
+          write = operations.write
+          commit = operations.commit
+          operations.markReady()
+          return {
+            loadSubset: (options: LoadSubsetOptions) => {
+              loads.push(options)
+              begin()
+              write({
+                type: `insert`,
+                value: { id: 1, rank: 0, keep: true },
+              })
+              commit()
+              return true
+            },
+          }
+        },
+      },
+    })
+    const live = createLiveQueryCollection((query) =>
+      query
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank, `asc`)
+        .limit(1),
+    )
+
+    try {
+      await live.preload()
+      const loadsBeforeMutation = loads.length
+      begin()
+      write({ type: `update`, value: { id: 1, rank: 0, keep: false } })
+      commit()
+      await flushPromises()
+
+      expect(
+        live.toArray.map(({ id, rank, keep }) => ({ id, rank, keep })),
+      ).toEqual([{ id: 1, rank: 0, keep: false }])
+      expect(loads).toHaveLength(loadsBeforeMutation)
+    } finally {
+      await cleanupAll(live, source)
+    }
+  })
+
   it.each([
     [`top-one`, [0, 0], { offset: 0, limit: 1 }, 1, 1],
     [`offset`, [0, 0, 1], { offset: 1, limit: 1 }, 2, 2],

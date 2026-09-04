@@ -629,9 +629,14 @@ generation. Cleanup invalidates that generation before adapter teardown, so an
 obsolete replay cannot publish its private rows, report a late error, or emit a
 late `ready` transition even when the transport ignores cancellation.
 Ordinary source mutations stay synchronous except while an initial ordered
-load or imperative window move owns this publication barrier. Mutations that
-arrive during that interval join the private state and publish with the
-completed replacement; a failed move keeps them private until retry or
+load, imperative window move, or asynchronous repair of invalid finite source
+coverage owns this publication barrier. A visible delete or a change to a
+visible row's source-order value can invalidate a provider prefix because a
+hidden row may now belong in the window. That repair loads the authoritative
+source and keeps the last complete public snapshot until it settles; an update
+that compares equal under the source order does not broaden demand. Mutations
+that arrive during a barrier join the private state and publish with the
+completed replacement; a failed operation keeps them private until retry or
 restart. The loader tracks each sequential request as a bounded participant,
 not every recursive suffix of a long refinement chain.
 

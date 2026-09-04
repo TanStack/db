@@ -364,9 +364,13 @@ export class CollectionSubscriber<
       subscription,
       this.alias,
       () => this.biggest,
-      (result) => {
+      (result, holdPublication) => {
         if (result instanceof Promise) {
-          this.collectionConfigBuilder.trackOrderedLoadPromise(result)
+          this.collectionConfigBuilder.trackOrderedLoadPromise(
+            result,
+            holdPublication &&
+              !this.collectionConfigBuilder.hasPendingSourceRecovery(),
+          )
         }
         onLoadSubsetResult(result)
       },
@@ -476,10 +480,13 @@ export class CollectionSubscriber<
     changes: Array<ChangeMessage<any, string | number>>,
     comparator: (a: any, b: any) => number,
   ): void {
-    const invalidatesSourceOrdering = changes.some(
-      (change) =>
-        change.type !== `insert` && this.sentToD2Rows.has(change.key),
-    )
+    const invalidatesSourceOrdering = changes.some((change) => {
+      const previous = this.sentToD2Rows.get(change.key)
+      if (change.type === `insert` || previous === undefined) return false
+      return (
+        change.type === `delete` || comparator(previous, change.value) !== 0
+      )
+    })
     const result = trackBiggestSentValue(
       changes,
       this.biggest,

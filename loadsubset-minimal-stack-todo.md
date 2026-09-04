@@ -1164,6 +1164,13 @@ explicitly removed.
         descending tie witness covers the same missing-prefix class. A changed
         or deleted delivered row now invalidates finite source-order coverage
         and takes the conservative full-source recovery path.
+  - [x] Cross that implicit-key repair with asynchronous success and rejection.
+        A post-ready recovery now joins the ordered publication barrier, so the
+        public query retains its last complete window until the authoritative
+        full-source request succeeds; rejection records the source error and
+        leaves the old window intact. The audit also exposed an over-broad
+        trigger: updates that compare equal under the source order no longer
+        turn a finite lazy demand into a retained full-source demand.
 - [x] Prevent a reentrant truncate started during synchronous replacement
       publication from letting the superseded attempt emit transient `ready`.
       Readiness now requires both zero tracked load participants and zero
