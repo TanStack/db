@@ -1324,7 +1324,13 @@ explicitly removed.
         greens: ordered owner tokens now drive the generated readiness check,
         failure-delivery cleanup cells perform real cleanup, and every async
         settlement checks transient rows, errors, and status instead of only
-        the final state. Ordered authority/barrier generation remains.
+        the final state. A second audit made those repairs independently
+        observable: cleanup cells prove cleanup status and aborts, the async
+        restart model requires every generation-demand acquisition instead of
+        deriving expected coverage from runtime attempts, stale writes are
+        tested against a non-cooperative source, and statistics describe only
+        commands the history actually executes. Ordered authority/barrier
+        generation remains.
   - [x] Catalog all red cells before changing production code. Fix by invalid
         transition class, then rerun the entire matrix after each coherent
         commit. The core slice exposed 15 red cells in five classes: phantom

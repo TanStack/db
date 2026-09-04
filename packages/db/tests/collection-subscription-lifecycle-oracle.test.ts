@@ -123,12 +123,14 @@ const asyncRestartScenarioArbitrary: fc.Arbitrary<AsyncRestartScenario> =
 
 function classifyLifecycleHistory(history: ReadonlyArray<LifecycleCommand>) {
   const owners = new Map<`a` | `b`, number>()
+  const executedTypes = new Set<LifecycleCommand[`type`]>()
   let active = true
   let cleaned = false
   let cleanupThenRestart = false
   let simultaneousDemands = false
   let duplicateDemand = false
   for (const command of history) {
+    executedTypes.add(command.type)
     if (command.type === `request`) {
       const count = owners.get(command.demand) ?? 0
       owners.set(command.demand, count + 1)
@@ -143,22 +145,31 @@ function classifyLifecycleHistory(history: ReadonlyArray<LifecycleCommand>) {
       cleaned = true
     } else if (command.type === `restart` && !active) {
       active = true
-      cleanupThenRestart ||= cleaned
+      cleanupThenRestart ||= cleaned && owners.size > 0
     } else if (command.type === `unsubscribe`) {
       break
     }
   }
-  return { cleanupThenRestart, simultaneousDemands, duplicateDemand }
+  return {
+    executedTypes,
+    cleanupThenRestart,
+    simultaneousDemands,
+    duplicateDemand,
+  }
 }
 
 if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
   fc.statistics(
     lifecycleHistoryArbitrary,
     (history) => {
-      const { cleanupThenRestart, simultaneousDemands, duplicateDemand } =
-        classifyLifecycleHistory(history)
+      const {
+        executedTypes,
+        cleanupThenRestart,
+        simultaneousDemands,
+        duplicateDemand,
+      } = classifyLifecycleHistory(history)
       return [
-        ...new Set(history.map(({ type }) => type)),
+        ...executedTypes,
         `effective-cleanup-restart=${cleanupThenRestart}`,
         `simultaneous-demands=${simultaneousDemands}`,
         `duplicate-demand=${duplicateDemand}`,
@@ -359,7 +370,6 @@ async function runAsyncRestartScenario(
               deferred,
             })
             return deferred.promise.then(() => {
-              if (options.signal?.aborted) return
               operations.begin()
               operations.write({
                 type: `insert`,
@@ -424,6 +434,19 @@ async function runAsyncRestartScenario(
     }
 
     const currentSession = scenario.generationOutcomes.length
+    expect(
+      attempts.map(({ session: attemptSession, demand }) => ({
+        session: attemptSession,
+        demand,
+      })),
+    ).toEqual(
+      Array.from({ length: currentSession + 1 }, (_, attemptSession) =>
+        scenario.demands.map((demand) => ({
+          session: attemptSession,
+          demand,
+        })),
+      ).flat(),
+    )
     const obsolete = attempts.filter(
       ({ session: value }) => value > 0 && value < currentSession,
     )
@@ -734,6 +757,12 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
             : [`loadingSubset`, `ready`]
           : [],
       )
+      if (reentry === `cleanup`) {
+        expect(collection.status).toBe(`cleaned-up`)
+        expect(peerLoad.signal?.aborted).toBe(true)
+        expect(targetLoad.signal?.aborted).toBe(true)
+        expect(subscription.status).toBe(`ready`)
+      }
 
       subscription.unsubscribe()
       await collection.cleanup()
