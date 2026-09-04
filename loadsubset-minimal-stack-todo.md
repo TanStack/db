@@ -1060,6 +1060,23 @@ explicitly removed.
         synchronous request returns and retires an acquisition whose later
         local read or publication fails. Page, prefix, full-source, and boundary
         cells all red/green callback-before-throw ordering.
+  - [x] Mark callback-before-throw failure before retiring its acquisition.
+        Adapter cleanup may reenter `loadMore()`; that nested call must not
+        start recovery before the original request has entered its failure
+        generation. The exact prefix witness failed with a second snapshot;
+        failure state and the request guard now cover provisional retirement.
+  - [ ] Preserve the primary request failure when provisional-acquisition
+        cleanup also throws. The caller, subscription error event, and stored
+        error must report the request failure while the release remains cleanup
+        debt.
+  - [ ] Retire a provisional acquisition when the ordered-loader result
+        observer throws. A throwing publication/listener callback must not
+        leave successful coverage behind or let the queued settlement clear
+        the failure gate.
+  - [ ] Replace the synthetic callback-before-throw page cell with a reachable
+        production integration that throws after adapter startup during local
+        read or publication. Keep direct route cells only for method-selection
+        laws that cannot be observed through the public API.
   - [ ] Replace the direct loader-only route matrix with production-path
         witnesses where practical. The matrix currently proves method choice
         and reentry suppression, but only its page integration exercises
@@ -1074,6 +1091,16 @@ explicitly removed.
         identity back to the loader; replacement releases that lease before it
         starts. A later truncate replays no obsolete cursor, and cleanup
         releases each remaining live lease once.
+  - [ ] Retire a failed logical demand even if truncate has already replaced
+        its physical acquisition object. Cross failure, truncate, explicit
+        retry, and another truncate; the obsolete cursor must not rejoin or
+        veto the successful replacement. Use a stable logical-demand handle.
+  - [ ] Fence explicit retry while failed-acquisition release is in progress.
+        Reentrant `unloadSubset` must not start the replacement before the old
+        release succeeds, and a failed release must leave no replacement work.
+  - [ ] Extend failed-acquisition tests across async page, prefix, full-source,
+        and boundary routes with real acquisition identity, real signal abort,
+        final release counts, and exact replay request traces.
   - [x] Derive the zero-window no-load and readiness-wake expectations from the
         requested limit, not observed load count. Every publication now records
         callback-time status, so only one empty `ready` batch can satisfy the
@@ -1088,10 +1115,6 @@ explicitly removed.
   - [ ] Pin and fix both implicit-public-key tie update failures found by the
         10x state campaign: top-1 equal-rank replacement and offset-1 equal-rank
         replacement must choose the lowest public key after an update.
-  - [ ] Ignore a rejection from an obsolete ordered-loader generation before it
-        invalidates source coverage. A truncate replacement can succeed before
-        an aborted older page rejects; that late rejection must not make the
-        next ordinary source turn start another full-source request.
 - [ ] Prevent a reentrant truncate started during synchronous replacement
       publication from letting the superseded attempt emit transient `ready`.
 - [ ] Close the subscription-teardown follow-up audit:

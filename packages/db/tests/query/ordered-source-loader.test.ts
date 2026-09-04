@@ -171,6 +171,38 @@ describe(`OrderedSourceLoader`, () => {
     },
   )
 
+  it(`blocks retry reentered from provisional acquisition cleanup`, () => {
+    const failure = new Error(`prefix request failed`)
+    const methods: Array<string> = []
+    let fail = true
+    const subscription = {
+      setOrderByIndex: () => {},
+      releaseLoadSubset: () => {
+        loader.loadMore(1)
+      },
+      requestSnapshot: (options: RequestOptions) => {
+        methods.push(`snapshot`)
+        if (!fail) return
+        fail = false
+        options.onLoadSubsetResult?.(true, {})
+        throw failure
+      },
+    } as unknown as CollectionSubscription
+    const loader = new OrderedSourceLoader(
+      createOrderByInfo({ index: undefined }),
+      subscription,
+      `row`,
+      () => undefined,
+    )
+
+    expect(() => loader.start()).toThrow(failure)
+    expect(methods).toEqual([`snapshot`])
+
+    loader.loadMore(2)
+    expect(methods).toEqual([`snapshot`, `snapshot`])
+    loader.dispose()
+  })
+
   it(`blocks a reentrant boundary retry until a later operation`, async () => {
     const failure = new Error(`boundary request failed`)
     const methods: Array<string> = []

@@ -639,15 +639,6 @@ export class OrderedSourceLoader {
     this.needsFullSourceRecovery = true
   }
 
-  private runRequest(request: () => void): void {
-    this.requesting = true
-    try {
-      request()
-    } finally {
-      this.requesting = false
-    }
-  }
-
   /** Observe settlement only after all synchronous request work succeeds. */
   private requestAndObserve(
     request: (
@@ -664,13 +655,21 @@ export class OrderedSourceLoader {
     let observed:
       | { result: LoadSubsetRequestResult; options: LoadSubsetOptions }
       | undefined
+    this.requesting = true
     try {
-      this.runRequest(() => {
-        request((result, options) => {
-          observed = { result, options }
-        })
+      request((result, options) => {
+        observed = { result, options }
       })
     } catch (error) {
+      // Enter failure state before adapter cleanup. Releasing the provisional
+      // acquisition may call back into the graph, but it cannot start a
+      // replacement while the failed request is still unwinding.
+      this.invalidateSourceCoverage()
+      this.failed = true
+      this.failedWindowOperationGeneration = windowOperationGeneration
+      if (isFullSource) {
+        this.fullSourceFailed = true
+      }
       // The acquisition began, but later synchronous snapshot or publication
       // work failed. Retire it without replacing the original failure.
       if (observed) {
@@ -681,6 +680,8 @@ export class OrderedSourceLoader {
         }
       }
       throw error
+    } finally {
+      this.requesting = false
     }
     if (!observed) return
     return this.observe(
