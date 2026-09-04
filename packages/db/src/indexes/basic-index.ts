@@ -1,12 +1,10 @@
+import { compareKeys } from '@tanstack/db-ivm'
 import {
   areSameValueZeroEqual,
   defaultComparator,
   normalizeValue,
 } from '../utils/comparison.js'
-import {
-  deleteInSortedArray,
-  findInsertPositionInArray,
-} from '../utils/array-utils.js'
+import { findInsertPositionInArray } from '../utils/array-utils.js'
 import { BaseIndex } from './base-index.js'
 import type { CompareOptions } from '../query/builder/types.js'
 import type { BasicExpression } from '../query/ir.js'
@@ -94,6 +92,7 @@ export class BasicIndex<
     const normalizedValue = normalizeValue(indexedValue)
 
     this.addToBucket(key, normalizedValue)
+    this.addRangeValue(indexedValue)
 
     this.indexedKeys.add(key)
     this.updateTimestamp()
@@ -138,6 +137,7 @@ export class BasicIndex<
     const normalizedValue = normalizeValue(indexedValue)
 
     this.removeFromBucket(key, normalizedValue)
+    this.removeRangeValue(indexedValue)
 
     this.indexedKeys.delete(key)
     this.updateTimestamp()
@@ -151,7 +151,10 @@ export class BasicIndex<
       if (keySet.size === 0) {
         // No more keys for this value, remove from map and sorted array
         this.valueMap.delete(normalizedValue)
-        deleteInSortedArray(this.sortedValues, normalizedValue, this.compareFn)
+        const sortedIndex = this.sortedValues.findIndex((value) =>
+          areSameValueZeroEqual(value, normalizedValue),
+        )
+        if (sortedIndex !== -1) this.sortedValues.splice(sortedIndex, 1)
       }
     }
   }
@@ -160,27 +163,33 @@ export class BasicIndex<
    * Updates a value in the index
    */
   update(key: TKey, oldItem: any, newItem: any): void {
-    let oldValue: unknown
-    let newValue: unknown
+    let oldIndexedValue: unknown
+    let newIndexedValue: unknown
     try {
-      oldValue = normalizeValue(this.evaluateIndexExpression(oldItem))
-      newValue = normalizeValue(this.evaluateIndexExpression(newItem))
+      oldIndexedValue = this.evaluateIndexExpression(oldItem)
+      newIndexedValue = this.evaluateIndexExpression(newItem)
     } catch {
       this.remove(key, oldItem)
       this.add(key, newItem)
       return
     }
 
+    const oldValue = normalizeValue(oldIndexedValue)
+    const newValue = normalizeValue(newIndexedValue)
     if (
       areSameValueZeroEqual(oldValue, newValue) &&
       this.valueMap.get(newValue)?.has(key) &&
       this.indexedKeys.has(key)
     ) {
+      this.removeRangeValue(oldIndexedValue)
+      this.addRangeValue(newIndexedValue)
       return
     }
 
     this.removeFromBucket(key, oldValue)
+    this.removeRangeValue(oldIndexedValue)
     this.addToBucket(key, newValue)
+    this.addRangeValue(newIndexedValue)
     this.indexedKeys.add(key)
     this.updateTimestamp()
   }
@@ -204,6 +213,7 @@ export class BasicIndex<
         )
       }
       entriesArray.push({ key, value: normalizeValue(indexedValue) })
+      this.addRangeValue(indexedValue)
       this.indexedKeys.add(key)
     }
 
@@ -229,6 +239,7 @@ export class BasicIndex<
     this.valueMap.clear()
     this.sortedValues = []
     this.indexedKeys.clear()
+    this.clearRangeValues()
     this.updateTimestamp()
   }
 
@@ -304,8 +315,9 @@ export class BasicIndex<
         normalizedFrom,
         this.compareFn,
       )
-      // If not inclusive and we found exact match, skip it
-      if (
+      // Comparator-equal values form one range boundary even when they are
+      // distinct equality keys.
+      while (
         !fromInclusive &&
         startIdx < this.sortedValues.length &&
         this.compareFn(this.sortedValues[startIdx], normalizedFrom) === 0
@@ -322,8 +334,8 @@ export class BasicIndex<
         normalizedTo,
         this.compareFn,
       )
-      // If inclusive and we found the value, include it
-      if (
+      // Include the whole comparator group at an inclusive upper boundary.
+      while (
         toInclusive &&
         endIdx < this.sortedValues.length &&
         this.compareFn(this.sortedValues[endIdx], normalizedTo) === 0
@@ -348,32 +360,22 @@ export class BasicIndex<
    */
   rangeQueryReversed(options: RangeQueryOptions = {}): Set<TKey> {
     const { from, to, fromInclusive = true, toInclusive = true } = options
-
-    // Swap from/to and fromInclusive/toInclusive to handle reversed ranges
-    // If to is undefined, we want to start from the end (max value)
-    // If from is undefined, we want to end at the beginning (min value)
-    const swappedFrom =
-      to ??
-      (this.sortedValues.length > 0
-        ? this.sortedValues[this.sortedValues.length - 1]
-        : undefined)
-    const swappedTo =
-      from ?? (this.sortedValues.length > 0 ? this.sortedValues[0] : undefined)
-
-    return this.rangeQuery({
-      from: swappedFrom,
-      to: swappedTo,
-      fromInclusive: toInclusive,
-      toInclusive: fromInclusive,
-    })
+    const reversed: RangeQueryOptions = {}
+    if (`to` in options) {
+      reversed.from = to
+      reversed.fromInclusive = toInclusive
+    }
+    if (`from` in options) {
+      reversed.to = from
+      reversed.toInclusive = fromInclusive
+    }
+    return this.rangeQuery(reversed)
   }
 
   /**
    * Returns the next n items in sorted order
    */
   take(n: number, from?: any, filterFn?: (key: TKey) => boolean): Array<TKey> {
-    const result: Array<TKey> = []
-
     let startIdx = 0
     if (from !== undefined) {
       const normalizedFrom = normalizeValue(from)
@@ -391,23 +393,7 @@ export class BasicIndex<
       }
     }
 
-    for (
-      let i = startIdx;
-      i < this.sortedValues.length && result.length < n;
-      i++
-    ) {
-      const keys = this.valueMap.get(this.sortedValues[i])
-      if (keys) {
-        for (const key of keys) {
-          if (result.length >= n) break
-          if (!filterFn || filterFn(key)) {
-            result.push(key)
-          }
-        }
-      }
-    }
-
-    return result
+    return this.takeFromIndex(n, startIdx, 1, filterFn)
   }
 
   /**
@@ -418,8 +404,6 @@ export class BasicIndex<
     from?: any,
     filterFn?: (key: TKey) => boolean,
   ): Array<TKey> {
-    const result: Array<TKey> = []
-
     let startIdx = this.sortedValues.length - 1
     if (from !== undefined) {
       const normalizedFrom = normalizeValue(from)
@@ -438,38 +422,14 @@ export class BasicIndex<
       }
     }
 
-    for (let i = startIdx; i >= 0 && result.length < n; i--) {
-      const keys = this.valueMap.get(this.sortedValues[i])
-      if (keys) {
-        for (const key of keys) {
-          if (result.length >= n) break
-          if (!filterFn || filterFn(key)) {
-            result.push(key)
-          }
-        }
-      }
-    }
-
-    return result
+    return this.takeFromIndex(n, startIdx, -1, filterFn)
   }
 
   /**
    * Returns the first n items in sorted order (from the start)
    */
   takeFromStart(n: number, filterFn?: (key: TKey) => boolean): Array<TKey> {
-    const result: Array<TKey> = []
-    for (let i = 0; i < this.sortedValues.length && result.length < n; i++) {
-      const keys = this.valueMap.get(this.sortedValues[i])
-      if (keys) {
-        for (const key of keys) {
-          if (result.length >= n) break
-          if (!filterFn || filterFn(key)) {
-            result.push(key)
-          }
-        }
-      }
-    }
-    return result
+    return this.takeFromIndex(n, 0, 1, filterFn)
   }
 
   /**
@@ -479,21 +439,42 @@ export class BasicIndex<
     n: number,
     filterFn?: (key: TKey) => boolean,
   ): Array<TKey> {
+    return this.takeFromIndex(
+      n,
+      this.sortedValues.length - 1,
+      -1,
+      filterFn,
+    )
+  }
+
+  private takeFromIndex(
+    n: number,
+    startIndex: number,
+    step: 1 | -1,
+    filterFn?: (key: TKey) => boolean,
+  ): Array<TKey> {
     const result: Array<TKey> = []
-    for (
-      let i = this.sortedValues.length - 1;
-      i >= 0 && result.length < n;
-      i--
+    let index = startIndex
+    while (
+      index >= 0 &&
+      index < this.sortedValues.length &&
+      result.length < n
     ) {
-      const keys = this.valueMap.get(this.sortedValues[i])
-      if (keys) {
-        for (const key of keys) {
-          if (result.length >= n) break
-          if (!filterFn || filterFn(key)) {
-            result.push(key)
-          }
+      const groupValue = this.sortedValues[index]
+      const groupKeys: Array<TKey> = []
+      do {
+        for (const key of this.valueMap.get(this.sortedValues[index]) ?? []) {
+          if (filterFn?.(key) ?? true) groupKeys.push(key)
         }
-      }
+        index += step
+      } while (
+        index >= 0 &&
+        index < this.sortedValues.length &&
+        this.compareFn(this.sortedValues[index], groupValue) === 0
+      )
+      groupKeys.sort(compareKeys)
+      if (step === -1) groupKeys.reverse()
+      result.push(...groupKeys.slice(0, n - result.length))
     }
     return result
   }

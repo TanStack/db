@@ -1,8 +1,11 @@
-import { describe, expect } from 'vitest'
+import { describe, expect, test } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
+import { compareKeys } from '@tanstack/db-ivm'
 import { BasicIndex } from '../src/indexes/basic-index.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { PropRef } from '../src/query/ir.js'
+import { DEFAULT_COMPARE_OPTIONS } from '../src/utils.js'
+import { makeComparator } from '../src/utils/comparison.js'
 import type { BaseIndex } from '../src/indexes/base-index.js'
 
 type IndexValue = number
@@ -83,7 +86,10 @@ function expectIndexMatchesModel(
 
     expect(index.rangeQuery({ from: boundary })).toEqual(keysAtOrAbove)
     expect(index.rangeQuery({ to: boundary })).toEqual(keysAtOrBelow)
+    expect(index.rangeQueryReversed({ from: boundary })).toEqual(keysAtOrBelow)
+    expect(index.rangeQueryReversed({ to: boundary })).toEqual(keysAtOrAbove)
   }
+  expect(index.rangeQueryReversed()).toEqual(new Set(rows.keys()))
 }
 
 describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
@@ -123,9 +129,37 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
       expectIndexMatchesModel(rebuilt, rows)
     },
   )
+
+  test(`tracks range-domain safety through updates, rebuilds, and clear`, () => {
+    const index = new IndexType(1, new PropRef([`value`]))
+    const other = [20]
+
+    index.add(`number`, { value: 50 })
+    expect(index.canOptimizeRangeFor(100)).toBe(true)
+
+    index.add(`other`, { value: other })
+    expect(index.canOptimizeRangeFor(100)).toBe(false)
+
+    index.update(`other`, { value: other }, { value: 20 })
+    expect(index.canOptimizeRangeFor(100)).toBe(true)
+
+    index.update(`number`, { value: 50 }, { value: new Date(50) })
+    expect(index.canOptimizeRangeFor(100)).toBe(false)
+    index.remove(`other`, { value: 20 })
+    expect(index.canOptimizeRangeFor(new Date(100))).toBe(true)
+
+    index.clear()
+    expect(index.canOptimizeRangeFor(100)).toBe(true)
+
+    index.build([
+      [`number`, { value: 50 }],
+      [`other`, { value: [20] }],
+    ])
+    expect(index.canOptimizeRangeFor(100)).toBe(false)
+  })
 })
 
-describe(`BTreeIndex comparator groups`, () => {
+describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
   fcTest.prop([
     fc.array(fc.integer({ min: 0, max: 4 }), {
       minLength: 2,
@@ -144,30 +178,74 @@ describe(`BTreeIndex comparator groups`, () => {
           groupId,
         }
       })
-      const index = new BTreeIndex<string>(1, new PropRef([`value`]))
+      const index = new IndexType(1, new PropRef([`value`]))
 
-      for (const row of rows) {
-        index.add(row.key, row)
-      }
-
-      const expectedKeys = new Set(rows.map((row) => row.key))
-      expect(new Set(index.takeFromStart(rows.length))).toEqual(expectedKeys)
-      expect(new Set(index.takeReversedFromEnd(rows.length))).toEqual(
-        expectedKeys,
-      )
-
-      for (const row of rows) {
-        expect(index.equalityLookup(row.value)).toEqual(new Set([row.key]))
-        expect(
-          index.rangeQuery({ from: row.value, to: row.value }),
-        ).toEqual(
-          new Set(
-            rows
-              .filter((candidate) => candidate.groupId === row.groupId)
-              .map((candidate) => candidate.key),
-          ),
+      const expectMatchesModel = (
+        subject: BaseIndex<string>,
+        currentRows: typeof rows,
+      ) => {
+        const groups = new Map<number, typeof rows>()
+        for (const row of currentRows) {
+          const group = groups.get(row.groupId) ?? []
+          group.push(row)
+          groups.set(row.groupId, group)
+        }
+        const compare = makeComparator(DEFAULT_COMPARE_OPTIONS)
+        const orderedGroups = [...groups.values()].sort((left, right) =>
+          compare(left[0]!.value, right[0]!.value),
         )
+        const forward = orderedGroups.flatMap((group) =>
+          group.map((row) => row.key).sort(compareKeys),
+        )
+        const reversed = [...orderedGroups].reverse().flatMap((group) =>
+          group
+            .map((row) => row.key)
+            .sort(compareKeys)
+            .reverse(),
+        )
+
+        expect(subject.takeFromStart(currentRows.length)).toEqual(forward)
+        expect(subject.takeReversedFromEnd(currentRows.length)).toEqual(
+          reversed,
+        )
+        for (const [representative, keys] of subject.orderedEntriesArray) {
+          expect(
+            currentRows.some(
+              (row) => row.value === representative && keys.has(row.key),
+            ),
+          ).toBe(true)
+        }
+        for (const row of currentRows) {
+          expect(subject.equalityLookup(row.value)).toEqual(new Set([row.key]))
+          expect(
+            subject.rangeQuery({ from: row.value, to: row.value }),
+          ).toEqual(
+            new Set(
+              currentRows
+                .filter((candidate) => candidate.groupId === row.groupId)
+                .map((candidate) => candidate.key),
+            ),
+          )
+        }
       }
+
+      for (const row of rows) index.add(row.key, row)
+      expectMatchesModel(index, rows)
+
+      const removed = rows.shift()!
+      index.remove(removed.key, removed)
+      expectMatchesModel(index, rows)
+
+      const changed = rows[0]!
+      const previous = { ...changed }
+      changed.groupId = 99
+      changed.value = [Symbol(`updated`)]
+      index.update(changed.key, previous, changed)
+      expectMatchesModel(index, rows)
+
+      const rebuilt = new IndexType(2, new PropRef([`value`]))
+      rebuilt.build(rows.map((row) => [row.key, row]))
+      expectMatchesModel(rebuilt, rows)
     },
   )
 })

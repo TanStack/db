@@ -924,6 +924,32 @@ explicitly removed.
       and bounded range traversal together. The scan/index and comparator-group
       regressions failed before the fixes; 160 focused index, ordering, and
       routed-value tests plus the DB build are green.
+- [x] Close the index audit's lifecycle and mixed-domain gaps. Basic and B-tree
+      indexes now keep every comparator-equal value in stable public-key order,
+      replace a retired B-tree representative with a live exact value, and
+      translate open-ended reversed ranges without inventing opposite bounds.
+      A small live-domain summary disables range optimization when the bound
+      and stored values do not share relational ordering. Generated add,
+      update, remove, rebuild, reverse-range, and comparator-group laws plus
+      both index implementations' mixed-domain scan regressions pass 87 focused
+      tests; the DB build and changed-file lint are green.
+- [ ] Repair the retained ordered-pagination path that repeats a
+      comparator-equal boundary group on the third local page. The existing
+      eager-index regression fails at parent commit `80563ee9`, so the broader
+      load-subset stack introduced it before the current index-audit fixes.
+- [ ] Normalize a primitive rejection once per shared physical load promise so
+      all logical demands, completion state, and `lastError` expose one Error
+      object.
+- [ ] Prevent reentrant specific-status listeners from delivering a stale
+      status event to later listeners.
+- [ ] Prevent a reentrant truncate started during synchronous replacement
+      publication from letting the superseded attempt emit transient `ready`.
+- [ ] Reconcile the joined-recovery readiness wording with the public
+      multi-source barrier: a single source can become ready before the joined
+      replacement is public.
+- [ ] Finish the functional-projection boundary matrix: initial placeholders,
+      recursive and union sources, ready facades in callbacks, derived scalar
+      behavior, and opaque callback roots.
 - [ ] Ask multiple fresh reviewers for final coherence, hostile-assay, and
       loss-audit passes.
 - [ ] Update RFC/PR text and changeset to match the final design.

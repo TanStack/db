@@ -188,7 +188,8 @@ function canRangeOptimize(
 ): boolean {
   return (
     !isRangeOrderingDivergent(value, collection) &&
-    index.supportsRangeOptimization
+    index.supportsRangeOptimization &&
+    (index.canOptimizeRangeFor?.(value) ?? true)
   )
 }
 

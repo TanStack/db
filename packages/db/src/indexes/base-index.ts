@@ -100,6 +100,13 @@ export interface IndexInterface<
    */
   get supportsRangeOptimization(): boolean
 
+  /**
+   * Whether the live values in this index share the predicate operand's
+   * relational domain. Mixed domains can sort differently in the index and
+   * WHERE evaluator, which can make a range lookup omit matching rows.
+   */
+  canOptimizeRangeFor?: (value: unknown) => boolean
+
   matchesField: (fieldPath: Array<string>) => boolean
   matchesCompareOptions: (compareOptions: CompareOptions) => boolean
   matchesDirection: (direction: OrderByDirection) => boolean
@@ -128,6 +135,7 @@ export abstract class BaseIndex<
    * ordering may not match the WHERE evaluator's relational operators.
    */
   protected hasCustomComparator = false
+  private rangeValueDomains = new Map<string, number>()
 
   constructor(
     id: number,
@@ -184,6 +192,37 @@ export abstract class BaseIndex<
 
   get supportsRangeOptimization(): boolean {
     return !this.hasCustomComparator
+  }
+
+  protected addRangeValue(value: unknown): void {
+    const domain = rangeValueDomain(value)
+    if (domain === undefined) return
+    this.rangeValueDomains.set(
+      domain,
+      (this.rangeValueDomains.get(domain) ?? 0) + 1,
+    )
+  }
+
+  protected removeRangeValue(value: unknown): void {
+    const domain = rangeValueDomain(value)
+    if (domain === undefined) return
+    const count = this.rangeValueDomains.get(domain)
+    if (count === undefined) return
+    if (count === 1) this.rangeValueDomains.delete(domain)
+    else this.rangeValueDomains.set(domain, count - 1)
+  }
+
+  protected clearRangeValues(): void {
+    this.rangeValueDomains.clear()
+  }
+
+  canOptimizeRangeFor(value: unknown): boolean {
+    const domain = rangeValueDomain(value)
+    if (domain === undefined) return true
+    if (!isNativeRangeDomain(domain)) return false
+    return [...this.rangeValueDomains.keys()].every(
+      (storedDomain) => storedDomain === domain,
+    )
   }
 
   matchesField(fieldPath: Array<string>): boolean {
@@ -258,6 +297,22 @@ export abstract class BaseIndex<
   protected updateTimestamp(): void {
     this.lastUpdated = new Date()
   }
+}
+
+function rangeValueDomain(value: unknown): string | undefined {
+  if (value == null) return undefined
+  if (value instanceof Date) return `date`
+  return typeof value
+}
+
+function isNativeRangeDomain(domain: string): boolean {
+  return (
+    domain === `number` ||
+    domain === `bigint` ||
+    domain === `boolean` ||
+    domain === `string` ||
+    domain === `date`
+  )
 }
 
 /**

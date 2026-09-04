@@ -29,6 +29,12 @@ export interface RangeQueryOptions {
   toInclusive?: boolean
 }
 
+type OrderedBucket<TKey> = {
+  representative: unknown
+  exactValues: Set<unknown>
+  keys: Set<TKey>
+}
+
 /**
  * B+Tree index for sorted data with range queries
  * This maintains items in sorted order and provides efficient range operations
@@ -48,7 +54,7 @@ export class BTreeIndex<
   // Internal data structures - private to hide implementation details
   // The `orderedEntries` B+ tree groups values that occupy the same comparator
   // position. The `valueMap` keeps exact values separate for equality lookups.
-  private orderedEntries: BTree<any, Set<TKey>>
+  private orderedEntries: BTree<any, OrderedBucket<TKey>>
   private valueMap = new Map<any, Set<TKey>>()
   private indexedKeys = new Set<TKey>()
   private compareFn: (a: any, b: any) => number = defaultComparator
@@ -96,6 +102,7 @@ export class BTreeIndex<
     const normalizedValue = normalizeForBTree(indexedValue)
 
     this.addToBucket(key, normalizedValue)
+    this.addRangeValue(indexedValue)
 
     this.indexedKeys.add(key)
     this.updateTimestamp()
@@ -103,17 +110,23 @@ export class BTreeIndex<
 
   private addToBucket(key: TKey, normalizedValue: unknown): void {
     const keySet = this.valueMap.get(normalizedValue)
+    const isNewExactValue = keySet === undefined
     if (keySet) {
       keySet.add(key)
     } else {
       this.valueMap.set(normalizedValue, new Set([key]))
     }
 
-    const orderedKeySet = this.orderedEntries.get(normalizedValue)
-    if (orderedKeySet) {
-      orderedKeySet.add(key)
+    const orderedBucket = this.orderedEntries.get(normalizedValue)
+    if (orderedBucket) {
+      orderedBucket.keys.add(key)
+      if (isNewExactValue) orderedBucket.exactValues.add(normalizedValue)
     } else {
-      this.orderedEntries.set(normalizedValue, new Set([key]))
+      this.orderedEntries.set(normalizedValue, {
+        representative: normalizedValue,
+        exactValues: new Set([normalizedValue]),
+        keys: new Set([key]),
+      })
     }
   }
 
@@ -136,6 +149,7 @@ export class BTreeIndex<
     const normalizedValue = normalizeForBTree(indexedValue)
 
     this.removeFromBucket(key, normalizedValue)
+    this.removeRangeValue(indexedValue)
 
     this.indexedKeys.delete(key)
     this.updateTimestamp()
@@ -143,18 +157,31 @@ export class BTreeIndex<
 
   private removeFromBucket(key: TKey, normalizedValue: unknown): void {
     const keySet = this.valueMap.get(normalizedValue)
+    let removedExactValue = false
     if (keySet) {
       keySet.delete(key)
 
       if (keySet.size === 0) {
         this.valueMap.delete(normalizedValue)
+        removedExactValue = true
       }
     }
 
-    const orderedKeySet = this.orderedEntries.get(normalizedValue)
-    orderedKeySet?.delete(key)
-    if (orderedKeySet?.size === 0) {
+    const orderedBucket = this.orderedEntries.get(normalizedValue)
+    if (!orderedBucket) return
+    orderedBucket.keys.delete(key)
+    if (removedExactValue) orderedBucket.exactValues.delete(normalizedValue)
+
+    if (orderedBucket.keys.size === 0) {
       this.orderedEntries.delete(normalizedValue)
+    } else if (
+      removedExactValue &&
+      areSameValueZeroEqual(orderedBucket.representative, normalizedValue)
+    ) {
+      this.orderedEntries.delete(normalizedValue)
+      const representative = orderedBucket.exactValues.values().next().value
+      orderedBucket.representative = representative
+      this.orderedEntries.set(representative, orderedBucket)
     }
   }
 
@@ -162,26 +189,32 @@ export class BTreeIndex<
    * Updates a value in the index
    */
   update(key: TKey, oldItem: any, newItem: any): void {
-    let oldValue: unknown
-    let newValue: unknown
+    let oldIndexedValue: unknown
+    let newIndexedValue: unknown
     try {
-      oldValue = normalizeForBTree(this.evaluateIndexExpression(oldItem))
-      newValue = normalizeForBTree(this.evaluateIndexExpression(newItem))
+      oldIndexedValue = this.evaluateIndexExpression(oldItem)
+      newIndexedValue = this.evaluateIndexExpression(newItem)
     } catch {
       this.remove(key, oldItem)
       this.add(key, newItem)
       return
     }
 
+    const oldValue = normalizeForBTree(oldIndexedValue)
+    const newValue = normalizeForBTree(newIndexedValue)
     if (
       areSameValueZeroEqual(oldValue, newValue) &&
       this.valueMap.get(newValue)?.has(key)
     ) {
+      this.removeRangeValue(oldIndexedValue)
+      this.addRangeValue(newIndexedValue)
       return
     }
 
     this.removeFromBucket(key, oldValue)
+    this.removeRangeValue(oldIndexedValue)
     this.addToBucket(key, newValue)
+    this.addRangeValue(newIndexedValue)
     this.indexedKeys.add(key)
     this.updateTimestamp()
   }
@@ -204,6 +237,7 @@ export class BTreeIndex<
     this.orderedEntries.clear()
     this.valueMap.clear()
     this.indexedKeys.clear()
+    this.clearRangeValues()
     this.updateTimestamp()
   }
 
@@ -281,7 +315,7 @@ export class BTreeIndex<
       fromKey,
       toKey,
       toInclusive,
-      (indexedValue, keys) => {
+      (indexedValue, bucket) => {
         // Only exclude the boundary when an exclusive lower bound was
         // actually provided. Without a `from` bound, `fromKey` defaults to
         // the minimum key and must not be dropped. Compare against the
@@ -297,7 +331,7 @@ export class BTreeIndex<
           return
         }
 
-        keys.forEach((key) => result.add(key))
+        bucket.keys.forEach((key) => result.add(key))
       },
     )
 
@@ -309,16 +343,16 @@ export class BTreeIndex<
    */
   rangeQueryReversed(options: RangeQueryOptions = {}): Set<TKey> {
     const { from, to, fromInclusive = true, toInclusive = true } = options
-    const hasFrom = `from` in options
-    const hasTo = `to` in options
-
-    // Swap from/to for reversed query, respecting explicit undefined values
-    return this.rangeQuery({
-      from: hasTo ? to : this.orderedEntries.maxKey(),
-      to: hasFrom ? from : this.orderedEntries.minKey(),
-      fromInclusive: toInclusive,
-      toInclusive: fromInclusive,
-    })
+    const reversed: RangeQueryOptions = {}
+    if (`to` in options) {
+      reversed.from = to
+      reversed.fromInclusive = toInclusive
+    }
+    if (`from` in options) {
+      reversed.to = from
+      reversed.toInclusive = fromInclusive
+    }
+    return this.rangeQuery(reversed)
   }
 
   /**
@@ -331,19 +365,19 @@ export class BTreeIndex<
    */
   private takeInternal(
     n: number,
-    nextPair: (k?: any) => [any, Set<TKey>] | undefined,
+    nextPair: (k?: any) => [any, OrderedBucket<TKey>] | undefined,
     from: any,
     filterFn?: (key: TKey) => boolean,
     reversed: boolean = false,
   ): Array<TKey> {
     const keysInResult: Set<TKey> = new Set()
     const result: Array<TKey> = []
-    let pair: [any, Set<TKey>] | undefined
+    let pair: [any, OrderedBucket<TKey>] | undefined
     let key = from // Use as-is - it's already normalized by the caller
 
     while ((pair = nextPair(key)) !== undefined && result.length < n) {
       key = pair[0]
-      const keys = pair[1]
+      const keys = pair[1].keys
       // Sort keys for deterministic order, reverse if needed
       const sorted = Array.from(keys).sort(compareKeys)
       if (reversed) sorted.reverse()
@@ -443,7 +477,7 @@ export class BTreeIndex<
       .keysArray()
       .map((key) => [
         denormalizeUndefined(key),
-        this.orderedEntries.get(key) ?? new Set(),
+        this.orderedEntries.get(key)?.keys ?? new Set(),
       ])
   }
 
@@ -453,7 +487,7 @@ export class BTreeIndex<
       .reverse()
       .map((key) => [
         denormalizeUndefined(key),
-        this.orderedEntries.get(key) ?? new Set(),
+        this.orderedEntries.get(key)?.keys ?? new Set(),
       ])
   }
 

@@ -14,6 +14,7 @@ import {
   or,
 } from '../src/query/builder/functions'
 import { PropRef } from '../src/query/ir'
+import { BasicIndex } from '../src/indexes/basic-index.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { DEFAULT_COMPARE_OPTIONS } from '../src/utils.js'
 import { findIndexForField } from '../src/utils/index-optimization.js'
@@ -1618,6 +1619,65 @@ describe(`Collection Indexes`, () => {
         })
       })
     })
+
+    it.each(
+      [BasicIndex, BTreeIndex].flatMap((IndexType) => [
+        {
+          name: `a symbol row under a numeric lower bound`,
+          IndexType,
+          rows: [
+            { id: `number`, value: 1 as unknown },
+            { id: `other`, value: Symbol(`other`) as unknown },
+          ],
+          where: gt(new PropRef([`value`]), 0),
+        },
+        {
+          name: `an array row under a numeric upper bound`,
+          IndexType,
+          rows: [
+            { id: `number`, value: 50 as unknown },
+            { id: `other`, value: [20] as unknown },
+          ],
+          where: lt(new PropRef([`value`]), 100),
+        },
+      ]),
+    )(
+      `should scan mixed domains for $name with $IndexType.name`,
+      async ({ rows, where, IndexType }) => {
+        const mixedCollection = createCollection<
+          { id: string; value: unknown },
+          string
+        >({
+          getKey: (row) => row.id,
+          startSync: true,
+          autoIndex: `off`,
+          defaultIndexType: IndexType,
+          sync: {
+            sync: ({ begin, write, commit, markReady }) => {
+              begin()
+              for (const value of rows) write({ type: `insert`, value })
+              commit()
+              markReady()
+            },
+          },
+        })
+        await mixedCollection.stateWhenReady()
+
+        const scanned = mixedCollection.currentStateAsChanges({ where })!
+        mixedCollection.createIndex((row) => row.value)
+
+        withIndexTracking(mixedCollection, (tracker) => {
+          const indexed = mixedCollection.currentStateAsChanges({ where })!
+          expect(indexed.map((change) => change.key).sort()).toEqual(
+            scanned.map((change) => change.key).sort(),
+          )
+          expectIndexUsage(tracker.stats, {
+            shouldUseIndex: false,
+            shouldUseFullScan: true,
+          })
+        })
+      },
+    )
 
     it(`should retain every row whose index values share one comparator position`, async () => {
       const shared = Symbol(`shared`)

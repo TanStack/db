@@ -143,9 +143,11 @@ Tree indexes give symbols a stable runtime-local order because JavaScript
 relational comparison throws for them; comparator equality still holds only
 for the same symbol. That order is a physical index detail: symbol range
 predicates fall back to the evaluator instead of treating it as query
-semantics. An ordered index groups exact value buckets that compare at the same
-position, so range traversal and ordered limits cannot drop rows whose distinct
-values are comparator-equal.
+semantics. Range predicates also fall back when the live indexed values do not
+share the bound's relational domain. An ordered index groups exact value
+buckets that compare at the same position and keeps a live representative for
+each group, so range traversal and ordered limits cannot drop rows whose
+distinct values are comparator-equal.
 Compiler tokens belong to one compiled graph. This keeps every operator in the
 graph on the same identity relation. Objects, functions, and local symbols are
 weakly keyed where the runtime supports weak symbol keys. Older runtimes retain

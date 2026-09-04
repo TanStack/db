@@ -77,6 +77,10 @@ export class ReverseIndex<
     return this.originalIndex.supportsRangeOptimization
   }
 
+  canOptimizeRangeFor(value: unknown): boolean {
+    return this.originalIndex.canOptimizeRangeFor?.(value) ?? true
+  }
+
   matchesField(fieldPath: Array<string>): boolean {
     return this.originalIndex.matchesField(fieldPath)
   }
