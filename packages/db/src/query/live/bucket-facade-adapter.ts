@@ -5,7 +5,10 @@ import {
   INCLUDES_ROUTING,
   transformPublicContainers,
 } from '../compiler/route-metadata.js'
-import { BUCKET_FACADE_REF } from './materialized-pipeline.js'
+import {
+  BUCKET_FACADE_REF,
+  runIncludesFnSelect,
+} from './materialized-pipeline.js'
 import type { Collection } from '../../collection/index.js'
 import type { SyncConfig } from '../../types.js'
 import type { PublicationDeferral } from '../../collection/changes.js'
@@ -13,6 +16,7 @@ import type {
   BucketFacadeCompilation,
   BucketFacadeRef,
   BucketRow,
+  FnSelectState,
 } from './materialized-pipeline.js'
 
 const PRIVATE_RESULT_KEYS = new Set<PropertyKey>([
@@ -483,6 +487,18 @@ export class BucketFacadeAdapter {
         this.getEntry(edgeId, bucketKey).collection
       this.resolvedValues.set(value, facade)
       return facade
+    }
+    const fnSelectState = (value as Record<PropertyKey, unknown>)[
+      FN_SELECT_STATE
+    ] as FnSelectState | undefined
+    if (fnSelectState?.deferUntilFacade) {
+      const sourceRow = this.resolveValue(fnSelectState.sourceRow) as Record<
+        PropertyKey,
+        any
+      >
+      const selected = runIncludesFnSelect(fnSelectState, sourceRow, value)
+      this.resolvedValues.set(value, selected)
+      return selected
     }
     if (Array.isArray(value) || isPlainObject(value)) {
       const result = transformPublicContainers(

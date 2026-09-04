@@ -42,9 +42,10 @@ type IncludeRoute = {
   parentContext: Record<string, any> | null
 }
 
-type FnSelectState = {
+export type FnSelectState = {
   sourceRow: Record<PropertyKey, any>
   fnSelect: (row: any) => unknown
+  deferUntilFacade?: boolean
 }
 
 type CanonicalResult = {
@@ -540,6 +541,28 @@ function setMaterializedInclude(
   if (!state) return setNestedValue(value, path, materialized)
 
   const sourceRow = setNestedValue(state.sourceRow, path, materialized)
+  const deferUntilFacade =
+    state.deferUntilFacade === true || isBucketFacadeRef(materialized)
+  const selected = deferUntilFacade
+    ? Array.isArray(value)
+      ? [...value]
+      : { ...value }
+    : runIncludesFnSelect(state, sourceRow, value)
+  selected[INCLUDES_ROUTING] = value[INCLUDES_ROUTING]
+  Object.defineProperty(selected, FN_SELECT_STATE, {
+    value: { sourceRow, fnSelect: state.fnSelect, deferUntilFacade },
+    enumerable: true,
+    configurable: true,
+  })
+  return selected
+}
+
+/** Run a deferred functional projection after its include values are public. */
+export function runIncludesFnSelect(
+  state: FnSelectState,
+  sourceRow: Record<PropertyKey, any>,
+  previousValue: Record<PropertyKey, any>,
+): Record<PropertyKey, any> {
   const selectedValue = state.fnSelect(stripInternalCallbackMetadata(sourceRow))
   validateFnSelectResult(selectedValue)
   if (!selectedValue || typeof selectedValue !== `object`) {
@@ -550,15 +573,15 @@ function setMaterializedInclude(
     ? [...selectedValue]
     : { ...selectedValue }
   for (const property of VIRTUAL_PROP_NAMES) {
-    if (property in value && !(property in selected)) {
-      selected[property] = value[property]
+    if (property in previousValue && !(property in selected)) {
+      selected[property] = previousValue[property]
     }
   }
-  selected[INCLUDES_ROUTING] = value[INCLUDES_ROUTING]
-  Object.defineProperty(selected, FN_SELECT_STATE, {
-    value: { sourceRow, fnSelect: state.fnSelect },
-    enumerable: true,
-    configurable: true,
-  })
   return selected
+}
+
+function isBucketFacadeRef(value: unknown): value is BucketFacadeRef {
+  return (
+    value !== null && typeof value === `object` && BUCKET_FACADE_REF in value
+  )
 }

@@ -869,6 +869,12 @@ explicitly removed.
       equal hashes for separately allocated equal cycles instead of overflowing
       when an enumerable symbol is the back-edge. The regression failed before
       the fix and the full 330-test db-ivm suite is green.
+- [x] Defer functional projections over bare Collection includes until bucket
+      references become public facades. The callback can now return an opaque
+      wrapper around the Collection without retaining compiler state; child
+      updates stay on the stable facade and route moves produce a new facade.
+      The exact union regression failed before the fix, and all nine includes
+      oracle suites pass 343 tests with no type errors.
 - [ ] Ask multiple fresh reviewers for final coherence, hostile-assay, and
       loss-audit passes.
 - [ ] Update RFC/PR text and changeset to match the final design.

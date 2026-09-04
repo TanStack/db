@@ -232,6 +232,14 @@ state. This avoids reserving user aliases or selected field names while keeping
 the context stable across D2 operators without collapsing two
 reference-sensitive leaf values that happen to have the same object shape.
 
+A functional projection that consumes a Collection-valued include is deferred
+until the facade adapter has replaced every inert bucket reference with its
+public Collection. D2 retains the source row and route as private projection
+state, so route changes still retract the right graph value. The callback may
+then wrap or pass through the Collection without capturing compiler state;
+child-only changes continue through that stable facade without republishing the
+parent.
+
 Every valid plan is checked as a Collection, `toArray`, and `materialize`
 include at initial load, after a parent-route update, and after a child update.
 The grammar declarations generate the cases; individual reported defects do
