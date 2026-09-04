@@ -1054,9 +1054,11 @@ explicitly removed.
   - [ ] Queue or reject a new explicit window operation started reentrantly
         inside the adapter request. It must not return success after the loader
         drops its work merely because another request is still on the stack.
-  - [ ] Ignore a successful result callback when the surrounding snapshot call
-        later throws. Callback-before-throw must not erase the failure or allow
-        an ordinary graph turn to retry it.
+  - [x] Ignore a successful result callback when the surrounding snapshot call
+        later throws. The loader now observes settlement only after the full
+        synchronous request returns and retires an acquisition whose later
+        local read or publication fails. Page, prefix, full-source, and boundary
+        cells all red/green callback-before-throw ordering.
   - [ ] Replace the direct loader-only route matrix with production-path
         witnesses where practical. The matrix currently proves method choice
         and reentry suppression, but only its page integration exercises

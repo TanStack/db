@@ -379,22 +379,19 @@ export class OrderedSourceLoader {
     this.fullSourceFailed = false
     this.fullSource = true
     try {
-      this.runRequest(() => {
-        this.subscription.requestSnapshot({
-          trackLoadSubsetPromise: false,
-          replaceExistingDemand,
-          onLoadSubsetResult: (result, options) => {
-            this.observe(
-              result,
-              options,
-              false,
-              true,
-              true,
-              windowOperationGeneration,
-            )
-          },
-        })
-      })
+      this.requestAndObserve(
+        (onLoadSubsetResult) => {
+          this.subscription.requestSnapshot({
+            trackLoadSubsetPromise: false,
+            replaceExistingDemand,
+            onLoadSubsetResult,
+          })
+        },
+        false,
+        true,
+        true,
+        windowOperationGeneration,
+      )
     } catch (error) {
       this.invalidateSourceCoverage()
       this.fullSource = false
@@ -418,22 +415,20 @@ export class OrderedSourceLoader {
       return
     }
     try {
-      this.runRequest(() => {
-        this.subscription.requestSnapshot({
-          orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
-          limit: count,
-          trackLoadSubsetPromise: false,
-          onLoadSubsetResult: (result, options) =>
-            this.observe(
-              result,
-              options,
-              refine,
-              false,
-              true,
-              windowOperationGeneration,
-            ),
-        })
-      })
+      this.requestAndObserve(
+        (onLoadSubsetResult) => {
+          this.subscription.requestSnapshot({
+            orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
+            limit: count,
+            trackLoadSubsetPromise: false,
+            onLoadSubsetResult,
+          })
+        },
+        refine,
+        false,
+        true,
+        windowOperationGeneration,
+      )
     } catch (error) {
       this.invalidateSourceCoverage()
       this.failed = true
@@ -500,26 +495,24 @@ export class OrderedSourceLoader {
     }
     this.lastPage = { count, boundary }
     try {
-      this.runRequest(() => {
-        this.subscription.requestLimitedSnapshot({
-          orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
-          limit: count,
-          minValues,
-          // Local rows seen before the first provider request prove neither a
-          // cursor nor a remote offset. Start the first acquisition at zero.
-          offset: startsFromSourcePrefix ? 0 : undefined,
-          trackLoadSubsetPromise: false,
-          onLoadSubsetResult: (result, options) =>
-            this.observe(
-              result,
-              options,
-              refine,
-              false,
-              true,
-              windowOperationGeneration,
-            ),
-        })
-      })
+      this.requestAndObserve(
+        (onLoadSubsetResult) => {
+          this.subscription.requestLimitedSnapshot({
+            orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
+            limit: count,
+            minValues,
+            // Local rows seen before the first provider request prove neither
+            // a cursor nor a remote offset. Start the first acquisition at zero.
+            offset: startsFromSourcePrefix ? 0 : undefined,
+            trackLoadSubsetPromise: false,
+            onLoadSubsetResult,
+          })
+        },
+        refine,
+        false,
+        true,
+        windowOperationGeneration,
+      )
     } catch (error) {
       this.invalidateSourceCoverage()
       this.failed = true
@@ -560,10 +553,11 @@ export class OrderedSourceLoader {
       this.loadMore()
     }
     const request = result instanceof Promise ? result : Promise.resolve()
-    const tracked = request
-      .then(complete)
-      .then(() => undefined)
-      .catch((error: unknown) => {
+    const tracked = request.then(
+      () => {
+        complete()
+      },
+      (error: unknown) => {
         if (this.pending === tracked) this.pending = undefined
         if (!this.active) return
         // A failed request may already have written only part of its result.
@@ -584,7 +578,8 @@ export class OrderedSourceLoader {
         this.hasLastBoundary = false
         this.lastBoundary = undefined
         throw error
-      })
+      },
+    )
     this.pending = tracked
     // Register each request separately. The operation tracker observes the
     // next request before this promise settles, so the logical chain remains
@@ -615,31 +610,28 @@ export class OrderedSourceLoader {
     }
     this.hasLastBoundary = true
     this.lastBoundary = value
-    let tracked: Promise<void> | undefined
     try {
-      this.runRequest(() => {
-        this.subscription.requestSnapshot({
-          where,
-          trackLoadSubsetPromise: false,
-          onLoadSubsetResult: (result, options) => {
-            tracked = this.observe(
-              result,
-              options,
-              false,
-              false,
-              false,
-              windowOperationGeneration,
-            )
-          },
-        })
-      })
+      return this.requestAndObserve(
+        (onLoadSubsetResult) => {
+          this.subscription.requestSnapshot({
+            where,
+            trackLoadSubsetPromise: false,
+            onLoadSubsetResult,
+          })
+        },
+        false,
+        false,
+        false,
+        windowOperationGeneration,
+      )
     } catch (error) {
       this.invalidateSourceCoverage()
       this.hasLastBoundary = false
       this.lastBoundary = undefined
+      this.failed = true
+      this.failedWindowOperationGeneration = windowOperationGeneration
       throw error
     }
-    return tracked
   }
 
   private invalidateSourceCoverage(): void {
@@ -654,5 +646,50 @@ export class OrderedSourceLoader {
     } finally {
       this.requesting = false
     }
+  }
+
+  /** Observe settlement only after all synchronous request work succeeds. */
+  private requestAndObserve(
+    request: (
+      onResult: (
+        result: LoadSubsetRequestResult,
+        options: LoadSubsetOptions,
+      ) => void,
+    ) => void,
+    refine: boolean,
+    isFullSource: boolean,
+    establishesSourceCoverage: boolean,
+    windowOperationGeneration?: number,
+  ): Promise<void> | undefined {
+    let observed:
+      | { result: LoadSubsetRequestResult; options: LoadSubsetOptions }
+      | undefined
+    try {
+      this.runRequest(() => {
+        request((result, options) => {
+          observed = { result, options }
+        })
+      })
+    } catch (error) {
+      // The acquisition began, but later synchronous snapshot or publication
+      // work failed. Retire it without replacing the original failure.
+      if (observed) {
+        try {
+          this.subscription.releaseLoadSubset(observed.options)
+        } catch {
+          // releaseLoadSubset retains cleanup debt for a later retry.
+        }
+      }
+      throw error
+    }
+    if (!observed) return
+    return this.observe(
+      observed.result,
+      observed.options,
+      refine,
+      isFullSource,
+      establishesSourceCoverage,
+      windowOperationGeneration,
+    )
   }
 }

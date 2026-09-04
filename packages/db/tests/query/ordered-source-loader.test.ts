@@ -3,6 +3,17 @@ import { OrderedSourceLoader } from '../../src/query/live/utils.js'
 import { PropRef } from '../../src/query/ir.js'
 import type { CollectionSubscription } from '../../src/collection/subscription.js'
 import type { OrderByOptimizationInfo } from '../../src/query/compiler/order-by.js'
+import type {
+  LoadSubsetOptions,
+  LoadSubsetRequestResult,
+} from '../../src/types.js'
+
+type RequestOptions = {
+  onLoadSubsetResult?: (
+    result: LoadSubsetRequestResult,
+    acquisition: LoadSubsetOptions,
+  ) => void
+}
 
 function createDeferred() {
   let resolve!: () => void
@@ -45,12 +56,10 @@ describe(`OrderedSourceLoader`, () => {
     let biggest: { rank: number } | undefined
     const requests: Array<ReturnType<typeof createDeferred>> = []
     const tracked: Array<{ settled: boolean }> = []
-    const request = (options: {
-      onLoadSubsetResult?: (result: Promise<void>) => void
-    }) => {
+    const request = (options: RequestOptions) => {
       const next = createDeferred()
       requests.push(next)
-      options.onLoadSubsetResult?.(next.promise)
+      options.onLoadSubsetResult?.(next.promise, {})
     }
     const subscription = {
       setOrderByIndex: () => {},
@@ -113,22 +122,34 @@ describe(`OrderedSourceLoader`, () => {
       expectedMethod: `snapshot`,
     },
   ])(
-    `blocks reentrant $name retries until a later operation`,
-    ({ info, expectedMethod }) => {
+    `keeps a callback-before-throw $name request failed until a later operation`,
+    async ({ info, expectedMethod }) => {
       const failure = new Error(`${expectedMethod} request failed`)
       const methods: Array<string> = []
       let fail = true
-      const request = (method: string) => {
+      const request = (
+        method: string,
+        options: {
+          onLoadSubsetResult?: (
+            result: true,
+            acquisition: LoadSubsetOptions,
+          ) => void
+        },
+      ) => {
         methods.push(method)
         if (!fail) return
         fail = false
+        options.onLoadSubsetResult?.(true, {})
         loader.loadMore()
         throw failure
       }
       const subscription = {
         setOrderByIndex: () => {},
-        requestLimitedSnapshot: () => request(`limited`),
-        requestSnapshot: () => request(`snapshot`),
+        releaseLoadSubset: () => {},
+        requestLimitedSnapshot: (options: RequestOptions) =>
+          request(`limited`, options),
+        requestSnapshot: (options: RequestOptions) =>
+          request(`snapshot`, options),
       } as unknown as CollectionSubscription
       const loader = new OrderedSourceLoader(
         info,
@@ -138,6 +159,8 @@ describe(`OrderedSourceLoader`, () => {
       )
 
       expect(() => loader.start()).toThrow(failure)
+      await Promise.resolve()
+      await Promise.resolve()
       expect(methods).toEqual([expectedMethod])
       expect(loader.loadMore()).toBeUndefined()
       expect(methods).toEqual([expectedMethod])
@@ -154,16 +177,23 @@ describe(`OrderedSourceLoader`, () => {
     let failBoundary = true
     const subscription = {
       setOrderByIndex: () => {},
+      releaseLoadSubset: () => {},
       requestLimitedSnapshot: (options: {
         onLoadSubsetResult?: (result: true) => void
       }) => {
         methods.push(`limited`)
-        options.onLoadSubsetResult?.(true)
+        options.onLoadSubsetResult?.(true, {})
       },
-      requestSnapshot: () => {
+      requestSnapshot: (options: {
+        onLoadSubsetResult?: (
+          result: true,
+          acquisition: LoadSubsetOptions,
+        ) => void
+      }) => {
         methods.push(`snapshot`)
         if (!failBoundary) return
         failBoundary = false
+        options.onLoadSubsetResult?.(true, {})
         loader.loadMore()
         throw failure
       },
