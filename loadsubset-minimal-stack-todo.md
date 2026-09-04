@@ -1247,7 +1247,7 @@ every row is either green or has a named red witness.
 | Sync acquisition availability                        | executable 6-phase × 7-entry census with 15 legal cells and 27 explicit exclusions                  | 8 named reds; adjacent controls green          |
 | Cleanup/restart ownership                            | 20 restart cells plus fixed callback boundaries                                                     | green except the acquisition-availability reds |
 | Async session fencing                                | 2–4 sessions, 1–2 demands, mixed outcomes, obsolete/current/interleaved settlement                  | green                                          |
-| Generated async lifecycle histories                  | one pure reducer drives request/release/settle/truncate/cleanup/restart/unsubscribe histories        | 3 named replay-generation reds                 |
+| Generated async lifecycle histories                  | one pure reducer drives async-pending and sync-success histories with one ordered event trace        | 5 named replay-generation/status reds          |
 | Replay phase transitions                             | setup/pending/settling/publishing crossed with release, reacquisition, supersession, abort, cleanup | three audit claims remain to reconcile below   |
 | Ordered route mechanics                              | page/prefix/boundary/full-source × return/throw/resolve/reject/abort/cleanup                        | green                                          |
 | Ordered consumer integration                         | Collection/Effect parity, source-local recovery, public-window reentry, sync-session settlement     | 5 named reds                                   |
@@ -1345,9 +1345,11 @@ every row is either green or has a named red witness.
         assertions to every restart/callback witness. Do not call the phase
         table complete until this census itself fails when a legal cell is
         omitted. The census now has six phases, seven possible entries, 15
-        legal executable cells, and 27 documented exclusions. Omitting a legal
-        witness fails the census. Restart/callback unloads name the adapter
-        session that owns each physical acquisition.
+        legal executable cells, and 27 explicit exclusions with reasons.
+        Omitting any cell fails the typed record; omitting a legal witness fails
+        the registration census. No witness may register itself outside the
+        test helper. Restart/callback unloads name the adapter session that
+        owns each physical acquisition.
   - [ ] Keep the ordered-query layer as a consumer of the same protocol. Cross
         page, prefix, boundary, and full-source routes with cancellation,
         failure, retry, and reentrant `setWindow`; do not duplicate ownership
@@ -1407,9 +1409,15 @@ every row is either green or has a named red witness.
         errors retain exact demand identity, and each settlement checks the
         full publication and status trace. Per-demand outcomes now include a
         mixed success/failure current generation. The duplicate simple history
-        runner has now been deleted in favor of one pure reducer with explicit
-        sync-session and replay-generation identity. Ordered authority/barrier
-        generation remains.
+        runner has now been deleted in favor of one shared pure reducer with
+        explicit sync-session and replay-generation identity. The driver now
+        allocates observed attempt identities without reading expected model
+        events, and compares one ordered load/unload/result/error/status/
+        publication trace. The same reducer also drives sync-success histories,
+        preserving the old synchronous lifecycle law without a second runner.
+        That mode found two more red variants: synchronous replay emits a false
+        loading cycle, and restarting an aborted retained demand does the same.
+        Ordered authority/barrier generation remains.
   - [x] Catalog all red cells before changing production code. Fix by invalid
         transition class, then rerun the entire matrix after each coherent
         commit. The core slice exposed 15 red cells in five classes: phantom
@@ -1421,9 +1429,11 @@ every row is either green or has a named red witness.
         the stricter audit added four red acquisition-availability cells. The
         last fully green checkpoint had 86 core lifecycle cells plus 129
         existing subscription/replay tests. The consolidated checkpoint has
-        106 lifecycle tests: 92 green laws and 14 named reds. Those reds fall
-        into acquisition availability (5), phantom ownership/resource
-        retirement (4), replay/abort generation (3), and cleanup/reentry (2).
+        The independent-trace checkpoint has 109 lifecycle tests: 93 green
+        laws and 16 named reds. The follow-up added two named status reds. The
+        open classes remain acquisition availability,
+        phantom ownership/resource retirement, replay/abort generation, and
+        cleanup/reentry.
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
       behavior, and opaque callback roots.

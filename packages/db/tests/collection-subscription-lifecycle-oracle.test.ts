@@ -46,29 +46,146 @@ type AcquisitionPhase = (typeof acquisitionPhases)[number]
 type AcquisitionEntry = (typeof acquisitionEntries)[number]
 type AcquisitionCell = `${AcquisitionPhase}:${AcquisitionEntry}`
 
-const legalAcquisitionCells = new Set<AcquisitionCell>([
-  `deferred:request`,
-  `deferred:release`,
-  `deferred:cleanup`,
-  `deferred:resume`,
-  `starting:request`,
-  `starting:markReady`,
-  `starting:markError`,
-  `starting:syncReturn`,
-  `on-demand:request`,
-  `on-demand:markReady`,
-  `on-demand:markError`,
-  `eager:request`,
-  `retiring:request`,
-  `unavailable:request`,
-  `unavailable:markReady`,
-])
+type AcquisitionCellDefinition =
+  | { kind: `covered` }
+  | { kind: `excluded`; reason: string }
+
+const acquisitionCellDefinitions = {
+  'deferred:request': { kind: `covered` },
+  'deferred:release': { kind: `covered` },
+  'deferred:cleanup': { kind: `covered` },
+  'deferred:resume': { kind: `covered` },
+  'deferred:markReady': {
+    kind: `excluded`,
+    reason: `the sync callback has not started and cannot mark ready`,
+  },
+  'deferred:markError': {
+    kind: `excluded`,
+    reason: `the sync callback has not started and cannot mark error`,
+  },
+  'deferred:syncReturn': {
+    kind: `excluded`,
+    reason: `the deferred sync callback has no result to return`,
+  },
+  'starting:request': { kind: `covered` },
+  'starting:release': {
+    kind: `excluded`,
+    reason: `adapter-start release reentry belongs to the start matrix`,
+  },
+  'starting:cleanup': {
+    kind: `excluded`,
+    reason: `adapter-start cleanup reentry belongs to the start matrix`,
+  },
+  'starting:resume': {
+    kind: `excluded`,
+    reason: `resuming the deferred gate enters this phase only once`,
+  },
+  'starting:markReady': { kind: `covered` },
+  'starting:markError': { kind: `covered` },
+  'starting:syncReturn': { kind: `covered` },
+  'on-demand:request': { kind: `covered` },
+  'on-demand:release': {
+    kind: `excluded`,
+    reason: `active physical release belongs to the release matrix`,
+  },
+  'on-demand:cleanup': {
+    kind: `excluded`,
+    reason: `active cleanup belongs to the restart and release matrices`,
+  },
+  'on-demand:resume': {
+    kind: `excluded`,
+    reason: `an installed loader is no longer behind the deferred gate`,
+  },
+  'on-demand:markReady': { kind: `covered` },
+  'on-demand:markError': { kind: `covered` },
+  'on-demand:syncReturn': {
+    kind: `excluded`,
+    reason: `the sync callback already returned the installed loader`,
+  },
+  'eager:request': { kind: `covered` },
+  'eager:release': {
+    kind: `excluded`,
+    reason: `eager demand has no subset acquisition to release`,
+  },
+  'eager:cleanup': {
+    kind: `excluded`,
+    reason: `eager cleanup owns the source session, not a subset lease`,
+  },
+  'eager:resume': {
+    kind: `excluded`,
+    reason: `eager sync is not a deferred subset acquisition`,
+  },
+  'eager:markReady': {
+    kind: `excluded`,
+    reason: `eager readiness does not install a subset loader`,
+  },
+  'eager:markError': {
+    kind: `excluded`,
+    reason: `eager errors do not change subset acquisition availability`,
+  },
+  'eager:syncReturn': {
+    kind: `excluded`,
+    reason: `eager sync results own no subset loader contract`,
+  },
+  'retiring:request': { kind: `covered` },
+  'retiring:release': {
+    kind: `excluded`,
+    reason: `release reentry during retirement belongs to the release matrix`,
+  },
+  'retiring:cleanup': {
+    kind: `excluded`,
+    reason: `the retiring source session cannot begin a second cleanup`,
+  },
+  'retiring:resume': {
+    kind: `excluded`,
+    reason: `retirement is outside the deferred-start gate`,
+  },
+  'retiring:markReady': {
+    kind: `excluded`,
+    reason: `callbacks from a retiring session cannot restore availability`,
+  },
+  'retiring:markError': {
+    kind: `excluded`,
+    reason: `callbacks from a retiring session are obsolete`,
+  },
+  'retiring:syncReturn': {
+    kind: `excluded`,
+    reason: `obsolete returned resources use the resource-installation axis`,
+  },
+  'unavailable:request': { kind: `covered` },
+  'unavailable:release': {
+    kind: `excluded`,
+    reason: `detached demand has no physical acquisition to release`,
+  },
+  'unavailable:cleanup': {
+    kind: `excluded`,
+    reason: `cleanup of detached demand is covered by deferred cleanup`,
+  },
+  'unavailable:resume': {
+    kind: `excluded`,
+    reason: `same-session recovery uses markReady rather than defer resume`,
+  },
+  'unavailable:markReady': { kind: `covered` },
+  'unavailable:markError': {
+    kind: `excluded`,
+    reason: `a repeated error leaves acquisition unavailable`,
+  },
+  'unavailable:syncReturn': {
+    kind: `excluded`,
+    reason: `handler-less return is the transition into unavailable`,
+  },
+} satisfies Record<AcquisitionCell, AcquisitionCellDefinition>
+
+const legalAcquisitionCells = new Set<AcquisitionCell>(
+  Object.entries(acquisitionCellDefinitions)
+    .filter(([, definition]) => definition.kind === `covered`)
+    .map(([cell]) => cell as AcquisitionCell),
+)
 const excludedAcquisitionCells = new Map<AcquisitionCell, string>(
-  acquisitionPhases.flatMap((phase) =>
-    acquisitionEntries
-      .map((entry): AcquisitionCell => `${phase}:${entry}`)
-      .filter((cell) => !legalAcquisitionCells.has(cell))
-      .map((cell) => [cell, `entry is not legal in this phase`] as const),
+  Object.entries(acquisitionCellDefinitions).flatMap(([cell, definition]) =>
+    definition.kind === `excluded`
+      ? [[cell as AcquisitionCell, definition.reason]]
+      : [],
   ),
 )
 const registeredAcquisitionCells = new Set<AcquisitionCell>()
@@ -1496,51 +1613,51 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     },
   )
 
-  registeredAcquisitionCells.add(`deferred:request`)
-  registeredAcquisitionCells.add(`deferred:resume`)
-  registeredAcquisitionCells.add(`deferred:release`)
-  it.each([`resume`, `release-before-resume`] as const)(
-    `owns deferred-start acquisition only when it reaches the adapter: %s`,
-    async (action) => {
-      const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
-      const loads: Array<LoadSubsetOptions> = []
-      const unloads: Array<LoadSubsetOptions> = []
-      const collection = createCollection<{ id: string }>({
-        id: `deferred-start-${action}`,
-        getKey: ({ id }) => id,
-        startSync: false,
-        syncMode: `on-demand`,
-        sync: {
-          sync: ({ markReady }) => {
-            markReady()
-            return {
-              loadSubset: (options) => {
-                loads.push(options)
-                return true
-              },
-              unloadSubset: (options) => unloads.push(options),
-            }
+  acquisitionCase(
+    [`deferred:request`, `deferred:resume`, `deferred:release`],
+    `owns deferred-start acquisition only when it reaches the adapter`,
+    async () => {
+      for (const action of [`resume`, `release-before-resume`] as const) {
+        const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
+        const loads: Array<LoadSubsetOptions> = []
+        const unloads: Array<LoadSubsetOptions> = []
+        const collection = createCollection<{ id: string }>({
+          id: `deferred-start-${action}`,
+          getKey: ({ id }) => id,
+          startSync: false,
+          syncMode: `on-demand`,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return {
+                loadSubset: (options) => {
+                  loads.push(options)
+                  return true
+                },
+                unloadSubset: (options) => unloads.push(options),
+              }
+            },
           },
-        },
-      })
-      expect(collection._deferSyncStart()).toBe(true)
-      const subscription = collection.subscribeChanges(() => {}, {
-        includeInitialState: false,
-      })
-      subscription.requestSnapshot({ where })
-      expect(loads).toEqual([])
+        })
+        expect(collection._deferSyncStart()).toBe(true)
+        const subscription = collection.subscribeChanges(() => {}, {
+          includeInitialState: false,
+        })
+        subscription.requestSnapshot({ where })
+        expect(loads).toEqual([])
 
-      if (action === `release-before-resume`) {
-        subscription.releaseSnapshot(where)
+        if (action === `release-before-resume`) {
+          subscription.releaseSnapshot(where)
+        }
+        collection._resumeSyncStart()
+        await flushPromises()
+
+        expect(loads).toHaveLength(action === `resume` ? 1 : 0)
+        subscription.unsubscribe()
+        expect(unloads).toHaveLength(action === `resume` ? 1 : 0)
+        if (action === `resume`) expect(unloads).toEqual(loads)
+        await collection.cleanup()
       }
-      collection._resumeSyncStart()
-      await flushPromises()
-
-      expect(loads).toHaveLength(action === `resume` ? 1 : 0)
-      subscription.unsubscribe()
-      expect(unloads).toHaveLength(action === `resume` ? 1 : 0)
-      if (action === `resume`) expect(unloads).toEqual(loads)
-      await collection.cleanup()
     },
   )
 
