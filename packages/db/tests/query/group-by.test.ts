@@ -277,6 +277,43 @@ function representativeSignature(value: unknown): string {
 
 function createGroupByTests(autoIndex: `off` | `eager`): void {
   describe(`with autoIndex ${autoIndex}`, () => {
+    test(`scopes opaque grouping identities to one compiled graph`, async () => {
+      const symbol = Symbol(`group`)
+      const valuesCollection = createCollection(
+        mockSyncCollectionOptions<{ id: number; value: symbol }>({
+          id: `scoped-group-symbol-${autoIndex}`,
+          getKey: (row) => row.id,
+          initialData: [{ id: 1, value: symbol }],
+          autoIndex,
+        }),
+      )
+      const createSummary = () =>
+        createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ value: valuesCollection })
+              .groupBy(({ value }) => value.value)
+              .select(({ value }) => ({
+                value: value.value,
+                count: count(value.id),
+              })),
+        })
+
+      const first = createSummary()
+      const second = createSummary()
+
+      try {
+        expect([...first.keys()]).not.toEqual([...second.keys()])
+      } finally {
+        await Promise.all([
+          first.cleanup(),
+          second.cleanup(),
+          valuesCollection.cleanup(),
+        ])
+      }
+    })
+
     test.each(equalityEquivalentGroupValues)(
       `groups %s by query equality`,
       (_name, createValues) => {

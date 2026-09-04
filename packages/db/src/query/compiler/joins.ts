@@ -18,11 +18,10 @@ import {
 } from '../../errors.js'
 import { normalizeValue } from '../../utils/comparison.js'
 import {
-  getEqualityValueIdentity,
   getParentContextIdentity,
   getParentContextValue,
-  serializeEqualityValue,
 } from '../equality-value-identity.js'
+import type { ValueIdentity } from '../equality-value-identity.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
 import { compileExpression } from './evaluators.js'
 import { getLazyLoadTargets } from './lazy-targets.js'
@@ -73,6 +72,7 @@ let nextLazyDemandPlanId = 0
 function parameterizeJoinInputByParentRoutes(
   input: KeyedStream,
   parentKeyStream: KeyedStream,
+  valueIdentity: ValueIdentity,
 ): KeyedStream {
   return crossJoinParentRoutes(
     input,
@@ -80,8 +80,8 @@ function parameterizeJoinInputByParentRoutes(
     (rowKey, row, correlationKey, parentContext) => {
       return [
         serializeValue([
-          getEqualityValueIdentity(rowKey),
-          getEqualityValueIdentity(correlationKey),
+          valueIdentity.equality(rowKey),
+          valueIdentity.equality(correlationKey),
           getParentContextIdentity(parentContext),
         ]),
         attachRouteMetadata(
@@ -136,12 +136,13 @@ function getRouteJoinKey(
   row: NamespacedRow,
   source: string,
   value: unknown,
+  valueIdentity: ValueIdentity,
 ): string {
   const route = getNamespacedRouteMetadata(row, source)
   return serializeValue([
-    getEqualityValueIdentity(route?.correlationKey),
+    valueIdentity.equality(route?.correlationKey),
     getParentContextIdentity(route?.parentContext ?? null),
-    getEqualityValueIdentity(value),
+    valueIdentity.equality(value),
   ])
 }
 
@@ -186,6 +187,7 @@ export function processJoins(
   aliasRemapping: Record<string, string>,
   sourceWhereClauses: Map<string, BasicExpression<boolean>>,
   mainSourceIsParentFiltered: boolean,
+  valueIdentity: ValueIdentity,
   parentKeyStream?: KeyedStream,
 ): NamespacedAndKeyedStream {
   let resultPipeline = pipeline
@@ -212,6 +214,7 @@ export function processJoins(
       aliasRemapping,
       sourceWhereClauses,
       mainSourceIsParentFiltered,
+      valueIdentity,
       parentKeyStream,
     )
   }
@@ -244,6 +247,7 @@ function processJoin(
   aliasRemapping: Record<string, string>,
   sourceWhereClauses: Map<string, BasicExpression<boolean>>,
   mainSourceIsParentFiltered: boolean,
+  valueIdentity: ValueIdentity,
   parentKeyStream?: KeyedStream,
 ): NamespacedAndKeyedStream {
   const isCollectionRef = joinClause.from.type === `collectionRef`
@@ -285,6 +289,7 @@ function processJoin(
     aliasToCollectionId,
     aliasRemapping,
     sourceWhereClauses,
+    valueIdentity,
     routeJoinedSource ? parentKeyStream : undefined,
   )
 
@@ -332,7 +337,7 @@ function processJoin(
       // Extract the join key from the main source expression
       const value = normalizeValue(compiledMainExpr(namespacedRow))
       const mainKey = routeJoinedSource
-        ? getRouteJoinKey(namespacedRow, mainSource, value)
+        ? getRouteJoinKey(namespacedRow, mainSource, value, valueIdentity)
         : value
 
       // Return [joinKey, [originalKey, namespacedRow]]
@@ -352,7 +357,7 @@ function processJoin(
       // Extract the join key from the joined source expression
       const value = normalizeValue(compiledJoinedExpr(namespacedRow))
       const joinedKey = routeJoinedSource
-        ? getRouteJoinKey(namespacedRow, joinedSource, value)
+        ? getRouteJoinKey(namespacedRow, joinedSource, value, valueIdentity)
         : value
 
       // Return [joinKey, [originalKey, namespacedRow]]
@@ -429,7 +434,7 @@ function processJoin(
         tap((data) => {
           for (const [[joinKey], weight] of data.getInner()) {
             if (joinKey == null) continue
-            const encoded = serializeEqualityValue(joinKey)
+            const encoded = valueIdentity.serializeEquality(joinKey)
             const previous = demandWeights.get(encoded)
             const nextWeight = (previous?.weight ?? 0) + weight
             if (nextWeight === 0) {
@@ -588,6 +593,7 @@ function processJoinSource(
   aliasToCollectionId: Record<string, string>,
   aliasRemapping: Record<string, string>,
   sourceWhereClauses: Map<string, BasicExpression<boolean>>,
+  valueIdentity: ValueIdentity,
   parentKeyStream?: KeyedStream,
 ): { alias: string; input: KeyedStream; collectionId: string } {
   switch (from.type) {
@@ -604,7 +610,11 @@ function processJoinSource(
       return {
         alias: from.alias,
         input: parentKeyStream
-          ? parameterizeJoinInputByParentRoutes(input, parentKeyStream)
+          ? parameterizeJoinInputByParentRoutes(
+              input,
+              parentKeyStream,
+              valueIdentity,
+            )
           : input,
         collectionId: from.collection.id,
       }

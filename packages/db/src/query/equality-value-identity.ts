@@ -1,6 +1,9 @@
 import { serializeValue } from '@tanstack/db-ivm'
 import { normalizeValue } from '../utils/comparison.js'
-import { getRuntimeReferenceIdentity } from './runtime-reference-identity.js'
+import {
+  createRuntimeReferenceIdentityFactory,
+  getRuntimeReferenceIdentity,
+} from './runtime-reference-identity.js'
 
 const PARENT_CONTEXT = Symbol(`tanstack_db_parent_context`)
 
@@ -10,17 +13,61 @@ type ParentContext = {
   identity: unknown
 }
 
-/** Preserve the value relation used by equality predicates in keyed state. */
-export function getEqualityValueIdentity(value: unknown): unknown {
+type ReferenceIdentity = typeof getRuntimeReferenceIdentity
+
+export type ValueIdentity = {
+  equality: (value: unknown) => unknown
+  exact: (value: unknown) => unknown
+  serializeEquality: (value: unknown) => string
+}
+
+function equalityIdentity(
+  value: unknown,
+  referenceIdentity: ReferenceIdentity,
+): unknown {
   const normalized = normalizeValue(value)
   if (
     (typeof normalized === `object` && normalized !== null) ||
     typeof normalized === `function` ||
     typeof normalized === `symbol`
   ) {
-    return getRuntimeReferenceIdentity(normalized as object | symbol)
+    return referenceIdentity(normalized as object | symbol)
   }
   return normalized
+}
+
+function exactIdentity(
+  value: unknown,
+  referenceIdentity: ReferenceIdentity,
+): unknown {
+  if (
+    (typeof value === `object` && value !== null) ||
+    typeof value === `function` ||
+    typeof value === `symbol`
+  ) {
+    return referenceIdentity(value as object | symbol)
+  }
+  if (typeof value === `number`) {
+    if (Object.is(value, -0)) return [`number`, `-0`]
+    if (Number.isNaN(value)) return [`number`, `NaN`]
+  }
+  return value
+}
+
+export function createValueIdentity(): ValueIdentity {
+  const referenceIdentity = createRuntimeReferenceIdentityFactory()
+  const equality = (value: unknown) =>
+    equalityIdentity(value, referenceIdentity)
+  return {
+    equality,
+    exact: (value) => exactIdentity(value, referenceIdentity),
+    serializeEquality: (value) => serializeValue(equality(value)),
+  }
+}
+
+/** Preserve the value relation used by equality predicates in keyed state. */
+export function getEqualityValueIdentity(value: unknown): unknown {
+  return equalityIdentity(value, getRuntimeReferenceIdentity)
 }
 
 export function serializeEqualityValue(value: unknown): string {
@@ -29,18 +76,7 @@ export function serializeEqualityValue(value: unknown): string {
 
 /** Preserve exact output identity without traversing opaque runtime values. */
 export function getExactValueIdentity(value: unknown): unknown {
-  if (
-    (typeof value === `object` && value !== null) ||
-    typeof value === `function` ||
-    typeof value === `symbol`
-  ) {
-    return getRuntimeReferenceIdentity(value as object | symbol)
-  }
-  if (typeof value === `number`) {
-    if (Object.is(value, -0)) return [`number`, `-0`]
-    if (Number.isNaN(value)) return [`number`, `NaN`]
-  }
-  return value
+  return exactIdentity(value, getRuntimeReferenceIdentity)
 }
 
 /** Keep compiler identity outside the namespace that holds user aliases. */

@@ -139,6 +139,11 @@ binary values by the same normalized value as `eq`/`in`, and retain runtime
 reference identity for other objects, functions, and symbols. These tokens are
 valid only for equality-keyed routing, grouping, and demand. Output values and
 arbitrary function arguments keep their exact runtime identity and value.
+Compiler tokens belong to one compiled graph. This keeps every operator in the
+graph on the same identity relation while allowing its strong symbol table to
+die with the graph. A demand controller owns a separate scope and discards it
+when the controller is cleared. Process-wide query identity keeps its own
+runtime scope because equivalent query plans must still share a cache entry.
 For grouping, the equality token is the D2 group key. The group retains a raw
 value from a currently positive contributor only as the projected
 representative. The representative is chosen by stable source-row identity, so

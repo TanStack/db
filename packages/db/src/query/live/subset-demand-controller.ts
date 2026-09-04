@@ -1,6 +1,7 @@
 import { inArray } from '../builder/functions.js'
 import { PropRef } from '../ir.js'
-import { serializeEqualityValue } from '../equality-value-identity.js'
+import { createValueIdentity } from '../equality-value-identity.js'
+import type { ValueIdentity } from '../equality-value-identity.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
 import type { LazyDemandPlan } from '../compiler/joins.js'
 import type { BasicExpression } from '../ir.js'
@@ -33,13 +34,14 @@ export type DemandUpdate = {
 export class SubsetDemandController {
   private readonly states = new Map<string, DemandState>()
   private readonly warnedPlans = new Set<string>()
+  private valueIdentity = createValueIdentity()
 
   setDemand(
     subscription: CollectionSubscription,
     plan: LazyDemandPlan,
     keys: Set<unknown>,
   ): DemandUpdate {
-    const nextKeys = canonicalizeKeys(keys)
+    const nextKeys = canonicalizeKeys(keys, this.valueIdentity)
     const previous = this.states.get(plan.id)
     const hasFailedCoverage = previous?.segments.some(
       (segment) =>
@@ -110,6 +112,7 @@ export class SubsetDemandController {
     }
     this.states.clear()
     this.warnedPlans.clear()
+    this.valueIdentity = createValueIdentity()
   }
 
   private warnUnoptimized(plan: LazyDemandPlan): void {
@@ -125,8 +128,13 @@ export class SubsetDemandController {
   }
 }
 
-function canonicalizeKeys(keys: Set<unknown>): Map<string, unknown> {
-  return new Map([...keys].map((key) => [serializeEqualityValue(key), key]))
+function canonicalizeKeys(
+  keys: Set<unknown>,
+  valueIdentity: ValueIdentity,
+): Map<string, unknown> {
+  return new Map(
+    [...keys].map((key) => [valueIdentity.serializeEquality(key), key]),
+  )
 }
 
 function equalKeySets(

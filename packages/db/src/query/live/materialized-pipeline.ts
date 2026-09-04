@@ -14,10 +14,8 @@ import {
 } from '../compiler/index.js'
 import { VIRTUAL_PROP_NAMES } from '../../virtual-props.js'
 import { deepEquals } from '../../utils.js'
-import {
-  getEqualityValueIdentity,
-  getParentContextIdentity,
-} from '../equality-value-identity.js'
+import { getParentContextIdentity } from '../equality-value-identity.js'
+import type { ValueIdentity } from '../equality-value-identity.js'
 import type {
   CompilationResult,
   IncludesCompilationResult,
@@ -132,6 +130,7 @@ function materializeRelation(
     exposeRouting(compilation.pipeline),
     getKey,
     scope,
+    compilation.valueIdentity,
   )
   const facades: Array<BucketFacadeCompilation> = []
 
@@ -144,10 +143,17 @@ function materializeRelation(
     )
     facades.push(...child.facades)
 
-    const bucketRows = createBucketRows(child.pipeline)
+    const bucketRows = createBucketRows(
+      child.pipeline,
+      include.childCompilationResult.valueIdentity,
+    )
     if (include.materialization === `collection`) {
       const edgeId = `bucket-facade-${++nextBucketFacadeEdgeId}`
-      const activeBuckets = createActiveBuckets(pipeline, include)
+      const activeBuckets = createActiveBuckets(
+        pipeline,
+        include,
+        compilation.valueIdentity,
+      )
       const activeBucketRows = activeBuckets.pipe(
         join(bucketRows),
         map(([bucketKey, [, row]]) => [bucketKey, row]),
@@ -158,9 +164,21 @@ function materializeRelation(
         activeBuckets,
         hasOrderBy: include.hasOrderBy,
       })
-      pipeline = attachCollectionInclude(pipeline, include, edgeId, scope)
+      pipeline = attachCollectionInclude(
+        pipeline,
+        include,
+        edgeId,
+        scope,
+        compilation.valueIdentity,
+      )
     } else {
-      pipeline = attachInlineInclude(pipeline, bucketRows, include, scope)
+      pipeline = attachInlineInclude(
+        pipeline,
+        bucketRows,
+        include,
+        scope,
+        compilation.valueIdentity,
+      )
     }
   }
 
@@ -198,6 +216,7 @@ function canonicalizeByPublicKey(
   pipeline: ResultStream,
   getKey: ((row: any) => unknown) | undefined,
   scope: RelationScope,
+  valueIdentity: ValueIdentity,
 ): ResultStream {
   return pipeline.pipe(
     map(([internalKey, rawTuple]) => {
@@ -206,7 +225,10 @@ function canonicalizeByPublicKey(
       const relationKey =
         scope === `root`
           ? serializeValue([`root`, publicKey])
-          : serializeValue([routeKey(tuple[2], tuple[3]), publicKey])
+          : serializeValue([
+              routeKey(tuple[2], tuple[3], valueIdentity),
+              publicKey,
+            ])
       return [relationKey, { publicKey, tuple }] as [string, CanonicalResult]
     }),
     reduce((values: Array<[CanonicalResult, number]>) => {
@@ -265,6 +287,7 @@ function attachInlineInclude(
   bucketRows: IStreamBuilder<[string, BucketRow]>,
   include: IncludesCompilationResult,
   scope: RelationScope,
+  valueIdentity: ValueIdentity,
 ): ResultStream {
   const bucketValues = bucketRows.pipe(
     reduce((values: Array<[BucketRow, number]>) => {
@@ -290,7 +313,11 @@ function attachInlineInclude(
       return [
         routing?.active !== true
           ? `inactive:${serializeValue(parentKey)}`
-          : routeKey(routing.correlationKey, routing.parentContext),
+          : routeKey(
+              routing.correlationKey,
+              routing.parentContext,
+              valueIdentity,
+            ),
         { parentKey, tuple },
       ] as [string, { parentKey: unknown; tuple: ResultTuple }]
     }),
@@ -329,18 +356,20 @@ function attachInlineInclude(
     routedParents as ResultStream,
     undefined,
     scope,
+    valueIdentity,
   )
 }
 
 function createBucketRows(
   childPipeline: ResultStream,
+  valueIdentity: ValueIdentity,
 ): IStreamBuilder<[string, BucketRow]> {
   return childPipeline.pipe(
     map(([internalKey, rawTuple]) => {
       const [value, order, correlationKey, parentContext, , publicKey] =
         rawTuple as ResultTuple
       return [
-        routeKey(correlationKey, parentContext),
+        routeKey(correlationKey, parentContext, valueIdentity),
         { publicKey: publicKey ?? internalKey, value, order },
       ] as [string, BucketRow]
     }),
@@ -352,6 +381,7 @@ function attachCollectionInclude(
   include: IncludesCompilationResult,
   edgeId: string,
   scope: RelationScope,
+  valueIdentity: ValueIdentity,
 ): ResultStream {
   const routedParents = parentPipeline.pipe(
     map(([parentKey, rawTuple]) => {
@@ -360,7 +390,7 @@ function attachCollectionInclude(
       if (routing?.active !== true) return [parentKey, tuple]
       const facade = createBucketFacadeRef(
         edgeId,
-        routeKey(routing.correlationKey, routing.parentContext),
+        routeKey(routing.correlationKey, routing.parentContext, valueIdentity),
       )
       return [
         parentKey,
@@ -379,12 +409,14 @@ function attachCollectionInclude(
     routedParents as ResultStream,
     undefined,
     scope,
+    valueIdentity,
   )
 }
 
 function createActiveBuckets(
   parentPipeline: ResultStream,
   include: IncludesCompilationResult,
+  valueIdentity: ValueIdentity,
 ): IStreamBuilder<[string, true]> {
   return parentPipeline.pipe(
     map(([parentKey, rawTuple]) => {
@@ -392,7 +424,11 @@ function createActiveBuckets(
       const routing = getIncludeRoute(tuple, include.fieldName)
       const bucketKey =
         routing?.active === true
-          ? routeKey(routing.correlationKey, routing.parentContext)
+          ? routeKey(
+              routing.correlationKey,
+              routing.parentContext,
+              valueIdentity,
+            )
           : undefined
       return [parentKey, bucketKey] as [unknown, string | undefined]
     }),
@@ -419,9 +455,10 @@ function getIncludeRoute(
 function routeKey(
   correlationKey: unknown,
   parentContext: Record<string, any> | null | undefined,
+  valueIdentity: ValueIdentity,
 ): string {
   return serializeValue([
-    getEqualityValueIdentity(correlationKey ?? null),
+    valueIdentity.equality(correlationKey ?? null),
     getParentContextIdentity(parentContext ?? null),
   ])
 }

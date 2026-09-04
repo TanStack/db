@@ -589,8 +589,16 @@ explicitly removed.
       uses a private symbol, and the grammar crosses all three former internal
       names with parent aliases, selected fields, and direct, `QueryRef`, join,
       and group boundaries.
-- [ ] Scope symbol correlation identity to releasable graph state, then prove
-      fresh symbol route churn is bounded after retirement and cleanup.
+- [ ] Repair the route-metadata gaps recovered by the fresh loss audit of the
+      symbol carrier. Red/green object-valued `QueryRef` scalars, nested
+      functional projections that spread source rows, and implicit joined
+      output. Public results must contain no internal symbols at any depth.
+- [x] Scope symbol correlation identity to releasable graph state. Every
+      compiler path now shares one identity scope through its compile cache;
+      the scope dies with the graph, and demand-controller cleanup replaces its
+      scope. The regression failed first because two independent compiled
+      graphs reused the same process-global symbol token. Grouping, stable
+      identity, route-context, and temporal-demand suites are 281/281 green.
 - [ ] Make equality auto-index fallback quiet and safe for symbol-valued join
       fields; the symbol-route oracle exposed a comparator throw while the
       query correctly fell back to a full scan.

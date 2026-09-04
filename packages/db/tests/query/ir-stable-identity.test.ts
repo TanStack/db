@@ -54,6 +54,7 @@ import {
   createRuntimeReferenceIdentityFactory,
   getRuntimeReferenceIdentity,
 } from '../../src/query/runtime-reference-identity.js'
+import { createValueIdentity } from '../../src/query/equality-value-identity.js'
 import type { BasicExpression, QueryIR } from '../../src/query/ir.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 
@@ -365,6 +366,17 @@ describe(`semantic expression identity`, () => {
     expect(getRuntimeReferenceIdentity(first)).not.toEqual(
       getRuntimeReferenceIdentity(second),
     )
+  })
+
+  it(`scopes opaque value identities to their owner`, () => {
+    const firstScope = createValueIdentity()
+    const secondScope = createValueIdentity()
+    const first = Symbol(`value`)
+    const second = Symbol(`value`)
+
+    expect(firstScope.equality(first)).toEqual(firstScope.equality(first))
+    expect(firstScope.equality(first)).not.toEqual(firstScope.equality(second))
+    expect(firstScope.equality(first)).not.toEqual(secondScope.equality(first))
   })
 
   it(`falls back when the runtime crypto object lacks getRandomValues`, () => {

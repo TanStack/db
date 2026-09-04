@@ -10,12 +10,12 @@ import {
 } from '@tanstack/db-ivm'
 import { optimizeQuery } from '../optimizer.js'
 import {
+  createValueIdentity,
   createParentContext,
-  getEqualityValueIdentity,
   getParentContextIdentity,
   getParentContextValue,
-  serializeEqualityValue,
 } from '../equality-value-identity.js'
+import type { ValueIdentity } from '../equality-value-identity.js'
 import {
   CollectionInputNotFoundError,
   DistinctRequiresSelectError,
@@ -163,6 +163,7 @@ type CompiledParentProjection = {
 function projectParentContext(
   nsRow: NamespacedRow,
   projections: Array<CompiledParentProjection>,
+  valueIdentity: ValueIdentity,
 ): Record<string, any> {
   const inherited = getRouteMetadata(nsRow)?.parentContext
   const inheritedValue = getParentContextValue(inherited)
@@ -175,7 +176,7 @@ function projectParentContext(
     projectedIdentity.push([
       projection.alias,
       projection.field,
-      getEqualityValueIdentity(projectedValue),
+      valueIdentity.equality(projectedValue),
     ])
     if (projection.field.length === 0) {
       const projectedAlias = projectedValue
@@ -217,6 +218,7 @@ function parameterizeByParentRoutes(
   pipeline: NamespacedAndKeyedStream,
   parentKeyStream: KeyedStream,
   mainSource: string,
+  valueIdentity: ValueIdentity,
 ): NamespacedAndKeyedStream {
   return crossJoinParentRoutes(
     pipeline,
@@ -236,8 +238,8 @@ function parameterizeByParentRoutes(
       attachRouteMetadata(namespaced, correlationKey, parentContext)
       return [
         serializeValue([
-          getEqualityValueIdentity(rowKey),
-          getEqualityValueIdentity(correlationKey),
+          valueIdentity.equality(rowKey),
+          valueIdentity.equality(correlationKey),
           getParentContextIdentity(parentContext),
         ]),
         namespaced,
@@ -304,6 +306,9 @@ export interface CompilationResult {
   /** The compiled query pipeline (D2 stream) */
   pipeline: ResultStream
 
+  /** Runtime identity scope owned by this compiled graph. */
+  valueIdentity: ValueIdentity
+
   /** Map of opaque source IDs to their WHERE clauses for index optimization */
   sourceWhereClauses: Map<string, BasicExpression<boolean>>
 
@@ -331,6 +336,17 @@ export interface CompilationResult {
 
   /** Child pipelines for includes subqueries */
   includes?: Array<IncludesCompilationResult>
+}
+
+const valueIdentitiesByCache = new WeakMap<QueryCache, ValueIdentity>()
+
+function getCompilationValueIdentity(cache: QueryCache): ValueIdentity {
+  let valueIdentity = valueIdentitiesByCache.get(cache)
+  if (!valueIdentity) {
+    valueIdentity = createValueIdentity()
+    valueIdentitiesByCache.set(cache, valueIdentity)
+  }
+  return valueIdentity
 }
 
 /**
@@ -367,6 +383,7 @@ export function compileQuery(
   if (cachedResult) {
     return cachedResult
   }
+  const valueIdentity = getCompilationValueIdentity(cache)
 
   // Validate the raw query BEFORE optimization to check user's original structure.
   // This must happen before optimization because the optimizer may create internal
@@ -451,7 +468,7 @@ export function compileQuery(
       map(([key, row]: [unknown, any]) => {
         const correlationValue = getNestedValue(row, childFieldPath)
         return [
-          serializeEqualityValue(correlationValue),
+          valueIdentity.serializeEquality(correlationValue),
           [key, row, correlationValue],
         ] as [unknown, [unknown, any, unknown]]
       }),
@@ -459,7 +476,7 @@ export function compileQuery(
 
     const equalityParentKeys = parentKeyStream.pipe(
       map(([correlationValue, parentContext]: [unknown, unknown]) => [
-        serializeEqualityValue(correlationValue),
+        valueIdentity.serializeEquality(correlationValue),
         parentContext,
       ]),
       reduce((values: Array<[unknown, number]>) =>
@@ -492,7 +509,7 @@ export function compileQuery(
         const effectiveKey =
           parentSide != null
             ? serializeValue([
-                getEqualityValueIdentity(childKey),
+                valueIdentity.equality(childKey),
                 getParentContextIdentity(parentSide),
               ])
             : childKey
@@ -511,6 +528,7 @@ export function compileQuery(
       initialPipeline,
       parentKeyStream,
       mainSource,
+      valueIdentity,
     )
   }
 
@@ -537,6 +555,7 @@ export function compileQuery(
       aliasRemapping,
       sourceWhereClauses,
       parentKeyStream !== undefined,
+      valueIdentity,
       parentKeyStream,
     )
   }
@@ -723,6 +742,7 @@ export function compileQuery(
             const parentContext = projectParentContext(
               nsRow,
               compiledProjections,
+              valueIdentity,
             )
             return [compiledCorrelation(nsRow), parentContext] as any
           }),
@@ -799,7 +819,7 @@ export function compileQuery(
           tap((data: any) => {
             for (const [[correlationValue], weight] of data.getInner()) {
               if (correlationValue == null) continue
-              const encoded = serializeEqualityValue(correlationValue)
+              const encoded = valueIdentity.serializeEquality(correlationValue)
               const previous = demandWeights.get(encoded)
               const nextWeight = (previous?.weight ?? 0) + weight
               if (nextWeight === 0) {
@@ -893,6 +913,7 @@ export function compileQuery(
             const parentContext = projectParentContext(
               nsRow,
               compiledProjections,
+              valueIdentity,
             )
             return {
               active: true,
@@ -1038,6 +1059,7 @@ export function compileQuery(
     pipeline = processGroupBy(
       pipeline,
       query.groupBy,
+      valueIdentity,
       query.having,
       query.select,
       query.fnHaving,
@@ -1054,6 +1076,7 @@ export function compileQuery(
       pipeline = processGroupBy(
         pipeline,
         [], // Empty group by means single group
+        valueIdentity,
         query.having,
         query.select,
         query.fnHaving,
@@ -1134,11 +1157,11 @@ export function compileQuery(
             )
             if (parentContext != null) {
               return serializeValue([
-                getEqualityValueIdentity(correlationKey),
+                valueIdentity.equality(correlationKey),
                 getParentContextIdentity(parentContext),
               ])
             }
-            return getEqualityValueIdentity(correlationKey)
+            return valueIdentity.equality(correlationKey)
           }
         : undefined
 
@@ -1189,6 +1212,7 @@ export function compileQuery(
     const compilationResult: CompilationResult = {
       collectionId: mainCollectionId,
       pipeline: resultPipeline,
+      valueIdentity,
       sourceWhereClauses: keyedSourceWhereClauses,
       aliasToCollectionId,
       aliasRemapping,
@@ -1233,6 +1257,7 @@ export function compileQuery(
   const compilationResult: CompilationResult = {
     collectionId: mainCollectionId,
     pipeline: resultPipeline,
+    valueIdentity,
     sourceWhereClauses: keyedSourceWhereClauses,
     aliasToCollectionId,
     aliasRemapping,
@@ -1442,6 +1467,7 @@ function processFromClause(
   isUnionFrom: boolean
   isParentRouted: boolean
 } {
+  const valueIdentity = getCompilationValueIdentity(cache)
   if (from.type === `unionAll`) {
     return processUnionAll(
       from,
@@ -1539,6 +1565,7 @@ function processFromClause(
             wrapInputWithAlias(input, alias),
             parentKeyStream,
             alias,
+            valueIdentity,
           )
         : wrapInputWithAlias(input, alias)
     const branch = routedBranch.pipe(

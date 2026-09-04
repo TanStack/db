@@ -24,11 +24,10 @@ import {
   toBooleanPredicate,
 } from './evaluators.js'
 import {
-  getExactValueIdentity,
-  getEqualityValueIdentity,
   getParentContextIdentity,
   getParentContextValue,
 } from '../equality-value-identity.js'
+import type { ValueIdentity } from '../equality-value-identity.js'
 import {
   attachRouteMetadata,
   getNamespacedRouteMetadata,
@@ -92,7 +91,7 @@ type Representative<T> = {
 function createRepresentative<T>(
   rowKey: string,
   value: T,
-  identity: unknown = getExactValueIdentity(value),
+  identity: unknown,
 ): Representative<T> {
   const representative = { rowKey, identity } as Representative<T>
   Object.defineProperty(representative, RAW_REPRESENTATIVE, { value })
@@ -126,9 +125,10 @@ function addCorrelationRouteIdentityToGroupKey(
   row: NamespacedRow,
   mainSource: string,
   fields: InternalGroupFields,
+  valueIdentity: ValueIdentity,
 ): void {
   const route = getNamespacedRouteMetadata(row, mainSource)
-  key[fields.correlationIdentity] = getEqualityValueIdentity(
+  key[fields.correlationIdentity] = valueIdentity.equality(
     route?.correlationKey,
   )
   if (route?.parentContext != null) {
@@ -142,12 +142,16 @@ function addCorrelationRouteAggregates(
   aggregates: Record<string, any>,
   mainSource: string,
   fields: InternalGroupFields,
+  valueIdentity: ValueIdentity,
 ): void {
   aggregates[fields.correlationKey] = {
     preMap: ([rowKey, row]: [string, NamespacedRow]) =>
       createRepresentative(
         rowKey,
         getNamespacedRouteMetadata(row, mainSource)?.correlationKey,
+        valueIdentity.exact(
+          getNamespacedRouteMetadata(row, mainSource)?.correlationKey,
+        ),
       ),
     reduce: getRepresentative,
     postMap: unwrapRepresentative,
@@ -285,6 +289,7 @@ function validateAndCreateMapping(
 export function processGroupBy(
   pipeline: NamespacedAndKeyedStream,
   groupByClause: GroupBy,
+  valueIdentity: ValueIdentity,
   havingClauses?: Array<Having>,
   selectClause?: Select,
   fnHavingClauses?: Array<(row: any) => any>,
@@ -320,7 +325,12 @@ export function processGroupBy(
   }
 
   if (mainSource) {
-    addCorrelationRouteAggregates(virtualAggregates, mainSource, fields)
+    addCorrelationRouteAggregates(
+      virtualAggregates,
+      mainSource,
+      fields,
+      valueIdentity,
+    )
   }
 
   // Handle empty GROUP BY (single-group aggregation)
@@ -358,7 +368,13 @@ export function processGroupBy(
     const keyExtractor = ([, row]: [string, NamespacedRow]) => {
       const key: Record<string, unknown> = { [fields.singleGroup]: true }
       if (mainSource) {
-        addCorrelationRouteIdentityToGroupKey(key, row, mainSource, fields)
+        addCorrelationRouteIdentityToGroupKey(
+          key,
+          row,
+          mainSource,
+          fields,
+          valueIdentity,
+        )
       }
       return key
     }
@@ -492,11 +508,17 @@ export function processGroupBy(
     for (let i = 0; i < groupByClause.length; i++) {
       const compiledExpr = compiledGroupByExpressions[i]!
       const value = compiledExpr(namespacedRow)
-      key[fields.groupKeys[i]!] = getEqualityValueIdentity(value)
+      key[fields.groupKeys[i]!] = valueIdentity.equality(value)
     }
 
     if (mainSource) {
-      addCorrelationRouteIdentityToGroupKey(key, row, mainSource, fields)
+      addCorrelationRouteIdentityToGroupKey(
+        key,
+        row,
+        mainSource,
+        fields,
+        valueIdentity,
+      )
     }
 
     return key
@@ -510,8 +532,10 @@ export function processGroupBy(
   for (let i = 0; i < compiledGroupByExpressions.length; i++) {
     const compiledExpr = compiledGroupByExpressions[i]!
     aggregates[fields.groupValues[i]!] = {
-      preMap: ([rowKey, row]: [string, NamespacedRow]) =>
-        createRepresentative(rowKey, compiledExpr(row)),
+      preMap: ([rowKey, row]: [string, NamespacedRow]) => {
+        const value = compiledExpr(row)
+        return createRepresentative(rowKey, value, valueIdentity.exact(value))
+      },
       reduce: getRepresentative,
       postMap: unwrapRepresentative,
     }
