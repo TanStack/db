@@ -1271,12 +1271,18 @@ explicitly removed.
         red/greened. A 20-cell two-demand restart matrix and eight
         three-generation settlement orders cover return, throw, resolve,
         reject, release, unsubscribe, cleanup, and obsolete/current ordering.
-        The next loss audit recovered four omitted restart boundaries, all now
-        red/greened as one acquisition-availability class: demand created by
-        the synchronous restart status callback, false physical settlement
-        while cleaned up, eager-mode restart, and failure of the replacement
-        `sync()` function itself. Logical demand now stays detached until a
-        current loader exists; only real adapter work emits settlement.
+        The next loss audit recovered four omitted restart boundaries and the
+        first repair closed the coarse cases: demand created by the synchronous
+        loading-status callback, false physical settlement while cleaned up,
+        eager-mode restart, and failure of the replacement `sync()` function.
+        A stricter acquisition-availability census is now red for four seams
+        that collection status cannot describe: demand reentered from
+        `markReady()` before the new loader is installed, demand reentered from
+        the failed-start error callback, demand started by the retiring
+        adapter's cleanup callback, and eager demand later sent to
+        `unloadSubset` despite never calling `loadSubset`. Replace the status
+        guesses with one explicit sync-session acquisition contract before
+        making these cells green.
   - [ ] Keep the ordered-query layer as a consumer of the same protocol. Cross
         page, prefix, boundary, and full-source routes with cancellation,
         failure, retry, and reentrant `setWindow`; do not duplicate ownership
@@ -1338,9 +1344,10 @@ explicitly removed.
         barrier reuse, external-abort success, and replay cleanup reentrancy.
         A second audit added nine red boundary cells across restart entry,
         public window reentry/session fencing, Effect parity, and source-local
-        recovery gates. The first four restart-entry cells are now green. All
-        86 core lifecycle cells plus 129 existing subscription/replay tests
-        pass after that class-level fix.
+        recovery gates. The first four coarse restart-entry cells are green;
+        the stricter audit added four red acquisition-availability cells. The
+        last fully green checkpoint had 86 core lifecycle cells plus 129
+        existing subscription/replay tests.
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
       behavior, and opaque callback roots.
