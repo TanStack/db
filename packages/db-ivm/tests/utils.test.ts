@@ -186,12 +186,27 @@ describe(`hash`, () => {
     it(`includes enumerable symbol keys and values`, () => {
       const key = Symbol(`key`)
 
-      expect(hash({ [key]: `before` })).not.toBe(
-        hash({ [key]: `after` }),
-      )
+      expect(hash({ [key]: `before` })).not.toBe(hash({ [key]: `after` }))
       expect(hash({ [Symbol(`key`)]: `value` })).not.toBe(
         hash({ [Symbol(`key`)]: `value` }),
       )
+    })
+
+    it(`hashes structurally equal cycles through symbol keys`, () => {
+      const key = Symbol(`cycle`)
+      const first: Record<PropertyKey, unknown> = {}
+      const second: Record<PropertyKey, unknown> = {}
+      first[key] = first
+      second[key] = second
+
+      const firstPeer: Record<PropertyKey, unknown> = {}
+      const secondPeer: Record<PropertyKey, unknown> = {}
+      firstPeer[key] = secondPeer
+      secondPeer[key] = firstPeer
+
+      expect(hash(first)).toBe(hash(second))
+      expect(hash(first)).toBe(hash(first))
+      expect(hash(firstPeer)).toBe(hash(secondPeer))
     })
 
     it(`should hash arrays`, () => {

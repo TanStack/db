@@ -1,8 +1,4 @@
-import {
-  MurmurHashStream,
-  getSymbolIdentity,
-  randomHash,
-} from './murmur.js'
+import { MurmurHashStream, getSymbolIdentity, randomHash } from './murmur.js'
 import type { Hasher } from './murmur.js'
 
 /*
@@ -23,6 +19,7 @@ const MAP_MARKER = randomHash()
 const SET_MARKER = randomHash()
 const UINT8ARRAY_MARKER = randomHash()
 const TEMPORAL_MARKER = randomHash()
+const CYCLE_MARKER = randomHash()
 
 const temporalTypes = new Set([
   `Temporal.Duration`,
@@ -52,63 +49,81 @@ const UINT8ARRAY_CONTENT_HASH_THRESHOLD = 128
 
 const hashCache = new WeakMap<object, number>()
 
+type HashContext = {
+  activeObjects: Map<object, number>
+  activeOrder: Array<object>
+  cyclicObjects: Set<object>
+}
+
 export function hash(input: any): number {
   const hasher = new MurmurHashStream()
-  updateHasher(hasher, input)
+  updateHasher(hasher, input, {
+    activeObjects: new Map(),
+    activeOrder: [],
+    cyclicObjects: new Set(),
+  })
   return hasher.digest()
 }
 
-function hashObject(input: object): number {
+function hashObject(input: object, context: HashContext): number {
   const cachedHash = hashCache.get(input)
   if (cachedHash !== undefined) {
     return cachedHash
   }
 
+  context.activeObjects.set(input, context.activeOrder.length)
+  context.activeOrder.push(input)
+
   let valueHash: number | undefined
-  if (input instanceof Date) {
-    valueHash = hashDate(input)
-  } else if (
-    // Check if input is a Uint8Array or Buffer
-    (typeof Buffer !== `undefined` && input instanceof Buffer) ||
-    input instanceof Uint8Array
-  ) {
-    // For small Uint8Arrays/Buffers (e.g., ULIDs, UUIDs), hash by content
-    // to enable proper equality comparisons. For large arrays, hash by reference
-    // to avoid performance costs.
-    if (input.byteLength <= UINT8ARRAY_CONTENT_HASH_THRESHOLD) {
-      valueHash = hashUint8Array(input)
-    } else {
-      // Deeply hashing large arrays would be too costly
-      // so we track them by reference and cache them in a weak map
+  try {
+    if (input instanceof Date) {
+      valueHash = hashDate(input)
+    } else if (
+      // Check if input is a Uint8Array or Buffer
+      (typeof Buffer !== `undefined` && input instanceof Buffer) ||
+      input instanceof Uint8Array
+    ) {
+      // For small Uint8Arrays/Buffers (e.g., ULIDs, UUIDs), hash by content
+      // to enable proper equality comparisons. For large arrays, hash by reference
+      // to avoid performance costs.
+      if (input.byteLength <= UINT8ARRAY_CONTENT_HASH_THRESHOLD) {
+        valueHash = hashUint8Array(input)
+      } else {
+        // Deeply hashing large arrays would be too costly
+        // so we track them by reference and cache them in a weak map
+        return cachedReferenceHash(input)
+      }
+    } else if (input instanceof File) {
+      // Files are always hashed by reference due to their potentially large size
       return cachedReferenceHash(input)
-    }
-  } else if (input instanceof File) {
-    // Files are always hashed by reference due to their potentially large size
-    return cachedReferenceHash(input)
-  } else if (isTemporal(input)) {
-    valueHash = hashTemporal(input)
-  } else {
-    let plainObjectInput = input
-    let marker = OBJECT_MARKER
+    } else if (isTemporal(input)) {
+      valueHash = hashTemporal(input)
+    } else {
+      let plainObjectInput = input
+      let marker = OBJECT_MARKER
 
-    if (input instanceof Array) {
-      marker = ARRAY_MARKER
-    }
+      if (input instanceof Array) {
+        marker = ARRAY_MARKER
+      }
 
-    if (input instanceof Map) {
-      marker = MAP_MARKER
-      plainObjectInput = [...input.entries()]
-    }
+      if (input instanceof Map) {
+        marker = MAP_MARKER
+        plainObjectInput = [...input.entries()]
+      }
 
-    if (input instanceof Set) {
-      marker = SET_MARKER
-      plainObjectInput = [...input.entries()]
-    }
+      if (input instanceof Set) {
+        marker = SET_MARKER
+        plainObjectInput = [...input.entries()]
+      }
 
-    valueHash = hashPlainObject(plainObjectInput, marker)
+      valueHash = hashPlainObject(plainObjectInput, marker, context)
+    }
+  } finally {
+    context.activeObjects.delete(input)
+    context.activeOrder.pop()
   }
 
-  hashCache.set(input, valueHash)
+  if (!context.cyclicObjects.has(input)) hashCache.set(input, valueHash)
   return valueHash
 }
 
@@ -139,7 +154,11 @@ function hashTemporal(input: TemporalLike): number {
   return hasher.digest()
 }
 
-function hashPlainObject(input: object, marker: number): number {
+function hashPlainObject(
+  input: object,
+  marker: number,
+  context: HashContext,
+): number {
   const hasher = new MurmurHashStream()
 
   // Mark the type of the input
@@ -149,7 +168,7 @@ function hashPlainObject(input: object, marker: number): number {
   for (const key of keys) {
     hasher.update(KEY)
     hasher.update(key)
-    updateHasher(hasher, input[key as keyof typeof input])
+    updateHasher(hasher, input[key as keyof typeof input], context)
   }
   const symbolKeys = Object.getOwnPropertySymbols(input)
     .filter((key) => Object.prototype.propertyIsEnumerable.call(input, key))
@@ -157,13 +176,17 @@ function hashPlainObject(input: object, marker: number): number {
   for (const key of symbolKeys) {
     hasher.update(KEY)
     hasher.update(key)
-    updateHasher(hasher, input[key as keyof typeof input])
+    updateHasher(hasher, input[key as keyof typeof input], context)
   }
 
   return hasher.digest()
 }
 
-function updateHasher(hasher: Hasher, input: unknown): void {
+function updateHasher(
+  hasher: Hasher,
+  input: unknown,
+  context: HashContext,
+): void {
   if (input === null) {
     hasher.update(NULL)
     return
@@ -185,7 +208,7 @@ function updateHasher(hasher: Hasher, input: unknown): void {
       hasher.update(input)
       return
     case `object`:
-      hasher.update(getCachedHash(input))
+      hasher.update(getCachedHash(input, context))
       return
     case `function`:
       // Functions are assigned a globally unique ID
@@ -199,10 +222,21 @@ function updateHasher(hasher: Hasher, input: unknown): void {
   }
 }
 
-function getCachedHash(input: object): number {
+function getCachedHash(input: object, context: HashContext): number {
+  const activeIndex = context.activeObjects.get(input)
+  if (activeIndex !== undefined) {
+    for (let index = activeIndex; index < context.activeOrder.length; index++) {
+      context.cyclicObjects.add(context.activeOrder[index]!)
+    }
+    const hasher = new MurmurHashStream()
+    hasher.update(CYCLE_MARKER)
+    hasher.update(context.activeOrder.length - activeIndex - 1)
+    return hasher.digest()
+  }
+
   let valueHash = hashCache.get(input)
   if (valueHash === undefined) {
-    valueHash = hashObject(input)
+    valueHash = hashObject(input, context)
   }
   return valueHash
 }

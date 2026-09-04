@@ -864,6 +864,11 @@ explicitly removed.
       error in a host microtask instead of producing an unhandled derived
       rejection. The three focused regressions failed before the fix and the
       151-test subscription, replay, reentrancy, and lifecycle run is green.
+- [x] Close the symbol-cycle gap exposed by the routed-value audit. D2 now
+      hashes cyclic back-references by structural traversal distance, preserving
+      equal hashes for separately allocated equal cycles instead of overflowing
+      when an enumerable symbol is the back-edge. The regression failed before
+      the fix and the full 330-test db-ivm suite is green.
 - [ ] Ask multiple fresh reviewers for final coherence, hostile-assay, and
       loss-audit passes.
 - [ ] Update RFC/PR text and changeset to match the final design.
