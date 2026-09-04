@@ -10,11 +10,11 @@ import {
 } from '@tanstack/db-ivm'
 import { optimizeQuery } from '../optimizer.js'
 import {
+  createParentContext,
   getEqualityValueIdentity,
   getParentContextIdentity,
-  PARENT_CONTEXT_IDENTITY,
+  getParentContextValue,
   serializeEqualityValue,
-  setParentContextIdentity,
 } from '../equality-value-identity.js'
 import {
   CollectionInputNotFoundError,
@@ -161,8 +161,9 @@ function projectParentContext(
   projections: Array<CompiledParentProjection>,
 ): Record<string, any> {
   const inherited = (nsRow as any).__parentContext
+  const inheritedValue = getParentContextValue(inherited)
   const parentContext: Record<string, any> =
-    inherited != null && typeof inherited === `object` ? { ...inherited } : {}
+    inheritedValue === undefined ? {} : { ...inheritedValue }
   const projectedIdentity: Array<unknown> = []
 
   for (const projection of projections) {
@@ -202,11 +203,10 @@ function projectParentContext(
     target[projection.field[projection.field.length - 1]!] = projectedValue
   }
 
-  setParentContextIdentity(parentContext, [
+  return createParentContext(parentContext, [
     getParentContextIdentity(inherited),
     projectedIdentity,
   ])
-  return parentContext
 }
 
 function parameterizeByParentRoutes(
@@ -227,7 +227,9 @@ function parameterizeByParentRoutes(
         [INCLUDES_PUBLIC_KEY]:
           namespaced[mainSource]?.[INCLUDES_PUBLIC_KEY] ?? rowKey,
       }
-      if (parentContext != null) Object.assign(namespaced, parentContext)
+      if (parentContext != null) {
+        Object.assign(namespaced, getParentContextValue(parentContext))
+      }
       namespaced.__correlationKey = correlationKey
       namespaced.__parentContext = parentContext
       return [
@@ -1682,7 +1684,7 @@ function wrapInputWithAlias(
           scalar.parentContext != null &&
           typeof scalar.parentContext === `object`
         ) {
-          Object.assign(nsRow, scalar.parentContext)
+          Object.assign(nsRow, getParentContextValue(scalar.parentContext))
         }
         return [key, nsRow] as [unknown, NamespacedRow]
       }
@@ -1697,7 +1699,7 @@ function wrapInputWithAlias(
       const { __parentContext, ...cleanRow } = row as any
       const nsRow: Record<string, any> = { [alias]: cleanRow }
       if (__parentContext) {
-        Object.assign(nsRow, __parentContext)
+        Object.assign(nsRow, getParentContextValue(__parentContext))
         ;(nsRow as any).__parentContext = __parentContext
       }
       return [key, nsRow] as [unknown, Record<string, typeof row>]
@@ -1915,7 +1917,6 @@ function stripInternalCorrelation(selected: any): any {
     typeof selected !== `object` ||
     (!(`__correlationKey` in selected) &&
       !(`__parentContext` in selected) &&
-      !(PARENT_CONTEXT_IDENTITY in selected) &&
       !(INCLUDES_PUBLIC_KEY in selected))
   ) {
     return selected
@@ -1924,7 +1925,6 @@ function stripInternalCorrelation(selected: any): any {
   const result = Array.isArray(selected) ? [...selected] : { ...selected }
   delete result.__correlationKey
   delete result.__parentContext
-  delete result[PARENT_CONTEXT_IDENTITY]
   delete result[INCLUDES_PUBLIC_KEY]
   return result
 }

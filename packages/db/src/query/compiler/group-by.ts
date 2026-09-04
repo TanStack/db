@@ -26,6 +26,7 @@ import {
 import {
   getEqualityValueIdentity,
   getParentContextIdentity,
+  getParentContextValue,
 } from '../equality-value-identity.js'
 import type {
   Aggregate,
@@ -102,9 +103,7 @@ function getCorrelationRouteIdentity(
 function getHavingEvaluationRow(row: Record<string, unknown>): NamespacedRow {
   const parentContext = row.__parentContext
   return {
-    ...(parentContext !== null && typeof parentContext === `object`
-      ? (parentContext as NamespacedRow)
-      : {}),
+    ...getParentContextValue(parentContext),
     $selected: row.$selected as Record<string, unknown>,
   }
 }
@@ -115,9 +114,7 @@ function getWrappedAggregateEvaluationRow(
 ): NamespacedRow {
   const parentContext = row.__parentContext
   return {
-    ...(parentContext !== null && typeof parentContext === `object`
-      ? (parentContext as NamespacedRow)
-      : {}),
+    ...getParentContextValue(parentContext),
     $selected: selected,
   }
 }

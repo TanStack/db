@@ -2,7 +2,13 @@ import { serializeValue } from '@tanstack/db-ivm'
 import { normalizeValue } from '../utils/comparison.js'
 import { getRuntimeReferenceIdentity } from './runtime-reference-identity.js'
 
-export const PARENT_CONTEXT_IDENTITY = `__parentContextIdentity`
+const PARENT_CONTEXT = Symbol(`tanstack_db_parent_context`)
+
+type ParentContext = {
+  [PARENT_CONTEXT]: true
+  value: Record<string, unknown>
+  identity: unknown
+}
 
 /** Preserve the value relation used by equality predicates in keyed state. */
 export function getEqualityValueIdentity(value: unknown): unknown {
@@ -21,26 +27,35 @@ export function serializeEqualityValue(value: unknown): string {
   return serializeValue(getEqualityValueIdentity(value))
 }
 
-/** Record the evaluator-level identity of a compiler-created parent context. */
-export function setParentContextIdentity(
-  context: Record<string, unknown>,
+/** Keep compiler identity outside the namespace that holds user aliases. */
+export function createParentContext(
+  value: Record<string, unknown>,
   identity: unknown,
-): void {
-  // This field is enumerable on purpose: D2's multiset must distinguish two
-  // compiler contexts whose user-visible shapes match but whose leaf values
-  // compare by reference. Output cleanup removes it with the other route data.
-  context[PARENT_CONTEXT_IDENTITY] = identity
+): ParentContext {
+  return { [PARENT_CONTEXT]: true, value, identity }
+}
+
+function isParentContext(context: unknown): context is ParentContext {
+  return (
+    typeof context === `object` && context !== null && PARENT_CONTEXT in context
+  )
+}
+
+export function getParentContextValue(
+  context: unknown,
+): Record<string, unknown> | undefined {
+  if (isParentContext(context)) return context.value
+  if (typeof context === `object` && context !== null) {
+    return context as Record<string, unknown>
+  }
+  return undefined
 }
 
 /**
- * Parent contexts are structural compiler records whose leaf values still use
- * query equality. Their identity is recorded when the projection is built so
- * a later insert/retract can reconstruct the same route without treating the
- * wrapper object itself as a user value.
+ * The envelope is structural D2 state, but its value keeps the user's alias
+ * namespace separate from compiler identity. A later insert or retract can
+ * therefore rebuild the same route without reserving a user-visible key.
  */
 export function getParentContextIdentity(context: unknown): unknown {
-  if (typeof context !== `object` || context === null) return context
-  return (
-    (context as Record<string, unknown>)[PARENT_CONTEXT_IDENTITY] ?? context
-  )
+  return isParentContext(context) ? context.identity : context
 }

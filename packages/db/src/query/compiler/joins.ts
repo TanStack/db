@@ -20,6 +20,7 @@ import { normalizeValue } from '../../utils/comparison.js'
 import {
   getEqualityValueIdentity,
   getParentContextIdentity,
+  getParentContextValue,
   serializeEqualityValue,
 } from '../equality-value-identity.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
@@ -102,7 +103,7 @@ function wrapJoinedInputRow(alias: string, row: any): NamespacedRow {
       scalar.parentContext != null &&
       typeof scalar.parentContext === `object`
     ) {
-      Object.assign(namespaced, scalar.parentContext)
+      Object.assign(namespaced, getParentContextValue(scalar.parentContext))
     }
     return namespaced
   }
@@ -114,7 +115,7 @@ function wrapJoinedInputRow(alias: string, row: any): NamespacedRow {
   const { __parentContext, ...cleanRow } = row
   const namespaced: NamespacedRow = { [alias]: cleanRow }
   if (__parentContext != null) {
-    Object.assign(namespaced, __parentContext)
+    Object.assign(namespaced, getParentContextValue(__parentContext))
     namespaced.__parentContext = __parentContext
   }
   return namespaced

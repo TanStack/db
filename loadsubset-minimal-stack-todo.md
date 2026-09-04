@@ -576,7 +576,7 @@ explicitly removed.
 - [x] Make equality identity the actual D2 grouping key while preserving one
       raw representative only for output. Red/green the full equality-class
       matrix, including Date/number, invalid Date/NaN, and unhashable symbols.
-- [ ] Replace string-keyed parent-context metadata with a collision-free
+- [x] Replace string-keyed parent-context metadata with a collision-free
       carrier and prove internal-looking aliases and selected field names are
       untouched.
 - [ ] Scope symbol correlation identity to releasable graph state, then prove

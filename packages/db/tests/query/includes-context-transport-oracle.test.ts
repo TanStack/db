@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import {
   add,
+  and,
   coalesce,
   count,
   createLiveQueryCollection,
@@ -66,6 +67,9 @@ const routeContextGrammar = {
     selections: [`expression`, `functional`] as const,
     domains: [`non-null`, `nullable`] as const,
   },
+  namespaceCollision: {
+    locations: [`parent-alias`, `selected-field`] as const,
+  },
 } as const
 
 const queryRefMetadataGrammar = {
@@ -119,6 +123,11 @@ type DerivedResultCell = {
   domain: (typeof routeContextGrammar.derivedResult.domains)[number]
 }
 
+type NamespaceCollisionCell = {
+  family: `namespace-collision`
+  location: (typeof routeContextGrammar.namespaceCollision.locations)[number]
+}
+
 type GrammarCell =
   | ParentProjectionCell
   | CorrelationDomainCell
@@ -128,6 +137,7 @@ type GrammarCell =
   | JoinCell
   | UnionIdentityCell
   | DerivedResultCell
+  | NamespaceCollisionCell
 
 const grammarCells: Array<GrammarCell> = [
   ...routeContextGrammar.parentProjection.shapes.map(
@@ -186,6 +196,12 @@ const grammarCells: Array<GrammarCell> = [
         }),
       ),
     ),
+  ),
+  ...routeContextGrammar.namespaceCollision.locations.map(
+    (location): NamespaceCollisionCell => ({
+      family: `namespace-collision`,
+      location,
+    }),
   ),
 ]
 
@@ -257,6 +273,8 @@ function grammarCellName(cell: GrammarCell): string {
       return `${cell.family} / ${cell.form}`
     case `derived-result`:
       return `${cell.family} / ${cell.boundary} / ${cell.selection} / ${cell.domain}`
+    case `namespace-collision`:
+      return `${cell.family} / ${cell.location}`
   }
 }
 
@@ -1458,6 +1476,97 @@ async function runJoinCell({
   }
 }
 
+async function runNamespaceCollisionCell({
+  location,
+}: NamespaceCollisionCell): Promise<void> {
+  const parents = createGrammarCollection(`collision-${location}-parents`, [
+    { id: 1, group: 1, token: `one` },
+  ])
+  const children = createGrammarCollection(`collision-${location}-children`, [
+    { id: 10, parentGroup: 1, token: `one`, label: `one` },
+    { id: 20, parentGroup: 2, token: `two`, label: `two` },
+  ])
+  const live =
+    location === `parent-alias`
+      ? createLiveQueryCollection((q) =>
+          q
+            .from({ __parentContextIdentity: parents.collection })
+            .select(({ __parentContextIdentity: parent }) => {
+              const rows = q
+                .from({ child: children.collection })
+                .where(({ child }) =>
+                  and(
+                    eq(child.parentGroup, parent.group),
+                    eq(child.token, parent.token),
+                  ),
+                )
+                .select(({ child }) => ({
+                  id: child.id,
+                  value: child.label,
+                }))
+              return { id: parent.id, ...includeInEveryForm(rows) }
+            }),
+        )
+      : createLiveQueryCollection((q) =>
+          q.from({ parent: parents.collection }).select(({ parent }) => {
+            const rows = q
+              .from({ child: children.collection })
+              .where(({ child }) =>
+                and(
+                  eq(child.parentGroup, parent.group),
+                  eq(child.token, parent.token),
+                ),
+              )
+              .select(({ child }) => ({
+                id: child.id,
+                __parentContextIdentity: child.label,
+              }))
+            return { id: parent.id, ...includeInEveryForm(rows) }
+          }),
+        )
+
+  const expected = () => {
+    const group = parents.collection.get(1)!.group
+    return children.collection.toArray
+      .filter(
+        (child) =>
+          child.parentGroup === group &&
+          child.token === parents.collection.get(1)!.token,
+      )
+      .map((child) => ({ id: child.id, value: child.label }))
+  }
+  const project = (rows: Iterable<Record<string, unknown>>) =>
+    [...rows].map((row) => ({
+      id: row.id,
+      value:
+        location === `parent-alias` ? row.value : row.__parentContextIdentity,
+    }))
+  const assertCurrent = () =>
+    expectEveryForm(
+      live.get(1)! as MaterializedForms<Record<string, unknown>>,
+      project,
+      expected(),
+    )
+
+  try {
+    await live.preload()
+    assertCurrent()
+
+    parents.write(`update`, { id: 1, group: 2, token: `two` })
+    assertCurrent()
+
+    children.write(`update`, {
+      id: 20,
+      parentGroup: 2,
+      token: `two`,
+      label: `updated`,
+    })
+    assertCurrent()
+  } finally {
+    await cleanup(live, [parents, children])
+  }
+}
+
 async function runGrammarCell(cell: GrammarCell): Promise<void> {
   switch (cell.family) {
     case `parent-projection`:
@@ -1476,6 +1585,8 @@ async function runGrammarCell(cell: GrammarCell): Promise<void> {
       return runUnionIdentityCell(cell)
     case `derived-result`:
       return runDerivedResultCell(cell)
+    case `namespace-collision`:
+      return runNamespaceCollisionCell(cell)
   }
 }
 
@@ -1494,14 +1605,15 @@ describe(`correlated include route-context transport grammar`, () => {
       routeContextGrammar.unionIdentity.forms.length +
       routeContextGrammar.derivedResult.boundaries.length *
         routeContextGrammar.derivedResult.selections.length *
-        routeContextGrammar.derivedResult.domains.length
+        routeContextGrammar.derivedResult.domains.length +
+      routeContextGrammar.namespaceCollision.locations.length
     const names = grammarCells.map(grammarCellName)
 
     expect(grammarCells).toHaveLength(expectedCellCount)
     expect(new Set(names)).toHaveLength(expectedCellCount)
     expect(
       grammarCells.length * materializationForms.length * checkpoints.length,
-    ).toBe(387)
+    ).toBe(405)
   })
 
   for (const cell of grammarCells) {
