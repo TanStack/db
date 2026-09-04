@@ -1,6 +1,6 @@
-import { serializeValue } from '@tanstack/db-ivm'
 import { inArray } from '../builder/functions.js'
 import { PropRef } from '../ir.js'
+import { serializeEqualityValue } from '../equality-value-identity.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
 import type { LazyDemandPlan } from '../compiler/joins.js'
 import type { BasicExpression } from '../ir.js'
@@ -126,7 +126,7 @@ export class SubsetDemandController {
 }
 
 function canonicalizeKeys(keys: Set<unknown>): Map<string, unknown> {
-  return new Map([...keys].map((key) => [serializeValue(key), key]))
+  return new Map([...keys].map((key) => [serializeEqualityValue(key), key]))
 }
 
 function equalKeySets(

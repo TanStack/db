@@ -23,6 +23,10 @@ import {
   isCaseWhenConditionTrue,
   toBooleanPredicate,
 } from './evaluators.js'
+import {
+  getEqualityValueIdentity,
+  getParentContextIdentity,
+} from '../equality-value-identity.js'
 import type {
   Aggregate,
   BasicExpression,
@@ -51,8 +55,12 @@ function addCorrelationRouteToGroupKey(
   const rowRecord = row as Record<string, unknown>
   const source = rowRecord[mainSource] as Record<string, unknown> | undefined
   key.__correlationKey = source?.__correlationKey
+  key.__correlationIdentity = getEqualityValueIdentity(source?.__correlationKey)
   if (rowRecord.__parentContext != null) {
     key.__parentContext = rowRecord.__parentContext
+    key.__parentContextIdentity = getParentContextIdentity(
+      rowRecord.__parentContext,
+    )
   }
 }
 
@@ -60,8 +68,11 @@ function getCorrelationRouteIdentity(
   aggregatedRow: Record<string, unknown>,
 ): unknown {
   return aggregatedRow.__parentContext == null
-    ? aggregatedRow.__correlationKey
-    : [aggregatedRow.__correlationKey, aggregatedRow.__parentContext]
+    ? getEqualityValueIdentity(aggregatedRow.__correlationKey)
+    : [
+        getEqualityValueIdentity(aggregatedRow.__correlationKey),
+        getParentContextIdentity(aggregatedRow.__parentContext),
+      ]
 }
 
 function getHavingEvaluationRow(row: Record<string, unknown>): NamespacedRow {
@@ -366,6 +377,7 @@ export function processGroupBy(
       const compiledExpr = compiledGroupByExpressions[i]!
       const value = compiledExpr(namespacedRow)
       key[`__key_${i}`] = value
+      key[`__keyIdentity_${i}`] = getEqualityValueIdentity(value)
     }
 
     if (mainSource) addCorrelationRouteToGroupKey(key, row, mainSource)
@@ -448,7 +460,7 @@ export function processGroupBy(
         : undefined
       const keyParts: Array<unknown> = []
       for (let i = 0; i < groupByClause.length; i++) {
-        keyParts.push(aggregatedRow[`__key_${i}`])
+        keyParts.push(getEqualityValueIdentity(aggregatedRow[`__key_${i}`]))
       }
       if (correlationRoute !== undefined) {
         keyParts.push(correlationRoute)

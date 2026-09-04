@@ -772,6 +772,14 @@ explicitly removed.
       per-attempt error storage made that contract the simpler implementation.
       The public error guide now states that ordinary deltas remain private
       after failed replay until a later authoritative replacement succeeds.
+- [x] Align correlation routes with evaluator equality. The independent
+      cross-formulation oracle now compares fully loaded and lazy includes for
+      same-shaped but reference-distinct correlation keys and projected parent
+      context, including delete/reinsert transitions and grouped children.
+      Equality tokens are confined to equality-keyed route, group, and demand
+      state; output-producing expressions retain exact runtime values. The
+      compiler records parent-context identity from projected leaves so D2 can
+      retract the same route without structurally merging opaque references.
 - [x] Measure source and compressed bundle size against both `origin/main` and
       the large RFC stack. Across all package `src` trees, the old stack was
       +10,545/-1,692 lines (net +8,853) while this tree is +2,006/-1,302

@@ -134,7 +134,11 @@ type BucketKey = readonly [
 Correlation equality must use the same value semantics as query predicates.
 Implementations use canonical values, interned handles, or nested maps; they do
 not reconstruct array or object keys and expect JavaScript `Map` identity to
-match.
+match. Equality tokens collapse `-0` with `0`, compare Date, Temporal, and
+binary values by the same normalized value as `eq`/`in`, and retain runtime
+reference identity for other objects, functions, and symbols. These tokens are
+valid only for equality-keyed routing, grouping, and demand. Output values and
+arbitrary function arguments keep their exact runtime identity and value.
 
 ### Route-context transport
 
@@ -184,7 +188,10 @@ Objects carry route metadata as hidden fields while the compiler moves them
 through recursive sources. Scalars, including `null`, cannot carry fields, so
 the compiler uses an internal envelope at those same edges. Namespacing and
 join adapters unwrap the value, keep the route beside it, and never expose the
-envelope in the public query result.
+envelope in the public query result. Compiler-created parent-context records
+carry a separate equality identity derived from their projected leaves. This
+keeps the structural wrapper stable across D2 operators without collapsing two
+reference-sensitive leaf values that happen to have the same object shape.
 
 Every valid plan is checked as a Collection, `toArray`, and `materialize`
 include at initial load, after a parent-route update, and after a child update.
@@ -693,18 +700,19 @@ create recursive Collection machinery.
 
 ## Executable contracts
 
-| Contract                                                                    | Test suite                                                                |
-| --------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| State equivalence, route lifecycle, transition history, and batch partition | `packages/db/tests/query/includes-oracle.property.test.ts`                |
-| Joined multiplicity, alias identity, and null-key normalization             | `packages/db/tests/query/includes-query-shape-oracle.test.ts`             |
-| Demand, cancellation, and progressive timing                                | `packages/db/tests/query/includes-temporal-oracle.test.ts`                |
-| Optimistic confirmation, rollback, and later reactivity                     | `packages/db/tests/query/includes-optimistic-oracle.property.test.ts`     |
-| Coherent layered publication                                                | `packages/db/tests/query/includes-publication-oracle.test.ts`             |
-| Collection facades, event coherence, and route activation                   | `packages/db/tests/query/includes-collection-oracle.property.test.ts`     |
-| Correlated physical work                                                    | `packages/db/tests/query/includes-work-counter-oracle.test.ts`            |
-| Route-context discovery and transport across recursive and join boundaries  | `packages/db/tests/query/includes-context-transport-oracle.test.ts`       |
-| Query-db ownership                                                          | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`   |
-| Reachable nested shape                                                      | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts` |
+| Contract                                                                    | Test suite                                                                   |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| State equivalence, route lifecycle, transition history, and batch partition | `packages/db/tests/query/includes-oracle.property.test.ts`                   |
+| Joined multiplicity, alias identity, and null-key normalization             | `packages/db/tests/query/includes-query-shape-oracle.test.ts`                |
+| Demand, cancellation, and progressive timing                                | `packages/db/tests/query/includes-temporal-oracle.test.ts`                   |
+| Optimistic confirmation, rollback, and later reactivity                     | `packages/db/tests/query/includes-optimistic-oracle.property.test.ts`        |
+| Coherent layered publication                                                | `packages/db/tests/query/includes-publication-oracle.test.ts`                |
+| Collection facades, event coherence, and route activation                   | `packages/db/tests/query/includes-collection-oracle.property.test.ts`        |
+| Correlated physical work                                                    | `packages/db/tests/query/includes-work-counter-oracle.test.ts`               |
+| Route-context discovery and transport across recursive and join boundaries  | `packages/db/tests/query/includes-context-transport-oracle.test.ts`          |
+| Cross-formulation equivalence and reference-sensitive route identity        | `packages/db/tests/query/includes-cross-formulation-oracle.property.test.ts` |
+| Query-db ownership                                                          | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`      |
+| Reachable nested shape                                                      | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts`    |
 
 Each oracle identifies the first divergent checkpoint and compares either the
 whole result or one exact structural difference. Correlated-materialization

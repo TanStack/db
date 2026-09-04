@@ -10,6 +10,13 @@ import {
 } from '@tanstack/db-ivm'
 import { optimizeQuery } from '../optimizer.js'
 import {
+  getEqualityValueIdentity,
+  getParentContextIdentity,
+  PARENT_CONTEXT_IDENTITY,
+  serializeEqualityValue,
+  setParentContextIdentity,
+} from '../equality-value-identity.js'
+import {
   CollectionInputNotFoundError,
   DistinctRequiresSelectError,
   DuplicateAliasInSubqueryError,
@@ -156,10 +163,17 @@ function projectParentContext(
   const inherited = (nsRow as any).__parentContext
   const parentContext: Record<string, any> =
     inherited != null && typeof inherited === `object` ? { ...inherited } : {}
+  const projectedIdentity: Array<unknown> = []
 
   for (const projection of projections) {
+    const projectedValue = projection.compiled(nsRow)
+    projectedIdentity.push([
+      projection.alias,
+      projection.field,
+      getEqualityValueIdentity(projectedValue),
+    ])
     if (projection.field.length === 0) {
-      const projectedAlias = projection.compiled(nsRow)
+      const projectedAlias = projectedValue
       parentContext[projection.alias] =
         projectedAlias != null && typeof projectedAlias === `object`
           ? { ...projectedAlias }
@@ -185,10 +199,13 @@ function projectParentContext(
       target[segment] = nested
       target = nested
     }
-    target[projection.field[projection.field.length - 1]!] =
-      projection.compiled(nsRow)
+    target[projection.field[projection.field.length - 1]!] = projectedValue
   }
 
+  setParentContextIdentity(parentContext, [
+    getParentContextIdentity(inherited),
+    projectedIdentity,
+  ])
   return parentContext
 }
 
@@ -214,7 +231,11 @@ function parameterizeByParentRoutes(
       namespaced.__correlationKey = correlationKey
       namespaced.__parentContext = parentContext
       return [
-        serializeValue([rowKey, correlationKey, parentContext]),
+        serializeValue([
+          getEqualityValueIdentity(rowKey),
+          getEqualityValueIdentity(correlationKey),
+          getParentContextIdentity(parentContext),
+        ]),
         namespaced,
       ] as [string, NamespacedRow]
     },
@@ -447,7 +468,12 @@ export function compileQuery(
           tagged.__parentContext = parentSide
         }
         const effectiveKey =
-          parentSide != null ? serializeValue([childKey, parentSide]) : childKey
+          parentSide != null
+            ? serializeValue([
+                getEqualityValueIdentity(childKey),
+                getParentContextIdentity(parentSide),
+              ])
+            : childKey
         return [effectiveKey, tagged]
       }),
     )
@@ -751,7 +777,7 @@ export function compileQuery(
           tap((data: any) => {
             for (const [[correlationValue], weight] of data.getInner()) {
               if (correlationValue == null) continue
-              const encoded = serializeValue(correlationValue)
+              const encoded = serializeEqualityValue(correlationValue)
               const previous = demandWeights.get(encoded)
               const nextWeight = (previous?.weight ?? 0) + weight
               if (nextWeight === 0) {
@@ -1081,9 +1107,12 @@ export function compileQuery(
               (row as any)?.__correlationKey
             const parentContext = (row as any)?.__parentContext
             if (parentContext != null) {
-              return serializeValue([correlationKey, parentContext])
+              return serializeValue([
+                getEqualityValueIdentity(correlationKey),
+                getParentContextIdentity(parentContext),
+              ])
             }
-            return correlationKey
+            return getEqualityValueIdentity(correlationKey)
           }
         : undefined
 
@@ -1886,6 +1915,7 @@ function stripInternalCorrelation(selected: any): any {
     typeof selected !== `object` ||
     (!(`__correlationKey` in selected) &&
       !(`__parentContext` in selected) &&
+      !(PARENT_CONTEXT_IDENTITY in selected) &&
       !(INCLUDES_PUBLIC_KEY in selected))
   ) {
     return selected
@@ -1894,6 +1924,7 @@ function stripInternalCorrelation(selected: any): any {
   const result = Array.isArray(selected) ? [...selected] : { ...selected }
   delete result.__correlationKey
   delete result.__parentContext
+  delete result[PARENT_CONTEXT_IDENTITY]
   delete result[INCLUDES_PUBLIC_KEY]
   return result
 }

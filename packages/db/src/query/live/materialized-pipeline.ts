@@ -14,6 +14,10 @@ import {
 } from '../compiler/index.js'
 import { VIRTUAL_PROP_NAMES } from '../../virtual-props.js'
 import { deepEquals } from '../../utils.js'
+import {
+  getEqualityValueIdentity,
+  getParentContextIdentity,
+} from '../equality-value-identity.js'
 import type {
   CompilationResult,
   IncludesCompilationResult,
@@ -416,7 +420,10 @@ function routeKey(
   correlationKey: unknown,
   parentContext: Record<string, any> | null | undefined,
 ): string {
-  return serializeValue([correlationKey ?? null, parentContext ?? null])
+  return serializeValue([
+    getEqualityValueIdentity(correlationKey ?? null),
+    getParentContextIdentity(parentContext ?? null),
+  ])
 }
 
 function compareBucketRows(left: BucketRow, right: BucketRow): number {

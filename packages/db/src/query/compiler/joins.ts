@@ -17,6 +17,11 @@ import {
   UnsupportedJoinTypeError,
 } from '../../errors.js'
 import { normalizeValue } from '../../utils/comparison.js'
+import {
+  getEqualityValueIdentity,
+  getParentContextIdentity,
+  serializeEqualityValue,
+} from '../equality-value-identity.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
 import { compileExpression } from './evaluators.js'
 import { getLazyLoadTargets } from './lazy-targets.js'
@@ -69,7 +74,11 @@ function parameterizeJoinInputByParentRoutes(
     parentKeyStream,
     (rowKey, row, correlationKey, parentContext) => {
       return [
-        serializeValue([rowKey, correlationKey, parentContext]),
+        serializeValue([
+          getEqualityValueIdentity(rowKey),
+          getEqualityValueIdentity(correlationKey),
+          getParentContextIdentity(parentContext),
+        ]),
         {
           ...(row as Record<string, unknown>),
           __correlationKey: correlationKey,
@@ -117,9 +126,13 @@ function getRouteJoinKey(
   value: unknown,
 ): string {
   return serializeValue([
-    row[source]?.__correlationKey ?? row.__correlationKey,
-    row.__parentContext ?? row[source]?.__parentContext ?? null,
-    value,
+    getEqualityValueIdentity(
+      row[source]?.__correlationKey ?? row.__correlationKey,
+    ),
+    getParentContextIdentity(
+      row.__parentContext ?? row[source]?.__parentContext ?? null,
+    ),
+    getEqualityValueIdentity(value),
   ])
 }
 
@@ -407,7 +420,7 @@ function processJoin(
         tap((data) => {
           for (const [[joinKey], weight] of data.getInner()) {
             if (joinKey == null) continue
-            const encoded = serializeValue(joinKey)
+            const encoded = serializeEqualityValue(joinKey)
             const previous = demandWeights.get(encoded)
             const nextWeight = (previous?.weight ?? 0) + weight
             if (nextWeight === 0) {
