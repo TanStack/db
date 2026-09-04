@@ -1,7 +1,7 @@
 import { normalizeExpressionPaths } from '../compiler/expressions.js'
 import {
-  computeSubscriptionOrderByHints,
   OrderedSourceLoader,
+  computeSubscriptionOrderByHints,
   reconcileChangesForD2,
   sendChangesToInput,
   splitUpdates,
@@ -384,14 +384,13 @@ export class CollectionSubscriber<
       start: () => {
         onStart?.()
       },
-      succeed: () =>
-        queueMicrotask(() => {
-          if (syncSession !== this.collectionConfigBuilder.getSyncSession()) {
-            return
-          }
-          this.orderedLoader?.settleFullSourceReplay()
-          this.collectionConfigBuilder.scheduleGraphRunForSession(syncSession)
-        }),
+      succeed: () => {
+        if (syncSession !== this.collectionConfigBuilder.getSyncSession()) {
+          return
+        }
+        this.orderedLoader?.settleFullSourceReplay()
+        this.collectionConfigBuilder.scheduleGraphRunForSession(syncSession)
+      },
     }
   }
 

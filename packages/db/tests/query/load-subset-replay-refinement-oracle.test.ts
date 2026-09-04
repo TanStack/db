@@ -186,6 +186,77 @@ describe(`loadSubset replay refinement`, () => {
     }
   })
 
+  it(`publishes a replay replacement before its source reports ready`, async () => {
+    const replay = createDeferred<void>()
+    let loadCount = 0
+    let begin!: () => void
+    let write!: (message: ChangeMessageOrDeleteKeyMessage<Row, string>) => void
+    let commit!: () => void
+    let truncate!: () => void
+    let sourceSubscription: LoadSubsetOptions[`subscription`]
+    const source = createCollection<Row>({
+      id: `replay-ready-publication-source`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (operations) => {
+          begin = operations.begin
+          write = operations.write
+          commit = operations.commit
+          truncate = operations.truncate
+          operations.markReady()
+          return {
+            loadSubset: (options) => {
+              sourceSubscription = options.subscription
+              loadCount++
+              if (loadCount === 1) {
+                begin()
+                write({ type: `insert`, value: { id: `row`, version: 1 } })
+                commit()
+                return true
+              }
+              return replay.promise
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const live = createLiveQueryCollection((q) =>
+      q.from({ row: source }).select(({ row }) => ({
+        id: row.id,
+        version: row.version,
+      })),
+    )
+    const readVersions = () => live.toArray.map(({ version }) => version)
+    const readyReads: Array<Array<number>> = []
+
+    try {
+      await live.preload()
+      expect(readVersions()).toEqual([1])
+      sourceSubscription!.on(`status:ready`, () => {
+        readyReads.push(readVersions())
+      })
+
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+      begin()
+      write({ type: `insert`, value: { id: `row`, version: 2 } })
+      commit()
+
+      replay.resolve()
+      await flushPromises()
+
+      expect(readyReads).toEqual([[2]])
+      expect(readVersions()).toEqual([2])
+    } finally {
+      replay.resolve()
+      await Promise.all([live.cleanup(), source.cleanup()])
+    }
+  })
+
   it(`keeps a failed replay private until a later authoritative replay`, async () => {
     const sourceId = `replay-refinement-failure-liveness`
     const row = (version: number) => ({ sourceId, rowKey: `row`, version })

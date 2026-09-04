@@ -2178,7 +2178,7 @@ describe(`createLiveQueryCollection`, () => {
       },
     )
 
-    it(`ignores a queued replay-success callback after cleanup`, async () => {
+    it(`ignores queued replay setup after cleanup`, async () => {
       type Row = { id: number; rank: number }
       let syncOps!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
       const source = createCollection<Row>({
@@ -2215,13 +2215,10 @@ describe(`createLiveQueryCollection`, () => {
         if (replayReceipt !== true) await replayReceipt
         const replaySetup = queued.splice(0)
         expect(replaySetup.length).toBeGreaterThan(0)
-        for (const callback of replaySetup) callback()
-        expect(queued.length).toBeGreaterThan(0)
 
         await live.cleanup()
-        for (const callback of queued.splice(0)) {
-          expect(callback).not.toThrow()
-        }
+        for (const callback of replaySetup) expect(callback).not.toThrow()
+        for (const callback of queued.splice(0)) expect(callback).not.toThrow()
         queueSpy.mockRestore()
       } finally {
         vi.restoreAllMocks()

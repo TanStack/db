@@ -2907,6 +2907,145 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
+  it(`rejects replay completion with the exact reported adapter error`, async () => {
+    let begin!: () => void
+    let commit!: () => void
+    let truncate!: () => void
+    const replayLoad = createDeferred<void>()
+    const failure = new Error(`exact replay failure`)
+    const reportedErrors: Array<unknown> = []
+    let loadCount = 0
+    const collection = createCollection<ReplayRow>({
+      id: `exact-replay-completion-error`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (operations) => {
+          begin = operations.begin
+          commit = operations.commit
+          truncate = operations.truncate
+          operations.markReady()
+          return {
+            loadSubset: () => (++loadCount === 1 ? true : replayLoad.promise),
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+      truncateReplayPublication: {
+        start: () => {},
+        succeed: () => {},
+      },
+    })
+    subscription.on(`loadSubset:error`, ({ error }) => {
+      reportedErrors.push(error)
+    })
+
+    try {
+      subscription.requestSnapshot({ optimizedOnly: false })
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+      const replacement = subscription.pendingTruncateReplacement
+      expect(replacement).toBeInstanceOf(Promise)
+
+      replayLoad.reject(failure)
+
+      await expect(replacement).rejects.toBe(failure)
+      expect(subscription.lastError).toBe(failure)
+      expect(reportedErrors).toEqual([failure])
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`does not start replacement work after release unsubscribes`, () => {
+    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const collection = createCollection<ReplayRow>({
+      id: `reentrant-replacement-unsubscribe`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (operations) => {
+          operations.markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return true
+            },
+            unloadSubset: (options) => {
+              unloads.push(options)
+              subscription.unsubscribe()
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+
+    subscription.requestSnapshot({ where, optimizedOnly: false })
+    expect(
+      subscription.requestSnapshot({
+        where,
+        optimizedOnly: false,
+        replaceExistingDemand: true,
+      }),
+    ).toBe(false)
+
+    expect(loads).toHaveLength(1)
+    expect(unloads).toEqual([loads[0]])
+  })
+
+  it(`does not emit a stale specific status after reentrant release`, async () => {
+    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
+    const load = createDeferred<void>()
+    const collection = createCollection<ReplayRow>({
+      id: `reentrant-specific-status`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (operations) => {
+          operations.markReady()
+          return {
+            loadSubset: () => load.promise,
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const observed: Array<{ event: string; current: string }> = []
+    subscription.on(`status:change`, ({ status }) => {
+      if (status === `loadingSubset`) subscription.releaseSnapshot(where)
+    })
+    subscription.on(`status:loadingSubset`, ({ status }) => {
+      observed.push({ event: status, current: subscription.status })
+    })
+    subscription.on(`status:ready`, ({ status }) => {
+      observed.push({ event: status, current: subscription.status })
+    })
+
+    try {
+      subscription.requestSnapshot({ where, optimizedOnly: false })
+      expect(observed).toEqual([{ event: `ready`, current: `ready` }])
+    } finally {
+      load.resolve()
+      await flushPromises()
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   fcTest.prop([replayScenarioArbitrary], {
     numRuns: generatedRuns,
     seed: 1756,

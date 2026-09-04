@@ -170,6 +170,10 @@ export class CollectionSubscription
   // One replay session owns the publication baseline, overlapping attempts,
   // and buffered changes until every attempt settles.
   private truncateReplaySession: TruncateReplaySession | undefined
+  private readonly truncateReplayErrors = new WeakMap<
+    Promise<unknown>,
+    Error
+  >()
   private truncateReplacementPending = false
   private unsubscribed = false
 
@@ -509,10 +513,16 @@ export class CollectionSubscription
     attempt.pending.add(pending)
     void result.then(
       () => this.settleTruncateReplay(session, attempt, pending),
-      () => {
+      (error: unknown) => {
         // A released demand no longer participates in this replacement. Its
         // cooperative AbortError must not discard rows from active demands.
         if (this.subsetDemands.includes(demand) && !options.signal?.aborted) {
+          const normalized = normalizeError(error)
+          this.truncateReplayErrors.set(result, normalized)
+          // Replay completion is observed before the ordinary status listener,
+          // so retain the exact normalized error for the completion barrier.
+          // The status listener emits the public error event next.
+          this._lastError = normalized
           attempt.failed = true
         }
         this.settleTruncateReplay(session, attempt, pending)
@@ -731,6 +741,10 @@ export class CollectionSubscription
       status: newStatus,
     })
 
+    // A generic listener may synchronously start or release demand. Do not
+    // follow that newer transition with a stale specific event.
+    if (this._status !== newStatus) return
+
     // Emit specific status event
     const eventKey: `status:${SubscriptionStatus}` = `status:${newStatus}`
     this.emitInner(eventKey, {
@@ -768,7 +782,12 @@ export class CollectionSubscription
     }
 
     void syncResult.then(finish, (error: unknown) => {
-      if (shouldReportError()) this.recordLoadSubsetError(options, error)
+      if (shouldReportError()) {
+        this.recordLoadSubsetError(
+          options,
+          this.truncateReplayErrors.get(syncResult) ?? error,
+        )
+      }
       finish()
     })
     return trackStatus ? participant : undefined
@@ -1078,7 +1097,7 @@ export class CollectionSubscription
     }
 
     if (opts?.replaceExistingDemand) {
-      this.releaseMatchingDemand(loadOptions)
+      if (!this.releaseMatchingDemand(loadOptions)) return false
     }
 
     const { demand, result: syncResult } = this.startSubsetDemand(loadOptions)
@@ -1151,12 +1170,13 @@ export class CollectionSubscription
     this.releaseDemandAt(index)
   }
 
-  private releaseMatchingDemand(options: LoadSubsetOptions): void {
+  private releaseMatchingDemand(options: LoadSubsetOptions): boolean {
     const key = getLoadSubsetDemandKey(options)
     const index = this.subsetDemands.findIndex(
       (demand) => getLoadSubsetDemandKey(demand.requestOptions) === key,
     )
     if (index !== -1) this.releaseDemandAt(index)
+    return !this.unsubscribed
   }
 
   private releaseDemandAt(index: number): void {

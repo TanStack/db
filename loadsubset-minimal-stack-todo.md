@@ -875,6 +875,14 @@ explicitly removed.
       all cleanup steps even if publication throws. The six exact regressions
       failed before their fixes and the 157-test subscription, replay,
       reentrancy, and lifecycle run is green.
+- [x] Close the replay settlement audit gaps. Replay completion, the error
+      event, and `lastError` now share the exact normalized adapter error;
+      replacement release cannot start new adapter work after reentrant
+      teardown; and a generic status listener cannot cause a stale specific
+      event. The live-query oracle also reads the public result from
+      `status:ready` and proves that the replacement graph commit happened
+      first. All four regressions failed before the fixes; the 192-test replay,
+      subscription, and live-query run plus the DB build are green.
 - [x] Close the symbol-cycle gap exposed by the routed-value audit. D2 now
       hashes cyclic back-references by structural traversal distance, preserving
       equal hashes for separately allocated equal cycles instead of overflowing
