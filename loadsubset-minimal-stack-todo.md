@@ -1335,7 +1335,13 @@ explicitly removed.
         restart model requires every generation-demand acquisition instead of
         deriving expected coverage from runtime attempts, stale writes are
         tested against a non-cooperative source, and statistics describe only
-        commands the history actually executes. Ordered authority/barrier
+        commands the history actually executes. The follow-up audit tightened
+        that boundary again: the acquisition census now runs after every
+        restart, the hostile source commits without honoring the abort signal,
+        statistics exclude skipped commands and degenerate interleavings,
+        errors retain exact demand identity, and each settlement checks the
+        full publication and status trace. Per-demand outcomes now include a
+        mixed success/failure current generation. Ordered authority/barrier
         generation remains.
   - [x] Catalog all red cells before changing production code. Fix by invalid
         transition class, then rerun the entire matrix after each coherent

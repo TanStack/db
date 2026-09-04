@@ -100,58 +100,72 @@ const lifecycleHistoryArbitrary = fc.array(lifecycleCommandArbitrary, {
 
 type AsyncRestartScenario = {
   demands: ReadonlyArray<`a` | `b`>
-  generationOutcomes: ReadonlyArray<`resolve` | `reject`>
+  generationOutcomes: ReadonlyArray<ReadonlyArray<`resolve` | `reject`>>
   settlementOrder: `obsolete-first` | `current-first` | `interleaved`
 }
 
-const asyncRestartScenarioArbitrary: fc.Arbitrary<AsyncRestartScenario> =
-  fc.record({
-    demands: fc.uniqueArray(fc.constantFrom(`a` as const, `b` as const), {
-      minLength: 1,
-      maxLength: 2,
-    }),
-    generationOutcomes: fc.array(
-      fc.constantFrom(`resolve` as const, `reject` as const),
-      { minLength: 1, maxLength: 3 },
-    ),
-    settlementOrder: fc.constantFrom(
-      `obsolete-first` as const,
-      `current-first` as const,
-      `interleaved` as const,
-    ),
+const asyncRestartScenarioArbitrary: fc.Arbitrary<AsyncRestartScenario> = fc
+  .uniqueArray(fc.constantFrom(`a` as const, `b` as const), {
+    minLength: 1,
+    maxLength: 2,
   })
+  .chain((demands) =>
+    fc.record({
+      demands: fc.constant(demands),
+      generationOutcomes: fc.array(
+        fc.array(fc.constantFrom(`resolve` as const, `reject` as const), {
+          minLength: demands.length,
+          maxLength: demands.length,
+        }),
+        { minLength: 1, maxLength: 3 },
+      ),
+      settlementOrder: fc.constantFrom(
+        `obsolete-first` as const,
+        `current-first` as const,
+        `interleaved` as const,
+      ),
+    }),
+  )
 
 function classifyLifecycleHistory(history: ReadonlyArray<LifecycleCommand>) {
   const owners = new Map<`a` | `b`, number>()
-  const executedTypes = new Set<LifecycleCommand[`type`]>()
+  const effectiveTypes = new Set<LifecycleCommand[`type`]>()
   let active = true
   let cleaned = false
   let cleanupThenRestart = false
   let simultaneousDemands = false
   let duplicateDemand = false
   for (const command of history) {
-    executedTypes.add(command.type)
     if (command.type === `request`) {
+      effectiveTypes.add(command.type)
       const count = owners.get(command.demand) ?? 0
       owners.set(command.demand, count + 1)
       duplicateDemand ||= count > 0
       simultaneousDemands ||= owners.size === 2
     } else if (command.type === `release`) {
       const count = owners.get(command.demand) ?? 0
+      if (count === 0) continue
+      effectiveTypes.add(command.type)
       if (count === 1) owners.delete(command.demand)
       else if (count > 1) owners.set(command.demand, count - 1)
     } else if (command.type === `cleanup`) {
+      if (!active) continue
+      effectiveTypes.add(command.type)
       active = false
       cleaned = true
     } else if (command.type === `restart` && !active) {
+      effectiveTypes.add(command.type)
       active = true
       cleanupThenRestart ||= cleaned && owners.size > 0
+    } else if (command.type === `truncate` && active) {
+      effectiveTypes.add(command.type)
     } else if (command.type === `unsubscribe`) {
+      effectiveTypes.add(command.type)
       break
     }
   }
   return {
-    executedTypes,
+    effectiveTypes,
     cleanupThenRestart,
     simultaneousDemands,
     duplicateDemand,
@@ -163,13 +177,13 @@ if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
     lifecycleHistoryArbitrary,
     (history) => {
       const {
-        executedTypes,
+        effectiveTypes,
         cleanupThenRestart,
         simultaneousDemands,
         duplicateDemand,
       } = classifyLifecycleHistory(history)
       return [
-        ...executedTypes,
+        ...effectiveTypes,
         `effective-cleanup-restart=${cleanupThenRestart}`,
         `simultaneous-demands=${simultaneousDemands}`,
         `duplicate-demand=${duplicateDemand}`,
@@ -179,13 +193,26 @@ if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
   )
   fc.statistics(
     asyncRestartScenarioArbitrary,
-    ({ demands, generationOutcomes, settlementOrder }) => [
-      `demands=${demands.length}`,
-      `generations=${generationOutcomes.length + 1}`,
-      `current=${generationOutcomes.at(-1)}`,
-      `obsolete-reject=${generationOutcomes.slice(0, -1).includes(`reject`)}`,
-      `order=${settlementOrder}`,
-    ],
+    ({ demands, generationOutcomes, settlementOrder }) => {
+      const realizesInterleaving =
+        settlementOrder === `interleaved` &&
+        demands.length > 1 &&
+        generationOutcomes.length > 1
+      return [
+        `demands=${demands.length}`,
+        `generations=${generationOutcomes.length + 1}`,
+        `current=${generationOutcomes.at(-1)?.join(`+`)}`,
+        `mixed-current=${new Set(generationOutcomes.at(-1)).size > 1}`,
+        `obsolete-reject=${generationOutcomes
+          .slice(0, -1)
+          .some((outcomes) => outcomes.includes(`reject`))}`,
+        `order=${
+          settlementOrder === `interleaved` && !realizesInterleaving
+            ? `degenerate-interleaved`
+            : settlementOrder
+        }`,
+      ]
+    },
     oraclePropertyOptions(1_000, `subscription-lifecycle.async-statistics`),
   )
 }
@@ -340,11 +367,15 @@ async function runAsyncRestartScenario(
     [where.b, `b`],
   ])
   const attempts: Array<Attempt> = []
-  const errors: Array<unknown> = []
+  const errors: Array<{ demand: DemandName; error: unknown }> = []
+  const publications: Array<Array<Row>> = []
+  const statuses: Array<string> = []
   const visible = new Map<string | number, Row>()
   const unloads: Array<{ session: number; demand: DemandName }> = []
-  const failures = scenario.generationOutcomes.map(
-    (_, index) => new Error(`session ${index + 1} failed`),
+  const failures = scenario.generationOutcomes.map((_, generation) =>
+    scenario.demands.map(
+      (demand) => new Error(`session ${generation + 1} ${demand} failed`),
+    ),
   )
   let session = -1
 
@@ -375,7 +406,7 @@ async function runAsyncRestartScenario(
                 type: `insert`,
                 value: { id: demand, version: ownSession + 1 },
               })
-              const receipt = operations.commit(options.signal)
+              const receipt = operations.commit()
               if (receipt !== true) return receipt
               return undefined
             })
@@ -400,10 +431,18 @@ async function runAsyncRestartScenario(
           })
         }
       }
+      publications.push(
+        [...visible.values()].sort((a, b) => a.id.localeCompare(b.id)),
+      )
     },
     { includeInitialState: false },
   )
-  subscription.on(`loadSubset:error`, ({ error }) => errors.push(error))
+  subscription.on(`loadSubset:error`, ({ options, error }) => {
+    const demand = demandForWhere.get(options.where)
+    if (!demand) throw new Error(`unknown errored demand`)
+    errors.push({ demand, error })
+  })
+  subscription.on(`status:change`, ({ status }) => statuses.push(status))
 
   try {
     for (const demand of scenario.demands) {
@@ -431,6 +470,24 @@ async function runAsyncRestartScenario(
       await collection.cleanup()
       collection.startSyncImmediate()
       await flushPromises()
+      const expectedSession = generation + 1
+      expect(
+        attempts
+          .filter(
+            ({ session: attemptSession }) => attemptSession <= expectedSession,
+          )
+          .map(({ session: attemptSession, demand }) => ({
+            session: attemptSession,
+            demand,
+          })),
+      ).toEqual(
+        Array.from({ length: expectedSession + 1 }, (_, attemptSession) =>
+          scenario.demands.map((demand) => ({
+            session: attemptSession,
+            demand,
+          })),
+        ).flat(),
+      )
     }
 
     const currentSession = scenario.generationOutcomes.length
@@ -466,42 +523,60 @@ async function runAsyncRestartScenario(
                   : left.demand.localeCompare(right.demand),
               )
 
-    const settledCurrent = new Set<Attempt>()
+    const outcomeFor = (attempt: Attempt) =>
+      scenario.generationOutcomes[attempt.session - 1]![
+        scenario.demands.indexOf(attempt.demand)
+      ]!
+    const failureFor = (attempt: Attempt) =>
+      failures[attempt.session - 1]![scenario.demands.indexOf(attempt.demand)]!
+    const settledCurrent: Array<Attempt> = []
+    const publicationTraceStart = publications.length
+    const statusTraceStart = statuses.length
     const assertObservableState = () => {
-      const currentComplete = settledCurrent.size === current.length
-      const currentOutcome = scenario.generationOutcomes.at(-1)!
+      const currentComplete = settledCurrent.length === current.length
+      const currentSucceeded = current.every(
+        (attempt) => outcomeFor(attempt) === `resolve`,
+      )
       const visibleVersion =
-        currentComplete && currentOutcome === `resolve` ? currentSession + 1 : 1
+        currentComplete && currentSucceeded ? currentSession + 1 : 1
+      const expectedRows = [...scenario.demands]
+        .sort((a, b) => a.localeCompare(b))
+        .map((id) => ({ id, version: visibleVersion }))
       expect(
         [...visible.values()].sort((a, b) => a.id.localeCompare(b.id)),
-      ).toEqual(
-        [...scenario.demands]
-          .sort((a, b) => a.localeCompare(b))
-          .map((id) => ({ id, version: visibleVersion })),
-      )
-      const expectedErrorCount =
-        currentOutcome === `reject` ? settledCurrent.size : 0
-      expect(errors).toHaveLength(expectedErrorCount)
-      expect(subscription.lastError).toBe(
-        expectedErrorCount > 0 ? failures[currentSession - 1] : undefined,
-      )
+      ).toEqual(expectedRows)
+      const expectedErrors = settledCurrent
+        .filter((attempt) => outcomeFor(attempt) === `reject`)
+        .map((attempt) => ({
+          demand: attempt.demand,
+          error: failureFor(attempt),
+        }))
+      expect(errors).toEqual(expectedErrors)
+      expect(subscription.lastError).toBe(expectedErrors.at(-1)?.error)
       expect(subscription.status).toBe(
         currentComplete ? `ready` : `loadingSubset`,
+      )
+      expect(publications.slice(publicationTraceStart)).toEqual(
+        currentComplete && currentSucceeded ? [expectedRows] : [],
+      )
+      expect(statuses.slice(statusTraceStart)).toEqual(
+        currentComplete ? [`ready`] : [],
       )
     }
 
     for (const attempt of orderedAttempts) {
-      const outcome = scenario.generationOutcomes[attempt.session - 1]!
+      const outcome = outcomeFor(attempt)
       if (outcome === `resolve`) attempt.deferred.resolve()
-      else attempt.deferred.reject(failures[attempt.session - 1])
+      else attempt.deferred.reject(failureFor(attempt))
       await flushPromises()
-      if (attempt.session === currentSession) settledCurrent.add(attempt)
+      if (attempt.session === currentSession) settledCurrent.push(attempt)
       assertObservableState()
     }
 
-    const currentOutcome = scenario.generationOutcomes.at(-1)!
-    const expectedVersion =
-      currentOutcome === `resolve` ? currentSession + 1 : 1
+    const currentSucceeded = current.every(
+      (attempt) => outcomeFor(attempt) === `resolve`,
+    )
+    const expectedVersion = currentSucceeded ? currentSession + 1 : 1
     expect(
       [...visible.values()].sort((a, b) => a.id.localeCompare(b.id)),
     ).toEqual(
@@ -509,15 +584,18 @@ async function runAsyncRestartScenario(
         .sort((a, b) => a.localeCompare(b))
         .map((id) => ({ id, version: expectedVersion })),
     )
-    if (currentOutcome === `resolve`) {
+    if (currentSucceeded) {
       expect(errors).toEqual([])
       expect(subscription.lastError).toBeUndefined()
     } else {
-      expect(errors).toHaveLength(scenario.demands.length)
-      expect(
-        errors.every((error) => error === failures[currentSession - 1]),
-      ).toBe(true)
-      expect(subscription.lastError).toBe(failures[currentSession - 1])
+      const expectedErrors = settledCurrent
+        .filter((attempt) => outcomeFor(attempt) === `reject`)
+        .map((attempt) => ({
+          demand: attempt.demand,
+          error: failureFor(attempt),
+        }))
+      expect(errors).toEqual(expectedErrors)
+      expect(subscription.lastError).toBe(expectedErrors.at(-1)?.error)
     }
     expect(subscription.status).toBe(`ready`)
 
