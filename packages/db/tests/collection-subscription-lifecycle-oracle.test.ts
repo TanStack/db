@@ -299,7 +299,7 @@ async function runLifecycleHistory(
       expect(unloads, JSON.stringify({ history, command })).toEqual(
         expectedUnloads,
       )
-      if (active && owners.size > 0) {
+      if (active && owners.length > 0) {
         expect(subscription.status).toBe(`ready`)
       }
     }
@@ -443,11 +443,37 @@ async function runAsyncRestartScenario(
                   : left.demand.localeCompare(right.demand),
               )
 
+    const settledCurrent = new Set<Attempt>()
+    const assertObservableState = () => {
+      const currentComplete = settledCurrent.size === current.length
+      const currentOutcome = scenario.generationOutcomes.at(-1)!
+      const visibleVersion =
+        currentComplete && currentOutcome === `resolve` ? currentSession + 1 : 1
+      expect(
+        [...visible.values()].sort((a, b) => a.id.localeCompare(b.id)),
+      ).toEqual(
+        [...scenario.demands]
+          .sort((a, b) => a.localeCompare(b))
+          .map((id) => ({ id, version: visibleVersion })),
+      )
+      const expectedErrorCount =
+        currentOutcome === `reject` ? settledCurrent.size : 0
+      expect(errors).toHaveLength(expectedErrorCount)
+      expect(subscription.lastError).toBe(
+        expectedErrorCount > 0 ? failures[currentSession - 1] : undefined,
+      )
+      expect(subscription.status).toBe(
+        currentComplete ? `ready` : `loadingSubset`,
+      )
+    }
+
     for (const attempt of orderedAttempts) {
       const outcome = scenario.generationOutcomes[attempt.session - 1]!
       if (outcome === `resolve`) attempt.deferred.resolve()
       else attempt.deferred.reject(failures[attempt.session - 1])
       await flushPromises()
+      if (attempt.session === currentSession) settledCurrent.add(attempt)
+      assertObservableState()
     }
 
     const currentOutcome = scenario.generationOutcomes.at(-1)!
@@ -670,6 +696,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
           subscription.releaseSnapshot(peerWhere)
         } else if (reentry === `unsubscribe`) {
           subscription.unsubscribe()
+        } else if (reentry === `cleanup`) {
+          void collection.cleanup()
         }
       })
 

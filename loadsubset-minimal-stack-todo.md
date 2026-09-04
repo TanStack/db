@@ -1320,7 +1320,11 @@ explicitly removed.
         second generated history crosses one or two demands, two to four sync
         generations, obsolete/current resolve or reject, and three settlement
         orders; its coverage labels describe effective transitions rather than
-        mere command presence. Ordered authority/barrier generation remains.
+        mere command presence. A catalog loss audit then repaired three false
+        greens: ordered owner tokens now drive the generated readiness check,
+        failure-delivery cleanup cells perform real cleanup, and every async
+        settlement checks transient rows, errors, and status instead of only
+        the final state. Ordered authority/barrier generation remains.
   - [x] Catalog all red cells before changing production code. Fix by invalid
         transition class, then rerun the entire matrix after each coherent
         commit. The core slice exposed 15 red cells in five classes: phantom
