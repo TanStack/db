@@ -3367,12 +3367,7 @@ describe(`CollectionSubscription replay oracle`, () => {
       const subscription = collection.subscribeChanges(() => {}, {
         includeInitialState: false,
       })
-      const genericEvents: Array<{
-        previousStatus: string
-        status: string
-        current: string
-      }> = []
-      const specificLoadingEvents: Array<string> = []
+      const trace: Array<string> = []
       let reentered = false
       const reenter = () => {
         if (reentered) return
@@ -3388,56 +3383,92 @@ describe(`CollectionSubscription replay oracle`, () => {
         subscription.on(`status:loadingSubset`, reenter)
       }
       subscription.on(`status:change`, ({ previousStatus, status }) => {
-        genericEvents.push({
-          previousStatus,
-          status,
-          current: subscription.status,
-        })
+        trace.push(
+          `generic:${previousStatus}->${status}:${subscription.status}`,
+        )
       })
       subscription.on(`status:loadingSubset`, () => {
-        specificLoadingEvents.push(subscription.status)
+        trace.push(`specific:loadingSubset:${subscription.status}`)
       })
 
       try {
         subscription.requestSnapshot({ where: firstWhere })
 
-        expect(specificLoadingEvents).toEqual([`loadingSubset`])
-        expect(genericEvents).toEqual(
+        expect(trace).toEqual(
           reentryEvent === `generic`
             ? [
-                {
-                  previousStatus: `loadingSubset`,
-                  status: `ready`,
-                  current: `ready`,
-                },
-                {
-                  previousStatus: `ready`,
-                  status: `loadingSubset`,
-                  current: `loadingSubset`,
-                },
+                `generic:loadingSubset->ready:ready`,
+                `generic:ready->loadingSubset:loadingSubset`,
+                `specific:loadingSubset:loadingSubset`,
               ]
             : [
-                {
-                  previousStatus: `ready`,
-                  status: `loadingSubset`,
-                  current: `loadingSubset`,
-                },
-                {
-                  previousStatus: `loadingSubset`,
-                  status: `ready`,
-                  current: `ready`,
-                },
-                {
-                  previousStatus: `ready`,
-                  status: `loadingSubset`,
-                  current: `loadingSubset`,
-                },
+                `generic:ready->loadingSubset:loadingSubset`,
+                `generic:loadingSubset->ready:ready`,
+                `generic:ready->loadingSubset:loadingSubset`,
+                `specific:loadingSubset:loadingSubset`,
               ],
         )
       } finally {
         load.resolve()
         await flushPromises()
         subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it.each([`generic`, `specific`] as const)(
+    `stops %s status delivery when an earlier ready listener unsubscribes`,
+    async (reentryEvent) => {
+      const where = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
+      const load = createDeferred<void>()
+      const collection = createCollection<ReplayRow>({
+        id: `reentrant-status-unsubscribe-${reentryEvent}`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (operations) => {
+            operations.markReady()
+            return {
+              loadSubset: () => load.promise,
+              unloadSubset: () => {},
+            }
+          },
+        },
+      })
+      const subscription = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      const trace: Array<string> = []
+      const unsubscribe = () => {
+        trace.push(`unsubscribe`)
+        subscription.unsubscribe()
+      }
+      if (reentryEvent === `generic`) {
+        subscription.on(`status:change`, ({ status }) => {
+          if (status === `ready`) unsubscribe()
+        })
+      } else {
+        subscription.on(`status:ready`, unsubscribe)
+      }
+      subscription.on(`status:change`, ({ status }) => {
+        if (status === `ready`) trace.push(`late-generic`)
+      })
+      subscription.on(`status:ready`, () => trace.push(`late-specific`))
+      subscription.on(`unsubscribed`, () => trace.push(`unsubscribed`))
+
+      try {
+        subscription.requestSnapshot({ where })
+        load.resolve()
+        await flushPromises()
+
+        expect(trace).toEqual(
+          reentryEvent === `generic`
+            ? [`unsubscribe`, `unsubscribed`]
+            : [`late-generic`, `unsubscribe`, `unsubscribed`],
+        )
+      } finally {
+        load.resolve()
         await collection.cleanup()
       }
     },

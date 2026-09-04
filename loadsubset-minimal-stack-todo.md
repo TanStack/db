@@ -984,10 +984,10 @@ explicitly removed.
       status events had the same gap. Both status layers now guard each listener
       with a transition revision; regressions cover simple reentry and ABA from
       both generic and specific callbacks.
-- [ ] Stop a subscription status transition when an earlier listener
+- [x] Stop a subscription status transition when an earlier listener
       unsubscribes. Clearing the listener map does not stop iteration of the
       current listener set, so later listeners can run after `unsubscribed`.
-- [ ] Pin one cross-channel trace for generic-before-specific status delivery,
+- [x] Pin one cross-channel trace for generic-before-specific status delivery,
       including nested ABA reentry, and add the missing Collection-level
       generic and specific ABA matrix promised by the architecture text.
 - [ ] Close the ordered-pagination oracle gaps found after its runtime fix.

@@ -91,6 +91,55 @@ describe(`Collection Events System`, () => {
       ])
       expect(loadingEvents).toEqual([])
     })
+
+    it.each([`generic`, `specific`] as const)(
+      `keeps cross-channel order under %s-listener ABA reentry`,
+      (reentryEvent) => {
+        const trace: Array<string> = []
+        let reentered = false
+        const reenter = () => {
+          if (reentered) return
+          reentered = true
+          collection._lifecycle.setStatus(`error`)
+          collection._lifecycle.setStatus(`idle`)
+          collection._lifecycle.setStatus(`loading`)
+        }
+        if (reentryEvent === `generic`) {
+          collection.on(`status:change`, ({ status }) => {
+            if (status === `loading`) reenter()
+          })
+        } else {
+          collection.on(`status:loading`, reenter)
+        }
+        collection.on(`status:change`, ({ previousStatus, status }) => {
+          trace.push(
+            `generic:${previousStatus}->${status}:${collection.status}`,
+          )
+        })
+        collection.on(`status:loading`, () => {
+          trace.push(`specific:loading:${collection.status}`)
+        })
+
+        collection.startSyncImmediate()
+
+        expect(trace).toEqual(
+          reentryEvent === `generic`
+            ? [
+                `generic:loading->error:error`,
+                `generic:error->idle:idle`,
+                `generic:idle->loading:loading`,
+                `specific:loading:loading`,
+              ]
+            : [
+                `generic:idle->loading:loading`,
+                `generic:loading->error:error`,
+                `generic:error->idle:idle`,
+                `generic:idle->loading:loading`,
+                `specific:loading:loading`,
+              ],
+        )
+      },
+    )
   })
 
   describe(`Subscriber Count Change Events`, () => {

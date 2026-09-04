@@ -1625,6 +1625,9 @@ export class CollectionSubscription
 
   unsubscribe() {
     this.unsubscribed = true
+    // Stop any status listener set already being iterated. Clearing the
+    // emitter's map cannot invalidate that captured Set by itself.
+    this.statusRevision++
     let firstCleanupError: unknown
 
     // Clean up truncate event listener
