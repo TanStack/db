@@ -269,8 +269,7 @@ export function computeSubscriptionOrderByHints(
 export class OrderedSourceLoader {
   private pending: Promise<unknown> | undefined
   private hasEstablishedSourceCoverage = false
-  private recoveringPrefix = false
-  private establishedPrefixCount = 0
+  private needsFullSourceRecovery = false
   private requesting = false
   private fullSource = false
   private fullSourceFailed = false
@@ -325,6 +324,10 @@ export class OrderedSourceLoader {
       this.fullSourceFailed = false
     }
     if (this.fullSource) return this.pending
+    if (this.needsFullSourceRecovery) {
+      this.loadFullSource(replaceFailedFullSource, windowOperationGeneration)
+      return this.pending
+    }
     if (this.info.requiresFullSource) {
       this.loadFullSource(replaceFailedFullSource, windowOperationGeneration)
       return this.pending
@@ -337,11 +340,6 @@ export class OrderedSourceLoader {
       )
       return this.pending
     }
-    const requiredPrefix = this.info.offset + this.info.limit
-    if (this.recoveringPrefix && this.establishedPrefixCount < requiredPrefix) {
-      this.loadPage(requiredPrefix, true, true, windowOperationGeneration)
-      return this.pending
-    }
     if (!this.info.dataNeeded) return this.pending
     const count = Math.max(
       this.info.dataNeeded(),
@@ -351,7 +349,7 @@ export class OrderedSourceLoader {
     )
     if (this.pending) return this.pending
     if (count > 0) {
-      this.loadPage(count, true, false, windowOperationGeneration)
+      this.loadPage(count, true, windowOperationGeneration)
     }
     return this.pending
   }
@@ -369,14 +367,7 @@ export class OrderedSourceLoader {
           trackLoadSubsetPromise: false,
           replaceExistingDemand,
           onLoadSubsetResult: (result) => {
-            this.observe(
-              result,
-              false,
-              true,
-              true,
-              undefined,
-              windowOperationGeneration,
-            )
+            this.observe(result, false, true, true, windowOperationGeneration)
           },
         })
       })
@@ -414,7 +405,6 @@ export class OrderedSourceLoader {
               refine,
               false,
               true,
-              count,
               windowOperationGeneration,
             ),
         })
@@ -439,7 +429,6 @@ export class OrderedSourceLoader {
   }
 
   invalidateCursor(): void {
-    this.failed = false
     this.lastPage = undefined
     this.lastPrefixCount = undefined
     this.hasLastBoundary = false
@@ -454,15 +443,13 @@ export class OrderedSourceLoader {
   private loadPage(
     count: number,
     refine: boolean,
-    forceSourcePrefix = false,
     windowOperationGeneration?: number,
   ): void {
     if (!this.active || this.pending) return
     // Rows observed before the first provider request do not prove ordered
     // source coverage. In particular, a row inserted while limit is zero must
     // not become the cursor when that window first opens.
-    const startsFromSourcePrefix =
-      forceSourcePrefix || !this.hasEstablishedSourceCoverage
+    const startsFromSourcePrefix = !this.hasEstablishedSourceCoverage
     const biggest = !startsFromSourcePrefix ? this.getBiggest() : undefined
     let minValues: Array<unknown> | undefined
     if (biggest !== undefined) {
@@ -503,7 +490,6 @@ export class OrderedSourceLoader {
               refine,
               false,
               true,
-              startsFromSourcePrefix ? count : undefined,
               windowOperationGeneration,
             ),
         })
@@ -522,7 +508,6 @@ export class OrderedSourceLoader {
     refine: boolean,
     isFullSource = false,
     establishesSourceCoverage = false,
-    establishedPrefixCount?: number,
     windowOperationGeneration?: number,
   ): Promise<void> {
     const generation = this.generation
@@ -534,16 +519,9 @@ export class OrderedSourceLoader {
       if (establishesSourceCoverage) {
         this.hasEstablishedSourceCoverage = true
       }
-      if (establishedPrefixCount !== undefined) {
-        this.establishedPrefixCount = Math.max(
-          this.establishedPrefixCount,
-          establishedPrefixCount,
-        )
-      }
       if (isFullSource) {
         this.fullSourceFailed = false
-        this.recoveringPrefix = false
-        this.establishedPrefixCount = Number.POSITIVE_INFINITY
+        this.needsFullSourceRecovery = false
       }
       if (refine) {
         this.loadBoundary(windowOperationGeneration)
@@ -620,7 +598,6 @@ export class OrderedSourceLoader {
               false,
               false,
               false,
-              undefined,
               windowOperationGeneration,
             )
           },
@@ -637,8 +614,7 @@ export class OrderedSourceLoader {
 
   private invalidateSourceCoverage(): void {
     this.hasEstablishedSourceCoverage = false
-    this.recoveringPrefix = true
-    this.establishedPrefixCount = 0
+    this.needsFullSourceRecovery = true
   }
 
   private runRequest(request: () => void): void {

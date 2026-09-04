@@ -568,15 +568,15 @@ if it rejects, an explicit retry must also start at offset zero without a
 cursor. The same holds after any later ordered request fails or is canceled:
 the adapter may already have written only part of its response, so those rows
 cannot establish a continuation boundary. The next explicit retry starts from
-the source prefix. A successful finite-prefix retry proves only that prefix;
-rows left by the failed request remain unusable as evidence for a wider window.
-Until a full-source acquisition succeeds, each later widening beyond the
-proven prefix also reloads from the source start. A finite
-prefix that still cannot fill the local window falls back once to a full-source
-load rather than repeating the same request or inferring exhaustion. This also
-lets multi-column windows revalidate after a non-boundary row leaves. If the
-provider predicate cannot express the local order relation, such as locale
-string order, refinement loads the full source instead of treating boundary
+the source as one authoritative filtered full-source request. Core cannot know
+which rows a failed request wrote, and a successful limited request proves
+neither how many authoritative rows it applied nor source exhaustion. Recovery
+therefore does not infer a safe finite prefix from local row count or boundary
+values. This rare error path trades bandwidth for a small, sound rule and keeps
+the last settled public snapshot visible until recovery succeeds. It also lets
+multi-column windows revalidate after a non-boundary row leaves. If the provider
+predicate cannot express the local order relation, such as locale string order,
+ordinary refinement likewise loads the full source instead of treating boundary
 equality as an ordered continuation. An asynchronous failure of that
 full-source acquisition does not start duplicate recovery work. It keeps the
 logical demand so a later truncate replay can retry one authoritative

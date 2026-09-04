@@ -2300,7 +2300,7 @@ describe(`pagination recomputation oracle`, () => {
     { offset: 0, limit: 1, failureKind: `abort` as const },
     { offset: 2, limit: 1, failureKind: `abort` as const },
   ])(
-    `retries the first $failureKind-rejected ordered request for window $offset:$limit from the source prefix`,
+    `recovers the first $failureKind-rejected ordered request for window $offset:$limit from the full source`,
     async ({ failureKind, ...window }) => {
       const authoritativeRows: Array<PageRow> = [
         { id: 1, rank: 0 },
@@ -2378,14 +2378,10 @@ describe(`pagination recomputation oracle`, () => {
 
         const retry = live.utils.setWindow(window)
         if (retry instanceof Promise) await retry
-        expect(requests[1]).toMatchObject({
-          offset: 0,
-          limit: requestedPrefix,
-        })
+        expect(requests[1]?.limit).toBeUndefined()
+        expect(requests[1]?.offset).toBeUndefined()
         expect(requests[1]?.cursor).toBeUndefined()
-        expect(requests).toHaveLength(3)
-        expect(requests[2]?.where).toBeDefined()
-        expect(requests[2]?.limit).toBeUndefined()
+        expect(requests).toHaveLength(2)
         expect(Array.from(live.values(), ({ id }) => id)).toEqual(
           referenceWindow(authoritativeRows, `asc`, window),
         )
@@ -2480,15 +2476,15 @@ describe(`pagination recomputation oracle`, () => {
         const retry = live.utils.setWindow({ offset: 0, limit: 2 })
         if (retry instanceof Promise) await retry
         const retryRequest = requests[initialRequestCount + 1]
-        expect(retryRequest).toMatchObject({ offset: 0, limit: 2 })
+        expect(retryRequest?.limit).toBeUndefined()
+        expect(retryRequest?.offset).toBeUndefined()
         expect(retryRequest?.cursor).toBeUndefined()
         expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2])
 
         const beforeWiden = requests.length
         const widen = live.utils.setWindow({ offset: 0, limit: 3 })
         if (widen instanceof Promise) await widen
-        expect(requests[beforeWiden]).toMatchObject({ offset: 0, limit: 3 })
-        expect(requests[beforeWiden]?.cursor).toBeUndefined()
+        expect(requests).toHaveLength(beforeWiden)
         expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2, 3])
       } finally {
         rejectedPage.resolve()
@@ -2496,6 +2492,105 @@ describe(`pagination recomputation oracle`, () => {
       }
     },
   )
+
+  it(`recovers a failed tie boundary from the authoritative full source`, async () => {
+    const authoritativeRows: Array<PageRow> = [
+      { id: 1, rank: -1 },
+      // A provider may return equal-order rows in any order. The local public
+      // key tie-breaker must choose id 2 after boundary refinement.
+      { id: 4, rank: 0 },
+      { id: 3, rank: 0 },
+      { id: 2, rank: 0 },
+      { id: 6, rank: 1 },
+      { id: 5, rank: 99 },
+    ]
+    const deliveredIds = new Set<number>()
+    const requests: Array<LoadSubsetOptions> = []
+    const failedPage = createDeferred<void>()
+    let rejectNextPage = false
+    let begin!: () => void
+    let write!: (message: { type: `insert` | `delete`; value: PageRow }) => void
+    let commit!: () => void
+    const source = createCollection<PageRow>({
+      id: `pagination-recovered-prefix-tie-${collectionSequence++}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (operations) => {
+          begin = operations.begin
+          write = operations.write
+          commit = operations.commit
+          operations.markReady()
+          return {
+            loadSubset: (options: LoadSubsetOptions) => {
+              requests.push(options)
+              if (rejectNextPage) {
+                rejectNextPage = false
+                begin()
+                deliveredIds.add(5)
+                write({ type: `insert`, value: { id: 5, rank: 99 } })
+                commit()
+                return failedPage.promise
+              }
+
+              begin()
+              for (const row of rowsForLoadSubset(authoritativeRows, options)) {
+                if (deliveredIds.has(row.id)) continue
+                deliveredIds.add(row.id)
+                write({ type: `insert`, value: { ...row } })
+              }
+              commit()
+              return true
+            },
+          }
+        },
+      },
+    })
+    const live = createLiveQueryCollection((query) =>
+      query
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank, `asc`)
+        .limit(1),
+    )
+
+    try {
+      await live.preload()
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
+
+      rejectNextPage = true
+      const failed = live.utils.setWindow({ offset: 0, limit: 3 })
+      expect(failed).toBeInstanceOf(Promise)
+      failedPage.reject(new Error(`later page failed`))
+      await expect(failed).rejects.toThrow(`later page failed`)
+
+      const retry = live.utils.setWindow({ offset: 0, limit: 2 })
+      if (retry instanceof Promise) await retry
+      const recoveryRequest = requests.at(-1)
+      expect(recoveryRequest?.limit).toBeUndefined()
+      expect(recoveryRequest?.offset).toBeUndefined()
+      expect(recoveryRequest?.cursor).toBeUndefined()
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2])
+
+      const deleted = authoritativeRows.filter(({ id }) =>
+        [1, 2, 3].includes(id),
+      )
+      for (const row of deleted) {
+        authoritativeRows.splice(authoritativeRows.indexOf(row), 1)
+        deliveredIds.delete(row.id)
+      }
+      begin()
+      for (const row of deleted) write({ type: `delete`, value: { ...row } })
+      commit()
+      await flushPromises()
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual([4, 6])
+    } finally {
+      failedPage.resolve()
+      await cleanupAll(live, source)
+    }
+  })
 
   it(`does not retry reentrantly when an ordered request writes and then throws`, async () => {
     const authoritativeRows: Array<PageRow> = [

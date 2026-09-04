@@ -143,7 +143,7 @@ describe(`OrderedSourceLoader`, () => {
       expect(methods).toEqual([expectedMethod])
 
       loader.loadMore(1)
-      expect(methods).toEqual([expectedMethod, expectedMethod])
+      expect(methods).toEqual([expectedMethod, `snapshot`])
       loader.dispose()
     },
   )
@@ -151,6 +151,7 @@ describe(`OrderedSourceLoader`, () => {
   it(`blocks a reentrant boundary retry until a later operation`, async () => {
     const failure = new Error(`boundary request failed`)
     const methods: Array<string> = []
+    let failBoundary = true
     const subscription = {
       setOrderByIndex: () => {},
       requestLimitedSnapshot: (options: {
@@ -161,6 +162,8 @@ describe(`OrderedSourceLoader`, () => {
       },
       requestSnapshot: () => {
         methods.push(`snapshot`)
+        if (!failBoundary) return
+        failBoundary = false
         loader.loadMore()
         throw failure
       },
@@ -180,7 +183,7 @@ describe(`OrderedSourceLoader`, () => {
     expect(methods).toEqual([`limited`, `snapshot`])
 
     loader.loadMore(1)
-    expect(methods).toEqual([`limited`, `snapshot`, `limited`])
+    expect(methods).toEqual([`limited`, `snapshot`, `snapshot`])
     loader.dispose()
   })
 })

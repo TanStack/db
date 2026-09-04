@@ -1010,7 +1010,9 @@ explicitly removed.
   - [x] Pin the zero-window defect against a true on-demand source and assert
         that its first request has no cursor.
   - [x] After that first request rejects, retry from offset zero without a
-        cursor; a started request is not established remote coverage.
+        cursor; a started request is not established remote coverage. Recovery
+        now uses one authoritative filtered full-source request because the
+        adapter result does not prove a finite prefix or source exhaustion.
   - [ ] Cross the same first-request law with real cancellation at both zero
         and nonzero offsets. Rejecting with an `AbortError` value does not
         exercise ownership-driven `options.signal.abort()` and must not count
@@ -1024,19 +1026,41 @@ explicitly removed.
         window that requests nothing.
   - [x] Reject partial rows from a failed later page as continuation evidence.
         A successful prefix followed by a request that writes one row and then
-        rejects now red/greens the rule that the next explicit retry starts at
-        offset zero with no cursor. The test also proves rejection does not
-        start an eager retry.
+        rejects now red/greens the rule that the next explicit retry loads the
+        filtered full source with no cursor. The test also proves rejection
+        does not start an eager retry.
   - [x] Keep a far-ahead row written by a failed request from becoming trusted
-        after a finite-prefix retry; a later widening must not publish that row
-        ahead of missing authoritative rows. Recovery now records the exact
-        successful prefix length and reloads every later widening from offset
-        zero until a full-source acquisition succeeds.
+        after retry. Recovery uses one authoritative full-source request, so it
+        does not derive finite-prefix coverage from a local row count polluted
+        by the failed attempt.
+  - [x] Keep failed rows out of a recovered tie boundary. A failed request can
+        write an equal-rank or far-ahead row, but recovery does not use either
+        as a boundary because it reloads the full filtered source.
+  - [x] Keep failed rows out of a later same-window refill after authoritative
+        rows leave. The recovery request already loaded the full source, so the
+        refill derives its window from authoritative local state rather than a
+        boundary left by the failed request.
+  - [x] Avoid false finite-prefix success when an adapter returns fewer rows
+        than requested. Recovery never treats a successful limited call as
+        proof of extent; it makes one full-source request instead.
 - [x] Cross partial writes with synchronous throws across page, prefix,
       full-source, and boundary requests. No failed `setWindow()` may start
       eager recovery before an explicit retry. An integration witness covers
       a page write followed by a throw; focused loader cells cover all four
       request routes and prove only a later operation generation may retry.
+  - [x] Keep an ordinary source insert or update after the failure from clearing
+        the failure gate and starting recovery without an explicit operation.
+        Cursor invalidation no longer changes failure ownership.
+  - [ ] Queue or reject a new explicit window operation started reentrantly
+        inside the adapter request. It must not return success after the loader
+        drops its work merely because another request is still on the stack.
+  - [ ] Ignore a successful result callback when the surrounding snapshot call
+        later throws. Callback-before-throw must not erase the failure or allow
+        an ordinary graph turn to retry it.
+  - [ ] Replace the direct loader-only route matrix with production-path
+        witnesses where practical. The matrix currently proves method choice
+        and reentry suppression, but only its page integration exercises
+        adapter writes, graph work, operation generations, and publication.
   - [ ] Retire the failed physical ordered acquisition when its explicit retry
         replaces it. A later truncate must replay only current demand, and
         cleanup must release each live lease once.
@@ -1064,7 +1088,7 @@ explicitly removed.
         new registration until the next emission.
   - [ ] Do not register a subscription that unsubscribed reentrantly during
         automatic `includeInitialState` loading.
-- [x] Close the replay-release follow-up audit:
+- [ ] Close the replay-release follow-up audit:
   - [x] A synchronous delete callback that reacquires demand must not emit
         `ready` before its replacement row becomes public.
   - [x] A replay demand that rejects and then retires must not leave its
@@ -1072,6 +1096,13 @@ explicitly removed.
   - [x] A demand reacquired from reentrant adapter `unloadSubset` must join the
         same private replay gate; completion cannot be decided before that
         release callback.
+  - [ ] Preserve a surviving demand's successful replay when a different failed
+        demand retires after the failed attempt has already settled. Cross
+        direct and graph-controlled publication.
+  - [ ] Store each replay failure on its demand or attempt so an unrelated
+        `unloadSubset` failure cannot replace the replay completion error.
+  - [ ] Keep status non-ready while an untracked asynchronous demand acquired
+        reentrantly from `unloadSubset` still gates replay publication.
 - [ ] Reconcile the joined-recovery readiness wording with the public
       multi-source barrier: a single source can become ready before the joined
       replacement is public.
