@@ -975,7 +975,7 @@ explicitly removed.
       current status before each listener; the regression covers reentry from
       both generic and specific status callbacks.
 - [ ] Close the ordered-pagination oracle gaps found after its runtime fix.
-  - [ ] Pin the zero-window defect against a true on-demand source and assert
+  - [x] Pin the zero-window defect against a true on-demand source and assert
         that its first request has no cursor.
   - [ ] Record every on-demand publication callback so an equal duplicate
         cannot hide behind snapshot deduplication.

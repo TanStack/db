@@ -426,6 +426,9 @@ export class OrderedSourceLoader {
         orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
         limit: count,
         minValues,
+        // Local rows seen before the first provider request prove neither a
+        // cursor nor a remote offset. Start the first acquisition at zero.
+        offset: this.hasRequestedSource ? undefined : 0,
         trackLoadSubsetPromise: false,
         onLoadSubsetResult: (result) => this.observe(result, refine),
       })
