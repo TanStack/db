@@ -965,10 +965,10 @@ explicitly removed.
       object. The replay oracle now observes two logical demands sharing one
       rejecting transport and requires both events, the replay barrier, and
       `lastError` to expose the same normalized instance.
-  - [ ] Cross this law with ordinary (non-replay) shared loads.
-  - [ ] Preserve event provenance by proving each logical demand emits exactly
+  - [x] Cross this law with ordinary (non-replay) shared loads.
+  - [x] Preserve event provenance by proving each logical demand emits exactly
         one event with its own options.
-  - [ ] Cross shared rejection identity with releasing one of two distinct
+  - [x] Cross shared rejection identity with releasing one of two distinct
         replay demands before the common promise rejects.
 - [x] Prevent reentrant specific-status listeners from delivering a stale
       status event to later listeners. Specific event delivery now checks the

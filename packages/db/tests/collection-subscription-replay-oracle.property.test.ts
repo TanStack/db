@@ -2968,7 +2968,13 @@ describe(`CollectionSubscription replay oracle`, () => {
     let commit!: () => void
     let truncate!: () => void
     const replayLoad = createDeferred<void>()
-    const reportedErrors: Array<unknown> = []
+    const firstWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
+    const secondWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`two`)])
+    const loads: Array<LoadSubsetOptions> = []
+    const reportedErrors: Array<{
+      options: LoadSubsetOptions
+      error: unknown
+    }> = []
     let loadCount = 0
     const collection = createCollection<ReplayRow>({
       id: `shared-primitive-replay-error`,
@@ -2981,7 +2987,8 @@ describe(`CollectionSubscription replay oracle`, () => {
           truncate = operations.truncate
           operations.markReady()
           return {
-            loadSubset: () => {
+            loadSubset: (options) => {
+              loads.push(options)
               loadCount++
               return loadCount <= 2 ? true : replayLoad.promise
             },
@@ -2997,13 +3004,19 @@ describe(`CollectionSubscription replay oracle`, () => {
         succeed: () => {},
       },
     })
-    subscription.on(`loadSubset:error`, ({ error }) => {
-      reportedErrors.push(error)
+    subscription.on(`loadSubset:error`, ({ options, error }) => {
+      reportedErrors.push({ options, error })
     })
 
     try {
-      subscription.requestSnapshot({ optimizedOnly: false })
-      subscription.requestSnapshot({ optimizedOnly: false })
+      subscription.requestSnapshot({
+        where: firstWhere,
+        optimizedOnly: false,
+      })
+      subscription.requestSnapshot({
+        where: secondWhere,
+        optimizedOnly: false,
+      })
       begin()
       truncate()
       commit()
@@ -3020,10 +3033,146 @@ describe(`CollectionSubscription replay oracle`, () => {
         replacementError = error
       }
       expect(reportedErrors).toHaveLength(2)
-      expect(reportedErrors[0]).toBeInstanceOf(Error)
-      expect(reportedErrors[1]).toBe(reportedErrors[0])
-      expect(subscription.lastError).toBe(reportedErrors[0])
-      expect(replacementError).toBe(reportedErrors[0])
+      expect(reportedErrors.map(({ options }) => options)).toEqual([
+        loads[2],
+        loads[3],
+      ])
+      expect(reportedErrors[0]?.error).toBeInstanceOf(Error)
+      expect(reportedErrors[1]?.error).toBe(reportedErrors[0]?.error)
+      expect(subscription.lastError).toBe(reportedErrors[0]?.error)
+      expect(replacementError).toBe(reportedErrors[0]?.error)
+    } finally {
+      replayLoad.resolve()
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`normalizes one primitive rejection for ordinary demands sharing a load`, async () => {
+    const sharedLoad = createDeferred<void>()
+    const firstWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
+    const secondWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`two`)])
+    const loads: Array<LoadSubsetOptions> = []
+    const reportedErrors: Array<{
+      options: LoadSubsetOptions
+      error: unknown
+    }> = []
+    const collection = createCollection<ReplayRow>({
+      id: `shared-primitive-ordinary-error`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (operations) => {
+          operations.markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return sharedLoad.promise
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    subscription.on(`loadSubset:error`, ({ options, error }) => {
+      reportedErrors.push({ options, error })
+    })
+
+    try {
+      subscription.requestSnapshot({ where: firstWhere })
+      subscription.requestSnapshot({ where: secondWhere })
+      sharedLoad.reject(undefined)
+      await flushPromises()
+
+      expect(reportedErrors.map(({ options }) => options)).toEqual(loads)
+      expect(reportedErrors[0]?.error).toBeInstanceOf(Error)
+      expect(reportedErrors[1]?.error).toBe(reportedErrors[0]?.error)
+      expect(subscription.lastError).toBe(reportedErrors[0]?.error)
+      expect(subscription.status).toBe(`ready`)
+    } finally {
+      sharedLoad.resolve()
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`reports a shared replay rejection only for the demand that remains active`, async () => {
+    let begin!: () => void
+    let commit!: () => void
+    let truncate!: () => void
+    const replayLoad = createDeferred<void>()
+    const firstWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
+    const secondWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`two`)])
+    const loads: Array<LoadSubsetOptions> = []
+    const reportedErrors: Array<{
+      options: LoadSubsetOptions
+      error: unknown
+    }> = []
+    let loadCount = 0
+    const collection = createCollection<ReplayRow>({
+      id: `released-shared-primitive-replay-error`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (operations) => {
+          begin = operations.begin
+          commit = operations.commit
+          truncate = operations.truncate
+          operations.markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              loadCount++
+              return loadCount <= 2 ? true : replayLoad.promise
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+      truncateReplayPublication: {
+        start: () => {},
+        succeed: () => {},
+      },
+    })
+    subscription.on(`loadSubset:error`, ({ options, error }) => {
+      reportedErrors.push({ options, error })
+    })
+
+    try {
+      subscription.requestSnapshot({ where: firstWhere })
+      subscription.requestSnapshot({ where: secondWhere })
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+      const replacement = subscription.pendingTruncateReplacement
+      expect(replacement).toBeInstanceOf(Promise)
+
+      subscription.releaseSnapshot(firstWhere)
+      expect(loads[2]?.signal?.aborted).toBe(true)
+      expect(loads[3]?.signal?.aborted).toBe(false)
+      expect(subscription.pendingTruncateReplacement).toBe(replacement)
+      expect(subscription.status).toBe(`loadingSubset`)
+
+      replayLoad.reject(undefined)
+      let replacementError: unknown
+      try {
+        await replacement
+      } catch (error) {
+        replacementError = error
+      }
+
+      expect(reportedErrors).toHaveLength(1)
+      expect(reportedErrors[0]?.options).toBe(loads[3])
+      expect(reportedErrors[0]?.error).toBeInstanceOf(Error)
+      expect(subscription.lastError).toBe(reportedErrors[0]?.error)
+      expect(replacementError).toBe(reportedErrors[0]?.error)
     } finally {
       replayLoad.resolve()
       subscription.unsubscribe()
