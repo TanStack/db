@@ -1223,38 +1223,32 @@ export class CollectionSubscription
     options: LoadSubsetOptions,
     primaryFailure?: { error: unknown },
   ): void {
-    const index = this.subsetDemands.findIndex(
+    const demand = this.subsetDemands.find(
       (demand) => demand.options === options,
     )
-    this.releaseDemandAtWithPrimaryFailure(index, options, primaryFailure)
+    if (demand) {
+      this.releaseDemand(demand, primaryFailure)
+    } else if (primaryFailure) {
+      this.recordLoadSubsetError(options, primaryFailure.error, true)
+    }
   }
 
   private releaseDemand(
     demand: SubsetDemand,
     primaryFailure?: { error: unknown },
   ): void {
-    this.releaseDemandAtWithPrimaryFailure(
-      this.subsetDemands.indexOf(demand),
-      demand.options,
-      primaryFailure,
-    )
-  }
-
-  private releaseDemandAtWithPrimaryFailure(
-    index: number,
-    options: LoadSubsetOptions,
-    primaryFailure?: { error: unknown },
-  ): void {
     if (!primaryFailure) {
+      const index = this.subsetDemands.indexOf(demand)
       if (index !== -1) this.releaseDemandAt(index)
       return
     }
 
     try {
-      this.recordLoadSubsetError(options, primaryFailure.error, true)
+      this.recordLoadSubsetError(demand.options, primaryFailure.error, true)
     } finally {
       // The failed request remains the public error. A release failure is
       // retained as cleanup debt and may be reported if that later retry fails.
+      const index = this.subsetDemands.indexOf(demand)
       if (index !== -1) this.releaseDemandAt(index, false)
     }
   }

@@ -1072,10 +1072,12 @@ explicitly removed.
         failure plus a throwing adapter release and its later cleanup retry.
   - [ ] Normalize a non-`Error` primary failure once before recording and
         rethrowing it, so caller, event, and `lastError` share one `Error` object.
-  - [ ] Never retain a demand-array index across `loadSubset:error` delivery.
+  - [x] Never retain a demand-array index across `loadSubset:error` delivery.
         Reentrant listeners may remove the failed demand or an earlier demand;
         cleanup must re-find the same logical demand instead of unloading its
-        successor or leaving the failed one live.
+        successor or leaving the failed one live. A Cartesian witness now
+        crosses whether the failed demand comes before or after the demand
+        removed by the listener.
   - [ ] Strengthen the provisional cleanup-debt witness: assert the exact
         options unload twice, no unrelated lease unloads, successful retry
         clears debt, and the primary stored error remains unchanged.

@@ -500,6 +500,77 @@ describe(`CollectionSubscription status tracking`, () => {
     await collection.cleanup()
   })
 
+  it.each([`failed-first`, `failed-last`] as const)(
+    `re-finds the %s demand after reentrant error delivery`,
+    async (position) => {
+      const primaryFailure = new Error(`request failed after acquisition`)
+      const loaded: Array<LoadSubsetOptions> = []
+      const unloaded: Array<LoadSubsetOptions> = []
+      const collection = createCollection<{ id: string }>({
+        id: `reentrant-primary-release-${position}`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options) => {
+                loaded.push(options)
+                return true
+              },
+              unloadSubset: (options) => unloaded.push(options),
+            }
+          },
+        },
+      })
+      const subscription = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      const firstWhere = new Func(`eq`, [
+        new PropRef([`id`]),
+        new Value(`first`),
+      ])
+      const secondWhere = new Func(`eq`, [
+        new PropRef([`id`]),
+        new Value(`second`),
+      ])
+      let releaseFirst:
+        | ((primaryFailure?: { error: unknown }) => void)
+        | undefined
+      let releaseSecond:
+        | ((primaryFailure?: { error: unknown }) => void)
+        | undefined
+
+      subscription.requestSnapshot({
+        where: firstWhere,
+        onLoadSubsetResult: (_result, _options, release) => {
+          releaseFirst = release
+        },
+      })
+      subscription.requestSnapshot({
+        where: secondWhere,
+        onLoadSubsetResult: (_result, _options, release) => {
+          releaseSecond = release
+        },
+      })
+      subscription.on(`loadSubset:error`, () => {
+        subscription.releaseSnapshot(firstWhere)
+      })
+
+      if (position === `failed-first`) {
+        releaseFirst!({ error: primaryFailure })
+        expect(unloaded).toEqual([loaded[0]])
+      } else {
+        releaseSecond!({ error: primaryFailure })
+        expect(unloaded).toEqual([loaded[0], loaded[1]])
+      }
+
+      subscription.unsubscribe()
+      expect(unloaded).toEqual([loaded[0], loaded[1]])
+      await collection.cleanup()
+    },
+  )
+
   it.each([`releaseSnapshot`, `unsubscribe`] as const)(
     `retries a failed exact release through %s`,
     async (releaseMode) => {
