@@ -971,9 +971,11 @@ explicitly removed.
   - [x] Cross shared rejection identity with releasing one of two distinct
         replay demands before the common promise rejects.
 - [x] Prevent reentrant specific-status listeners from delivering a stale
-      status event to later listeners. Specific event delivery now checks the
-      current status before each listener; the regression covers reentry from
-      both generic and specific status callbacks.
+      status event to later listeners. A loss audit found that status-label
+      equality still admitted ABA reentry and that generic and Collection
+      status events had the same gap. Both status layers now guard each listener
+      with a transition revision; regressions cover simple reentry and ABA from
+      both generic and specific callbacks.
 - [ ] Close the ordered-pagination oracle gaps found after its runtime fix.
   - [x] Pin the zero-window defect against a true on-demand source and assert
         that its first request has no cursor.

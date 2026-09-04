@@ -58,6 +58,39 @@ describe(`Collection Events System`, () => {
         status: `loading`,
       })
     })
+
+    it(`stops an obsolete status event after a listener changes status`, () => {
+      const genericEvents: Array<{
+        previousStatus: string
+        status: string
+        current: string
+      }> = []
+      const loadingEvents: Array<string> = []
+      collection.on(`status:change`, ({ status }) => {
+        if (status === `loading`) collection._lifecycle.markReady()
+      })
+      collection.on(`status:change`, ({ previousStatus, status }) => {
+        genericEvents.push({
+          previousStatus,
+          status,
+          current: collection.status,
+        })
+      })
+      collection.on(`status:loading`, ({ status }) => {
+        loadingEvents.push(status)
+      })
+
+      collection.startSyncImmediate()
+
+      expect(genericEvents).toEqual([
+        {
+          previousStatus: `loading`,
+          status: `ready`,
+          current: `ready`,
+        },
+      ])
+      expect(loadingEvents).toEqual([])
+    })
   })
 
   describe(`Subscriber Count Change Events`, () => {

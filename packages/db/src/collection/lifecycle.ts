@@ -106,12 +106,16 @@ export class CollectionLifecycleManager<
       )
     }
     this.validateStatusTransition(this.status, newStatus)
-    this.statusRevision++
+    const revision = ++this.statusRevision
     const previousStatus = this.status
     this.status = newStatus
 
     // Emit event
-    this.events.emitStatusChange(newStatus, previousStatus)
+    this.events.emitStatusChange(
+      newStatus,
+      previousStatus,
+      () => this.statusRevision === revision,
+    )
   }
 
   /**

@@ -158,6 +158,7 @@ export class CollectionSubscription
 
   // Status tracking
   private _status: SubscriptionStatus = `ready`
+  private statusRevision = 0
   private _lastError: unknown | undefined
   private pendingLoadSubsetParticipants = new Set<{
     demand: SubsetDemand
@@ -731,18 +732,23 @@ export class CollectionSubscription
 
     const previousStatus = this._status
     this._status = newStatus
+    const revision = ++this.statusRevision
 
     // Emit status:change event
-    this.emitInner(`status:change`, {
-      type: `status:change`,
-      subscription: this,
-      previousStatus,
-      status: newStatus,
-    })
+    this.emitInnerWhile(
+      `status:change`,
+      {
+        type: `status:change`,
+        subscription: this,
+        previousStatus,
+        status: newStatus,
+      },
+      () => this.statusRevision === revision,
+    )
 
     // A listener may synchronously start or release demand. Do not follow that
     // newer transition with a stale specific event.
-    if (this._status !== newStatus) return
+    if (this.statusRevision !== revision) return
 
     // Emit specific status event
     const eventKey: `status:${SubscriptionStatus}` = `status:${newStatus}`
@@ -754,7 +760,7 @@ export class CollectionSubscription
         previousStatus,
         status: newStatus,
       } as SubscriptionEvents[typeof eventKey],
-      () => this._status === newStatus,
+      () => this.statusRevision === revision,
     )
   }
 

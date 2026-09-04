@@ -3272,6 +3272,108 @@ describe(`CollectionSubscription replay oracle`, () => {
     },
   )
 
+  it.each([`generic`, `specific`] as const)(
+    `does not resume an obsolete status transition after %s-listener ABA reentry`,
+    async (reentryEvent) => {
+      const firstWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
+      const secondWhere = new Func(`eq`, [
+        new PropRef([`id`]),
+        new Value(`two`),
+      ])
+      const load = createDeferred<void>()
+      const collection = createCollection<ReplayRow>({
+        id: `reentrant-status-aba-${reentryEvent}`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (operations) => {
+            operations.markReady()
+            return {
+              loadSubset: () => load.promise,
+              unloadSubset: () => {},
+            }
+          },
+        },
+      })
+      const subscription = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      const genericEvents: Array<{
+        previousStatus: string
+        status: string
+        current: string
+      }> = []
+      const specificLoadingEvents: Array<string> = []
+      let reentered = false
+      const reenter = () => {
+        if (reentered) return
+        reentered = true
+        subscription.releaseSnapshot(firstWhere)
+        subscription.requestSnapshot({ where: secondWhere })
+      }
+      if (reentryEvent === `generic`) {
+        subscription.on(`status:change`, ({ status }) => {
+          if (status === `loadingSubset`) reenter()
+        })
+      } else {
+        subscription.on(`status:loadingSubset`, reenter)
+      }
+      subscription.on(`status:change`, ({ previousStatus, status }) => {
+        genericEvents.push({
+          previousStatus,
+          status,
+          current: subscription.status,
+        })
+      })
+      subscription.on(`status:loadingSubset`, () => {
+        specificLoadingEvents.push(subscription.status)
+      })
+
+      try {
+        subscription.requestSnapshot({ where: firstWhere })
+
+        expect(specificLoadingEvents).toEqual([`loadingSubset`])
+        expect(genericEvents).toEqual(
+          reentryEvent === `generic`
+            ? [
+                {
+                  previousStatus: `loadingSubset`,
+                  status: `ready`,
+                  current: `ready`,
+                },
+                {
+                  previousStatus: `ready`,
+                  status: `loadingSubset`,
+                  current: `loadingSubset`,
+                },
+              ]
+            : [
+                {
+                  previousStatus: `ready`,
+                  status: `loadingSubset`,
+                  current: `loadingSubset`,
+                },
+                {
+                  previousStatus: `loadingSubset`,
+                  status: `ready`,
+                  current: `ready`,
+                },
+                {
+                  previousStatus: `ready`,
+                  status: `loadingSubset`,
+                  current: `loadingSubset`,
+                },
+              ],
+        )
+      } finally {
+        load.resolve()
+        await flushPromises()
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
   fcTest.prop([replayScenarioArbitrary], {
     numRuns: generatedRuns,
     seed: 1756,

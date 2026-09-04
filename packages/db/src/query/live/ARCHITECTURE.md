@@ -630,9 +630,10 @@ publication happens before the subscription emits `ready`. Cleanup runs every
 ownership step even when replacement publication throws. Subscriber errors
 raised by an asynchronous replacement do not turn source success into replay
 failure: core finishes its internal state and surfaces the exact callback error
-in a host microtask. Status callbacks may synchronously change demand; before
-each specific-status listener runs, the subscription verifies that status is
-still current and stops stale delivery after a reentrant transition.
+in a host microtask. Status callbacks may synchronously change demand. Generic
+and specific status delivery capture the transition revision and stop before a
+later listener when reentry supersedes it, including an ABA transition back to
+the same status label.
 Failure keeps the last complete result visible and partly replayed source state
 private for both direct subscribers and query graphs. Ordinary source deltas or
 snapshot requests do not reopen that gate because they cannot prove the source
