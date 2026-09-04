@@ -70,6 +70,7 @@ import type {
   IncludesMaterialization,
   QueryIR,
   QueryRef,
+  Select,
   UnionAll,
   UnionFrom,
 } from '../ir.js'
@@ -440,17 +441,34 @@ export function compileQuery(
   if (parentKeyStream && childCorrelationField && joinsParentDirectly) {
     const mainInput = sources[mainSource]!
     let filteredMainInput = mainInput
-    // Re-key child input by correlation field: [correlationValue, [childKey, childRow]]
+    // Join on query equality rather than raw JavaScript identity. Keep the raw
+    // child value beside the row so result routing can still expose it.
     const childFieldPath = childCorrelationField.path.slice(1) // remove alias prefix
     const childRekeyed = mainInput.pipe(
       map(([key, row]: [unknown, any]) => {
         const correlationValue = getNestedValue(row, childFieldPath)
-        return [correlationValue, [key, row]] as [unknown, [unknown, any]]
+        return [
+          serializeEqualityValue(correlationValue),
+          [key, row, correlationValue],
+        ] as [unknown, [unknown, any, unknown]]
       }),
     )
 
+    const equalityParentKeys = parentKeyStream.pipe(
+      map(([correlationValue, parentContext]: [unknown, unknown]) => [
+        serializeEqualityValue(correlationValue),
+        parentContext,
+      ]),
+      reduce((values: Array<[unknown, number]>) =>
+        values.map(([value, multiplicity]) => [
+          value,
+          multiplicity > 0 ? 1 : 0,
+        ]),
+      ),
+    )
+
     // Inner join: only children whose correlation key exists in parent keys pass through
-    const joined = childRekeyed.pipe(joinOperator(parentKeyStream, `inner`))
+    const joined = childRekeyed.pipe(joinOperator(equalityParentKeys, `inner`))
 
     // Extract: [correlationValue, [[childKey, childRow], parentContext]] → [childKey, childRow]
     // Tag the row with __correlationKey for output routing
@@ -459,8 +477,8 @@ export function compileQuery(
       filter(([_correlationValue, [childSide]]: any) => {
         return childSide != null
       }),
-      map(([correlationValue, [childSide, parentSide]]: any) => {
-        const [childKey, childRow] = childSide
+      map(([_correlationIdentity, [childSide, parentSide]]: any) => {
+        const [childKey, childRow, correlationValue] = childSide
         const tagged: any = {
           ...childRow,
           __correlationKey: correlationValue,
@@ -1147,7 +1165,10 @@ export function compileQuery(
             (row as any).__correlationKey
           const parentContext = (row as any).__parentContext ?? null
           const publicKey = getIncludesPublicKey(row, mainSource, key)
-          const routedResults = stripInternalCorrelation(finalResults)
+          const routedResults = stripInternalCorrelation(
+            finalResults,
+            query.select,
+          )
           return [
             key,
             [
@@ -1196,7 +1217,10 @@ export function compileQuery(
           (row as any).__correlationKey
         const parentContext = (row as any).__parentContext ?? null
         const publicKey = getIncludesPublicKey(row, mainSource, key)
-        const routedResults = stripInternalCorrelation(finalResults)
+        const routedResults = stripInternalCorrelation(
+          finalResults,
+          query.select,
+        )
         return [
           key,
           [routedResults, undefined, correlationKey, parentContext, publicKey],
@@ -1911,7 +1935,7 @@ function attachVirtualPropsToSelected(
   return result
 }
 
-function stripInternalCorrelation(selected: any): any {
+function stripInternalCorrelation(selected: any, selectClause?: Select): any {
   if (
     !selected ||
     typeof selected !== `object` ||
@@ -1923,8 +1947,12 @@ function stripInternalCorrelation(selected: any): any {
   }
 
   const result = Array.isArray(selected) ? [...selected] : { ...selected }
-  delete result.__correlationKey
-  delete result.__parentContext
+  if (!Object.hasOwn(selectClause ?? {}, `__correlationKey`)) {
+    delete result.__correlationKey
+  }
+  if (!Object.hasOwn(selectClause ?? {}, `__parentContext`)) {
+    delete result.__parentContext
+  }
   delete result[INCLUDES_PUBLIC_KEY]
   return result
 }

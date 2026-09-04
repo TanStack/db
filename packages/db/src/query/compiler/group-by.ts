@@ -24,6 +24,7 @@ import {
   toBooleanPredicate,
 } from './evaluators.js'
 import {
+  getExactValueIdentity,
   getEqualityValueIdentity,
   getParentContextIdentity,
   getParentContextValue,
@@ -39,32 +40,96 @@ import type {
 import type { NamespacedAndKeyedStream, NamespacedRow } from '../../types.js'
 import type { VirtualOrigin } from '../../virtual-props.js'
 
-const VIRTUAL_SYNCED_KEY = `__virtual_synced__`
-const VIRTUAL_HAS_LOCAL_KEY = `__virtual_has_local__`
-const GROUP_KEY_REF_PREFIX = `__group_key_`
-const GROUP_VALUE_PREFIX = `__group_value_`
+const RAW_REPRESENTATIVE = Symbol(`raw_group_representative`)
+
+type InternalGroupFields = ReturnType<typeof createInternalGroupFields>
+
+function createInternalGroupFields(groupCount: number, selectClause?: Select) {
+  const aliases = Object.keys(selectClause ?? {})
+  let prefix = `__tanstack_group_`
+  while (aliases.some((alias) => alias.startsWith(prefix))) prefix += `_`
+
+  return {
+    prefix,
+    synced: `${prefix}synced`,
+    hasLocal: `${prefix}has_local`,
+    correlationKey: `${prefix}correlation_key`,
+    parentContext: `${prefix}parent_context`,
+    correlationIdentity: `${prefix}correlation_identity`,
+    parentContextIdentity: `${prefix}parent_context_identity`,
+    singleGroup: `${prefix}single_group`,
+    aggregatePrefix: `${prefix}aggregate_`,
+    groupKeys: Array.from(
+      { length: groupCount },
+      (_, i) => `${prefix}key_${i}`,
+    ),
+    groupValues: Array.from(
+      { length: groupCount },
+      (_, i) => `${prefix}value_${i}`,
+    ),
+    groupKeyRefs: Array.from(
+      { length: groupCount },
+      (_, i) => `${prefix}key_ref_${i}`,
+    ),
+  }
+}
 
 type RowVirtualMetadata = {
   synced: boolean
   hasLocal: boolean
 }
 
+type Representative<T> = {
+  rowKey: string
+  identity: unknown
+  [RAW_REPRESENTATIVE]: T
+}
+
+function createRepresentative<T>(
+  rowKey: string,
+  value: T,
+  identity: unknown = getExactValueIdentity(value),
+): Representative<T> {
+  const representative = { rowKey, identity } as Representative<T>
+  Object.defineProperty(representative, RAW_REPRESENTATIVE, { value })
+  return representative
+}
+
 function getRepresentative<T>(
-  values: Array<[readonly [unknown, T], number]>,
+  values: Array<[Representative<T>, number]>,
+): Representative<T> | undefined {
+  let selected: Representative<T> | undefined
+  let selectedKey: string | undefined
+  for (const [candidate, multiplicity] of values) {
+    if (multiplicity <= 0) continue
+    const candidateKey = serializeValue([candidate.rowKey, candidate.identity])
+    if (selectedKey === undefined || candidateKey < selectedKey) {
+      selected = candidate
+      selectedKey = candidateKey
+    }
+  }
+  return selected
+}
+
+function unwrapRepresentative<T>(
+  value: Representative<T> | undefined,
 ): T | undefined {
-  return values.find(([, multiplicity]) => multiplicity > 0)?.[0][1]
+  return value?.[RAW_REPRESENTATIVE]
 }
 
 function addCorrelationRouteIdentityToGroupKey(
   key: Record<string, unknown>,
   row: NamespacedRow,
   mainSource: string,
+  fields: InternalGroupFields,
 ): void {
   const rowRecord = row as Record<string, unknown>
   const source = rowRecord[mainSource] as Record<string, unknown> | undefined
-  key.__correlationIdentity = getEqualityValueIdentity(source?.__correlationKey)
+  key[fields.correlationIdentity] = getEqualityValueIdentity(
+    source?.__correlationKey,
+  )
   if (rowRecord.__parentContext != null) {
-    key.__parentContextIdentity = getParentContextIdentity(
+    key[fields.parentContextIdentity] = getParentContextIdentity(
       rowRecord.__parentContext,
     )
   }
@@ -73,35 +138,48 @@ function addCorrelationRouteIdentityToGroupKey(
 function addCorrelationRouteAggregates(
   aggregates: Record<string, any>,
   mainSource: string,
+  fields: InternalGroupFields,
 ): void {
-  aggregates.__correlationKey = {
+  aggregates[fields.correlationKey] = {
     preMap: ([rowKey, row]: [string, NamespacedRow]) =>
-      [
+      createRepresentative(
         rowKey,
         (row as Record<string, any>)[mainSource]?.__correlationKey,
-      ] as const,
+      ),
     reduce: getRepresentative,
+    postMap: unwrapRepresentative,
   }
-  aggregates.__parentContext = {
+  aggregates[fields.parentContext] = {
     preMap: ([rowKey, row]: [string, NamespacedRow]) =>
-      [rowKey, (row as Record<string, unknown>).__parentContext] as const,
+      createRepresentative(
+        rowKey,
+        (row as Record<string, unknown>).__parentContext,
+        getParentContextIdentity(
+          (row as Record<string, unknown>).__parentContext,
+        ),
+      ),
     reduce: getRepresentative,
+    postMap: unwrapRepresentative,
   }
 }
 
 function getCorrelationRouteIdentity(
   aggregatedRow: Record<string, unknown>,
+  fields: InternalGroupFields,
 ): unknown {
-  return aggregatedRow.__parentContext == null
-    ? aggregatedRow.__correlationIdentity
+  return aggregatedRow[fields.parentContext] == null
+    ? aggregatedRow[fields.correlationIdentity]
     : [
-        aggregatedRow.__correlationIdentity,
-        aggregatedRow.__parentContextIdentity,
+        aggregatedRow[fields.correlationIdentity],
+        aggregatedRow[fields.parentContextIdentity],
       ]
 }
 
-function getHavingEvaluationRow(row: Record<string, unknown>): NamespacedRow {
-  const parentContext = row.__parentContext
+function getHavingEvaluationRow(
+  row: Record<string, unknown>,
+  fields: InternalGroupFields,
+): NamespacedRow {
+  const parentContext = row[fields.parentContext]
   return {
     ...getParentContextValue(parentContext),
     $selected: row.$selected as Record<string, unknown>,
@@ -111,8 +189,9 @@ function getHavingEvaluationRow(row: Record<string, unknown>): NamespacedRow {
 function getWrappedAggregateEvaluationRow(
   row: Record<string, unknown>,
   selected: Record<string, unknown>,
+  fields: InternalGroupFields,
 ): NamespacedRow {
-  const parentContext = row.__parentContext
+  const parentContext = row[fields.parentContext]
   return {
     ...getParentContextValue(parentContext),
     $selected: selected,
@@ -209,8 +288,9 @@ export function processGroupBy(
   aggregateCollectionId?: string,
   mainSource?: string,
 ): NamespacedAndKeyedStream {
+  const fields = createInternalGroupFields(groupByClause.length, selectClause)
   const virtualAggregates: Record<string, any> = {
-    [VIRTUAL_SYNCED_KEY]: {
+    [fields.synced]: {
       preMap: ([, row]: [string, NamespacedRow]) =>
         getRowVirtualMetadata(row).synced,
       reduce: (values: Array<[boolean, number]>) => {
@@ -222,7 +302,7 @@ export function processGroupBy(
         return true
       },
     },
-    [VIRTUAL_HAS_LOCAL_KEY]: {
+    [fields.hasLocal]: {
       preMap: ([, row]: [string, NamespacedRow]) =>
         getRowVirtualMetadata(row).hasLocal,
       reduce: (values: Array<[boolean, number]>) => {
@@ -237,7 +317,7 @@ export function processGroupBy(
   }
 
   if (mainSource) {
-    addCorrelationRouteAggregates(virtualAggregates, mainSource)
+    addCorrelationRouteAggregates(virtualAggregates, mainSource, fields)
   }
 
   // Handle empty GROUP BY (single-group aggregation)
@@ -260,6 +340,7 @@ export function processGroupBy(
           const { transformed, extracted } = extractAndReplaceAggregates(
             expr as SelectValueExpression,
             aggCounter,
+            fields.aggregatePrefix,
           )
           for (const [syntheticAlias, aggExpr] of Object.entries(extracted)) {
             aggregates[syntheticAlias] = getAggregateFunction(aggExpr)
@@ -272,9 +353,9 @@ export function processGroupBy(
     // Use a constant key for single group. In includes mode, add the complete
     // correlation route so parents with distinct projected inputs stay apart.
     const keyExtractor = ([, row]: [string, NamespacedRow]) => {
-      const key: Record<string, unknown> = { __singleGroup: true }
+      const key: Record<string, unknown> = { [fields.singleGroup]: true }
       if (mainSource) {
-        addCorrelationRouteIdentityToGroupKey(key, row, mainSource)
+        addCorrelationRouteIdentityToGroupKey(key, row, mainSource, fields)
       }
       return key
     }
@@ -302,6 +383,7 @@ export function processGroupBy(
             finalResults,
             aggregatedRow as Record<string, any>,
             wrappedAggExprs,
+            fields,
           )
         }
 
@@ -309,10 +391,10 @@ export function processGroupBy(
         // When in includes mode, restore the namespaced source structure with
         // __correlationKey so output extraction can route results per-parent.
         const correlationKey = mainSource
-          ? (aggregatedRow as any).__correlationKey
+          ? (aggregatedRow as any)[fields.correlationKey]
           : undefined
         const correlationRoute = mainSource
-          ? getCorrelationRouteIdentity(aggregatedRow)
+          ? getCorrelationRouteIdentity(aggregatedRow, fields)
           : undefined
         const resultKey =
           correlationRoute !== undefined
@@ -323,10 +405,10 @@ export function processGroupBy(
           $selected: finalResults,
         }
         const groupSynced = (aggregatedRow as Record<string, any>)[
-          VIRTUAL_SYNCED_KEY
+          fields.synced
         ]
         const groupHasLocal = (aggregatedRow as Record<string, any>)[
-          VIRTUAL_HAS_LOCAL_KEY
+          fields.hasLocal
         ]
         resultRow.$synced = groupSynced ?? true
         resultRow.$origin = (
@@ -337,6 +419,8 @@ export function processGroupBy(
           aggregateCollectionId ?? resultRow.$collectionId
         if (mainSource && correlationKey !== undefined) {
           resultRow[mainSource] = { __correlationKey: correlationKey }
+          resultRow.__parentContext =
+            aggregatedRow[fields.parentContext] ?? null
         }
         return [resultKey, resultRow] as [unknown, Record<string, any>]
       }),
@@ -355,7 +439,7 @@ export function processGroupBy(
 
         pipeline = pipeline.pipe(
           filter(([, row]) => {
-            const namespacedRow = getHavingEvaluationRow(row)
+            const namespacedRow = getHavingEvaluationRow(row, fields)
             return toBooleanPredicate(compiledHaving(namespacedRow))
           }),
         )
@@ -367,7 +451,7 @@ export function processGroupBy(
       for (const fnHaving of fnHavingClauses) {
         pipeline = pipeline.pipe(
           filter(([, row]) => {
-            const namespacedRow = getHavingEvaluationRow(row)
+            const namespacedRow = getHavingEvaluationRow(row, fields)
             return toBooleanPredicate(fnHaving(namespacedRow))
           }),
         )
@@ -404,11 +488,11 @@ export function processGroupBy(
     for (let i = 0; i < groupByClause.length; i++) {
       const compiledExpr = compiledGroupByExpressions[i]!
       const value = compiledExpr(namespacedRow)
-      key[`__key_${i}`] = getEqualityValueIdentity(value)
+      key[fields.groupKeys[i]!] = getEqualityValueIdentity(value)
     }
 
     if (mainSource) {
-      addCorrelationRouteIdentityToGroupKey(key, row, mainSource)
+      addCorrelationRouteIdentityToGroupKey(key, row, mainSource, fields)
     }
 
     return key
@@ -421,10 +505,11 @@ export function processGroupBy(
 
   for (let i = 0; i < compiledGroupByExpressions.length; i++) {
     const compiledExpr = compiledGroupByExpressions[i]!
-    aggregates[`${GROUP_VALUE_PREFIX}${i}`] = {
+    aggregates[fields.groupValues[i]!] = {
       preMap: ([rowKey, row]: [string, NamespacedRow]) =>
-        [rowKey, compiledExpr(row)] as const,
+        createRepresentative(rowKey, compiledExpr(row)),
       reduce: getRepresentative,
+      postMap: unwrapRepresentative,
     }
   }
 
@@ -437,12 +522,17 @@ export function processGroupBy(
         const { transformed, extracted } = extractAndReplaceAggregates(
           expr as SelectValueExpression,
           aggCounter,
+          fields.aggregatePrefix,
         )
         for (const [syntheticAlias, aggExpr] of Object.entries(extracted)) {
           aggregates[syntheticAlias] = getAggregateFunction(aggExpr)
         }
         wrappedAggExprs[alias] = compileGroupedSelectValue(
-          replaceGroupByRefsInSelectValue(transformed, groupByClause),
+          replaceGroupByRefsInSelectValue(
+            transformed,
+            groupByClause,
+            fields.groupKeyRefs,
+          ),
         )
       }
     }
@@ -468,7 +558,7 @@ export function processGroupBy(
             const groupIndex = mapping.selectToGroupByIndex.get(alias)
             if (groupIndex !== undefined) {
               finalResults[alias] =
-                aggregatedRow[`${GROUP_VALUE_PREFIX}${groupIndex}`]
+                aggregatedRow[fields.groupValues[groupIndex]!]
             } else {
               // Fallback to original SELECT results
               finalResults[alias] = selectResults[alias]
@@ -479,13 +569,12 @@ export function processGroupBy(
           finalResults,
           aggregatedRow as Record<string, any>,
           wrappedAggExprs,
-          groupByClause.length,
+          fields,
         )
       } else {
         // No SELECT clause - just use the group keys
         for (let i = 0; i < groupByClause.length; i++) {
-          finalResults[`__key_${i}`] =
-            aggregatedRow[`${GROUP_VALUE_PREFIX}${i}`]
+          finalResults[`__key_${i}`] = aggregatedRow[fields.groupValues[i]!]
         }
       }
 
@@ -493,14 +582,14 @@ export function processGroupBy(
       // In includes mode, add the complete route so correlated groups do not
       // collide.
       const correlationKey = mainSource
-        ? (aggregatedRow as any).__correlationKey
+        ? (aggregatedRow as any)[fields.correlationKey]
         : undefined
       const correlationRoute = mainSource
-        ? getCorrelationRouteIdentity(aggregatedRow)
+        ? getCorrelationRouteIdentity(aggregatedRow, fields)
         : undefined
       const keyParts: Array<unknown> = []
       for (let i = 0; i < groupByClause.length; i++) {
-        keyParts.push(aggregatedRow[`__key_${i}`])
+        keyParts.push(aggregatedRow[fields.groupKeys[i]!])
       }
       if (correlationRoute !== undefined) {
         keyParts.push(correlationRoute)
@@ -514,11 +603,9 @@ export function processGroupBy(
         ...(aggregatedRow as Record<string, any>),
         $selected: finalResults,
       }
-      const groupSynced = (aggregatedRow as Record<string, any>)[
-        VIRTUAL_SYNCED_KEY
-      ]
+      const groupSynced = (aggregatedRow as Record<string, any>)[fields.synced]
       const groupHasLocal = (aggregatedRow as Record<string, any>)[
-        VIRTUAL_HAS_LOCAL_KEY
+        fields.hasLocal
       ]
       resultRow.$synced = groupSynced ?? true
       resultRow.$origin = (
@@ -528,6 +615,7 @@ export function processGroupBy(
       resultRow.$collectionId = aggregateCollectionId ?? resultRow.$collectionId
       if (mainSource && correlationKey !== undefined) {
         resultRow[mainSource] = { __correlationKey: correlationKey }
+        resultRow.__parentContext = aggregatedRow[fields.parentContext] ?? null
       }
       return [finalKey, resultRow] as [unknown, Record<string, any>]
     }),
@@ -545,7 +633,7 @@ export function processGroupBy(
 
       pipeline = pipeline.pipe(
         filter(([, row]) => {
-          const namespacedRow = getHavingEvaluationRow(row)
+          const namespacedRow = getHavingEvaluationRow(row, fields)
           return compiledHaving(namespacedRow)
         }),
       )
@@ -557,7 +645,7 @@ export function processGroupBy(
     for (const fnHaving of fnHavingClauses) {
       pipeline = pipeline.pipe(
         filter(([, row]) => {
-          const namespacedRow = getHavingEvaluationRow(row)
+          const namespacedRow = getHavingEvaluationRow(row, fields)
           return toBooleanPredicate(fnHaving(namespacedRow))
         }),
       )
@@ -730,24 +818,27 @@ function evaluateWrappedAggregates(
   finalResults: Record<string, any>,
   aggregatedRow: Record<string, any>,
   wrappedAggExprs: Record<string, (data: any) => any>,
-  groupKeyCount: number = 0,
+  fields: InternalGroupFields,
 ): void {
   for (const key of Object.keys(aggregatedRow)) {
-    if (key.startsWith(`__agg_`)) {
+    if (key.startsWith(fields.aggregatePrefix)) {
       finalResults[key] = aggregatedRow[key]
     }
   }
-  for (let i = 0; i < groupKeyCount; i++) {
-    finalResults[`${GROUP_KEY_REF_PREFIX}${i}`] =
-      aggregatedRow[`${GROUP_VALUE_PREFIX}${i}`]
+  for (let i = 0; i < fields.groupKeyRefs.length; i++) {
+    finalResults[fields.groupKeyRefs[i]!] =
+      aggregatedRow[fields.groupValues[i]!]
   }
   for (const [alias, evaluator] of Object.entries(wrappedAggExprs)) {
     finalResults[alias] = evaluator(
-      getWrappedAggregateEvaluationRow(aggregatedRow, finalResults),
+      getWrappedAggregateEvaluationRow(aggregatedRow, finalResults, fields),
     )
   }
   for (const key of Object.keys(finalResults)) {
-    if (key.startsWith(`__agg_`) || key.startsWith(GROUP_KEY_REF_PREFIX)) {
+    if (
+      key.startsWith(fields.aggregatePrefix) ||
+      fields.groupKeyRefs.includes(key)
+    ) {
       delete finalResults[key]
     }
   }
@@ -804,6 +895,7 @@ export function containsAggregate(
 function extractAndReplaceAggregates(
   expr: SelectValueExpression,
   counter: { value: number },
+  aggregatePrefix: string,
 ): {
   transformed: SelectValueExpression
   extracted: Record<string, Aggregate>
@@ -813,7 +905,7 @@ function extractAndReplaceAggregates(
   }
 
   if (expr.type === `agg`) {
-    const alias = `__agg_${counter.value++}`
+    const alias = `${aggregatePrefix}${counter.value++}`
     return {
       transformed: new PropRef([`$selected`, alias]),
       extracted: { [alias]: expr },
@@ -823,7 +915,7 @@ function extractAndReplaceAggregates(
   if (expr.type === `func`) {
     const allExtracted: Record<string, Aggregate> = {}
     const newArgs = expr.args.map((arg: BasicExpression | Aggregate) => {
-      const result = extractAndReplaceAggregates(arg, counter)
+      const result = extractAndReplaceAggregates(arg, counter, aggregatePrefix)
       Object.assign(allExtracted, result.extracted)
       return result.transformed as BasicExpression
     })
@@ -836,8 +928,16 @@ function extractAndReplaceAggregates(
   if (isConditionalSelect(expr)) {
     const allExtracted: Record<string, Aggregate> = {}
     const branches = expr.branches.map((branch) => {
-      const condition = extractAndReplaceAggregates(branch.condition, counter)
-      const value = extractAndReplaceAggregates(branch.value, counter)
+      const condition = extractAndReplaceAggregates(
+        branch.condition,
+        counter,
+        aggregatePrefix,
+      )
+      const value = extractAndReplaceAggregates(
+        branch.value,
+        counter,
+        aggregatePrefix,
+      )
       Object.assign(allExtracted, condition.extracted, value.extracted)
       return {
         condition: condition.transformed as BasicExpression,
@@ -847,7 +947,11 @@ function extractAndReplaceAggregates(
     const defaultValue =
       expr.defaultValue === undefined
         ? undefined
-        : extractAndReplaceAggregates(expr.defaultValue, counter)
+        : extractAndReplaceAggregates(
+            expr.defaultValue,
+            counter,
+            aggregatePrefix,
+          )
 
     if (defaultValue) {
       Object.assign(allExtracted, defaultValue.extracted)
@@ -867,6 +971,7 @@ function extractAndReplaceAggregates(
       const result = extractAndReplaceAggregates(
         value as SelectValueExpression,
         counter,
+        aggregatePrefix,
       )
       Object.assign(allExtracted, result.extracted)
       transformed[key] = result.transformed
@@ -882,6 +987,7 @@ function extractAndReplaceAggregates(
 function replaceGroupByRefsInSelectValue(
   value: SelectValueExpression,
   groupByClause: GroupBy,
+  groupKeyRefs: Array<string>,
 ): SelectValueExpression {
   if (isConditionalSelect(value)) {
     return new ConditionalSelect(
@@ -889,12 +995,21 @@ function replaceGroupByRefsInSelectValue(
         condition: replaceGroupByRefsInExpression(
           branch.condition,
           groupByClause,
+          groupKeyRefs,
         ),
-        value: replaceGroupByRefsInSelectValue(branch.value, groupByClause),
+        value: replaceGroupByRefsInSelectValue(
+          branch.value,
+          groupByClause,
+          groupKeyRefs,
+        ),
       })),
       value.defaultValue === undefined
         ? undefined
-        : replaceGroupByRefsInSelectValue(value.defaultValue, groupByClause),
+        : replaceGroupByRefsInSelectValue(
+            value.defaultValue,
+            groupByClause,
+            groupKeyRefs,
+          ),
     )
   }
 
@@ -904,6 +1019,7 @@ function replaceGroupByRefsInSelectValue(
       transformed[key] = replaceGroupByRefsInSelectValue(
         entry as SelectValueExpression,
         groupByClause,
+        groupKeyRefs,
       )
     }
     return transformed
@@ -917,12 +1033,13 @@ function replaceGroupByRefsInSelectValue(
     return value
   }
 
-  return replaceGroupByRefsInExpression(value, groupByClause)
+  return replaceGroupByRefsInExpression(value, groupByClause, groupKeyRefs)
 }
 
 function replaceGroupByRefsInExpression(
   expr: BasicExpression,
   groupByClause: GroupBy,
+  groupKeyRefs: Array<string>,
 ): BasicExpression {
   if (expr.type === `ref`) {
     const groupIndex = groupByClause.findIndex((groupExpr) =>
@@ -930,14 +1047,14 @@ function replaceGroupByRefsInExpression(
     )
     return groupIndex === -1
       ? expr
-      : new PropRef([`$selected`, `${GROUP_KEY_REF_PREFIX}${groupIndex}`])
+      : new PropRef([`$selected`, groupKeyRefs[groupIndex]!])
   }
 
   if (expr.type === `func`) {
     return new Func(
       expr.name,
       expr.args.map((arg) =>
-        replaceGroupByRefsInExpression(arg, groupByClause),
+        replaceGroupByRefsInExpression(arg, groupByClause, groupKeyRefs),
       ),
     )
   }

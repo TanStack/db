@@ -1,5 +1,6 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect } from 'vitest'
+import { describe, expect, test } from 'vitest'
+import { Temporal } from 'temporal-polyfill'
 import { createCollection } from '../../src/collection/index.js'
 import { createFilterFunctionFromExpression } from '../../src/collection/change-events.js'
 import {
@@ -619,6 +620,111 @@ describe(`includes cross-formulation oracle`, () => {
           parents.collection.cleanup(),
           fullyLoadedChildren.collection.cleanup(),
           lazyChildren.cleanup(),
+        ])
+      }
+    },
+  )
+
+  test.each([
+    [`Date and number`, () => [new Date(0), 0] as const],
+    [
+      `Buffer and Uint8Array`,
+      () => [Buffer.from([1, 2, 3]), new Uint8Array([1, 2, 3])] as const,
+    ],
+    [
+      `equivalent Temporal values`,
+      () =>
+        [
+          Temporal.PlainDate.from(`2024-04-05`),
+          Temporal.PlainDate.from(`2024-04-05`),
+        ] as const,
+    ],
+  ])(
+    `grouped includes use query equality for %s routes`,
+    async (_name, createValues) => {
+      const [parentGroup, equivalentChildGroup] = createValues()
+      const parents = createControlledCollection(`equality-route-parents`, [
+        { id: 1, group: parentGroup as unknown },
+      ])
+      const children = createControlledCollection(`equality-route-children`, [
+        { id: 10, parentGroup: parentGroup as unknown },
+        { id: 11, parentGroup: equivalentChildGroup as unknown },
+      ])
+      const nested = createLiveQueryCollection({
+        query: (q) =>
+          q.from({ parent: parents.collection }).select(({ parent }) => ({
+            id: parent.id,
+            summaries: toArray(
+              q
+                .from({ child: children.collection })
+                .where(({ child }) => eq(child.parentGroup, parent.group))
+                .groupBy(({ child }) => child.parentGroup)
+                .select(({ child }) => ({ count: count(child.id) })),
+            ),
+          })),
+      })
+      const standalone = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ child: children.collection })
+            .where(({ child }) => eq(child.parentGroup, parentGroup))
+            .groupBy(({ child }) => child.parentGroup)
+            .select(({ child }) => ({ count: count(child.id) })),
+      })
+
+      try {
+        await Promise.all([nested.preload(), standalone.preload()])
+        const nestedCounts = nested
+          .get(1)
+          ?.summaries.map(({ count: childCount }) => ({ count: childCount }))
+        const standaloneCounts = standalone.toArray.map(
+          ({ count: childCount }) => ({ count: childCount }),
+        )
+        expect(nestedCounts).toEqual(standaloneCounts)
+        expect(nestedCounts).toEqual([{ count: 2 }])
+      } finally {
+        await Promise.allSettled([
+          nested.cleanup(),
+          standalone.cleanup(),
+          parents.collection.cleanup(),
+          children.collection.cleanup(),
+        ])
+      }
+    },
+  )
+
+  test.each([`__correlationKey`, `__tanstack_group_correlation_key`])(
+    `grouped includes preserve internal-looking aggregate alias %s`,
+    async (alias) => {
+      const parents = createControlledCollection(`aggregate-alias-parents`, [
+        { id: 1, group: 1 },
+      ])
+      const children = createControlledCollection(`aggregate-alias-children`, [
+        { id: 10, parentGroup: 1 },
+        { id: 11, parentGroup: 1 },
+      ])
+      const nested = createLiveQueryCollection({
+        query: (q) =>
+          q.from({ parent: parents.collection }).select(({ parent }) => ({
+            id: parent.id,
+            summaries: toArray(
+              q
+                .from({ child: children.collection })
+                .where(({ child }) => eq(child.parentGroup, parent.group))
+                .groupBy(({ child }) => child.parentGroup)
+                .select(({ child }) => ({ [alias]: count(child.id) })),
+            ),
+          })),
+      })
+
+      try {
+        await nested.preload()
+        expect(nested.get(1)?.summaries.map((row) => row[alias])).toEqual([2])
+      } finally {
+        await Promise.allSettled([
+          nested.cleanup(),
+          parents.collection.cleanup(),
+          children.collection.cleanup(),
         ])
       }
     },

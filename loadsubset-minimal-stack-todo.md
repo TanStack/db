@@ -576,6 +576,12 @@ explicitly removed.
 - [x] Make equality identity the actual D2 grouping key while preserving one
       raw representative only for output. Red/green the full equality-class
       matrix, including Date/number, invalid Date/NaN, and unhashable symbols.
+      The loss audit then recovered four false-greens: the first correlated D2
+      join still used raw keys, compiler aggregate names could collide with
+      selected aliases, representative choice depended on insertion history,
+      and raw cyclic values still entered D2 hashing. Each now has a failing
+      regression and uses canonical join keys, a disjoint local field namespace,
+      stable row-key selection, and an opaque exact-identity carrier.
 - [x] Replace string-keyed parent-context metadata with a collision-free
       carrier and prove internal-looking aliases and selected field names are
       untouched.

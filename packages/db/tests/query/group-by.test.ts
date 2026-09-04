@@ -247,7 +247,33 @@ const equalityEquivalentGroupValues: Array<
       return [value, value]
     },
   ],
+  [
+    `the same cyclic object`,
+    () => {
+      const value: { self?: unknown } = {}
+      value.self = value
+      return [value, value]
+    },
+  ],
 ]
+
+function representativeSignature(value: unknown): string {
+  if (value instanceof Date) return `date`
+  if (Buffer.isBuffer(value)) return `buffer`
+  if (value instanceof Uint8Array) return `uint8array`
+  if (typeof value === `number` && Object.is(value, -0)) return `negative-zero`
+  if (typeof value === `number` && Number.isNaN(value)) return `nan`
+  if (typeof value === `number`) return `number`
+  if (typeof value === `symbol`) return `symbol`
+  if (
+    typeof value === `object` &&
+    value !== null &&
+    (value as { self?: unknown }).self === value
+  ) {
+    return `cyclic-object`
+  }
+  return `${typeof value}:${String(value)}`
+}
 
 function createGroupByTests(autoIndex: `off` | `eager`): void {
   describe(`with autoIndex ${autoIndex}`, () => {
@@ -281,14 +307,16 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
 
         const expectSingleGroup = (
           expectedCount: number,
-          representatives: Array<unknown>,
+          representative: unknown,
         ) => {
           expect(summary.toArray).toHaveLength(1)
           expect(summary.toArray[0]?.count).toBe(expectedCount)
-          expect(representatives).toContainEqual(summary.toArray[0]?.value)
+          expect(representativeSignature(summary.toArray[0]?.value)).toBe(
+            representativeSignature(representative),
+          )
         }
 
-        expectSingleGroup(2, [left, right])
+        expectSingleGroup(2, left)
 
         valuesCollection.utils.begin()
         valuesCollection.utils.write({
@@ -296,7 +324,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
           value: { id: 1, value: left },
         })
         valuesCollection.utils.commit()
-        expectSingleGroup(1, [right])
+        expectSingleGroup(1, right)
 
         valuesCollection.utils.begin()
         valuesCollection.utils.write({
@@ -304,7 +332,44 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
           value: { id: 1, value: left },
         })
         valuesCollection.utils.commit()
-        expectSingleGroup(2, [left, right])
+        expectSingleGroup(2, left)
+      },
+    )
+
+    test.each([
+      `__group_value_0`,
+      `__key_0`,
+      `__tanstack_group_value_0`,
+      `__tanstack_group_key_0`,
+    ])(
+      `keeps the grouped value when an aggregate uses internal-looking alias %s`,
+      (alias) => {
+        const valuesCollection = createCollection(
+          mockSyncCollectionOptions<{ id: number; value: string }>({
+            id: `group-alias-collision-${autoIndex}-${alias}`,
+            getKey: (row) => row.id,
+            initialData: [
+              { id: 1, value: `x` },
+              { id: 2, value: `x` },
+            ],
+            autoIndex,
+          }),
+        )
+        const summary = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ value: valuesCollection })
+              .groupBy(({ value }) => value.value)
+              .select(({ value }) => ({
+                value: value.value,
+                [alias]: count(value.id),
+              })),
+        })
+
+        expect(summary.toArray.map(stripVirtualProps)).toEqual([
+          { value: `x`, [alias]: 2 },
+        ])
       },
     )
 

@@ -27,6 +27,22 @@ export function serializeEqualityValue(value: unknown): string {
   return serializeValue(getEqualityValueIdentity(value))
 }
 
+/** Preserve exact output identity without traversing opaque runtime values. */
+export function getExactValueIdentity(value: unknown): unknown {
+  if (
+    (typeof value === `object` && value !== null) ||
+    typeof value === `function` ||
+    typeof value === `symbol`
+  ) {
+    return getRuntimeReferenceIdentity(value as object | symbol)
+  }
+  if (typeof value === `number`) {
+    if (Object.is(value, -0)) return [`number`, `-0`]
+    if (Number.isNaN(value)) return [`number`, `NaN`]
+  }
+  return value
+}
+
 /** Keep compiler identity outside the namespace that holds user aliases. */
 export function createParentContext(
   value: Record<string, unknown>,

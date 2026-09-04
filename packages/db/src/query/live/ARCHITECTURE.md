@@ -141,7 +141,12 @@ valid only for equality-keyed routing, grouping, and demand. Output values and
 arbitrary function arguments keep their exact runtime identity and value.
 For grouping, the equality token is the D2 group key. The group retains a raw
 value from a currently positive contributor only as the projected
-representative; a raw value never participates in the internal key.
+representative. The representative is chosen by stable source-row identity, so
+restoring the same source state restores the same value regardless of update
+history. D2 sees only safe exact-value identity for that representative, not the
+raw value itself. Compiler group fields use a query-local namespace disjoint
+from every selected alias. Direct correlated joins canonicalize both sides
+before the first D2 join; normalizing only the later group key is too late.
 
 ### Route-context transport
 
