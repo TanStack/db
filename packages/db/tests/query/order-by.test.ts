@@ -2676,7 +2676,7 @@ describe(`OrderBy with duplicate values`, () => {
         ])
 
         // Now move to next page (offset 5, limit 5)
-        collection.utils.setWindow({ offset: 5, limit: 5 })
+        await collection.utils.setWindow({ offset: 5, limit: 5 })
         await collection.stateWhenReady()
 
         // Second page should return items 6-10 (all with value 5)
@@ -2693,7 +2693,7 @@ describe(`OrderBy with duplicate values`, () => {
 
         // Now move to third page (offset 10, limit 5)
         // It should advance past the duplicate 5s
-        collection.utils.setWindow({ offset: 10, limit: 5 })
+        await collection.utils.setWindow({ offset: 10, limit: 5 })
         await collection.stateWhenReady()
 
         // Third page should return items 11-13 (the items after the duplicate 5s)
@@ -2710,7 +2710,7 @@ describe(`OrderBy with duplicate values`, () => {
         ])
 
         // Verify we can continue to next page
-        collection.utils.setWindow({ offset: 15, limit: 5 })
+        await collection.utils.setWindow({ offset: 15, limit: 5 })
         await collection.stateWhenReady()
 
         // Should be empty since we've exhausted all items

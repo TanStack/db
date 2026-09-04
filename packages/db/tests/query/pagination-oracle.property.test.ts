@@ -20,6 +20,7 @@ import type { LoadSubsetOptions } from '../../src/types.js'
 type PageRow = {
   id: number
   rank: number
+  keep?: boolean
 }
 
 type MultiOrderRow = {
@@ -70,6 +71,8 @@ type PaginationScenario = {
   ranks: ReadonlyArray<number>
   direction: `asc` | `desc`
   windows: ReadonlyArray<PaginationWindow>
+  explicitPublicKeyOrder?: boolean
+  includeFilter?: boolean
 }
 
 type PaginationAction =
@@ -135,6 +138,8 @@ const scenarioArbitrary: fc.Arbitrary<PaginationScenario> = fc.record({
     maxLength: 12,
   }),
   direction: fc.constantFrom(`asc`, `desc`),
+  explicitPublicKeyOrder: fc.boolean(),
+  includeFilter: fc.boolean(),
   windows: fc.array(
     fc.record({
       offset: fc.integer({ min: 0, max: 12 }),
@@ -441,7 +446,11 @@ function createConformingOrderedSource<TRow extends { id: number }>(
 async function runPaginationScenario(
   scenario: PaginationScenario,
 ): Promise<void> {
-  const rows = scenario.ranks.map((rank, index) => ({ id: index + 1, rank }))
+  const rows = scenario.ranks.map((rank, index) => ({
+    id: index + 1,
+    rank,
+    keep: true,
+  }))
   const initialWindow = scenario.windows[0]!
   const source = createCollection(
     mockSyncCollectionOptions({
@@ -451,15 +460,22 @@ async function runPaginationScenario(
       autoIndex: `eager`,
     }),
   )
-  const live = createLiveQueryCollection((query) =>
-    query
-      .from({ row: source })
-      .orderBy(({ row }) => row.rank, scenario.direction)
-      .orderBy(({ row }) => row.id, `asc`)
+  const live = createLiveQueryCollection((query) => {
+    const from = query.from({ row: source })
+    const filtered = scenario.includeFilter
+      ? from.where(({ row }) => eq(row.keep, true))
+      : from
+    const ordered = filtered.orderBy(
+      ({ row }) => row.rank,
+      scenario.direction,
+    )
+    return (scenario.explicitPublicKeyOrder === false
+      ? ordered
+      : ordered.orderBy(({ row }) => row.id, `asc`))
       .offset(initialWindow.offset)
       .limit(initialWindow.limit)
-      .select(({ row }) => ({ id: row.id, rank: row.rank })),
-  )
+      .select(({ row }) => ({ id: row.id, rank: row.rank }))
+  })
 
   try {
     await live.preload()
@@ -753,6 +769,7 @@ async function runOnDemandPaginationScenario(
   const authoritativeRows = scenario.ranks.map((rank, index) => ({
     id: index + 1,
     rank,
+    keep: true,
   }))
   const directionFactor = scenario.direction === `asc` ? 1 : -1
   const orderedRows = [...authoritativeRows].sort(
@@ -797,15 +814,22 @@ async function runOnDemandPaginationScenario(
       },
     },
   })
-  const live = createLiveQueryCollection((query) =>
-    query
-      .from({ row: source })
-      .orderBy(({ row }) => row.rank, scenario.direction)
-      .orderBy(({ row }) => row.id, `asc`)
+  const live = createLiveQueryCollection((query) => {
+    const from = query.from({ row: source })
+    const filtered = scenario.includeFilter
+      ? from.where(({ row }) => eq(row.keep, true))
+      : from
+    const ordered = filtered.orderBy(
+      ({ row }) => row.rank,
+      scenario.direction,
+    )
+    return (scenario.explicitPublicKeyOrder === false
+      ? ordered
+      : ordered.orderBy(({ row }) => row.id, `asc`))
       .offset(initialWindow.offset)
       .limit(initialWindow.limit)
-      .select(({ row }) => ({ id: row.id, rank: row.rank })),
-  )
+      .select(({ row }) => ({ id: row.id, rank: row.rank }))
+  })
   const publications: Array<{
     window: PaginationWindow
     ids: Array<number>
@@ -856,10 +880,14 @@ async function runOnDemandPaginationScenario(
         expression: new PropRef([`rank`]),
         compareOptions: { direction: scenario.direction, nulls: `first` },
       },
-      {
-        expression: new PropRef([`id`]),
-        compareOptions: { direction: `asc`, nulls: `first` },
-      },
+      ...(scenario.explicitPublicKeyOrder === false
+        ? []
+        : [
+            {
+              expression: new PropRef([`id`]),
+              compareOptions: { direction: `asc`, nulls: `first` },
+            },
+          ]),
     ]
     for (const load of loads) {
       if (load.orderBy) {
@@ -1957,6 +1985,20 @@ describe(`pagination recomputation oracle`, () => {
         { offset: 0, limit: 2 },
         { offset: 0, limit: 0 },
         { offset: 1, limit: 1 },
+      ],
+    })
+  })
+
+  it(`advances past an implicit public-key tie class`, async () => {
+    await runPaginationScenario({
+      ranks: [1, 2, 3, 4, 5, 5, 5, 5, 5, 5, 11, 12, 13, 14, 15, 16],
+      direction: `asc`,
+      explicitPublicKeyOrder: false,
+      includeFilter: true,
+      windows: [
+        { offset: 0, limit: 5 },
+        { offset: 5, limit: 5 },
+        { offset: 10, limit: 5 },
       ],
     })
   })

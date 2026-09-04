@@ -934,10 +934,17 @@ explicitly removed.
       update, remove, rebuild, reverse-range, and comparator-group laws plus
       both index implementations' mixed-domain scan regressions pass 87 focused
       tests; the DB build and changed-file lint are green.
-- [ ] Repair the retained ordered-pagination path that repeats a
-      comparator-equal boundary group on the third local page. The existing
-      eager-index regression fails at parent commit `80563ee9`, so the broader
-      load-subset stack introduced it before the current index-audit fixes.
+- [x] Correct the retained ordered-pagination regression. The runtime already
+      advances through an implicit public-key tie class when callers await the
+      `setWindow()` operation. The old test discarded that promise and observed
+      page three while it was still in flight. The pagination oracle now varies
+      explicit versus implicit public-key tie-breaking and pins the three-page
+      case; both the oracle and corrected regression are green.
+- [ ] Preserve an explicit `undefined` bound in `BasicIndex` range queries;
+      absence and the indexed nullish value are distinct public inputs.
+- [ ] Tie executable index comparison to advertised `compareOptions`, and add
+      an independent ordering oracle that does not derive expected order from
+      production `makeComparator` or `compareKeys`.
 - [ ] Normalize a primitive rejection once per shared physical load promise so
       all logical demands, completion state, and `lastError` expose one Error
       object.
