@@ -972,6 +972,12 @@ explicitly removed.
         replay demands before the common promise rejects.
   - [x] Reject replay completion with `AbortError` when releasing every demand
         instead of letting participant removal resolve it first.
+  - [x] Recheck replay completion after release callbacks. A delete observer
+        may synchronously reacquire demand; the new demand joins the private
+        replacement without letting the retired promise keep its gate open.
+        Fixed witnesses cover both later and reentrant reacquisition, retained
+        source republish, exact callback batches, gate settlement, and one
+        unload per acquisition.
   - [x] Cover `none | first | second | both` release sets for ordinary and
         replay shared promises, and assert intended `where` provenance rather
         than only matching the adapter's captured option objects.

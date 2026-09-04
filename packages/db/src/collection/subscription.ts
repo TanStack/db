@@ -546,12 +546,6 @@ export class CollectionSubscription
         session.attempts.delete(attempt)
       }
     }
-    // The final demand must retire the replay as aborted after its private
-    // rows are pruned. Completing it here would resolve an empty attempt as a
-    // successful replacement before releaseDemandAt can retire the session.
-    if (this.subsetDemands.length > 0) {
-      this.checkTruncateReplayComplete(session)
-    }
   }
 
   /** Publish only after every overlapping replay attempt has settled. */
@@ -636,6 +630,7 @@ export class CollectionSubscription
       // Buffering records every source key before active-demand filtering.
       // Restore tracking even when a subscriber rejects the replacement.
       this.restorePublishedSnapshotTracking()
+      session.completion.resolve()
     }
   }
 
@@ -1204,6 +1199,7 @@ export class CollectionSubscription
   private releaseDemandAt(index: number): void {
     const demand = this.subsetDemands[index]
     if (!demand) return
+    const replaySession = this.truncateReplaySession
     const acquisition: SubsetAcquisition = {
       options: demand.options,
       abortController: demand.abortController,
@@ -1215,6 +1211,11 @@ export class CollectionSubscription
       () => this.pruneReleasedReplayRows(),
       () => this.stopDemandStatusParticipants(demand),
       () => this.retireEmptyReplay(),
+      // Decide replay completion only after release callbacks have had a
+      // chance to retire, replace, or synchronously reacquire demand.
+      () => {
+        if (replaySession) this.checkTruncateReplayComplete(replaySession)
+      },
       () => this.releaseOrRetainAcquisition(acquisition),
     ])
   }

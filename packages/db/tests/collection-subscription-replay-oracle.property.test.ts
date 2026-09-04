@@ -3023,6 +3023,12 @@ describe(`CollectionSubscription replay oracle`, () => {
       await flushPromises()
       const replacement = subscription.pendingTruncateReplacement
       expect(replacement).toBeInstanceOf(Promise)
+      expect(loads.map(({ where }) => where)).toEqual([
+        firstWhere,
+        secondWhere,
+        firstWhere,
+        secondWhere,
+      ])
 
       replayLoad.reject(undefined)
 
@@ -3058,6 +3064,7 @@ describe(`CollectionSubscription replay oracle`, () => {
         new Value(`two`),
       ])
       const loads: Array<LoadSubsetOptions> = []
+      const unloads: Array<LoadSubsetOptions> = []
       const reportedErrors: Array<{
         options: LoadSubsetOptions
         error: unknown
@@ -3074,7 +3081,7 @@ describe(`CollectionSubscription replay oracle`, () => {
                 loads.push(options)
                 return sharedLoad.promise
               },
-              unloadSubset: () => {},
+              unloadSubset: (options) => unloads.push(options),
             }
           },
         },
@@ -3129,6 +3136,10 @@ describe(`CollectionSubscription replay oracle`, () => {
         subscription.unsubscribe()
         await collection.cleanup()
       }
+      expect(unloads).toHaveLength(loads.length)
+      for (const load of loads) {
+        expect(unloads.filter((options) => options === load)).toHaveLength(1)
+      }
     },
   )
 
@@ -3145,11 +3156,14 @@ describe(`CollectionSubscription replay oracle`, () => {
         new Value(`two`),
       ])
       const loads: Array<LoadSubsetOptions> = []
+      const unloads: Array<LoadSubsetOptions> = []
       const reportedErrors: Array<{
         options: LoadSubsetOptions
         error: unknown
       }> = []
       let loadCount = 0
+      let replayStarts = 0
+      let replaySuccesses = 0
       const collection = createCollection<ReplayRow>({
         id: `released-shared-primitive-replay-error-${released}`,
         getKey: ({ id }) => id,
@@ -3166,7 +3180,7 @@ describe(`CollectionSubscription replay oracle`, () => {
                 loadCount++
                 return loadCount <= 2 ? true : replayLoad.promise
               },
-              unloadSubset: () => {},
+              unloadSubset: (options) => unloads.push(options),
             }
           },
         },
@@ -3174,8 +3188,8 @@ describe(`CollectionSubscription replay oracle`, () => {
       const subscription = collection.subscribeChanges(() => {}, {
         includeInitialState: false,
         truncateReplayPublication: {
-          start: () => {},
-          succeed: () => {},
+          start: () => replayStarts++,
+          succeed: () => replaySuccesses++,
         },
       })
       subscription.on(`loadSubset:error`, ({ options, error }) => {
@@ -3201,6 +3215,10 @@ describe(`CollectionSubscription replay oracle`, () => {
           () => ({ status: `resolved` as const }),
           (error: unknown) => ({ status: `rejected` as const, error }),
         )
+        expect({ replayStarts, replaySuccesses }).toEqual({
+          replayStarts: 1,
+          replaySuccesses: 0,
+        })
 
         if (released === `first` || released === `both`) {
           subscription.releaseSnapshot(firstWhere)
@@ -3224,6 +3242,7 @@ describe(`CollectionSubscription replay oracle`, () => {
           expect(reportedErrors).toEqual([])
           expect(subscription.lastError).toBeUndefined()
           expect(subscription.status).toBe(`ready`)
+          expect(replaySuccesses).toBe(1)
         } else {
           expect(subscription.pendingTruncateReplacement).toBe(replacement)
           expect(subscription.status).toBe(`loadingSubset`)
@@ -3245,6 +3264,130 @@ describe(`CollectionSubscription replay oracle`, () => {
         replayLoad.resolve()
         subscription.unsubscribe()
         await collection.cleanup()
+      }
+      expect(unloads).toHaveLength(loads.length)
+      for (const load of loads) {
+        expect(unloads.filter((options) => options === load)).toHaveLength(1)
+      }
+      expect(replayStarts).toBe(1)
+      expect(replaySuccesses).toBe(released === `both` ? 1 : 0)
+    },
+  )
+
+  it.each([`after-release`, `during-delete`] as const)(
+    `reacquires a final released replay demand %s without waiting for obsolete work`,
+    async (reacquireTiming) => {
+      let begin!: () => void
+      let write!: (
+        message: ChangeMessageOrDeleteKeyMessage<ReplayRow, string>,
+      ) => void
+      let commit!: () => void
+      let truncate!: () => void
+      const replayLoad = createDeferred<void>()
+      const where = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
+      const loads: Array<LoadSubsetOptions> = []
+      const unloads: Array<LoadSubsetOptions> = []
+      let reacquireInCallback = false
+      const collection = createCollection<ReplayRow>({
+        id: `final-replay-reacquire-${reacquireTiming}`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (operations) => {
+            begin = operations.begin
+            write = operations.write
+            commit = operations.commit
+            truncate = operations.truncate
+            operations.markReady()
+            return {
+              loadSubset: (options) => {
+                loads.push(options)
+                if (loads.length === 1) {
+                  begin()
+                  write({ type: `insert`, value: { id: `one`, value: 1 } })
+                  commit()
+                  return true
+                }
+                if (loads.length === 2) {
+                  begin()
+                  write({ type: `insert`, value: { id: `one`, value: 2 } })
+                  commit()
+                  return replayLoad.promise
+                }
+                return true
+              },
+              unloadSubset: (options) => unloads.push(options),
+            }
+          },
+        },
+      })
+      const visible = new Map<string | number, ReplayRow>()
+      const batches: Array<Array<ReplayChange>> = []
+      const subscription: CollectionSubscription = collection.subscribeChanges(
+        (changes) => {
+          batches.push(recordPublishedChanges(visible, changes))
+          if (
+            reacquireInCallback &&
+            changes.some(({ type }) => type === `delete`)
+          ) {
+            reacquireInCallback = false
+            subscription.requestSnapshot({ where })
+          }
+        },
+      )
+
+      try {
+        subscription.requestSnapshot({ where })
+        begin()
+        truncate()
+        commit()
+        await flushPromises()
+        const replacement = subscription.pendingTruncateReplacement
+        expect(replacement).toBeInstanceOf(Promise)
+        const settlement = replacement!.then(
+          () => ({ status: `resolved` as const }),
+          (error: unknown) => ({ status: `rejected` as const, error }),
+        )
+
+        reacquireInCallback = reacquireTiming === `during-delete`
+        subscription.releaseSnapshot(where)
+        if (reacquireTiming === `after-release`) {
+          await expect(settlement).resolves.toMatchObject({
+            status: `rejected`,
+            error: { name: `AbortError` },
+          })
+          subscription.requestSnapshot({ where })
+        } else {
+          expect(subscription.pendingTruncateReplacement).toBeUndefined()
+          await expect(settlement).resolves.toEqual({ status: `resolved` })
+        }
+
+        expect(subscription.pendingTruncateReplacement).toBeUndefined()
+        expect(sortedRows(visible)).toEqual([{ id: `one`, value: 2 }])
+        expect(sortedChanges(batches[0]!)).toEqual([
+          { type: `insert`, key: `one`, value: { id: `one`, value: 1 } },
+        ])
+        expect(sortedChanges(batches.at(-2)!)).toEqual([
+          { type: `delete`, key: `one`, value: { id: `one`, value: 1 } },
+        ])
+        expect(sortedChanges(batches.at(-1)!)).toEqual([
+          { type: `insert`, key: `one`, value: { id: `one`, value: 2 } },
+        ])
+        expect(loads).toHaveLength(3)
+        expect(loads.map(({ where: requestWhere }) => requestWhere)).toEqual([
+          where,
+          where,
+          where,
+        ])
+      } finally {
+        replayLoad.resolve()
+        await flushPromises()
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+      expect(unloads).toHaveLength(loads.length)
+      for (const load of loads) {
+        expect(unloads.filter((options) => options === load)).toHaveLength(1)
       }
     },
   )

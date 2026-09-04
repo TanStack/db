@@ -643,8 +643,11 @@ snapshot requests do not reopen that gate because they cannot prove the source
 complete; only a later successful truncate replay provides the authoritative
 replacement. If the last logical demand retires, the now-unreachable source
 replay rejects its completion with `AbortError` and stops gating the shared
-graph; unrelated parent or sibling changes may then publish. A genuine replay
-failure is normalized once by the subscription.
+graph; unrelated parent or sibling changes may then publish. If release
+publication synchronously acquires new demand, core checks completion after
+that callback: the new demand joins the private replacement, while the retired
+transport can no longer gate it. A genuine replay failure is normalized once
+by the subscription.
 The `loadSubset:error` event, `lastSubsetError`, and any window move waiting on
 that replay expose the same `Error` object.
 
