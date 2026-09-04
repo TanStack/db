@@ -1070,8 +1070,9 @@ explicitly removed.
         error must report the request failure while the release remains cleanup
         debt. A real `CollectionSubscription` witness red/greened publication
         failure plus a throwing adapter release and its later cleanup retry.
-  - [ ] Normalize a non-`Error` primary failure once before recording and
-        rethrowing it, so caller, event, and `lastError` share one `Error` object.
+  - [x] Normalize a non-`Error` primary failure once before recording and
+        rethrowing it, so caller, event, and `lastError` share one `Error`
+        object. String and `undefined` failures now red/green that identity.
   - [x] Never retain a demand-array index across `loadSubset:error` delivery.
         Reentrant listeners may remove the failed demand or an earlier demand;
         cleanup must re-find the same logical demand instead of unloading its

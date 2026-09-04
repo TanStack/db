@@ -256,6 +256,70 @@ describe(`OrderedSourceLoader`, () => {
     }
   })
 
+  it.each([
+    [`string`, `snapshot publication failed`],
+    [`undefined`, undefined],
+  ] as const)(
+    `normalizes a %s provisional failure once for every observer`,
+    async (_label, thrownValue) => {
+      const cleanupFailure = new Error(`provisional cleanup failed`)
+      const reported: Array<unknown> = []
+      let unloads = 0
+      const source = createCollection<{ id: number; rank: number }>({
+        id: `ordered-provisional-non-error-${String(thrownValue)}`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: 1, rank: 1 } })
+            commit()
+            markReady()
+            return {
+              loadSubset: () => true,
+              unloadSubset: () => {
+                unloads++
+                if (unloads === 1) throw cleanupFailure
+              },
+            }
+          },
+        },
+      })
+      const subscription = source.subscribeChanges(
+        (changes) => {
+          if (changes.length > 0) throw thrownValue
+        },
+        { includeInitialState: false },
+      )
+      subscription.on(`loadSubset:error`, ({ error }) => reported.push(error))
+      const loader = new OrderedSourceLoader(
+        createOrderByInfo({ index: undefined }),
+        subscription,
+        `row`,
+        () => undefined,
+      )
+      const notCaught = Symbol(`not caught`)
+      let caught: unknown = notCaught
+
+      try {
+        loader.start()
+      } catch (error) {
+        caught = error
+      }
+
+      expect(caught).not.toBe(notCaught)
+      expect(caught).toBeInstanceOf(Error)
+      expect((caught as Error).message).toBe(String(thrownValue))
+      expect(subscription.lastError).toBe(caught)
+      expect(reported).toEqual([caught])
+
+      loader.dispose()
+      subscription.unsubscribe()
+      await source.cleanup()
+    },
+  )
+
   it(`retires an acquisition when its result observer throws`, async () => {
     const observerFailure = new Error(`ordered result observer failed`)
     const acquisition: LoadSubsetOptions = {}

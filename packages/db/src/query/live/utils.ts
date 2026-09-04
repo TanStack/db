@@ -4,6 +4,7 @@ import {
   buildCursorCurrent,
   canExpressCursorOrder,
 } from '../../utils/cursor.js'
+import { normalizeError } from '../../utils/error.js'
 import { normalizeOrderByPaths } from '../compiler/expressions.js'
 import { buildQuery, getQueryIR } from '../builder/index.js'
 import { collectCollectionSources, isExpressionLike } from '../ir.js'
@@ -709,6 +710,7 @@ export class OrderedSourceLoader {
         }
       })
     } catch (error) {
+      const normalized = normalizeError(error)
       // Enter failure state before adapter cleanup. Releasing the provisional
       // acquisition may call back into the graph, but it cannot start a
       // replacement while the failed request is still unwinding.
@@ -717,7 +719,7 @@ export class OrderedSourceLoader {
       if (observed) {
         this.retireProvisionalFailure(
           observed,
-          error,
+          normalized,
           isFullSource,
           windowOperationGeneration,
         )
@@ -727,7 +729,7 @@ export class OrderedSourceLoader {
         this.failedWindowOperationGeneration = windowOperationGeneration
         if (isFullSource) this.fullSourceFailed = true
       }
-      throw error
+      throw normalized
     } finally {
       this.requesting = false
     }
@@ -742,14 +744,15 @@ export class OrderedSourceLoader {
         windowOperationGeneration,
       )
     } catch (error) {
+      const normalized = normalizeError(error)
       this.retireProvisionalFailure(
         observed,
-        error,
+        normalized,
         isFullSource,
         windowOperationGeneration,
         true,
       )
-      throw error
+      throw normalized
     }
   }
 }
