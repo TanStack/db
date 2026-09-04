@@ -15,12 +15,20 @@ import { evaluateReferenceExpression } from '../reference-expression.js'
 import { TraceAssertionError } from '../trace-runner.js'
 import { flushPromises, mockSyncCollectionOptions } from '../utils.js'
 import type { Deferred } from '../../src/deferred.js'
-import type { LoadSubsetOptions } from '../../src/types.js'
+import type { ChangeMessage, LoadSubsetOptions } from '../../src/types.js'
 
 type PageRow = {
   id: number
   rank: number
   keep?: boolean
+}
+
+type PublicPageRow = Pick<PageRow, `id` | `rank`>
+type PublicPageChange = {
+  type: `insert` | `update` | `delete`
+  key: number
+  value: PublicPageRow
+  previousValue?: PublicPageRow
 }
 
 type MultiOrderRow = {
@@ -429,6 +437,54 @@ function referenceWindowRows(
     )
     .slice(window.offset, window.offset + window.limit)
     .map(({ id, rank }) => ({ id, rank }))
+}
+
+function projectPageRow(row: PageRow): PublicPageRow {
+  return { id: row.id, rank: row.rank }
+}
+
+function normalizePageChanges(
+  changes: ReadonlyArray<ChangeMessage<PageRow, number>>,
+): Array<PublicPageChange> {
+  return changes
+    .map((change) => ({
+      type: change.type,
+      key: change.key,
+      value: projectPageRow(change.value),
+      ...(change.type === `update` && change.previousValue
+        ? { previousValue: projectPageRow(change.previousValue) }
+        : {}),
+    }))
+    .sort((left, right) => left.key - right.key)
+}
+
+function expectedPageChanges(
+  before: ReadonlyArray<PublicPageRow>,
+  after: ReadonlyArray<PublicPageRow>,
+): Array<PublicPageChange> {
+  const beforeById = new Map(before.map((row) => [row.id, row]))
+  const afterById = new Map(after.map((row) => [row.id, row]))
+  const changes: Array<PublicPageChange> = []
+
+  for (const row of before) {
+    const next = afterById.get(row.id)
+    if (!next) {
+      changes.push({ type: `delete`, key: row.id, value: row })
+    } else if (next.rank !== row.rank) {
+      changes.push({
+        type: `update`,
+        key: row.id,
+        value: next,
+        previousValue: row,
+      })
+    }
+  }
+  for (const row of after) {
+    if (!beforeById.has(row.id)) {
+      changes.push({ type: `insert`, key: row.id, value: row })
+    }
+  }
+  return changes.sort((left, right) => left.key - right.key)
 }
 
 function isKeptRow(id: number): boolean {
@@ -932,16 +988,18 @@ async function runOnDemandPaginationScenario(
       .select(({ row }) => ({ id: row.id, rank: row.rank }))
   })
   const publications: Array<{
-    rows: Array<{ id: number; rank: number }>
+    changes: Array<PublicPageChange>
+    rows: Array<PublicPageRow>
   }> = []
-  let lastPublishedRows: Array<{ id: number; rank: number }> = []
   const publicationSubscription = live.subscribeChanges(
-    () => {
+    (changes) => {
       const rows = Array.from(live.values(), ({ id, rank }) => ({ id, rank }))
-      if (JSON.stringify(rows) !== JSON.stringify(lastPublishedRows)) {
-        publications.push({ rows })
-        lastPublishedRows = rows
-      }
+      publications.push({
+        changes: normalizePageChanges(
+          changes as Array<ChangeMessage<PageRow, number>>,
+        ),
+        rows,
+      })
     },
     { includeInitialState: false },
   )
@@ -970,12 +1028,20 @@ async function runOnDemandPaginationScenario(
       scenario.direction,
       initialWindow,
     )
-    expect(publications.length - preloadPublicationCount).toBe(
-      initialExpected.length > 0 ? 1 : 0,
-    )
-    if (initialExpected.length > 0) {
-      expect(publications.at(-1)?.rows).toEqual(initialExpected)
-    }
+    expect(publications.slice(preloadPublicationCount)).toEqual([
+      ...(initialExpected.length > 0
+        ? [
+            {
+              changes: expectedPageChanges([], initialExpected),
+              rows: initialExpected,
+            },
+          ]
+        : []),
+      // A real source acquisition uses one empty batch to wake subscriptions
+      // when the initial source set becomes ready, even if it produced no
+      // visible rows. A zero window needs no acquisition or wake-up.
+      ...(loads.length > 0 ? [{ changes: [], rows: initialExpected }] : []),
+    ])
 
     if (scenario.localRowsBeforeFirstRequest) {
       expect(loads).toHaveLength(0)
@@ -1015,9 +1081,12 @@ async function runOnDemandPaginationScenario(
         scenario.direction,
         window,
       )
-      const changed = JSON.stringify(before) !== JSON.stringify(after)
-      expect(publications.length - publicationCount).toBe(changed ? 1 : 0)
-      if (changed) expect(publications.at(-1)?.rows).toEqual(after)
+      const expectedChanges = expectedPageChanges(before, after)
+      expect(publications.slice(publicationCount)).toEqual(
+        expectedChanges.length > 0
+          ? [{ changes: expectedChanges, rows: after }]
+          : [],
+      )
     }
 
     const expectedOrderBy = [
