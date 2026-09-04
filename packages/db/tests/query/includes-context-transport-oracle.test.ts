@@ -14,6 +14,10 @@ import {
   sum,
   toArray,
 } from '../../src/query/index.js'
+import {
+  attachRouteMetadata,
+  stripInternalRouteMetadata,
+} from '../../src/query/compiler/route-metadata.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 import type { Collection } from '../../src/collection/index.js'
 import type { Context, QueryBuilder } from '../../src/query/builder/index.js'
@@ -1847,17 +1851,18 @@ async function runPublicSurfaceCell({
       }
 
       if (shape === `adversarial-key`) {
-        const rows = correlated.select(({ child }) => ({
-          id: child.id,
-          payload: child.adversarial,
-        }))
+        const rows = correlated.fn.select((row) => {
+          const payload = createAdversarialPayload(row.child.adversarial.safe)
+          payload.row = row
+          return { id: row.child.id, payload }
+        })
         return { id: parent.id, ...includeInEveryForm(rows) }
       }
 
       if (shape === `user-symbol`) {
-        const rows = correlated.select(({ child }) => ({
-          id: child.id,
-          payload: child.symbols,
+        const rows = correlated.fn.select((row) => ({
+          id: row.child.id,
+          payload: { ...row.child.symbols, row },
         }))
         return { id: parent.id, ...includeInEveryForm(rows) }
       }
@@ -1928,6 +1933,7 @@ async function runPublicSurfaceCell({
         const row = rows[0] as any
         expect(row.box).toBeInstanceOf(PublicSurfaceBox)
         expect(row.box.row.child.id).toBe(child.id)
+        expect(row.box.row.child.label).toBe(child.label)
         expect(row.box.map.get(`row`)).toBe(row.box.row)
         expect(row.box.set.has(row.box.row)).toBe(true)
       }
@@ -1942,13 +1948,16 @@ async function runPublicSurfaceCell({
     }
 
     if (shape === `functional-having-input`) {
+      const total = children.collection.toArray.filter(
+        ({ parentGroup }) => parentGroup === parents.collection.get(1)!.group,
+      ).length
       for (const rows of rowsByForm) {
         expect(
           rows.map((row: any) => ({
             parentGroup: row.parentGroup,
             total: row.total,
           })),
-        ).toEqual([{ parentGroup: child.parentGroup, total: 1 }])
+        ).toEqual([{ parentGroup: child.parentGroup, total }])
       }
       return
     }
@@ -1963,15 +1972,20 @@ async function runPublicSurfaceCell({
         expect(payload.__proto__).toEqual({
           marker: child.adversarial.__proto__.marker,
         })
+        expect(payload.row.child.id).toBe(child.id)
       }
       return
     }
 
     if (shape === `user-symbol`) {
-      for (const rows of rowsByForm) {
-        expect((rows[0] as any).payload[userSymbol]).toBe(
+      for (const [index, rows] of rowsByForm.entries()) {
+        expect(
+          (rows[0] as any).payload[userSymbol],
+          materializationForms[index],
+        ).toBe(
           child.symbols[userSymbol],
         )
+        expect((rows[0] as any).payload.row.child.id).toBe(child.id)
       }
       return
     }
@@ -1995,6 +2009,31 @@ async function runPublicSurfaceCell({
 
     if (shape === `object-query-ref-scalar`) {
       candidates.write(`update`, { id: 20, value: third })
+    } else if (shape === `functional-having-input`) {
+      children.write(`insert`, {
+        id: 30,
+        parentGroup: 2,
+        value: third,
+        payload: { token: `third` },
+        adversarial: createAdversarialPayload(`third`),
+        symbols: { [userSymbol]: `third` },
+        label: `thirty`,
+      })
+    } else if (shape === `nested-reference`) {
+      children.write(`update`, {
+        ...children.collection.get(20)!,
+        payload: { token: `updated` },
+      })
+    } else if (shape === `adversarial-key`) {
+      children.write(`update`, {
+        ...children.collection.get(20)!,
+        adversarial: createAdversarialPayload(`updated`),
+      })
+    } else if (shape === `user-symbol`) {
+      children.write(`update`, {
+        ...children.collection.get(20)!,
+        symbols: { [userSymbol]: `updated` },
+      })
     } else {
       children.write(`update`, {
         ...children.collection.get(20)!,
@@ -2059,6 +2098,56 @@ describe(`correlated include route-context transport grammar`, () => {
     expect(
       grammarCells.length * materializationForms.length * checkpoints.length,
     ).toBe(819)
+  })
+
+  test(`preserves cycles while removing nested route metadata`, () => {
+    const routed = attachRouteMetadata({ id: 1 }, 1, null)
+    const value: Record<string, unknown> = { routed }
+    value.self = value
+
+    const cleaned = stripInternalRouteMetadata(value) as typeof value
+
+    expect(cleaned).not.toBe(value)
+    expect(cleaned.self).toBe(cleaned)
+    expectNoPrivateSymbolsDeep(cleaned, new Set())
+  })
+
+  test(`does not evaluate unused accessors while cleaning routed callback rows`, async () => {
+    let reads = 0
+    const payload = {}
+    Object.defineProperty(payload, `unused`, {
+      get() {
+        reads++
+        throw new Error(`unused getter evaluated`)
+      },
+      enumerable: true,
+    })
+    const parents = createGrammarCollection(`getter-parents`, [
+      { id: 1, group: 1 },
+    ])
+    const children = createGrammarCollection(`getter-children`, [
+      { id: 10, parentGroup: 1, payload },
+    ])
+    const live = createLiveQueryCollection((q) =>
+      q.from({ parent: parents.collection }).select(({ parent }) => ({
+        id: parent.id,
+        children: toArray(
+          q
+            .from({ child: children.collection })
+            .where(({ child }) => eq(child.parentGroup, parent.group))
+            .fn.where(() => true)
+            .fn.select(({ child }) => ({ id: child.id })),
+        ),
+      })),
+    )
+
+    try {
+      await live.preload()
+      expect(live.get(1)?.children).toEqual([{ id: 10 }])
+      expect(reads).toBe(0)
+    } finally {
+      await cleanup(live, [parents, children])
+    }
   })
 
   for (const cell of grammarCells) {

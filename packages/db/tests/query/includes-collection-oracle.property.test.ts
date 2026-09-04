@@ -775,6 +775,7 @@ describe(`Collection-valued includes oracle`, () => {
   fcTest(
     `outer fn.select recomputes nested values after a union branch include changes`,
     async () => {
+      const callbackRows: Array<Record<PropertyKey, unknown>> = []
       const messages = createControlledCollection(`fn-select-messages`, [
         { id: 1, group: 1 },
       ])
@@ -809,11 +810,14 @@ describe(`Collection-valued includes oracle`, () => {
             id: tool.id,
           }))
 
-        return q.unionAll(messageRows, toolRows).fn.select((row) => ({
-          kind: row.kind,
-          id: row.id,
-          payload: { children: row.children },
-        }))
+        return q.unionAll(messageRows, toolRows).fn.select((row) => {
+          callbackRows.push(row)
+          return {
+            kind: row.kind,
+            id: row.id,
+            payload: { children: row.children },
+          }
+        })
       })
 
       try {
@@ -829,6 +833,9 @@ describe(`Collection-valued includes oracle`, () => {
         expect(
           live.toArray.find((row) => row.kind === `message`)!.payload.children,
         ).toEqual([{ id: 10, value: 2 }])
+        expect(
+          callbackRows.flatMap((row) => Object.getOwnPropertySymbols(row)),
+        ).toEqual([])
       } finally {
         await Promise.all([
           live.cleanup(),

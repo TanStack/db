@@ -212,18 +212,23 @@ The executable oracle factors that product into valid compiler sub-grammars:
 Plain record results carry route metadata under a private symbol while the
 compiler moves them through recursive sources. Primitives and opaque objects,
 such as `Date`, use an internal envelope at those same edges. Namespacing and
-join adapters unwrap the value and keep its route beside it. Before publication,
-functional callbacks receive a clean copy of only the paths that contain
-private state. The publication boundary applies the same copy-on-write walk
-while resolving facade references. Both paths define copied keys as data
-properties, preserve clean nested references and user-owned symbols, strip
-route and public-key symbols at every depth, and never mutate values retained
-by D2. Compiler-created parent contexts use a separate internal envelope that
-keeps projected user aliases apart from the equality identity derived from
-their leaves. The whole parent-context envelope is structural D2 state. This
-avoids reserving user aliases or selected field names while keeping the context
-stable across D2 operators without collapsing two reference-sensitive leaf
-values that happen to have the same object shape.
+join adapters unwrap the value and keep its route beside it. Every functional
+callback whose source can carry route state receives a clean copy of only the
+paths that contain private state; this includes recursive and union sources,
+not only directly correlated child queries. The callback boundary removes all
+compiler-owned fields before invoking user code. The publication boundary
+applies the same copy-on-write walk while resolving facade references. Both
+paths preserve property descriptors, clean nested references, cycles,
+adversarial keys, and user-owned symbols. Discovery reads data descriptors
+directly and never invokes an accessor merely to find private state. D2 hashes
+enumerable symbol keys and uses exact symbol identity, so symbol-only changes
+cannot cancel as equal before publication. Neither boundary mutates values
+retained by D2. Compiler-created parent contexts use a separate internal
+envelope that keeps projected user aliases apart from the equality identity
+derived from their leaves. The whole parent-context envelope is structural D2
+state. This avoids reserving user aliases or selected field names while keeping
+the context stable across D2 operators without collapsing two
+reference-sensitive leaf values that happen to have the same object shape.
 
 Every valid plan is checked as a Collection, `toArray`, and `materialize`
 include at initial load, after a parent-route update, and after a child update.

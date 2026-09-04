@@ -1,4 +1,8 @@
-import { MurmurHashStream, randomHash } from './murmur.js'
+import {
+  MurmurHashStream,
+  getSymbolIdentity,
+  randomHash,
+} from './murmur.js'
 import type { Hasher } from './murmur.js'
 
 /*
@@ -143,6 +147,14 @@ function hashPlainObject(input: object, marker: number): number {
   const keys = Object.keys(input)
   keys.sort(keySort)
   for (const key of keys) {
+    hasher.update(KEY)
+    hasher.update(key)
+    updateHasher(hasher, input[key as keyof typeof input])
+  }
+  const symbolKeys = Object.getOwnPropertySymbols(input)
+    .filter((key) => Object.prototype.propertyIsEnumerable.call(input, key))
+    .sort((left, right) => getSymbolIdentity(left) - getSymbolIdentity(right))
+  for (const key of symbolKeys) {
     hasher.update(KEY)
     hasher.update(key)
     updateHasher(hasher, input[key as keyof typeof input])

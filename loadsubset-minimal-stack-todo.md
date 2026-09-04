@@ -624,6 +624,14 @@ explicitly removed.
       storage when available, registered symbols use their registry strings,
       and older runtimes keep the correctness-preserving strong fallback. The
       focused identity suite fails on the old strong maps and passes 54/54.
+- [x] Close the routed-callback and public-value gaps from the next loss audit.
+      Recursive and union sources now remove every compiler-owned field before
+      user callbacks. The copy-on-write boundary preserves descriptors without
+      evaluating unused accessors. Tightened child-update cells then exposed a
+      D2 hash collision for symbol-only changes; structural hashes and deep
+      equality now include enumerable symbol keys and keep distinct symbols
+      distinct. The regressions failed first, all 328 db-ivm tests pass, and the
+      six focused includes/grouping suites are 155/155 green.
 - [ ] Make equality auto-index fallback quiet and safe for symbol-valued join
       fields; the symbol-route oracle exposed a comparator throw while the
       query correctly fell back to a full scan.

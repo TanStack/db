@@ -153,10 +153,9 @@ describe(`hash`, () => {
       expect(typeof result1).toBe(hashType)
       expect(typeof result2).toBe(hashType)
       expect(typeof result3).toBe(hashType)
-      // Note: Different symbol instances with same description have same hash
-      expect(result1).toBe(result2)
+      expect(result1).not.toBe(result2)
       expect(result1).not.toBe(result3)
-      expect(result4).toBe(result5)
+      expect(result4).not.toBe(result5)
       expect(result1).not.toBe(result4)
     })
   })
@@ -172,6 +171,17 @@ describe(`hash`, () => {
       expect(typeof hash1).toBe(hashType)
       expect(typeof hash2).toBe(hashType)
       // Note: Different key orders might produce different hashes depending on JSON.stringify behavior
+    })
+
+    it(`includes enumerable symbol keys and values`, () => {
+      const key = Symbol(`key`)
+
+      expect(hash({ [key]: `before` })).not.toBe(
+        hash({ [key]: `after` }),
+      )
+      expect(hash({ [Symbol(`key`)]: `value` })).not.toBe(
+        hash({ [Symbol(`key`)]: `value` }),
+      )
     })
 
     it(`should hash arrays`, () => {

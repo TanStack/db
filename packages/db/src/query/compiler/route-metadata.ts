@@ -1,9 +1,16 @@
 const ROUTED_SCALAR_VALUE = Symbol(`tanstack_db_routed_scalar_value`)
 const ROUTE_METADATA = Symbol(`tanstack_db_route_metadata`)
 export const INCLUDES_PUBLIC_KEY = Symbol(`includesPublicKey`)
+export const INCLUDES_ROUTING = Symbol(`includesRouting`)
+export const FN_SELECT_STATE = Symbol(`fnSelectState`)
 const INTERNAL_ROUTE_KEYS = new Set<PropertyKey>([
   ROUTE_METADATA,
   INCLUDES_PUBLIC_KEY,
+])
+const INTERNAL_CALLBACK_KEYS = new Set<PropertyKey>([
+  ...INTERNAL_ROUTE_KEYS,
+  INCLUDES_ROUTING,
+  FN_SELECT_STATE,
 ])
 
 type RoutedResult = {
@@ -118,6 +125,15 @@ export function stripInternalRouteMetadata(value: unknown): unknown {
   return transformPublicContainers(value, (leaf) => leaf, INTERNAL_ROUTE_KEYS)
 }
 
+/** Remove every compiler-owned key before invoking user code. */
+export function stripInternalCallbackMetadata(value: unknown): unknown {
+  return transformPublicContainers(
+    value,
+    (leaf) => leaf,
+    INTERNAL_CALLBACK_KEYS,
+  )
+}
+
 /** Copy only paths changed by a leaf transform or an omitted private key. */
 export function transformPublicContainers(
   value: unknown,
@@ -131,7 +147,13 @@ export function transformPublicContainers(
   const parents = new WeakMap<object, Set<object>>()
   const properties = new WeakMap<
     object,
-    Map<PropertyKey, { value: unknown; replacement: unknown }>
+    Map<
+      PropertyKey,
+      {
+        descriptor: PropertyDescriptor
+        value?: { original: unknown; replacement: unknown }
+      }
+    >
   >()
   const visited = new WeakSet<object>()
   const dirty = new Set<object>()
@@ -140,7 +162,10 @@ export function transformPublicContainers(
     visited.add(current)
     const currentProperties = new Map<
       PropertyKey,
-      { value: unknown; replacement: unknown }
+      {
+        descriptor: PropertyDescriptor
+        value?: { original: unknown; replacement: unknown }
+      }
     >()
     properties.set(current, currentProperties)
     for (const key of Reflect.ownKeys(current)) {
@@ -149,10 +174,16 @@ export function transformPublicContainers(
         continue
       }
       const descriptor = Object.getOwnPropertyDescriptor(current, key)
-      if (!descriptor?.enumerable) continue
-      const child = (current as Record<PropertyKey, unknown>)[key]
+      if (!descriptor) continue
+      const property: {
+        descriptor: PropertyDescriptor
+        value?: { original: unknown; replacement: unknown }
+      } = { descriptor }
+      currentProperties.set(key, property)
+      if (!descriptor.enumerable || !(`value` in descriptor)) continue
+      const child = descriptor.value
       const replacement = transformLeaf(child)
-      currentProperties.set(key, { value: child, replacement })
+      property.value = { original: child, replacement }
       if (replacement !== child) {
         dirty.add(current)
         continue
@@ -187,17 +218,17 @@ export function transformPublicContainers(
       : Object.create(Object.getPrototypeOf(current))
     copies.set(current, result)
     for (const [key, property] of properties.get(current) ?? []) {
-      Object.defineProperty(result, key, {
-        value:
-          property.replacement !== property.value
-            ? property.replacement
-            : isPublicContainer(property.value)
-              ? copy(property.value)
-              : property.value,
-        enumerable: true,
-        configurable: true,
-        writable: true,
-      })
+      const descriptor = { ...property.descriptor }
+      if (property.value) {
+        const { original, replacement } = property.value
+        descriptor.value =
+          replacement !== original
+            ? replacement
+            : isPublicContainer(original)
+              ? copy(original)
+              : original
+      }
+      Object.defineProperty(result, key, descriptor)
     }
     return result
   }

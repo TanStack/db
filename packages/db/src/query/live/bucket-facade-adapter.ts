@@ -1,7 +1,10 @@
 import { output, serializeValue } from '@tanstack/db-ivm'
 import { createCollection } from '../../collection/index.js'
-import { FN_SELECT_STATE, INCLUDES_ROUTING } from '../compiler/index.js'
-import { transformPublicContainers } from '../compiler/route-metadata.js'
+import {
+  FN_SELECT_STATE,
+  INCLUDES_ROUTING,
+  transformPublicContainers,
+} from '../compiler/route-metadata.js'
 import { BUCKET_FACADE_REF } from './materialized-pipeline.js'
 import type { Collection } from '../../collection/index.js'
 import type { SyncConfig } from '../../types.js'

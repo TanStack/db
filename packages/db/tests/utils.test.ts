@@ -184,6 +184,16 @@ describe(`deepEquals`, () => {
       expect(deepEquals({ a: { b: 1 } }, { a: { b: 2 } })).toBe(false)
     })
 
+    it(`should compare enumerable symbol properties`, () => {
+      const key = Symbol(`key`)
+
+      expect(deepEquals({ [key]: 1 }, { [key]: 1 })).toBe(true)
+      expect(deepEquals({ [key]: 1 }, { [key]: 2 })).toBe(false)
+      expect(deepEquals({ [Symbol(`key`)]: 1 }, { [Symbol(`key`)]: 1 })).toBe(
+        false,
+      )
+    })
+
     it(`should handle circular references in objects`, () => {
       const a: any = { x: 1 }
       a.self = a

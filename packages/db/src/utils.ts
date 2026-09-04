@@ -188,9 +188,20 @@ function deepEqualsInternal(
     }
     visited.set(a, b)
 
-    // Get all keys from both objects
-    const keysA = Object.keys(a)
-    const keysB = Object.keys(b)
+    // Compare enumerable symbol keys as well as string keys. Query results may
+    // use user-owned symbols, and a symbol-only update is still a value change.
+    const keysA = [
+      ...Object.keys(a),
+      ...Object.getOwnPropertySymbols(a).filter((key) =>
+        Object.prototype.propertyIsEnumerable.call(a, key),
+      ),
+    ]
+    const keysB = [
+      ...Object.keys(b),
+      ...Object.getOwnPropertySymbols(b).filter((key) =>
+        Object.prototype.propertyIsEnumerable.call(b, key),
+      ),
+    ]
 
     // Check if they have the same number of keys
     if (keysA.length !== keysB.length) {

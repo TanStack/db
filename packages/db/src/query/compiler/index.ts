@@ -57,13 +57,16 @@ import { getLazyLoadTargets } from './lazy-targets.js'
 import { processOrderBy } from './order-by.js'
 import { crossJoinParentRoutes } from './parent-routes.js'
 import {
+  FN_SELECT_STATE,
   INCLUDES_PUBLIC_KEY,
+  INCLUDES_ROUTING,
   attachRouteMetadata,
   attachRouteMetadataToResult,
   getNamespacedRouteMetadata,
   getRouteMetadata,
   getRoutedScalarMetadata,
   isPlainObject,
+  stripInternalCallbackMetadata,
   stripInternalRouteMetadata,
   stripRouteMetadata,
 } from './route-metadata.js'
@@ -90,11 +93,12 @@ import type {
 import type { QueryCache, QueryMapping, WindowOptions } from './types.js'
 
 export type { WindowOptions } from './types.js'
-export { INCLUDES_PUBLIC_KEY } from './route-metadata.js'
+export {
+  FN_SELECT_STATE,
+  INCLUDES_PUBLIC_KEY,
+  INCLUDES_ROUTING,
+} from './route-metadata.js'
 
-/** Symbol used to tag parent $selected with routing metadata for includes */
-export const INCLUDES_ROUTING = Symbol(`includesRouting`)
-export const FN_SELECT_STATE = Symbol(`fnSelectState`)
 const SKIP_INCLUDE = Symbol(`skipInclude`)
 
 function getUnsupportedFnSelectResultDescription(
@@ -447,6 +451,10 @@ export function compileQuery(
     parentKeyStream,
   )
   Object.assign(sources, fromSources)
+  const sourceCarriesInternalRouteState =
+    parentKeyStream !== undefined ||
+    sourceIncludes.length > 0 ||
+    directIncludes.length > 0
 
   // If this is an includes child query, inner-join the raw input with parent keys.
   // This filters the child collection to only rows matching parents in the result set.
@@ -596,8 +604,8 @@ export function compileQuery(
     for (const fnWhere of query.fnWhere) {
       pipeline = pipeline.pipe(
         filter(([_key, namespacedRow]) => {
-          const callbackRow = parentKeyStream
-            ? (stripInternalRouteMetadata(namespacedRow) as NamespacedRow)
+          const callbackRow = sourceCarriesInternalRouteState
+            ? (stripInternalCallbackMetadata(namespacedRow) as NamespacedRow)
             : namespacedRow
           return toBooleanPredicate(fnWhere(callbackRow))
         }),
@@ -975,8 +983,8 @@ export function compileQuery(
     // Handle functional select - apply the function to transform the row
     pipeline = pipeline.pipe(
       map(([key, namespacedRow]) => {
-        const callbackRow = parentKeyStream
-          ? (stripInternalRouteMetadata(namespacedRow) as NamespacedRow)
+        const callbackRow = sourceCarriesInternalRouteState
+          ? (stripInternalCallbackMetadata(namespacedRow) as NamespacedRow)
           : namespacedRow
         const selectResults = query.fnSelect!(callbackRow)
         validateFnSelectResult(selectResults)
@@ -1077,6 +1085,7 @@ export function compileQuery(
       query.fnHaving,
       mainCollectionId,
       groupByMainSource,
+      sourceCarriesInternalRouteState || includesRoutingFns.length > 0,
     )
   } else if (query.select) {
     // Check if SELECT contains aggregates but no GROUP BY (implicit single-group aggregation)
@@ -1094,6 +1103,7 @@ export function compileQuery(
         query.fnHaving,
         mainCollectionId,
         groupByMainSource,
+        sourceCarriesInternalRouteState || includesRoutingFns.length > 0,
       )
     }
   }
@@ -1120,9 +1130,10 @@ export function compileQuery(
     for (const fnHaving of query.fnHaving) {
       pipeline = pipeline.pipe(
         filter(([_key, namespacedRow]) => {
-          const callbackRow = parentKeyStream
-            ? (stripInternalRouteMetadata(namespacedRow) as NamespacedRow)
-            : namespacedRow
+          const callbackRow =
+            sourceCarriesInternalRouteState || includesRoutingFns.length > 0
+              ? (stripInternalCallbackMetadata(namespacedRow) as NamespacedRow)
+              : namespacedRow
           return fnHaving(callbackRow)
         }),
       )

@@ -33,7 +33,7 @@ import {
   INCLUDES_PUBLIC_KEY,
   attachRouteMetadata,
   getNamespacedRouteMetadata,
-  stripInternalRouteMetadata,
+  stripInternalCallbackMetadata,
 } from './route-metadata.js'
 import type {
   Aggregate,
@@ -322,6 +322,7 @@ export function processGroupBy(
   fnHavingClauses?: Array<(row: any) => any>,
   aggregateCollectionId?: string,
   mainSource?: string,
+  sanitizeCallbackRows = false,
 ): NamespacedAndKeyedStream {
   const fields = createInternalGroupFields(groupByClause.length, selectClause)
   const virtualAggregates: Record<string, any> = {
@@ -504,8 +505,8 @@ export function processGroupBy(
         pipeline = pipeline.pipe(
           filter(([, row]) => {
             const namespacedRow = getHavingEvaluationRow(row, fields)
-            const callbackRow = mainSource
-              ? stripInternalRouteMetadata(namespacedRow)
+            const callbackRow = sanitizeCallbackRows
+              ? stripInternalCallbackMetadata(namespacedRow)
               : namespacedRow
             return toBooleanPredicate(fnHaving(callbackRow))
           }),
@@ -718,8 +719,8 @@ export function processGroupBy(
       pipeline = pipeline.pipe(
         filter(([, row]) => {
           const namespacedRow = getHavingEvaluationRow(row, fields)
-          const callbackRow = mainSource
-            ? stripInternalRouteMetadata(namespacedRow)
+          const callbackRow = sanitizeCallbackRows
+            ? stripInternalCallbackMetadata(namespacedRow)
             : namespacedRow
           return toBooleanPredicate(fnHaving(callbackRow))
         }),
