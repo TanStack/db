@@ -674,7 +674,7 @@ export class OrderedSourceLoader {
       // work failed. Retire it without replacing the original failure.
       if (observed) {
         try {
-          this.subscription.releaseLoadSubset(observed.options)
+          this.subscription.releaseLoadSubset(observed.options, { error })
         } catch {
           // releaseLoadSubset retains cleanup debt for a later retry.
         }

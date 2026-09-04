@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { createCollection } from '../../src/collection/index.js'
 import { OrderedSourceLoader } from '../../src/query/live/utils.js'
 import { PropRef } from '../../src/query/ir.js'
 import type { CollectionSubscription } from '../../src/collection/subscription.js'
@@ -201,6 +202,58 @@ describe(`OrderedSourceLoader`, () => {
     loader.loadMore(2)
     expect(methods).toEqual([`snapshot`, `snapshot`])
     loader.dispose()
+  })
+
+  it(`preserves the request failure when provisional cleanup also throws`, async () => {
+    const requestFailure = new Error(`snapshot publication failed`)
+    const cleanupFailure = new Error(`provisional cleanup failed`)
+    const reported: Array<unknown> = []
+    let unloads = 0
+    const source = createCollection<{ id: number; rank: number }>({
+      id: `ordered-provisional-cleanup-error`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({ type: `insert`, value: { id: 1, rank: 1 } })
+          commit()
+          markReady()
+          return {
+            loadSubset: () => true,
+            unloadSubset: () => {
+              unloads++
+              if (unloads === 1) throw cleanupFailure
+            },
+          }
+        },
+      },
+    })
+    const subscription = source.subscribeChanges(
+      (changes) => {
+        if (changes.length > 0) throw requestFailure
+      },
+      { includeInitialState: false },
+    )
+    subscription.on(`loadSubset:error`, ({ error }) => reported.push(error))
+    const loader = new OrderedSourceLoader(
+      createOrderByInfo({ index: undefined }),
+      subscription,
+      `row`,
+      () => undefined,
+    )
+
+    try {
+      expect(() => loader.start()).toThrow(requestFailure)
+      expect(subscription.lastError).toBe(requestFailure)
+      expect(reported).toEqual([requestFailure])
+      expect(unloads).toBe(1)
+    } finally {
+      loader.dispose()
+      subscription.unsubscribe()
+      await source.cleanup()
+    }
   })
 
   it(`blocks a reentrant boundary retry until a later operation`, async () => {

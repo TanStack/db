@@ -917,16 +917,21 @@ export class CollectionSubscription
   }
 
   /** Abort and release one exact adapter acquisition. */
-  private releaseSubsetAcquisition(acquisition: SubsetAcquisition): void {
+  private releaseSubsetAcquisition(
+    acquisition: SubsetAcquisition,
+    reportReleaseError = true,
+  ): void {
     acquisition.abortController?.abort()
     try {
       this.collection._sync.unloadSubset(acquisition.options)
     } catch (error) {
-      const normalized = this.recordLoadSubsetError(
-        acquisition.options,
-        normalizeError(error),
-        true,
-      )
+      const normalized = reportReleaseError
+        ? this.recordLoadSubsetError(
+            acquisition.options,
+            normalizeError(error),
+            true,
+          )
+        : normalizeError(error)
       throw normalized
     } finally {
       acquisition.removeRequestAbortListener?.()
@@ -934,14 +939,17 @@ export class CollectionSubscription
   }
 
   /** Keep an exact lease visible until one release attempt succeeds. */
-  private releaseOrRetainAcquisition(acquisition: SubsetAcquisition): void {
+  private releaseOrRetainAcquisition(
+    acquisition: SubsetAcquisition,
+    reportReleaseError = true,
+  ): void {
     if (!this.releaseDebts.includes(acquisition)) {
       this.releaseDebts.push(acquisition)
     }
     if (this.releasingAcquisitions.has(acquisition)) return
     this.releasingAcquisitions.add(acquisition)
     try {
-      this.releaseSubsetAcquisition(acquisition)
+      this.releaseSubsetAcquisition(acquisition, reportReleaseError)
       const index = this.releaseDebts.indexOf(acquisition)
       if (index !== -1) this.releaseDebts.splice(index, 1)
     } finally {
@@ -1201,11 +1209,25 @@ export class CollectionSubscription
   }
 
   /** Release the exact acquisition returned to an internal request observer. */
-  releaseLoadSubset(options: LoadSubsetOptions): void {
+  releaseLoadSubset(
+    options: LoadSubsetOptions,
+    primaryFailure?: { error: unknown },
+  ): void {
     const index = this.subsetDemands.findIndex(
       (demand) => demand.options === options,
     )
-    if (index !== -1) this.releaseDemandAt(index)
+    if (!primaryFailure) {
+      if (index !== -1) this.releaseDemandAt(index)
+      return
+    }
+
+    try {
+      this.recordLoadSubsetError(options, primaryFailure.error, true)
+    } finally {
+      // The failed request remains the public error. A release failure is
+      // retained as cleanup debt and may be reported if that later retry fails.
+      if (index !== -1) this.releaseDemandAt(index, false)
+    }
   }
 
   private releaseMatchingDemand(options: LoadSubsetOptions): boolean {
@@ -1217,7 +1239,7 @@ export class CollectionSubscription
     return !this.unsubscribed
   }
 
-  private releaseDemandAt(index: number): void {
+  private releaseDemandAt(index: number, reportReleaseError = true): void {
     const demand = this.subsetDemands[index]
     if (!demand) return
     const replaySession = this.truncateReplaySession
@@ -1232,7 +1254,8 @@ export class CollectionSubscription
       () => this.pruneReleasedReplayRows(),
       // Adapter release is a supported reentrancy boundary. A demand started
       // from unload joins this replacement before completion is decided.
-      () => this.releaseOrRetainAcquisition(acquisition),
+      () =>
+        this.releaseOrRetainAcquisition(acquisition, reportReleaseError),
       () => this.retireEmptyReplay(),
       () => {
         if (replaySession) this.checkTruncateReplayComplete(replaySession)

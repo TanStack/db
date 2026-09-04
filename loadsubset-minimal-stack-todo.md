@@ -1065,10 +1065,11 @@ explicitly removed.
         start recovery before the original request has entered its failure
         generation. The exact prefix witness failed with a second snapshot;
         failure state and the request guard now cover provisional retirement.
-  - [ ] Preserve the primary request failure when provisional-acquisition
+  - [x] Preserve the primary request failure when provisional-acquisition
         cleanup also throws. The caller, subscription error event, and stored
         error must report the request failure while the release remains cleanup
-        debt.
+        debt. A real `CollectionSubscription` witness red/greened publication
+        failure plus a throwing adapter release and its later cleanup retry.
   - [ ] Retire a provisional acquisition when the ordered-loader result
         observer throws. A throwing publication/listener callback must not
         leave successful coverage behind or let the queued settlement clear
@@ -1117,6 +1118,17 @@ explicitly removed.
         replacement must choose the lowest public key after an update.
 - [ ] Prevent a reentrant truncate started during synchronous replacement
       publication from letting the superseded attempt emit transient `ready`.
+- [ ] Close the public window-reentrancy follow-up audit:
+  - [ ] Reject or defer `setWindow()` called synchronously from the initial
+        ordered adapter load; it must not return `true` before the requested
+        rows are visible.
+  - [ ] Reject or defer `setWindow()` called from an ordinary live-query
+        publication listener; a coalesced graph turn must not look settled.
+  - [ ] Fence outer window settlement by sync-session identity. Synchronous
+        cleanup during its adapter request must not let the old operation write
+        a settled window into the restarted collection.
+  - [x] Preserve the existing async control: a superseding window move made
+        after the adapter has yielded remains legal and waits for its own work.
 - [ ] Close the subscription-teardown follow-up audit:
   - [ ] Prevent a stale outer cleanup-debt snapshot from unloading an
         acquisition again after a nested `unsubscribe()` already released it.
