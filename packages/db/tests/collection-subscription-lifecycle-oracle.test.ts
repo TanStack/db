@@ -1,9 +1,15 @@
+import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
 import { flushPromises } from './utils.js'
-import type { LoadSubsetOptions } from '../src/types.js'
+import {
+  oraclePropertyOptions,
+  oracleRandomParameters,
+  readOracleRunConfig,
+} from './oracle-config.js'
+import type { LoadSubsetOptions, SyncConfig } from '../src/types.js'
 
 type StartOutcome = `return` | `throw` | `resolve` | `reject`
 type StartReentry =
@@ -15,6 +21,12 @@ type StartReentry =
 type FailureOutcome = `throw` | `reject`
 type ReleaseOutcome = `return` | `throw`
 type ReleaseReentry = `none` | `reacquire-self` | `release-peer` | `unsubscribe`
+type RestartReentry =
+  | `none`
+  | `release-self`
+  | `release-peer`
+  | `unsubscribe`
+  | `cleanup`
 
 const startOutcomes = [`return`, `throw`, `resolve`, `reject`] as const
 const startReentries = [
@@ -44,6 +56,200 @@ const releaseScenarios = ([`return`, `throw`] as const).flatMap((outcome) =>
   ),
 )
 
+const restartScenarios = startOutcomes.flatMap((outcome) =>
+  (
+    [`none`, `release-self`, `release-peer`, `unsubscribe`, `cleanup`] as const
+  ).map((reentry: RestartReentry) => ({ outcome, reentry })),
+)
+
+const threeGenerationScenarios = ([`resolve`, `reject`] as const).flatMap(
+  (obsoleteOutcome) =>
+    ([`resolve`, `reject`] as const).flatMap((currentOutcome) =>
+      ([`obsolete-first`, `current-first`] as const).map((settlementOrder) => ({
+        obsoleteOutcome,
+        currentOutcome,
+        settlementOrder,
+      })),
+    ),
+)
+
+type LifecycleCommand =
+  | { type: `request`; demand: `a` | `b` }
+  | { type: `release`; demand: `a` | `b` }
+  | { type: `truncate` }
+  | { type: `cleanup` }
+  | { type: `restart` }
+  | { type: `unsubscribe` }
+
+const lifecycleCommandArbitrary: fc.Arbitrary<LifecycleCommand> = fc.oneof(
+  fc.record({
+    type: fc.constant(`request` as const),
+    demand: fc.constantFrom(`a` as const, `b` as const),
+  }),
+  fc.record({
+    type: fc.constant(`release` as const),
+    demand: fc.constantFrom(`a` as const, `b` as const),
+  }),
+  fc.constant({ type: `truncate` as const }),
+  fc.constant({ type: `cleanup` as const }),
+  fc.constant({ type: `restart` as const }),
+  fc.constant({ type: `unsubscribe` as const }),
+)
+
+const lifecycleHistoryArbitrary = fc.array(lifecycleCommandArbitrary, {
+  minLength: 1,
+  maxLength: 14,
+})
+
+if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
+  fc.statistics(
+    lifecycleHistoryArbitrary,
+    (history) => [
+      ...new Set(history.map(({ type }) => type)),
+      `cleanup+restart=${
+        history.some(({ type }) => type === `cleanup`) &&
+        history.some(({ type }) => type === `restart`)
+      }`,
+      `two-demands=${
+        history.some(
+          (command) => command.type === `request` && command.demand === `a`,
+        ) &&
+        history.some(
+          (command) => command.type === `request` && command.demand === `b`,
+        )
+      }`,
+    ],
+    oraclePropertyOptions(1_000, `subscription-lifecycle.statistics`),
+  )
+}
+
+async function runLifecycleHistory(
+  history: ReadonlyArray<LifecycleCommand>,
+): Promise<void> {
+  type DemandName = `a` | `b`
+  type Trace = { session: number; demand: DemandName }
+  const where = {
+    a: new Func(`eq`, [new PropRef([`id`]), new Value(`a`)]),
+    b: new Func(`eq`, [new PropRef([`id`]), new Value(`b`)]),
+  }
+  const demandForWhere = new Map<unknown, DemandName>([
+    [where.a, `a`],
+    [where.b, `b`],
+  ])
+  const loads: Array<Trace> = []
+  const unloads: Array<Trace> = []
+  const expectedLoads: Array<Trace> = []
+  const expectedUnloads: Array<Trace> = []
+  const owners = new Set<DemandName>()
+  const acquisitions = new Map<DemandName, number>()
+  let session = -1
+  let active = false
+  let unsubscribed = false
+  let syncOps: Parameters<SyncConfig<{ id: string }, string>[`sync`]>[0]
+
+  const collection = createCollection<{ id: string }>({
+    id: `generated-demand-lifecycle`,
+    getKey: ({ id }) => id,
+    syncMode: `on-demand`,
+    startSync: true,
+    sync: {
+      sync: (operations) => {
+        session++
+        active = true
+        syncOps = operations
+        operations.markReady()
+        return {
+          loadSubset: (options) => {
+            const demand = demandForWhere.get(options.where)
+            if (!demand) throw new Error(`unknown generated demand`)
+            loads.push({ session, demand })
+            return true
+          },
+          unloadSubset: (options) => {
+            const demand = demandForWhere.get(options.where)
+            if (!demand) throw new Error(`unknown generated demand`)
+            unloads.push({ session, demand })
+          },
+        }
+      },
+    },
+  })
+  const subscription = collection.subscribeChanges(() => {}, {
+    includeInitialState: false,
+  })
+
+  try {
+    for (const command of history) {
+      if (unsubscribed) break
+      if (command.type === `request`) {
+        if (owners.has(command.demand)) continue
+        owners.add(command.demand)
+        subscription.requestSnapshot({ where: where[command.demand] })
+        if (active) {
+          expectedLoads.push({ session, demand: command.demand })
+          acquisitions.set(command.demand, session)
+        }
+      } else if (command.type === `release`) {
+        if (!owners.delete(command.demand)) continue
+        if (acquisitions.delete(command.demand)) {
+          expectedUnloads.push({ session, demand: command.demand })
+        }
+        subscription.releaseSnapshot(where[command.demand])
+      } else if (command.type === `cleanup`) {
+        await collection.cleanup()
+        active = false
+        acquisitions.clear()
+      } else if (command.type === `restart`) {
+        if (active) continue
+        collection.startSyncImmediate()
+        if (owners.size > 0) {
+          expect(subscription.status).toBe(`loadingSubset`)
+        }
+        const nextSession = session
+        for (const demand of owners) {
+          expectedLoads.push({ session: nextSession, demand })
+          acquisitions.set(demand, nextSession)
+        }
+      } else if (command.type === `truncate`) {
+        if (!active || !syncOps) continue
+        syncOps.begin()
+        syncOps.truncate()
+        const receipt = syncOps.commit()
+        if (receipt !== true) await receipt
+        for (const demand of owners) {
+          expectedLoads.push({ session, demand })
+          if (acquisitions.has(demand)) {
+            expectedUnloads.push({ session, demand })
+          }
+          acquisitions.set(demand, session)
+        }
+      } else {
+        for (const demand of owners) {
+          if (acquisitions.has(demand)) {
+            expectedUnloads.push({ session, demand })
+          }
+        }
+        owners.clear()
+        acquisitions.clear()
+        subscription.unsubscribe()
+        unsubscribed = true
+      }
+
+      await flushPromises()
+      expect(loads, JSON.stringify({ history, command })).toEqual(expectedLoads)
+      expect(unloads, JSON.stringify({ history, command })).toEqual(
+        expectedUnloads,
+      )
+      if (active && owners.size > 0) {
+        expect(subscription.status).toBe(`ready`)
+      }
+    }
+  } finally {
+    if (!unsubscribed) subscription.unsubscribe()
+    await collection.cleanup()
+  }
+}
+
 /**
  * Exhaust the synchronous adapter-start boundary before adding more runtime
  * special cases. Logical demand is visible during this callback, but a
@@ -66,6 +272,11 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         releaseScenarios.map(({ outcome, reentry }) => `${outcome}:${reentry}`),
       ),
     ).toHaveLength(2 * 4)
+    expect(
+      new Set(
+        restartScenarios.map(({ outcome, reentry }) => `${outcome}:${reentry}`),
+      ),
+    ).toHaveLength(4 * 5)
   })
 
   it.each(startScenarios)(
@@ -443,6 +654,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       collection.startSyncImmediate()
       expect(syncSession).toBe(2)
       expect([...visible.values()]).toEqual([{ id: `row`, version: 3 }])
+      expect(subscription.status).toBe(`loadingSubset`)
+      await flushPromises()
       expect(subscription.status).toBe(`ready`)
 
       if (outcome === `resolve`) replay.resolve()
@@ -516,6 +729,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
 
     await collection.cleanup()
     collection.startSyncImmediate()
+    expect(subscription.status).toBe(`loadingSubset`)
+    expect(loads).toHaveLength(1)
     await flushPromises()
 
     expect(syncSession).toBe(2)
@@ -528,6 +743,323 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     expect(unloads).toEqual([loads[1]])
     await collection.cleanup()
   })
+
+  it(`reacquires demand requested while the collection is cleaned up`, async () => {
+    const oldWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`old`)])
+    const newWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`new`)])
+    let syncSession = 0
+    const loads: Array<{ session: number; options: LoadSubsetOptions }> = []
+    const unloads: Array<{ session: number; options: LoadSubsetOptions }> = []
+    const collection = createCollection<{ id: string }>({
+      id: `request-while-cleaned-up`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          const session = syncSession++
+          markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push({ session, options })
+              return true
+            },
+            unloadSubset: (options) => unloads.push({ session, options }),
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    subscription.requestSnapshot({ where: oldWhere })
+
+    await collection.cleanup()
+    subscription.requestSnapshot({ where: newWhere })
+    collection.startSyncImmediate()
+    await flushPromises()
+
+    expect(loads.map(({ session }) => session)).toEqual([0, 1, 1])
+    expect(loads.slice(1).map(({ options }) => options.where)).toEqual([
+      oldWhere,
+      newWhere,
+    ])
+
+    subscription.unsubscribe()
+    expect(unloads.map(({ session }) => session)).toEqual([1, 1])
+    expect(unloads.map(({ options }) => options.where)).toEqual([
+      oldWhere,
+      newWhere,
+    ])
+    await collection.cleanup()
+  })
+
+  it(`does not retry cleanup debt through a replacement adapter session`, async () => {
+    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
+    let syncSession = 0
+    const unloadSessions: Array<number> = []
+    const releaseFailure = new Error(`old session release failed`)
+    const collection = createCollection<{ id: string }>({
+      id: `cleanup-debt-session`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          const session = syncSession++
+          markReady()
+          return {
+            loadSubset: () => true,
+            unloadSubset: () => {
+              unloadSessions.push(session)
+              if (session === 0) throw releaseFailure
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    subscription.requestSnapshot({ where })
+    expect(() => subscription.releaseSnapshot(where)).toThrow(releaseFailure)
+
+    await collection.cleanup()
+    collection.startSyncImmediate()
+    await flushPromises()
+    subscription.unsubscribe()
+
+    expect(unloadSessions).toEqual([0])
+    await collection.cleanup()
+  })
+
+  it.each(restartScenarios)(
+    `keeps restart ownership aligned for $outcome × $reentry`,
+    async ({ outcome, reentry }) => {
+      type DemandName = `target` | `peer`
+      const targetWhere = new Func(`eq`, [
+        new PropRef([`id`]),
+        new Value(`target`),
+      ])
+      const peerWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`peer`)])
+      const demandForWhere = new Map<unknown, DemandName>([
+        [targetWhere, `target`],
+        [peerWhere, `peer`],
+      ])
+      const failure = new Error(`restart acquisition failed`)
+      const pending = createDeferred<void>()
+      void pending.promise.catch(() => {})
+      const loads: Array<{ session: number; demand: DemandName }> = []
+      const unloads: Array<{ session: number; demand: DemandName }> = []
+      const errors: Array<unknown> = []
+      let session = -1
+      let ranReentry = false
+      let subscription!: ReturnType<
+        ReturnType<typeof createCollection<{ id: string }>>[`subscribeChanges`]
+      >
+
+      const collection = createCollection<{ id: string }>({
+        id: `restart-${outcome}-${reentry}`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            session++
+            markReady()
+            return {
+              loadSubset: (options) => {
+                const demand = demandForWhere.get(options.where)
+                if (!demand) throw new Error(`unknown restart demand`)
+                loads.push({ session, demand })
+                if (session === 0 || demand === `peer`) return true
+                if (!ranReentry) {
+                  ranReentry = true
+                  if (reentry === `release-self`) {
+                    subscription.releaseSnapshot(targetWhere)
+                  } else if (reentry === `release-peer`) {
+                    subscription.releaseSnapshot(peerWhere)
+                  } else if (reentry === `unsubscribe`) {
+                    subscription.unsubscribe()
+                  } else if (reentry === `cleanup`) {
+                    void collection.cleanup()
+                  }
+                }
+                if (outcome === `throw`) throw failure
+                if (outcome === `return`) return true
+                return pending.promise
+              },
+              unloadSubset: (options) => {
+                const demand = demandForWhere.get(options.where)
+                if (!demand) throw new Error(`unknown restart demand`)
+                unloads.push({ session, demand })
+              },
+            }
+          },
+        },
+      })
+      subscription = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      subscription.on(`loadSubset:error`, ({ error }) => errors.push(error))
+      subscription.requestSnapshot({ where: targetWhere })
+      subscription.requestSnapshot({ where: peerWhere })
+
+      await collection.cleanup()
+      collection.startSyncImmediate()
+      await flushPromises()
+      if (outcome === `resolve`) pending.resolve()
+      if (outcome === `reject`) pending.reject(failure)
+      await flushPromises()
+
+      const targetEstablished = outcome !== `throw` && reentry !== `cleanup`
+      const targetSurvives = reentry === `none` || reentry === `release-peer`
+      const peerStarts =
+        reentry !== `release-peer` &&
+        reentry !== `unsubscribe` &&
+        reentry !== `cleanup`
+      expect(loads).toEqual([
+        { session: 0, demand: `target` },
+        { session: 0, demand: `peer` },
+        { session: 1, demand: `target` },
+        ...(peerStarts ? [{ session: 1, demand: `peer` as const }] : []),
+      ])
+      expect(errors).toEqual(
+        (outcome === `throw` || outcome === `reject`) && targetSurvives
+          ? [failure]
+          : [],
+      )
+
+      if (reentry !== `unsubscribe`) subscription.unsubscribe()
+      expect(unloads).toEqual([
+        ...(targetEstablished && !targetSurvives
+          ? [{ session: 1, demand: `target` as const }]
+          : []),
+        ...(targetEstablished && targetSurvives
+          ? [{ session: 1, demand: `target` as const }]
+          : []),
+        ...(peerStarts ? [{ session: 1, demand: `peer` as const }] : []),
+      ])
+      await collection.cleanup()
+    },
+  )
+
+  it.each(threeGenerationScenarios)(
+    `fences three generations for $obsoleteOutcome/$currentOutcome settled $settlementOrder`,
+    async ({ obsoleteOutcome, currentOutcome, settlementOrder }) => {
+      type Row = { id: string; version: number }
+      const obsolete = createDeferred<void>()
+      const current = createDeferred<void>()
+      void obsolete.promise.catch(() => {})
+      void current.promise.catch(() => {})
+      const obsoleteFailure = new Error(`obsolete generation failed`)
+      const currentFailure = new Error(`current generation failed`)
+      const visible = new Map<string | number, Row>()
+      const errors: Array<unknown> = []
+      const unloadSessions: Array<number> = []
+      let session = -1
+
+      const collection = createCollection<Row>({
+        id: `three-generation-${obsoleteOutcome}-${currentOutcome}-${settlementOrder}`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (operations) => {
+            session++
+            const ownSession = session
+            operations.markReady()
+            return {
+              loadSubset: (options) => {
+                if (ownSession === 0) {
+                  operations.begin()
+                  operations.write({
+                    type: `insert`,
+                    value: { id: `row`, version: 1 },
+                  })
+                  operations.commit(options.signal)
+                  return true
+                }
+                const gate = ownSession === 1 ? obsolete : current
+                const outcome =
+                  ownSession === 1 ? obsoleteOutcome : currentOutcome
+                const failure =
+                  ownSession === 1 ? obsoleteFailure : currentFailure
+                return gate.promise.then(() => {
+                  if (outcome === `reject`) throw failure
+                  operations.begin()
+                  operations.write({
+                    type: `insert`,
+                    value: { id: `row`, version: ownSession + 1 },
+                  })
+                  return operations.commit(options.signal)
+                })
+              },
+              unloadSubset: () => unloadSessions.push(ownSession),
+            }
+          },
+        },
+      })
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          for (const change of changes) {
+            if (change.type === `delete`) visible.delete(change.key)
+            else {
+              visible.set(change.key, {
+                id: change.value.id,
+                version: change.value.version,
+              })
+            }
+          }
+        },
+        { includeInitialState: false },
+      )
+      subscription.on(`loadSubset:error`, ({ error }) => errors.push(error))
+      subscription.requestSnapshot()
+      expect([...visible.values()]).toEqual([{ id: `row`, version: 1 }])
+
+      await collection.cleanup()
+      collection.startSyncImmediate()
+      await flushPromises()
+      await collection.cleanup()
+      collection.startSyncImmediate()
+      await flushPromises()
+      expect(subscription.status).toBe(`loadingSubset`)
+
+      const settleObsolete = () =>
+        obsoleteOutcome === `resolve`
+          ? obsolete.resolve()
+          : obsolete.reject(obsoleteFailure)
+      const settleCurrent = () =>
+        currentOutcome === `resolve`
+          ? current.resolve()
+          : current.reject(currentFailure)
+      if (settlementOrder === `obsolete-first`) {
+        settleObsolete()
+        await flushPromises()
+        expect(subscription.status).toBe(`loadingSubset`)
+        settleCurrent()
+      } else {
+        settleCurrent()
+        await flushPromises()
+        settleObsolete()
+      }
+      await flushPromises()
+
+      expect([...visible.values()]).toEqual([
+        currentOutcome === `resolve`
+          ? { id: `row`, version: 3 }
+          : { id: `row`, version: 1 },
+      ])
+      expect(errors).toEqual(
+        currentOutcome === `reject` ? [currentFailure] : [],
+      )
+      expect(subscription.lastError).toBe(
+        currentOutcome === `reject` ? currentFailure : undefined,
+      )
+      expect(subscription.status).toBe(`ready`)
+
+      subscription.unsubscribe()
+      expect(unloadSessions).toEqual([2])
+      await collection.cleanup()
+    },
+  )
 
   it(`treats an externally aborted replay as failed without publishing partial rows`, async () => {
     type Row = { id: string; value: string }
@@ -729,5 +1261,24 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       subscription.unsubscribe()
       await collection.cleanup()
     },
+  )
+
+  const { multiplier, ...replay } = readOracleRunConfig()
+
+  fcTest.prop([lifecycleHistoryArbitrary], {
+    numRuns: 80 * multiplier,
+    seed: 1_657_001,
+  })(`matches the demand lifecycle model for a fixed seed`, runLifecycleHistory)
+
+  fcTest.prop(
+    [lifecycleHistoryArbitrary],
+    oracleRandomParameters(
+      80 * multiplier,
+      replay,
+      `subscription-lifecycle.history`,
+    ),
+  )(
+    `matches the demand lifecycle model for a random or replayed seed`,
+    runLifecycleHistory,
   )
 })

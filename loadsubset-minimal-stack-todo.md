@@ -1261,7 +1261,13 @@ explicitly removed.
         cannot write rows, report an error, change readiness, or settle a new
         window. Cleanup now detaches surviving demand and restart reacquires it
         under a fresh private barrier seeded from the new session's current
-        rows.
+        rows. The follow-up loss audit found that requests made while already
+        cleaned up became phantom active acquisitions, cleanup debt crossed
+        adapter sessions, and restart had a false-ready microtask. Physical
+        acquisitions now carry their source-session identity; all three cases
+        red/greened. A 20-cell two-demand restart matrix and eight
+        three-generation settlement orders cover return, throw, resolve,
+        reject, release, unsubscribe, cleanup, and obsolete/current ordering.
   - [ ] Keep the ordered-query layer as a consumer of the same protocol. Cross
         page, prefix, boundary, and full-source routes with cancellation,
         failure, retry, and reentrant `setWindow`; do not duplicate ownership
@@ -1270,8 +1276,12 @@ explicitly removed.
         `fc.statistics` for generated histories. Fixed witnesses, exhaustive
         small-domain cells, fixed-seed fuzzing, and random/replayable fuzzing
         must all exercise the same laws. The core start, failure-delivery, and
-        release matrices have checked finite censuses; generated-history
-        statistics remain for the final combined lifecycle grammar.
+        release matrices have checked finite censuses. Restart adds 20 checked
+        cells and three-generation fencing adds eight fixed settlement orders.
+        The independent sync-history model now runs both fixed and random,
+        replayable command sequences across request, release, truncate,
+        cleanup, restart, and unsubscribe, with optional coverage statistics.
+        Ordered-route census and combined async-history statistics remain.
   - [x] Catalog all red cells before changing production code. Fix by invalid
         transition class, then rerun the entire matrix after each coherent
         commit. The core slice exposed 15 red cells in five classes: phantom

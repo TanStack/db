@@ -520,8 +520,13 @@ demand join readiness or a later replay.
 
 Collection cleanup detaches surviving logical demand from the discarded sync
 session. It aborts that session's physical work and rejects its replay barrier,
-but it does not turn still-owned demand into cleanup debt. When the Collection
-starts a new sync session, the subscription reacquires that demand through a
+but it does not turn still-owned demand into cleanup debt. Physical
+acquisitions and cleanup debt belong to the sync session that created them;
+cleanup retires both instead of sending an old release to a replacement
+adapter. Demand requested while the Collection is cleaned up remains detached
+rather than pretending that a physical acquisition succeeded. When the
+Collection starts a new sync session, the subscription enters `loadingSubset`
+before it queues reacquisition, then reacquires all detached demand through a
 fresh private publication barrier. Settlements from the old session cannot
 publish rows, report errors, or change readiness in the new session.
 

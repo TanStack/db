@@ -96,6 +96,7 @@ type TruncatePublicationState = {
 
 type SubsetAcquisition = {
   options: LoadSubsetOptions
+  loadSubsetSession: number
   abortController?: AbortController
   removeRequestAbortListener?: () => void
 }
@@ -248,6 +249,13 @@ export class CollectionSubscription
     })
     this.collectionRestartCleanup = this.collection.on(`status:loading`, () => {
       const loadSubsetSession = this.collection._sync.getLoadSubsetSession()
+      if (
+        this.subsetDemands.some(
+          (demand) => demand.acquisitionState === `detached`,
+        )
+      ) {
+        this.setStatus(`loadingSubset`)
+      }
       queueMicrotask(() => this.restartDetachedDemands(loadSubsetSession))
     })
   }
@@ -262,6 +270,11 @@ export class CollectionSubscription
     this.truncateReplacementPending = false
     this.stalePublishedRows = new Map(this.publishedRows)
     this.pendingLoadSubsetParticipants.clear()
+    for (const acquisition of this.releaseDebts) {
+      acquisition.abortController?.abort()
+      acquisition.removeRequestAbortListener?.()
+    }
+    this.releaseDebts = []
 
     for (const demand of [...this.subsetDemands]) {
       demand.abortController?.abort()
@@ -461,6 +474,7 @@ export class CollectionSubscription
     const hadPreviousAcquisition = previousState === `active`
     const previous: SubsetAcquisition = {
       options: demand.options,
+      loadSubsetSession: demand.loadSubsetSession,
       abortController: demand.abortController,
       removeRequestAbortListener: demand.removeRequestAbortListener,
     }
@@ -468,6 +482,7 @@ export class CollectionSubscription
     const restorePrevious = () => {
       if (demand.options !== next.options) return
       demand.options = previous.options
+      demand.loadSubsetSession = previous.loadSubsetSession
       demand.abortController = previous.abortController
       demand.removeRequestAbortListener = previous.removeRequestAbortListener
       demand.acquisitionState = previousState
@@ -477,6 +492,7 @@ export class CollectionSubscription
       session.currentAttempt === attempt
 
     demand.options = next.options
+    demand.loadSubsetSession = next.loadSubsetSession
     demand.abortController = next.abortController
     demand.removeRequestAbortListener = next.removeRequestAbortListener
     if (!hadPreviousAcquisition) demand.acquisitionState = `starting`
@@ -1048,6 +1064,7 @@ export class CollectionSubscription
         ...demand.requestOptions,
         signal: abortController.signal,
       },
+      loadSubsetSession: this.collection._sync.getLoadSubsetSession(),
       abortController,
       removeRequestAbortListener,
     }
@@ -1060,6 +1077,7 @@ export class CollectionSubscription
   ): void {
     const previous: SubsetAcquisition = {
       options: demand.options,
+      loadSubsetSession: demand.loadSubsetSession,
       abortController: demand.abortController,
       removeRequestAbortListener: demand.removeRequestAbortListener,
     }
@@ -1068,6 +1086,7 @@ export class CollectionSubscription
     // adapter may synchronously release the logical demand from unloadSubset;
     // that reentrant release must then see and release the new acquisition.
     demand.options = next.options
+    demand.loadSubsetSession = next.loadSubsetSession
     demand.abortController = next.abortController
     demand.removeRequestAbortListener = next.removeRequestAbortListener
     try {
@@ -1075,6 +1094,7 @@ export class CollectionSubscription
     } catch (error) {
       if (this.subsetDemands.includes(demand)) {
         demand.options = previous.options
+        demand.loadSubsetSession = previous.loadSubsetSession
         demand.abortController = previous.abortController
         demand.removeRequestAbortListener = previous.removeRequestAbortListener
       } else if (!this.releaseDebts.includes(previous)) {
@@ -1094,7 +1114,9 @@ export class CollectionSubscription
   ): void {
     acquisition.abortController?.abort()
     try {
-      this.collection._sync.unloadSubset(acquisition.options)
+      if (this.isLoadSubsetSessionCurrent(acquisition.loadSubsetSession)) {
+        this.collection._sync.unloadSubset(acquisition.options)
+      }
     } catch (error) {
       const normalized = reportReleaseError
         ? this.recordLoadSubsetError(
@@ -1136,10 +1158,17 @@ export class CollectionSubscription
     const demand: SubsetDemand = {
       requestOptions,
       options: requestOptions,
+      loadSubsetSession: this.collection._sync.getLoadSubsetSession(),
       acquisitionState: `starting`,
+    }
+    if (this.collection.status === `cleaned-up`) {
+      demand.acquisitionState = `detached`
+      this.subsetDemands.push(demand)
+      return { demand, result: true }
     }
     const acquisition = this.createSubsetAcquisition(demand)
     demand.options = acquisition.options
+    demand.loadSubsetSession = acquisition.loadSubsetSession
     demand.abortController = acquisition.abortController
     demand.removeRequestAbortListener = acquisition.removeRequestAbortListener
     const replaySession = this.truncateReplaySession
@@ -1454,6 +1483,7 @@ export class CollectionSubscription
     const replaySession = this.truncateReplaySession
     const acquisition: SubsetAcquisition = {
       options: demand.options,
+      loadSubsetSession: demand.loadSubsetSession,
       abortController: demand.abortController,
       removeRequestAbortListener: demand.removeRequestAbortListener,
     }
