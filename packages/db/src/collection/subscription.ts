@@ -42,6 +42,7 @@ type RequestSnapshotOptions = {
   onLoadSubsetResult?: (
     result: LoadSubsetRequestResult,
     options: LoadSubsetOptions,
+    release?: ReleaseLoadSubset,
   ) => void
   /** Called when the local snapshot must fall back from an index to a scan. */
   onUnoptimized?: () => void
@@ -62,8 +63,13 @@ type RequestLimitedSnapshotOptions = {
   onLoadSubsetResult?: (
     result: LoadSubsetRequestResult,
     options: LoadSubsetOptions,
+    release?: ReleaseLoadSubset,
   ) => void
 }
+
+export type ReleaseLoadSubset = (
+  primaryFailure?: { error: unknown },
+) => void
 
 type CollectionSubscriptionOptions = {
   includeInitialState?: boolean
@@ -1143,7 +1149,11 @@ export class CollectionSubscription
     if (opts?.where) this.requestedSubsetWhere.set(loadOptions, opts.where)
 
     // Pass the raw loadSubset result to the caller for external tracking
-    opts?.onLoadSubsetResult?.(syncResult, demand.options)
+    opts?.onLoadSubsetResult?.(
+      syncResult,
+      demand.options,
+      (primaryFailure) => this.releaseDemand(demand, primaryFailure),
+    )
     if (!this.isDemandActive(demand)) return false
 
     this.observeLoadSubsetResult(
@@ -1216,6 +1226,25 @@ export class CollectionSubscription
     const index = this.subsetDemands.findIndex(
       (demand) => demand.options === options,
     )
+    this.releaseDemandAtWithPrimaryFailure(index, options, primaryFailure)
+  }
+
+  private releaseDemand(
+    demand: SubsetDemand,
+    primaryFailure?: { error: unknown },
+  ): void {
+    this.releaseDemandAtWithPrimaryFailure(
+      this.subsetDemands.indexOf(demand),
+      demand.options,
+      primaryFailure,
+    )
+  }
+
+  private releaseDemandAtWithPrimaryFailure(
+    index: number,
+    options: LoadSubsetOptions,
+    primaryFailure?: { error: unknown },
+  ): void {
     if (!primaryFailure) {
       if (index !== -1) this.releaseDemandAt(index)
       return
@@ -1511,7 +1540,11 @@ export class CollectionSubscription
     if (!this.isDemandActive(demand)) return
 
     // Pass the raw loadSubset result to the caller for external tracking
-    onLoadSubsetResult?.(syncResult, demand.options)
+    onLoadSubsetResult?.(
+      syncResult,
+      demand.options,
+      (primaryFailure) => this.releaseDemand(demand, primaryFailure),
+    )
     if (!this.isDemandActive(demand)) return
     this.observeLoadSubsetResult(
       syncResult,

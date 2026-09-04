@@ -9,7 +9,10 @@ import { buildQuery, getQueryIR } from '../builder/index.js'
 import { collectCollectionSources, isExpressionLike } from '../ir.js'
 import type { MultiSetArray, RootStreamBuilder } from '@tanstack/db-ivm'
 import type { Collection } from '../../collection/index.js'
-import type { CollectionSubscription } from '../../collection/subscription.js'
+import type {
+  CollectionSubscription,
+  ReleaseLoadSubset,
+} from '../../collection/subscription.js'
 import type {
   ChangeMessage,
   LoadSubsetOptions,
@@ -279,7 +282,7 @@ export class OrderedSourceLoader {
   private fullSourceFailed = false
   private failed = false
   private failedWindowOperationGeneration: number | undefined
-  private failedAcquisition: LoadSubsetOptions | undefined
+  private releaseFailedAcquisition: ReleaseLoadSubset | undefined
   private active = true
   private generation = 0
   private lastPage: { count: number; boundary: unknown } | undefined
@@ -323,16 +326,19 @@ export class OrderedSourceLoader {
       (windowOperationGeneration !== undefined &&
         windowOperationGeneration !== this.failedWindowOperationGeneration)
     if (!mayRetryFailure) return this.pending
-    if (this.failed && windowOperationGeneration !== undefined) {
+    if (
+      (this.failed || this.releaseFailedAcquisition) &&
+      windowOperationGeneration !== undefined
+    ) {
       // Move ownership to the explicit replacement before releasing the old
       // lease. Adapter cleanup may reenter the loader.
       this.failedWindowOperationGeneration = windowOperationGeneration
-      const failedAcquisition = this.failedAcquisition
-      this.failedAcquisition = undefined
-      if (failedAcquisition) {
+      const releaseFailedAcquisition = this.releaseFailedAcquisition
+      this.releaseFailedAcquisition = undefined
+      if (releaseFailedAcquisition) {
         this.requesting = true
         try {
-          this.subscription.releaseLoadSubset(failedAcquisition)
+          releaseFailedAcquisition()
         } finally {
           this.requesting = false
         }
@@ -529,7 +535,7 @@ export class OrderedSourceLoader {
 
   private observe(
     result: LoadSubsetRequestResult,
-    acquisition: LoadSubsetOptions,
+    releaseAcquisition: ReleaseLoadSubset,
     refine: boolean,
     isFullSource = false,
     establishesSourceCoverage = false,
@@ -541,7 +547,6 @@ export class OrderedSourceLoader {
       if (!this.active || generation !== this.generation) return
       this.failed = false
       this.failedWindowOperationGeneration = undefined
-      this.failedAcquisition = undefined
       if (establishesSourceCoverage) {
         this.hasEstablishedSourceCoverage = true
       }
@@ -577,7 +582,7 @@ export class OrderedSourceLoader {
         }
         this.failed = true
         this.failedWindowOperationGeneration = windowOperationGeneration
-        this.failedAcquisition = acquisition
+        this.releaseFailedAcquisition = releaseAcquisition
         this.lastPage = undefined
         this.lastPrefixCount = undefined
         this.hasLastBoundary = false
@@ -645,7 +650,11 @@ export class OrderedSourceLoader {
   }
 
   private retireProvisionalFailure(
-    observed: { result: LoadSubsetRequestResult; options: LoadSubsetOptions },
+    observed: {
+      result: LoadSubsetRequestResult
+      options: LoadSubsetOptions
+      release: ReleaseLoadSubset
+    },
     error: unknown,
     isFullSource: boolean,
     windowOperationGeneration?: number,
@@ -660,7 +669,7 @@ export class OrderedSourceLoader {
     this.failedWindowOperationGeneration = windowOperationGeneration
     if (isFullSource) this.fullSourceFailed = true
     try {
-      this.subscription.releaseLoadSubset(observed.options, { error })
+      observed.release({ error })
     } catch {
       // releaseLoadSubset retains cleanup debt for a later retry.
     }
@@ -672,6 +681,7 @@ export class OrderedSourceLoader {
       onResult: (
         result: LoadSubsetRequestResult,
         options: LoadSubsetOptions,
+        release?: ReleaseLoadSubset,
       ) => void,
     ) => void,
     refine: boolean,
@@ -680,12 +690,23 @@ export class OrderedSourceLoader {
     windowOperationGeneration?: number,
   ): Promise<void> | undefined {
     let observed:
-      | { result: LoadSubsetRequestResult; options: LoadSubsetOptions }
+      | {
+          result: LoadSubsetRequestResult
+          options: LoadSubsetOptions
+          release: ReleaseLoadSubset
+        }
       | undefined
     this.requesting = true
     try {
-      request((result, options) => {
-        observed = { result, options }
+      request((result, options, release) => {
+        observed = {
+          result,
+          options,
+          release:
+            release ??
+            ((primaryFailure) =>
+              this.subscription.releaseLoadSubset(options, primaryFailure)),
+        }
       })
     } catch (error) {
       // Enter failure state before adapter cleanup. Releasing the provisional
@@ -714,7 +735,7 @@ export class OrderedSourceLoader {
     try {
       return this.observe(
         observed.result,
-        observed.options,
+        observed.release,
         refine,
         isFullSource,
         establishesSourceCoverage,

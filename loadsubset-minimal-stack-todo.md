@@ -1070,6 +1070,15 @@ explicitly removed.
         error must report the request failure while the release remains cleanup
         debt. A real `CollectionSubscription` witness red/greened publication
         failure plus a throwing adapter release and its later cleanup retry.
+  - [ ] Normalize a non-`Error` primary failure once before recording and
+        rethrowing it, so caller, event, and `lastError` share one `Error` object.
+  - [ ] Never retain a demand-array index across `loadSubset:error` delivery.
+        Reentrant listeners may remove the failed demand or an earlier demand;
+        cleanup must re-find the same logical demand instead of unloading its
+        successor or leaving the failed one live.
+  - [ ] Strengthen the provisional cleanup-debt witness: assert the exact
+        options unload twice, no unrelated lease unloads, successful retry
+        clears debt, and the primary stored error remains unchanged.
   - [x] Retire a provisional acquisition when the ordered-loader result
         observer throws. A throwing publication/listener callback must not
         leave successful coverage behind or let the queued settlement clear
@@ -1097,10 +1106,13 @@ explicitly removed.
         identity back to the loader; replacement releases that lease before it
         starts. A later truncate replays no obsolete cursor, and cleanup
         releases each remaining live lease once.
-  - [ ] Retire a failed logical demand even if truncate has already replaced
+  - [x] Retire a failed logical demand even if truncate has already replaced
         its physical acquisition object. Cross failure, truncate, explicit
         retry, and another truncate; the obsolete cursor must not rejoin or
-        veto the successful replacement. Use a stable logical-demand handle.
+        veto the successful replacement. The request observer now retains a
+        stable release closure over the logical demand instead of a mutable
+        physical options object; the production replay regression red/greened
+        both Error and AbortError-shaped failures.
   - [x] Fence explicit retry while failed-acquisition release is in progress.
         Reentrant `unloadSubset` must not start the replacement before the old
         release succeeds, and a failed release must leave no replacement work.

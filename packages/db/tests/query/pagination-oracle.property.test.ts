@@ -2481,15 +2481,29 @@ describe(`pagination recomputation oracle`, () => {
         await expect(failed).rejects.toBe(failure)
         await flushPromises()
         expect(requests).toHaveLength(initialRequestCount + 1)
-        const failedRequest = requests.at(-1)!
 
+        // Replay can replace the failed request's physical options object
+        // before the explicit retry retires its logical demand.
+        const beforeFailedReplay = requests.length
+        deliveredIds.clear()
+        begin()
+        truncate()
+        commit()
+        await flushPromises()
+        const failedReplayRequests = requests.slice(beforeFailedReplay)
+        const replayedFailedRequest = failedReplayRequests.find(
+          ({ cursor }) => cursor !== undefined,
+        )
+        expect(replayedFailedRequest).toBeDefined()
+
+        const releasesBeforeRetry = unloaded.length
+        const requestsBeforeRetry = requests.length
         const retry = live.utils.setWindow({ offset: 0, limit: 2 })
         if (retry instanceof Promise) await retry
-        expect(unloaded).toEqual([failedRequest])
-        const retryRequest = requests[initialRequestCount + 1]
-        expect(retryRequest?.limit).toBeUndefined()
-        expect(retryRequest?.offset).toBeUndefined()
-        expect(retryRequest?.cursor).toBeUndefined()
+        expect(unloaded.slice(releasesBeforeRetry)).toEqual([
+          replayedFailedRequest,
+        ])
+        expect(requests).toHaveLength(requestsBeforeRetry)
         expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2])
 
         const beforeWiden = requests.length
