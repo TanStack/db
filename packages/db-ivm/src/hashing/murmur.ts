@@ -15,9 +15,20 @@ type SymbolIdStore = {
 }
 
 const symbolIds = createSymbolIdStore()
+const registeredSymbolIds = new Map<string, number>()
 let nextSymbolId = 0
 
 export function getSymbolIdentity(symbol: symbol): number {
+  const registeredKey = Symbol.keyFor(symbol)
+  if (registeredKey !== undefined) {
+    let id = registeredSymbolIds.get(registeredKey)
+    if (id === undefined) {
+      id = ++nextSymbolId
+      registeredSymbolIds.set(registeredKey, id)
+    }
+    return id
+  }
+
   let id = symbolIds.get(symbol)
   if (id === undefined) {
     id = ++nextSymbolId

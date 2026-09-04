@@ -158,6 +158,16 @@ describe(`hash`, () => {
       expect(result4).not.toBe(result5)
       expect(result1).not.toBe(result4)
     })
+
+    it(`should hash registered symbols`, () => {
+      const first = Symbol.for(`tanstack-db-ivm-hash-first`)
+      const same = Symbol.for(`tanstack-db-ivm-hash-first`)
+      const second = Symbol.for(`tanstack-db-ivm-hash-second`)
+
+      expect(hash(first)).toBe(hash(same))
+      expect(hash(first)).not.toBe(hash(second))
+      expect(hash({ [first]: 1 })).not.toBe(hash({ [second]: 1 }))
+    })
   })
 
   describe(`object types`, () => {

@@ -630,8 +630,10 @@ explicitly removed.
       evaluating unused accessors. Tightened child-update cells then exposed a
       D2 hash collision for symbol-only changes; structural hashes and deep
       equality now include enumerable symbol keys and keep distinct symbols
-      distinct. The regressions failed first, all 328 db-ivm tests pass, and the
-      six focused includes/grouping suites are 155/155 green.
+      distinct. The follow-up audit caught that registered symbols cannot be
+      weak keys; those now use their registry string while local symbols remain
+      weakly held. The regressions failed first, all 329 db-ivm tests pass, and
+      the six focused includes/grouping suites are 155/155 green.
 - [ ] Make equality auto-index fallback quiet and safe for symbol-valued join
       fields; the symbol-route oracle exposed a comparator throw while the
       query correctly fell back to a full scan.

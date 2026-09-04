@@ -221,9 +221,10 @@ applies the same copy-on-write walk while resolving facade references. Both
 paths preserve property descriptors, clean nested references, cycles,
 adversarial keys, and user-owned symbols. Discovery reads data descriptors
 directly and never invokes an accessor merely to find private state. D2 hashes
-enumerable symbol keys and uses exact symbol identity, so symbol-only changes
-cannot cancel as equal before publication. Neither boundary mutates values
-retained by D2. Compiler-created parent contexts use a separate internal
+enumerable symbol keys and uses exact local-symbol identity plus registry keys
+for registered symbols, so symbol-only changes cannot cancel as equal before
+publication. Neither boundary mutates values retained by D2. Compiler-created
+parent contexts use a separate internal
 envelope that keeps projected user aliases apart from the equality identity
 derived from their leaves. The whole parent-context envelope is structural D2
 state. This avoids reserving user aliases or selected field names while keeping
