@@ -2608,7 +2608,7 @@ describe(`pagination recomputation oracle`, () => {
     }
   })
 
-  it(`does not retry reentrantly when an ordered request writes and then throws`, async () => {
+  it(`rejects a reentrant window move when an ordered request writes and then throws`, async () => {
     const authoritativeRows: Array<PageRow> = [
       { id: 1, rank: 0 },
       { id: 2, rank: 1 },
@@ -2617,6 +2617,7 @@ describe(`pagination recomputation oracle`, () => {
     const requests: Array<LoadSubsetOptions> = []
     const deliveredIds = new Set<number>()
     const failure = new Error(`ordered request threw after writing`)
+    let reentrantError: unknown
     let throwNextPage = false
     let begin!: () => void
     let write!: (message: { type: `insert`; value: PageRow }) => void
@@ -2643,6 +2644,11 @@ describe(`pagination recomputation oracle`, () => {
                 deliveredIds.add(3)
                 write({ type: `insert`, value: { ...authoritativeRows[2]! } })
                 commit()
+                try {
+                  live.utils.setWindow({ offset: 0, limit: 3 })
+                } catch (error) {
+                  reentrantError = error
+                }
                 throw failure
               }
 
@@ -2674,6 +2680,7 @@ describe(`pagination recomputation oracle`, () => {
       expect(() => live.utils.setWindow({ offset: 0, limit: 2 })).toThrow(
         failure,
       )
+      expect(reentrantError).toMatchObject({ name: `SetWindowReentrancyError` })
       expect(requests).toHaveLength(initialRequestCount + 1)
       expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
 

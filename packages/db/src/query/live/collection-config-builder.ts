@@ -2,6 +2,7 @@ import { D2, output } from '@tanstack/db-ivm'
 import { compileQuery } from '../compiler/index.js'
 import {
   MissingAliasInputsError,
+  SetWindowReentrancyError,
   SetWindowRequiresOrderByError,
 } from '../../errors.js'
 import {
@@ -300,6 +301,9 @@ export class CollectionConfigBuilder<
     const windowFn = this.windowFn
     if (!windowFn) {
       throw new SetWindowRequiresOrderByError()
+    }
+    if (this.activeWindowOperation) {
+      throw new SetWindowReentrancyError()
     }
 
     // Keep caller-owned objects out of the long-lived query state. A caller may

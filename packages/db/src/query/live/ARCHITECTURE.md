@@ -591,6 +591,9 @@ revalidates that physical window before publishing it.
 An ordered request cannot start another ordered request through its own
 synchronous writes. If the adapter then throws, graph callbacks scheduled by
 those writes still belong to the failed window operation and cannot retry it.
+A public `setWindow()` call made from inside that synchronous operation throws
+`SetWindowReentrancyError`; it must not claim that a nested window settled after
+the loader suppressed its work.
 A synchronous result callback is provisional until the whole snapshot request
 returns: a later local read or publication throw fails and retires that
 acquisition instead of letting its queued success erase the failure.

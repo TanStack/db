@@ -822,3 +822,13 @@ export class SetWindowRequiresOrderByError extends QueryCompilationError {
     )
   }
 }
+
+/** Error thrown when setWindow is called from inside another setWindow call. */
+export class SetWindowReentrancyError extends TanStackDBError {
+  constructor() {
+    super(
+      `setWindow() cannot run reentrantly. Wait for the current window operation to return before starting another one.`,
+    )
+    this.name = `SetWindowReentrancyError`
+  }
+}

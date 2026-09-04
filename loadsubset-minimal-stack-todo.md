@@ -1051,9 +1051,10 @@ explicitly removed.
   - [x] Keep an ordinary source insert or update after the failure from clearing
         the failure gate and starting recovery without an explicit operation.
         Cursor invalidation no longer changes failure ownership.
-  - [ ] Queue or reject a new explicit window operation started reentrantly
-        inside the adapter request. It must not return success after the loader
-        drops its work merely because another request is still on the stack.
+  - [x] Reject a new explicit window operation started reentrantly inside the
+        adapter request with `SetWindowReentrancyError`. A production-path
+        regression writes synchronously, attempts the nested move, then throws;
+        the nested operation can no longer report an unloaded window as settled.
   - [x] Ignore a successful result callback when the surrounding snapshot call
         later throws. The loader now observes settlement only after the full
         synchronous request returns and retires an acquisition whose later
@@ -1063,6 +1064,11 @@ explicitly removed.
         witnesses where practical. The matrix currently proves method choice
         and reentry suppression, but only its page integration exercises
         adapter writes, graph work, operation generations, and publication.
+  - [ ] Make failed-load recovery a true replacement, not an additive full-source
+        request. A failed request may leave a row that no longer exists remotely;
+        neither a normal `requestSnapshot()` nor an already-deduped unbounded
+        load removes it. Red/green both a failed-only stale row and a completed
+        unbounded acquisition that would otherwise suppress physical recovery.
   - [x] Retire the exact failed physical ordered acquisition when its explicit
         retry replaces it. The request callback now carries acquisition
         identity back to the loader; replacement releases that lease before it
