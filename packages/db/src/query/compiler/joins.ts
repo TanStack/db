@@ -29,8 +29,12 @@ import { getLazyLoadTargets } from './lazy-targets.js'
 import { crossJoinParentRoutes } from './parent-routes.js'
 import {
   INCLUDES_PUBLIC_KEY,
+  attachRouteMetadata,
   attachRouteMetadataToResult,
+  getNamespacedRouteMetadata,
+  getRouteMetadata,
   getRoutedScalarMetadata,
+  stripRouteMetadata,
 } from './route-metadata.js'
 import type { CompileQueryFn } from './index.js'
 import type { OrderByOptimizationInfo } from './order-by.js'
@@ -80,11 +84,13 @@ function parameterizeJoinInputByParentRoutes(
           getEqualityValueIdentity(correlationKey),
           getParentContextIdentity(parentContext),
         ]),
-        {
-          ...(row as Record<string, unknown>),
-          __correlationKey: correlationKey,
-          __parentContext: parentContext,
-        },
+        attachRouteMetadata(
+          {
+            ...(row as Record<string, unknown>),
+          },
+          correlationKey,
+          parentContext,
+        ),
       ]
     },
   )
@@ -93,12 +99,14 @@ function parameterizeJoinInputByParentRoutes(
 function wrapJoinedInputRow(alias: string, row: any): NamespacedRow {
   const scalar = getRoutedScalarMetadata(row)
   if (scalar) {
-    const namespaced = {
-      [alias]: scalar.value,
-      __correlationKey: scalar.correlationKey,
-      __parentContext: scalar.parentContext,
-      [INCLUDES_PUBLIC_KEY]: scalar.publicKey,
-    } as unknown as NamespacedRow
+    const namespaced = attachRouteMetadata(
+      {
+        [alias]: scalar.value,
+        [INCLUDES_PUBLIC_KEY]: scalar.publicKey,
+      },
+      scalar.correlationKey,
+      scalar.parentContext,
+    ) as unknown as NamespacedRow
     if (
       scalar.parentContext != null &&
       typeof scalar.parentContext === `object`
@@ -112,11 +120,14 @@ function wrapJoinedInputRow(alias: string, row: any): NamespacedRow {
     return { [alias]: row }
   }
 
-  const { __parentContext, ...cleanRow } = row
+  const route = getRouteMetadata(row)
+  const cleanRow = route ? stripRouteMetadata(row) : row
   const namespaced: NamespacedRow = { [alias]: cleanRow }
-  if (__parentContext != null) {
-    Object.assign(namespaced, getParentContextValue(__parentContext))
-    namespaced.__parentContext = __parentContext
+  if (route?.parentContext != null) {
+    Object.assign(namespaced, getParentContextValue(route.parentContext))
+  }
+  if (route) {
+    attachRouteMetadata(namespaced, route.correlationKey, route.parentContext)
   }
   return namespaced
 }
@@ -126,13 +137,10 @@ function getRouteJoinKey(
   source: string,
   value: unknown,
 ): string {
+  const route = getNamespacedRouteMetadata(row, source)
   return serializeValue([
-    getEqualityValueIdentity(
-      row[source]?.__correlationKey ?? row.__correlationKey,
-    ),
-    getParentContextIdentity(
-      row.__parentContext ?? row[source]?.__parentContext ?? null,
-    ),
+    getEqualityValueIdentity(route?.correlationKey),
+    getParentContextIdentity(route?.parentContext ?? null),
     getEqualityValueIdentity(value),
   ])
 }

@@ -191,18 +191,19 @@ The executable oracle factors that product into valid compiler sub-grammars:
 - join-key side by correlation attachment point;
 - union form and public-key identity; and
 - derived-result boundary by selection mode and scalar nullability; and
-- user namespace collision by parent alias and selected child field.
+- user namespace collision by parent alias and selected child field, crossed
+  with direct, `QueryRef`, join, and group boundaries.
 
-Objects carry route metadata as hidden fields while the compiler moves them
-through recursive sources. Scalars, including `null`, cannot carry fields, so
-the compiler uses an internal envelope at those same edges. Namespacing and
-join adapters unwrap the value, keep the route beside it, and never expose the
-envelope in the public query result. Compiler-created parent contexts use an
-internal envelope that keeps projected user aliases separate from the equality
-identity derived from their leaves. The whole envelope is structural D2 state.
-This avoids reserving a user field name while keeping the context stable across
-D2 operators without collapsing two reference-sensitive leaf values that
-happen to have the same object shape.
+Objects carry route metadata under a private symbol while the compiler moves
+them through recursive sources. Scalars, including `null`, use an internal
+envelope at those same edges. Namespacing and join adapters unwrap the value,
+keep the symbol-keyed route beside it, and never expose either carrier in the
+public query result. Compiler-created parent contexts use a separate internal
+envelope that keeps projected user aliases apart from the equality identity
+derived from their leaves. The whole parent-context envelope is structural D2
+state. This avoids reserving user aliases or selected field names while keeping
+the context stable across D2 operators without collapsing two
+reference-sensitive leaf values that happen to have the same object shape.
 
 Every valid plan is checked as a Collection, `toArray`, and `materialize`
 include at initial load, after a parent-route update, and after a child update.

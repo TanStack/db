@@ -69,6 +69,14 @@ const routeContextGrammar = {
   },
   namespaceCollision: {
     locations: [`parent-alias`, `selected-field`] as const,
+    boundaries: [`direct`, `query-ref`, `join`, `group`] as const,
+    names: [
+      `__parentContextIdentity`,
+      `__parentContext`,
+      `__correlationKey`,
+      `value`,
+      `identity`,
+    ] as const,
   },
 } as const
 
@@ -126,6 +134,8 @@ type DerivedResultCell = {
 type NamespaceCollisionCell = {
   family: `namespace-collision`
   location: (typeof routeContextGrammar.namespaceCollision.locations)[number]
+  boundary: (typeof routeContextGrammar.namespaceCollision.boundaries)[number]
+  name: (typeof routeContextGrammar.namespaceCollision.names)[number]
 }
 
 type GrammarCell =
@@ -197,11 +207,17 @@ const grammarCells: Array<GrammarCell> = [
       ),
     ),
   ),
-  ...routeContextGrammar.namespaceCollision.locations.map(
-    (location): NamespaceCollisionCell => ({
-      family: `namespace-collision`,
-      location,
-    }),
+  ...routeContextGrammar.namespaceCollision.locations.flatMap((location) =>
+    routeContextGrammar.namespaceCollision.boundaries.flatMap((boundary) =>
+      routeContextGrammar.namespaceCollision.names.map(
+        (name): NamespaceCollisionCell => ({
+          family: `namespace-collision`,
+          location,
+          boundary,
+          name,
+        }),
+      ),
+    ),
   ),
 ]
 
@@ -274,7 +290,7 @@ function grammarCellName(cell: GrammarCell): string {
     case `derived-result`:
       return `${cell.family} / ${cell.boundary} / ${cell.selection} / ${cell.domain}`
     case `namespace-collision`:
-      return `${cell.family} / ${cell.location}`
+      return `${cell.family} / ${cell.location} / ${cell.boundary} / ${cell.name}`
   }
 }
 
@@ -1478,38 +1494,27 @@ async function runJoinCell({
 
 async function runNamespaceCollisionCell({
   location,
+  boundary,
+  name,
 }: NamespaceCollisionCell): Promise<void> {
-  const parents = createGrammarCollection(`collision-${location}-parents`, [
+  const cellName = `collision-${location}-${boundary}-${name}`
+  const parents = createGrammarCollection(`${cellName}-parents`, [
     { id: 1, group: 1, token: `one` },
   ])
-  const children = createGrammarCollection(`collision-${location}-children`, [
+  const children = createGrammarCollection(`${cellName}-children`, [
     { id: 10, parentGroup: 1, token: `one`, label: `one` },
     { id: 20, parentGroup: 2, token: `two`, label: `two` },
+  ])
+  const tags = createGrammarCollection(`${cellName}-tags`, [
+    { id: 10 },
+    { id: 20 },
   ])
   const live =
     location === `parent-alias`
       ? createLiveQueryCollection((q) =>
-          q
-            .from({ __parentContextIdentity: parents.collection })
-            .select(({ __parentContextIdentity: parent }) => {
-              const rows = q
-                .from({ child: children.collection })
-                .where(({ child }) =>
-                  and(
-                    eq(child.parentGroup, parent.group),
-                    eq(child.token, parent.token),
-                  ),
-                )
-                .select(({ child }) => ({
-                  id: child.id,
-                  value: child.label,
-                }))
-              return { id: parent.id, ...includeInEveryForm(rows) }
-            }),
-        )
-      : createLiveQueryCollection((q) =>
-          q.from({ parent: parents.collection }).select(({ parent }) => {
-            const rows = q
+          q.from({ [name]: parents.collection }).select((sources) => {
+            const parent = sources[name]
+            const correlated = q
               .from({ child: children.collection })
               .where(({ child }) =>
                 and(
@@ -1517,10 +1522,97 @@ async function runNamespaceCollisionCell({
                   eq(child.token, parent.token),
                 ),
               )
-              .select(({ child }) => ({
-                id: child.id,
-                __parentContextIdentity: child.label,
-              }))
+            const rows = (() => {
+              switch (boundary) {
+                case `direct`:
+                  return correlated.select(({ child }) => ({
+                    id: child.id,
+                    value: child.label,
+                  }))
+                case `query-ref`: {
+                  const projected = correlated.select(({ child }) => ({
+                    id: child.id,
+                    parentGroup: child.parentGroup,
+                    label: child.label,
+                  }))
+                  return q
+                    .from({ result: projected })
+                    .where(({ result }) => eq(result.parentGroup, parent.group))
+                    .select(({ result }) => ({
+                      id: result.id,
+                      value: result.label,
+                    }))
+                }
+                case `join`:
+                  return correlated
+                    .innerJoin({ tag: tags.collection }, ({ child, tag }) =>
+                      eq(child.id, tag.id),
+                    )
+                    .select(({ child }) => ({
+                      id: child.id,
+                      value: child.label,
+                    }))
+                case `group`:
+                  return correlated
+                    .groupBy(({ child }) => [child.id, child.label])
+                    .select(({ child }) => ({
+                      id: child.id,
+                      value: child.label,
+                    }))
+              }
+            })()
+            return { id: parent.id, ...includeInEveryForm(rows) }
+          }),
+        )
+      : createLiveQueryCollection((q) =>
+          q.from({ parent: parents.collection }).select(({ parent }) => {
+            const correlated = q
+              .from({ child: children.collection })
+              .where(({ child }) =>
+                and(
+                  eq(child.parentGroup, parent.group),
+                  eq(child.token, parent.token),
+                ),
+              )
+            const rows = (() => {
+              switch (boundary) {
+                case `direct`:
+                  return correlated.select(({ child }) => ({
+                    id: child.id,
+                    [name]: child.label,
+                  }))
+                case `query-ref`: {
+                  const projected = correlated.select(({ child }) => ({
+                    id: child.id,
+                    parentGroup: child.parentGroup,
+                    label: child.label,
+                  }))
+                  return q
+                    .from({ result: projected })
+                    .where(({ result }) => eq(result.parentGroup, parent.group))
+                    .select(({ result }) => ({
+                      id: result.id,
+                      [name]: result.label,
+                    }))
+                }
+                case `join`:
+                  return correlated
+                    .innerJoin({ tag: tags.collection }, ({ child, tag }) =>
+                      eq(child.id, tag.id),
+                    )
+                    .select(({ child }) => ({
+                      id: child.id,
+                      [name]: child.label,
+                    }))
+                case `group`:
+                  return correlated
+                    .groupBy(({ child }) => [child.id, child.label])
+                    .select(({ child }) => ({
+                      id: child.id,
+                      [name]: child.label,
+                    }))
+              }
+            })()
             return { id: parent.id, ...includeInEveryForm(rows) }
           }),
         )
@@ -1538,8 +1630,7 @@ async function runNamespaceCollisionCell({
   const project = (rows: Iterable<Record<string, unknown>>) =>
     [...rows].map((row) => ({
       id: row.id,
-      value:
-        location === `parent-alias` ? row.value : row.__parentContextIdentity,
+      value: location === `parent-alias` ? row.value : row[name],
     }))
   const assertCurrent = () =>
     expectEveryForm(
@@ -1563,7 +1654,7 @@ async function runNamespaceCollisionCell({
     })
     assertCurrent()
   } finally {
-    await cleanup(live, [parents, children])
+    await cleanup(live, [parents, children, tags])
   }
 }
 
@@ -1606,14 +1697,16 @@ describe(`correlated include route-context transport grammar`, () => {
       routeContextGrammar.derivedResult.boundaries.length *
         routeContextGrammar.derivedResult.selections.length *
         routeContextGrammar.derivedResult.domains.length +
-      routeContextGrammar.namespaceCollision.locations.length
+      routeContextGrammar.namespaceCollision.locations.length *
+        routeContextGrammar.namespaceCollision.boundaries.length *
+        routeContextGrammar.namespaceCollision.names.length
     const names = grammarCells.map(grammarCellName)
 
     expect(grammarCells).toHaveLength(expectedCellCount)
     expect(new Set(names)).toHaveLength(expectedCellCount)
     expect(
       grammarCells.length * materializationForms.length * checkpoints.length,
-    ).toBe(405)
+    ).toBe(747)
   })
 
   for (const cell of grammarCells) {

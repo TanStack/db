@@ -58,8 +58,12 @@ import { processOrderBy } from './order-by.js'
 import { crossJoinParentRoutes } from './parent-routes.js'
 import {
   INCLUDES_PUBLIC_KEY,
+  attachRouteMetadata,
   attachRouteMetadataToResult,
+  getNamespacedRouteMetadata,
+  getRouteMetadata,
   getRoutedScalarMetadata,
+  stripRouteMetadata,
 } from './route-metadata.js'
 import { processSelect } from './select.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
@@ -70,7 +74,6 @@ import type {
   IncludesMaterialization,
   QueryIR,
   QueryRef,
-  Select,
   UnionAll,
   UnionFrom,
 } from '../ir.js'
@@ -161,7 +164,7 @@ function projectParentContext(
   nsRow: NamespacedRow,
   projections: Array<CompiledParentProjection>,
 ): Record<string, any> {
-  const inherited = (nsRow as any).__parentContext
+  const inherited = getRouteMetadata(nsRow)?.parentContext
   const inheritedValue = getParentContextValue(inherited)
   const parentContext: Record<string, any> =
     inheritedValue === undefined ? {} : { ...inheritedValue }
@@ -224,15 +227,13 @@ function parameterizeByParentRoutes(
       } as Record<string, any>
       namespaced[mainSource] = {
         ...namespaced[mainSource],
-        __correlationKey: correlationKey,
         [INCLUDES_PUBLIC_KEY]:
           namespaced[mainSource]?.[INCLUDES_PUBLIC_KEY] ?? rowKey,
       }
       if (parentContext != null) {
         Object.assign(namespaced, getParentContextValue(parentContext))
       }
-      namespaced.__correlationKey = correlationKey
-      namespaced.__parentContext = parentContext
+      attachRouteMetadata(namespaced, correlationKey, parentContext)
       return [
         serializeValue([
           getEqualityValueIdentity(rowKey),
@@ -246,9 +247,11 @@ function parameterizeByParentRoutes(
 }
 
 function getRowCorrelationKey(row: NamespacedRow, mainSource: string): unknown {
-  return (
-    (row as any)[mainSource]?.__correlationKey ?? (row as any).__correlationKey
-  )
+  return getNamespacedRouteMetadata(row, mainSource)?.correlationKey
+}
+
+function getRowParentContext(row: NamespacedRow, mainSource: string): unknown {
+  return getNamespacedRouteMetadata(row, mainSource)?.parentContext ?? null
 }
 
 function correlationValuesEqual(left: unknown, right: unknown): boolean {
@@ -471,22 +474,21 @@ export function compileQuery(
     const joined = childRekeyed.pipe(joinOperator(equalityParentKeys, `inner`))
 
     // Extract: [correlationValue, [[childKey, childRow], parentContext]] → [childKey, childRow]
-    // Tag the row with __correlationKey for output routing
-    // If parentSide is non-null (parent context projected), attach as __parentContext
+    // Keep routing metadata outside the user-visible row namespace.
     filteredMainInput = joined.pipe(
       filter(([_correlationValue, [childSide]]: any) => {
         return childSide != null
       }),
       map(([_correlationIdentity, [childSide, parentSide]]: any) => {
         const [childKey, childRow, correlationValue] = childSide
-        const tagged: any = {
-          ...childRow,
-          __correlationKey: correlationValue,
-          [INCLUDES_PUBLIC_KEY]: childKey,
-        }
-        if (parentSide != null) {
-          tagged.__parentContext = parentSide
-        }
+        const tagged: any = attachRouteMetadata(
+          {
+            ...childRow,
+            [INCLUDES_PUBLIC_KEY]: childKey,
+          },
+          correlationValue,
+          parentSide,
+        )
         const effectiveKey =
           parentSide != null
             ? serializeValue([
@@ -1030,7 +1032,7 @@ export function compileQuery(
 
   // Process the GROUP BY clause if it exists.
   // When in includes mode (parentKeyStream), pass mainSource so that groupBy
-  // preserves __correlationKey for per-parent aggregation.
+  // preserves route metadata for per-parent aggregation.
   const groupByMainSource = parentKeyStream ? mainSource : undefined
   if (query.groupBy && query.groupBy.length > 0) {
     pipeline = processGroupBy(
@@ -1122,10 +1124,14 @@ export function compileQuery(
       parentKeyStream &&
       (query.limit !== undefined || query.offset !== undefined)
         ? (_key: unknown, row: unknown) => {
-            const correlationKey =
-              (row as any)?.[mainSource]?.__correlationKey ??
-              (row as any)?.__correlationKey
-            const parentContext = (row as any)?.__parentContext
+            const correlationKey = getRowCorrelationKey(
+              row as NamespacedRow,
+              mainSource,
+            )
+            const parentContext = getRowParentContext(
+              row as NamespacedRow,
+              mainSource,
+            )
             if (parentContext != null) {
               return serializeValue([
                 getEqualityValueIdentity(correlationKey),
@@ -1160,15 +1166,10 @@ export function compileQuery(
         )
         // When in includes mode, embed the correlation key and parentContext
         if (parentKeyStream) {
-          const correlationKey =
-            (row as any)[mainSource]?.__correlationKey ??
-            (row as any).__correlationKey
-          const parentContext = (row as any).__parentContext ?? null
+          const correlationKey = getRowCorrelationKey(row, mainSource)
+          const parentContext = getRowParentContext(row, mainSource)
           const publicKey = getIncludesPublicKey(row, mainSource, key)
-          const routedResults = stripInternalCorrelation(
-            finalResults,
-            query.select,
-          )
+          const routedResults = stripInternalCorrelation(finalResults)
           return [
             key,
             [
@@ -1212,15 +1213,10 @@ export function compileQuery(
       )
       // When in includes mode, embed the correlation key and parentContext
       if (parentKeyStream) {
-        const correlationKey =
-          (row as any)[mainSource]?.__correlationKey ??
-          (row as any).__correlationKey
-        const parentContext = (row as any).__parentContext ?? null
+        const correlationKey = getRowCorrelationKey(row, mainSource)
+        const parentContext = getRowParentContext(row, mainSource)
         const publicKey = getIncludesPublicKey(row, mainSource, key)
-        const routedResults = stripInternalCorrelation(
-          finalResults,
-          query.select,
-        )
+        const routedResults = stripInternalCorrelation(finalResults)
         return [
           key,
           [routedResults, undefined, correlationKey, parentContext, publicKey],
@@ -1294,10 +1290,10 @@ function canonicalizeSelectedRows(
     value: row.$selected,
     routing: row.$selected?.[INCLUDES_ROUTING],
     outerCorrelation: isIncludedRelation
-      ? (row[mainSource]?.__correlationKey ?? row.__correlationKey)
+      ? getRowCorrelationKey(row, mainSource)
       : undefined,
     parentContext: isIncludedRelation
-      ? (row.__parentContext ?? row[mainSource]?.__parentContext ?? null)
+      ? getRowParentContext(row, mainSource)
       : undefined,
     order: compiledOrder.map((evaluate) => evaluate(row)),
   })
@@ -1698,12 +1694,14 @@ function wrapInputWithAlias(
       const inputRow: unknown = row
       const scalar = getRoutedScalarMetadata(inputRow)
       if (scalar) {
-        const nsRow = {
-          [alias]: scalar.value,
-          __correlationKey: scalar.correlationKey,
-          __parentContext: scalar.parentContext,
-          [INCLUDES_PUBLIC_KEY]: scalar.publicKey,
-        } as unknown as NamespacedRow
+        const nsRow = attachRouteMetadata(
+          {
+            [alias]: scalar.value,
+            [INCLUDES_PUBLIC_KEY]: scalar.publicKey,
+          },
+          scalar.correlationKey,
+          scalar.parentContext,
+        ) as unknown as NamespacedRow
         if (
           scalar.parentContext != null &&
           typeof scalar.parentContext === `object`
@@ -1717,14 +1715,18 @@ function wrapInputWithAlias(
         return [key, { [alias]: inputRow }] as [unknown, NamespacedRow]
       }
 
-      // Initialize the record with a nested structure.
-      // If __parentContext exists (from parent-referencing includes), merge parent
-      // aliases into the namespaced row so WHERE can resolve parent refs.
-      const { __parentContext, ...cleanRow } = row as any
+      // Initialize the record with a nested structure. Route metadata remains
+      // outside the user namespace while projected parent aliases stay visible.
+      const route = getRouteMetadata(inputRow)
+      const cleanRow = route
+        ? stripRouteMetadata(inputRow as Record<PropertyKey, unknown>)
+        : inputRow
       const nsRow: Record<string, any> = { [alias]: cleanRow }
-      if (__parentContext) {
-        Object.assign(nsRow, getParentContextValue(__parentContext))
-        ;(nsRow as any).__parentContext = __parentContext
+      if (route?.parentContext != null) {
+        Object.assign(nsRow, getParentContextValue(route.parentContext))
+      }
+      if (route) {
+        attachRouteMetadata(nsRow, route.correlationKey, route.parentContext)
       }
       return [key, nsRow] as [unknown, Record<string, typeof row>]
     }),
@@ -1935,24 +1937,19 @@ function attachVirtualPropsToSelected(
   return result
 }
 
-function stripInternalCorrelation(selected: any, selectClause?: Select): any {
+function stripInternalCorrelation(selected: any): any {
   if (
     !selected ||
     typeof selected !== `object` ||
-    (!(`__correlationKey` in selected) &&
-      !(`__parentContext` in selected) &&
+    (getRouteMetadata(selected) === undefined &&
       !(INCLUDES_PUBLIC_KEY in selected))
   ) {
     return selected
   }
 
-  const result = Array.isArray(selected) ? [...selected] : { ...selected }
-  if (!Object.hasOwn(selectClause ?? {}, `__correlationKey`)) {
-    delete result.__correlationKey
-  }
-  if (!Object.hasOwn(selectClause ?? {}, `__parentContext`)) {
-    delete result.__parentContext
-  }
+  const result = Array.isArray(selected)
+    ? [...selected]
+    : stripRouteMetadata(selected)
   delete result[INCLUDES_PUBLIC_KEY]
   return result
 }

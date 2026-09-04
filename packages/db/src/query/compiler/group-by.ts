@@ -29,6 +29,10 @@ import {
   getParentContextIdentity,
   getParentContextValue,
 } from '../equality-value-identity.js'
+import {
+  attachRouteMetadata,
+  getNamespacedRouteMetadata,
+} from './route-metadata.js'
 import type {
   Aggregate,
   BasicExpression,
@@ -123,14 +127,13 @@ function addCorrelationRouteIdentityToGroupKey(
   mainSource: string,
   fields: InternalGroupFields,
 ): void {
-  const rowRecord = row as Record<string, unknown>
-  const source = rowRecord[mainSource] as Record<string, unknown> | undefined
+  const route = getNamespacedRouteMetadata(row, mainSource)
   key[fields.correlationIdentity] = getEqualityValueIdentity(
-    source?.__correlationKey,
+    route?.correlationKey,
   )
-  if (rowRecord.__parentContext != null) {
+  if (route?.parentContext != null) {
     key[fields.parentContextIdentity] = getParentContextIdentity(
-      rowRecord.__parentContext,
+      route.parentContext,
     )
   }
 }
@@ -144,7 +147,7 @@ function addCorrelationRouteAggregates(
     preMap: ([rowKey, row]: [string, NamespacedRow]) =>
       createRepresentative(
         rowKey,
-        (row as Record<string, any>)[mainSource]?.__correlationKey,
+        getNamespacedRouteMetadata(row, mainSource)?.correlationKey,
       ),
     reduce: getRepresentative,
     postMap: unwrapRepresentative,
@@ -153,9 +156,9 @@ function addCorrelationRouteAggregates(
     preMap: ([rowKey, row]: [string, NamespacedRow]) =>
       createRepresentative(
         rowKey,
-        (row as Record<string, unknown>).__parentContext,
+        getNamespacedRouteMetadata(row, mainSource)?.parentContext,
         getParentContextIdentity(
-          (row as Record<string, unknown>).__parentContext,
+          getNamespacedRouteMetadata(row, mainSource)?.parentContext,
         ),
       ),
     reduce: getRepresentative,
@@ -388,8 +391,7 @@ export function processGroupBy(
         }
 
         // Use a single key for the result and update $selected.
-        // When in includes mode, restore the namespaced source structure with
-        // __correlationKey so output extraction can route results per-parent.
+        // When in includes mode, restore route metadata for output routing.
         const correlationKey = mainSource
           ? (aggregatedRow as any)[fields.correlationKey]
           : undefined
@@ -418,9 +420,11 @@ export function processGroupBy(
         resultRow.$collectionId =
           aggregateCollectionId ?? resultRow.$collectionId
         if (mainSource && correlationKey !== undefined) {
-          resultRow[mainSource] = { __correlationKey: correlationKey }
-          resultRow.__parentContext =
-            aggregatedRow[fields.parentContext] ?? null
+          attachRouteMetadata(
+            resultRow,
+            correlationKey,
+            aggregatedRow[fields.parentContext] ?? null,
+          )
         }
         return [resultKey, resultRow] as [unknown, Record<string, any>]
       }),
@@ -597,8 +601,7 @@ export function processGroupBy(
       const finalKey =
         keyParts.length === 1 ? keyParts[0] : serializeValue(keyParts)
 
-      // When in includes mode, restore the namespaced source structure with
-      // __correlationKey so output extraction can route results per-parent.
+      // When in includes mode, restore route metadata for output routing.
       const resultRow: Record<string, any> = {
         ...(aggregatedRow as Record<string, any>),
         $selected: finalResults,
@@ -614,8 +617,11 @@ export function processGroupBy(
       resultRow.$key = finalKey
       resultRow.$collectionId = aggregateCollectionId ?? resultRow.$collectionId
       if (mainSource && correlationKey !== undefined) {
-        resultRow[mainSource] = { __correlationKey: correlationKey }
-        resultRow.__parentContext = aggregatedRow[fields.parentContext] ?? null
+        attachRouteMetadata(
+          resultRow,
+          correlationKey,
+          aggregatedRow[fields.parentContext] ?? null,
+        )
       }
       return [finalKey, resultRow] as [unknown, Record<string, any>]
     }),

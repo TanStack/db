@@ -583,8 +583,12 @@ explicitly removed.
       regression and uses canonical join keys, a disjoint local field namespace,
       stable row-key selection, and an opaque exact-identity carrier.
 - [x] Replace string-keyed parent-context metadata with a collision-free
-      carrier and prove internal-looking aliases and selected field names are
-      untouched.
+      carrier. A loss audit found that the first fix covered only
+      `__parentContextIdentity`; valid `__parentContext` and `__correlationKey`
+      aliases still shared the compiler's route namespace. Route metadata now
+      uses a private symbol, and the grammar crosses all three former internal
+      names with parent aliases, selected fields, and direct, `QueryRef`, join,
+      and group boundaries.
 - [ ] Scope symbol correlation identity to releasable graph state, then prove
       fresh symbol route churn is bounded after retirement and cleanup.
 - [ ] Make equality auto-index fallback quiet and safe for symbol-valued join
