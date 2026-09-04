@@ -291,9 +291,31 @@ describe(`hash`, () => {
         shared[depth]![`left${level}`] = left[level]
       }
 
+      expect(() => hash(shared[0])).toThrow(RangeError)
       expect(() => hash(shared[0])).toThrow(
         `Cyclic value is too complex to hash safely`,
       )
+
+      const ring = Array.from(
+        { length: 600 },
+        (_, value) => ({ value }) as { value: number; next?: unknown },
+      )
+      for (let index = 0; index < ring.length; index++) {
+        ring[index]!.next = ring[(index + 1) % ring.length]
+      }
+      expect(hash(structuredClone(ring[0]))).toBe(hash(ring[0]))
+
+      const independent: Record<string, { self?: unknown }> = {}
+      for (let index = 0; index < 600; index++) {
+        const cycle: { self?: unknown } = {}
+        cycle.self = cycle
+        independent[String(index)] = cycle
+      }
+      expect(() => hash(independent)).not.toThrow()
+
+      const small: { self?: unknown } = {}
+      small.self = small
+      expect(hash(structuredClone(small))).toBe(hash(small))
     })
 
     it(`should hash arrays`, () => {

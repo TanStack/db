@@ -231,9 +231,10 @@ directly and never invokes an accessor merely to find private state. D2 hashes
 enumerable symbol keys and uses exact local-symbol identity plus registry keys
 for registered symbols. Its structural hash records cyclic back-references and
 memoizes a repeated cyclic subgraph only when the same external ancestors hold
-the same relative positions. A cyclic value with too many distinct ancestor
-contexts is rejected at a fixed traversal budget instead of consuming
-exponential work. Symbol-only changes and supported cycles therefore cannot
+the same relative positions. A cyclic value with too many additional
+ancestor-context variants is rejected at a fixed budget instead of consuming
+exponential work. The budget does not penalize large simple rings or
+independent cycles. Symbol-only changes and supported cycles therefore cannot
 disappear or overflow before publication. Neither
 boundary mutates values retained by D2. Compiler-created
 parent contexts use a separate internal

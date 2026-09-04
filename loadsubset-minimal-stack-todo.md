@@ -902,10 +902,11 @@ explicitly removed.
       green.
 - [x] Bound the remaining ancestor-context explosion. A hostile cyclic graph
       can encode exponentially many valid ancestor histories, so memoization
-      alone cannot make every input cheap. Hashing now rejects after 512 cyclic
-      traversals instead of stalling a graph turn. The 34-node regression fell
-      from hundreds of milliseconds to a bounded failure in 16 ms, while the
-      supported cycle and context-separation laws remain green.
+      alone cannot make every input cheap. Hashing now rejects after 512
+      additional ancestor-context variants instead of stalling a graph turn.
+      The 34-node regression fell from hundreds of milliseconds to a bounded
+      failure in 16 ms. Large simple rings, many independent cycles, recovery
+      after rejection, and the supported context-separation laws remain green.
 - [x] Defer functional projections over bare Collection includes until bucket
       references become public facades. The callback can now return an opaque
       wrapper around the Collection without retaining compiler state; child

@@ -60,7 +60,7 @@ type HashContext = {
   cyclicObjects: Set<object>
   frames: Array<HashFrame>
   traversalHashes: WeakMap<object, Array<TraversalHash>>
-  cyclicTraversals: number
+  cyclicContextVariants: number
 }
 
 type HashDependency = {
@@ -89,7 +89,7 @@ export function hash(input: any): number {
     cyclicObjects: new Set(),
     frames: [],
     traversalHashes: new WeakMap(),
-    cyclicTraversals: 0,
+    cyclicContextVariants: 0,
   })
   return hasher.digest()
 }
@@ -162,11 +162,13 @@ function hashObject(input: object, context: HashContext): number {
   }
 
   if (context.cyclicObjects.has(input)) {
-    context.cyclicTraversals++
-    if (context.cyclicTraversals > MAX_CYCLIC_TRAVERSALS) {
-      throw new RangeError(`Cyclic value is too complex to hash safely`)
-    }
     const traversalHashes = context.traversalHashes.get(input) ?? []
+    if (traversalHashes.length > 0) {
+      context.cyclicContextVariants++
+      if (context.cyclicContextVariants > MAX_CYCLIC_TRAVERSALS) {
+        throw new RangeError(`Cyclic value is too complex to hash safely`)
+      }
+    }
     traversalHashes.push({ valueHash, ...frame })
     context.traversalHashes.set(input, traversalHashes)
   } else {
