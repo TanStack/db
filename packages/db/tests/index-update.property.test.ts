@@ -13,6 +13,11 @@ type IndexValue = number
 type IndexConstructor = new (
   id: number,
   expression: PropRef,
+  name?: string,
+  options?: {
+    compareFn?: (left: unknown, right: unknown) => number
+    compareOptions?: typeof DEFAULT_COMPARE_OPTIONS
+  },
 ) => BaseIndex<string>
 
 type IndexAction =
@@ -157,6 +162,40 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
     ])
     expect(index.canOptimizeRangeFor(100)).toBe(false)
   })
+
+  test(`distinguishes explicit undefined range and cursor bounds`, () => {
+    const index = new IndexType(1, new PropRef([`value`]))
+    index.add(`undefined`, { value: undefined })
+    index.add(`null`, { value: null })
+    index.add(`one`, { value: 1 })
+
+    expect(index.rangeQuery({ to: undefined })).toEqual(
+      new Set([`undefined`, `null`]),
+    )
+    expect(index.rangeQueryReversed({ from: undefined })).toEqual(
+      new Set([`undefined`, `null`]),
+    )
+    expect(index.take(3, undefined)).toEqual([`one`])
+    expect(index.takeReversed(3, undefined)).toEqual([])
+  })
+
+  test(`executes the ordering advertised by compare options`, () => {
+    const compareOptions = {
+      ...DEFAULT_COMPARE_OPTIONS,
+      nulls: `last` as const,
+      stringSort: `lexical` as const,
+    }
+    const index = new IndexType(1, new PropRef([`value`]), undefined, {
+      compareOptions,
+    })
+    index.add(`undefined`, { value: undefined })
+    index.add(`null`, { value: null })
+    index.add(`one`, { value: 1 })
+
+    expect(index.matchesCompareOptions(compareOptions)).toBe(true)
+    expect(index.takeFromStart(3)).toEqual([`one`, `null`, `undefined`])
+    expect(index.rangeQuery({ to: 1 })).toEqual(new Set([`one`]))
+  })
 })
 
 describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
@@ -246,6 +285,63 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
       const rebuilt = new IndexType(2, new PropRef([`value`]))
       rebuilt.build(rows.map((row) => [row.key, row]))
       expectMatchesModel(rebuilt, rows)
+    },
+  )
+
+  fcTest.prop([
+    fc.array(fc.integer({ min: 0, max: 4 }), {
+      minLength: 2,
+      maxLength: 20,
+    }),
+  ])(
+    `matches an independent custom-comparator model`,
+    (generatedGroups) => {
+      const groupIds = [...generatedGroups, generatedGroups[0]!]
+      const rows = groupIds.map((groupId, position) => ({
+        key: String(position).padStart(2, `0`),
+        value: { groupId, position },
+      }))
+      const index = new IndexType(1, new PropRef([`value`]), undefined, {
+        compareFn: (left, right) =>
+          (left as { groupId: number }).groupId -
+          (right as { groupId: number }).groupId,
+      })
+
+      const expectMatchesModel = (currentRows: typeof rows) => {
+        const ordered = [...currentRows].sort(
+          (left, right) =>
+            left.value.groupId - right.value.groupId ||
+            (left.key < right.key ? -1 : left.key > right.key ? 1 : 0),
+        )
+        const forward = ordered.map(({ key }) => key)
+        expect(index.takeFromStart(currentRows.length)).toEqual(forward)
+        expect(index.takeReversedFromEnd(currentRows.length)).toEqual(
+          [...forward].reverse(),
+        )
+
+        for (const row of currentRows) {
+          expect(index.equalityLookup(row.value)).toEqual(new Set([row.key]))
+          expect(
+            index.rangeQuery({ from: row.value, to: row.value }),
+          ).toEqual(
+            new Set(
+              currentRows
+                .filter(
+                  (candidate) =>
+                    candidate.value.groupId === row.value.groupId,
+                )
+                .map(({ key }) => key),
+            ),
+          )
+        }
+      }
+
+      for (const row of rows) index.add(row.key, row)
+      expectMatchesModel(rows)
+
+      const removed = rows[0]!
+      index.remove(removed.key, removed)
+      expectMatchesModel(rows.slice(1))
     },
   )
 })

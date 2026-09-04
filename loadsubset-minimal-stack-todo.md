@@ -943,11 +943,13 @@ explicitly removed.
       and insertion order across static, on-demand, and mutation histories. It
       pins the three-page and filtered-mutation cases; the full 104-test oracle
       and corrected regression are green.
-- [ ] Preserve an explicit `undefined` bound in `BasicIndex` range queries;
-      absence and the indexed nullish value are distinct public inputs.
-- [ ] Tie executable index comparison to advertised `compareOptions`, and add
-      an independent ordering oracle that does not derive expected order from
-      production `makeComparator` or `compareKeys`.
+- [x] Preserve explicit `undefined` bounds in `BasicIndex` range and cursor
+      queries; absence and the indexed nullish value are distinct public
+      inputs. Both index types now derive their executable comparator from
+      advertised `compareOptions` when no custom comparator is supplied. An
+      independent generated custom-comparator model covers forward/reverse
+      order, exact equality, comparator groups, and representative retirement
+      without using production comparison helpers.
 - [ ] Normalize a primitive rejection once per shared physical load promise so
       all logical demands, completion state, and `lastError` expose one Error
       object.

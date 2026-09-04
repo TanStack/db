@@ -4,6 +4,7 @@ import {
   areSameValueZeroEqual,
   defaultComparator,
   denormalizeUndefined,
+  makeComparator,
   normalizeForBTree,
 } from '../utils/comparison.js'
 import { BaseIndex } from './base-index.js'
@@ -67,8 +68,13 @@ export class BTreeIndex<
   ) {
     super(id, expression, name, options)
 
+    if (options?.compareOptions) {
+      this.compareOptions = options!.compareOptions
+    }
+
     // Get the base compare function
-    const baseCompareFn = options?.compareFn ?? defaultComparator
+    const baseCompareFn =
+      options?.compareFn ?? makeComparator(this.compareOptions)
     this.hasCustomComparator = options?.compareFn != null
 
     // Wrap it to denormalize sentinels before comparison
@@ -77,9 +83,6 @@ export class BTreeIndex<
     this.compareFn = (a: any, b: any) =>
       baseCompareFn(denormalizeUndefined(a), denormalizeUndefined(b))
 
-    if (options?.compareOptions) {
-      this.compareOptions = options!.compareOptions
-    }
     this.orderedEntries = new BTree(this.compareFn)
   }
 

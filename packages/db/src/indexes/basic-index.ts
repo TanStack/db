@@ -2,6 +2,7 @@ import { compareKeys } from '@tanstack/db-ivm'
 import {
   areSameValueZeroEqual,
   defaultComparator,
+  makeComparator,
   normalizeValue,
 } from '../utils/comparison.js'
 import { findInsertPositionInArray } from '../utils/array-utils.js'
@@ -66,11 +67,11 @@ export class BasicIndex<
     options?: any,
   ) {
     super(id, expression, name, options)
-    this.compareFn = options?.compareFn ?? defaultComparator
-    this.hasCustomComparator = options?.compareFn != null
     if (options?.compareOptions) {
       this.compareOptions = options!.compareOptions
     }
+    this.compareFn = options?.compareFn ?? makeComparator(this.compareOptions)
+    this.hasCustomComparator = options?.compareFn != null
   }
 
   protected initialize(_options?: BasicIndexOptions): void {}
@@ -306,10 +307,12 @@ export class BasicIndex<
 
     const normalizedFrom = normalizeValue(from)
     const normalizedTo = normalizeValue(to)
+    const hasFrom = `from` in options
+    const hasTo = `to` in options
 
     // Find start index
     let startIdx = 0
-    if (normalizedFrom !== undefined) {
+    if (hasFrom) {
       startIdx = findInsertPositionInArray(
         this.sortedValues,
         normalizedFrom,
@@ -328,7 +331,7 @@ export class BasicIndex<
 
     // Find end index
     let endIdx = this.sortedValues.length
-    if (normalizedTo !== undefined) {
+    if (hasTo) {
       endIdx = findInsertPositionInArray(
         this.sortedValues,
         normalizedTo,
@@ -375,22 +378,19 @@ export class BasicIndex<
   /**
    * Returns the next n items in sorted order
    */
-  take(n: number, from?: any, filterFn?: (key: TKey) => boolean): Array<TKey> {
-    let startIdx = 0
-    if (from !== undefined) {
-      const normalizedFrom = normalizeValue(from)
-      startIdx = findInsertPositionInArray(
-        this.sortedValues,
-        normalizedFrom,
-        this.compareFn,
-      )
-      // Skip past the 'from' value (exclusive)
-      while (
-        startIdx < this.sortedValues.length &&
-        this.compareFn(this.sortedValues[startIdx], normalizedFrom) <= 0
-      ) {
-        startIdx++
-      }
+  take(n: number, from: any, filterFn?: (key: TKey) => boolean): Array<TKey> {
+    const normalizedFrom = normalizeValue(from)
+    let startIdx = findInsertPositionInArray(
+      this.sortedValues,
+      normalizedFrom,
+      this.compareFn,
+    )
+    // Skip past the 'from' value (exclusive)
+    while (
+      startIdx < this.sortedValues.length &&
+      this.compareFn(this.sortedValues[startIdx], normalizedFrom) <= 0
+    ) {
+      startIdx++
     }
 
     return this.takeFromIndex(n, startIdx, 1, filterFn)
@@ -401,25 +401,22 @@ export class BasicIndex<
    */
   takeReversed(
     n: number,
-    from?: any,
+    from: any,
     filterFn?: (key: TKey) => boolean,
   ): Array<TKey> {
-    let startIdx = this.sortedValues.length - 1
-    if (from !== undefined) {
-      const normalizedFrom = normalizeValue(from)
-      startIdx =
-        findInsertPositionInArray(
-          this.sortedValues,
-          normalizedFrom,
-          this.compareFn,
-        ) - 1
-      // Skip past the 'from' value (exclusive)
-      while (
-        startIdx >= 0 &&
-        this.compareFn(this.sortedValues[startIdx], normalizedFrom) >= 0
-      ) {
-        startIdx--
-      }
+    const normalizedFrom = normalizeValue(from)
+    let startIdx =
+      findInsertPositionInArray(
+        this.sortedValues,
+        normalizedFrom,
+        this.compareFn,
+      ) - 1
+    // Skip past the 'from' value (exclusive)
+    while (
+      startIdx >= 0 &&
+      this.compareFn(this.sortedValues[startIdx], normalizedFrom) >= 0
+    ) {
+      startIdx--
     }
 
     return this.takeFromIndex(n, startIdx, -1, filterFn)
