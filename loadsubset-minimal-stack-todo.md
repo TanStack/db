@@ -1170,7 +1170,13 @@ explicitly removed.
       replay attempts whose setup or Promise settlement is still pending. The
       production regression starts a second truncate from the first replay's
       synchronous replacement callback and proves the status trace contains no
-      intermediate `ready` event.
+      intermediate `ready` event. The follow-up loss audit recovered two more
+      exits that bypassed the shared predicate: releasing a demand during
+      sibling replay setup and failing to unload the old lease after its async
+      replacement had started. Both now stay `loadingSubset` until all current
+      replay work settles. Subscription async work also carries the Collection
+      sync-session generation, so cleanup retires an obsolete replay without
+      publishing its private rows, reporting its error, or emitting `ready`.
 - [ ] Close the public window-reentrancy follow-up audit:
   - [ ] Reject or defer `setWindow()` called synchronously from the initial
         ordered adapter load; it must not return `true` before the requested

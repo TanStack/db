@@ -113,6 +113,7 @@ type TruncateReplayAttempt = {
 }
 
 type TruncateReplaySession = {
+  loadSubsetSession: number
   publicationState: TruncatePublicationState
   privateRows: Map<string | number, object>
   attempts: Set<TruncateReplayAttempt>
@@ -277,6 +278,7 @@ export class CollectionSubscription
     let session = this.truncateReplaySession
     if (!session) {
       session = {
+        loadSubsetSession: this.collection._sync.getLoadSubsetSession(),
         publicationState: {
           loadedInitialState: this.loadedInitialState,
           snapshotSent: this.snapshotSent,
@@ -328,6 +330,10 @@ export class CollectionSubscription
     // buffer before a synchronous adapter can publish replacement rows.
     queueMicrotask(() => {
       if (this.truncateReplaySession !== session) return
+      if (!this.isLoadSubsetSessionCurrent(session.loadSubsetSession)) {
+        this.retireStaleTruncateReplay(session)
+        return
+      }
       if (session.currentAttempt !== attempt) {
         // A newer truncate arrived before this attempt began source work. It
         // already captured the active demands, so starting this obsolete
@@ -488,6 +494,10 @@ export class CollectionSubscription
   ): void {
     try {
       if (this.truncateReplaySession !== session) return
+      if (!this.isLoadSubsetSessionCurrent(session.loadSubsetSession)) {
+        this.retireStaleTruncateReplay(session)
+        return
+      }
       attempt.pending.delete(pending)
       if (
         attempt !== session.currentAttempt &&
@@ -723,6 +733,20 @@ export class CollectionSubscription
     }
   }
 
+  private isLoadSubsetSessionCurrent(session: number): boolean {
+    return session === this.collection._sync.getLoadSubsetSession()
+  }
+
+  private retireStaleTruncateReplay(session: TruncateReplaySession): void {
+    if (this.truncateReplaySession !== session) return
+    if (session.completion.isPending()) {
+      session.completion.reject(new LoadSubsetOperationAbortedError())
+    }
+    this.truncateReplaySession = undefined
+    this.truncateReplacementPending = false
+    this.stalePublishedRows.clear()
+  }
+
   public get hasPendingTruncateReplacement(): boolean {
     return this.truncateReplacementPending
   }
@@ -805,6 +829,7 @@ export class CollectionSubscription
   ): { demand: SubsetDemand; promise: Promise<unknown> } | undefined {
     if (!(syncResult instanceof Promise)) return
 
+    const loadSubsetSession = this.collection._sync.getLoadSubsetSession()
     const participant = { demand, promise: syncResult }
 
     if (trackStatus) {
@@ -815,12 +840,17 @@ export class CollectionSubscription
     const finish = () => {
       if (trackStatus) {
         this.pendingLoadSubsetParticipants.delete(participant)
-        this.setReadyIfIdle()
+        if (this.isLoadSubsetSessionCurrent(loadSubsetSession)) {
+          this.setReadyIfIdle()
+        }
       }
     }
 
     void syncResult.then(finish, (error: unknown) => {
-      if (shouldReportError()) {
+      if (
+        this.isLoadSubsetSessionCurrent(loadSubsetSession) &&
+        shouldReportError()
+      ) {
         this.recordLoadSubsetError(
           options,
           this.normalizeLoadSubsetPromiseError(syncResult, error),
@@ -850,7 +880,7 @@ export class CollectionSubscription
   ): void {
     if (!participant) return
     this.pendingLoadSubsetParticipants.delete(participant)
-    if (this.pendingLoadSubsetParticipants.size === 0) this.setStatus(`ready`)
+    this.setReadyIfIdle()
   }
 
   private stopDemandStatusParticipants(demand: SubsetDemand): void {
@@ -859,7 +889,7 @@ export class CollectionSubscription
         this.pendingLoadSubsetParticipants.delete(participant)
       }
     }
-    if (this.pendingLoadSubsetParticipants.size === 0) this.setStatus(`ready`)
+    this.setReadyIfIdle()
   }
 
   private loadSubset(

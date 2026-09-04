@@ -1847,7 +1847,7 @@ describe(`CollectionSubscription status tracking`, () => {
       await flushPromises()
 
       expect(loads).toHaveLength(2)
-      expect(subscription.status).toBe(`ready`)
+      expect(subscription.status).toBe(`loadingSubset`)
 
       replay.reject(new DOMException(`replacement abandoned`, `AbortError`))
       await flushPromises()
@@ -1862,6 +1862,145 @@ describe(`CollectionSubscription status tracking`, () => {
     } finally {
       replay.resolve()
       if (!unsubscribed) subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`does not become ready while replay setup still has a surviving demand`, async () => {
+    const firstWhere = new Func(`eq`, [
+      new PropRef([`id`]),
+      new Value(`one`),
+    ])
+    const secondWhere = new Func(`eq`, [
+      new PropRef([`id`]),
+      new Value(`two`),
+    ])
+    const firstReplay = createDeferred<void>()
+    const statusEvents: Array<{ status: string; loadCount: number }> = []
+    let begin!: () => void
+    let commit!: () => void
+    let truncate!: () => void
+    let loadCount = 0
+    const collection = createCollection<{ id: string }>({
+      id: `replay-setup-readiness`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (operations) => {
+          begin = operations.begin
+          commit = operations.commit
+          truncate = operations.truncate
+          operations.markReady()
+          return {
+            loadSubset: () => {
+              loadCount++
+              return loadCount === 3 ? firstReplay.promise : true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    let releaseFirstReplay = false
+    subscription.on(`status:change`, ({ status }) => {
+      statusEvents.push({ status, loadCount })
+      if (releaseFirstReplay && status === `loadingSubset`) {
+        releaseFirstReplay = false
+        subscription.releaseSnapshot(firstWhere)
+      }
+    })
+
+    try {
+      subscription.requestSnapshot({ where: firstWhere })
+      subscription.requestSnapshot({ where: secondWhere })
+      releaseFirstReplay = true
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+
+      expect(loadCount).toBe(4)
+      expect(statusEvents).toEqual([
+        { status: `loadingSubset`, loadCount: 3 },
+        { status: `ready`, loadCount: 4 },
+      ])
+    } finally {
+      firstReplay.resolve()
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`does not publish a pending replay after collection cleanup`, async () => {
+    type Row = { id: string; version: number }
+    const replay = createDeferred<void>()
+    const visible = new Map<string | number, Row>()
+    const statusEvents: Array<string> = []
+    let begin!: () => void
+    let write!: (message: { type: `insert`; value: Row }) => void
+    let commit!: () => void
+    let truncate!: () => void
+    let loadCount = 0
+    const collection = createCollection<Row>({
+      id: `cleanup-pending-replay`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: (operations) => {
+          begin = operations.begin
+          write = operations.write
+          commit = operations.commit
+          truncate = operations.truncate
+          operations.markReady()
+          return {
+            loadSubset: () => {
+              const version = ++loadCount
+              begin()
+              write({ type: `insert`, value: { id: `row`, version } })
+              commit()
+              return version === 1 ? true : replay.promise
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(
+      (changes) => {
+        for (const change of changes) {
+          if (change.type === `delete`) visible.delete(change.key)
+          else visible.set(change.key, change.value)
+        }
+      },
+      { includeInitialState: false },
+    )
+    subscription.on(`status:change`, ({ status }) => {
+      statusEvents.push(status)
+    })
+
+    try {
+      subscription.requestSnapshot()
+      expect(visible.get(`row`)?.version).toBe(1)
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+      expect(subscription.status).toBe(`loadingSubset`)
+
+      await collection.cleanup()
+      const eventsAfterCleanup = [...statusEvents]
+      replay.resolve()
+      await flushPromises()
+
+      expect(visible.get(`row`)?.version).toBe(1)
+      expect(statusEvents).toEqual(eventsAfterCleanup)
+    } finally {
+      replay.resolve()
+      subscription.unsubscribe()
       await collection.cleanup()
     }
   })

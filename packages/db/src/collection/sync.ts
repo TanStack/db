@@ -787,6 +787,11 @@ export class CollectionSyncManager<
     void promise.then(finish, finish)
   }
 
+  /** @internal Generation fence for subscription-owned async work. */
+  public getLoadSubsetSession(): number {
+    return this.loadSubsetSession
+  }
+
   /**
    * Requests the sync layer to load more data.
    * @param options Options to control what data is being loaded

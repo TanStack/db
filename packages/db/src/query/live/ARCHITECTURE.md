@@ -624,6 +624,10 @@ move without advancing the reported window. Replay completion callbacks carry
 their sync-session identity and become no-ops after cleanup or restart.
 Cleanup rejects the replay barrier, and therefore every window move waiting on
 it, with `AbortError`; no waiter may outlive the discarded subscription.
+Subscription-owned Promise observers carry the Collection's load-session
+generation. Cleanup invalidates that generation before adapter teardown, so an
+obsolete replay cannot publish its private rows, report a late error, or emit a
+late `ready` transition even when the transport ignores cancellation.
 Ordinary source mutations stay synchronous except while an initial ordered
 load or imperative window move owns this publication barrier. Mutations that
 arrive during that interval join the private state and publish with the
