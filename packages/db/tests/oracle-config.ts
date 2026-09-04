@@ -83,6 +83,8 @@ const staticOracleProperties = [
   `subscription-replay.shared`,
   `subscription-replay.same-tick`,
   `subscription-lifecycle.history`,
+  `subscription-lifecycle.async-restart`,
+  `subscription-lifecycle.async-statistics`,
   `subscription-lifecycle.statistics`,
 ] as const
 

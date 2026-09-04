@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { OrderedSourceLoader } from '../../src/query/live/utils.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
-import type { CollectionSubscription } from '../../src/collection/subscription.js'
+import type {
+  CollectionSubscription,
+  ReleaseLoadSubset,
+} from '../../src/collection/subscription.js'
 import type { OrderByOptimizationInfo } from '../../src/query/compiler/order-by.js'
 import type {
   LoadSubsetOptions,
@@ -13,15 +16,18 @@ type RequestOptions = {
   onLoadSubsetResult?: (
     result: LoadSubsetRequestResult,
     acquisition: LoadSubsetOptions,
+    release?: ReleaseLoadSubset,
   ) => void
 }
 
 function createDeferred() {
   let resolve!: () => void
-  const promise = new Promise<void>((done) => {
+  let reject!: (error: unknown) => void
+  const promise = new Promise<void>((done, fail) => {
     resolve = done
+    reject = fail
   })
-  return { promise, resolve }
+  return { promise, resolve, reject }
 }
 
 function createOrderByInfo(
@@ -53,6 +59,121 @@ function createOrderByInfo(
 }
 
 describe(`OrderedSourceLoader`, () => {
+  const asyncRouteCells = (
+    [`page`, `prefix`, `boundary`, `full-source`] as const
+  ).flatMap((route) =>
+    (
+      [
+        `resolve`,
+        `reject`,
+        `abort`,
+        `dispose-resolve`,
+        `dispose-reject`,
+      ] as const
+    ).map((outcome) => ({ route, outcome })),
+  )
+
+  it.each(asyncRouteCells)(
+    `keeps the $route acquisition lifecycle exact for $outcome`,
+    async ({ route, outcome }) => {
+      type ObservedRequest = {
+        method: `limited` | `snapshot`
+        options: RequestOptions
+        acquisition: LoadSubsetOptions
+        controller: AbortController
+        deferred: ReturnType<typeof createDeferred>
+      }
+      const requests: Array<ObservedRequest> = []
+      const releases: Array<LoadSubsetOptions> = []
+      const request = (
+        method: ObservedRequest[`method`],
+        options: RequestOptions,
+      ) => {
+        const controller = new AbortController()
+        const acquisition: LoadSubsetOptions = {
+          signal: controller.signal,
+        }
+        const deferred = createDeferred()
+        requests.push({ method, options, acquisition, controller, deferred })
+        options.onLoadSubsetResult?.(deferred.promise, acquisition, () =>
+          releases.push(acquisition),
+        )
+      }
+      const subscription = {
+        setOrderByIndex: () => {},
+        requestLimitedSnapshot: (options: RequestOptions) =>
+          request(`limited`, options),
+        requestSnapshot: (options: RequestOptions) =>
+          request(`snapshot`, options),
+      } as unknown as CollectionSubscription
+      const info = createOrderByInfo(
+        route === `prefix`
+          ? { index: undefined }
+          : route === `full-source`
+            ? { requiresFullSource: true }
+            : {},
+      )
+      const loader = new OrderedSourceLoader(info, subscription, `row`, () =>
+        route === `boundary` ? { rank: 1 } : undefined,
+      )
+
+      loader.start()
+      if (route === `boundary`) {
+        expect(requests.map(({ method }) => method)).toEqual([`limited`])
+        requests[0]!.deferred.resolve()
+        await Promise.resolve()
+        await Promise.resolve()
+        expect(requests.map(({ method }) => method)).toEqual([
+          `limited`,
+          `snapshot`,
+        ])
+      }
+      const target = requests.at(-1)!
+      const targetSettlement = loader.pendingPromise!
+      const failure =
+        outcome === `abort`
+          ? new DOMException(`${route} canceled`, `AbortError`)
+          : new Error(`${route} rejected`)
+
+      if (outcome === `dispose-resolve` || outcome === `dispose-reject`) {
+        loader.dispose()
+        if (outcome === `dispose-resolve`) target.deferred.resolve()
+        else target.deferred.reject(failure)
+        await targetSettlement
+        expect(requests.at(-1)).toBe(target)
+        expect(releases).toEqual([])
+        return
+      }
+
+      if (outcome === `resolve`) {
+        target.deferred.resolve()
+        await targetSettlement
+        expect(target.controller.signal.aborted).toBe(false)
+        expect(releases).toEqual([])
+      } else {
+        if (outcome === `abort`) target.controller.abort()
+        target.deferred.reject(failure)
+        await expect(targetSettlement).rejects.toBe(failure)
+        expect(target.controller.signal.aborted).toBe(outcome === `abort`)
+
+        const requestCount = requests.length
+        expect(loader.loadMore()).toBeUndefined()
+        expect(requests).toHaveLength(requestCount)
+
+        loader.loadMore(1)
+        expect(releases).toEqual([target.acquisition])
+        expect(requests).toHaveLength(requestCount + 1)
+        const retry = requests.at(-1)!
+        expect(retry.method).toBe(`snapshot`)
+        retry.deferred.resolve()
+        await loader.pendingPromise
+        expect(releases).toEqual([target.acquisition])
+      }
+
+      loader.dispose()
+    },
+  )
+
   it(`retains only bounded promise state during a long refinement chain`, async () => {
     let biggest: { rank: number } | undefined
     const requests: Array<ReturnType<typeof createDeferred>> = []
@@ -253,10 +374,7 @@ describe(`OrderedSourceLoader`, () => {
 
     try {
       subscription.requestSnapshot({
-        where: new Func(`eq`, [
-          new PropRef([`id`]),
-          new Value(`unrelated`),
-        ]),
+        where: new Func(`eq`, [new PropRef([`id`]), new Value(`unrelated`)]),
         optimizedOnly: false,
       })
       expect(() => loader.start()).toThrow(requestFailure)
@@ -433,7 +551,10 @@ describe(`OrderedSourceLoader`, () => {
       setOrderByIndex: () => {},
       releaseLoadSubset: () => {},
       requestLimitedSnapshot: (options: {
-        onLoadSubsetResult?: (result: true) => void
+        onLoadSubsetResult?: (
+          result: true,
+          acquisition: LoadSubsetOptions,
+        ) => void
       }) => {
         methods.push(`limited`)
         options.onLoadSubsetResult?.(true, {})

@@ -1187,12 +1187,15 @@ explicitly removed.
 - [ ] Close the public window-reentrancy follow-up audit:
   - [ ] Reject or defer `setWindow()` called synchronously from the initial
         ordered adapter load; it must not return `true` before the requested
-        rows are visible.
+        rows are visible. The public regression is red: the nested call returns
+        `true` and advances `getWindow()`.
   - [ ] Reject or defer `setWindow()` called from an ordinary live-query
         publication listener; a coalesced graph turn must not look settled.
+        The public regression is red with the same false `true` result.
   - [ ] Fence outer window settlement by sync-session identity. Synchronous
         cleanup during its adapter request must not let the old operation write
-        a settled window into the restarted collection.
+        a settled window into the restarted collection. The public regression
+        is red: the abandoned operation returns `true` after cleanup.
   - [x] Preserve the existing async control: a superseding window move made
         after the adapter has yielded remains legal and waits for its own work.
 - [ ] Close the subscription-teardown follow-up audit:
@@ -1268,10 +1271,40 @@ explicitly removed.
         red/greened. A 20-cell two-demand restart matrix and eight
         three-generation settlement orders cover return, throw, resolve,
         reject, release, unsubscribe, cleanup, and obsolete/current ordering.
+        The next loss audit recovered four omitted restart boundaries, all now
+        red: demand created by the synchronous restart status callback, false
+        physical settlement while cleaned up, eager-mode restart, and failure
+        of the replacement `sync()` function itself.
   - [ ] Keep the ordered-query layer as a consumer of the same protocol. Cross
         page, prefix, boundary, and full-source routes with cancellation,
         failure, retry, and reentrant `setWindow`; do not duplicate ownership
         rules in a second reference model.
+    - The ordered layer adds only these state axes to the core ownership model:
+      source authority (`unknown`, `finite`, `invalid`, `full`), route (`idle`,
+      `page`, `prefix`, `boundary`, `full-source`), publication barrier (`none`,
+      `bootstrap`, `window`, `repair`, `replay`), requested versus settled
+      window, and query sync session.
+    - Its complete event alphabet is initial start, source insert/update/delete,
+      `setWindow`, request return/throw/resolve/reject, release/abort, truncate,
+      cleanup/restart, and a second source starting or settling replay/repair.
+      Reentrant calls are the same events while adapter entry, graph execution,
+      publication, or cleanup is on the stack.
+    - The merge laws are: public rows are always the last complete snapshot or
+      exact recomputation of the settled window; successful window settlement
+      means that window is public in the same sync session; failed or obsolete
+      work cannot publish or advance the window; invalid finite authority is
+      restored only by authoritative full-source success; recovery gates are
+      source-local; and a semantic request chain reaches a bounded fixed point.
+    - [x] Cross async resolve, reject, and signal-abort outcomes over page,
+          prefix, boundary, and full-source routes. Failed acquisitions stay
+          quiescent until an explicit operation, then release the exact lease
+          once and retry through one conservative full-source request. Core
+          owns the physical abort and final teardown laws.
+    - [x] Cross every route with query cleanup before settlement and prove a
+          late result starts no boundary, refill, error, or publication work.
+    - [ ] Generate combined ordered histories and report reach for every route,
+          authority state, barrier owner, settlement kind, and sync-session
+          transition.
   - [ ] Add a checked coverage census for every finite Cartesian axis and
         `fc.statistics` for generated histories. Fixed witnesses, exhaustive
         small-domain cells, fixed-seed fuzzing, and random/replayable fuzzing
@@ -1281,7 +1314,11 @@ explicitly removed.
         The independent sync-history model now runs both fixed and random,
         replayable command sequences across request, release, truncate,
         cleanup, restart, and unsubscribe, with optional coverage statistics.
-        Ordered-route census and combined async-history statistics remain.
+        It now models repeated same-key owners instead of suppressing them. A
+        second generated history crosses one or two demands, two to four sync
+        generations, obsolete/current resolve or reject, and three settlement
+        orders; its coverage labels describe effective transitions rather than
+        mere command presence. Ordered authority/barrier generation remains.
   - [x] Catalog all red cells before changing production code. Fix by invalid
         transition class, then rerun the entire matrix after each coherent
         commit. The core slice exposed 15 red cells in five classes: phantom

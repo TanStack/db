@@ -470,6 +470,129 @@ async function observeLaterOrderTermMutation(
   }
 }
 
+async function observeFinitePrefixMutation(
+  kind: `collection` | `effect`,
+): Promise<{
+  rows: Array<number>
+  requests: number
+  publications: Array<Array<number>>
+}> {
+  const truth = new Map<number, Row>([
+    [1, { id: 1, rank: 0, eligible: true, label: `visible` }],
+    [2, { id: 2, rank: 1, eligible: true, label: `hidden` }],
+  ])
+  const delivered = new Set<number>()
+  const effectRows = new Map<number, Row>()
+  const publications: Array<Array<number>> = []
+  let requests = 0
+  let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
+
+  const source = createCollection<Row, number>({
+    id: `ordered-finite-prefix-${kind}-${harnessId++}`,
+    getKey: ({ id }) => id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (operations) => {
+        sync = operations
+        operations.markReady()
+        return {
+          loadSubset: async (options) => {
+            requests++
+            let selected = [...truth.values()].sort(
+              (left, right) => left.rank - right.rank || left.id - right.id,
+            )
+            if (options.where) {
+              selected = selected.filter(
+                (row) =>
+                  evaluateReferenceExpression(options.where!, row) === true,
+              )
+            }
+            if (options.cursor) {
+              selected = selected.filter(
+                (row) =>
+                  evaluateReferenceExpression(
+                    options.cursor!.whereFrom,
+                    row,
+                  ) === true,
+              )
+            } else if (options.offset) {
+              selected = selected.slice(options.offset)
+            }
+            if (options.limit !== undefined) {
+              selected = selected.slice(0, options.limit)
+            }
+            const fresh = selected.filter(({ id }) => !delivered.has(id))
+            if (fresh.length === 0) return
+            operations.begin()
+            for (const row of fresh) {
+              delivered.add(row.id)
+              operations.write({ type: `insert`, value: { ...row } })
+            }
+            const receipt = operations.commit()
+            if (receipt !== true) await receipt
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const query = (q: InitialQueryBuilder) =>
+    q
+      .from({ row: source })
+      .orderBy(({ row }) => row.rank)
+      .limit(1)
+  const live =
+    kind === `collection` ? createLiveQueryCollection({ query }) : undefined
+  const effect =
+    kind === `effect`
+      ? createEffect<Row, number>({
+          query,
+          onBatch: (events) => {
+            for (const event of events) {
+              if (event.type === `exit`) effectRows.delete(event.key)
+              else effectRows.set(event.key, { ...event.value })
+            }
+            publications.push(
+              [...effectRows.values()]
+                .sort((left, right) => left.rank - right.rank)
+                .map(({ id }) => id),
+            )
+          },
+        })
+      : undefined
+  const visibleIds = () =>
+    (live ? live.toArray : [...effectRows.values()])
+      .sort((left, right) => left.rank - right.rank)
+      .map(({ id }) => id)
+
+  try {
+    if (live) {
+      live.subscribeChanges(() => publications.push(visibleIds()))
+      await live.preload()
+    } else {
+      await vi.waitFor(() => expect(visibleIds()).toEqual([1]))
+    }
+    const requestsBeforeMutation = requests
+    const moved = { ...truth.get(1)!, rank: 10 }
+    truth.set(1, moved)
+    sync.begin({ immediate: true })
+    sync.write({ type: `update`, value: { ...moved } })
+    const receipt = sync.commit()
+    if (receipt !== true) await receipt
+    await vi.waitFor(() => expect(visibleIds()).toEqual([2]))
+
+    expect(requests).toBeGreaterThan(requestsBeforeMutation)
+    return { rows: visibleIds(), requests, publications }
+  } finally {
+    if (effect) await effect.dispose()
+    if (live) await live.cleanup()
+    await source.cleanup()
+  }
+}
+
 describe(`ordered source work oracle`, () => {
   it(`keeps later order-term invalidation equal across consumers`, async () => {
     const [collection, effect] = await Promise.all([
@@ -480,6 +603,14 @@ describe(`ordered source work oracle`, () => {
     // The two graph entry points may take a different bounded number of
     // refinement passes, but they must exercise the same demand forms.
     expect(new Set(effect.requests)).toEqual(new Set(collection.requests))
+  })
+
+  it(`recovers a finite source prefix equally across consumers`, async () => {
+    const collection = await observeFinitePrefixMutation(`collection`)
+    const effect = await observeFinitePrefixMutation(`effect`)
+
+    expect(effect.rows).toEqual(collection.rows)
+    expect(effect.publications.at(-1)).toEqual(collection.publications.at(-1))
   })
 
   it(`loads each source of a filtered join once`, async () => {
@@ -1047,6 +1178,156 @@ describe(`ordered source work oracle`, () => {
       await Promise.all([
         first.cleanup(),
         second.cleanup(),
+        primary.cleanup(),
+        secondary.cleanup(),
+      ])
+    }
+  })
+
+  it(`keeps one source's replay from suppressing another source's recovery`, async () => {
+    type Primary = { id: number; rank: number }
+    type Secondary = { id: number; primaryId: number }
+    const primaryTruth = new Map<number, Primary>([
+      [1, { id: 1, rank: 0 }],
+      [2, { id: 2, rank: 1 }],
+    ])
+    const deliveredPrimary = new Set<number>()
+    const secondaryReplay = createDeferred<void>()
+    let primaryRequests = 0
+    let replayingSecondary = false
+    let primarySync!: Parameters<SyncConfig<Primary, number>[`sync`]>[0]
+    let secondarySync!: Parameters<SyncConfig<Secondary, number>[`sync`]>[0]
+    let secondaryReplayCalls = 0
+
+    const primary = createCollection<Primary, number>({
+      id: `ordered-independent-recovery-primary`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (operations) => {
+          primarySync = operations
+          operations.markReady()
+          return {
+            loadSubset: async (options) => {
+              primaryRequests++
+              let selected = [...primaryTruth.values()].sort(
+                (left, right) => left.rank - right.rank || left.id - right.id,
+              )
+              if (options.where) {
+                selected = selected.filter(
+                  (row) =>
+                    evaluateReferenceExpression(options.where!, row) === true,
+                )
+              }
+              if (options.cursor) {
+                selected = selected.filter(
+                  (row) =>
+                    evaluateReferenceExpression(
+                      options.cursor!.whereFrom,
+                      row,
+                    ) === true,
+                )
+              } else if (options.offset) {
+                selected = selected.slice(options.offset)
+              }
+              if (options.limit !== undefined) {
+                selected = selected.slice(0, options.limit)
+              }
+              const fresh = selected.filter(
+                ({ id }) => !deliveredPrimary.has(id),
+              )
+              if (fresh.length === 0) return
+              operations.begin()
+              for (const row of fresh) {
+                deliveredPrimary.add(row.id)
+                operations.write({ type: `insert`, value: { ...row } })
+              }
+              const receipt = operations.commit(options.signal)
+              if (receipt !== true) await receipt
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const secondary = createCollection<Secondary, number>({
+      id: `ordered-independent-recovery-secondary`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (operations) => {
+          secondarySync = operations
+          operations.markReady()
+          return {
+            loadSubset: async (options) => {
+              if (replayingSecondary) {
+                secondaryReplayCalls++
+                await secondaryReplay.promise
+              }
+              operations.begin()
+              operations.write({
+                type: `insert`,
+                value: { id: 1, primaryId: 1 },
+              })
+              const receipt = operations.commit(options.signal)
+              if (receipt !== true) await receipt
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const live = createLiveQueryCollection((q) =>
+      q
+        .from({ row: primary })
+        .leftJoin({ child: secondary }, ({ row, child }) =>
+          eq(row.id, child.primaryId),
+        )
+        .orderBy(({ row }) => row.rank)
+        .limit(1)
+        .select(({ row, child }) => ({
+          id: row.id,
+          rank: row.rank,
+          childId: child?.id,
+        })),
+    )
+
+    try {
+      await live.preload()
+      expect(live.toArray.map(({ id }) => id)).toEqual([1])
+
+      replayingSecondary = true
+      secondarySync.begin()
+      secondarySync.truncate()
+      const truncateReceipt = secondarySync.commit()
+      if (truncateReceipt !== true) await truncateReceipt
+      await vi.waitFor(() => expect(secondaryReplayCalls).toBeGreaterThan(0))
+
+      const requestsBeforeMutation = primaryRequests
+      const moved = { id: 1, rank: 10 }
+      primaryTruth.set(1, moved)
+      primarySync.begin({ immediate: true })
+      primarySync.write({ type: `update`, value: moved })
+      const mutationReceipt = primarySync.commit()
+      if (mutationReceipt !== true) await mutationReceipt
+      await flushPromises()
+      expect(live.toArray.map(({ id }) => id)).toEqual([1])
+
+      secondaryReplay.resolve()
+      await vi.waitFor(() =>
+        expect(live.toArray.map(({ id }) => id)).toEqual([2]),
+      )
+      expect(primaryRequests).toBeGreaterThan(requestsBeforeMutation)
+    } finally {
+      secondaryReplay.resolve()
+      await Promise.all([
+        live.cleanup(),
         primary.cleanup(),
         secondary.cleanup(),
       ])

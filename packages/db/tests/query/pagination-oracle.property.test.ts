@@ -2718,6 +2718,217 @@ describe(`pagination recomputation oracle`, () => {
     }
   })
 
+  it(`rejects a window move reentered from the initial ordered request`, async () => {
+    const authoritativeRows: Array<PageRow> = [
+      { id: 1, rank: 0 },
+      { id: 2, rank: 1 },
+    ]
+    const delivered = new Set<number>()
+    let nestedResult: true | Promise<void> | undefined
+    let nestedError: unknown
+    function createWindowedQuery() {
+      return createLiveQueryCollection((query) =>
+        query
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank)
+          .limit(1),
+      )
+    }
+    let live!: ReturnType<typeof createWindowedQuery>
+    const source = createCollection<PageRow>({
+      id: `pagination-initial-request-reentrancy-${collectionSequence++}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          markReady()
+          return {
+            loadSubset: (options) => {
+              if (nestedResult === undefined && nestedError === undefined) {
+                try {
+                  nestedResult = live.utils.setWindow({ offset: 0, limit: 2 })
+                } catch (error) {
+                  nestedError = error
+                }
+              }
+              const fresh = rowsForLoadSubset(
+                authoritativeRows,
+                options,
+              ).filter(({ id }) => !delivered.has(id))
+              if (fresh.length === 0) return true
+              begin()
+              for (const row of fresh) {
+                delivered.add(row.id)
+                write({ type: `insert`, value: { ...row } })
+              }
+              commit()
+              return true
+            },
+          }
+        },
+      },
+    })
+    live = createWindowedQuery()
+
+    try {
+      await live.preload()
+      expect(nestedResult).toBeUndefined()
+      expect(nestedError).toMatchObject({ name: `SetWindowReentrancyError` })
+      expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
+    } finally {
+      await cleanupAll(live, source)
+    }
+  })
+
+  it(`rejects a window move reentered from a public change callback`, async () => {
+    const authoritativeRows: Array<PageRow> = [
+      { id: 1, rank: 0, keep: true },
+      { id: 2, rank: 1, keep: true },
+    ]
+    const delivered = new Set<number>()
+    let begin!: () => void
+    let write!: (message: {
+      type: `update`
+      value: PageRow
+      previousValue: PageRow
+    }) => void
+    let commit!: () => void
+    const source = createCollection<PageRow>({
+      id: `pagination-publication-reentrancy-${collectionSequence++}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (operations) => {
+          begin = operations.begin
+          write = operations.write
+          commit = operations.commit
+          operations.markReady()
+          return {
+            loadSubset: (options) => {
+              const fresh = rowsForLoadSubset(
+                authoritativeRows,
+                options,
+              ).filter(({ id }) => !delivered.has(id))
+              if (fresh.length === 0) return true
+              begin()
+              for (const row of fresh) {
+                delivered.add(row.id)
+                operations.write({ type: `insert`, value: { ...row } })
+              }
+              commit()
+              return true
+            },
+          }
+        },
+      },
+    })
+    const live = createLiveQueryCollection((query) =>
+      query
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(1),
+    )
+    let nestedResult: true | Promise<void> | undefined
+    let nestedError: unknown
+
+    try {
+      await live.preload()
+      const subscription = live.subscribeChanges(() => {
+        try {
+          nestedResult = live.utils.setWindow({ offset: 0, limit: 2 })
+        } catch (error) {
+          nestedError = error
+        }
+      })
+      const previous = authoritativeRows[0]!
+      const current = { ...previous, keep: false }
+      authoritativeRows[0] = current
+      begin()
+      write({ type: `update`, value: current, previousValue: previous })
+      commit()
+      subscription.unsubscribe()
+
+      expect(nestedResult).toBeUndefined()
+      expect(nestedError).toMatchObject({ name: `SetWindowReentrancyError` })
+      expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
+    } finally {
+      await cleanupAll(live, source)
+    }
+  })
+
+  it(`does not settle a window move after its sync session is cleaned up`, async () => {
+    const authoritativeRows: Array<PageRow> = [
+      { id: 1, rank: 0 },
+      { id: 2, rank: 1 },
+    ]
+    const delivered = new Set<number>()
+    let cleanUpDuringNextRequest = false
+    let cleanupPromise: Promise<void> | undefined
+    function createWindowedQuery() {
+      return createLiveQueryCollection((query) =>
+        query
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank)
+          .limit(1),
+      )
+    }
+    let live!: ReturnType<typeof createWindowedQuery>
+    const source = createCollection<PageRow>({
+      id: `pagination-window-cleanup-${collectionSequence++}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          markReady()
+          return {
+            loadSubset: (options) => {
+              if (cleanUpDuringNextRequest) {
+                cleanUpDuringNextRequest = false
+                cleanupPromise = live.cleanup()
+              }
+              const fresh = rowsForLoadSubset(
+                authoritativeRows,
+                options,
+              ).filter(({ id }) => !delivered.has(id))
+              if (fresh.length === 0) return true
+              begin()
+              for (const row of fresh) {
+                delivered.add(row.id)
+                write({ type: `insert`, value: { ...row } })
+              }
+              commit()
+              return true
+            },
+          }
+        },
+      },
+    })
+    live = createWindowedQuery()
+
+    try {
+      await live.preload()
+      cleanUpDuringNextRequest = true
+      const move = live.utils.setWindow({ offset: 0, limit: 2 })
+      await cleanupPromise
+
+      expect(move).toBeInstanceOf(Promise)
+      await expect(move).rejects.toMatchObject({ name: `AbortError` })
+      expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
+    } finally {
+      await cleanupAll(live, source)
+    }
+  })
+
   it(`tracks an asynchronous prefix refresh after synchronous satisfaction`, async () => {
     const rows: Array<PageRow> = [
       { id: 1, rank: 1 },
@@ -3793,15 +4004,11 @@ describe(`pagination recomputation oracle`, () => {
         await flushPromises()
 
         if (settlement === `resolve`) {
-          expect(live.toArray.map(projectPageRow)).toEqual([
-            { id: 2, rank: 1 },
-          ])
+          expect(live.toArray.map(projectPageRow)).toEqual([{ id: 2, rank: 1 }])
           expect(publications).toEqual([[{ id: 2, rank: 1 }]])
           expect(live.utils.lastSubsetError).toBeUndefined()
         } else {
-          expect(live.toArray.map(projectPageRow)).toEqual([
-            { id: 1, rank: 0 },
-          ])
+          expect(live.toArray.map(projectPageRow)).toEqual([{ id: 1, rank: 0 }])
           expect(publications).toEqual([])
           expect(live.utils.lastSubsetError).toBe(recoveryError)
         }
@@ -3816,10 +4023,7 @@ describe(`pagination recomputation oracle`, () => {
   it(`does not recover the full source when a visible row keeps its order`, async () => {
     const loads: Array<LoadSubsetOptions> = []
     let begin!: () => void
-    let write!: (message: {
-      type: `insert` | `update`
-      value: PageRow
-    }) => void
+    let write!: (message: { type: `insert` | `update`; value: PageRow }) => void
     let commit!: () => void
     const source = createCollection<PageRow>({
       id: `pagination-stable-order-update-${collectionSequence++}`,
