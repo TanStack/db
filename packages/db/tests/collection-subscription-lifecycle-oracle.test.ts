@@ -1635,6 +1635,45 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     },
   )
 
+  it(`does not settle a deferred demand when cleanup abandons it before resume`, async () => {
+    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
+    const observed: Array<unknown> = []
+    let loads = 0
+    const collection = createCollection<{ id: string }>({
+      id: `deferred-start-cleanup-before-resume`,
+      getKey: ({ id }) => id,
+      startSync: false,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => {
+              loads++
+              return true
+            },
+          }
+        },
+      },
+    })
+    expect(collection._deferSyncStart()).toBe(true)
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    subscription.requestSnapshot({
+      where,
+      onLoadSubsetResult: (result) => observed.push(result),
+    })
+
+    await collection.cleanup()
+    await flushPromises()
+
+    expect(loads).toBe(0)
+    expect(observed).toHaveLength(0)
+
+    subscription.unsubscribe()
+  })
+
   it(`does not settle ready-callback demand when on-demand sync returns no loader`, async () => {
     const oldWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`old`)])
     const newWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`new`)])
@@ -1731,12 +1770,116 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     await collection.cleanup()
   })
 
-  it(`does not acquire after an installed loader marks initial sync as failed`, async () => {
+  it(`retains demand requested during initial error for same-session recovery`, async () => {
+    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
+    const loads: Array<LoadSubsetOptions> = []
+    const observed: Array<unknown> = []
+    let syncSession = 0
+    let recover!: () => void
+    let subscription!: ReturnType<typeof collection.subscribeChanges>
+    const collection = createCollection<{ id: string }>({
+      id: `sync-entry-error-ready-recovery`,
+      getKey: ({ id }) => id,
+      startSync: false,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markError, markReady }) => {
+          if (syncSession++ === 0) {
+            markReady()
+            return {
+              loadSubset: (options) => {
+                loads.push(options)
+                return true
+              },
+              unloadSubset: () => {},
+            }
+          }
+          recover = markReady
+          markError(new Error(`initial sync failed`))
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    await collection.cleanup()
+    const removeErrorListener = collection.on(`status:error`, () => {
+      subscription.requestSnapshot({
+        where,
+        onLoadSubsetResult: (result) => observed.push(result),
+      })
+    })
+
+    collection.startSyncImmediate()
+    expect(collection.status).toBe(`error`)
+    expect(loads).toEqual([])
+    expect(observed).toEqual([])
+
+    recover()
+    await flushPromises()
+
+    expect(collection.status).toBe(`ready`)
+    expect(loads.map(({ where: loadedWhere }) => loadedWhere)).toEqual([where])
+    expect(observed).toEqual([true])
+
+    removeErrorListener()
+    subscription.unsubscribe()
+    await collection.cleanup()
+  })
+
+  it(`re-enables an installed loader after same-session initial recovery`, async () => {
+    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
+    const loads: Array<LoadSubsetOptions> = []
+    let markError!: (error: unknown) => void
+    let markReady!: () => void
+    const collection = createCollection<{ id: string }>({
+      id: `installed-loader-error-ready-recovery`,
+      getKey: ({ id }) => id,
+      startSync: false,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (operations) => {
+          markError = operations.markError
+          markReady = operations.markReady
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    collection.startSyncImmediate()
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+
+    markError(new Error(`initial sync failed`))
+    markReady()
+    subscription.requestSnapshot({ where })
+
+    expect(collection.status).toBe(`ready`)
+    expect(loads.map(({ where: loadedWhere }) => loadedWhere)).toEqual([where])
+
+    subscription.unsubscribe()
+    await collection.cleanup()
+  })
+
+  it(`defers demand while an installed loader is in initial error`, async () => {
     const oldWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`old`)])
     const newWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`new`)])
     const loads: Array<LoadSubsetOptions> = []
     let markError!: (error: unknown) => void
-    let requestError: unknown
+    let markReady!: () => void
     const collection = createCollection<{ id: string }>({
       id: `installed-loader-initial-error`,
       getKey: ({ id }) => id,
@@ -1745,6 +1888,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       sync: {
         sync: (operations) => {
           markError = operations.markError
+          markReady = operations.markReady
           return {
             loadSubset: (options) => {
               loads.push(options)
@@ -1761,18 +1905,17 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     })
     subscription.requestSnapshot({ where: oldWhere })
     const removeErrorListener = collection.on(`status:error`, () => {
-      try {
-        subscription.requestSnapshot({ where: newWhere })
-      } catch (error) {
-        requestError = error
-      }
+      subscription.requestSnapshot({ where: newWhere })
     })
 
     markError(new Error(`initial sync failed`))
 
     expect(collection.status).toBe(`error`)
     expect(loads.map(({ where }) => where)).toEqual([oldWhere])
-    expect(requestError).toMatchObject({ name: `CollectionInErrorStateError` })
+
+    markReady()
+    await flushPromises()
+    expect(loads.map(({ where }) => where)).toEqual([oldWhere, newWhere])
 
     removeErrorListener()
     subscription.unsubscribe()
@@ -1818,8 +1961,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     await flushPromises()
 
     expect(collection.status).toBe(`cleaned-up`)
-    expect(loads).toEqual([])
-    expect(unloads).toEqual([])
+    expect(loads).toHaveLength(0)
+    expect(unloads).toHaveLength(0)
 
     removeReadyListener()
     subscription.unsubscribe()

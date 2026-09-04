@@ -1244,9 +1244,10 @@ every row is either green or has a named red witness.
 | Protocol slice                                       | Executable coverage                                                                                 | Current result                                 |
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
 | Logical demand start/release and synchronous reentry | 20 start cells, 10 failure-delivery cells, 8 release cells                                          | green                                          |
-| Sync acquisition availability                        | starting/installed/eager/deferred/retiring/unavailable phases × request entry                       | 9 named reds; 3 adjacent controls green        |
+| Sync acquisition availability                        | starting/installed/eager/deferred/retiring/unavailable phases × request entry                       | 11 named reds; 4 adjacent controls green       |
 | Cleanup/restart ownership                            | 20 restart cells plus fixed callback boundaries                                                     | green except the acquisition-availability reds |
 | Async session fencing                                | 2–4 sessions, 1–2 demands, mixed outcomes, obsolete/current/interleaved settlement                  | green                                          |
+| Generated async lifecycle histories                  | request/release/settle/truncate/cleanup/restart/unsubscribe plus fixed abort boundaries              | 1 named abort/replay ownership red              |
 | Replay phase transitions                             | setup/pending/settling/publishing crossed with release, reacquisition, supersession, abort, cleanup | three audit claims remain to reconcile below   |
 | Ordered route mechanics                              | page/prefix/boundary/full-source × return/throw/resolve/reject/abort/cleanup                        | green                                          |
 | Ordered consumer integration                         | Collection/Effect parity, source-local recovery, public-window reentry, sync-session settlement     | 5 named reds                                   |
@@ -1309,7 +1310,33 @@ every row is either green or has a named red witness.
         followed by an invalid handler-less return, an obsolete sync result
         returned after ready-callback cleanup, an installed loader used after
         initial `markError`, and deferred resume continuing after reentrant
-        cleanup.
+        cleanup. The latest loss audit recovered two earlier-phase omissions:
+        cleanup can falsely settle a request while start is still deferred,
+        and `markError()` during synchronous `sync()` entry can falsely settle
+        a reentrant request before a valid loader is returned. A same-session
+        error-to-ready control proves an installed loader remains usable after
+        recovery. The intended contract is now explicit: requests made while
+        initial sync is in error remain detached and recover automatically on
+        a later same-session `markReady()`; `requestSnapshot()` does not gain
+        an undocumented synchronous error-state throw.
+  - [x] Interleave logical owners and exact physical attempts across request,
+        release, resolve/reject, truncate, cleanup, restart, and unsubscribe.
+        The generated history model observes exact options identity, aborts,
+        unloads, error identity, `lastError`, and the full status trace after
+        every effective command. Fixed histories guarantee partial-generation
+        supersession, duplicate owners, request while cleaned, overlapping
+        replay, initial rejection followed by successful restart, and external
+        abort. It found one new red: replaying an externally aborted logical
+        demand can install a phantom acquisition that was never sent to the
+        adapter, then later call `unloadSubset` for it. Random abort
+        interleavings stay excluded until that named red is fixed; all other
+        commands run under fixed and random seeds.
+  - [ ] Replace the hand-picked acquisition boundary list with an executable,
+        typed phase × entry census. Keep obsolete sync-result retirement on a
+        separate resource-installation axis, and add session-tagged unload
+        assertions to every restart/callback witness. Do not call the phase
+        table complete until this census itself fails when a legal cell is
+        omitted.
   - [ ] Keep the ordered-query layer as a consumer of the same protocol. Cross
         page, prefix, boundary, and full-source routes with cancellation,
         failure, retry, and reentrant `setWindow`; do not duplicate ownership
