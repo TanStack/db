@@ -67,6 +67,21 @@ describe(`ascComparator - Temporal values`, () => {
   })
 })
 
+describe(`ascComparator - symbols`, () => {
+  const opts = DEFAULT_COMPARE_OPTIONS
+
+  it(`gives symbols a stable total order`, () => {
+    const first = Symbol(`group`)
+    const second = Symbol(`group`)
+
+    expect(ascComparator(first, first, opts)).toBe(0)
+    expect(ascComparator(first, second, opts)).toBeLessThan(0)
+    expect(ascComparator(second, first, opts)).toBeGreaterThan(0)
+    expect(ascComparator(first, 1, opts)).toBeGreaterThan(0)
+    expect(ascComparator(1, first, opts)).toBeLessThan(0)
+  })
+})
+
 describe(`compareValues - NaN behavior`, () => {
   // NaN satisfies neither < nor >, so the fallback returns 0. In practice
   // gt/gte/lt/lte catch NaN via isUnorderable before reaching compareValues.

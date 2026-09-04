@@ -139,6 +139,9 @@ binary values by the same normalized value as `eq`/`in`, and retain runtime
 reference identity for other objects, functions, and symbols. These tokens are
 valid only for equality-keyed routing, grouping, and demand. Output values and
 arbitrary function arguments keep their exact runtime identity and value.
+Tree indexes give symbols a stable runtime-local order because JavaScript
+relational comparison throws for them; comparator equality still holds only
+for the same symbol.
 Compiler tokens belong to one compiled graph. This keeps every operator in the
 graph on the same identity relation. Objects, functions, and local symbols are
 weakly keyed where the runtime supports weak symbol keys. Older runtimes retain

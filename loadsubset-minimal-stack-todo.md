@@ -634,9 +634,12 @@ explicitly removed.
       weak keys; those now use their registry string while local symbols remain
       weakly held. The regressions failed first, all 329 db-ivm tests pass, and
       the six focused includes/grouping suites are 155/155 green.
-- [ ] Make equality auto-index fallback quiet and safe for symbol-valued join
-      fields; the symbol-route oracle exposed a comparator throw while the
-      query correctly fell back to a full scan.
+- [x] Make equality auto-indexing safe for symbol-valued join fields. The
+      comparator now gives symbols a stable runtime-local total order instead
+      of throwing during B-tree construction. The direct auto-index regression
+      failed by falling back to a scan and logging a warning; comparator,
+      auto-index, and symbol-route suites now pass 65 focused tests and the DB
+      package build is green.
 
 - [x] Restore the exported `minusWherePredicates` laws for SQL nulls,
       duplicate terms, and nested `NOT`/range expressions; fix the false-green

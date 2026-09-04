@@ -1,4 +1,5 @@
 import { isTemporal } from '../utils'
+import { getRuntimeReferenceIdentity } from '../query/runtime-reference-identity'
 import type { CompareOptions } from '../query/builder/types'
 
 // WeakMap to store stable IDs for objects
@@ -84,6 +85,18 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
   if (isTemporal(a) && isTemporal(b)) {
     return compareTemporalValues(a, b)
   }
+
+  // Symbols have identity but no built-in order: relational comparison throws.
+  // A stable runtime ID gives tree indexes a total order while preserving
+  // equality only for the same symbol.
+  const aIsSymbol = typeof a === `symbol`
+  const bIsSymbol = typeof b === `symbol`
+  if (aIsSymbol && bIsSymbol) {
+    if (a === b) return 0
+    return getRuntimeReferenceIdentity(a)[2] - getRuntimeReferenceIdentity(b)[2]
+  }
+  if (aIsSymbol) return 1
+  if (bIsSymbol) return -1
 
   // If at least one of the values is an object, use stable IDs for comparison
   const aIsObject = typeof a === `object`
