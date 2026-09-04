@@ -1079,9 +1079,11 @@ explicitly removed.
         successor or leaving the failed one live. A Cartesian witness now
         crosses whether the failed demand comes before or after the demand
         removed by the listener.
-  - [ ] Strengthen the provisional cleanup-debt witness: assert the exact
+  - [x] Strengthen the provisional cleanup-debt witness: assert the exact
         options unload twice, no unrelated lease unloads, successful retry
-        clears debt, and the primary stored error remains unchanged.
+        clears debt, and the primary stored error remains unchanged. The
+        production witness now checks object identity and a second idempotent
+        unsubscribe.
   - [x] Retire a provisional acquisition when the ordered-loader result
         observer throws. A throwing publication/listener callback must not
         leave successful coverage behind or let the queued settlement clear

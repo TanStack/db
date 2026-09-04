@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { OrderedSourceLoader } from '../../src/query/live/utils.js'
-import { PropRef } from '../../src/query/ir.js'
+import { Func, PropRef, Value } from '../../src/query/ir.js'
 import type { CollectionSubscription } from '../../src/collection/subscription.js'
 import type { OrderByOptimizationInfo } from '../../src/query/compiler/order-by.js'
 import type {
@@ -208,7 +208,9 @@ describe(`OrderedSourceLoader`, () => {
     const requestFailure = new Error(`snapshot publication failed`)
     const cleanupFailure = new Error(`provisional cleanup failed`)
     const reported: Array<unknown> = []
-    let unloads = 0
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    let failedReleaseAttempts = 0
     const source = createCollection<{ id: number; rank: number }>({
       id: `ordered-provisional-cleanup-error`,
       getKey: ({ id }) => id,
@@ -221,10 +223,15 @@ describe(`OrderedSourceLoader`, () => {
           commit()
           markReady()
           return {
-            loadSubset: () => true,
-            unloadSubset: () => {
-              unloads++
-              if (unloads === 1) throw cleanupFailure
+            loadSubset: (options) => {
+              loads.push(options)
+              return true
+            },
+            unloadSubset: (options) => {
+              unloads.push(options)
+              if (options === loads[1] && ++failedReleaseAttempts === 1) {
+                throw cleanupFailure
+              }
             },
           }
         },
@@ -245,10 +252,26 @@ describe(`OrderedSourceLoader`, () => {
     )
 
     try {
+      subscription.requestSnapshot({
+        where: new Func(`eq`, [
+          new PropRef([`id`]),
+          new Value(`unrelated`),
+        ]),
+        optimizedOnly: false,
+      })
       expect(() => loader.start()).toThrow(requestFailure)
       expect(subscription.lastError).toBe(requestFailure)
       expect(reported).toEqual([requestFailure])
-      expect(unloads).toBe(1)
+      expect(unloads).toEqual([loads[1]])
+
+      loader.dispose()
+      subscription.unsubscribe()
+      expect(unloads).toEqual([loads[1], loads[1], loads[0]])
+      expect(subscription.lastError).toBe(requestFailure)
+      expect(reported).toEqual([requestFailure])
+
+      subscription.unsubscribe()
+      expect(unloads).toEqual([loads[1], loads[1], loads[0]])
     } finally {
       loader.dispose()
       subscription.unsubscribe()
