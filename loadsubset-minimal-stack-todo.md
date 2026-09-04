@@ -597,6 +597,15 @@ explicitly removed.
       and an immutable recursive boundary copy removes internal symbols without
       corrupting D2 retractions. The context grammar is 89/89 green and the four
       broader includes oracle suites are 207/207 green.
+- [x] Close the public-surface product gaps found by the loss audit of that
+      repair. Four new grammar cells failed first: an opaque wrapper exposed a
+      routed descendant, clean nested payloads lost reference identity, and an
+      enumerable `__proto__` key was lost while changing the output prototype.
+      Callback and facade boundaries now share one cycle-safe copy-on-write
+      transform that copies only private paths and defines keys safely. The
+      symbol assertion now permits user-owned symbols and traverses opaque,
+      `Map`, and `Set` containers. Context, facade, functional, grouping, and
+      broad includes suites are 450/450 green.
 - [x] Scope symbol correlation identity to releasable graph state. Every
       compiler path now shares one identity scope through its compile cache;
       the scope dies with the graph, and demand-controller cleanup replaces its

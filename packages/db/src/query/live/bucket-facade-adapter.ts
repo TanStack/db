@@ -1,6 +1,7 @@
 import { output, serializeValue } from '@tanstack/db-ivm'
 import { createCollection } from '../../collection/index.js'
 import { FN_SELECT_STATE, INCLUDES_ROUTING } from '../compiler/index.js'
+import { transformPublicContainers } from '../compiler/route-metadata.js'
 import { BUCKET_FACADE_REF } from './materialized-pipeline.js'
 import type { Collection } from '../../collection/index.js'
 import type { SyncConfig } from '../../types.js'
@@ -10,6 +11,11 @@ import type {
   BucketFacadeRef,
   BucketRow,
 } from './materialized-pipeline.js'
+
+const PRIVATE_RESULT_KEYS = new Set<PropertyKey>([
+  INCLUDES_ROUTING,
+  FN_SELECT_STATE,
+])
 
 type FacadeSync = Parameters<SyncConfig<any>[`sync`]>[0]
 
@@ -475,21 +481,16 @@ export class BucketFacadeAdapter {
       this.resolvedValues.set(value, facade)
       return facade
     }
-    if (Array.isArray(value)) {
-      const result: Array<unknown> = []
+    if (Array.isArray(value) || isPlainObject(value)) {
+      const result = transformPublicContainers(
+        value,
+        (leaf) => (isBucketFacadeRef(leaf) ? this.resolveValue(leaf) : leaf),
+        PRIVATE_RESULT_KEYS,
+      )
       this.resolvedValues.set(value, result)
-      result.push(...value.map((item) => this.resolveValue(item)))
       return result
     }
-    if (!isPlainObject(value)) return value
-
-    const result: Record<PropertyKey, unknown> = {}
-    this.resolvedValues.set(value, result)
-    for (const key of Reflect.ownKeys(value)) {
-      if (key === INCLUDES_ROUTING || key === FN_SELECT_STATE) continue
-      result[key] = this.resolveValue(value[key])
-    }
-    return result
+    return value
   }
 
   private cleanupRetiredEntries(): void {

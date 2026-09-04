@@ -596,7 +596,10 @@ export function compileQuery(
     for (const fnWhere of query.fnWhere) {
       pipeline = pipeline.pipe(
         filter(([_key, namespacedRow]) => {
-          return toBooleanPredicate(fnWhere(namespacedRow))
+          const callbackRow = parentKeyStream
+            ? (stripInternalRouteMetadata(namespacedRow) as NamespacedRow)
+            : namespacedRow
+          return toBooleanPredicate(fnWhere(callbackRow))
         }),
       )
     }
@@ -972,7 +975,10 @@ export function compileQuery(
     // Handle functional select - apply the function to transform the row
     pipeline = pipeline.pipe(
       map(([key, namespacedRow]) => {
-        const selectResults = query.fnSelect!(namespacedRow)
+        const callbackRow = parentKeyStream
+          ? (stripInternalRouteMetadata(namespacedRow) as NamespacedRow)
+          : namespacedRow
+        const selectResults = query.fnSelect!(callbackRow)
         validateFnSelectResult(selectResults)
         let selected = selectResults
         if (
@@ -1114,7 +1120,10 @@ export function compileQuery(
     for (const fnHaving of query.fnHaving) {
       pipeline = pipeline.pipe(
         filter(([_key, namespacedRow]) => {
-          return fnHaving(namespacedRow)
+          const callbackRow = parentKeyStream
+            ? (stripInternalRouteMetadata(namespacedRow) as NamespacedRow)
+            : namespacedRow
+          return fnHaving(callbackRow)
         }),
       )
     }

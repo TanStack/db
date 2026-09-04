@@ -82,6 +82,11 @@ const routeContextGrammar = {
     shapes: [
       `object-query-ref-scalar`,
       `nested-functional-spread`,
+      `opaque-wrapper`,
+      `functional-having-input`,
+      `nested-reference`,
+      `adversarial-key`,
+      `user-symbol`,
       `implicit-join`,
     ] as const,
   },
@@ -1676,20 +1681,46 @@ async function runNamespaceCollisionCell({
   }
 }
 
+class PublicSurfaceBox {
+  readonly map: Map<string, unknown>
+  readonly set: Set<unknown>
+
+  constructor(readonly row: unknown) {
+    this.map = new Map([[`row`, row]])
+    this.set = new Set([row])
+  }
+}
+
 function expectNoPrivateSymbolsDeep(
   value: unknown,
+  allowedSymbols: ReadonlySet<symbol>,
   seen = new WeakSet<object>(),
 ): void {
   if (value == null || typeof value !== `object` || seen.has(value)) return
   seen.add(value)
 
   for (const key of Reflect.ownKeys(value)) {
-    expect(
-      typeof key,
-      `unexpected private symbol in public query output`,
-    ).not.toBe(`symbol`)
-    if (typeof key === `string`) {
-      expectNoPrivateSymbolsDeep((value as Record<string, unknown>)[key], seen)
+    if (typeof key === `symbol`) {
+      expect(
+        allowedSymbols.has(key),
+        `unexpected private symbol in public query output`,
+      ).toBe(true)
+    }
+    expectNoPrivateSymbolsDeep(
+      (value as Record<PropertyKey, unknown>)[key],
+      allowedSymbols,
+      seen,
+    )
+  }
+
+  if (value instanceof Map) {
+    for (const [key, entry] of value) {
+      expectNoPrivateSymbolsDeep(key, allowedSymbols, seen)
+      expectNoPrivateSymbolsDeep(entry, allowedSymbols, seen)
+    }
+  } else if (value instanceof Set) {
+    for (const entry of value) {
+      expectNoPrivateSymbolsDeep(entry, allowedSymbols, seen)
     }
   }
 }
@@ -1697,15 +1728,47 @@ function expectNoPrivateSymbolsDeep(
 async function runPublicSurfaceCell({
   shape,
 }: PublicSurfaceCell): Promise<void> {
+  const callbackRows: Array<unknown> = []
   const parents = createGrammarCollection(`surface-${shape}-parents`, [
     { id: 1, group: 1 },
   ])
   const first = new Date(`2026-01-01T00:00:00.000Z`)
   const second = new Date(`2026-01-02T00:00:00.000Z`)
   const third = new Date(`2026-01-03T00:00:00.000Z`)
+  const firstPayload = { token: `first` }
+  const secondPayload = { token: `second` }
+  const userSymbol = Symbol(`user-owned`)
+  const createAdversarialPayload = (marker: string) => {
+    const value: Record<PropertyKey, unknown> = { safe: marker }
+    Object.defineProperty(value, `__proto__`, {
+      value: { marker },
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    })
+    return value
+  }
+  const firstAdversarial = createAdversarialPayload(`first`)
+  const secondAdversarial = createAdversarialPayload(`second`)
   const children = createGrammarCollection(`surface-${shape}-children`, [
-    { id: 10, parentGroup: 1, value: first, label: `ten` },
-    { id: 20, parentGroup: 2, value: second, label: `twenty` },
+    {
+      id: 10,
+      parentGroup: 1,
+      value: first,
+      payload: firstPayload,
+      adversarial: firstAdversarial,
+      symbols: { [userSymbol]: `first` },
+      label: `ten`,
+    },
+    {
+      id: 20,
+      parentGroup: 2,
+      value: second,
+      payload: secondPayload,
+      adversarial: secondAdversarial,
+      symbols: { [userSymbol]: `second` },
+      label: `twenty`,
+    },
   ])
   const candidates = createGrammarCollection(`surface-${shape}-candidates`, [
     { id: 10, value: first },
@@ -1748,6 +1811,57 @@ async function runPublicSurfaceCell({
         return { id: parent.id, ...includeInEveryForm(rows) }
       }
 
+      if (shape === `opaque-wrapper`) {
+        const rows = correlated.fn
+          .where((row) => {
+            callbackRows.push(row)
+            return true
+          })
+          .fn.select((row) => ({
+            id: row.child.id,
+            box: new PublicSurfaceBox(row),
+          }))
+        return { id: parent.id, ...includeInEveryForm(rows) }
+      }
+
+      if (shape === `functional-having-input`) {
+        const rows = correlated
+          .groupBy(({ child }) => child.parentGroup)
+          .select(({ child }) => ({
+            parentGroup: child.parentGroup,
+            total: count(child.id),
+          }))
+          .fn.having((row) => {
+            callbackRows.push(row)
+            return true
+          })
+        return { id: parent.id, ...includeInEveryForm(rows) }
+      }
+
+      if (shape === `nested-reference`) {
+        const rows = correlated.select(({ child }) => ({
+          id: child.id,
+          payload: child.payload,
+        }))
+        return { id: parent.id, ...includeInEveryForm(rows) }
+      }
+
+      if (shape === `adversarial-key`) {
+        const rows = correlated.select(({ child }) => ({
+          id: child.id,
+          payload: child.adversarial,
+        }))
+        return { id: parent.id, ...includeInEveryForm(rows) }
+      }
+
+      if (shape === `user-symbol`) {
+        const rows = correlated.select(({ child }) => ({
+          id: child.id,
+          payload: child.symbols,
+        }))
+        return { id: parent.id, ...includeInEveryForm(rows) }
+      }
+
       const rows = correlated.innerJoin(
         { tag: tags.collection },
         ({ child, tag }) => eq(child.id, tag.childId),
@@ -1764,7 +1878,12 @@ async function runPublicSurfaceCell({
       [...forms.materialized],
     ]
     for (const rows of rowsByForm) {
-      for (const row of rows) expectNoPrivateSymbolsDeep(row)
+      for (const row of rows) {
+        expectNoPrivateSymbolsDeep(row, new Set([userSymbol]))
+      }
+    }
+    for (const row of callbackRows) {
+      expectNoPrivateSymbolsDeep(row, new Set([userSymbol]))
     }
 
     if (shape === `object-query-ref-scalar`) {
@@ -1775,19 +1894,9 @@ async function runPublicSurfaceCell({
             ? [{ id: 200, value: second }]
             : [{ id: 300, value: third }]
       for (const rows of rowsByForm) {
-        expect(
-          rows.map((row: any) => ({
-            id: row.id,
-            isDate: row.value instanceof Date,
-            time: row.value.getTime(),
-          })),
-        ).toEqual(
-          expected.map((row) => ({
-            id: row.id,
-            isDate: true,
-            time: row.value.getTime(),
-          })),
-        )
+        expect(rows).toHaveLength(1)
+        expect((rows[0] as any).id).toBe(expected[0]!.id)
+        expect((rows[0] as any).value).toBe(expected[0]!.value)
       }
       return
     }
@@ -1812,6 +1921,61 @@ async function runPublicSurfaceCell({
       parents.collection.get(1)!.group === 1
         ? children.collection.get(10)!
         : children.collection.get(20)!
+
+    if (shape === `opaque-wrapper`) {
+      for (const rows of rowsByForm) {
+        expect(rows).toHaveLength(1)
+        const row = rows[0] as any
+        expect(row.box).toBeInstanceOf(PublicSurfaceBox)
+        expect(row.box.row.child.id).toBe(child.id)
+        expect(row.box.map.get(`row`)).toBe(row.box.row)
+        expect(row.box.set.has(row.box.row)).toBe(true)
+      }
+      return
+    }
+
+    if (shape === `nested-reference`) {
+      for (const rows of rowsByForm) {
+        expect((rows[0] as any).payload).toBe(child.payload)
+      }
+      return
+    }
+
+    if (shape === `functional-having-input`) {
+      for (const rows of rowsByForm) {
+        expect(
+          rows.map((row: any) => ({
+            parentGroup: row.parentGroup,
+            total: row.total,
+          })),
+        ).toEqual([{ parentGroup: child.parentGroup, total: 1 }])
+      }
+      return
+    }
+
+    if (shape === `adversarial-key`) {
+      for (const rows of rowsByForm) {
+        const payload = (rows[0] as any).payload
+        expect(Object.prototype.hasOwnProperty.call(payload, `__proto__`)).toBe(
+          true,
+        )
+        expect(Object.getPrototypeOf(payload)).toBe(Object.prototype)
+        expect(payload.__proto__).toEqual({
+          marker: child.adversarial.__proto__.marker,
+        })
+      }
+      return
+    }
+
+    if (shape === `user-symbol`) {
+      for (const rows of rowsByForm) {
+        expect((rows[0] as any).payload[userSymbol]).toBe(
+          child.symbols[userSymbol],
+        )
+      }
+      return
+    }
+
     const tag = tags.collection.toArray.find(
       ({ childId }) => childId === child.id,
     )!
@@ -1894,7 +2058,7 @@ describe(`correlated include route-context transport grammar`, () => {
     expect(new Set(names)).toHaveLength(expectedCellCount)
     expect(
       grammarCells.length * materializationForms.length * checkpoints.length,
-    ).toBe(774)
+    ).toBe(819)
   })
 
   for (const cell of grammarCells) {

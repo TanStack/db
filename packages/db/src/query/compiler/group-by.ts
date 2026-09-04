@@ -33,6 +33,7 @@ import {
   INCLUDES_PUBLIC_KEY,
   attachRouteMetadata,
   getNamespacedRouteMetadata,
+  stripInternalRouteMetadata,
 } from './route-metadata.js'
 import type {
   Aggregate,
@@ -503,7 +504,10 @@ export function processGroupBy(
         pipeline = pipeline.pipe(
           filter(([, row]) => {
             const namespacedRow = getHavingEvaluationRow(row, fields)
-            return toBooleanPredicate(fnHaving(namespacedRow))
+            const callbackRow = mainSource
+              ? stripInternalRouteMetadata(namespacedRow)
+              : namespacedRow
+            return toBooleanPredicate(fnHaving(callbackRow))
           }),
         )
       }
@@ -714,7 +718,10 @@ export function processGroupBy(
       pipeline = pipeline.pipe(
         filter(([, row]) => {
           const namespacedRow = getHavingEvaluationRow(row, fields)
-          return toBooleanPredicate(fnHaving(namespacedRow))
+          const callbackRow = mainSource
+            ? stripInternalRouteMetadata(namespacedRow)
+            : namespacedRow
+          return toBooleanPredicate(fnHaving(callbackRow))
         }),
       )
     }

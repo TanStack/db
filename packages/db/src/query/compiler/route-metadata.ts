@@ -1,6 +1,10 @@
 const ROUTED_SCALAR_VALUE = Symbol(`tanstack_db_routed_scalar_value`)
 const ROUTE_METADATA = Symbol(`tanstack_db_route_metadata`)
 export const INCLUDES_PUBLIC_KEY = Symbol(`includesPublicKey`)
+const INTERNAL_ROUTE_KEYS = new Set<PropertyKey>([
+  ROUTE_METADATA,
+  INCLUDES_PUBLIC_KEY,
+])
 
 type RoutedResult = {
   [ROUTED_SCALAR_VALUE]: unknown
@@ -111,31 +115,94 @@ export function getRoutedScalarMetadata(
 
 /** Copy public containers while removing private route state at every depth. */
 export function stripInternalRouteMetadata(value: unknown): unknown {
-  const copies = new WeakMap<object, object>()
+  return transformPublicContainers(value, (leaf) => leaf, INTERNAL_ROUTE_KEYS)
+}
 
-  const visit = (current: unknown): unknown => {
-    if (current == null || typeof current !== `object`) return current
-    const existing = copies.get(current)
-    if (existing) return existing
-    if (!Array.isArray(current) && !isPlainObject(current)) return current
+/** Copy only paths changed by a leaf transform or an omitted private key. */
+export function transformPublicContainers(
+  value: unknown,
+  transformLeaf: (value: unknown) => unknown,
+  omittedKeys: ReadonlySet<PropertyKey>,
+): unknown {
+  const rootReplacement = transformLeaf(value)
+  if (rootReplacement !== value) return rootReplacement
+  if (!isPublicContainer(value)) return value
 
-    const copy: Record<PropertyKey, unknown> | Array<unknown> = Array.isArray(
-      current,
-    )
-      ? []
-      : {}
-    const output = copy as unknown as Record<PropertyKey, unknown>
-    copies.set(current, copy)
+  const parents = new WeakMap<object, Set<object>>()
+  const properties = new WeakMap<
+    object,
+    Map<PropertyKey, { value: unknown; replacement: unknown }>
+  >()
+  const visited = new WeakSet<object>()
+  const dirty = new Set<object>()
+  const visit = (current: object): void => {
+    if (visited.has(current)) return
+    visited.add(current)
+    const currentProperties = new Map<
+      PropertyKey,
+      { value: unknown; replacement: unknown }
+    >()
+    properties.set(current, currentProperties)
     for (const key of Reflect.ownKeys(current)) {
-      if (key === ROUTE_METADATA || key === INCLUDES_PUBLIC_KEY) continue
+      if (omittedKeys.has(key)) {
+        dirty.add(current)
+        continue
+      }
       const descriptor = Object.getOwnPropertyDescriptor(current, key)
       if (!descriptor?.enumerable) continue
-      output[key] = visit((current as Record<PropertyKey, unknown>)[key])
+      const child = (current as Record<PropertyKey, unknown>)[key]
+      const replacement = transformLeaf(child)
+      currentProperties.set(key, { value: child, replacement })
+      if (replacement !== child) {
+        dirty.add(current)
+        continue
+      }
+      if (!isPublicContainer(child)) continue
+      const childParents = parents.get(child) ?? new Set<object>()
+      childParents.add(current)
+      parents.set(child, childParents)
+      visit(child)
     }
-    return copy
+  }
+  visit(value)
+
+  const queue = [...dirty]
+  for (const current of queue) {
+    for (const parent of parents.get(current) ?? []) {
+      if (dirty.has(parent)) continue
+      dirty.add(parent)
+      queue.push(parent)
+    }
+  }
+  if (!dirty.has(value)) return value
+
+  const copies = new WeakMap<object, object>()
+  const copy = (current: object): object => {
+    if (!dirty.has(current)) return current
+    const existing = copies.get(current)
+    if (existing) return existing
+
+    const result = Array.isArray(current)
+      ? []
+      : Object.create(Object.getPrototypeOf(current))
+    copies.set(current, result)
+    for (const [key, property] of properties.get(current) ?? []) {
+      Object.defineProperty(result, key, {
+        value:
+          property.replacement !== property.value
+            ? property.replacement
+            : isPublicContainer(property.value)
+              ? copy(property.value)
+              : property.value,
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      })
+    }
+    return result
   }
 
-  return visit(value)
+  return copy(value)
 }
 
 export function isPlainObject(
@@ -144,4 +211,8 @@ export function isPlainObject(
   if (value == null || typeof value !== `object`) return false
   const prototype = Object.getPrototypeOf(value)
   return prototype === Object.prototype || prototype === null
+}
+
+function isPublicContainer(value: unknown): value is object {
+  return Array.isArray(value) || isPlainObject(value)
 }
