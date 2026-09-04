@@ -256,6 +256,47 @@ describe(`OrderedSourceLoader`, () => {
     }
   })
 
+  it(`retires an acquisition when its result observer throws`, async () => {
+    const observerFailure = new Error(`ordered result observer failed`)
+    const acquisition: LoadSubsetOptions = {}
+    const methods: Array<string> = []
+    const releases: Array<LoadSubsetOptions> = []
+    let failObserver = true
+    const subscription = {
+      setOrderByIndex: () => {},
+      releaseLoadSubset: (options: LoadSubsetOptions) => {
+        releases.push(options)
+      },
+      requestSnapshot: (options: RequestOptions) => {
+        methods.push(`snapshot`)
+        options.onLoadSubsetResult?.(true, acquisition)
+      },
+    } as unknown as CollectionSubscription
+    const loader = new OrderedSourceLoader(
+      createOrderByInfo({ index: undefined }),
+      subscription,
+      `row`,
+      () => undefined,
+      () => {
+        if (!failObserver) return
+        failObserver = false
+        throw observerFailure
+      },
+    )
+
+    expect(() => loader.start()).toThrow(observerFailure)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(releases).toEqual([acquisition])
+
+    expect(loader.loadMore()).toBeUndefined()
+    expect(methods).toEqual([`snapshot`])
+
+    loader.loadMore(1)
+    expect(methods).toEqual([`snapshot`, `snapshot`])
+    loader.dispose()
+  })
+
   it(`blocks a reentrant boundary retry until a later operation`, async () => {
     const failure = new Error(`boundary request failed`)
     const methods: Array<string> = []

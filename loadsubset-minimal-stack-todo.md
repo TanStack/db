@@ -1070,10 +1070,12 @@ explicitly removed.
         error must report the request failure while the release remains cleanup
         debt. A real `CollectionSubscription` witness red/greened publication
         failure plus a throwing adapter release and its later cleanup retry.
-  - [ ] Retire a provisional acquisition when the ordered-loader result
+  - [x] Retire a provisional acquisition when the ordered-loader result
         observer throws. A throwing publication/listener callback must not
         leave successful coverage behind or let the queued settlement clear
-        the failure gate.
+        the failure gate. The red witness now checks exact release, blocks an
+        ordinary retry after the queued settlement, and permits only a later
+        explicit operation generation.
   - [ ] Replace the synthetic callback-before-throw page cell with a reachable
         production integration that throws after adapter startup during local
         read or publication. Keep direct route cells only for method-selection

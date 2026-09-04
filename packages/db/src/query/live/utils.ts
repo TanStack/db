@@ -581,11 +581,11 @@ export class OrderedSourceLoader {
       },
     )
     this.pending = tracked
+    void tracked.catch(() => {})
     // Register each request separately. The operation tracker observes the
     // next request before this promise settles, so the logical chain remains
     // pending without retaining every ancestor promise until the final page.
     this.onResult(tracked)
-    void tracked.catch(() => {})
     return tracked
   }
 
@@ -639,6 +639,28 @@ export class OrderedSourceLoader {
     this.needsFullSourceRecovery = true
   }
 
+  private retireProvisionalFailure(
+    observed: { result: LoadSubsetRequestResult; options: LoadSubsetOptions },
+    error: unknown,
+    isFullSource: boolean,
+    windowOperationGeneration?: number,
+    cancelObservedSettlement = false,
+  ): void {
+    if (cancelObservedSettlement) {
+      this.generation++
+      this.pending = undefined
+    }
+    this.invalidateSourceCoverage()
+    this.failed = true
+    this.failedWindowOperationGeneration = windowOperationGeneration
+    if (isFullSource) this.fullSourceFailed = true
+    try {
+      this.subscription.releaseLoadSubset(observed.options, { error })
+    } catch {
+      // releaseLoadSubset retains cleanup debt for a later retry.
+    }
+  }
+
   /** Observe settlement only after all synchronous request work succeeds. */
   private requestAndObserve(
     request: (
@@ -664,33 +686,44 @@ export class OrderedSourceLoader {
       // Enter failure state before adapter cleanup. Releasing the provisional
       // acquisition may call back into the graph, but it cannot start a
       // replacement while the failed request is still unwinding.
-      this.invalidateSourceCoverage()
-      this.failed = true
-      this.failedWindowOperationGeneration = windowOperationGeneration
-      if (isFullSource) {
-        this.fullSourceFailed = true
-      }
       // The acquisition began, but later synchronous snapshot or publication
       // work failed. Retire it without replacing the original failure.
       if (observed) {
-        try {
-          this.subscription.releaseLoadSubset(observed.options, { error })
-        } catch {
-          // releaseLoadSubset retains cleanup debt for a later retry.
-        }
+        this.retireProvisionalFailure(
+          observed,
+          error,
+          isFullSource,
+          windowOperationGeneration,
+        )
+      } else {
+        this.invalidateSourceCoverage()
+        this.failed = true
+        this.failedWindowOperationGeneration = windowOperationGeneration
+        if (isFullSource) this.fullSourceFailed = true
       }
       throw error
     } finally {
       this.requesting = false
     }
     if (!observed) return
-    return this.observe(
-      observed.result,
-      observed.options,
-      refine,
-      isFullSource,
-      establishesSourceCoverage,
-      windowOperationGeneration,
-    )
+    try {
+      return this.observe(
+        observed.result,
+        observed.options,
+        refine,
+        isFullSource,
+        establishesSourceCoverage,
+        windowOperationGeneration,
+      )
+    } catch (error) {
+      this.retireProvisionalFailure(
+        observed,
+        error,
+        isFullSource,
+        windowOperationGeneration,
+        true,
+      )
+      throw error
+    }
   }
 }
