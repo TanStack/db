@@ -12,10 +12,9 @@ import {
 import type { LoadSubsetOptions, SyncConfig } from '../src/types.js'
 
 type DemandName = `a` | `b`
-type SettlementOutcome = `resolve` | `reject`
 type AttemptScope = `current` | `obsolete`
-
-type AsyncLifecycleCommand =
+type AttemptAge = `oldest` | `newest`
+type Command =
   | { type: `request`; demand: DemandName }
   | { type: `abort`; demand: DemandName }
   | { type: `release`; demand: DemandName }
@@ -23,170 +22,367 @@ type AsyncLifecycleCommand =
       type: `settle`
       demand: DemandName
       scope: AttemptScope
-      outcome: SettlementOutcome
+      age: AttemptAge
+      outcome: `resolve` | `reject`
     }
   | { type: `truncate` }
   | { type: `cleanup` }
   | { type: `restart` }
   | { type: `unsubscribe` }
 
-const asyncLifecycleCommandArbitrary: fc.Arbitrary<AsyncLifecycleCommand> =
-  fc.oneof(
-    fc.record({
-      type: fc.constant(`request` as const),
-      demand: fc.constantFrom(`a` as const, `b` as const),
-    }),
-    fc.record({
-      type: fc.constant(`release` as const),
-      demand: fc.constantFrom(`a` as const, `b` as const),
-    }),
-    fc.record({
-      type: fc.constant(`abort` as const),
-      demand: fc.constantFrom(`a` as const, `b` as const),
-    }),
-    fc.record({
-      type: fc.constant(`settle` as const),
-      demand: fc.constantFrom(`a` as const, `b` as const),
-      scope: fc.constantFrom(`current` as const, `obsolete` as const),
-      outcome: fc.constantFrom(`resolve` as const, `reject` as const),
-    }),
-    fc.constant({ type: `truncate` as const }),
-    fc.constant({ type: `cleanup` as const }),
-    fc.constant({ type: `restart` as const }),
-    fc.constant({ type: `unsubscribe` as const }),
-  )
-
-const asyncLifecycleHistoryArbitrary = fc.array(
-  // External abort has one known replay bug cataloged below. Keep the broad
-  // green history property useful until that red is fixed, then remove this
-  // filter so abort participates in arbitrary interleavings too.
-  asyncLifecycleCommandArbitrary.filter(({ type }) => type !== `abort`),
-  { minLength: 1, maxLength: 20 },
-)
-
-type Attempt = {
-  id: number
-  session: number
-  demand: DemandName
-  ownerId?: number
-  options: LoadSubsetOptions
-  deferred: ReturnType<typeof createDeferred<void>>
-  failure: Error
-  settled: boolean
-  gating: boolean
-  reportable: boolean
-  shouldBeAborted: boolean
-}
-
 type Owner = {
   id: number
   demand: DemandName
-  abortController: AbortController
-  acquisition?: Attempt
+  aborted: boolean
+  attemptId?: number
 }
-
-type EffectiveCoverage = {
-  types: Set<AsyncLifecycleCommand[`type`]>
-  partialRestart: boolean
-  duplicateOwner: boolean
-  requestWhileCleaned: boolean
-  overlappingReplay: boolean
+type Attempt = {
+  id: number
+  ownerId: number
+  demand: DemandName
+  session: number
+  replay: number
+  settled: boolean
+  gating: boolean
+  reportable: boolean
+  aborted: boolean
+  failure: Error
 }
+type LoadEvent = Pick<Attempt, `id` | `demand` | `session` | `replay`>
+type UnloadEvent = { attemptId: number; handlerSession: number }
+type ErrorEvent = { attemptId: number; error: Error }
+type Model = {
+  active: boolean
+  unsubscribed: boolean
+  session: number
+  replay: number
+  publicationBarrierOpen: boolean
+  nextOwnerId: number
+  nextAttemptId: number
+  owners: Array<Owner>
+  attempts: Array<Attempt>
+  loads: Array<LoadEvent>
+  unloads: Array<UnloadEvent>
+  errors: Array<ErrorEvent>
+  results: Array<number>
+  publications: number
+  statuses: Array<string>
+  status: string
+  collectionStatus: `ready` | `cleaned-up`
+  lastError?: Error
+  reach: Set<string>
+}
+type Effect = { ownerId?: number; attemptId?: number; requestResult?: boolean }
 
-function classifyAsyncLifecycleHistory(
-  history: ReadonlyArray<AsyncLifecycleCommand>,
-): EffectiveCoverage {
-  const owners: Array<DemandName> = []
-  const pending: Array<{ session: number; demand: DemandName }> = []
-  const types = new Set<AsyncLifecycleCommand[`type`]>()
-  let session = 0
-  let active = true
-  let unsubscribed = false
-  let partialRestart = false
-  let duplicateOwner = false
-  let requestWhileCleaned = false
-  let overlappingReplay = false
-
-  for (const command of history) {
-    if (unsubscribed) break
-    if (command.type === `request`) {
-      types.add(command.type)
-      duplicateOwner ||= owners.includes(command.demand)
-      requestWhileCleaned ||= !active
-      owners.push(command.demand)
-      if (active) pending.push({ session, demand: command.demand })
-    } else if (command.type === `abort`) {
-      if (!owners.includes(command.demand)) continue
-      types.add(command.type)
-    } else if (command.type === `release`) {
-      const owner = owners.indexOf(command.demand)
-      if (owner === -1) continue
-      types.add(command.type)
-      owners.splice(owner, 1)
-    } else if (command.type === `settle`) {
-      const attempt = pending.find(
-        (candidate) =>
-          candidate.demand === command.demand &&
-          (command.scope === `current`
-            ? candidate.session === session
-            : candidate.session !== session),
-      )
-      if (!attempt) continue
-      types.add(command.type)
-      pending.splice(pending.indexOf(attempt), 1)
-    } else if (command.type === `cleanup`) {
-      if (!active) continue
-      types.add(command.type)
-      active = false
-    } else if (command.type === `restart`) {
-      if (active) continue
-      types.add(command.type)
-      partialRestart ||= pending.some((attempt) => attempt.session === session)
-      active = true
-      session++
-      pending.push(...owners.map((demand) => ({ session, demand })))
-    } else if (command.type === `truncate`) {
-      if (!active || owners.length === 0) continue
-      types.add(command.type)
-      overlappingReplay ||= pending.some(
-        (attempt) => attempt.session === session,
-      )
-      pending.push(...owners.map((demand) => ({ session, demand })))
-    } else {
-      types.add(command.type)
-      unsubscribed = true
-    }
-  }
-
+const commandArbitrary: fc.Arbitrary<Command> = fc.oneof(
+  fc.record({
+    type: fc.constant(`request` as const),
+    demand: fc.constantFrom(`a` as const, `b` as const),
+  }),
+  fc.record({
+    type: fc.constant(`abort` as const),
+    demand: fc.constantFrom(`a` as const, `b` as const),
+  }),
+  fc.record({
+    type: fc.constant(`release` as const),
+    demand: fc.constantFrom(`a` as const, `b` as const),
+  }),
+  fc.record({
+    type: fc.constant(`settle` as const),
+    demand: fc.constantFrom(`a` as const, `b` as const),
+    scope: fc.constantFrom(`current` as const, `obsolete` as const),
+    age: fc.constantFrom(`oldest` as const, `newest` as const),
+    outcome: fc.constantFrom(`resolve` as const, `reject` as const),
+  }),
+  fc.constant({ type: `truncate` as const }),
+  fc.constant({ type: `cleanup` as const }),
+  fc.constant({ type: `restart` as const }),
+  fc.constant({ type: `unsubscribe` as const }),
+)
+function createModel(): Model {
   return {
-    types,
-    partialRestart,
-    duplicateOwner,
-    requestWhileCleaned,
-    overlappingReplay,
+    active: true,
+    unsubscribed: false,
+    session: 0,
+    replay: 0,
+    publicationBarrierOpen: false,
+    nextOwnerId: 0,
+    nextAttemptId: 0,
+    owners: [],
+    attempts: [],
+    loads: [],
+    unloads: [],
+    errors: [],
+    results: [],
+    publications: 0,
+    statuses: [],
+    status: `ready`,
+    collectionStatus: `ready`,
+    reach: new Set(),
   }
 }
 
-if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
-  fc.statistics(
-    asyncLifecycleHistoryArbitrary,
-    (history) => {
-      const coverage = classifyAsyncLifecycleHistory(history)
-      return [
-        ...coverage.types,
-        `partial-restart=${coverage.partialRestart}`,
-        `duplicate-owner=${coverage.duplicateOwner}`,
-        `request-while-cleaned=${coverage.requestWhileCleaned}`,
-        `overlapping-replay=${coverage.overlappingReplay}`,
-      ]
-    },
-    oraclePropertyOptions(1_000, `subscription-lifecycle.history-statistics`),
-  )
+function setStatus(model: Model): void {
+  if (model.unsubscribed) return
+  const status =
+    model.active && model.attempts.some(({ gating }) => gating)
+      ? `loadingSubset`
+      : `ready`
+  if (status !== model.status) {
+    model.status = status
+    model.statuses.push(status)
+  }
 }
 
-async function runAsyncLifecycleHistory(
-  history: ReadonlyArray<AsyncLifecycleCommand>,
-): Promise<void> {
+function startAttempt(model: Model, owner: Owner): Attempt {
+  const id = model.nextAttemptId++
+  const attempt: Attempt = {
+    id,
+    ownerId: owner.id,
+    demand: owner.demand,
+    session: model.session,
+    replay: model.replay,
+    settled: false,
+    gating: true,
+    reportable: true,
+    aborted: false,
+    failure: new Error(`attempt ${id} failed`),
+  }
+  model.attempts.push(attempt)
+  model.loads.push({
+    id,
+    demand: attempt.demand,
+    session: attempt.session,
+    replay: attempt.replay,
+  })
+  owner.attemptId = id
+  return attempt
+}
+
+function retireAttempt(model: Model, owner: Owner, unload: boolean): void {
+  if (owner.attemptId === undefined) return
+  const attempt = model.attempts[owner.attemptId]
+  owner.attemptId = undefined
+  if (!attempt) throw new Error(`model lost attempt`)
+  attempt.gating = false
+  attempt.reportable = false
+  attempt.aborted = true
+  if (unload) {
+    model.unloads.push({ attemptId: attempt.id, handlerSession: model.session })
+  }
+}
+
+function selectAttempt(
+  model: Model,
+  command: Extract<Command, { type: `settle` }>,
+): Attempt | undefined {
+  const currentAttemptIds = new Set(
+    model.owners.flatMap(({ attemptId }) =>
+      attemptId === undefined ? [] : [attemptId],
+    ),
+  )
+  const candidates = model.attempts.filter(
+    (attempt) =>
+      !attempt.settled &&
+      attempt.demand === command.demand &&
+      (command.scope === `current`
+        ? currentAttemptIds.has(attempt.id)
+        : !currentAttemptIds.has(attempt.id)),
+  )
+  return command.age === `oldest` ? candidates[0] : candidates.at(-1)
+}
+
+/** Pure reference transition. It never reads adapter callbacks or SUT state. */
+function reduce(model: Model, command: Command): Effect {
+  model.reach.add(`command:${command.type}`)
+  if (model.unsubscribed) {
+    if (command.type === `cleanup` && model.active) {
+      model.active = false
+      model.collectionStatus = `cleaned-up`
+    } else if (command.type === `restart` && !model.active) {
+      model.active = true
+      model.session++
+      model.replay = 0
+      model.publicationBarrierOpen = false
+      model.collectionStatus = `ready`
+    }
+    return { requestResult: false }
+  }
+
+  if (command.type === `request`) {
+    if (model.owners.some(({ demand }) => demand === command.demand)) {
+      model.reach.add(`duplicate-owner`)
+    }
+    if (!model.active) model.reach.add(`request-while-cleaned`)
+    const owner: Owner = {
+      id: model.nextOwnerId++,
+      demand: command.demand,
+      aborted: false,
+    }
+    model.owners.push(owner)
+    if (model.active) model.results.push(startAttempt(model, owner).id)
+    if (!model.publicationBarrierOpen) model.publications++
+    setStatus(model)
+    return { ownerId: owner.id, requestResult: true }
+  }
+
+  if (command.type === `abort`) {
+    const owner = model.owners.find(
+      ({ demand, aborted }) => demand === command.demand && !aborted,
+    )
+    if (!owner) return {}
+    owner.aborted = true
+    if (owner.attemptId !== undefined) {
+      const attempt = model.attempts[owner.attemptId]!
+      attempt.aborted = true
+      attempt.reportable = false
+    }
+    return { ownerId: owner.id }
+  }
+
+  if (command.type === `release`) {
+    const index = model.owners.findIndex(
+      ({ demand }) => demand === command.demand,
+    )
+    if (index === -1) return {}
+    const [owner] = model.owners.splice(index, 1)
+    retireAttempt(model, owner!, true)
+    if (
+      model.publicationBarrierOpen &&
+      model.owners.every(({ attemptId }) =>
+        attemptId === undefined ? true : model.attempts[attemptId]!.settled,
+      )
+    ) {
+      model.publicationBarrierOpen = false
+    }
+    setStatus(model)
+    return { ownerId: owner!.id }
+  }
+
+  if (command.type === `settle`) {
+    const attempt = selectAttempt(model, command)
+    if (!attempt) return {}
+    attempt.settled = true
+    attempt.gating = false
+    if (
+      command.outcome === `reject` &&
+      attempt.reportable &&
+      !attempt.aborted
+    ) {
+      model.lastError = attempt.failure
+      model.errors.push({ attemptId: attempt.id, error: attempt.failure })
+    }
+    if (
+      model.publicationBarrierOpen &&
+      model.owners.every(({ attemptId }) =>
+        attemptId === undefined ? true : model.attempts[attemptId]!.settled,
+      )
+    ) {
+      model.publicationBarrierOpen = false
+    }
+    setStatus(model)
+    return { attemptId: attempt.id }
+  }
+
+  if (command.type === `truncate`) {
+    if (!model.active) return {}
+    if (
+      model.replay > 0 &&
+      model.attempts.some(
+        ({ session, settled }) => session === model.session && !settled,
+      )
+    ) {
+      model.reach.add(`overlapping-replay`)
+    }
+    model.replay++
+    model.publicationBarrierOpen = model.owners.some(({ aborted }) => !aborted)
+    for (const owner of model.owners) {
+      retireAttempt(model, owner, true)
+      if (!owner.aborted) startAttempt(model, owner)
+    }
+    setStatus(model)
+    return {}
+  }
+
+  if (command.type === `cleanup`) {
+    if (!model.active) return {}
+    const current = model.attempts.filter(
+      ({ session }) => session === model.session,
+    )
+    if (
+      current.some(({ settled }) => settled) &&
+      current.some(({ settled }) => !settled)
+    ) {
+      model.reach.add(`partial-generation-supersession`)
+    }
+    for (const owner of model.owners) retireAttempt(model, owner, false)
+    model.active = false
+    model.publicationBarrierOpen = false
+    model.collectionStatus = `cleaned-up`
+    setStatus(model)
+    return {}
+  }
+
+  if (command.type === `restart`) {
+    if (model.active) return {}
+    model.active = true
+    model.session++
+    model.replay = 0
+    model.publicationBarrierOpen = model.owners.some(({ aborted }) => !aborted)
+    model.collectionStatus = `ready`
+    if (!model.unsubscribed) model.publications++
+    for (const owner of model.owners) {
+      if (!owner.aborted) startAttempt(model, owner)
+    }
+    setStatus(model)
+    return {}
+  }
+
+  for (const owner of model.owners) retireAttempt(model, owner, true)
+  model.owners.length = 0
+  model.unsubscribed = true
+  return {}
+}
+
+function crossesPendingReplaySupersession(
+  history: ReadonlyArray<Command>,
+): boolean {
+  const model = createModel()
+  for (const command of history) {
+    if (
+      command.type === `truncate` &&
+      model.active &&
+      model.owners.some(({ attemptId }) =>
+        attemptId === undefined ? false : !model.attempts[attemptId]!.settled,
+      )
+    ) {
+      return true
+    }
+    reduce(model, command)
+  }
+  return false
+}
+
+const historyArbitrary = fc
+  .array(
+    // Remove this filter when the named abort/replay red below turns green.
+    commandArbitrary.filter(({ type }) => type !== `abort`),
+    { minLength: 1, maxLength: 20 },
+  )
+  // Obsolete non-cooperative loads currently keep readiness gated. A focused
+  // red below owns that class while other histories continue to fuzz.
+  .filter((history) => !crossesPendingReplaySupersession(history))
+
+type RuntimeAttempt = {
+  options: LoadSubsetOptions
+  deferred: ReturnType<typeof createDeferred<void>>
+}
+
+async function runHistory(
+  history: ReadonlyArray<Command>,
+  options: { ignoreStatusTrace?: boolean } = {},
+): Promise<Set<string>> {
+  const model = createModel()
   const where = {
     a: new Func(`eq`, [new PropRef([`id`]), new Value(`a`)]),
     b: new Func(`eq`, [new PropRef([`id`]), new Value(`b`)]),
@@ -195,390 +391,282 @@ async function runAsyncLifecycleHistory(
     [where.a, `a`],
     [where.b, `b`],
   ])
-  const attempts: Array<Attempt> = []
-  const owners: Array<Owner> = []
-  const unloadIds: Array<number | `unacquired`> = []
-  const expectedUnloadIds: Array<number> = []
-  const errors: Array<{ attemptId: number; error: unknown }> = []
-  const expectedErrors: Array<{ attemptId: number; error: unknown }> = []
-  const statuses: Array<string> = []
-  const expectedStatuses: Array<string> = []
-  let expectedStatus = `ready`
-  let session = -1
-  let active = false
-  let unsubscribed = false
-  let nextOwnerId = 0
-  let nextAttemptId = 0
+  const runtimeAttempts = new Map<number, RuntimeAttempt>()
+  const attemptByOptions = new Map<LoadSubsetOptions, number>()
+  const ownerControllers = new Map<number, AbortController>()
+  const observedLoads: Array<LoadEvent> = []
+  const observedUnloads: Array<
+    UnloadEvent | { attemptId: `unacquired`; handlerSession: number }
+  > = []
+  const observedErrors: Array<{
+    attemptId: number | `unacquired`
+    error: unknown
+  }> = []
+  const observedResults: Array<number | `unacquired`> = []
+  const observedStatuses: Array<string> = []
+  let observedSession = -1
   let syncOps:
     | Parameters<SyncConfig<{ id: string }, string>[`sync`]>[0]
     | undefined
 
-  const attemptByOptions = new Map<LoadSubsetOptions, Attempt>()
   const collection = createCollection<{ id: string }, string>({
     id: `generated-async-demand-lifecycle`,
     getKey: ({ id }) => id,
     syncMode: `on-demand`,
     sync: {
       sync: (operations) => {
-        session++
-        active = true
+        const handlerSession = ++observedSession
         syncOps = operations
         operations.markReady()
-        const ownSession = session
         return {
           loadSubset: (options) => {
+            const expected = model.loads[observedLoads.length]
+            if (!expected) throw new Error(`unexpected adapter load`)
             const demand = demandForWhere.get(options.where)
-            if (!demand) throw new Error(`unknown generated async demand`)
-            const id = nextAttemptId++
+            if (
+              demand !== expected.demand ||
+              handlerSession !== expected.session
+            ) {
+              throw new Error(`adapter load did not match the model`)
+            }
             const deferred = createDeferred<void>()
             void deferred.promise.catch(() => undefined)
-            const attempt: Attempt = {
-              id,
-              session: ownSession,
-              demand,
-              options,
-              deferred,
-              failure: new Error(`attempt ${id} failed`),
-              settled: false,
-              gating: true,
-              reportable: true,
-              shouldBeAborted: false,
-            }
-            attempts.push(attempt)
-            attemptByOptions.set(options, attempt)
+            runtimeAttempts.set(expected.id, { options, deferred })
+            attemptByOptions.set(options, expected.id)
+            observedLoads.push(expected)
             return deferred.promise
           },
           unloadSubset: (options) => {
-            const attempt = attemptByOptions.get(options)
-            unloadIds.push(attempt?.id ?? `unacquired`)
+            observedUnloads.push({
+              attemptId: attemptByOptions.get(options) ?? `unacquired`,
+              handlerSession,
+            })
           },
         }
       },
     },
   })
-  const subscription = collection.subscribeChanges(() => {}, {
-    includeInitialState: false,
-  })
-  subscription.on(`status:change`, ({ status }) => statuses.push(status))
+  const publications: Array<unknown> = []
+  const subscription = collection.subscribeChanges(
+    (changes) => publications.push(changes),
+    { includeInitialState: false },
+  )
+  subscription.on(`status:change`, ({ status }) =>
+    observedStatuses.push(status),
+  )
   subscription.on(`loadSubset:error`, ({ options, error }) => {
-    const attempt = attemptByOptions.get(options)
-    if (!attempt) throw new Error(`unknown generated async error`)
-    errors.push({ attemptId: attempt.id, error })
+    observedErrors.push({
+      attemptId: attemptByOptions.get(options) ?? `unacquired`,
+      error,
+    })
   })
 
-  const setExpectedStatus = () => {
-    if (unsubscribed) return
-    const next =
-      active && attempts.some((attempt) => attempt.gating && !attempt.settled)
-        ? `loadingSubset`
-        : `ready`
-    if (next !== expectedStatus) {
-      expectedStatus = next
-      expectedStatuses.push(next)
+  const assertState = (command: Command) => {
+    const context = JSON.stringify({ history, command })
+    expect(observedLoads, context).toEqual(model.loads)
+    expect(observedUnloads, context).toEqual(model.unloads)
+    expect(observedErrors, context).toEqual(model.errors)
+    expect(observedResults, context).toEqual(model.results)
+    if (!options.ignoreStatusTrace) {
+      expect(observedStatuses, context).toEqual(model.statuses)
     }
-  }
-
-  const assertState = (command: AsyncLifecycleCommand) => {
-    setExpectedStatus()
-    expect(
-      attempts.map(({ session: attemptSession, demand }) => ({
-        session: attemptSession,
-        demand,
-      })),
-      JSON.stringify({ history, command }),
-    ).toHaveLength(nextAttemptId)
-    expect(unloadIds, JSON.stringify({ history, command })).toEqual(
-      expectedUnloadIds,
+    expect(subscription.status, context).toBe(model.status)
+    expect(subscription.lastError, context).toBe(model.lastError)
+    expect(collection.status, context).toBe(model.collectionStatus)
+    expect(publications, context).toEqual(
+      Array.from({ length: model.publications }, () => []),
     )
-    expect(errors, JSON.stringify({ history, command })).toEqual(expectedErrors)
-    expect(statuses, JSON.stringify({ history, command })).toEqual(
-      expectedStatuses,
-    )
-    expect(subscription.status, JSON.stringify({ history, command })).toBe(
-      expectedStatus,
-    )
-    expect(subscription.lastError, JSON.stringify({ history, command })).toBe(
-      expectedErrors.at(-1)?.error,
-    )
-    for (const attempt of attempts) {
+    for (const attempt of model.attempts) {
       expect(
-        attempt.options.signal?.aborted,
-        JSON.stringify({ history, command, attemptId: attempt.id }),
-      ).toBe(attempt.shouldBeAborted)
+        runtimeAttempts.get(attempt.id)?.options.signal?.aborted,
+        context,
+      ).toBe(attempt.aborted)
     }
   }
 
   try {
     for (const command of history) {
-      if (unsubscribed) break
-      const attemptsBefore = attempts.length
-
+      const effect = reduce(model, command)
       if (command.type === `request`) {
-        const owner: Owner = {
-          id: nextOwnerId++,
-          demand: command.demand,
-          abortController: new AbortController(),
+        const controller = new AbortController()
+        if (effect.ownerId !== undefined) {
+          ownerControllers.set(effect.ownerId, controller)
         }
-        owners.push(owner)
-        subscription.requestSnapshot({
+        const result = subscription.requestSnapshot({
           where: where[command.demand],
-          signal: owner.abortController.signal,
+          signal: controller.signal,
+          onLoadSubsetResult: (_result, options) => {
+            observedResults.push(attemptByOptions.get(options) ?? `unacquired`)
+          },
         })
-        const started = attempts.slice(attemptsBefore)
-        expect(
-          started.map(({ demand }) => demand),
-          JSON.stringify({ history, command }),
-        ).toEqual(active ? [command.demand] : [])
-        if (active) {
-          owner.acquisition = started[0]
-          started[0]!.ownerId = owner.id
-        }
+        expect(result).toBe(effect.requestResult)
       } else if (command.type === `abort`) {
-        const owner = owners.find(
-          (candidate) =>
-            candidate.demand === command.demand &&
-            !candidate.abortController.signal.aborted,
-        )
-        if (!owner) continue
-        owner.abortController.abort()
-        if (owner.acquisition) {
-          owner.acquisition.shouldBeAborted = true
-          owner.acquisition.reportable = false
+        if (effect.ownerId !== undefined) {
+          ownerControllers.get(effect.ownerId)?.abort()
         }
       } else if (command.type === `release`) {
-        const ownerIndex = owners.findIndex(
-          ({ demand }) => demand === command.demand,
-        )
-        if (ownerIndex === -1) continue
-        const [owner] = owners.splice(ownerIndex, 1)
         subscription.releaseSnapshot(where[command.demand])
-        for (const attempt of attempts) {
-          if (attempt.ownerId !== owner!.id) continue
-          attempt.gating = false
-          attempt.reportable = false
-        }
-        if (owner!.acquisition) {
-          owner!.acquisition.shouldBeAborted = true
-          expectedUnloadIds.push(owner!.acquisition.id)
-        }
-      } else if (command.type === `settle`) {
-        const attempt = attempts.find(
-          (candidate) =>
-            !candidate.settled &&
-            candidate.demand === command.demand &&
-            (command.scope === `current`
-              ? candidate.session === session
-              : candidate.session !== session),
-        )
-        if (!attempt) continue
-        attempt.settled = true
-        attempt.gating = false
-        if (command.outcome === `resolve`) {
-          attempt.deferred.resolve()
-        } else {
-          if (attempt.reportable && attempt.session === session) {
-            expectedErrors.push({
-              attemptId: attempt.id,
-              error: attempt.failure,
-            })
-          }
-          attempt.deferred.reject(attempt.failure)
-        }
-      } else if (command.type === `cleanup`) {
-        if (!active) continue
-        for (const attempt of attempts) {
-          if (attempt.session !== session) continue
-          attempt.gating = false
-          attempt.reportable = false
-          attempt.shouldBeAborted = true
-        }
-        for (const owner of owners) owner.acquisition = undefined
-        await collection.cleanup()
-        active = false
-      } else if (command.type === `restart`) {
-        if (active) continue
-        collection.startSyncImmediate()
-        await flushPromises()
-        const started = attempts.slice(attemptsBefore)
-        expect(
-          started.map(({ demand }) => demand),
-          JSON.stringify({ history, command }),
-        ).toEqual(owners.map(({ demand }) => demand))
-        for (let index = 0; index < owners.length; index++) {
-          owners[index]!.acquisition = started[index]
-          started[index]!.ownerId = owners[index]!.id
-        }
+      } else if (command.type === `settle` && effect.attemptId !== undefined) {
+        const runtime = runtimeAttempts.get(effect.attemptId)
+        if (!runtime) throw new Error(`model selected an unobserved attempt`)
+        const attempt = model.attempts[effect.attemptId]!
+        if (command.outcome === `resolve`) runtime.deferred.resolve()
+        else runtime.deferred.reject(attempt.failure)
       } else if (command.type === `truncate`) {
-        if (!active || !syncOps || owners.length === 0) continue
-        const previous = owners.map(({ acquisition }) => acquisition)
-        const replayOwners = owners.filter(
-          ({ abortController }) => !abortController.signal.aborted,
-        )
-        syncOps.begin()
-        syncOps.truncate()
-        const receipt = syncOps.commit()
+        syncOps?.begin()
+        syncOps?.truncate()
+        const receipt = syncOps?.commit()
         if (receipt !== true) await receipt
-        await flushPromises()
-        const started = attempts.slice(attemptsBefore)
-        expect(
-          started.map(({ demand }) => demand),
-          JSON.stringify({ history, command }),
-        ).toEqual(replayOwners.map(({ demand }) => demand))
-        let replayIndex = 0
-        for (let index = 0; index < owners.length; index++) {
-          const prior = previous[index]
-          if (prior) {
-            prior.shouldBeAborted = true
-            prior.reportable = false
-            expectedUnloadIds.push(prior.id)
-          }
-          const owner = owners[index]!
-          if (owner.abortController.signal.aborted) {
-            owner.acquisition = undefined
-          } else {
-            owner.acquisition = started[replayIndex]
-            started[replayIndex]!.ownerId = owner.id
-            replayIndex++
-          }
-        }
-      } else {
-        for (const attempt of attempts) {
-          if (attempt.session !== session) continue
-          attempt.gating = false
-          attempt.reportable = false
-        }
-        for (const owner of owners) {
-          if (!owner.acquisition) continue
-          owner.acquisition.shouldBeAborted = true
-          expectedUnloadIds.push(owner.acquisition.id)
-        }
-        owners.length = 0
+      } else if (command.type === `cleanup`) {
+        await collection.cleanup()
+      } else if (command.type === `restart`) {
+        collection.startSyncImmediate()
+      } else if (command.type === `unsubscribe`) {
         subscription.unsubscribe()
-        unsubscribed = true
       }
-
       await flushPromises()
       assertState(command)
     }
   } finally {
-    for (const attempt of attempts) attempt.deferred.resolve()
+    for (const { deferred } of runtimeAttempts.values()) deferred.resolve()
     await flushPromises()
-    if (!unsubscribed) subscription.unsubscribe()
+    subscription.unsubscribe()
     await collection.cleanup()
   }
+  return model.reach
 }
 
-const fixedHistories: ReadonlyArray<ReadonlyArray<AsyncLifecycleCommand>> = [
-  [
-    { type: `request`, demand: `a` },
-    { type: `settle`, demand: `a`, scope: `current`, outcome: `reject` },
-    { type: `cleanup` },
-    { type: `restart` },
-    { type: `settle`, demand: `a`, scope: `current`, outcome: `resolve` },
-  ],
+const settle = (
+  demand: DemandName,
+  scope: AttemptScope,
+  age: AttemptAge,
+  outcome: `resolve` | `reject`,
+): Command => ({ type: `settle`, demand, scope, age, outcome })
+
+const greenFixedHistories: ReadonlyArray<ReadonlyArray<Command>> = [
   [
     { type: `request`, demand: `a` },
     { type: `request`, demand: `b` },
-    { type: `settle`, demand: `a`, scope: `current`, outcome: `resolve` },
+    settle(`a`, `current`, `oldest`, `resolve`),
     { type: `cleanup` },
     { type: `restart` },
-    { type: `settle`, demand: `b`, scope: `obsolete`, outcome: `reject` },
-    { type: `settle`, demand: `a`, scope: `current`, outcome: `resolve` },
-    { type: `settle`, demand: `b`, scope: `current`, outcome: `reject` },
+    settle(`b`, `obsolete`, `oldest`, `reject`),
+    settle(`a`, `current`, `oldest`, `resolve`),
+    settle(`b`, `current`, `oldest`, `reject`),
   ],
   [
+    { type: `cleanup` },
     { type: `request`, demand: `a` },
-    { type: `request`, demand: `a` },
+    { type: `restart` },
+    settle(`a`, `current`, `oldest`, `resolve`),
     { type: `truncate` },
+    { type: `cleanup` },
+    { type: `restart` },
     { type: `release`, demand: `a` },
-    { type: `request`, demand: `b` },
-    { type: `truncate` },
-    { type: `settle`, demand: `a`, scope: `current`, outcome: `resolve` },
-    { type: `settle`, demand: `b`, scope: `current`, outcome: `resolve` },
     { type: `unsubscribe` },
   ],
   [
-    { type: `cleanup` },
     { type: `request`, demand: `a` },
-    { type: `restart` },
-    { type: `settle`, demand: `a`, scope: `current`, outcome: `resolve` },
-    { type: `truncate` },
+    settle(`a`, `current`, `oldest`, `reject`),
     { type: `cleanup` },
     { type: `restart` },
-    { type: `release`, demand: `a` },
-  ],
-  [
-    { type: `request`, demand: `a` },
-    { type: `abort`, demand: `a` },
-    { type: `settle`, demand: `a`, scope: `current`, outcome: `reject` },
-    { type: `release`, demand: `a` },
+    settle(`a`, `current`, `oldest`, `resolve`),
   ],
 ]
+const pendingSupersessionHistory: ReadonlyArray<Command> = [
+  { type: `request`, demand: `a` },
+  { type: `request`, demand: `a` },
+  { type: `truncate` },
+  { type: `truncate` },
+  settle(`a`, `current`, `newest`, `resolve`),
+  settle(`a`, `current`, `oldest`, `reject`),
+  { type: `release`, demand: `a` },
+]
+const abortReplayHistory: ReadonlyArray<Command> = [
+  { type: `request`, demand: `a` },
+  { type: `abort`, demand: `a` },
+  settle(`a`, `current`, `oldest`, `reject`),
+  { type: `truncate` },
+  { type: `release`, demand: `a` },
+]
+
+if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
+  fc.statistics(
+    historyArbitrary,
+    (history) => {
+      const model = createModel()
+      for (const command of history) reduce(model, command)
+      return [...model.reach]
+    },
+    oraclePropertyOptions(1_000, `subscription-lifecycle.history-statistics`),
+  )
+}
 
 describe(`CollectionSubscription async lifecycle history oracle`, () => {
-  it(`covers the fixed cross-phase lifecycle histories`, async () => {
-    for (const history of fixedHistories) {
-      await runAsyncLifecycleHistory(history)
+  it(`covers every required command and cross-phase transition`, async () => {
+    const reach = new Set<string>()
+    for (const history of greenFixedHistories) {
+      for (const label of await runHistory(history)) reach.add(label)
     }
-  })
-
-  it(`covers every command and named cross-phase boundary`, () => {
-    const coverage = fixedHistories.map(classifyAsyncLifecycleHistory)
-    const commandTypes = new Set(coverage.flatMap(({ types }) => [...types]))
-
-    expect(commandTypes).toEqual(
-      new Set<AsyncLifecycleCommand[`type`]>([
-        `request`,
-        `abort`,
-        `release`,
-        `settle`,
-        `truncate`,
-        `cleanup`,
-        `restart`,
-        `unsubscribe`,
+    for (const history of [pendingSupersessionHistory, abortReplayHistory]) {
+      const model = createModel()
+      for (const command of history) reduce(model, command)
+      for (const label of model.reach) reach.add(label)
+    }
+    expect(reach).toEqual(
+      new Set([
+        ...[
+          `request`,
+          `abort`,
+          `release`,
+          `settle`,
+          `truncate`,
+          `cleanup`,
+          `restart`,
+          `unsubscribe`,
+        ].map((type) => `command:${type}`),
+        `duplicate-owner`,
+        `request-while-cleaned`,
+        `overlapping-replay`,
+        `partial-generation-supersession`,
       ]),
     )
-    expect(coverage.some(({ partialRestart }) => partialRestart)).toBe(true)
-    expect(coverage.some(({ duplicateOwner }) => duplicateOwner)).toBe(true)
-    expect(
-      coverage.some(({ requestWhileCleaned }) => requestWhileCleaned),
-    ).toBe(true)
-    expect(coverage.some(({ overlappingReplay }) => overlappingReplay)).toBe(
-      true,
-    )
+  })
+
+  it(`retires pending acquisition status when replay supersedes it`, async () => {
+    await runHistory(pendingSupersessionHistory)
+  })
+
+  it(`does not create loading work when an aborted demand replays`, async () => {
+    await runHistory(abortReplayHistory)
   })
 
   it(`does not release an unacquired replacement after an aborted demand replays`, async () => {
-    await runAsyncLifecycleHistory([
-      { type: `request`, demand: `a` },
-      { type: `abort`, demand: `a` },
-      { type: `truncate` },
-      { type: `release`, demand: `a` },
-    ])
+    await runHistory(abortReplayHistory, { ignoreStatusTrace: true })
   })
 
   const { multiplier, ...replay } = readOracleRunConfig()
   const runs = 80 * multiplier
 
-  fcTest.prop([asyncLifecycleHistoryArbitrary], {
-    numRuns: runs,
-    seed: 1_657_003,
-  })(
-    `matches ownership and settlement laws for a fixed seed`,
-    runAsyncLifecycleHistory,
+  fcTest.prop([historyArbitrary], { numRuns: runs, seed: 1_657_003 })(
+    `matches the pure lifecycle model for a fixed seed`,
+    async (history) => {
+      await runHistory(history)
+    },
     120_000,
   )
-
   fcTest.prop(
-    [asyncLifecycleHistoryArbitrary],
+    [historyArbitrary],
     oracleRandomParameters(
       runs,
       replay,
       `subscription-lifecycle.async-history`,
     ),
   )(
-    `matches ownership and settlement laws for a random or replayed seed`,
-    runAsyncLifecycleHistory,
+    `matches the pure lifecycle model for a random or replayed seed`,
+    async (history) => {
+      await runHistory(history)
+    },
     120_000,
   )
 })

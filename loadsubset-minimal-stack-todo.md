@@ -1244,10 +1244,10 @@ every row is either green or has a named red witness.
 | Protocol slice                                       | Executable coverage                                                                                 | Current result                                 |
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
 | Logical demand start/release and synchronous reentry | 20 start cells, 10 failure-delivery cells, 8 release cells                                          | green                                          |
-| Sync acquisition availability                        | starting/installed/eager/deferred/retiring/unavailable phases × request entry                       | 11 named reds; 4 adjacent controls green       |
+| Sync acquisition availability                        | executable 6-phase × 7-entry census with 15 legal cells and 27 explicit exclusions                  | 8 named reds; adjacent controls green          |
 | Cleanup/restart ownership                            | 20 restart cells plus fixed callback boundaries                                                     | green except the acquisition-availability reds |
 | Async session fencing                                | 2–4 sessions, 1–2 demands, mixed outcomes, obsolete/current/interleaved settlement                  | green                                          |
-| Generated async lifecycle histories                  | request/release/settle/truncate/cleanup/restart/unsubscribe plus fixed abort boundaries              | 1 named abort/replay ownership red              |
+| Generated async lifecycle histories                  | one pure reducer drives request/release/settle/truncate/cleanup/restart/unsubscribe histories        | 3 named replay-generation reds                 |
 | Replay phase transitions                             | setup/pending/settling/publishing crossed with release, reacquisition, supersession, abort, cleanup | three audit claims remain to reconcile below   |
 | Ordered route mechanics                              | page/prefix/boundary/full-source × return/throw/resolve/reject/abort/cleanup                        | green                                          |
 | Ordered consumer integration                         | Collection/Effect parity, source-local recovery, public-window reentry, sync-session settlement     | 5 named reds                                   |
@@ -1328,15 +1328,26 @@ every row is either green or has a named red witness.
         replay, initial rejection followed by successful restart, and external
         abort. It found one new red: replaying an externally aborted logical
         demand can install a phantom acquisition that was never sent to the
-        adapter, then later call `unloadSubset` for it. Random abort
-        interleavings stay excluded until that named red is fixed; all other
-        commands run under fixed and random seeds.
-  - [ ] Replace the hand-picked acquisition boundary list with an executable,
+        adapter, then later call `unloadSubset` for it. The independent reducer
+        also found that superseded replay work from a source which ignores
+        abort can keep current readiness gated, and that replaying an aborted
+        demand emits a spurious `loadingSubset -> ready` pair. Random abort and
+        pending-supersession histories stay excluded from the broad green
+        campaign only while these three named red witnesses remain. All other
+        commands run under fixed and random seeds. The older command runner
+        was removed: the one surviving reducer owns expected sync sessions,
+        replay generations, physical attempts, errors, result callbacks,
+        collection/subscription status, and empty-publication barriers without
+        learning those facts from production callbacks.
+  - [x] Replace the hand-picked acquisition boundary list with an executable,
         typed phase × entry census. Keep obsolete sync-result retirement on a
         separate resource-installation axis, and add session-tagged unload
         assertions to every restart/callback witness. Do not call the phase
         table complete until this census itself fails when a legal cell is
-        omitted.
+        omitted. The census now has six phases, seven possible entries, 15
+        legal executable cells, and 27 documented exclusions. Omitting a legal
+        witness fails the census. Restart/callback unloads name the adapter
+        session that owns each physical acquisition.
   - [ ] Keep the ordered-query layer as a consumer of the same protocol. Cross
         page, prefix, boundary, and full-source routes with cancellation,
         failure, retry, and reentrant `setWindow`; do not duplicate ownership
@@ -1395,7 +1406,9 @@ every row is either green or has a named red witness.
         statistics exclude skipped commands and degenerate interleavings,
         errors retain exact demand identity, and each settlement checks the
         full publication and status trace. Per-demand outcomes now include a
-        mixed success/failure current generation. Ordered authority/barrier
+        mixed success/failure current generation. The duplicate simple history
+        runner has now been deleted in favor of one pure reducer with explicit
+        sync-session and replay-generation identity. Ordered authority/barrier
         generation remains.
   - [x] Catalog all red cells before changing production code. Fix by invalid
         transition class, then rerun the entire matrix after each coherent
@@ -1407,7 +1420,10 @@ every row is either green or has a named red witness.
         recovery gates. The first four coarse restart-entry cells are green;
         the stricter audit added four red acquisition-availability cells. The
         last fully green checkpoint had 86 core lifecycle cells plus 129
-        existing subscription/replay tests.
+        existing subscription/replay tests. The consolidated checkpoint has
+        106 lifecycle tests: 92 green laws and 14 named reds. Those reds fall
+        into acquisition availability (5), phantom ownership/resource
+        retirement (4), replay/abort generation (3), and cleanup/reentry (2).
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
       behavior, and opaque callback roots.
