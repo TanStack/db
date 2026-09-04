@@ -1086,6 +1086,44 @@ describe(`CollectionSubscription status tracking`, () => {
     },
   )
 
+  it(`does not register a subscription closed during its automatic snapshot`, async () => {
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const collection = createCollection<{ id: string }>({
+      id: `closed-during-automatic-snapshot`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              options.subscription.unsubscribe()
+              return true
+            },
+            unloadSubset: (options) => unloads.push(options),
+          }
+        },
+      },
+    })
+
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: true,
+    })
+
+    expect(loads).toHaveLength(1)
+    expect(unloads).toEqual(loads)
+    expect(collection._changes.changeSubscriptions.has(subscription)).toBe(
+      false,
+    )
+    expect(collection._changes.activeSubscribersCount).toBe(0)
+
+    subscription.unsubscribe()
+    expect(unloads).toHaveLength(1)
+    await collection.cleanup()
+  })
+
   it(`does not deliver a direct snapshot after adapter work unsubscribes`, async () => {
     type Row = { id: string; rank: number }
     const loads: Array<LoadSubsetOptions> = []

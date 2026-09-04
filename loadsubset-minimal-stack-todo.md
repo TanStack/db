@@ -1164,8 +1164,9 @@ explicitly removed.
         re-adding the same pending callback during an emission must defer the
         new registration until the next emission. The red/green event test
         proves both deferral and delivery on the following emission.
-  - [ ] Do not register a subscription that unsubscribed reentrantly during
-        automatic `includeInitialState` loading.
+  - [x] Do not register a subscription that unsubscribed reentrantly during
+        automatic `includeInitialState` loading. The production witness checks
+        exact acquisition release, live-set membership, and subscriber count.
 - [ ] Close the replay-release follow-up audit:
   - [x] A synchronous delete callback that reacquires demand must not emit
         `ready` before its replacement row becomes public.
