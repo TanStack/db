@@ -568,7 +568,10 @@ if it rejects, an explicit retry must also start at offset zero without a
 cursor. The same holds after any later ordered request fails or is canceled:
 the adapter may already have written only part of its response, so those rows
 cannot establish a continuation boundary. The next explicit retry starts from
-the source prefix. A finite
+the source prefix. A successful finite-prefix retry proves only that prefix;
+rows left by the failed request remain unusable as evidence for a wider window.
+Until a full-source acquisition succeeds, each later widening beyond the
+proven prefix also reloads from the source start. A finite
 prefix that still cannot fill the local window falls back once to a full-source
 load rather than repeating the same request or inferring exhaustion. This also
 lets multi-column windows revalidate after a non-boundary row leaves. If the

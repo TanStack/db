@@ -2396,13 +2396,14 @@ describe(`pagination recomputation oracle`, () => {
     },
   )
 
-  it.each([`error`, `abort`] as const)(
+  it.each([`error`, `AbortError`] as const)(
     `does not derive a retry cursor from rows written by a %s request`,
     async (failureKind) => {
       const authoritativeRows: Array<PageRow> = [
         { id: 1, rank: 0 },
         { id: 2, rank: 1 },
         { id: 3, rank: 2 },
+        { id: 4, rank: 99 },
       ]
       const requests: Array<LoadSubsetOptions> = []
       const deliveredIds = new Set<number>()
@@ -2430,8 +2431,8 @@ describe(`pagination recomputation oracle`, () => {
                 if (rejectNextPage) {
                   rejectNextPage = false
                   begin()
-                  deliveredIds.add(3)
-                  write({ type: `insert`, value: { ...authoritativeRows[2]! } })
+                  deliveredIds.add(4)
+                  write({ type: `insert`, value: { ...authoritativeRows[3]! } })
                   commit()
                   return rejectedPage.promise
                 }
@@ -2465,10 +2466,10 @@ describe(`pagination recomputation oracle`, () => {
         expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
 
         rejectNextPage = true
-        const failed = live.utils.setWindow({ offset: 0, limit: 2 })
+        const failed = live.utils.setWindow({ offset: 0, limit: 4 })
         expect(failed).toBeInstanceOf(Promise)
         const failure =
-          failureKind === `abort`
+          failureKind === `AbortError`
             ? new DOMException(`partial ordered request canceled`, `AbortError`)
             : new Error(`partial ordered request failed`)
         rejectedPage.reject(failure)
@@ -2482,6 +2483,13 @@ describe(`pagination recomputation oracle`, () => {
         expect(retryRequest).toMatchObject({ offset: 0, limit: 2 })
         expect(retryRequest?.cursor).toBeUndefined()
         expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2])
+
+        const beforeWiden = requests.length
+        const widen = live.utils.setWindow({ offset: 0, limit: 3 })
+        if (widen instanceof Promise) await widen
+        expect(requests[beforeWiden]).toMatchObject({ offset: 0, limit: 3 })
+        expect(requests[beforeWiden]?.cursor).toBeUndefined()
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2, 3])
       } finally {
         rejectedPage.resolve()
         await cleanupAll(live, source)

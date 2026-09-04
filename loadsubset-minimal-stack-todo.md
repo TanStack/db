@@ -1027,9 +1027,11 @@ explicitly removed.
         rejects now red/greens the rule that the next explicit retry starts at
         offset zero with no cursor. The test also proves rejection does not
         start an eager retry.
-  - [ ] Keep a far-ahead row written by a failed request from becoming trusted
+  - [x] Keep a far-ahead row written by a failed request from becoming trusted
         after a finite-prefix retry; a later widening must not publish that row
-        ahead of missing authoritative rows.
+        ahead of missing authoritative rows. Recovery now records the exact
+        successful prefix length and reloads every later widening from offset
+        zero until a full-source acquisition succeeds.
   - [ ] Cross partial writes with synchronous throws across page, prefix,
         full-source, and boundary requests. No failed `setWindow()` may start
         eager recovery before an explicit retry.
