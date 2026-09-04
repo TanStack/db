@@ -543,11 +543,13 @@ function setMaterializedInclude(
   const sourceRow = setNestedValue(state.sourceRow, path, materialized)
   const deferUntilFacade =
     state.deferUntilFacade === true || isBucketFacadeRef(materialized)
-  const selected = deferUntilFacade
-    ? Array.isArray(value)
-      ? [...value]
-      : { ...value }
-    : runIncludesFnSelect(state, sourceRow, value)
+  const selected = (
+    deferUntilFacade
+      ? Array.isArray(value)
+        ? [...value]
+        : { ...value }
+      : runIncludesFnSelect(state, sourceRow, value)
+  ) as Record<PropertyKey, any>
   selected[INCLUDES_ROUTING] = value[INCLUDES_ROUTING]
   Object.defineProperty(selected, FN_SELECT_STATE, {
     value: { sourceRow, fnSelect: state.fnSelect, deferUntilFacade },

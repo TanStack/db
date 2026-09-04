@@ -475,10 +475,9 @@ export class BucketFacadeAdapter {
   }
 
   private resolveValue(value: unknown): unknown {
-    if (value !== null && typeof value === `object`) {
-      const cached = this.resolvedValues.get(value)
-      if (cached !== undefined) return cached
-    }
+    if (value === null || typeof value !== `object`) return value
+    const cached = this.resolvedValues.get(value)
+    if (cached !== undefined) return cached
     if (isBucketFacadeRef(value)) {
       const { edgeId, bucketKey } = value[BUCKET_FACADE_REF]
       const facade =
@@ -496,7 +495,11 @@ export class BucketFacadeAdapter {
         PropertyKey,
         any
       >
-      const selected = runIncludesFnSelect(fnSelectState, sourceRow, value)
+      const selected = runIncludesFnSelect(
+        fnSelectState,
+        sourceRow,
+        value as Record<PropertyKey, any>,
+      )
       this.resolvedValues.set(value, selected)
       return selected
     }
