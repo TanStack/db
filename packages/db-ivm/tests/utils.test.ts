@@ -209,6 +209,36 @@ describe(`hash`, () => {
       expect(hash(firstPeer)).toBe(hash(secondPeer))
     })
 
+    it(`hashes shared cyclic branches with bounded work`, () => {
+      const createBranchingCycle = () => {
+        const size = 14
+        let reads = 0
+        const nodes = Array.from({ length: size }, (_, value) => ({ value }))
+
+        for (let index = 0; index < size; index++) {
+          const node = nodes[index]!
+          const next = nodes[(index + 1) % size]!
+          for (const key of [`left`, `right`] as const) {
+            Object.defineProperty(node, key, {
+              enumerable: true,
+              get: () => {
+                reads++
+                return next
+              },
+            })
+          }
+        }
+
+        return { root: nodes[0]!, size, reads: () => reads }
+      }
+      const first = createBranchingCycle()
+      const second = createBranchingCycle()
+
+      expect(hash(first.root)).toBe(hash(second.root))
+      expect(first.reads()).toBeLessThanOrEqual(first.size * 2)
+      expect(second.reads()).toBeLessThanOrEqual(second.size * 2)
+    })
+
     it(`should hash arrays`, () => {
       const arr1 = [1, 2, 3]
       const arr2 = [1, 2, 3]

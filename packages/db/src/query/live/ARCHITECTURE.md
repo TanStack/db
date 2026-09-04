@@ -222,8 +222,9 @@ paths preserve property descriptors, clean nested references, cycles,
 adversarial keys, and user-owned symbols. Discovery reads data descriptors
 directly and never invokes an accessor merely to find private state. D2 hashes
 enumerable symbol keys and uses exact local-symbol identity plus registry keys
-for registered symbols. Its structural hash also records cyclic back-references,
-so symbol-only changes and cycles cannot disappear or overflow before
+for registered symbols. Its structural hash records cyclic back-references and
+reuses repeated children only within one fixed parent traversal, so symbol-only
+changes and cycles cannot disappear, overflow, or grow exponentially before
 publication. Neither boundary mutates values retained by D2. Compiler-created
 parent contexts use a separate internal
 envelope that keeps projected user aliases apart from the equality identity

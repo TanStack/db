@@ -160,6 +160,7 @@ function hashPlainObject(
   context: HashContext,
 ): number {
   const hasher = new MurmurHashStream()
+  const childHashes = new WeakMap<object, number>()
 
   // Mark the type of the input
   hasher.update(marker)
@@ -168,7 +169,12 @@ function hashPlainObject(
   for (const key of keys) {
     hasher.update(KEY)
     hasher.update(key)
-    updateHasher(hasher, input[key as keyof typeof input], context)
+    updateMemberHasher(
+      hasher,
+      input[key as keyof typeof input],
+      context,
+      childHashes,
+    )
   }
   const symbolKeys = Object.getOwnPropertySymbols(input)
     .filter((key) => Object.prototype.propertyIsEnumerable.call(input, key))
@@ -176,10 +182,35 @@ function hashPlainObject(
   for (const key of symbolKeys) {
     hasher.update(KEY)
     hasher.update(key)
-    updateHasher(hasher, input[key as keyof typeof input], context)
+    updateMemberHasher(
+      hasher,
+      input[key as keyof typeof input],
+      context,
+      childHashes,
+    )
   }
 
   return hasher.digest()
+}
+
+/** Reuse a repeated child only while its parent traversal context is fixed. */
+function updateMemberHasher(
+  hasher: Hasher,
+  input: unknown,
+  context: HashContext,
+  childHashes: WeakMap<object, number>,
+): void {
+  if (input === null || typeof input !== `object`) {
+    updateHasher(hasher, input, context)
+    return
+  }
+
+  let valueHash = childHashes.get(input)
+  if (valueHash === undefined) {
+    valueHash = getCachedHash(input, context)
+    childHashes.set(input, valueHash)
+  }
+  hasher.update(valueHash)
 }
 
 function updateHasher(

@@ -877,6 +877,12 @@ explicitly removed.
       equal hashes for separately allocated equal cycles instead of overflowing
       when an enumerable symbol is the back-edge. The regression failed before
       the fix and the full 330-test db-ivm suite is green.
+- [x] Bound cyclic structural hashing when a node repeats the same child on
+      several branches. A parent-local child cache preserves the exact active
+      ancestor context while reducing the audited branching ring from
+      exponential traversal to two property reads per node. The deterministic
+      work-count regression failed at 32,766 reads before the fix, and the full
+      331-test db-ivm suite is green.
 - [x] Defer functional projections over bare Collection includes until bucket
       references become public facades. The callback can now return an opaque
       wrapper around the Collection without retaining compiler state; child
