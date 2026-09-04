@@ -1232,6 +1232,53 @@ explicitly removed.
 - [ ] Reconcile the joined-recovery readiness wording with the public
       multi-source barrier: a single source can become ready before the joined
       replacement is public.
+- [ ] Finish the subset-demand lifecycle oracle before accepting more local
+      runtime patches. Treat these as one protocol, not separate regressions:
+  - [x] Model the logical demand states `absent`, `starting`, `active`, and
+        `retired`, independently from physical acquisition state and cleanup
+        debt. The production protocol records `starting`, `active`, and
+        sync-session-detached demand; absence from the owner set is `retired`.
+        A synchronous adapter failure never creates a releasable physical
+        lease.
+  - [x] Cross acquisition start outcome (`return`, `throw`, `resolve`,
+        `reject`) with adapter-start reentry (`none`, release self, release
+        peer, unsubscribe, cleanup) and assert the exact request, abort,
+        release, error, status, and ownership trace. The finite census covers
+        all 20 start cells and all 10 failure-delivery cells.
+  - [x] Cross physical release outcome (`return`, `throw`) with unload reentry
+        (`none`, reacquire self, release peer, unsubscribe) and prove logical
+        retirement happens once while failed cleanup stays exact retry debt.
+        The finite census covers all eight release cells.
+  - [x] Cross replay phase (`setup`, `pending`, `settling`, `publishing`) with
+        release, reacquisition, truncate supersession, and cleanup. Assert the
+        full status/publication trace, not only the settled row set. The new
+        lifecycle suite adds cleanup-during-pending, external abort,
+        queued-loading, and adapter-reentrant-cleanup cells; the existing
+        replay oracle supplies release, reacquisition, supersession, and
+        publication histories.
+  - [x] Cross collection sync-session replacement with every pending async
+        settlement. An obsolete operation may clean up its own acquisition but
+        cannot write rows, report an error, change readiness, or settle a new
+        window. Cleanup now detaches surviving demand and restart reacquires it
+        under a fresh private barrier seeded from the new session's current
+        rows.
+  - [ ] Keep the ordered-query layer as a consumer of the same protocol. Cross
+        page, prefix, boundary, and full-source routes with cancellation,
+        failure, retry, and reentrant `setWindow`; do not duplicate ownership
+        rules in a second reference model.
+  - [ ] Add a checked coverage census for every finite Cartesian axis and
+        `fc.statistics` for generated histories. Fixed witnesses, exhaustive
+        small-domain cells, fixed-seed fuzzing, and random/replayable fuzzing
+        must all exercise the same laws. The core start, failure-delivery, and
+        release matrices have checked finite censuses; generated-history
+        statistics remain for the final combined lifecycle grammar.
+  - [x] Catalog all red cells before changing production code. Fix by invalid
+        transition class, then rerun the entire matrix after each coherent
+        commit. The core slice exposed 15 red cells in five classes: phantom
+        unload after failed start, cleanup during startup, cleanup/restart
+        barrier reuse, external-abort success, and replay cleanup reentrancy.
+        All 48 lifecycle cells plus 129 existing subscription/replay tests are
+        green after the class-level fixes.
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
       behavior, and opaque callback roots.

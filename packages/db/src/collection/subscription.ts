@@ -67,9 +67,7 @@ type RequestLimitedSnapshotOptions = {
   ) => void
 }
 
-export type ReleaseLoadSubset = (
-  primaryFailure?: { error: unknown },
-) => void
+export type ReleaseLoadSubset = (primaryFailure?: { error: unknown }) => void
 
 type CollectionSubscriptionOptions = {
   includeInitialState?: boolean
@@ -104,11 +102,12 @@ type SubsetAcquisition = {
 
 type SubsetDemand = SubsetAcquisition & {
   requestOptions: LoadSubsetOptions
+  acquisitionState: `starting` | `active` | `detached`
 }
 
 type TruncateReplayAttempt = {
   pending: Set<{ demand: SubsetDemand; promise: Promise<unknown> }>
-  failedDemands: Set<SubsetDemand>
+  failures: Map<SubsetDemand, Error>
   setupComplete: boolean
 }
 
@@ -181,6 +180,8 @@ export class CollectionSubscription
 
   // Cleanup function for truncate event listener
   private truncateCleanup: (() => void) | undefined
+  private collectionCleanup: (() => void) | undefined
+  private collectionRestartCleanup: (() => void) | undefined
 
   // One replay session owns the publication baseline, overlapping attempts,
   // and buffered changes until every attempt settles.
@@ -242,6 +243,94 @@ export class CollectionSubscription
     this.truncateCleanup = this.collection.on(`truncate`, () => {
       this.handleTruncate()
     })
+    this.collectionCleanup = this.collection.on(`status:cleaned-up`, () => {
+      this.handleCollectionCleanup()
+    })
+    this.collectionRestartCleanup = this.collection.on(`status:loading`, () => {
+      const loadSubsetSession = this.collection._sync.getLoadSubsetSession()
+      queueMicrotask(() => this.restartDetachedDemands(loadSubsetSession))
+    })
+  }
+
+  /** Detach logical demand from work owned by a discarded sync session. */
+  private handleCollectionCleanup(): void {
+    const session = this.truncateReplaySession
+    if (session?.completion.isPending()) {
+      session.completion.reject(new LoadSubsetOperationAbortedError())
+    }
+    this.truncateReplaySession = undefined
+    this.truncateReplacementPending = false
+    this.stalePublishedRows = new Map(this.publishedRows)
+    this.pendingLoadSubsetParticipants.clear()
+
+    for (const demand of [...this.subsetDemands]) {
+      demand.abortController?.abort()
+      demand.removeRequestAbortListener?.()
+      if (demand.acquisitionState === `starting`) {
+        const index = this.subsetDemands.indexOf(demand)
+        if (index !== -1) this.subsetDemands.splice(index, 1)
+      } else {
+        demand.acquisitionState = `detached`
+        demand.options = demand.requestOptions
+        demand.abortController = undefined
+        demand.removeRequestAbortListener = undefined
+      }
+    }
+    this.setReadyIfIdle()
+  }
+
+  /** Reacquire logical demand that survived a Collection cleanup. */
+  private restartDetachedDemands(loadSubsetSession: number): void {
+    if (
+      this.unsubscribed ||
+      !this.isLoadSubsetSessionCurrent(loadSubsetSession) ||
+      this.collection._sync.syncLoadSubsetFn === null
+    ) {
+      return
+    }
+    const demands = this.subsetDemands.filter(
+      (demand) => demand.acquisitionState === `detached`,
+    )
+    if (demands.length === 0) return
+
+    const attempt: TruncateReplayAttempt = {
+      pending: new Set(),
+      failures: new Map(),
+      setupComplete: false,
+    }
+    const currentRows = this.collection.currentStateAsChanges({
+      optimizedOnly: false,
+    })
+    const session: TruncateReplaySession = {
+      loadSubsetSession,
+      publicationState: {
+        loadedInitialState: this.loadedInitialState,
+        snapshotSent: this.snapshotSent,
+        sentKeys: new Set(this.sentKeys),
+        publishedRows: new Map(this.publishedRows),
+        limitedSnapshotRowCount: this.limitedSnapshotRowCount,
+        lastSentKey: this.lastSentKey,
+      },
+      privateRows: new Map(
+        (currentRows ?? [])
+          .filter((change) => change.type !== `delete`)
+          .map((change) => [change.key, change.value]),
+      ),
+      attempts: new Set([attempt]),
+      currentAttempt: attempt,
+      completion: createReplayCompletion(),
+    }
+    this.truncateReplaySession = session
+    this.setStatus(`loadingSubset`)
+    if (this.truncateReplaySession !== session) return
+
+    for (const demand of demands) {
+      if (!this.subsetDemands.includes(demand)) continue
+      this.startTruncateReplayDemand(session, attempt, demand)
+      if (this.truncateReplaySession !== session) break
+    }
+    attempt.setupComplete = true
+    this.checkTruncateReplayComplete(session)
   }
 
   /**
@@ -272,7 +361,7 @@ export class CollectionSubscription
 
     const attempt: TruncateReplayAttempt = {
       pending: new Set(),
-      failedDemands: new Set(),
+      failures: new Map(),
       setupComplete: false,
     }
     let session = this.truncateReplaySession
@@ -303,6 +392,9 @@ export class CollectionSubscription
     }
     session.attempts.add(attempt)
     session.currentAttempt = attempt
+    this.setStatus(`loadingSubset`)
+
+    if (this.truncateReplaySession !== session) return
 
     if (this.options.truncateReplayPublication) {
       this.truncateReplacementPending = true
@@ -365,6 +457,8 @@ export class CollectionSubscription
     attempt: TruncateReplayAttempt,
     demand: SubsetDemand,
   ): void {
+    const previousState = demand.acquisitionState
+    const hadPreviousAcquisition = previousState === `active`
     const previous: SubsetAcquisition = {
       options: demand.options,
       abortController: demand.abortController,
@@ -376,6 +470,7 @@ export class CollectionSubscription
       demand.options = previous.options
       demand.abortController = previous.abortController
       demand.removeRequestAbortListener = previous.removeRequestAbortListener
+      demand.acquisitionState = previousState
     }
     const isCurrentAttempt = () =>
       this.truncateReplaySession === session &&
@@ -384,6 +479,7 @@ export class CollectionSubscription
     demand.options = next.options
     demand.abortController = next.abortController
     demand.removeRequestAbortListener = next.removeRequestAbortListener
+    if (!hadPreviousAcquisition) demand.acquisitionState = `starting`
 
     let result: LoadSubsetRequestResult
     try {
@@ -391,13 +487,13 @@ export class CollectionSubscription
         next.options,
         () => isCurrentAttempt() && this.subsetDemands.includes(demand),
       )
-    } catch {
+    } catch (error) {
       const demandRemains = this.subsetDemands.includes(demand)
       restorePrevious()
       if (demandRemains) {
         next.abortController.abort()
         next.removeRequestAbortListener?.()
-      } else {
+      } else if (hadPreviousAcquisition) {
         try {
           this.releaseOrRetainAcquisition(previous)
         } catch {
@@ -406,18 +502,36 @@ export class CollectionSubscription
         }
       }
       if (demandRemains && isCurrentAttempt()) {
-        attempt.failedDemands.add(demand)
+        attempt.failures.set(demand, normalizeError(error))
       }
       return
     }
 
     if (!this.subsetDemands.includes(demand)) {
-      // Reentrant release already retired `next`; it could not see the old
-      // acquisition held on this stack, so retire that exact lease now.
+      // A detached demand could not release its tentative acquisition before
+      // adapter return. An ordinary replay already released `next`, so retire
+      // the old acquisition held on this stack instead.
       try {
-        this.releaseOrRetainAcquisition(previous)
-      } catch {
-        attempt.failedDemands.add(demand)
+        this.releaseOrRetainAcquisition(
+          hadPreviousAcquisition ? previous : next,
+        )
+      } catch (error) {
+        attempt.failures.set(demand, normalizeError(error))
+      }
+      return
+    }
+    if (!this.isLoadSubsetSessionCurrent(session.loadSubsetSession)) {
+      next.abortController.abort()
+      next.removeRequestAbortListener?.()
+      return
+    }
+    if (!isCurrentAttempt()) {
+      restorePrevious()
+      next.abortController.abort()
+      try {
+        this.releaseOrRetainAcquisition(next)
+      } catch (error) {
+        attempt.failures.set(demand, normalizeError(error))
       }
       return
     }
@@ -444,8 +558,8 @@ export class CollectionSubscription
       // the old lease held on this stack, so retire that lease exactly once.
       try {
         this.releaseOrRetainAcquisition(previous)
-      } catch {
-        attempt.failedDemands.add(demand)
+      } catch (error) {
+        attempt.failures.set(demand, normalizeError(error))
       }
       return
     }
@@ -457,9 +571,14 @@ export class CollectionSubscription
       next.abortController.abort()
       try {
         this.releaseOrRetainAcquisition(next)
-      } catch {
-        attempt.failedDemands.add(demand)
+      } catch (error) {
+        attempt.failures.set(demand, normalizeError(error))
       }
+      return
+    }
+
+    if (!hadPreviousAcquisition) {
+      demand.acquisitionState = `active`
       return
     }
 
@@ -483,7 +602,7 @@ export class CollectionSubscription
       }
       this.recordLoadSubsetError(demand.options, error, true)
       this.stopStatusParticipant(statusParticipant)
-      attempt.failedDemands.add(demand)
+      attempt.failures.set(demand, normalizeError(error))
     }
   }
 
@@ -542,13 +661,13 @@ export class CollectionSubscription
       (error: unknown) => {
         // A released demand no longer participates in this replacement. Its
         // cooperative AbortError must not discard rows from active demands.
-        if (this.subsetDemands.includes(demand) && !options.signal?.aborted) {
+        if (
+          this.truncateReplaySession === session &&
+          this.isLoadSubsetSessionCurrent(session.loadSubsetSession) &&
+          this.subsetDemands.includes(demand)
+        ) {
           const normalized = this.normalizeLoadSubsetPromiseError(result, error)
-          // Replay completion is observed before the ordinary status listener,
-          // so retain the exact normalized error for the completion barrier.
-          // The status listener emits the public error event next.
-          this._lastError = normalized
-          attempt.failedDemands.add(demand)
+          attempt.failures.set(demand, normalized)
         }
         this.settleTruncateReplay(session, attempt, pending)
       },
@@ -560,7 +679,7 @@ export class CollectionSubscription
     const session = this.truncateReplaySession
     if (!session) return
     for (const attempt of session.attempts) {
-      attempt.failedDemands.delete(demand)
+      attempt.failures.delete(demand)
       for (const pending of attempt.pending) {
         if (pending.demand === demand) attempt.pending.delete(pending)
       }
@@ -581,12 +700,12 @@ export class CollectionSubscription
       if (!attempt.setupComplete || attempt.pending.size > 0) return
     }
 
-    const activeFailure = [...session.currentAttempt.failedDemands].some(
-      (demand) => this.subsetDemands.includes(demand),
+    const activeFailure = [...session.currentAttempt.failures].find(
+      ([demand]) => this.subsetDemands.includes(demand),
     )
     try {
       if (activeFailure) {
-        this.abandonTruncateReplay(session)
+        this.abandonTruncateReplay(session, activeFailure[1])
       } else {
         this.flushTruncateReplay(session)
       }
@@ -599,12 +718,13 @@ export class CollectionSubscription
    * Keep an incomplete replay private. The source no longer proves a complete
    * state, so only a later successful truncate replay may reopen publication.
    */
-  private abandonTruncateReplay(session: TruncateReplaySession): void {
+  private abandonTruncateReplay(
+    session: TruncateReplaySession,
+    failure: Error,
+  ): void {
     if (this.truncateReplaySession !== session) return
     if (this.options.truncateReplayPublication) {
-      session.completion.reject(
-        this._lastError ?? new Error(`Truncate replay failed`),
-      )
+      session.completion.reject(failure)
       return
     }
     const publicationState = session.publicationState
@@ -723,8 +843,9 @@ export class CollectionSubscription
   }
 
   private setReadyIfIdle(): void {
-    const hasPendingReplayWork = [...(this.truncateReplaySession?.attempts ?? [])]
-      .some((attempt) => !attempt.setupComplete || attempt.pending.size > 0)
+    const hasPendingReplayWork = [
+      ...(this.truncateReplaySession?.attempts ?? []),
+    ].some((attempt) => !attempt.setupComplete || attempt.pending.size > 0)
     if (
       this.pendingLoadSubsetParticipants.size === 0 &&
       !hasPendingReplayWork
@@ -1015,6 +1136,7 @@ export class CollectionSubscription
     const demand: SubsetDemand = {
       requestOptions,
       options: requestOptions,
+      acquisitionState: `starting`,
     }
     const acquisition = this.createSubsetAcquisition(demand)
     demand.options = acquisition.options
@@ -1022,32 +1144,21 @@ export class CollectionSubscription
     demand.removeRequestAbortListener = acquisition.removeRequestAbortListener
     const replaySession = this.truncateReplaySession
     const replayAttempt = replaySession?.currentAttempt
+    const loadSubsetSession = this.collection._sync.getLoadSubsetSession()
     // Reentrant release must see the exact acquisition before adapter work
     // starts. A genuine load throw removes this tentative logical owner below.
     this.subsetDemands.push(demand)
+    let result: LoadSubsetRequestResult
     try {
-      const result = this.loadSubset(
+      result = this.loadSubset(
         acquisition.options,
         () =>
+          this.isLoadSubsetSessionCurrent(loadSubsetSession) &&
           this.subsetDemands.includes(demand) &&
           (replaySession === undefined ||
             (this.truncateReplaySession === replaySession &&
               replaySession.currentAttempt === replayAttempt)),
       )
-      if (
-        this.subsetDemands.includes(demand) &&
-        replaySession &&
-        replayAttempt
-      ) {
-        this.trackTruncateReplayParticipant(
-          replaySession,
-          replayAttempt,
-          demand,
-          acquisition.options,
-          result,
-        )
-      }
-      return { demand, result }
     } catch (error) {
       const demandIndex = this.subsetDemands.indexOf(demand)
       if (demandIndex !== -1) {
@@ -1057,14 +1168,39 @@ export class CollectionSubscription
           this.truncateReplaySession === replaySession &&
           replaySession.currentAttempt === replayAttempt
         ) {
-          replayAttempt.failedDemands.add(demand)
+          replayAttempt.failures.set(demand, normalizeError(error))
         }
         this.subsetDemands.splice(demandIndex, 1)
-        acquisition.abortController.abort()
-        acquisition.removeRequestAbortListener?.()
       }
+      acquisition.abortController.abort()
+      acquisition.removeRequestAbortListener?.()
       throw error
     }
+
+    if (!this.isLoadSubsetSessionCurrent(loadSubsetSession)) {
+      const demandIndex = this.subsetDemands.indexOf(demand)
+      if (demandIndex !== -1) this.subsetDemands.splice(demandIndex, 1)
+      acquisition.abortController.abort()
+      acquisition.removeRequestAbortListener?.()
+      return { demand, result }
+    }
+
+    demand.acquisitionState = `active`
+    if (!this.subsetDemands.includes(demand)) {
+      this.releaseOrRetainAcquisition(acquisition)
+      return { demand, result }
+    }
+
+    if (replaySession && replayAttempt) {
+      this.trackTruncateReplayParticipant(
+        replaySession,
+        replayAttempt,
+        demand,
+        acquisition.options,
+        result,
+      )
+    }
+    return { demand, result }
   }
 
   /** Re-check ownership after adapter and event callbacks that may reenter. */
@@ -1198,10 +1334,8 @@ export class CollectionSubscription
     if (opts?.where) this.requestedSubsetWhere.set(loadOptions, opts.where)
 
     // Pass the raw loadSubset result to the caller for external tracking
-    opts?.onLoadSubsetResult?.(
-      syncResult,
-      demand.options,
-      (primaryFailure) => this.releaseDemand(demand, primaryFailure),
+    opts?.onLoadSubsetResult?.(syncResult, demand.options, (primaryFailure) =>
+      this.releaseDemand(demand, primaryFailure),
     )
     if (!this.isDemandActive(demand)) return false
 
@@ -1324,20 +1458,25 @@ export class CollectionSubscription
       removeRequestAbortListener: demand.removeRequestAbortListener,
     }
     this.subsetDemands.splice(index, 1)
-    runAllCallbacks([
+    const releaseCallbacks = [
       () => this.removeTruncateReplayParticipant(demand),
       () => this.pruneReleasedReplayRows(),
-      // Adapter release is a supported reentrancy boundary. A demand started
-      // from unload joins this replacement before completion is decided.
-      () =>
-        this.releaseOrRetainAcquisition(acquisition, reportReleaseError),
+      ...(demand.acquisitionState === `active`
+        ? [
+            // Adapter release is a supported reentrancy boundary. A demand
+            // started from unload joins this replacement before completion.
+            () =>
+              this.releaseOrRetainAcquisition(acquisition, reportReleaseError),
+          ]
+        : []),
       () => this.retireEmptyReplay(),
       () => {
         if (replaySession) this.checkTruncateReplayComplete(replaySession)
       },
       // Ready follows replacement publication, never the delete half of it.
       () => this.stopDemandStatusParticipants(demand),
-    ])
+    ]
+    runAllCallbacks(releaseCallbacks)
   }
 
   /** A replay with no remaining logical demand cannot establish more rows. */
@@ -1586,10 +1725,8 @@ export class CollectionSubscription
     if (!this.isDemandActive(demand)) return
 
     // Pass the raw loadSubset result to the caller for external tracking
-    onLoadSubsetResult?.(
-      syncResult,
-      demand.options,
-      (primaryFailure) => this.releaseDemand(demand, primaryFailure),
+    onLoadSubsetResult?.(syncResult, demand.options, (primaryFailure) =>
+      this.releaseDemand(demand, primaryFailure),
     )
     if (!this.isDemandActive(demand)) return
     this.observeLoadSubsetResult(
@@ -1775,6 +1912,18 @@ export class CollectionSubscription
       firstCleanupError = error
     }
     this.truncateCleanup = undefined
+    try {
+      this.collectionCleanup?.()
+    } catch (error) {
+      firstCleanupError ??= error
+    }
+    this.collectionCleanup = undefined
+    try {
+      this.collectionRestartCleanup?.()
+    } catch (error) {
+      firstCleanupError ??= error
+    }
+    this.collectionRestartCleanup = undefined
 
     // Stop any buffered replay from publishing after unsubscription.
     if (this.truncateReplaySession?.completion.isPending()) {
@@ -1791,10 +1940,16 @@ export class CollectionSubscription
     // joining a later truncate replay.
     const acquisitions: Array<SubsetAcquisition> = [
       ...this.releaseDebts,
-      ...this.subsetDemands,
+      ...this.subsetDemands.filter(
+        (demand) => demand.acquisitionState === `active`,
+      ),
     ]
     for (const demand of this.subsetDemands) {
       this.stopDemandStatusParticipants(demand)
+      if (demand.acquisitionState === `starting`) {
+        demand.abortController?.abort()
+        demand.removeRequestAbortListener?.()
+      }
     }
     this.subsetDemands = []
     for (const acquisition of acquisitions) {

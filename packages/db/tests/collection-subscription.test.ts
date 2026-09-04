@@ -828,6 +828,44 @@ describe(`CollectionSubscription status tracking`, () => {
     },
   )
 
+  it(`does not unload a synchronous acquisition that never started`, async () => {
+    const failure = new Error(`load failed before acquisition`)
+    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`failed`)])
+    const unloads: Array<LoadSubsetOptions> = []
+    const collection = createCollection<{ id: string }>({
+      id: `reentrant-failed-start-release`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => {
+              throw failure
+            },
+            unloadSubset: (options) => {
+              unloads.push(options)
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    subscription.on(`loadSubset:error`, ({ error }) => {
+      if (error === failure) subscription.releaseSnapshot(where)
+    })
+
+    try {
+      expect(() => subscription.requestSnapshot({ where })).toThrow(failure)
+      expect(unloads).toEqual([])
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   it(`does not replay a logically retired demand after its unload fails`, async () => {
     const loads: Array<LoadSubsetOptions> = []
     const unloads: Array<LoadSubsetOptions> = []
@@ -1561,7 +1599,7 @@ describe(`CollectionSubscription status tracking`, () => {
       })),
     ),
   )(
-    `retries a failed reentrant release: $name`,
+    `retries a failed release deferred past adapter startup: $name`,
     async ({ adapterCatches, result }) => {
       const failure = new Error(`reentrant release failed`)
       const loads: Array<LoadSubsetOptions> = []
@@ -1605,12 +1643,8 @@ describe(`CollectionSubscription status tracking`, () => {
       try {
         const request = () =>
           subscription.requestSnapshot({ limit: 1, optimizedOnly: false })
-        if (adapterCatches) {
-          request()
-          expect(observedReleaseError).toBe(failure)
-        } else {
-          expect(request).toThrow(failure)
-        }
+        expect(request).toThrow(failure)
+        expect(observedReleaseError).toBeUndefined()
         await flushPromises()
 
         expect(unloads).toEqual([loads[0]])
@@ -1867,14 +1901,8 @@ describe(`CollectionSubscription status tracking`, () => {
   })
 
   it(`does not become ready while replay setup still has a surviving demand`, async () => {
-    const firstWhere = new Func(`eq`, [
-      new PropRef([`id`]),
-      new Value(`one`),
-    ])
-    const secondWhere = new Func(`eq`, [
-      new PropRef([`id`]),
-      new Value(`two`),
-    ])
+    const firstWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
+    const secondWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`two`)])
     const firstReplay = createDeferred<void>()
     const statusEvents: Array<{ status: string; loadCount: number }> = []
     let begin!: () => void
@@ -1892,9 +1920,11 @@ describe(`CollectionSubscription status tracking`, () => {
           truncate = operations.truncate
           operations.markReady()
           return {
-            loadSubset: () => {
+            loadSubset: (options) => {
               loadCount++
-              return loadCount === 3 ? firstReplay.promise : true
+              return loadCount > 2 && options.where === firstWhere
+                ? firstReplay.promise
+                : true
             },
             unloadSubset: () => {},
           }
@@ -1922,10 +1952,11 @@ describe(`CollectionSubscription status tracking`, () => {
       commit()
       await flushPromises()
 
-      expect(loadCount).toBe(4)
+      expect(loadCount).toBe(3)
+      expect(subscription.status).toBe(`ready`)
       expect(statusEvents).toEqual([
-        { status: `loadingSubset`, loadCount: 3 },
-        { status: `ready`, loadCount: 4 },
+        { status: `loadingSubset`, loadCount: 2 },
+        { status: `ready`, loadCount: 3 },
       ])
     } finally {
       firstReplay.resolve()

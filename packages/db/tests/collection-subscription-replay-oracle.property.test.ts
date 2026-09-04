@@ -2510,7 +2510,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
-  it(`releases the old and new leases once when loading status retires a replay demand`, async () => {
+  it(`does not start replay work retired by the loading transition`, async () => {
     let begin!: () => void
     let commit!: () => void
     let truncate!: () => void
@@ -2554,9 +2554,8 @@ describe(`CollectionSubscription replay oracle`, () => {
       commit()
       await flushPromises()
 
-      expect(loads).toHaveLength(2)
-      expect(loads[1]?.signal?.aborted).toBe(true)
-      expect(unloads.map((options) => loads.indexOf(options))).toEqual([1, 0])
+      expect(loads).toHaveLength(1)
+      expect(unloads).toEqual([loads[0]])
       expect(subscription.status).toBe(`ready`)
     } finally {
       replay.resolve()

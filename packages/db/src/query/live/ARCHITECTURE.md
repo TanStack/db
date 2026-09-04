@@ -510,12 +510,20 @@ active while another owner still needs that acquisition. The source signal
 aborts only after every attached owner has released it.
 
 A Collection subscription installs each logical subset owner before it calls
-the source adapter. Reentrant release during `loadSubset` must therefore see and
-release that exact acquisition. A synchronous `loadSubset` throw that did not
-follow a failed release rolls the tentative owner back without calling
-`unloadSubset`. Logical demand retires even when `unloadSubset` fails. The exact
-physical acquisition then remains as cleanup debt so teardown can retry it
-without letting a retired demand join readiness or a later replay.
+the source adapter. Reentrant release during `loadSubset` therefore retires the
+logical owner at once, but physical release waits until the adapter returns and
+proves that it established an acquisition. A synchronous `loadSubset` throw
+rolls the tentative owner back without calling `unloadSubset`. Logical demand
+retires even when `unloadSubset` fails. The exact physical acquisition then
+remains as cleanup debt so teardown can retry it without letting a retired
+demand join readiness or a later replay.
+
+Collection cleanup detaches surviving logical demand from the discarded sync
+session. It aborts that session's physical work and rejects its replay barrier,
+but it does not turn still-owned demand into cleanup debt. When the Collection
+starts a new sync session, the subscription reacquires that demand through a
+fresh private publication barrier. Settlements from the old session cannot
+publish rows, report errors, or change readiness in the new session.
 
 Its semantic contract is:
 
