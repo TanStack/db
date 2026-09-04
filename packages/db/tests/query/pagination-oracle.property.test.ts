@@ -2295,11 +2295,13 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it.each([
-    { offset: 0, limit: 1 },
-    { offset: 2, limit: 1 },
+    { offset: 0, limit: 1, failureKind: `error` as const },
+    { offset: 2, limit: 1, failureKind: `error` as const },
+    { offset: 0, limit: 1, failureKind: `abort` as const },
+    { offset: 2, limit: 1, failureKind: `abort` as const },
   ])(
-    `retries the first rejected ordered request for window $offset:$limit from the source prefix`,
-    async (window) => {
+    `retries the first $failureKind-rejected ordered request for window $offset:$limit from the source prefix`,
+    async ({ failureKind, ...window }) => {
       const authoritativeRows: Array<PageRow> = [
         { id: 1, rank: 0 },
         { id: 2, rank: 1 },
@@ -2367,7 +2369,10 @@ describe(`pagination recomputation oracle`, () => {
           limit: requestedPrefix,
         })
         expect(requests[0]?.cursor).toBeUndefined()
-        const failure = new Error(`first ordered request failed`)
+        const failure =
+          failureKind === `abort`
+            ? new DOMException(`first ordered request canceled`, `AbortError`)
+            : new Error(`first ordered request failed`)
         firstRequest.reject(failure)
         await expect(failed).rejects.toBe(failure)
 
@@ -2386,6 +2391,99 @@ describe(`pagination recomputation oracle`, () => {
         )
       } finally {
         firstRequest.resolve()
+        await cleanupAll(live, source)
+      }
+    },
+  )
+
+  it.each([`error`, `abort`] as const)(
+    `does not derive a retry cursor from rows written by a %s request`,
+    async (failureKind) => {
+      const authoritativeRows: Array<PageRow> = [
+        { id: 1, rank: 0 },
+        { id: 2, rank: 1 },
+        { id: 3, rank: 2 },
+      ]
+      const requests: Array<LoadSubsetOptions> = []
+      const deliveredIds = new Set<number>()
+      const rejectedPage = createDeferred<void>()
+      let rejectNextPage = false
+      let begin!: () => void
+      let write!: (message: { type: `insert`; value: PageRow }) => void
+      let commit!: () => void
+      const source = createCollection<PageRow>({
+        id: `pagination-rejected-partial-page-${collectionSequence++}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: (operations) => {
+            begin = operations.begin
+            write = operations.write
+            commit = operations.commit
+            operations.markReady()
+            return {
+              loadSubset: (options: LoadSubsetOptions) => {
+                requests.push(options)
+                if (rejectNextPage) {
+                  rejectNextPage = false
+                  begin()
+                  deliveredIds.add(3)
+                  write({ type: `insert`, value: { ...authoritativeRows[2]! } })
+                  commit()
+                  return rejectedPage.promise
+                }
+
+                begin()
+                for (const row of rowsForLoadSubset(
+                  authoritativeRows,
+                  options,
+                )) {
+                  if (deliveredIds.has(row.id)) continue
+                  deliveredIds.add(row.id)
+                  write({ type: `insert`, value: { ...row } })
+                }
+                commit()
+                return true
+              },
+            }
+          },
+        },
+      })
+      const live = createLiveQueryCollection((query) =>
+        query
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank, `asc`)
+          .limit(1),
+      )
+
+      try {
+        await live.preload()
+        const initialRequestCount = requests.length
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
+
+        rejectNextPage = true
+        const failed = live.utils.setWindow({ offset: 0, limit: 2 })
+        expect(failed).toBeInstanceOf(Promise)
+        const failure =
+          failureKind === `abort`
+            ? new DOMException(`partial ordered request canceled`, `AbortError`)
+            : new Error(`partial ordered request failed`)
+        rejectedPage.reject(failure)
+        await expect(failed).rejects.toBe(failure)
+        await flushPromises()
+        expect(requests).toHaveLength(initialRequestCount + 1)
+
+        const retry = live.utils.setWindow({ offset: 0, limit: 2 })
+        if (retry instanceof Promise) await retry
+        const retryRequest = requests[initialRequestCount + 1]
+        expect(retryRequest).toMatchObject({ offset: 0, limit: 2 })
+        expect(retryRequest?.cursor).toBeUndefined()
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2])
+      } finally {
+        rejectedPage.resolve()
         await cleanupAll(live, source)
       }
     },

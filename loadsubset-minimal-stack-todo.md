@@ -1001,7 +1001,8 @@ explicitly removed.
         that its first request has no cursor.
   - [x] After that first request rejects, retry from offset zero without a
         cursor; a started request is not established remote coverage.
-  - [ ] Cross the same first-request law with cancellation.
+  - [x] Cross the same first-request law with cancellation at both zero and
+        nonzero offsets.
   - [x] Cross the zero-window/local-row case with a nonzero target offset and
         assert the exact finite-prefix request count and shape.
   - [x] Record every on-demand publication callback so an equal duplicate
@@ -1009,6 +1010,11 @@ explicitly removed.
         exact delta and post-callback row set, including the one empty readiness
         wake-up after a real initial acquisition and no wake-up for a zero
         window that requests nothing.
+  - [x] Reject partial rows from a failed later page as continuation evidence.
+        A successful prefix followed by a request that writes one row and then
+        rejects now red/greens the rule that the next explicit retry starts at
+        offset zero with no cursor. The test also proves rejection does not
+        start an eager retry.
   - [ ] Derive the zero-window no-load and readiness-wake expectations from the
         requested semantics, not observed load count, and record callback-time
         status so a stray empty batch cannot impersonate the ready wake-up.

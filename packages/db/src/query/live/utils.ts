@@ -351,6 +351,7 @@ export class OrderedSourceLoader {
         },
       })
     } catch (error) {
+      this.hasEstablishedSourceCoverage = false
       this.fullSource = false
       this.fullSourceFailed = true
       throw error
@@ -363,12 +364,18 @@ export class OrderedSourceLoader {
       if ((this.info.dataNeeded?.() ?? 0) > 0) this.loadFullSource()
       return
     }
-    this.subscription.requestSnapshot({
-      orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
-      limit: count,
-      trackLoadSubsetPromise: false,
-      onLoadSubsetResult: (result) => this.observe(result, refine, false, true),
-    })
+    try {
+      this.subscription.requestSnapshot({
+        orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
+        limit: count,
+        trackLoadSubsetPromise: false,
+        onLoadSubsetResult: (result) =>
+          this.observe(result, refine, false, true),
+      })
+    } catch (error) {
+      this.hasEstablishedSourceCoverage = false
+      throw error
+    }
     this.lastPrefixCount = count
   }
 
@@ -434,6 +441,7 @@ export class OrderedSourceLoader {
           this.observe(result, refine, false, true),
       })
     } catch (error) {
+      this.hasEstablishedSourceCoverage = false
       this.failed = true
       this.lastPage = undefined
       throw error
@@ -469,7 +477,11 @@ export class OrderedSourceLoader {
       .then(() => undefined)
       .catch((error: unknown) => {
         if (this.pending === tracked) this.pending = undefined
-        if (!this.active || generation !== this.generation) return
+        if (!this.active) return
+        // A failed request may already have written only part of its result.
+        // None of those rows is a safe continuation boundary.
+        this.hasEstablishedSourceCoverage = false
+        if (generation !== this.generation) return
         if (isFullSource) {
           // A failed request proves no full-source coverage. An explicit
           // window move or later replay may retry it, but an ordinary graph
@@ -521,6 +533,7 @@ export class OrderedSourceLoader {
         },
       })
     } catch (error) {
+      this.hasEstablishedSourceCoverage = false
       this.hasLastBoundary = false
       this.lastBoundary = undefined
       throw error
