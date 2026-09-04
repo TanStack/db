@@ -809,6 +809,82 @@ describe(`CollectionSubscription status tracking`, () => {
     }
   })
 
+  it(`does not retry cleanup debt retired by reentrant teardown`, async () => {
+    const releaseFailure = new Error(`release failed`)
+    const duplicateFailure = new Error(`duplicate release`)
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const attempts = new Map<LoadSubsetOptions, number>()
+    const collection = createCollection<{ id: string }>({
+      id: `reentrant-cleanup-debt-retirement`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return true
+            },
+            unloadSubset: (options) => {
+              unloads.push(options)
+              const attempt = (attempts.get(options) ?? 0) + 1
+              attempts.set(options, attempt)
+              if (attempt <= 2) throw releaseFailure
+              if (options === loads[0] && attempt === 3) {
+                subscription.unsubscribe()
+              }
+              if (options === loads[1] && attempt === 4) {
+                throw duplicateFailure
+              }
+            },
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const firstWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`first`)])
+    const secondWhere = new Func(`eq`, [
+      new PropRef([`id`]),
+      new Value(`second`),
+    ])
+
+    try {
+      subscription.requestSnapshot({ where: firstWhere })
+      subscription.requestSnapshot({ where: secondWhere })
+      expect(() => subscription.releaseSnapshot(firstWhere)).toThrow(
+        releaseFailure,
+      )
+      expect(() => subscription.releaseSnapshot(secondWhere)).toThrow(
+        releaseFailure,
+      )
+      expect(() => subscription.unsubscribe()).toThrow(releaseFailure)
+
+      expect(() => subscription.unsubscribe()).not.toThrow()
+      expect(unloads).toEqual([
+        loads[0],
+        loads[1],
+        loads[0],
+        loads[1],
+        loads[0],
+        loads[1],
+      ])
+
+      subscription.unsubscribe()
+      expect(unloads).toHaveLength(6)
+    } finally {
+      try {
+        subscription.unsubscribe()
+      } catch {
+        // A red run may leave the duplicate-release debt for this final retry.
+      }
+      await collection.cleanup()
+    }
+  })
+
   it.each([`sync`, `async`] as const)(
     `reopens a failed %s replay only after its last logical demand retires`,
     async (failureMode) => {

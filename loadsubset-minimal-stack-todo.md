@@ -1155,9 +1155,10 @@ explicitly removed.
   - [x] Preserve the existing async control: a superseding window move made
         after the adapter has yielded remains legal and waits for its own work.
 - [ ] Close the subscription-teardown follow-up audit:
-  - [ ] Prevent a stale outer cleanup-debt snapshot from unloading an
+  - [x] Prevent a stale outer cleanup-debt snapshot from unloading an
         acquisition again after a nested `unsubscribe()` already released it.
-        Cross multiple debts, repeated teardown, and reentrant cleanup.
+        The red/green witness crosses two debts, repeated teardown, reentrant
+        cleanup, exact release counts, and a duplicate-release failure trap.
   - [ ] Give EventEmitter registrations their own identity. Removing and
         re-adding the same pending callback during an emission must defer the
         new registration until the next emission.

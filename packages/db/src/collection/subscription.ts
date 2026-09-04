@@ -1720,6 +1720,7 @@ export class CollectionSubscription
     if (this.unsubscribed) {
       let firstCleanupError: unknown
       for (const acquisition of [...this.releaseDebts]) {
+        if (!this.releaseDebts.includes(acquisition)) continue
         try {
           this.releaseOrRetainAcquisition(acquisition)
         } catch (error) {
