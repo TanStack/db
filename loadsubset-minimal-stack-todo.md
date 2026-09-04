@@ -960,9 +960,11 @@ explicitly removed.
       independent generated custom-comparator model covers forward/reverse
       order, exact equality, comparator groups, and representative retirement
       without using production comparison helpers.
-- [ ] Normalize a primitive rejection once per shared physical load promise so
+- [x] Normalize a primitive rejection once per shared physical load promise so
       all logical demands, completion state, and `lastError` expose one Error
-      object.
+      object. The replay oracle now observes two logical demands sharing one
+      rejecting transport and requires both events, the replay barrier, and
+      `lastError` to expose the same normalized instance.
 - [ ] Prevent reentrant specific-status listeners from delivering a stale
       status event to later listeners.
 - [ ] Prevent a reentrant truncate started during synchronous replacement

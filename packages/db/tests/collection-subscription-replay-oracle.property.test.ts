@@ -2963,6 +2963,74 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
+  it(`normalizes one primitive rejection for every observer of a shared replay`, async () => {
+    let begin!: () => void
+    let commit!: () => void
+    let truncate!: () => void
+    const replayLoad = createDeferred<void>()
+    const reportedErrors: Array<unknown> = []
+    let loadCount = 0
+    const collection = createCollection<ReplayRow>({
+      id: `shared-primitive-replay-error`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (operations) => {
+          begin = operations.begin
+          commit = operations.commit
+          truncate = operations.truncate
+          operations.markReady()
+          return {
+            loadSubset: () => {
+              loadCount++
+              return loadCount <= 2 ? true : replayLoad.promise
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+      truncateReplayPublication: {
+        start: () => {},
+        succeed: () => {},
+      },
+    })
+    subscription.on(`loadSubset:error`, ({ error }) => {
+      reportedErrors.push(error)
+    })
+
+    try {
+      subscription.requestSnapshot({ optimizedOnly: false })
+      subscription.requestSnapshot({ optimizedOnly: false })
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+      const replacement = subscription.pendingTruncateReplacement
+      expect(replacement).toBeInstanceOf(Promise)
+
+      replayLoad.reject(undefined)
+
+      let replacementError: unknown
+      try {
+        await replacement
+      } catch (error) {
+        replacementError = error
+      }
+      expect(reportedErrors).toHaveLength(2)
+      expect(reportedErrors[0]).toBeInstanceOf(Error)
+      expect(reportedErrors[1]).toBe(reportedErrors[0])
+      expect(subscription.lastError).toBe(reportedErrors[0])
+      expect(replacementError).toBe(reportedErrors[0])
+    } finally {
+      replayLoad.resolve()
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   it(`does not start replacement work after release unsubscribes`, () => {
     const where = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
     const loads: Array<LoadSubsetOptions> = []

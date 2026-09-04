@@ -170,7 +170,7 @@ export class CollectionSubscription
   // One replay session owns the publication baseline, overlapping attempts,
   // and buffered changes until every attempt settles.
   private truncateReplaySession: TruncateReplaySession | undefined
-  private readonly truncateReplayErrors = new WeakMap<
+  private readonly loadSubsetPromiseErrors = new WeakMap<
     Promise<unknown>,
     Error
   >()
@@ -517,8 +517,10 @@ export class CollectionSubscription
         // A released demand no longer participates in this replacement. Its
         // cooperative AbortError must not discard rows from active demands.
         if (this.subsetDemands.includes(demand) && !options.signal?.aborted) {
-          const normalized = normalizeError(error)
-          this.truncateReplayErrors.set(result, normalized)
+          const normalized = this.normalizeLoadSubsetPromiseError(
+            result,
+            error,
+          )
           // Replay completion is observed before the ordinary status listener,
           // so retain the exact normalized error for the completion barrier.
           // The status listener emits the public error event next.
@@ -785,12 +787,24 @@ export class CollectionSubscription
       if (shouldReportError()) {
         this.recordLoadSubsetError(
           options,
-          this.truncateReplayErrors.get(syncResult) ?? error,
+          this.normalizeLoadSubsetPromiseError(syncResult, error),
         )
       }
       finish()
     })
     return trackStatus ? participant : undefined
+  }
+
+  /** Give every logical observer of one transport rejection the same Error. */
+  private normalizeLoadSubsetPromiseError(
+    promise: Promise<unknown>,
+    error: unknown,
+  ): Error {
+    const existing = this.loadSubsetPromiseErrors.get(promise)
+    if (existing) return existing
+    const normalized = normalizeError(error)
+    this.loadSubsetPromiseErrors.set(promise, normalized)
+    return normalized
   }
 
   private stopStatusParticipant(
