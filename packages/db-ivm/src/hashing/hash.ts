@@ -53,6 +53,26 @@ type HashContext = {
   activeObjects: Map<object, number>
   activeOrder: Array<object>
   cyclicObjects: Set<object>
+  frames: Array<HashFrame>
+  traversalHashes: WeakMap<object, Array<TraversalHash>>
+}
+
+type HashDependency = {
+  object: object
+  offset: number
+}
+
+type HashFrame = {
+  startIndex: number
+  visitedObjects: Set<object>
+  externalDependencies: Array<HashDependency>
+}
+
+type TraversalHash = Pick<
+  HashFrame,
+  `visitedObjects` | `externalDependencies`
+> & {
+  valueHash: number
 }
 
 export function hash(input: any): number {
@@ -61,6 +81,8 @@ export function hash(input: any): number {
     activeObjects: new Map(),
     activeOrder: [],
     cyclicObjects: new Set(),
+    frames: [],
+    traversalHashes: new WeakMap(),
   })
   return hasher.digest()
 }
@@ -71,7 +93,15 @@ function hashObject(input: object, context: HashContext): number {
     return cachedHash
   }
 
-  context.activeObjects.set(input, context.activeOrder.length)
+  const startIndex = context.activeOrder.length
+  for (const frame of context.frames) frame.visitedObjects.add(input)
+  const frame: HashFrame = {
+    startIndex,
+    visitedObjects: new Set([input]),
+    externalDependencies: [],
+  }
+  context.frames.push(frame)
+  context.activeObjects.set(input, startIndex)
   context.activeOrder.push(input)
 
   let valueHash: number | undefined
@@ -121,9 +151,16 @@ function hashObject(input: object, context: HashContext): number {
   } finally {
     context.activeObjects.delete(input)
     context.activeOrder.pop()
+    context.frames.pop()
   }
 
-  if (!context.cyclicObjects.has(input)) hashCache.set(input, valueHash)
+  if (context.cyclicObjects.has(input)) {
+    const traversalHashes = context.traversalHashes.get(input) ?? []
+    traversalHashes.push({ valueHash, ...frame })
+    context.traversalHashes.set(input, traversalHashes)
+  } else {
+    hashCache.set(input, valueHash)
+  }
   return valueHash
 }
 
@@ -160,7 +197,6 @@ function hashPlainObject(
   context: HashContext,
 ): number {
   const hasher = new MurmurHashStream()
-  const childHashes = new WeakMap<object, number>()
 
   // Mark the type of the input
   hasher.update(marker)
@@ -169,12 +205,7 @@ function hashPlainObject(
   for (const key of keys) {
     hasher.update(KEY)
     hasher.update(key)
-    updateMemberHasher(
-      hasher,
-      input[key as keyof typeof input],
-      context,
-      childHashes,
-    )
+    updateHasher(hasher, input[key as keyof typeof input], context)
   }
   const symbolKeys = Object.getOwnPropertySymbols(input)
     .filter((key) => Object.prototype.propertyIsEnumerable.call(input, key))
@@ -182,35 +213,10 @@ function hashPlainObject(
   for (const key of symbolKeys) {
     hasher.update(KEY)
     hasher.update(key)
-    updateMemberHasher(
-      hasher,
-      input[key as keyof typeof input],
-      context,
-      childHashes,
-    )
+    updateHasher(hasher, input[key as keyof typeof input], context)
   }
 
   return hasher.digest()
-}
-
-/** Reuse a repeated child only while its parent traversal context is fixed. */
-function updateMemberHasher(
-  hasher: Hasher,
-  input: unknown,
-  context: HashContext,
-  childHashes: WeakMap<object, number>,
-): void {
-  if (input === null || typeof input !== `object`) {
-    updateHasher(hasher, input, context)
-    return
-  }
-
-  let valueHash = childHashes.get(input)
-  if (valueHash === undefined) {
-    valueHash = getCachedHash(input, context)
-    childHashes.set(input, valueHash)
-  }
-  hasher.update(valueHash)
 }
 
 function updateHasher(
@@ -259,6 +265,11 @@ function getCachedHash(input: object, context: HashContext): number {
     for (let index = activeIndex; index < context.activeOrder.length; index++) {
       context.cyclicObjects.add(context.activeOrder[index]!)
     }
+    for (const frame of context.frames) {
+      if (activeIndex < frame.startIndex) {
+        addDependency(frame, input, activeIndex - frame.startIndex)
+      }
+    }
     const hasher = new MurmurHashStream()
     hasher.update(CYCLE_MARKER)
     hasher.update(context.activeOrder.length - activeIndex - 1)
@@ -266,10 +277,64 @@ function getCachedHash(input: object, context: HashContext): number {
   }
 
   let valueHash = hashCache.get(input)
-  if (valueHash === undefined) {
-    valueHash = hashObject(input, context)
+  if (valueHash !== undefined) return valueHash
+
+  const startIndex = context.activeOrder.length
+  const traversalHash = context.traversalHashes
+    .get(input)
+    ?.find(
+      (candidate) =>
+        [...candidate.visitedObjects].every(
+          (object) => !context.activeObjects.has(object),
+        ) &&
+        candidate.externalDependencies.every(
+          (dependency) =>
+            context.activeObjects.get(dependency.object) ===
+            startIndex + dependency.offset,
+        ),
+    )
+  if (traversalHash) {
+    adoptTraversalHash(traversalHash, context)
+    return traversalHash.valueHash
   }
-  return valueHash
+
+  return hashObject(input, context)
+}
+
+function addDependency(frame: HashFrame, object: object, offset: number): void {
+  if (
+    !frame.externalDependencies.some(
+      (dependency) =>
+        dependency.object === object && dependency.offset === offset,
+    )
+  ) {
+    frame.externalDependencies.push({ object, offset })
+  }
+}
+
+/** Merge a reused subtree's graph footprint into every active parent frame. */
+function adoptTraversalHash(
+  traversalHash: TraversalHash,
+  context: HashContext,
+): void {
+  for (const frame of context.frames) {
+    for (const object of traversalHash.visitedObjects) {
+      frame.visitedObjects.add(object)
+    }
+    for (const dependency of traversalHash.externalDependencies) {
+      const activeIndex = context.activeObjects.get(dependency.object)!
+      if (activeIndex < frame.startIndex) {
+        addDependency(frame, dependency.object, activeIndex - frame.startIndex)
+      }
+      for (
+        let index = activeIndex;
+        index < context.activeOrder.length;
+        index++
+      ) {
+        context.cyclicObjects.add(context.activeOrder[index]!)
+      }
+    }
+  }
 }
 
 let nextRefId = 1

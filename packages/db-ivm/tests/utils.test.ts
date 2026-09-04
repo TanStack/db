@@ -209,34 +209,64 @@ describe(`hash`, () => {
       expect(hash(firstPeer)).toBe(hash(secondPeer))
     })
 
-    it(`hashes shared cyclic branches with bounded work`, () => {
-      const createBranchingCycle = () => {
+    it.each([`object`, `map`] as const)(
+      `hashes shared cyclic branches through %s with bounded work`,
+      (container) => {
         const size = 14
         let reads = 0
-        const nodes = Array.from({ length: size }, (_, value) => ({ value }))
+        const nodes: Array<Record<string, unknown> | Map<string, unknown>> =
+          Array.from({ length: size }, (_, value) =>
+            container === `object`
+              ? { value }
+              : new Map<string, unknown>([[`value`, value]]),
+          )
 
         for (let index = 0; index < size; index++) {
           const node = nodes[index]!
           const next = nodes[(index + 1) % size]!
           for (const key of [`left`, `right`] as const) {
-            Object.defineProperty(node, key, {
+            const wrapper = Object.defineProperty({}, `next`, {
               enumerable: true,
               get: () => {
                 reads++
                 return next
               },
             })
+            if (node instanceof Map) node.set(key, wrapper)
+            else node[key] = wrapper
           }
         }
 
-        return { root: nodes[0]!, size, reads: () => reads }
-      }
-      const first = createBranchingCycle()
-      const second = createBranchingCycle()
+        const firstHash = hash(nodes[0]!)
+        const firstReads = reads
+        const copy = structuredClone(nodes[0]!)
 
-      expect(hash(first.root)).toBe(hash(second.root))
-      expect(first.reads()).toBeLessThanOrEqual(first.size * 2)
-      expect(second.reads()).toBeLessThanOrEqual(second.size * 2)
+        expect(hash(copy)).toBe(firstHash)
+        expect(firstReads).toBeLessThanOrEqual(size * 2)
+      },
+    )
+
+    it(`does not reuse a cyclic child under the wrong active ancestors`, () => {
+      const createGraph = (backBranch: `left` | `right`) => {
+        const root: Record<string, unknown> = {}
+        const left: Record<string, unknown> = {}
+        const right: Record<string, unknown> = {}
+        const shared: Record<string, unknown> = {}
+        root.left = left
+        root.right = right
+        left.next = shared
+        right.next = shared
+        shared.back = backBranch === `left` ? left : right
+        return root
+      }
+
+      const left = createGraph(`left`)
+      const equalLeft = createGraph(`left`)
+      const right = createGraph(`right`)
+
+      expect(hash(left)).toBe(hash(equalLeft))
+      expect(hash(left)).not.toBe(hash(right))
+      expect(hash(equalLeft)).toBe(hash(left))
     })
 
     it(`should hash arrays`, () => {

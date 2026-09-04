@@ -881,11 +881,17 @@ explicitly removed.
       when an enumerable symbol is the back-edge. The regression failed before
       the fix and the full 330-test db-ivm suite is green.
 - [x] Bound cyclic structural hashing when a node repeats the same child on
-      several branches. A parent-local child cache preserves the exact active
-      ancestor context while reducing the audited branching ring from
-      exponential traversal to two property reads per node. The deterministic
-      work-count regression failed at 32,766 reads before the fix, and the full
-      331-test db-ivm suite is green.
+      several direct branches. The first parent-local cache reduced the audited
+      direct branching ring from exponential traversal to two property reads
+      per node, but its loss audit found that distinct wrappers still hid the
+      shared cyclic child.
+- [x] Generalize bounded cyclic hashing across indirect object and Map
+      diamonds. A traversal-local memo records the visited subgraph and only
+      reuses it when its external ancestor dependencies match at the same
+      relative positions. Fourteen-node object and Map cases fell from 32,766
+      reads to 28; an adversarial shared child proves the cache rejects the
+      wrong ancestor context. The full 333-test db-ivm suite and build are
+      green.
 - [x] Defer functional projections over bare Collection includes until bucket
       references become public facades. The callback can now return an opaque
       wrapper around the Collection without retaining compiler state; child
