@@ -446,6 +446,30 @@ describe(`Collection Events System`, () => {
       expect(observed).toEqual([1])
     })
 
+    it(`defers a pending listener that is removed and re-added`, () => {
+      const emitter = new TestEventEmitter()
+      const observed: Array<string> = []
+      let replaced = false
+      const pending = ({ id }: { id: number }) => {
+        observed.push(`pending:${id}`)
+      }
+      let unsubscribePending = () => {}
+      emitter.on(`event`, ({ id }) => {
+        observed.push(`first:${id}`)
+        if (replaced) return
+        replaced = true
+        unsubscribePending()
+        unsubscribePending = emitter.on(`event`, pending)
+      })
+      unsubscribePending = emitter.on(`event`, pending)
+
+      emitter.emit(1)
+      expect(observed).toEqual([`first:1`])
+
+      emitter.emit(2)
+      expect(observed).toEqual([`first:1`, `first:2`, `pending:2`])
+    })
+
     it(`clears ordinary and once listeners together`, () => {
       const emitter = new TestEventEmitter()
       const ordinaryListener = vi.fn()

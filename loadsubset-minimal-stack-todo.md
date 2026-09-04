@@ -1160,9 +1160,10 @@ explicitly removed.
         acquisition again after a nested `unsubscribe()` already released it.
         The red/green witness crosses two debts, repeated teardown, reentrant
         cleanup, exact release counts, and a duplicate-release failure trap.
-  - [ ] Give EventEmitter registrations their own identity. Removing and
+  - [x] Give EventEmitter registrations their own identity. Removing and
         re-adding the same pending callback during an emission must defer the
-        new registration until the next emission.
+        new registration until the next emission. The red/green event test
+        proves both deferral and delivery on the following emission.
   - [ ] Do not register a subscription that unsubscribed reentrantly during
         automatic `includeInitialState` loading.
 - [ ] Close the replay-release follow-up audit:

@@ -5,7 +5,7 @@
 export class EventEmitter<TEvents extends Record<string, any>> {
   private listeners = new Map<
     keyof TEvents,
-    Set<(event: TEvents[keyof TEvents]) => void>
+    Map<(event: TEvents[keyof TEvents]) => void, object>
   >()
 
   /**
@@ -19,12 +19,21 @@ export class EventEmitter<TEvents extends Record<string, any>> {
     callback: (event: TEvents[T]) => void,
   ): () => void {
     if (!this.listeners.has(event)) {
-      this.listeners.set(event, new Set())
+      this.listeners.set(event, new Map())
     }
-    this.listeners.get(event)!.add(callback as (event: any) => void)
+    const listeners = this.listeners.get(event)!
+    const registered = callback as (event: any) => void
+    let registration = listeners.get(registered)
+    if (!registration) {
+      registration = {}
+      listeners.set(registered, registration)
+    }
 
     return () => {
-      this.listeners.get(event)?.delete(callback as (event: any) => void)
+      const current = this.listeners.get(event)
+      if (current?.get(registered) === registration) {
+        current.delete(registered)
+      }
     }
   }
 
@@ -61,7 +70,7 @@ export class EventEmitter<TEvents extends Record<string, any>> {
   ): void {
     const listeners = this.listeners.get(event)
     if (!listeners) return
-    for (const listener of listeners) {
+    for (const listener of listeners.keys()) {
       const registered = listener as typeof listener & {
         onceCallback?: (event: TEvents[T]) => void
       }
@@ -122,9 +131,9 @@ export class EventEmitter<TEvents extends Record<string, any>> {
   ): void {
     const listeners = this.listeners.get(event)
     if (!listeners) return
-    for (const listener of [...listeners]) {
+    for (const [listener, registration] of [...listeners]) {
       if (!isCurrent()) break
-      if (!this.listeners.get(event)?.has(listener)) continue
+      if (this.listeners.get(event)?.get(listener) !== registration) continue
       try {
         listener(eventPayload)
       } catch (error) {
