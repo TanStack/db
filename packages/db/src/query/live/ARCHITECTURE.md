@@ -583,6 +583,13 @@ never settles. A newer truncate aborts prior acquisitions, but publication
 still waits for overlapping work that had already started because some sources
 cannot cancel an in-flight snapshot. Such work must settle and must not install
 rows after observing cancellation. Settled historical attempts are discarded.
+Core installs each tentative acquisition and binds it to the current replay
+attempt before calling adapter code. A reentrant release or newer truncate can
+therefore see and retire the exact work it supersedes; work returned after that
+reentrancy cannot attach itself to a newer attempt. Subscriber errors raised by
+an asynchronous replacement do not turn source success into replay failure:
+core finishes its internal state and surfaces the exact callback error in a
+host microtask.
 Failure keeps the last complete result visible and partly replayed source state
 private for both direct subscribers and query graphs. Ordinary source deltas or
 snapshot requests do not reopen that gate because they cannot prove the source

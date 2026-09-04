@@ -1,5 +1,5 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
@@ -2174,6 +2174,248 @@ describe(`CollectionSubscription replay oracle`, () => {
       expect(loadSignals).toHaveLength(2)
       expect(loadSignals[0]?.aborted).toBe(true)
       expect(loadSignals[1]?.aborted).toBe(false)
+    } finally {
+      replay.resolve()
+      await flushPromises()
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`aborts a replay acquisition before a reentrant newer truncate starts`, async () => {
+    let begin!: () => void
+    let write!: (
+      message: ChangeMessageOrDeleteKeyMessage<ReplayRow, string>,
+    ) => void
+    let commit!: () => void
+    let truncate!: () => void
+    const olderReplay = createDeferred<void>()
+    const newerReplay = createDeferred<void>()
+    const replaySignals: Array<AbortSignal | undefined> = []
+    let loadCount = 0
+    const collection = createCollection<ReplayRow>({
+      id: `reentrant-newer-replay`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (operations) => {
+          begin = operations.begin
+          write = operations.write
+          commit = operations.commit
+          truncate = operations.truncate
+          operations.markReady()
+          return {
+            loadSubset: ({ signal }) => {
+              loadCount++
+              if (loadCount === 1) {
+                begin()
+                write({ type: `insert`, value: { id: `one`, value: 0 } })
+                commit()
+                return true
+              }
+
+              replaySignals.push(signal)
+              if (loadCount === 2) {
+                begin()
+                truncate()
+                commit()
+                return olderReplay.promise
+              }
+              return newerReplay.promise
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const visible = new Map<string | number, ReplayRow>()
+    const subscription = collection.subscribeChanges((changes) => {
+      recordPublishedChanges(visible, changes as Array<ReplayChange>)
+    })
+
+    const install = (value: number) => {
+      begin()
+      write({
+        type: collection.has(`one`) ? `update` : `insert`,
+        value: { id: `one`, value },
+      })
+      commit()
+    }
+
+    try {
+      subscription.requestSnapshot({ optimizedOnly: false })
+      expect(sortedRows(visible)).toEqual([{ id: `one`, value: 0 }])
+
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+
+      expect(replaySignals).toHaveLength(2)
+      expect(replaySignals[0]?.aborted).toBe(true)
+
+      install(2)
+      newerReplay.resolve()
+      await flushPromises()
+      if (!replaySignals[0]?.aborted) install(1)
+      olderReplay.resolve()
+      await flushPromises()
+
+      expect(sortedRows(visible)).toEqual([{ id: `one`, value: 2 }])
+    } finally {
+      olderReplay.resolve()
+      newerReplay.resolve()
+      await flushPromises()
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`does not retain replay work registered after its demand is released`, async () => {
+    let begin!: () => void
+    let write!: (
+      message: ChangeMessageOrDeleteKeyMessage<ReplayRow, string>,
+    ) => void
+    let commit!: () => void
+    let truncate!: () => void
+    let subscription!: ReturnType<Collection<ReplayRow>[`subscribeChanges`]>
+    const firstWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
+    const secondWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`two`)])
+    const releasedReplay = createDeferred<void>()
+    let loadCount = 0
+    const collection = createCollection<ReplayRow>({
+      id: `released-during-replay-start`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (operations) => {
+          begin = operations.begin
+          write = operations.write
+          commit = operations.commit
+          truncate = operations.truncate
+          begin()
+          write({ type: `insert`, value: { id: `one`, value: 1 } })
+          write({ type: `insert`, value: { id: `two`, value: 1 } })
+          commit()
+          operations.markReady()
+          return {
+            loadSubset: () => {
+              loadCount++
+              if (loadCount <= 2) return true
+              if (loadCount === 3) {
+                subscription.releaseSnapshot(firstWhere)
+                return releasedReplay.promise
+              }
+              begin()
+              write({ type: `insert`, value: { id: `two`, value: 2 } })
+              commit()
+              return Promise.resolve()
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const visible = new Map<string | number, ReplayRow>()
+    subscription = collection.subscribeChanges((changes) => {
+      recordPublishedChanges(visible, changes as Array<ReplayChange>)
+    })
+
+    try {
+      subscription.requestSnapshot({
+        where: firstWhere,
+        optimizedOnly: false,
+      })
+      subscription.requestSnapshot({
+        where: secondWhere,
+        optimizedOnly: false,
+      })
+
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+
+      expect(subscription.status).toBe(`ready`)
+      expect(sortedRows(visible)).toEqual([{ id: `two`, value: 2 }])
+    } finally {
+      releasedReplay.resolve()
+      await flushPromises()
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`finishes replay state and surfaces an async subscriber failure`, async () => {
+    let begin!: () => void
+    let write!: (
+      message: ChangeMessageOrDeleteKeyMessage<ReplayRow, string>,
+    ) => void
+    let commit!: () => void
+    let truncate!: () => void
+    const replay = createDeferred<void>()
+    const listenerFailure = new Error(`replay subscriber failed`)
+    const queuedMicrotasks: Array<VoidFunction> = []
+    let loadCount = 0
+    let rejectReplacement = false
+    const collection = createCollection<ReplayRow>({
+      id: `async-replay-subscriber-failure`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (operations) => {
+          begin = operations.begin
+          write = operations.write
+          commit = operations.commit
+          truncate = operations.truncate
+          operations.markReady()
+          return {
+            loadSubset: () => {
+              loadCount++
+              if (loadCount === 1) {
+                begin()
+                write({ type: `insert`, value: { id: `one`, value: 1 } })
+                commit()
+                return true
+              }
+              return replay.promise
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const visible = new Map<string | number, ReplayRow>()
+    const subscription = collection.subscribeChanges((changes) => {
+      recordPublishedChanges(visible, changes as Array<ReplayChange>)
+      if (rejectReplacement) throw listenerFailure
+    })
+
+    try {
+      subscription.requestSnapshot({ optimizedOnly: false })
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+
+      begin()
+      write({ type: `insert`, value: { id: `one`, value: 2 } })
+      commit()
+      rejectReplacement = true
+      const queueMicrotaskSpy = vi
+        .spyOn(globalThis, `queueMicrotask`)
+        .mockImplementation((callback) => queuedMicrotasks.push(callback))
+      try {
+        replay.resolve()
+        await flushPromises()
+
+        expect(subscription.status).toBe(`ready`)
+        expect(sortedRows(visible)).toEqual([{ id: `one`, value: 2 }])
+        expect(queuedMicrotasks).toHaveLength(1)
+        expect(() => queuedMicrotasks[0]!()).toThrow(listenerFailure)
+      } finally {
+        queueMicrotaskSpy.mockRestore()
+      }
     } finally {
       replay.resolve()
       await flushPromises()

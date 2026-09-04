@@ -855,6 +855,15 @@ explicitly removed.
       118,297 in the old stack. The retained cost is 10,430 raw bytes (3.1%) or
       2,608 gzip bytes (2.7%) over main. The simplification recovers 88.7% of
       the old raw bundle growth and 88.3% of its compressed growth.
+- [x] Make replay startup atomic across adapter reentrancy. A tentative
+      acquisition is now visible before `loadSubset` runs and is bound to the
+      captured replay attempt, so a synchronous release cannot leave phantom
+      loading work and a synchronous newer truncate aborts the obsolete
+      acquisition before it can publish. Async replacement callback failures
+      finish replay state, update the public snapshot, and surface the exact
+      error in a host microtask instead of producing an unhandled derived
+      rejection. The three focused regressions failed before the fix and the
+      151-test subscription, replay, reentrancy, and lifecycle run is green.
 - [ ] Ask multiple fresh reviewers for final coherence, hostile-assay, and
       loss-audit passes.
 - [ ] Update RFC/PR text and changeset to match the final design.

@@ -320,65 +320,7 @@ export class CollectionSubscription
 
       for (const demand of demandsToReload) {
         if (!this.subsetDemands.includes(demand)) continue
-
-        const isCurrentAttempt = () =>
-          this.truncateReplaySession === session &&
-          session.currentAttempt === attempt
-        const nextAcquisition = this.createSubsetAcquisition(demand)
-        let syncResult: LoadSubsetRequestResult
-        try {
-          syncResult = this.loadSubset(
-            nextAcquisition.options,
-            isCurrentAttempt,
-          )
-        } catch {
-          nextAcquisition.abortController.abort()
-          nextAcquisition.removeRequestAbortListener?.()
-          attempt.failed = true
-          continue
-        }
-
-        const statusParticipant = this.observeLoadSubsetResult(
-          syncResult,
-          demand,
-          nextAcquisition.options,
-          true,
-          () => isCurrentAttempt() && !nextAcquisition.options.signal?.aborted,
-        )
-        this.trackTruncateReplayParticipant(
-          demand,
-          nextAcquisition.options,
-          syncResult,
-        )
-
-        if (!this.subsetDemands.includes(demand)) {
-          try {
-            this.releaseOrRetainAcquisition(nextAcquisition)
-          } catch {
-            attempt.failed = true
-          }
-          continue
-        }
-
-        try {
-          this.replaceSubsetAcquisition(demand, nextAcquisition)
-        } catch (error) {
-          // The old lease is still owned because its release failed. Abort and
-          // release the new acquisition, but keep observing its work so rows
-          // from a non-cooperative adapter cannot escape the replay buffer.
-          if (this.subsetDemands.includes(demand)) {
-            nextAcquisition.abortController.abort()
-            try {
-              this.releaseOrRetainAcquisition(nextAcquisition)
-            } catch {
-              // Preserve the first ownership error. The demand still retains
-              // the old acquisition so normal cleanup can retry that release.
-            }
-          }
-          this.recordLoadSubsetError(demand.options, error, true)
-          this.stopStatusParticipant(statusParticipant)
-          attempt.failed = true
-        }
+        this.startTruncateReplayDemand(session, attempt, demand)
       }
 
       attempt.setupComplete = true
@@ -386,32 +328,158 @@ export class CollectionSubscription
     })
   }
 
+  /** Make tentative replay ownership visible before adapter code can reenter. */
+  private startTruncateReplayDemand(
+    session: TruncateReplaySession,
+    attempt: TruncateReplayAttempt,
+    demand: SubsetDemand,
+  ): void {
+    const previous: SubsetAcquisition = {
+      options: demand.options,
+      abortController: demand.abortController,
+      removeRequestAbortListener: demand.removeRequestAbortListener,
+    }
+    const next = this.createSubsetAcquisition(demand)
+    const restorePrevious = () => {
+      if (demand.options !== next.options) return
+      demand.options = previous.options
+      demand.abortController = previous.abortController
+      demand.removeRequestAbortListener = previous.removeRequestAbortListener
+    }
+    const isCurrentAttempt = () =>
+      this.truncateReplaySession === session &&
+      session.currentAttempt === attempt
+
+    demand.options = next.options
+    demand.abortController = next.abortController
+    demand.removeRequestAbortListener = next.removeRequestAbortListener
+
+    let result: LoadSubsetRequestResult
+    try {
+      result = this.loadSubset(next.options, isCurrentAttempt)
+    } catch {
+      const demandRemains = this.subsetDemands.includes(demand)
+      restorePrevious()
+      if (demandRemains) {
+        next.abortController.abort()
+        next.removeRequestAbortListener?.()
+      } else {
+        try {
+          this.releaseOrRetainAcquisition(previous)
+        } catch {
+          // The failed replay already owns the first error. Keep this old lease
+          // as cleanup debt without replacing it.
+        }
+      }
+      attempt.failed = true
+      return
+    }
+
+    if (!this.subsetDemands.includes(demand)) {
+      // Reentrant release already retired `next`; it could not see the old
+      // acquisition held on this stack, so retire that exact lease now.
+      try {
+        this.releaseOrRetainAcquisition(previous)
+      } catch {
+        attempt.failed = true
+      }
+      return
+    }
+
+    const statusParticipant = this.observeLoadSubsetResult(
+      result,
+      demand,
+      next.options,
+      true,
+      () => isCurrentAttempt() && !next.options.signal?.aborted,
+    )
+    this.trackTruncateReplayParticipant(
+      session,
+      attempt,
+      demand,
+      next.options,
+      result,
+    )
+
+    if (!isCurrentAttempt()) {
+      // A reentrant truncate aborted this tentative acquisition before it was
+      // returned. Keep its async work in the captured attempt's barrier, but
+      // restore the demand's prior lease for the newer replay to replace.
+      restorePrevious()
+      next.abortController.abort()
+      try {
+        this.releaseOrRetainAcquisition(next)
+      } catch {
+        attempt.failed = true
+      }
+      return
+    }
+
+    // Reuse the established replacement path after restoring the state it
+    // expects. This unloads the old lease only after adapter startup succeeds.
+    restorePrevious()
+    try {
+      this.replaceSubsetAcquisition(demand, next)
+    } catch (error) {
+      // The old lease is still owned because its release failed. Abort and
+      // release the new acquisition, but keep observing its work so rows from
+      // a non-cooperative adapter cannot escape the replay buffer.
+      if (this.subsetDemands.includes(demand)) {
+        next.abortController.abort()
+        try {
+          this.releaseOrRetainAcquisition(next)
+        } catch {
+          // Preserve the first ownership error. The demand still retains the
+          // old acquisition so normal cleanup can retry that release.
+        }
+      }
+      this.recordLoadSubsetError(demand.options, error, true)
+      this.stopStatusParticipant(statusParticipant)
+      attempt.failed = true
+    }
+  }
+
   private settleTruncateReplay(
     session: TruncateReplaySession,
     attempt: TruncateReplayAttempt,
     pending: { demand: SubsetDemand; promise: Promise<unknown> },
   ): void {
-    if (this.truncateReplaySession !== session) return
-    attempt.pending.delete(pending)
-    if (
-      attempt !== session.currentAttempt &&
-      attempt.setupComplete &&
-      attempt.pending.size === 0
-    ) {
-      session.attempts.delete(attempt)
+    try {
+      if (this.truncateReplaySession !== session) return
+      attempt.pending.delete(pending)
+      if (
+        attempt !== session.currentAttempt &&
+        attempt.setupComplete &&
+        attempt.pending.size === 0
+      ) {
+        session.attempts.delete(attempt)
+      }
+      this.checkTruncateReplayComplete(session)
+    } catch (error) {
+      // Replay settlement runs from a Promise callback, so throwing here would
+      // create an unobserved derived rejection. Surface subscriber errors like
+      // other async collection events instead.
+      queueMicrotask(() => {
+        throw error
+      })
     }
-    this.checkTruncateReplayComplete(session)
   }
 
   /** Keep every acquisition begun during recovery inside its publication barrier. */
   private trackTruncateReplayParticipant(
+    session: TruncateReplaySession,
+    attempt: TruncateReplayAttempt,
     demand: SubsetDemand,
     options: LoadSubsetOptions,
     result: LoadSubsetRequestResult,
   ): void {
-    const session = this.truncateReplaySession
-    const attempt = session?.currentAttempt
-    if (!session || !attempt || !(result instanceof Promise)) return
+    if (
+      this.truncateReplaySession !== session ||
+      !session.attempts.has(attempt) ||
+      !(result instanceof Promise)
+    ) {
+      return
+    }
 
     // A transport promise may be shared by several logical demands. Track each
     // acquisition separately so one observer cannot complete the attempt early.
@@ -538,18 +606,20 @@ export class CollectionSubscription
       session.publicationState.publishedRows,
       finalRows,
     )
-    if (replacement.length > 0) this.filteredCallback(replacement)
-    // Buffering records every source key before active-demand filtering. Reset
-    // the dedupe set to what the subscriber actually received so a later
-    // request can publish a row that belonged only to a released demand.
-    this.sentKeys = new Set(this.publishedRows.keys())
-    if (this.orderByIndex) {
-      this.limitedSnapshotRowCount = this.sentKeys.size
-      const orderedSentKeys = this.orderByIndex.takeFromStart(
-        this.sentKeys.size,
-        (key) => this.sentKeys.has(key),
-      )
-      this.lastSentKey = orderedSentKeys.at(-1)
+    try {
+      if (replacement.length > 0) this.filteredCallback(replacement)
+    } finally {
+      // Buffering records every source key before active-demand filtering.
+      // Restore tracking even when a subscriber rejects the replacement.
+      this.sentKeys = new Set(this.publishedRows.keys())
+      if (this.orderByIndex) {
+        this.limitedSnapshotRowCount = this.sentKeys.size
+        const orderedSentKeys = this.orderByIndex.takeFromStart(
+          this.sentKeys.size,
+          (key) => this.sentKeys.has(key),
+        )
+        this.lastSentKey = orderedSentKeys.at(-1)
+      }
     }
   }
 
@@ -826,12 +896,22 @@ export class CollectionSubscription
     demand.options = acquisition.options
     demand.abortController = acquisition.abortController
     demand.removeRequestAbortListener = acquisition.removeRequestAbortListener
+    const replaySession = this.truncateReplaySession
+    const replayAttempt = replaySession?.currentAttempt
     // Reentrant release must see the exact acquisition before adapter work
     // starts. A genuine load throw removes this tentative logical owner below.
     this.subsetDemands.push(demand)
     try {
       const result = this.loadSubset(acquisition.options)
-      this.trackTruncateReplayParticipant(demand, acquisition.options, result)
+      if (replaySession && replayAttempt) {
+        this.trackTruncateReplayParticipant(
+          replaySession,
+          replayAttempt,
+          demand,
+          acquisition.options,
+          result,
+        )
+      }
       return { demand, result }
     } catch (error) {
       this.failCurrentTruncateReplay()
