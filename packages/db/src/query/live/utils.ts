@@ -330,7 +330,12 @@ export class OrderedSourceLoader {
       const failedAcquisition = this.failedAcquisition
       this.failedAcquisition = undefined
       if (failedAcquisition) {
-        this.subscription.releaseLoadSubset(failedAcquisition)
+        this.requesting = true
+        try {
+          this.subscription.releaseLoadSubset(failedAcquisition)
+        } finally {
+          this.requesting = false
+        }
         // Adapter cleanup can synchronously tear down this loader.
         // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
         if (!this.active) return

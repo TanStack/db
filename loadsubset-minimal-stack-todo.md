@@ -1080,6 +1080,9 @@ explicitly removed.
         production integration that throws after adapter startup during local
         read or publication. Keep direct route cells only for method-selection
         laws that cannot be observed through the public API.
+  - [ ] Prove the failure publication barrier through the real subscription
+        boundary: provisional release may synchronously commit source work, but
+        the prior public snapshot stays fixed and status cannot become `ready`.
   - [ ] Replace the direct loader-only route matrix with production-path
         witnesses where practical. The matrix currently proves method choice
         and reentry suppression, but only its page integration exercises
@@ -1098,9 +1101,11 @@ explicitly removed.
         its physical acquisition object. Cross failure, truncate, explicit
         retry, and another truncate; the obsolete cursor must not rejoin or
         veto the successful replacement. Use a stable logical-demand handle.
-  - [ ] Fence explicit retry while failed-acquisition release is in progress.
+  - [x] Fence explicit retry while failed-acquisition release is in progress.
         Reentrant `unloadSubset` must not start the replacement before the old
         release succeeds, and a failed release must leave no replacement work.
+        The async-failure witness red/greened nested replacement followed by a
+        release throw, then proved a later explicit generation can retry.
   - [ ] Extend failed-acquisition tests across async page, prefix, full-source,
         and boundary routes with real acquisition identity, real signal abort,
         final release counts, and exact replay request traces.
