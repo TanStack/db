@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
@@ -211,6 +211,112 @@ describe(`CollectionSubscription status tracking`, () => {
     })
 
     subscription.unsubscribe()
+  })
+
+  it.each(
+    ([`generic`, `specific`] as const).flatMap((eventKind) =>
+      ([`clean`, `throw`] as const).map((releaseKind) => ({
+        eventKind,
+        releaseKind,
+      })),
+    ),
+  )(
+    `stops status delivery when a $eventKind loading listener unsubscribes with $releaseKind cleanup`,
+    async ({ eventKind, releaseKind }) => {
+      const pending = createDeferred<void>()
+      const releaseFailure = new Error(`release failed during status callback`)
+      const deferredMicrotasks: Array<VoidFunction> = []
+      const queueMicrotaskSpy = vi
+        .spyOn(globalThis, `queueMicrotask`)
+        .mockImplementation((callback) => deferredMicrotasks.push(callback))
+      const collection = createCollection<{ id: string }>({
+        id: `unsubscribe-during-${eventKind}-loading-status-${releaseKind}`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => pending.promise,
+              unloadSubset: () => {
+                if (releaseKind === `throw`) throw releaseFailure
+              },
+            }
+          },
+        },
+      })
+      const subscription = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      const eventsAfterTeardown: Array<string> = []
+      let teardownStarted = false
+      const unsubscribeOnLoading = () => {
+        teardownStarted = true
+        subscription.unsubscribe()
+      }
+      const recordAfterTeardown = (event: { status: string }) => {
+        if (teardownStarted) eventsAfterTeardown.push(event.status)
+      }
+
+      if (eventKind === `generic`) {
+        subscription.on(`status:change`, ({ status }) => {
+          if (status === `loadingSubset`) unsubscribeOnLoading()
+        })
+        subscription.on(`status:change`, recordAfterTeardown)
+      } else {
+        subscription.on(`status:loadingSubset`, unsubscribeOnLoading)
+        subscription.on(`status:loadingSubset`, recordAfterTeardown)
+        subscription.on(`status:change`, recordAfterTeardown)
+      }
+
+      try {
+        subscription.requestSnapshot({ optimizedOnly: false })
+        expect(eventsAfterTeardown).toEqual([])
+        expect(collection.subscriberCount).toBe(0)
+        expect(deferredMicrotasks).toHaveLength(releaseKind === `throw` ? 1 : 0)
+        if (releaseKind === `throw`) {
+          expect(() => deferredMicrotasks[0]!()).toThrow(releaseFailure)
+        }
+
+        pending.resolve()
+        await flushPromises()
+        expect(eventsAfterTeardown).toEqual([])
+      } finally {
+        queueMicrotaskSpy.mockRestore()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it(`unsubscribes once when an unsubscribed listener reenters`, async () => {
+    const deferredMicrotasks: Array<VoidFunction> = []
+    const queueMicrotaskSpy = vi
+      .spyOn(globalThis, `queueMicrotask`)
+      .mockImplementation((callback) => deferredMicrotasks.push(callback))
+    const collection = createCollection<{ id: string }>({
+      id: `reentrant-unsubscribed-event`,
+      getKey: ({ id }) => id,
+      sync: { sync: ({ markReady }) => markReady() },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    let events = 0
+    subscription.on(`unsubscribed`, () => {
+      events++
+      if (events === 1) subscription.unsubscribe()
+    })
+
+    try {
+      subscription.unsubscribe()
+
+      expect(events).toBe(1)
+      expect(collection.subscriberCount).toBe(0)
+      expect(deferredMicrotasks).toEqual([])
+    } finally {
+      queueMicrotaskSpy.mockRestore()
+      await collection.cleanup()
+    }
   })
 
   it(`promise rejection still cleans up and sets status back to 'ready'`, async () => {

@@ -426,6 +426,26 @@ describe(`Collection Events System`, () => {
       expect(observed).toEqual([1])
     })
 
+    it(`visits a listener once when it removes and re-adds itself`, () => {
+      const emitter = new TestEventEmitter()
+      const observed: Array<number> = []
+      let readded = false
+      let unsubscribe = () => {}
+      const listener = ({ id }: { id: number }) => {
+        observed.push(id)
+        unsubscribe()
+        if (!readded) {
+          readded = true
+          unsubscribe = emitter.on(`event`, listener)
+        }
+      }
+      unsubscribe = emitter.on(`event`, listener)
+
+      emitter.emit(1)
+
+      expect(observed).toEqual([1])
+    })
+
     it(`clears ordinary and once listeners together`, () => {
       const emitter = new TestEventEmitter()
       const ordinaryListener = vi.fn()

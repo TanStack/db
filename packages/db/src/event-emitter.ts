@@ -120,8 +120,11 @@ export class EventEmitter<TEvents extends Record<string, any>> {
     eventPayload: TEvents[T],
     isCurrent: () => boolean,
   ): void {
-    for (const listener of this.listeners.get(event) ?? []) {
+    const listeners = this.listeners.get(event)
+    if (!listeners) return
+    for (const listener of [...listeners]) {
       if (!isCurrent()) break
+      if (!this.listeners.get(event)?.has(listener)) continue
       try {
         listener(eventPayload)
       } catch (error) {

@@ -722,6 +722,7 @@ export class CollectionSubscription
    * Set subscription status and emit events if changed
    */
   private setStatus(newStatus: SubscriptionStatus) {
+    if (this.unsubscribed) return
     if (this._status === newStatus) {
       return // No change
     }
@@ -1625,6 +1626,18 @@ export class CollectionSubscription
   }
 
   unsubscribe() {
+    if (this.unsubscribed) {
+      let firstCleanupError: unknown
+      for (const acquisition of [...this.releaseDebts]) {
+        try {
+          this.releaseOrRetainAcquisition(acquisition)
+        } catch (error) {
+          firstCleanupError ??= error
+        }
+      }
+      if (firstCleanupError !== undefined) throw firstCleanupError
+      return
+    }
     this.unsubscribed = true
     // Stop any status listener set already being iterated. Clearing the
     // emitter's map cannot invalidate that captured Set by itself.

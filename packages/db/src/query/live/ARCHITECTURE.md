@@ -638,8 +638,10 @@ failure: core finishes its internal state and surfaces the exact callback error
 in a host microtask. Status callbacks may synchronously change demand. Generic
 and specific status delivery capture the transition revision and stop before a
 later listener when reentry supersedes it, including an ABA transition back to
-the same status label. Subscription teardown also advances that revision, so a
-listener that unsubscribes stops the status listener set already being walked.
+the same status label. Subscription teardown is a one-shot logical transition:
+it stops the listener set already being walked, emits no later status, and
+removes subscriber ownership once. A later `unsubscribe()` may retry physical
+adapter cleanup debt without repeating that logical transition.
 Failure keeps the last complete result visible and partly replayed source state
 private for both direct subscribers and query graphs. Ordinary source deltas or
 snapshot requests do not reopen that gate because they cannot prove the source

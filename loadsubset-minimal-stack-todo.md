@@ -991,8 +991,18 @@ explicitly removed.
       with a transition revision; regressions cover simple reentry and ABA from
       both generic and specific callbacks.
 - [x] Stop a subscription status transition when an earlier listener
-      unsubscribes. Clearing the listener map does not stop iteration of the
-      current listener set, so later listeners can run after `unsubscribed`.
+      unsubscribes, including teardown from generic or specific
+      `loadingSubset` listeners when adapter cleanup throws. Clearing the
+      listener map does not stop iteration of the current listener set, so
+      later listeners could run after `unsubscribed`; status changes during
+      teardown could also start a fresh `ready` delivery.
+- [x] Make logical unsubscribe reentrantly idempotent while preserving retries
+      of failed physical adapter cleanup. The `unsubscribed` event and
+      subscriber-count decrement now happen once.
+- [x] Snapshot each event's listener set and skip listeners removed before
+      their turn. A listener that removes and re-adds itself cannot run twice
+      in one emission, while an earlier listener can still cancel a pending
+      `once` callback.
 - [x] Pin one cross-channel trace for generic-before-specific status delivery,
       including nested ABA reentry, and add the missing Collection-level
       generic and specific ABA matrix promised by the architecture text.
@@ -1030,6 +1040,14 @@ explicitly removed.
         replacement must choose the lowest public key after an update.
 - [ ] Prevent a reentrant truncate started during synchronous replacement
       publication from letting the superseded attempt emit transient `ready`.
+- [ ] Close the replay-release follow-up audit:
+  - [ ] A synchronous delete callback that reacquires demand must not emit
+        `ready` before its replacement row becomes public.
+  - [ ] A replay demand that rejects and then retires must not leave its
+        attempt-global failure poisoning surviving successful demand.
+  - [ ] A demand reacquired from reentrant adapter `unloadSubset` must join the
+        same private replay gate; completion cannot be decided before that
+        release callback.
 - [ ] Reconcile the joined-recovery readiness wording with the public
       multi-source barrier: a single source can become ready before the joined
       replacement is public.
