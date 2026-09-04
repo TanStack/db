@@ -73,6 +73,7 @@ type PaginationScenario = {
   windows: ReadonlyArray<PaginationWindow>
   explicitPublicKeyOrder?: boolean
   includeFilter?: boolean
+  reverseInsertion?: boolean
 }
 
 type PaginationAction =
@@ -85,6 +86,9 @@ type PaginationStateScenario = {
   direction: `asc` | `desc`
   initialWindow: PaginationWindow
   actions: ReadonlyArray<PaginationAction>
+  explicitPublicKeyOrder?: boolean
+  includeFilter?: boolean
+  reverseInsertion?: boolean
 }
 
 type PendingCursorLoad = {
@@ -140,6 +144,7 @@ const scenarioArbitrary: fc.Arbitrary<PaginationScenario> = fc.record({
   direction: fc.constantFrom(`asc`, `desc`),
   explicitPublicKeyOrder: fc.boolean(),
   includeFilter: fc.boolean(),
+  reverseInsertion: fc.boolean(),
   windows: fc.array(
     fc.record({
       offset: fc.integer({ min: 0, max: 12 }),
@@ -186,6 +191,9 @@ const stateScenarioArbitrary: fc.Arbitrary<PaginationStateScenario> = fc.record(
       maxLength: 12,
     }),
     direction: fc.constantFrom(`asc`, `desc`),
+    explicitPublicKeyOrder: fc.boolean(),
+    includeFilter: fc.boolean(),
+    reverseInsertion: fc.boolean(),
     initialWindow: windowArbitrary,
     actions: fc.array(paginationActionArbitrary, {
       minLength: 1,
@@ -373,7 +381,18 @@ function referenceWindowRows(
         left.id - right.id,
     )
     .slice(window.offset, window.offset + window.limit)
-    .map((row) => ({ ...row }))
+    .map(({ id, rank }) => ({ id, rank }))
+}
+
+function isKeptRow(id: number): boolean {
+  return id % 3 !== 0
+}
+
+function visibleRows(
+  rows: ReadonlyArray<PageRow>,
+  includeFilter: boolean | undefined,
+): Array<PageRow> {
+  return includeFilter ? rows.filter(({ keep }) => keep) : [...rows]
 }
 
 function rowsForLoadSubset<TRow extends { id: number }>(
@@ -449,13 +468,15 @@ async function runPaginationScenario(
   const rows = scenario.ranks.map((rank, index) => ({
     id: index + 1,
     rank,
-    keep: true,
+    keep: isKeptRow(index + 1),
   }))
+  const initialRows = scenario.reverseInsertion ? [...rows].reverse() : rows
+  const expectedRows = visibleRows(rows, scenario.includeFilter)
   const initialWindow = scenario.windows[0]!
   const source = createCollection(
     mockSyncCollectionOptions({
       id: `pagination-oracle-source-${collectionSequence++}`,
-      initialData: rows.map((row) => ({ ...row })),
+      initialData: initialRows.map((row) => ({ ...row })),
       getKey: (row: PageRow) => row.id,
       autoIndex: `eager`,
     }),
@@ -480,7 +501,7 @@ async function runPaginationScenario(
   try {
     await live.preload()
     expect(Array.from(live.values(), ({ id }) => id)).toEqual(
-      referenceWindow(rows, scenario.direction, initialWindow),
+      referenceWindow(expectedRows, scenario.direction, initialWindow),
     )
 
     for (const window of scenario.windows.slice(1)) {
@@ -488,7 +509,7 @@ async function runPaginationScenario(
       if (result instanceof Promise) await result
 
       expect(Array.from(live.values(), ({ id }) => id)).toEqual(
-        referenceWindow(rows, scenario.direction, window),
+        referenceWindow(expectedRows, scenario.direction, window),
       )
     }
   } finally {
@@ -670,25 +691,37 @@ async function runPaginationStateScenario(
   scenario: PaginationStateScenario,
 ): Promise<void> {
   const rows = new Map<number, PageRow>(
-    scenario.ranks.map((rank, index) => [index + 1, { id: index + 1, rank }]),
+    scenario.ranks.map((rank, index) => [
+      index + 1,
+      { id: index + 1, rank, keep: isKeptRow(index + 1) },
+    ]),
   )
+  const initialRows = [...rows.values()]
+  if (scenario.reverseInsertion) initialRows.reverse()
   let currentWindow = scenario.initialWindow
   const sourceOptions = mockSyncCollectionOptions({
     id: `pagination-state-oracle-source-${collectionSequence++}`,
-    initialData: [...rows.values()].map((row) => ({ ...row })),
+    initialData: initialRows.map((row) => ({ ...row })),
     getKey: (row: PageRow) => row.id,
     autoIndex: `eager` as const,
   })
   const source = createCollection(sourceOptions)
-  const live = createLiveQueryCollection((query) =>
-    query
-      .from({ row: source })
-      .orderBy(({ row }) => row.rank, scenario.direction)
-      .orderBy(({ row }) => row.id, `asc`)
+  const live = createLiveQueryCollection((query) => {
+    const from = query.from({ row: source })
+    const filtered = scenario.includeFilter
+      ? from.where(({ row }) => eq(row.keep, true))
+      : from
+    const ordered = filtered.orderBy(
+      ({ row }) => row.rank,
+      scenario.direction,
+    )
+    return (scenario.explicitPublicKeyOrder === false
+      ? ordered
+      : ordered.orderBy(({ row }) => row.id, `asc`))
       .offset(currentWindow.offset)
       .limit(currentWindow.limit)
-      .select(({ row }) => ({ id: row.id, rank: row.rank })),
-  )
+      .select(({ row }) => ({ id: row.id, rank: row.rank }))
+  })
   const publications: Array<{
     changes: ReadonlyArray<unknown>
     rows: Array<{ id: number; rank: number }>
@@ -704,7 +737,7 @@ async function runPaginationStateScenario(
     try {
       expect(readCurrentWindow()).toEqual(
         referenceWindowRows(
-          [...rows.values()],
+          visibleRows([...rows.values()], scenario.includeFilter),
           scenario.direction,
           currentWindow,
         ),
@@ -732,7 +765,11 @@ async function runPaginationStateScenario(
         const result = live.utils.setWindow(currentWindow)
         if (result instanceof Promise) await result
       } else if (action.type === `put`) {
-        const row = { id: action.id, rank: action.rank }
+        const row = {
+          id: action.id,
+          rank: action.rank,
+          keep: isKeptRow(action.id),
+        }
         const type = rows.has(action.id) ? `update` : `insert`
         rows.set(action.id, row)
         sourceOptions.utils.begin()
@@ -769,12 +806,14 @@ async function runOnDemandPaginationScenario(
   const authoritativeRows = scenario.ranks.map((rank, index) => ({
     id: index + 1,
     rank,
-    keep: true,
+    keep: isKeptRow(index + 1),
   }))
+  const expectedRows = visibleRows(authoritativeRows, scenario.includeFilter)
   const directionFactor = scenario.direction === `asc` ? 1 : -1
   const orderedRows = [...authoritativeRows].sort(
     (left, right) =>
-      (left.rank - right.rank) * directionFactor || left.id - right.id,
+      (left.rank - right.rank) * directionFactor ||
+      (left.id - right.id) * (scenario.reverseInsertion ? -1 : 1),
   )
   const deliveredIds = new Set<number>()
   const loads: Array<LoadSubsetOptions> = []
@@ -853,7 +892,7 @@ async function runOnDemandPaginationScenario(
     }
     try {
       expect(Array.from(live.values(), ({ id }) => id)).toEqual(
-        referenceWindow(authoritativeRows, scenario.direction, initialWindow),
+        referenceWindow(expectedRows, scenario.direction, initialWindow),
       )
     } catch (error) {
       throw new TraceAssertionError(0, error)
@@ -868,7 +907,7 @@ async function runOnDemandPaginationScenario(
 
       try {
         expect(Array.from(live.values(), ({ id }) => id)).toEqual(
-          referenceWindow(authoritativeRows, scenario.direction, window),
+          referenceWindow(expectedRows, scenario.direction, window),
         )
       } catch (error) {
         throw new TraceAssertionError(index + 1, error)
@@ -906,7 +945,7 @@ async function runOnDemandPaginationScenario(
     }
     for (const publication of publications) {
       const expected = referenceWindow(
-        authoritativeRows,
+        expectedRows,
         scenario.direction,
         publication.window,
       )
@@ -915,7 +954,7 @@ async function runOnDemandPaginationScenario(
     if (
       scenario.windows.some(
         (window) =>
-          referenceWindow(authoritativeRows, scenario.direction, window)
+          referenceWindow(expectedRows, scenario.direction, window)
             .length > 0,
       )
     ) {
@@ -923,11 +962,11 @@ async function runOnDemandPaginationScenario(
     }
     if (publications.length > 0) {
       expect(publications.at(-1)?.ids).toEqual(
-        referenceWindow(authoritativeRows, scenario.direction, currentWindow),
+        referenceWindow(expectedRows, scenario.direction, currentWindow),
       )
     }
     expect(loads.length).toBeLessThanOrEqual(
-      scenario.windows.length * (authoritativeRows.length + 2),
+      scenario.windows.length * (expectedRows.length + 2),
     )
     expect(publications.length).toBeLessThanOrEqual(
       loads.length + scenario.windows.length,
@@ -1995,10 +2034,27 @@ describe(`pagination recomputation oracle`, () => {
       direction: `asc`,
       explicitPublicKeyOrder: false,
       includeFilter: true,
+      reverseInsertion: true,
       windows: [
         { offset: 0, limit: 5 },
         { offset: 5, limit: 5 },
         { offset: 10, limit: 5 },
+      ],
+    })
+  })
+
+  it(`keeps implicit ties stable across filtered source mutations`, async () => {
+    await runPaginationStateScenario({
+      ranks: [0, 0, 0, 1, 1, 1],
+      direction: `asc`,
+      explicitPublicKeyOrder: false,
+      includeFilter: true,
+      reverseInsertion: true,
+      initialWindow: { offset: 0, limit: 3 },
+      actions: [
+        { type: `put`, id: 7, rank: 0 },
+        { type: `delete`, id: 2 },
+        { type: `window`, offset: 1, limit: 3 },
       ],
     })
   })

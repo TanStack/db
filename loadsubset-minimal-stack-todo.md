@@ -939,8 +939,10 @@ explicitly removed.
       advances through an implicit public-key tie class when callers await the
       `setWindow()` operation. The old test discarded that promise and observed
       page three while it was still in flight. The pagination oracle now varies
-      explicit versus implicit public-key tie-breaking and pins the three-page
-      case; both the oracle and corrected regression are green.
+      explicit versus implicit public-key tie-breaking, real filter membership,
+      and insertion order across static, on-demand, and mutation histories. It
+      pins the three-page and filtered-mutation cases; the full 104-test oracle
+      and corrected regression are green.
 - [ ] Preserve an explicit `undefined` bound in `BasicIndex` range queries;
       absence and the indexed nullish value are distinct public inputs.
 - [ ] Tie executable index comparison to advertised `compareOptions`, and add
