@@ -313,9 +313,35 @@ describe(`hash`, () => {
       }
       expect(() => hash(independent)).not.toThrow()
 
+      const independentDiamonds: Record<string, unknown> = {}
+      for (let index = 0; index < 600; index++) {
+        const diamondCenter: Record<string, unknown> = {}
+        const leftIngress = { next: diamondCenter }
+        const rightIngress = { next: diamondCenter }
+        diamondCenter.back = leftIngress
+        independentDiamonds[`left${index}`] = leftIngress
+        independentDiamonds[`right${index}`] = rightIngress
+      }
+      expect(() => hash(independentDiamonds)).not.toThrow()
+
       const small: { self?: unknown } = {}
       small.self = small
       expect(hash(structuredClone(small))).toBe(hash(small))
+    })
+
+    it(`bounds internal work when adopting cached cyclic traversals`, () => {
+      const size = 300
+      const nodes = Array.from(
+        { length: size },
+        (_, value) => ({ value }) as Record<string, unknown>,
+      )
+      for (let index = 0; index < size; index++) {
+        const next = nodes[(index + 1) % size]!
+        nodes[index]!.left = { next }
+        nodes[index]!.right = { next }
+      }
+
+      expect(() => hash(nodes[0])).toThrow(RangeError)
     })
 
     it(`should hash arrays`, () => {

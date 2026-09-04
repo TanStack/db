@@ -22,9 +22,11 @@ const TEMPORAL_MARKER = randomHash()
 const CYCLE_MARKER = randomHash()
 
 // A cyclic subgraph can be reached under exponentially many distinct active
-// ancestor contexts. Reject that adversarial shape instead of letting one row
-// monopolize the graph turn. Ordinary cyclic values use far fewer traversals.
-const MAX_CYCLIC_TRAVERSALS = 512
+// ancestor contexts, and checking or adopting cached traversals can itself do
+// too much work. Bound both costs instead of letting one row monopolize the
+// graph turn. The context cap is per object so disjoint cycles remain linear.
+const MAX_CYCLIC_CONTEXT_VARIANTS = 512
+const MAX_CYCLIC_CACHE_WORK = 65_536
 
 const temporalTypes = new Set([
   `Temporal.Duration`,
@@ -60,7 +62,7 @@ type HashContext = {
   cyclicObjects: Set<object>
   frames: Array<HashFrame>
   traversalHashes: WeakMap<object, Array<TraversalHash>>
-  cyclicContextVariants: number
+  cyclicCacheWork: number
 }
 
 type HashDependency = {
@@ -89,7 +91,7 @@ export function hash(input: any): number {
     cyclicObjects: new Set(),
     frames: [],
     traversalHashes: new WeakMap(),
-    cyclicContextVariants: 0,
+    cyclicCacheWork: 0,
   })
   return hasher.digest()
 }
@@ -163,11 +165,8 @@ function hashObject(input: object, context: HashContext): number {
 
   if (context.cyclicObjects.has(input)) {
     const traversalHashes = context.traversalHashes.get(input) ?? []
-    if (traversalHashes.length > 0) {
-      context.cyclicContextVariants++
-      if (context.cyclicContextVariants > MAX_CYCLIC_TRAVERSALS) {
-        throw new RangeError(`Cyclic value is too complex to hash safely`)
-      }
+    if (traversalHashes.length > MAX_CYCLIC_CONTEXT_VARIANTS) {
+      throw new RangeError(`Cyclic value is too complex to hash safely`)
     }
     traversalHashes.push({ valueHash, ...frame })
     context.traversalHashes.set(input, traversalHashes)
@@ -293,25 +292,44 @@ function getCachedHash(input: object, context: HashContext): number {
   if (valueHash !== undefined) return valueHash
 
   const startIndex = context.activeOrder.length
-  const traversalHash = context.traversalHashes
-    .get(input)
-    ?.find(
-      (candidate) =>
-        [...candidate.visitedObjects].every(
-          (object) => !context.activeObjects.has(object),
-        ) &&
-        candidate.externalDependencies.every(
-          (dependency) =>
-            context.activeObjects.get(dependency.object) ===
-            startIndex + dependency.offset,
-        ),
-    )
+  const traversalHash = findReusableTraversalHash(input, startIndex, context)
   if (traversalHash) {
     adoptTraversalHash(traversalHash, context)
     return traversalHash.valueHash
   }
 
   return hashObject(input, context)
+}
+
+function findReusableTraversalHash(
+  input: object,
+  startIndex: number,
+  context: HashContext,
+): TraversalHash | undefined {
+  for (const candidate of context.traversalHashes.get(input) ?? []) {
+    let reusable = true
+    for (const object of candidate.visitedObjects) {
+      consumeCyclicCacheWork(context)
+      if (context.activeObjects.has(object)) {
+        reusable = false
+        break
+      }
+    }
+    if (!reusable) continue
+
+    for (const dependency of candidate.externalDependencies) {
+      consumeCyclicCacheWork(context)
+      if (
+        context.activeObjects.get(dependency.object) !==
+        startIndex + dependency.offset
+      ) {
+        reusable = false
+        break
+      }
+    }
+    if (reusable) return candidate
+  }
+  return undefined
 }
 
 function addDependency(frame: HashFrame, object: object, offset: number): void {
@@ -332,9 +350,11 @@ function adoptTraversalHash(
 ): void {
   for (const frame of context.frames) {
     for (const object of traversalHash.visitedObjects) {
+      consumeCyclicCacheWork(context)
       frame.visitedObjects.add(object)
     }
     for (const dependency of traversalHash.externalDependencies) {
+      consumeCyclicCacheWork(context)
       const activeIndex = context.activeObjects.get(dependency.object)!
       if (activeIndex < frame.startIndex) {
         addDependency(frame, dependency.object, activeIndex - frame.startIndex)
@@ -344,9 +364,17 @@ function adoptTraversalHash(
         index < context.activeOrder.length;
         index++
       ) {
+        consumeCyclicCacheWork(context)
         context.cyclicObjects.add(context.activeOrder[index]!)
       }
     }
+  }
+}
+
+function consumeCyclicCacheWork(context: HashContext): void {
+  context.cyclicCacheWork++
+  if (context.cyclicCacheWork > MAX_CYCLIC_CACHE_WORK) {
+    throw new RangeError(`Cyclic value is too complex to hash safely`)
   }
 }
 
