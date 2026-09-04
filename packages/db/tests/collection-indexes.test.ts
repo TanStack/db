@@ -1574,6 +1574,84 @@ describe(`Collection Indexes`, () => {
       expect(ids).toEqual([`1`])
     })
 
+    it(`should match symbol range predicates consistently with a full scan`, async () => {
+      const boundary = Symbol(`boundary`)
+      const symbolCollection = createCollection<
+        { id: string; group: symbol },
+        string
+      >({
+        getKey: (row) => row.id,
+        startSync: true,
+        autoIndex: `off`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({
+              type: `insert`,
+              value: { id: `1`, group: Symbol(`first`) },
+            })
+            write({
+              type: `insert`,
+              value: { id: `2`, group: Symbol(`second`) },
+            })
+            commit()
+            markReady()
+          },
+        },
+      })
+      await symbolCollection.stateWhenReady()
+
+      const where = gt(new PropRef([`group`]), boundary)
+      const scanned = symbolCollection.currentStateAsChanges({ where })!
+
+      symbolCollection.createIndex((row) => row.group)
+      withIndexTracking(symbolCollection, (tracker) => {
+        const indexed = symbolCollection.currentStateAsChanges({ where })!
+
+        expect(indexed.map((change) => change.key).sort()).toEqual(
+          scanned.map((change) => change.key).sort(),
+        )
+        expectIndexUsage(tracker.stats, {
+          shouldUseIndex: false,
+          shouldUseFullScan: true,
+        })
+      })
+    })
+
+    it(`should retain every row whose index values share one comparator position`, async () => {
+      const shared = Symbol(`shared`)
+      const groupedCollection = createCollection<
+        { id: string; value: Array<symbol> },
+        string
+      >({
+        getKey: (row) => row.id,
+        startSync: true,
+        autoIndex: `off`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `first`, value: [shared] } })
+            write({ type: `insert`, value: { id: `second`, value: [shared] } })
+            commit()
+            markReady()
+          },
+        },
+      })
+      await groupedCollection.stateWhenReady()
+
+      const index = groupedCollection.createIndex((row) => row.value)
+
+      expect(index.takeFromStart(2)).toEqual([`first`, `second`])
+      expect(index.orderedEntriesArray[0]?.[1]).toEqual(
+        new Set([`first`, `second`]),
+      )
+      expect(index.orderedEntriesArrayReversed[0]?.[1]).toEqual(
+        new Set([`first`, `second`]),
+      )
+    })
+
     it(`should return all matching rows for a range predicate on a custom-comparator index`, async () => {
       // A range predicate must return every row that satisfies it regardless
       // of the comparator the index was created with. With scores 5 and 20,

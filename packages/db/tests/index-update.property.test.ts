@@ -124,3 +124,50 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
     },
   )
 })
+
+describe(`BTreeIndex comparator groups`, () => {
+  fcTest.prop([
+    fc.array(fc.integer({ min: 0, max: 4 }), {
+      minLength: 2,
+      maxLength: 20,
+    }),
+  ])(
+    `preserves exact equality while ordered traversal retains every row`,
+    (groupIds) => {
+      const symbols = new Map<number, symbol>()
+      const rows = groupIds.map((groupId, position) => {
+        const symbol = symbols.get(groupId) ?? Symbol(String(groupId))
+        symbols.set(groupId, symbol)
+        return {
+          key: String(position),
+          value: [symbol],
+          groupId,
+        }
+      })
+      const index = new BTreeIndex<string>(1, new PropRef([`value`]))
+
+      for (const row of rows) {
+        index.add(row.key, row)
+      }
+
+      const expectedKeys = new Set(rows.map((row) => row.key))
+      expect(new Set(index.takeFromStart(rows.length))).toEqual(expectedKeys)
+      expect(new Set(index.takeReversedFromEnd(rows.length))).toEqual(
+        expectedKeys,
+      )
+
+      for (const row of rows) {
+        expect(index.equalityLookup(row.value)).toEqual(new Set([row.key]))
+        expect(
+          index.rangeQuery({ from: row.value, to: row.value }),
+        ).toEqual(
+          new Set(
+            rows
+              .filter((candidate) => candidate.groupId === row.groupId)
+              .map((candidate) => candidate.key),
+          ),
+        )
+      }
+    },
+  )
+})

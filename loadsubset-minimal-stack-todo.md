@@ -906,6 +906,15 @@ explicitly removed.
       updates stay on the stable facade and route moves produce a new facade.
       The exact union regression failed before the fix, and all nine includes
       oracle suites pass 343 tests with no type errors.
+- [x] Close the symbol-index loss-audit gaps. Symbol range predicates now use
+      the evaluator instead of treating the B-tree's runtime-local symbol order
+      as query semantics. Ordered traversal also merges exact value buckets
+      that share one comparator position, so distinct array references cannot
+      overwrite one another in the tree. A generated comparator-group law now
+      varies duplicate groups and proves exact equality, forward/reverse order,
+      and bounded range traversal together. The scan/index and comparator-group
+      regressions failed before the fixes; 160 focused index, ordering, and
+      routed-value tests plus the DB build are green.
 - [ ] Ask multiple fresh reviewers for final coherence, hostile-assay, and
       loss-audit passes.
 - [ ] Update RFC/PR text and changeset to match the final design.

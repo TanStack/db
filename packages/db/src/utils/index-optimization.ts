@@ -162,6 +162,8 @@ function isRangeOrderingDivergent(
       return false
     case `string`:
       return usesLocaleStringSort(collection)
+    case `symbol`:
+      return true
     case `object`: {
       if (value === null) return false
       // Dates order consistently with the evaluator: valid Dates by time, and
