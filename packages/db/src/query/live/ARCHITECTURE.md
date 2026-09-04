@@ -139,6 +139,9 @@ binary values by the same normalized value as `eq`/`in`, and retain runtime
 reference identity for other objects, functions, and symbols. These tokens are
 valid only for equality-keyed routing, grouping, and demand. Output values and
 arbitrary function arguments keep their exact runtime identity and value.
+For grouping, the equality token is the D2 group key. The group retains a raw
+value from a currently positive contributor only as the projected
+representative; a raw value never participates in the internal key.
 
 ### Route-context transport
 

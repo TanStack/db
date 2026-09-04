@@ -786,6 +786,80 @@ describe(`includes cross-formulation oracle`, () => {
     },
   )
 
+  fcTest.prop(
+    [fc.integer()],
+    oraclePropertyOptions(4, `includes-cross-formulation.symbol-group-route`),
+  )(
+    `grouped includes agree with standalone groups for symbol routes`,
+    async (code) => {
+      const firstGroup = Symbol(`first-${code}`)
+      const secondGroup = Symbol(`second-${code}`)
+      const parents = createControlledCollection(`symbol-route-parents`, [
+        { id: 1, group: firstGroup },
+        { id: 2, group: secondGroup },
+      ])
+      const children = createControlledCollection(`symbol-route-children`, [
+        { id: 10, parentGroup: firstGroup },
+        { id: 11, parentGroup: firstGroup },
+        { id: 20, parentGroup: secondGroup },
+      ])
+
+      const nested = createLiveQueryCollection({
+        getKey: (row) => row.id,
+        query: (q) =>
+          q.from({ parent: parents.collection }).select(({ parent }) => ({
+            id: parent.id,
+            summaries: toArray(
+              q
+                .from({ child: children.collection })
+                .where(({ child }) => eq(child.parentGroup, parent.group))
+                .groupBy(({ child }) => child.parentGroup)
+                .select(({ child }) => ({ count: count(child.id) })),
+            ),
+          })),
+      })
+      const standalone = [firstGroup, secondGroup].map((group) =>
+        createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ child: children.collection })
+              .where(({ child }) => eq(child.parentGroup, group))
+              .groupBy(({ child }) => child.parentGroup)
+              .select(({ child }) => ({ count: count(child.id) })),
+        }),
+      )
+
+      try {
+        await Promise.all([
+          nested.preload(),
+          ...standalone.map((query) => query.preload()),
+        ])
+        expect(
+          nested.toArray.map((row) => ({
+            id: row.id,
+            summaries: row.summaries.map(({ count: childCount }) => ({
+              count: childCount,
+            })),
+          })),
+        ).toEqual(
+          standalone.map((query, index) => ({
+            id: index + 1,
+            summaries: query.toArray.map(({ count: childCount }) => ({
+              count: childCount,
+            })),
+          })),
+        )
+      } finally {
+        await Promise.allSettled([
+          nested.cleanup(),
+          ...standalone.map((query) => query.cleanup()),
+          parents.collection.cleanup(),
+          children.collection.cleanup(),
+        ])
+      }
+    },
+  )
+
   fcTest(`shared-route child deletion agrees across formulations`, () =>
     expectFormulationsEquivalent({
       parents: [

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test } from 'vitest'
+import { Temporal } from 'temporal-polyfill'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
@@ -222,8 +223,91 @@ function createOrdersCollection(autoIndex: `off` | `eager` = `eager`) {
   )
 }
 
+const equalityEquivalentGroupValues: Array<
+  [string, () => readonly [unknown, unknown]]
+> = [
+  [`a Date and its timestamp`, () => [new Date(0), 0]],
+  [`an invalid Date and NaN`, () => [new Date(Number.NaN), Number.NaN]],
+  [`signed zero`, () => [-0, 0]],
+  [
+    `binary values with the same bytes`,
+    () => [Buffer.from([1, 2, 3]), new Uint8Array([1, 2, 3])],
+  ],
+  [
+    `equivalent Temporal values`,
+    () => [
+      Temporal.PlainDate.from(`2024-04-05`),
+      Temporal.PlainDate.from(`2024-04-05`),
+    ],
+  ],
+  [
+    `the same symbol reference`,
+    () => {
+      const value = Symbol(`group`)
+      return [value, value]
+    },
+  ],
+]
+
 function createGroupByTests(autoIndex: `off` | `eager`): void {
   describe(`with autoIndex ${autoIndex}`, () => {
+    test.each(equalityEquivalentGroupValues)(
+      `groups %s by query equality`,
+      (_name, createValues) => {
+        const [left, right] = createValues()
+        const valuesCollection = createCollection(
+          mockSyncCollectionOptions<{ id: number; value: unknown }>({
+            id: `equality-group-values-${autoIndex}`,
+            getKey: (row) => row.id,
+            initialData: [
+              { id: 1, value: left },
+              { id: 2, value: right },
+            ],
+            autoIndex,
+          }),
+        )
+
+        const summary = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ value: valuesCollection })
+              .groupBy(({ value }) => value.value)
+              .select(({ value }) => ({
+                value: value.value,
+                count: count(value.id),
+              })),
+        })
+
+        const expectSingleGroup = (
+          expectedCount: number,
+          representatives: Array<unknown>,
+        ) => {
+          expect(summary.toArray).toHaveLength(1)
+          expect(summary.toArray[0]?.count).toBe(expectedCount)
+          expect(representatives).toContainEqual(summary.toArray[0]?.value)
+        }
+
+        expectSingleGroup(2, [left, right])
+
+        valuesCollection.utils.begin()
+        valuesCollection.utils.write({
+          type: `delete`,
+          value: { id: 1, value: left },
+        })
+        valuesCollection.utils.commit()
+        expectSingleGroup(1, [right])
+
+        valuesCollection.utils.begin()
+        valuesCollection.utils.write({
+          type: `insert`,
+          value: { id: 1, value: left },
+        })
+        valuesCollection.utils.commit()
+        expectSingleGroup(2, [left, right])
+      },
+    )
+
     describe(`Single Column Grouping`, () => {
       let ordersCollection: ReturnType<typeof createOrdersCollection>
 

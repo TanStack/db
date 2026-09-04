@@ -18,6 +18,7 @@ const staticOracleProperties = [
   `includes-cross-formulation.ordered-window`,
   `includes-cross-formulation.reference-context`,
   `includes-cross-formulation.reference-key`,
+  `includes-cross-formulation.symbol-group-route`,
   `includes-optimistic.ancestor-rollback`,
   `includes-optimistic.confirm-different-route`,
   `includes-optimistic.confirm-same-route`,

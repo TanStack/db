@@ -41,26 +41,50 @@ import type { VirtualOrigin } from '../../virtual-props.js'
 const VIRTUAL_SYNCED_KEY = `__virtual_synced__`
 const VIRTUAL_HAS_LOCAL_KEY = `__virtual_has_local__`
 const GROUP_KEY_REF_PREFIX = `__group_key_`
+const GROUP_VALUE_PREFIX = `__group_value_`
 
 type RowVirtualMetadata = {
   synced: boolean
   hasLocal: boolean
 }
 
-function addCorrelationRouteToGroupKey(
+function getRepresentative<T>(
+  values: Array<[readonly [unknown, T], number]>,
+): T | undefined {
+  return values.find(([, multiplicity]) => multiplicity > 0)?.[0][1]
+}
+
+function addCorrelationRouteIdentityToGroupKey(
   key: Record<string, unknown>,
   row: NamespacedRow,
   mainSource: string,
 ): void {
   const rowRecord = row as Record<string, unknown>
   const source = rowRecord[mainSource] as Record<string, unknown> | undefined
-  key.__correlationKey = source?.__correlationKey
   key.__correlationIdentity = getEqualityValueIdentity(source?.__correlationKey)
   if (rowRecord.__parentContext != null) {
-    key.__parentContext = rowRecord.__parentContext
     key.__parentContextIdentity = getParentContextIdentity(
       rowRecord.__parentContext,
     )
+  }
+}
+
+function addCorrelationRouteAggregates(
+  aggregates: Record<string, any>,
+  mainSource: string,
+): void {
+  aggregates.__correlationKey = {
+    preMap: ([rowKey, row]: [string, NamespacedRow]) =>
+      [
+        rowKey,
+        (row as Record<string, any>)[mainSource]?.__correlationKey,
+      ] as const,
+    reduce: getRepresentative,
+  }
+  aggregates.__parentContext = {
+    preMap: ([rowKey, row]: [string, NamespacedRow]) =>
+      [rowKey, (row as Record<string, unknown>).__parentContext] as const,
+    reduce: getRepresentative,
   }
 }
 
@@ -68,10 +92,10 @@ function getCorrelationRouteIdentity(
   aggregatedRow: Record<string, unknown>,
 ): unknown {
   return aggregatedRow.__parentContext == null
-    ? getEqualityValueIdentity(aggregatedRow.__correlationKey)
+    ? aggregatedRow.__correlationIdentity
     : [
-        getEqualityValueIdentity(aggregatedRow.__correlationKey),
-        getParentContextIdentity(aggregatedRow.__parentContext),
+        aggregatedRow.__correlationIdentity,
+        aggregatedRow.__parentContextIdentity,
       ]
 }
 
@@ -215,6 +239,10 @@ export function processGroupBy(
     },
   }
 
+  if (mainSource) {
+    addCorrelationRouteAggregates(virtualAggregates, mainSource)
+  }
+
   // Handle empty GROUP BY (single-group aggregation)
   if (groupByClause.length === 0) {
     // For single-group aggregation, create a single group with all data
@@ -248,7 +276,9 @@ export function processGroupBy(
     // correlation route so parents with distinct projected inputs stay apart.
     const keyExtractor = ([, row]: [string, NamespacedRow]) => {
       const key: Record<string, unknown> = { __singleGroup: true }
-      if (mainSource) addCorrelationRouteToGroupKey(key, row, mainSource)
+      if (mainSource) {
+        addCorrelationRouteIdentityToGroupKey(key, row, mainSource)
+      }
       return key
     }
 
@@ -372,15 +402,17 @@ export function processGroupBy(
 
     const key: Record<string, unknown> = {}
 
-    // Use simple __key_X format for each groupBy expression
+    // D2 must key groups by the same relation as the query evaluator. The raw
+    // representative is retained separately as an aggregate for projection.
     for (let i = 0; i < groupByClause.length; i++) {
       const compiledExpr = compiledGroupByExpressions[i]!
       const value = compiledExpr(namespacedRow)
-      key[`__key_${i}`] = value
-      key[`__keyIdentity_${i}`] = getEqualityValueIdentity(value)
+      key[`__key_${i}`] = getEqualityValueIdentity(value)
     }
 
-    if (mainSource) addCorrelationRouteToGroupKey(key, row, mainSource)
+    if (mainSource) {
+      addCorrelationRouteIdentityToGroupKey(key, row, mainSource)
+    }
 
     return key
   }
@@ -389,6 +421,15 @@ export function processGroupBy(
   const aggregates: Record<string, any> = virtualAggregates
   const wrappedAggExprs: Record<string, (data: any) => any> = {}
   const aggCounter = { value: 0 }
+
+  for (let i = 0; i < compiledGroupByExpressions.length; i++) {
+    const compiledExpr = compiledGroupByExpressions[i]!
+    aggregates[`${GROUP_VALUE_PREFIX}${i}`] = {
+      preMap: ([rowKey, row]: [string, NamespacedRow]) =>
+        [rowKey, compiledExpr(row)] as const,
+      reduce: getRepresentative,
+    }
+  }
 
   if (selectClause) {
     // Scan the SELECT clause for aggregate functions
@@ -429,7 +470,8 @@ export function processGroupBy(
             // Use cached mapping to get the corresponding __key_X for non-aggregates
             const groupIndex = mapping.selectToGroupByIndex.get(alias)
             if (groupIndex !== undefined) {
-              finalResults[alias] = aggregatedRow[`__key_${groupIndex}`]
+              finalResults[alias] =
+                aggregatedRow[`${GROUP_VALUE_PREFIX}${groupIndex}`]
             } else {
               // Fallback to original SELECT results
               finalResults[alias] = selectResults[alias]
@@ -445,7 +487,8 @@ export function processGroupBy(
       } else {
         // No SELECT clause - just use the group keys
         for (let i = 0; i < groupByClause.length; i++) {
-          finalResults[`__key_${i}`] = aggregatedRow[`__key_${i}`]
+          finalResults[`__key_${i}`] =
+            aggregatedRow[`${GROUP_VALUE_PREFIX}${i}`]
         }
       }
 
@@ -460,7 +503,7 @@ export function processGroupBy(
         : undefined
       const keyParts: Array<unknown> = []
       for (let i = 0; i < groupByClause.length; i++) {
-        keyParts.push(getEqualityValueIdentity(aggregatedRow[`__key_${i}`]))
+        keyParts.push(aggregatedRow[`__key_${i}`])
       }
       if (correlationRoute !== undefined) {
         keyParts.push(correlationRoute)
@@ -698,7 +741,8 @@ function evaluateWrappedAggregates(
     }
   }
   for (let i = 0; i < groupKeyCount; i++) {
-    finalResults[`${GROUP_KEY_REF_PREFIX}${i}`] = aggregatedRow[`__key_${i}`]
+    finalResults[`${GROUP_KEY_REF_PREFIX}${i}`] =
+      aggregatedRow[`${GROUP_VALUE_PREFIX}${i}`]
   }
   for (const [alias, evaluator] of Object.entries(wrappedAggExprs)) {
     finalResults[alias] = evaluator(

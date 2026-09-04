@@ -573,6 +573,18 @@ explicitly removed.
 
 ## Remaining execution
 
+- [x] Make equality identity the actual D2 grouping key while preserving one
+      raw representative only for output. Red/green the full equality-class
+      matrix, including Date/number, invalid Date/NaN, and unhashable symbols.
+- [ ] Replace string-keyed parent-context metadata with a collision-free
+      carrier and prove internal-looking aliases and selected field names are
+      untouched.
+- [ ] Scope symbol correlation identity to releasable graph state, then prove
+      fresh symbol route churn is bounded after retirement and cleanup.
+- [ ] Make equality auto-index fallback quiet and safe for symbol-valued join
+      fields; the symbol-route oracle exposed a comparator throw while the
+      query correctly fell back to a full scan.
+
 - [x] Restore the exported `minusWherePredicates` laws for SQL nulls,
       duplicate terms, and nested `NOT`/range expressions; fix the false-green
       syntax-only assertion and stack overflow. All 145 predicate utility
