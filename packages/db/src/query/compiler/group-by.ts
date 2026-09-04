@@ -24,11 +24,13 @@ import {
   toBooleanPredicate,
 } from './evaluators.js'
 import {
+  getEqualityValueIdentity,
   getParentContextIdentity,
   getParentContextValue,
 } from '../equality-value-identity.js'
 import type { ValueIdentity } from '../equality-value-identity.js'
 import {
+  INCLUDES_PUBLIC_KEY,
   attachRouteMetadata,
   getNamespacedRouteMetadata,
 } from './route-metadata.js'
@@ -86,6 +88,30 @@ type Representative<T> = {
   rowKey: string
   identity: unknown
   [RAW_REPRESENTATIVE]: T
+}
+
+function createPublicGroupKey(values: Array<unknown>): unknown {
+  const identities = values.map(getEqualityValueIdentity)
+  if (identities.length === 1) {
+    const identity = identities[0]
+    if (
+      identity == null ||
+      (typeof identity !== `object` &&
+        typeof identity !== `function` &&
+        typeof identity !== `symbol`)
+    ) {
+      return identity
+    }
+  }
+  return serializeValue(identities)
+}
+
+function attachPublicGroupKey(
+  row: Record<string, any>,
+  publicKey: unknown,
+): void {
+  const keyedRow = row as Record<PropertyKey, unknown>
+  keyedRow[INCLUDES_PUBLIC_KEY] = publicKey
 }
 
 function createRepresentative<T>(
@@ -414,10 +440,11 @@ export function processGroupBy(
         const correlationRoute = mainSource
           ? getCorrelationRouteIdentity(aggregatedRow, fields)
           : undefined
-        const resultKey =
+        const internalKey =
           correlationRoute !== undefined
             ? `single_group_${serializeValue(correlationRoute)}`
             : `single_group`
+        const publicKey = `single_group`
         const resultRow: Record<string, any> = {
           ...(aggregatedRow as Record<string, any>),
           $selected: finalResults,
@@ -432,17 +459,21 @@ export function processGroupBy(
         resultRow.$origin = (
           groupHasLocal ? `local` : `remote`
         ) satisfies VirtualOrigin
-        resultRow.$key = resultKey
+        resultRow.$key = publicKey
         resultRow.$collectionId =
           aggregateCollectionId ?? resultRow.$collectionId
         if (mainSource && correlationKey !== undefined) {
+          attachPublicGroupKey(resultRow, publicKey)
           attachRouteMetadata(
             resultRow,
             correlationKey,
             aggregatedRow[fields.parentContext] ?? null,
           )
         }
-        return [resultKey, resultRow] as [unknown, Record<string, any>]
+        return [mainSource ? internalKey : publicKey, resultRow] as [
+          unknown,
+          Record<string, any>,
+        ]
       }),
     )
 
@@ -616,14 +647,17 @@ export function processGroupBy(
         ? getCorrelationRouteIdentity(aggregatedRow, fields)
         : undefined
       const keyParts: Array<unknown> = []
+      const publicKeyParts: Array<unknown> = []
       for (let i = 0; i < groupByClause.length; i++) {
         keyParts.push(aggregatedRow[fields.groupKeys[i]!])
+        publicKeyParts.push(aggregatedRow[fields.groupValues[i]!])
       }
       if (correlationRoute !== undefined) {
         keyParts.push(correlationRoute)
       }
       const finalKey =
         keyParts.length === 1 ? keyParts[0] : serializeValue(keyParts)
+      const publicKey = createPublicGroupKey(publicKeyParts)
 
       // When in includes mode, restore route metadata for output routing.
       const resultRow: Record<string, any> = {
@@ -638,16 +672,20 @@ export function processGroupBy(
       resultRow.$origin = (
         groupHasLocal ? `local` : `remote`
       ) satisfies VirtualOrigin
-      resultRow.$key = finalKey
+      resultRow.$key = publicKey
       resultRow.$collectionId = aggregateCollectionId ?? resultRow.$collectionId
       if (mainSource && correlationKey !== undefined) {
+        attachPublicGroupKey(resultRow, publicKey)
         attachRouteMetadata(
           resultRow,
           correlationKey,
           aggregatedRow[fields.parentContext] ?? null,
         )
       }
-      return [finalKey, resultRow] as [unknown, Record<string, any>]
+      return [mainSource ? finalKey : publicKey, resultRow] as [
+        unknown,
+        Record<string, any>,
+      ]
     }),
   )
 

@@ -142,16 +142,20 @@ arbitrary function arguments keep their exact runtime identity and value.
 Compiler tokens belong to one compiled graph. This keeps every operator in the
 graph on the same identity relation while allowing its strong symbol table to
 die with the graph. A demand controller owns a separate scope and discards it
-when the controller is cleared. Process-wide query identity keeps its own
-runtime scope because equivalent query plans must still share a cache entry.
+when the controller is cleared. Process-wide query identity and opaque public
+group keys keep their own runtime scope because equivalent query plans and
+retained public keys must survive graph replacement.
 For grouping, the equality token is the D2 group key. The group retains a raw
 value from a currently positive contributor only as the projected
 representative. The representative is chosen by stable source-row identity, so
 restoring the same source state restores the same value regardless of update
-history. D2 sees only safe exact-value identity for that representative, not the
-raw value itself. Compiler group fields use a query-local namespace disjoint
-from every selected alias. Direct correlated joins canonicalize both sides
-before the first D2 join; normalizing only the later group key is too late.
+history. D2 sees only safe exact-value identity for that representative, not
+the raw value itself. A separate public group key preserves primitive keys and
+serializes opaque equality identity; graph-local identity tokens never cross
+the Collection boundary. Compiler group fields use a query-local namespace
+disjoint from every selected alias. Direct correlated joins canonicalize both
+sides before the first D2 join; normalizing only the later group key is too
+late.
 
 ### Route-context transport
 

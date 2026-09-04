@@ -277,13 +277,17 @@ function representativeSignature(value: unknown): string {
 
 function createGroupByTests(autoIndex: `off` | `eager`): void {
   describe(`with autoIndex ${autoIndex}`, () => {
-    test(`scopes opaque grouping identities to one compiled graph`, async () => {
+    test(`keeps opaque public group keys stable across graph scopes`, async () => {
       const symbol = Symbol(`group`)
+      const otherSymbol = Symbol(`group`)
       const valuesCollection = createCollection(
         mockSyncCollectionOptions<{ id: number; value: symbol }>({
           id: `scoped-group-symbol-${autoIndex}`,
           getKey: (row) => row.id,
-          initialData: [{ id: 1, value: symbol }],
+          initialData: [
+            { id: 1, value: symbol },
+            { id: 2, value: otherSymbol },
+          ],
           autoIndex,
         }),
       )
@@ -304,7 +308,31 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
       const second = createSummary()
 
       try {
-        expect([...first.keys()]).not.toEqual([...second.keys()])
+        const firstKeys = [...first.keys()]
+        const secondKeys = [...second.keys()]
+        expect(firstKeys).toHaveLength(2)
+        expect(firstKeys.every((key) => typeof key === `string`)).toBe(true)
+        expect(new Set(firstKeys).size).toBe(2)
+        expect(secondKeys).toEqual(firstKeys)
+
+        const symbolKey = first.toArray.find(
+          (row) => row.value === symbol,
+        )!.$key
+        valuesCollection.utils.begin()
+        valuesCollection.utils.write({
+          type: `delete`,
+          value: { id: 1, value: symbol },
+        })
+        valuesCollection.utils.commit()
+        expect(first.get(symbolKey)).toBeUndefined()
+
+        valuesCollection.utils.begin()
+        valuesCollection.utils.write({
+          type: `insert`,
+          value: { id: 1, value: symbol },
+        })
+        valuesCollection.utils.commit()
+        expect(first.get(symbolKey)?.value).toBe(symbol)
       } finally {
         await Promise.all([
           first.cleanup(),

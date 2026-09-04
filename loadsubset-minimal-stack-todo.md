@@ -603,6 +603,17 @@ explicitly removed.
       scope. The regression failed first because two independent compiled
       graphs reused the same process-global symbol token. Grouping, stable
       identity, route-context, and temporal-demand suites are 281/281 green.
+- [x] Keep graph-local group identity out of public Collection keys. The prior
+      scope regression encoded the leaking token as success. Its corrected law
+      failed first: opaque keys were arrays and changed across graphs. Grouping
+      now uses scoped equality only inside D2 and derives a stable public key
+      from process identity. Two same-description symbols remain distinct, and
+      a retained key works after delete/reinsert. Grouping and includes suites
+      are 226/226 green.
+- [ ] Bound local-symbol identity retention within long-lived scopes where the
+      runtime supports weak symbol keys. Registered symbols are already held by
+      the global registry; older runtimes need a correctness-preserving strong
+      fallback rather than a lossy identity.
 - [ ] Make equality auto-index fallback quiet and safe for symbol-valued join
       fields; the symbol-route oracle exposed a comparator throw while the
       query correctly fell back to a full scan.
