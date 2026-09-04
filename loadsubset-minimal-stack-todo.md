@@ -1272,9 +1272,11 @@ explicitly removed.
         three-generation settlement orders cover return, throw, resolve,
         reject, release, unsubscribe, cleanup, and obsolete/current ordering.
         The next loss audit recovered four omitted restart boundaries, all now
-        red: demand created by the synchronous restart status callback, false
-        physical settlement while cleaned up, eager-mode restart, and failure
-        of the replacement `sync()` function itself.
+        red/greened as one acquisition-availability class: demand created by
+        the synchronous restart status callback, false physical settlement
+        while cleaned up, eager-mode restart, and failure of the replacement
+        `sync()` function itself. Logical demand now stays detached until a
+        current loader exists; only real adapter work emits settlement.
   - [ ] Keep the ordered-query layer as a consumer of the same protocol. Cross
         page, prefix, boundary, and full-source routes with cancellation,
         failure, retry, and reentrant `setWindow`; do not duplicate ownership
@@ -1324,8 +1326,11 @@ explicitly removed.
         commit. The core slice exposed 15 red cells in five classes: phantom
         unload after failed start, cleanup during startup, cleanup/restart
         barrier reuse, external-abort success, and replay cleanup reentrancy.
-        All 48 lifecycle cells plus 129 existing subscription/replay tests are
-        green after the class-level fixes.
+        A second audit added nine red boundary cells across restart entry,
+        public window reentry/session fencing, Effect parity, and source-local
+        recovery gates. The first four restart-entry cells are now green. All
+        86 core lifecycle cells plus 129 existing subscription/replay tests
+        pass after that class-level fix.
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
       behavior, and opaque callback roots.

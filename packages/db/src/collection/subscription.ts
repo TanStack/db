@@ -296,9 +296,12 @@ export class CollectionSubscription
   private restartDetachedDemands(loadSubsetSession: number): void {
     if (
       this.unsubscribed ||
-      !this.isLoadSubsetSessionCurrent(loadSubsetSession) ||
-      this.collection._sync.syncLoadSubsetFn === null
+      !this.isLoadSubsetSessionCurrent(loadSubsetSession)
     ) {
+      return
+    }
+    if (this.collection._sync.syncLoadSubsetFn === null) {
+      this.setReadyIfIdle()
       return
     }
     const demands = this.subsetDemands.filter(
@@ -1154,6 +1157,7 @@ export class CollectionSubscription
   private startSubsetDemand(requestOptions: LoadSubsetOptions): {
     demand: SubsetDemand
     result: LoadSubsetRequestResult
+    started: boolean
   } {
     const demand: SubsetDemand = {
       requestOptions,
@@ -1161,10 +1165,14 @@ export class CollectionSubscription
       loadSubsetSession: this.collection._sync.getLoadSubsetSession(),
       acquisitionState: `starting`,
     }
-    if (this.collection.status === `cleaned-up`) {
+    if (
+      this.collection.status === `cleaned-up` ||
+      (this.collection.status === `loading` &&
+        this.collection._sync.syncLoadSubsetFn === null)
+    ) {
       demand.acquisitionState = `detached`
       this.subsetDemands.push(demand)
-      return { demand, result: true }
+      return { demand, result: true, started: false }
     }
     const acquisition = this.createSubsetAcquisition(demand)
     demand.options = acquisition.options
@@ -1211,13 +1219,13 @@ export class CollectionSubscription
       if (demandIndex !== -1) this.subsetDemands.splice(demandIndex, 1)
       acquisition.abortController.abort()
       acquisition.removeRequestAbortListener?.()
-      return { demand, result }
+      return { demand, result, started: true }
     }
 
     demand.acquisitionState = `active`
     if (!this.subsetDemands.includes(demand)) {
       this.releaseOrRetainAcquisition(acquisition)
-      return { demand, result }
+      return { demand, result, started: true }
     }
 
     if (replaySession && replayAttempt) {
@@ -1229,7 +1237,7 @@ export class CollectionSubscription
         result,
       )
     }
-    return { demand, result }
+    return { demand, result, started: true }
   }
 
   /** Re-check ownership after adapter and event callbacks that may reenter. */
@@ -1358,22 +1366,30 @@ export class CollectionSubscription
       if (!this.releaseMatchingDemand(loadOptions)) return false
     }
 
-    const { demand, result: syncResult } = this.startSubsetDemand(loadOptions)
+    const {
+      demand,
+      result: syncResult,
+      started,
+    } = this.startSubsetDemand(loadOptions)
     if (!this.isDemandActive(demand)) return false
     if (opts?.where) this.requestedSubsetWhere.set(loadOptions, opts.where)
 
     // Pass the raw loadSubset result to the caller for external tracking
-    opts?.onLoadSubsetResult?.(syncResult, demand.options, (primaryFailure) =>
-      this.releaseDemand(demand, primaryFailure),
-    )
+    if (started) {
+      opts?.onLoadSubsetResult?.(syncResult, demand.options, (primaryFailure) =>
+        this.releaseDemand(demand, primaryFailure),
+      )
+    }
     if (!this.isDemandActive(demand)) return false
 
-    this.observeLoadSubsetResult(
-      syncResult,
-      demand,
-      demand.options,
-      opts?.trackLoadSubsetPromise ?? true,
-    )
+    if (started) {
+      this.observeLoadSubsetResult(
+        syncResult,
+        demand,
+        demand.options,
+        opts?.trackLoadSubsetPromise ?? true,
+      )
+    }
     if (!this.isDemandActive(demand)) return false
 
     // Also load data immediately from the collection
@@ -1751,20 +1767,28 @@ export class CollectionSubscription
       subscription: this,
     }
 
-    const { demand, result: syncResult } = this.startSubsetDemand(loadOptions)
+    const {
+      demand,
+      result: syncResult,
+      started,
+    } = this.startSubsetDemand(loadOptions)
     if (!this.isDemandActive(demand)) return
 
     // Pass the raw loadSubset result to the caller for external tracking
-    onLoadSubsetResult?.(syncResult, demand.options, (primaryFailure) =>
-      this.releaseDemand(demand, primaryFailure),
-    )
+    if (started) {
+      onLoadSubsetResult?.(syncResult, demand.options, (primaryFailure) =>
+        this.releaseDemand(demand, primaryFailure),
+      )
+    }
     if (!this.isDemandActive(demand)) return
-    this.observeLoadSubsetResult(
-      syncResult,
-      demand,
-      demand.options,
-      shouldTrackLoadSubsetPromise,
-    )
+    if (started) {
+      this.observeLoadSubsetResult(
+        syncResult,
+        demand,
+        demand.options,
+        shouldTrackLoadSubsetPromise,
+      )
+    }
     if (!this.isDemandActive(demand)) return
   }
 
