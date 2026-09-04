@@ -6,6 +6,7 @@ import { compileExpression } from '../query/compiler/evaluators.js'
 import { buildCursor, buildCursorCurrent } from '../utils/cursor.js'
 import { deepEquals } from '../utils.js'
 import { normalizeError } from '../utils/error.js'
+import { runAllCallbacks } from '../utils/callbacks.js'
 import { getLoadSubsetDemandKey } from '../query/ir-stable-identity.js'
 import { createDeferred } from '../deferred.js'
 import { LoadSubsetOperationAbortedError } from '../errors.js'
@@ -321,6 +322,12 @@ export class CollectionSubscription
       for (const demand of demandsToReload) {
         if (!this.subsetDemands.includes(demand)) continue
         this.startTruncateReplayDemand(session, attempt, demand)
+        if (
+          this.truncateReplaySession !== session ||
+          session.currentAttempt !== attempt
+        ) {
+          break
+        }
       }
 
       attempt.setupComplete = true
@@ -356,7 +363,10 @@ export class CollectionSubscription
 
     let result: LoadSubsetRequestResult
     try {
-      result = this.loadSubset(next.options, isCurrentAttempt)
+      result = this.loadSubset(
+        next.options,
+        () => isCurrentAttempt() && this.subsetDemands.includes(demand),
+      )
     } catch {
       const demandRemains = this.subsetDemands.includes(demand)
       restorePrevious()
@@ -371,7 +381,7 @@ export class CollectionSubscription
           // as cleanup debt without replacing it.
         }
       }
-      attempt.failed = true
+      if (demandRemains && isCurrentAttempt()) attempt.failed = true
       return
     }
 
@@ -386,13 +396,6 @@ export class CollectionSubscription
       return
     }
 
-    const statusParticipant = this.observeLoadSubsetResult(
-      result,
-      demand,
-      next.options,
-      true,
-      () => isCurrentAttempt() && !next.options.signal?.aborted,
-    )
     this.trackTruncateReplayParticipant(
       session,
       attempt,
@@ -400,7 +403,26 @@ export class CollectionSubscription
       next.options,
       result,
     )
-
+    const statusParticipant = this.observeLoadSubsetResult(
+      result,
+      demand,
+      next.options,
+      true,
+      () =>
+        isCurrentAttempt() &&
+        this.subsetDemands.includes(demand) &&
+        !next.options.signal?.aborted,
+    )
+    if (!this.subsetDemands.includes(demand)) {
+      // A status listener retired the tentative acquisition. It could not see
+      // the old lease held on this stack, so retire that lease exactly once.
+      try {
+        this.releaseOrRetainAcquisition(previous)
+      } catch {
+        attempt.failed = true
+      }
+      return
+    }
     if (!isCurrentAttempt()) {
       // A reentrant truncate aborted this tentative acquisition before it was
       // returned. Keep its async work in the captured attempt's barrier, but
@@ -515,11 +537,6 @@ export class CollectionSubscription
       }
     }
     this.checkTruncateReplayComplete(session)
-  }
-
-  private failCurrentTruncateReplay(): void {
-    const attempt = this.truncateReplaySession?.currentAttempt
-    if (attempt) attempt.failed = true
   }
 
   /** Publish only after every overlapping replay attempt has settled. */
@@ -902,8 +919,19 @@ export class CollectionSubscription
     // starts. A genuine load throw removes this tentative logical owner below.
     this.subsetDemands.push(demand)
     try {
-      const result = this.loadSubset(acquisition.options)
-      if (replaySession && replayAttempt) {
+      const result = this.loadSubset(
+        acquisition.options,
+        () =>
+          this.subsetDemands.includes(demand) &&
+          (replaySession === undefined ||
+            (this.truncateReplaySession === replaySession &&
+              replaySession.currentAttempt === replayAttempt)),
+      )
+      if (
+        this.subsetDemands.includes(demand) &&
+        replaySession &&
+        replayAttempt
+      ) {
         this.trackTruncateReplayParticipant(
           replaySession,
           replayAttempt,
@@ -914,15 +942,27 @@ export class CollectionSubscription
       }
       return { demand, result }
     } catch (error) {
-      this.failCurrentTruncateReplay()
       const demandIndex = this.subsetDemands.indexOf(demand)
       if (demandIndex !== -1) {
+        if (
+          replaySession &&
+          replayAttempt &&
+          this.truncateReplaySession === replaySession &&
+          replaySession.currentAttempt === replayAttempt
+        ) {
+          replayAttempt.failed = true
+        }
         this.subsetDemands.splice(demandIndex, 1)
         acquisition.abortController.abort()
         acquisition.removeRequestAbortListener?.()
       }
       throw error
     }
+  }
+
+  /** Re-check ownership after adapter and event callbacks that may reenter. */
+  private isDemandActive(demand: SubsetDemand): boolean {
+    return !this.unsubscribed && this.subsetDemands.includes(demand)
   }
 
   private recordLoadSubsetError(
@@ -1042,12 +1082,12 @@ export class CollectionSubscription
     }
 
     const { demand, result: syncResult } = this.startSubsetDemand(loadOptions)
-    if (this.unsubscribed) return false
+    if (!this.isDemandActive(demand)) return false
     if (opts?.where) this.requestedSubsetWhere.set(loadOptions, opts.where)
 
     // Pass the raw loadSubset result to the caller for external tracking
     opts?.onLoadSubsetResult?.(syncResult)
-    if (this.unsubscribed) return false
+    if (!this.isDemandActive(demand)) return false
 
     this.observeLoadSubsetResult(
       syncResult,
@@ -1055,7 +1095,7 @@ export class CollectionSubscription
       demand.options,
       opts?.trackLoadSubsetPromise ?? true,
     )
-    if (this.unsubscribed) return false
+    if (!this.isDemandActive(demand)) return false
 
     // Also load data immediately from the collection
     let snapshot: Array<ChangeMessage<any, any>> | void
@@ -1122,18 +1162,19 @@ export class CollectionSubscription
   private releaseDemandAt(index: number): void {
     const demand = this.subsetDemands[index]
     if (!demand) return
-    this.subsetDemands.splice(index, 1)
-    this.removeTruncateReplayParticipant(demand)
-    this.pruneReleasedReplayRows()
-    this.stopDemandStatusParticipants(demand)
-    this.retireEmptyReplay()
-
     const acquisition: SubsetAcquisition = {
       options: demand.options,
       abortController: demand.abortController,
       removeRequestAbortListener: demand.removeRequestAbortListener,
     }
-    this.releaseOrRetainAcquisition(acquisition)
+    this.subsetDemands.splice(index, 1)
+    runAllCallbacks([
+      () => this.removeTruncateReplayParticipant(demand),
+      () => this.pruneReleasedReplayRows(),
+      () => this.stopDemandStatusParticipants(demand),
+      () => this.retireEmptyReplay(),
+      () => this.releaseOrRetainAcquisition(acquisition),
+    ])
   }
 
   /** A replay with no remaining logical demand cannot establish more rows. */
@@ -1141,7 +1182,7 @@ export class CollectionSubscription
     if (this.subsetDemands.length !== 0 || !this.truncateReplaySession) {
       return
     }
-    if (this.truncateReplaySession?.completion.isPending()) {
+    if (this.truncateReplaySession.completion.isPending()) {
       this.truncateReplaySession.completion.reject(
         new LoadSubsetOperationAbortedError(),
       )
@@ -1374,17 +1415,18 @@ export class CollectionSubscription
     }
 
     const { demand, result: syncResult } = this.startSubsetDemand(loadOptions)
-    if (this.unsubscribed) return
+    if (!this.isDemandActive(demand)) return
 
     // Pass the raw loadSubset result to the caller for external tracking
     onLoadSubsetResult?.(syncResult)
-    if (this.unsubscribed) return
+    if (!this.isDemandActive(demand)) return
     this.observeLoadSubsetResult(
       syncResult,
       demand,
       demand.options,
       shouldTrackLoadSubsetPromise,
     )
+    if (!this.isDemandActive(demand)) return
   }
 
   // TODO: also add similar test but that checks that it can also load it from the collection's loadSubset function

@@ -864,6 +864,14 @@ explicitly removed.
       error in a host microtask instead of producing an unhandled derived
       rejection. The three focused regressions failed before the fix and the
       151-test subscription, replay, reentrancy, and lifecycle run is green.
+- [x] Close the remaining replay callback boundaries. Superseded attempts stop
+      before starting sibling demands; adapter and status callbacks recheck
+      logical ownership before adding replay or readiness participants; and a
+      self-released synchronous failure cannot defeat successful peer demand.
+      Replacement publication now precedes `status:ready`, while release runs
+      all cleanup steps even if publication throws. The six exact regressions
+      failed before their fixes and the 157-test subscription, replay,
+      reentrancy, and lifecycle run is green.
 - [x] Close the symbol-cycle gap exposed by the routed-value audit. D2 now
       hashes cyclic back-references by structural traversal distance, preserving
       equal hashes for separately allocated equal cycles instead of overflowing

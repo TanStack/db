@@ -595,10 +595,15 @@ rows after observing cancellation. Settled historical attempts are discarded.
 Core installs each tentative acquisition and binds it to the current replay
 attempt before calling adapter code. A reentrant release or newer truncate can
 therefore see and retire the exact work it supersedes; work returned after that
-reentrancy cannot attach itself to a newer attempt. Subscriber errors raised by
-an asynchronous replacement do not turn source success into replay failure:
-core finishes its internal state and surfaces the exact callback error in a
-host microtask.
+reentrancy cannot attach itself to a newer attempt. Once reentrancy supersedes
+an attempt, core starts none of that attempt's remaining demands. A demand that
+releases itself during adapter or status callbacks cannot join readiness or
+poison the replay with a later synchronous failure. Successful replacement
+publication happens before the subscription emits `ready`. Cleanup runs every
+ownership step even when replacement publication throws. Subscriber errors
+raised by an asynchronous replacement do not turn source success into replay
+failure: core finishes its internal state and surfaces the exact callback error
+in a host microtask.
 Failure keeps the last complete result visible and partly replayed source state
 private for both direct subscribers and query graphs. Ordinary source deltas or
 snapshot requests do not reopen that gate because they cannot prove the source

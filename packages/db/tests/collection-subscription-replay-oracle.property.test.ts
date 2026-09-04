@@ -2278,7 +2278,6 @@ describe(`CollectionSubscription replay oracle`, () => {
     ) => void
     let commit!: () => void
     let truncate!: () => void
-    let subscription!: ReturnType<Collection<ReplayRow>[`subscribeChanges`]>
     const firstWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
     const secondWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`two`)])
     const releasedReplay = createDeferred<void>()
@@ -2317,7 +2316,7 @@ describe(`CollectionSubscription replay oracle`, () => {
       },
     })
     const visible = new Map<string | number, ReplayRow>()
-    subscription = collection.subscribeChanges((changes) => {
+    const subscription = collection.subscribeChanges((changes) => {
       recordPublishedChanges(visible, changes as Array<ReplayChange>)
     })
 
@@ -2424,11 +2423,435 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
+  it(`does not start another demand for a replay superseded by reentrancy`, async () => {
+    let begin!: () => void
+    let write!: (
+      message: ChangeMessageOrDeleteKeyMessage<ReplayRow, string>,
+    ) => void
+    let commit!: () => void
+    let truncate!: () => void
+    const firstWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
+    const secondWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`two`)])
+    let loadCount = 0
+    let inSupersededSetup = false
+    let staleSecondDemandStarted = false
+    const collection = createCollection<ReplayRow>({
+      id: `reentrant-multi-demand-replay`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (operations) => {
+          begin = operations.begin
+          write = operations.write
+          commit = operations.commit
+          truncate = operations.truncate
+          begin()
+          write({ type: `insert`, value: { id: `one`, value: 0 } })
+          write({ type: `insert`, value: { id: `two`, value: 0 } })
+          commit()
+          operations.markReady()
+          return {
+            loadSubset: (options) => {
+              loadCount++
+              if (loadCount <= 2) return true
+              if (loadCount === 3) {
+                inSupersededSetup = true
+                queueMicrotask(() => {
+                  inSupersededSetup = false
+                })
+                begin()
+                truncate()
+                commit()
+                return true
+              }
+              if (inSupersededSetup) {
+                staleSecondDemandStarted = true
+                begin()
+                write({ type: `insert`, value: { id: `two`, value: 1 } })
+                commit()
+                return true
+              }
+              if (options.where === firstWhere) {
+                begin()
+                write({ type: `insert`, value: { id: `one`, value: 2 } })
+                commit()
+              }
+              return true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const visible = new Map<string | number, ReplayRow>()
+    const subscription = collection.subscribeChanges((changes) => {
+      recordPublishedChanges(visible, changes as Array<ReplayChange>)
+    })
+
+    try {
+      subscription.requestSnapshot({
+        where: firstWhere,
+        optimizedOnly: false,
+      })
+      subscription.requestSnapshot({
+        where: secondWhere,
+        optimizedOnly: false,
+      })
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+
+      expect(staleSecondDemandStarted).toBe(false)
+      expect(sortedRows(visible)).toEqual([{ id: `one`, value: 2 }])
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`releases the old and new leases once when loading status retires a replay demand`, async () => {
+    let begin!: () => void
+    let commit!: () => void
+    let truncate!: () => void
+    const replay = createDeferred<void>()
+    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const collection = createCollection<ReplayRow>({
+      id: `reentrant-status-release`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (operations) => {
+          begin = operations.begin
+          commit = operations.commit
+          truncate = operations.truncate
+          operations.markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return loads.length === 1 ? true : replay.promise
+            },
+            unloadSubset: (options) => unloads.push(options),
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    let releaseOnLoading = false
+    subscription.on(`status:loadingSubset`, () => {
+      if (releaseOnLoading) subscription.releaseSnapshot(where)
+    })
+
+    try {
+      subscription.requestSnapshot({ where, optimizedOnly: false })
+      releaseOnLoading = true
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+
+      expect(loads).toHaveLength(2)
+      expect(loads[1]?.signal?.aborted).toBe(true)
+      expect(unloads.map((options) => loads.indexOf(options))).toEqual([1, 0])
+      expect(subscription.status).toBe(`ready`)
+    } finally {
+      replay.resolve()
+      await flushPromises()
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`releases replay work when its final publication callback throws`, async () => {
+    let begin!: () => void
+    let write!: (
+      message: ChangeMessageOrDeleteKeyMessage<ReplayRow, string>,
+    ) => void
+    let commit!: () => void
+    let truncate!: () => void
+    const replay = createDeferred<void>()
+    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const listenerFailure = new Error(`release publication failed`)
+    let rejectReplacement = false
+    const collection = createCollection<ReplayRow>({
+      id: `replay-release-callback-cleanup`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (operations) => {
+          begin = operations.begin
+          write = operations.write
+          commit = operations.commit
+          truncate = operations.truncate
+          operations.markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              if (loads.length === 1) {
+                begin()
+                write({ type: `insert`, value: { id: `one`, value: 1 } })
+                commit()
+                return true
+              }
+              return replay.promise
+            },
+            unloadSubset: (options) => unloads.push(options),
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {
+      if (rejectReplacement) throw listenerFailure
+    })
+
+    try {
+      subscription.requestSnapshot({ where, optimizedOnly: false })
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+      begin()
+      write({ type: `insert`, value: { id: `one`, value: 2 } })
+      commit()
+      rejectReplacement = true
+
+      expect(() => subscription.releaseSnapshot(where)).toThrow(listenerFailure)
+      expect(loads[1]?.signal?.aborted).toBe(true)
+      expect(unloads.map((options) => loads.indexOf(options))).toEqual([0, 1])
+      expect(subscription.status).toBe(`ready`)
+    } finally {
+      rejectReplacement = false
+      replay.resolve()
+      await flushPromises()
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`does not retain a demand released during adapter startup`, async () => {
+    let begin!: () => void
+    let commit!: () => void
+    let truncate!: () => void
+    const replay = createDeferred<void>()
+    const releasedLoad = createDeferred<void>()
+    const firstWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
+    const secondWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`two`)])
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const collection = createCollection<ReplayRow>({
+      id: `reentrant-new-demand-release`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (operations) => {
+          begin = operations.begin
+          commit = operations.commit
+          truncate = operations.truncate
+          operations.markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              if (loads.length === 1) return true
+              if (loads.length === 2) return replay.promise
+              subscription.releaseSnapshot(secondWhere)
+              return releasedLoad.promise
+            },
+            unloadSubset: (options) => unloads.push(options),
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+
+    try {
+      subscription.requestSnapshot({
+        where: firstWhere,
+        optimizedOnly: false,
+      })
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+
+      subscription.requestSnapshot({
+        where: secondWhere,
+        optimizedOnly: false,
+      })
+      replay.resolve()
+      await flushPromises()
+
+      expect(loads).toHaveLength(3)
+      expect(loads[2]?.signal?.aborted).toBe(true)
+      expect(unloads).toContain(loads[2])
+      expect(subscription.status).toBe(`ready`)
+      expect(subscription.pendingTruncateReplacement).toBeUndefined()
+    } finally {
+      releasedLoad.resolve()
+      replay.resolve()
+      await flushPromises()
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`publishes a replay replacement before reporting ready`, async () => {
+    let begin!: () => void
+    let write!: (
+      message: ChangeMessageOrDeleteKeyMessage<ReplayRow, string>,
+    ) => void
+    let commit!: () => void
+    let truncate!: () => void
+    const replay = createDeferred<void>()
+    let loadCount = 0
+    const collection = createCollection<ReplayRow>({
+      id: `replay-ready-after-publication`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (operations) => {
+          begin = operations.begin
+          write = operations.write
+          commit = operations.commit
+          truncate = operations.truncate
+          operations.markReady()
+          return {
+            loadSubset: () => {
+              loadCount++
+              if (loadCount === 1) {
+                begin()
+                write({ type: `insert`, value: { id: `one`, value: 1 } })
+                commit()
+                return true
+              }
+              return replay.promise
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const visible = new Map<string | number, ReplayRow>()
+    const readyValues: Array<number | undefined> = []
+    const subscription = collection.subscribeChanges((changes) => {
+      recordPublishedChanges(visible, changes as Array<ReplayChange>)
+    })
+    subscription.on(`status:ready`, () => {
+      readyValues.push(visible.get(`one`)?.value)
+    })
+
+    try {
+      subscription.requestSnapshot({ optimizedOnly: false })
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+      begin()
+      write({ type: `insert`, value: { id: `one`, value: 2 } })
+      commit()
+
+      replay.resolve()
+      await flushPromises()
+
+      expect(readyValues).toEqual([2])
+      expect(visible.get(`one`)?.value).toBe(2)
+      expect(subscription.status).toBe(`ready`)
+    } finally {
+      replay.resolve()
+      await flushPromises()
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it(`ignores a synchronous replay failure after its demand releases itself`, async () => {
+    let begin!: () => void
+    let write!: (
+      message: ChangeMessageOrDeleteKeyMessage<ReplayRow, string>,
+    ) => void
+    let commit!: () => void
+    let truncate!: () => void
+    const firstWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
+    const secondWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`two`)])
+    const releasedFailure = new Error(`released replay load failed`)
+    const reportedErrors: Array<unknown> = []
+    let loadCount = 0
+    const collection = createCollection<ReplayRow>({
+      id: `released-sync-failure`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (operations) => {
+          begin = operations.begin
+          write = operations.write
+          commit = operations.commit
+          truncate = operations.truncate
+          begin()
+          write({ type: `insert`, value: { id: `one`, value: 1 } })
+          write({ type: `insert`, value: { id: `two`, value: 1 } })
+          commit()
+          operations.markReady()
+          return {
+            loadSubset: () => {
+              loadCount++
+              if (loadCount <= 2) return true
+              if (loadCount === 3) {
+                subscription.releaseSnapshot(firstWhere)
+                throw releasedFailure
+              }
+              begin()
+              write({ type: `insert`, value: { id: `two`, value: 2 } })
+              commit()
+              return true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const visible = new Map<string | number, ReplayRow>()
+    const subscription = collection.subscribeChanges((changes) => {
+      recordPublishedChanges(visible, changes as Array<ReplayChange>)
+    })
+    subscription.on(`loadSubset:error`, ({ error }) => {
+      reportedErrors.push(error)
+    })
+
+    try {
+      subscription.requestSnapshot({
+        where: firstWhere,
+        optimizedOnly: false,
+      })
+      subscription.requestSnapshot({
+        where: secondWhere,
+        optimizedOnly: false,
+      })
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+
+      expect(reportedErrors).not.toContain(releasedFailure)
+      expect(sortedRows(visible)).toEqual([{ id: `two`, value: 2 }])
+      expect(subscription.status).toBe(`ready`)
+      expect(subscription.pendingTruncateReplacement).toBeUndefined()
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   it(`retries an old replay lease when its reentrant release fails`, async () => {
     let begin!: () => void
     let commit!: () => void
     let truncate!: () => void
-    let subscription!: ReturnType<Collection<ReplayRow>[`subscribeChanges`]>
     const where = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
     const loads: Array<LoadSubsetOptions> = []
     const unloads: Array<LoadSubsetOptions> = []
@@ -2461,7 +2884,7 @@ describe(`CollectionSubscription replay oracle`, () => {
         },
       },
     })
-    subscription = collection.subscribeChanges(() => {}, {
+    const subscription = collection.subscribeChanges(() => {}, {
       includeInitialState: false,
     })
 
