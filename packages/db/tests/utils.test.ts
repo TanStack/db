@@ -10,16 +10,31 @@ import {
 } from './oracle-config'
 
 describe(`normalizeError`, () => {
-  it.each([
-    Object.create(null),
-    {
-      [Symbol.toPrimitive]: () => {
-        throw new Error(`conversion failed`)
+  it(`normalizes unstringifiable thrown values`, () => {
+    const revoked = Proxy.revocable({}, {})
+    revoked.revoke()
+    const thrownValues = [
+      Object.create(null),
+      {
+        [Symbol.toPrimitive]: () => {
+          throw new Error(`conversion failed`)
+        },
       },
-    },
-  ])(`normalizes an unstringifiable thrown value`, (thrownValue) => {
-    expect(() => normalizeError(thrownValue)).not.toThrow()
-    expect(normalizeError(thrownValue)).toEqual(new Error(`Unknown error`))
+      new Proxy(
+        {},
+        {
+          getPrototypeOf: () => {
+            throw new Error(`prototype lookup failed`)
+          },
+        },
+      ),
+      revoked.proxy,
+    ]
+
+    for (const thrownValue of thrownValues) {
+      expect(() => normalizeError(thrownValue)).not.toThrow()
+      expect(normalizeError(thrownValue)).toEqual(new Error(`Unknown error`))
+    }
   })
 })
 
