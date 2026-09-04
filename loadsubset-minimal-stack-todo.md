@@ -589,10 +589,14 @@ explicitly removed.
       uses a private symbol, and the grammar crosses all three former internal
       names with parent aliases, selected fields, and direct, `QueryRef`, join,
       and group boundaries.
-- [ ] Repair the route-metadata gaps recovered by the fresh loss audit of the
-      symbol carrier. Red/green object-valued `QueryRef` scalars, nested
-      functional projections that spread source rows, and implicit joined
-      output. Public results must contain no internal symbols at any depth.
+- [x] Repair the route-metadata gaps recovered by the fresh loss audit of the
+      symbol carrier. The grammar now crosses object-valued `QueryRef` scalars,
+      nested functional projections that spread source rows, and implicit
+      joined output with all three include forms and parent/child updates. It
+      failed first on all three shapes. Opaque values now retain their identity,
+      and an immutable recursive boundary copy removes internal symbols without
+      corrupting D2 retractions. The context grammar is 89/89 green and the four
+      broader includes oracle suites are 207/207 green.
 - [x] Scope symbol correlation identity to releasable graph state. Every
       compiler path now shares one identity scope through its compile cache;
       the scope dies with the graph, and demand-controller cleanup replaces its

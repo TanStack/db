@@ -78,6 +78,13 @@ const routeContextGrammar = {
       `identity`,
     ] as const,
   },
+  publicSurface: {
+    shapes: [
+      `object-query-ref-scalar`,
+      `nested-functional-spread`,
+      `implicit-join`,
+    ] as const,
+  },
 } as const
 
 const queryRefMetadataGrammar = {
@@ -138,6 +145,11 @@ type NamespaceCollisionCell = {
   name: (typeof routeContextGrammar.namespaceCollision.names)[number]
 }
 
+type PublicSurfaceCell = {
+  family: `public-surface`
+  shape: (typeof routeContextGrammar.publicSurface.shapes)[number]
+}
+
 type GrammarCell =
   | ParentProjectionCell
   | CorrelationDomainCell
@@ -148,6 +160,7 @@ type GrammarCell =
   | UnionIdentityCell
   | DerivedResultCell
   | NamespaceCollisionCell
+  | PublicSurfaceCell
 
 const grammarCells: Array<GrammarCell> = [
   ...routeContextGrammar.parentProjection.shapes.map(
@@ -218,6 +231,9 @@ const grammarCells: Array<GrammarCell> = [
         }),
       ),
     ),
+  ),
+  ...routeContextGrammar.publicSurface.shapes.map(
+    (shape): PublicSurfaceCell => ({ family: `public-surface`, shape }),
   ),
 ]
 
@@ -291,6 +307,8 @@ function grammarCellName(cell: GrammarCell): string {
       return `${cell.family} / ${cell.boundary} / ${cell.selection} / ${cell.domain}`
     case `namespace-collision`:
       return `${cell.family} / ${cell.location} / ${cell.boundary} / ${cell.name}`
+    case `public-surface`:
+      return `${cell.family} / ${cell.shape}`
   }
 }
 
@@ -1658,6 +1676,173 @@ async function runNamespaceCollisionCell({
   }
 }
 
+function expectNoPrivateSymbolsDeep(
+  value: unknown,
+  seen = new WeakSet<object>(),
+): void {
+  if (value == null || typeof value !== `object` || seen.has(value)) return
+  seen.add(value)
+
+  for (const key of Reflect.ownKeys(value)) {
+    expect(
+      typeof key,
+      `unexpected private symbol in public query output`,
+    ).not.toBe(`symbol`)
+    if (typeof key === `string`) {
+      expectNoPrivateSymbolsDeep((value as Record<string, unknown>)[key], seen)
+    }
+  }
+}
+
+async function runPublicSurfaceCell({
+  shape,
+}: PublicSurfaceCell): Promise<void> {
+  const parents = createGrammarCollection(`surface-${shape}-parents`, [
+    { id: 1, group: 1 },
+  ])
+  const first = new Date(`2026-01-01T00:00:00.000Z`)
+  const second = new Date(`2026-01-02T00:00:00.000Z`)
+  const third = new Date(`2026-01-03T00:00:00.000Z`)
+  const children = createGrammarCollection(`surface-${shape}-children`, [
+    { id: 10, parentGroup: 1, value: first, label: `ten` },
+    { id: 20, parentGroup: 2, value: second, label: `twenty` },
+  ])
+  const candidates = createGrammarCollection(`surface-${shape}-candidates`, [
+    { id: 10, value: first },
+    { id: 20, value: second },
+  ])
+  const anchors = createGrammarCollection(`surface-${shape}-anchors`, [
+    { id: 100, parentGroup: 1, value: first },
+    { id: 200, parentGroup: 2, value: second },
+    { id: 300, parentGroup: 2, value: third },
+  ])
+  const tags = createGrammarCollection(`surface-${shape}-tags`, [
+    { id: 1000, childId: 10, label: `first` },
+    { id: 2000, childId: 20, label: `second` },
+  ])
+
+  const live = createLiveQueryCollection((q) =>
+    q.from({ parent: parents.collection }).select(({ parent }) => {
+      if (shape === `object-query-ref-scalar`) {
+        const values = q
+          .from({ candidate: candidates.collection })
+          .fn.select(({ candidate }) => candidate.value)
+        const rows = q
+          .from({ anchor: anchors.collection })
+          .innerJoin({ value: values }, ({ anchor, value }) =>
+            eq(anchor.value, value),
+          )
+          .where(({ anchor }) => eq(anchor.parentGroup, parent.group))
+          .select(({ anchor, value }) => ({ id: anchor.id, value }))
+        return { id: parent.id, ...includeInEveryForm(rows) }
+      }
+
+      const correlated = q
+        .from({ child: children.collection })
+        .where(({ child }) => eq(child.parentGroup, parent.group))
+      if (shape === `nested-functional-spread`) {
+        const rows = correlated.fn.select((row) => ({
+          id: row.child.id,
+          nested: { ...row },
+        }))
+        return { id: parent.id, ...includeInEveryForm(rows) }
+      }
+
+      const rows = correlated.innerJoin(
+        { tag: tags.collection },
+        ({ child, tag }) => eq(child.id, tag.childId),
+      )
+      return { id: parent.id, ...includeInEveryForm(rows) }
+    }),
+  )
+
+  const assertCurrent = () => {
+    const forms = live.get(1)!
+    const rowsByForm = [
+      [...forms.collection.values()],
+      [...forms.array],
+      [...forms.materialized],
+    ]
+    for (const rows of rowsByForm) {
+      for (const row of rows) expectNoPrivateSymbolsDeep(row)
+    }
+
+    if (shape === `object-query-ref-scalar`) {
+      const expected =
+        parents.collection.get(1)!.group === 1
+          ? [{ id: 100, value: first }]
+          : candidates.collection.get(20)!.value === second
+            ? [{ id: 200, value: second }]
+            : [{ id: 300, value: third }]
+      for (const rows of rowsByForm) {
+        expect(
+          rows.map((row: any) => ({
+            id: row.id,
+            isDate: row.value instanceof Date,
+            time: row.value.getTime(),
+          })),
+        ).toEqual(
+          expected.map((row) => ({
+            id: row.id,
+            isDate: true,
+            time: row.value.getTime(),
+          })),
+        )
+      }
+      return
+    }
+
+    if (shape === `nested-functional-spread`) {
+      const child =
+        parents.collection.get(1)!.group === 1
+          ? children.collection.get(10)!
+          : children.collection.get(20)!
+      for (const rows of rowsByForm) {
+        expect(
+          rows.map((row: any) => ({
+            id: row.id,
+            child: row.nested.child,
+          })),
+        ).toEqual([{ id: child.id, child }])
+      }
+      return
+    }
+
+    const child =
+      parents.collection.get(1)!.group === 1
+        ? children.collection.get(10)!
+        : children.collection.get(20)!
+    const tag = tags.collection.toArray.find(
+      ({ childId }) => childId === child.id,
+    )!
+    for (const rows of rowsByForm) {
+      expect(
+        rows.map((row: any) => ({ child: row.child, tag: row.tag })),
+      ).toEqual([{ child, tag }])
+    }
+  }
+
+  try {
+    await live.preload()
+    assertCurrent()
+
+    parents.write(`update`, { id: 1, group: 2 })
+    assertCurrent()
+
+    if (shape === `object-query-ref-scalar`) {
+      candidates.write(`update`, { id: 20, value: third })
+    } else {
+      children.write(`update`, {
+        ...children.collection.get(20)!,
+        label: `updated`,
+      })
+    }
+    assertCurrent()
+  } finally {
+    await cleanup(live, [parents, children, candidates, anchors, tags])
+  }
+}
+
 async function runGrammarCell(cell: GrammarCell): Promise<void> {
   switch (cell.family) {
     case `parent-projection`:
@@ -1678,6 +1863,8 @@ async function runGrammarCell(cell: GrammarCell): Promise<void> {
       return runDerivedResultCell(cell)
     case `namespace-collision`:
       return runNamespaceCollisionCell(cell)
+    case `public-surface`:
+      return runPublicSurfaceCell(cell)
   }
 }
 
@@ -1699,14 +1886,15 @@ describe(`correlated include route-context transport grammar`, () => {
         routeContextGrammar.derivedResult.domains.length +
       routeContextGrammar.namespaceCollision.locations.length *
         routeContextGrammar.namespaceCollision.boundaries.length *
-        routeContextGrammar.namespaceCollision.names.length
+        routeContextGrammar.namespaceCollision.names.length +
+      routeContextGrammar.publicSurface.shapes.length
     const names = grammarCells.map(grammarCellName)
 
     expect(grammarCells).toHaveLength(expectedCellCount)
     expect(new Set(names)).toHaveLength(expectedCellCount)
     expect(
       grammarCells.length * materializationForms.length * checkpoints.length,
-    ).toBe(747)
+    ).toBe(774)
   })
 
   for (const cell of grammarCells) {

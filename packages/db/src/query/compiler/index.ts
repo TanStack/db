@@ -63,6 +63,8 @@ import {
   getNamespacedRouteMetadata,
   getRouteMetadata,
   getRoutedScalarMetadata,
+  isPlainObject,
+  stripInternalRouteMetadata,
   stripRouteMetadata,
 } from './route-metadata.js'
 import { processSelect } from './select.js'
@@ -973,7 +975,11 @@ export function compileQuery(
         const selectResults = query.fnSelect!(namespacedRow)
         validateFnSelectResult(selectResults)
         let selected = selectResults
-        if (selectResults && typeof selectResults === `object`) {
+        if (
+          selectResults &&
+          typeof selectResults === `object` &&
+          (Array.isArray(selectResults) || isPlainObject(selectResults))
+        ) {
           selected = Array.isArray(selectResults)
             ? [...selectResults]
             : { ...selectResults }
@@ -1938,13 +1944,18 @@ function attachVirtualPropsToSelected(
   selected: any,
   row: Record<string, any>,
 ): any {
-  if (!selected || typeof selected !== `object`) {
+  if (
+    !selected ||
+    typeof selected !== `object` ||
+    (!Array.isArray(selected) && !isPlainObject(selected))
+  ) {
     return selected
   }
 
+  const selectedRecord = selected as Record<PropertyKey, any>
   let needsMerge = false
   for (const prop of VIRTUAL_PROP_NAMES) {
-    if (selected[prop] == null && prop in row) {
+    if (selectedRecord[prop] == null && prop in row) {
       needsMerge = true
       break
     }
@@ -1954,9 +1965,11 @@ function attachVirtualPropsToSelected(
     return selected
   }
 
-  const result = Array.isArray(selected) ? [...selected] : { ...selected }
+  const result = (
+    Array.isArray(selected) ? [...selected] : { ...selected }
+  ) as Record<PropertyKey, any>
   for (const prop of VIRTUAL_PROP_NAMES) {
-    if (selected[prop] == null && prop in row) {
+    if (selectedRecord[prop] == null && prop in row) {
       result[prop] = row[prop]
     }
   }
@@ -1965,20 +1978,7 @@ function attachVirtualPropsToSelected(
 }
 
 function stripInternalCorrelation(selected: any): any {
-  if (
-    !selected ||
-    typeof selected !== `object` ||
-    (getRouteMetadata(selected) === undefined &&
-      !(INCLUDES_PUBLIC_KEY in selected))
-  ) {
-    return selected
-  }
-
-  const result = Array.isArray(selected)
-    ? [...selected]
-    : stripRouteMetadata(selected)
-  delete result[INCLUDES_PUBLIC_KEY]
-  return result
+  return stripInternalRouteMetadata(selected)
 }
 
 function getIncludesPublicKey(
