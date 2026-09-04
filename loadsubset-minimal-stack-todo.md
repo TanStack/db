@@ -1136,10 +1136,12 @@ explicitly removed.
         requested limit, not observed load count. Every publication now records
         callback-time status, so only one empty `ready` batch can satisfy the
         acquisition wake-up law and a zero window permits none.
-  - [ ] Preserve or reject `previousValue` explicitly on every normalized
-        public change; do not discard malformed insert/delete payload fields.
-  - [ ] Compare the exact public change batch with the reference before/after
-        rows instead of leaving scenario `changes` unasserted.
+  - [x] Preserve `previousValue` explicitly on every normalized public change;
+        malformed insert/delete payload fields can no longer be discarded by
+        the oracle normalizer.
+  - [x] Compare the exact public change batch with the reference before/after
+        rows. Generated mutation and window histories now check change type,
+        key, value, prior value, batch count, and final rows together.
   - [ ] Give every structural matrix cell a fixed semantic witness: a rank tie,
         mixed filter membership, two meaningful windows, and a real mutation,
         while crossing provider tie order independently.

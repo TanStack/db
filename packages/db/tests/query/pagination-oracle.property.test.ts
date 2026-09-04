@@ -451,7 +451,7 @@ function normalizePageChanges(
       type: change.type,
       key: change.key,
       value: projectPageRow(change.value),
-      ...(change.type === `update` && change.previousValue
+      ...(change.previousValue !== undefined
         ? { previousValue: projectPageRow(change.previousValue) }
         : {}),
     }))
@@ -828,8 +828,8 @@ async function runPaginationStateScenario(
       .select(({ row }) => ({ id: row.id, rank: row.rank }))
   })
   const publications: Array<{
-    changes: ReadonlyArray<unknown>
-    rows: Array<{ id: number; rank: number }>
+    changes: Array<PublicPageChange>
+    rows: Array<PublicPageRow>
   }> = []
   let publicationSubscription:
     | ReturnType<typeof live.subscribeChanges>
@@ -858,7 +858,13 @@ async function runPaginationStateScenario(
     expect(live.status).toBe(`ready`)
     expect(live.utils.lastSubsetError).toBeUndefined()
     publicationSubscription = live.subscribeChanges(
-      (changes) => publications.push({ changes, rows: readCurrentWindow() }),
+      (changes) =>
+        publications.push({
+          changes: normalizePageChanges(
+            changes as Array<ChangeMessage<PageRow, number>>,
+          ),
+          rows: readCurrentWindow(),
+        }),
       { includeInitialState: false },
     )
 
@@ -892,12 +898,13 @@ async function runPaginationStateScenario(
       expectCurrentWindow(index + 1)
       expect(live.status).toBe(`ready`)
       expect(live.utils.lastSubsetError).toBeUndefined()
-      const outputChanged =
-        JSON.stringify(readCurrentWindow()) !== JSON.stringify(beforeRows)
-      expect(publications.length - publicationCount).toBe(outputChanged ? 1 : 0)
-      if (outputChanged) {
-        expect(publications.at(-1)?.rows).toEqual(readCurrentWindow())
-      }
+      const afterRows = readCurrentWindow()
+      const expectedChanges = expectedPageChanges(beforeRows, afterRows)
+      expect(publications.slice(publicationCount)).toEqual(
+        expectedChanges.length > 0
+          ? [{ changes: expectedChanges, rows: afterRows }]
+          : [],
+      )
     }
   } finally {
     publicationSubscription?.unsubscribe()
