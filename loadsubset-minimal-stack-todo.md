@@ -764,6 +764,14 @@ explicitly removed.
       callbacks carry the sync-session token and do nothing after cleanup or
       restart. Pending, failed, same-source, publication, and cleanup traces
       fail the prior implementation and pass the revised boundary.
+- [x] Make replay/window termination and error identity explicit. Cleanup now
+      rejects a replay-blocked window move with `AbortError` instead of leaving
+      it pending forever. Throw/reject × `Error`, `undefined`, `NaN`, `false`,
+      and object cases prove that the replay event, `lastSubsetError`, and the
+      waiting window promise share one normalized `Error`. Removing raw
+      per-attempt error storage made that contract the simpler implementation.
+      The public error guide now states that ordinary deltas remain private
+      after failed replay until a later authoritative replacement succeeds.
 - [x] Measure source and compressed bundle size against both `origin/main` and
       the large RFC stack. Across all package `src` trees, the old stack was
       +10,545/-1,692 lines (net +8,853) while this tree is +2,006/-1,302

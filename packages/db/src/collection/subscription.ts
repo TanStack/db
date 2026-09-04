@@ -97,7 +97,6 @@ type TruncateReplayAttempt = {
   pending: Set<{ demand: SubsetDemand; promise: Promise<unknown> }>
   failed: boolean
   setupComplete: boolean
-  error?: unknown
 }
 
 type TruncateReplaySession = {
@@ -332,11 +331,10 @@ export class CollectionSubscription
             nextAcquisition.options,
             isCurrentAttempt,
           )
-        } catch (error) {
+        } catch {
           nextAcquisition.abortController.abort()
           nextAcquisition.removeRequestAbortListener?.()
           attempt.failed = true
-          attempt.error ??= error
           continue
         }
 
@@ -380,7 +378,6 @@ export class CollectionSubscription
           this.recordLoadSubsetError(demand.options, error, true)
           this.stopStatusParticipant(statusParticipant)
           attempt.failed = true
-          attempt.error ??= error
         }
       }
 
@@ -422,12 +419,11 @@ export class CollectionSubscription
     attempt.pending.add(pending)
     void result.then(
       () => this.settleTruncateReplay(session, attempt, pending),
-      (error) => {
+      () => {
         // A released demand no longer participates in this replacement. Its
         // cooperative AbortError must not discard rows from active demands.
         if (this.subsetDemands.includes(demand) && !options.signal?.aborted) {
           attempt.failed = true
-          attempt.error ??= error
         }
         this.settleTruncateReplay(session, attempt, pending)
       },
@@ -453,12 +449,9 @@ export class CollectionSubscription
     this.checkTruncateReplayComplete(session)
   }
 
-  private failCurrentTruncateReplay(error?: unknown): void {
+  private failCurrentTruncateReplay(): void {
     const attempt = this.truncateReplaySession?.currentAttempt
-    if (attempt) {
-      attempt.failed = true
-      attempt.error ??= error
-    }
+    if (attempt) attempt.failed = true
   }
 
   /** Publish only after every overlapping replay attempt has settled. */
@@ -483,9 +476,7 @@ export class CollectionSubscription
     if (this.truncateReplaySession !== session) return
     if (this.options.truncateReplayPublication) {
       session.completion.reject(
-        session.currentAttempt.error ??
-          this._lastError ??
-          new Error(`Truncate replay failed`),
+        this._lastError ?? new Error(`Truncate replay failed`),
       )
       return
     }
@@ -843,7 +834,7 @@ export class CollectionSubscription
       this.trackTruncateReplayParticipant(demand, acquisition.options, result)
       return { demand, result }
     } catch (error) {
-      this.failCurrentTruncateReplay(error)
+      this.failCurrentTruncateReplay()
       const demandIndex = this.subsetDemands.indexOf(demand)
       if (demandIndex !== -1) {
         this.subsetDemands.splice(demandIndex, 1)
@@ -1476,6 +1467,11 @@ export class CollectionSubscription
     this.truncateCleanup = undefined
 
     // Stop any buffered replay from publishing after unsubscription.
+    if (this.truncateReplaySession?.completion.isPending()) {
+      this.truncateReplaySession.completion.reject(
+        new LoadSubsetOperationAbortedError(),
+      )
+    }
     this.truncateReplaySession = undefined
     this.truncateReplacementPending = false
     this.stalePublishedRows.clear()

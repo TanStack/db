@@ -521,6 +521,8 @@ A window move started during an active source replay waits for that replay and
 applies only after its replacement is complete. A failed replay rejects the
 move without advancing the reported window. Replay completion callbacks carry
 their sync-session identity and become no-ops after cleanup or restart.
+Cleanup rejects the replay barrier, and therefore every window move waiting on
+it, with `AbortError`; no waiter may outlive the discarded subscription.
 Ordinary source mutations stay synchronous except while an initial ordered
 load or imperative window move owns this publication barrier. Mutations that
 arrive during that interval join the private state and publish with the
@@ -542,7 +544,9 @@ snapshot requests do not reopen that gate because they cannot prove the source
 complete; only a later successful truncate replay provides the authoritative
 replacement. If the last logical demand retires, the now-unreachable source
 replay stops gating the shared graph; unrelated parent or sibling changes may
-then publish.
+then publish. A genuine replay failure is normalized once by the subscription.
+The `loadSubset:error` event, `lastSubsetError`, and any window move waiting on
+that replay expose the same `Error` object.
 
 A transaction `mutationFn` must not start or await collection or live-query
 preloads. User persistence owns the causal queue while that function runs, so a

@@ -1969,6 +1969,82 @@ describe(`createLiveQueryCollection`, () => {
       }
     })
 
+    it(`rejects a replay-blocked window move when cleanup abandons it`, async () => {
+      type Row = { id: number; rank: number }
+      const replayGate = createDeferred<void>()
+      let recovering = false
+      let syncOps!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
+      const publications: Array<Array<number>> = []
+      const source = createCollection<Row>({
+        id: `ordered-replay-window-cleanup-source`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: (operations) => {
+            syncOps = operations
+            operations.begin()
+            operations.write({ type: `insert`, value: { id: 1, rank: 1 } })
+            operations.write({ type: `insert`, value: { id: 2, rank: 2 } })
+            operations.commit()
+            operations.markReady()
+            return {
+              loadSubset: () => (recovering ? replayGate.promise : true),
+            }
+          },
+        },
+      })
+      const live = createLiveQueryCollection((q) =>
+        q.from({ row: source }).orderBy(({ row }) => row.rank).limit(2),
+      )
+      const subscription = live.subscribeChanges(() => {
+        publications.push(Array.from(live.values(), ({ id }) => id))
+      })
+
+      try {
+        await live.preload()
+        publications.length = 0
+        recovering = true
+        syncOps.begin()
+        syncOps.truncate()
+        const replayReceipt = syncOps.commit()
+        if (replayReceipt !== true) await replayReceipt
+        await flushPromises()
+
+        const move = live.utils.setWindow({ offset: 0, limit: 3 })
+        expect(move).toBeInstanceOf(Promise)
+        let moveError: unknown
+        let settled = false
+        void Promise.resolve(move).then(
+          () => {
+            settled = true
+          },
+          (error) => {
+            moveError = error
+            settled = true
+          },
+        )
+        await flushPromises()
+        expect(settled).toBe(false)
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2])
+        expect(publications).toEqual([])
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
+
+        await live.cleanup()
+        await flushPromises()
+        expect(settled).toBe(true)
+        expect(moveError).toMatchObject({ name: `AbortError` })
+        expect(publications).toEqual([])
+        expect(live.status).toBe(`cleaned-up`)
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
+      } finally {
+        subscription.unsubscribe()
+        replayGate.resolve()
+        await Promise.all([live.cleanup(), source.cleanup()])
+      }
+    })
+
     it(`rejects a window move while source recovery is failed`, async () => {
       type Row = { id: number; rank: number }
       const failure = new Error(`ordered source replay failed`)
@@ -2023,6 +2099,84 @@ describe(`createLiveQueryCollection`, () => {
         await Promise.all([live.cleanup(), source.cleanup()])
       }
     })
+
+    it.each(
+      ([
+        { label: `Error`, value: new Error(`replay failed`) },
+        { label: `undefined`, value: undefined },
+        { label: `NaN`, value: Number.NaN },
+        { label: `false`, value: false },
+        { label: `object`, value: { reason: `replay failed` } },
+      ] as const).flatMap(({ label, value }) =>
+        ([`throw`, `reject`] as const).map((delivery) => ({
+          delivery,
+          label,
+          value,
+        })),
+      ),
+    )(
+      `uses one normalized error for a $delivery replay failure with $label`,
+      async ({ delivery, value }) => {
+        type Row = { id: number; rank: number }
+        const replayGate = createDeferred<void>()
+        let recovering = false
+        let replayCalls = 0
+        let syncOps!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
+        const source = createCollection<Row>({
+          id: `ordered-normalized-${delivery}-${String(value)}-source`,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          autoIndex: `eager`,
+          defaultIndexType: BTreeIndex,
+          sync: {
+            sync: (operations) => {
+              syncOps = operations
+              operations.begin()
+              operations.write({ type: `insert`, value: { id: 1, rank: 1 } })
+              operations.commit()
+              operations.markReady()
+              return {
+                loadSubset: () => {
+                  if (!recovering) return true
+                  replayCalls++
+                  if (replayCalls > 1) return replayGate.promise
+                  if (delivery === `throw`) throw value
+                  return Promise.reject(value)
+                },
+              }
+            },
+          },
+        })
+        const live = createLiveQueryCollection((q) =>
+          q.from({ row: source }).orderBy(({ row }) => row.rank).limit(1),
+        )
+
+        try {
+          await live.preload()
+          recovering = true
+          syncOps.begin()
+          syncOps.truncate()
+          const replayReceipt = syncOps.commit()
+          if (replayReceipt !== true) await replayReceipt
+          await vi.waitFor(() =>
+            expect(live.utils.lastSubsetError).toBeInstanceOf(Error),
+          )
+          const reportedError = live.utils.lastSubsetError
+
+          const windowMove = live.utils.setWindow({ offset: 0, limit: 2 })
+          expect(windowMove).toBeInstanceOf(Promise)
+          replayGate.resolve()
+          const windowError = await Promise.resolve(windowMove).catch(
+            (error: unknown) => error,
+          )
+          expect(windowError).toBe(reportedError)
+          expect(windowError).toBeInstanceOf(Error)
+        } finally {
+          replayGate.resolve()
+          await Promise.all([live.cleanup(), source.cleanup()])
+        }
+      },
+    )
 
     it(`ignores a queued replay-success callback after cleanup`, async () => {
       type Row = { id: number; rank: number }
