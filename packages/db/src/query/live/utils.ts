@@ -10,7 +10,11 @@ import { collectCollectionSources, isExpressionLike } from '../ir.js'
 import type { MultiSetArray, RootStreamBuilder } from '@tanstack/db-ivm'
 import type { Collection } from '../../collection/index.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
-import type { ChangeMessage, LoadSubsetRequestResult } from '../../types.js'
+import type {
+  ChangeMessage,
+  LoadSubsetOptions,
+  LoadSubsetRequestResult,
+} from '../../types.js'
 import type { InitialQueryBuilder, QueryBuilder } from '../builder/index.js'
 import type { Context } from '../builder/types.js'
 import type { OrderBy, QueryIR } from '../ir.js'
@@ -275,6 +279,7 @@ export class OrderedSourceLoader {
   private fullSourceFailed = false
   private failed = false
   private failedWindowOperationGeneration: number | undefined
+  private failedAcquisition: LoadSubsetOptions | undefined
   private active = true
   private generation = 0
   private lastPage: { count: number; boundary: unknown } | undefined
@@ -318,18 +323,30 @@ export class OrderedSourceLoader {
       (windowOperationGeneration !== undefined &&
         windowOperationGeneration !== this.failedWindowOperationGeneration)
     if (!mayRetryFailure) return this.pending
-    const replaceFailedFullSource = this.fullSourceFailed
+    if (this.failed && windowOperationGeneration !== undefined) {
+      // Move ownership to the explicit replacement before releasing the old
+      // lease. Adapter cleanup may reenter the loader.
+      this.failedWindowOperationGeneration = windowOperationGeneration
+      const failedAcquisition = this.failedAcquisition
+      this.failedAcquisition = undefined
+      if (failedAcquisition) {
+        this.subscription.releaseLoadSubset(failedAcquisition)
+        // Adapter cleanup can synchronously tear down this loader.
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        if (!this.active) return
+      }
+    }
     if (this.fullSourceFailed) {
       this.fullSource = false
       this.fullSourceFailed = false
     }
     if (this.fullSource) return this.pending
     if (this.needsFullSourceRecovery) {
-      this.loadFullSource(replaceFailedFullSource, windowOperationGeneration)
+      this.loadFullSource(false, windowOperationGeneration)
       return this.pending
     }
     if (this.info.requiresFullSource) {
-      this.loadFullSource(replaceFailedFullSource, windowOperationGeneration)
+      this.loadFullSource(false, windowOperationGeneration)
       return this.pending
     }
     if (!this.info.index || this.info.orderBy.length !== 1) {
@@ -366,8 +383,15 @@ export class OrderedSourceLoader {
         this.subscription.requestSnapshot({
           trackLoadSubsetPromise: false,
           replaceExistingDemand,
-          onLoadSubsetResult: (result) => {
-            this.observe(result, false, true, true, windowOperationGeneration)
+          onLoadSubsetResult: (result, options) => {
+            this.observe(
+              result,
+              options,
+              false,
+              true,
+              true,
+              windowOperationGeneration,
+            )
           },
         })
       })
@@ -399,9 +423,10 @@ export class OrderedSourceLoader {
           orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
           limit: count,
           trackLoadSubsetPromise: false,
-          onLoadSubsetResult: (result) =>
+          onLoadSubsetResult: (result, options) =>
             this.observe(
               result,
+              options,
               refine,
               false,
               true,
@@ -484,9 +509,10 @@ export class OrderedSourceLoader {
           // cursor nor a remote offset. Start the first acquisition at zero.
           offset: startsFromSourcePrefix ? 0 : undefined,
           trackLoadSubsetPromise: false,
-          onLoadSubsetResult: (result) =>
+          onLoadSubsetResult: (result, options) =>
             this.observe(
               result,
+              options,
               refine,
               false,
               true,
@@ -505,6 +531,7 @@ export class OrderedSourceLoader {
 
   private observe(
     result: LoadSubsetRequestResult,
+    acquisition: LoadSubsetOptions,
     refine: boolean,
     isFullSource = false,
     establishesSourceCoverage = false,
@@ -516,6 +543,7 @@ export class OrderedSourceLoader {
       if (!this.active || generation !== this.generation) return
       this.failed = false
       this.failedWindowOperationGeneration = undefined
+      this.failedAcquisition = undefined
       if (establishesSourceCoverage) {
         this.hasEstablishedSourceCoverage = true
       }
@@ -550,6 +578,7 @@ export class OrderedSourceLoader {
         }
         this.failed = true
         this.failedWindowOperationGeneration = windowOperationGeneration
+        this.failedAcquisition = acquisition
         this.lastPage = undefined
         this.lastPrefixCount = undefined
         this.hasLastBoundary = false
@@ -592,9 +621,10 @@ export class OrderedSourceLoader {
         this.subscription.requestSnapshot({
           where,
           trackLoadSubsetPromise: false,
-          onLoadSubsetResult: (result) => {
+          onLoadSubsetResult: (result, options) => {
             tracked = this.observe(
               result,
+              options,
               false,
               false,
               false,

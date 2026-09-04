@@ -39,7 +39,10 @@ type RequestSnapshotOptions = {
   /** Optional limit to pass to loadSubset for backend optimization */
   limit?: number
   /** Callback that receives the normalized loadSubset result for internal tracking */
-  onLoadSubsetResult?: (result: LoadSubsetRequestResult) => void
+  onLoadSubsetResult?: (
+    result: LoadSubsetRequestResult,
+    options: LoadSubsetOptions,
+  ) => void
   /** Called when the local snapshot must fall back from an index to a scan. */
   onUnoptimized?: () => void
   /** Replace an earlier exact acquisition before retrying it. */
@@ -56,7 +59,10 @@ type RequestLimitedSnapshotOptions = {
   /** Whether to track the loadSubset promise on this subscription (default: true) */
   trackLoadSubsetPromise?: boolean
   /** Callback that receives the normalized loadSubset result for internal tracking */
-  onLoadSubsetResult?: (result: LoadSubsetRequestResult) => void
+  onLoadSubsetResult?: (
+    result: LoadSubsetRequestResult,
+    options: LoadSubsetOptions,
+  ) => void
 }
 
 type CollectionSubscriptionOptions = {
@@ -1129,7 +1135,7 @@ export class CollectionSubscription
     if (opts?.where) this.requestedSubsetWhere.set(loadOptions, opts.where)
 
     // Pass the raw loadSubset result to the caller for external tracking
-    opts?.onLoadSubsetResult?.(syncResult)
+    opts?.onLoadSubsetResult?.(syncResult, demand.options)
     if (!this.isDemandActive(demand)) return false
 
     this.observeLoadSubsetResult(
@@ -1192,6 +1198,14 @@ export class CollectionSubscription
     if (index === -1) return
 
     this.releaseDemandAt(index)
+  }
+
+  /** Release the exact acquisition returned to an internal request observer. */
+  releaseLoadSubset(options: LoadSubsetOptions): void {
+    const index = this.subsetDemands.findIndex(
+      (demand) => demand.options === options,
+    )
+    if (index !== -1) this.releaseDemandAt(index)
   }
 
   private releaseMatchingDemand(options: LoadSubsetOptions): boolean {
@@ -1474,7 +1488,7 @@ export class CollectionSubscription
     if (!this.isDemandActive(demand)) return
 
     // Pass the raw loadSubset result to the caller for external tracking
-    onLoadSubsetResult?.(syncResult)
+    onLoadSubsetResult?.(syncResult, demand.options)
     if (!this.isDemandActive(demand)) return
     this.observeLoadSubsetResult(
       syncResult,

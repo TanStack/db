@@ -2402,12 +2402,14 @@ describe(`pagination recomputation oracle`, () => {
         { id: 4, rank: 99 },
       ]
       const requests: Array<LoadSubsetOptions> = []
+      const unloaded: Array<LoadSubsetOptions> = []
       const deliveredIds = new Set<number>()
       const rejectedPage = createDeferred<void>()
       let rejectNextPage = false
       let begin!: () => void
       let write!: (message: { type: `insert`; value: PageRow }) => void
       let commit!: () => void
+      let truncate!: () => void
       const source = createCollection<PageRow>({
         id: `pagination-rejected-partial-page-${collectionSequence++}`,
         getKey: (row) => row.id,
@@ -2420,6 +2422,7 @@ describe(`pagination recomputation oracle`, () => {
             begin = operations.begin
             write = operations.write
             commit = operations.commit
+            truncate = operations.truncate
             operations.markReady()
             return {
               loadSubset: (options: LoadSubsetOptions) => {
@@ -2445,6 +2448,7 @@ describe(`pagination recomputation oracle`, () => {
                 commit()
                 return true
               },
+              unloadSubset: (options) => unloaded.push(options),
             }
           },
         },
@@ -2472,9 +2476,11 @@ describe(`pagination recomputation oracle`, () => {
         await expect(failed).rejects.toBe(failure)
         await flushPromises()
         expect(requests).toHaveLength(initialRequestCount + 1)
+        const failedRequest = requests.at(-1)!
 
         const retry = live.utils.setWindow({ offset: 0, limit: 2 })
         if (retry instanceof Promise) await retry
+        expect(unloaded).toEqual([failedRequest])
         const retryRequest = requests[initialRequestCount + 1]
         expect(retryRequest?.limit).toBeUndefined()
         expect(retryRequest?.offset).toBeUndefined()
@@ -2486,6 +2492,16 @@ describe(`pagination recomputation oracle`, () => {
         if (widen instanceof Promise) await widen
         expect(requests).toHaveLength(beforeWiden)
         expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2, 3])
+
+        const beforeReplay = requests.length
+        deliveredIds.clear()
+        begin()
+        truncate()
+        commit()
+        await flushPromises()
+        expect(
+          requests.slice(beforeReplay).every(({ cursor }) => !cursor),
+        ).toBe(true)
       } finally {
         rejectedPage.resolve()
         await cleanupAll(live, source)

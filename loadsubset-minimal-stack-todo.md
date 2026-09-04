@@ -1061,9 +1061,11 @@ explicitly removed.
         witnesses where practical. The matrix currently proves method choice
         and reentry suppression, but only its page integration exercises
         adapter writes, graph work, operation generations, and publication.
-  - [ ] Retire the failed physical ordered acquisition when its explicit retry
-        replaces it. A later truncate must replay only current demand, and
-        cleanup must release each live lease once.
+  - [x] Retire the exact failed physical ordered acquisition when its explicit
+        retry replaces it. The request callback now carries acquisition
+        identity back to the loader; replacement releases that lease before it
+        starts. A later truncate replays no obsolete cursor, and cleanup
+        releases each remaining live lease once.
   - [ ] Derive the zero-window no-load and readiness-wake expectations from the
         requested semantics, not observed load count, and record callback-time
         status so a stray empty batch cannot impersonate the ready wake-up.
