@@ -148,6 +148,7 @@ export class CollectionSubscription
   private subsetDemands: Array<SubsetDemand> = []
   private releaseDebts: Array<SubsetAcquisition> = []
   private releasingAcquisitions = new Set<SubsetAcquisition>()
+  private primaryFailureDeliveryDepth = 0
   private readonly requestedSubsetWhere = new WeakMap<
     LoadSubsetOptions,
     BasicExpression<boolean>
@@ -1224,12 +1225,12 @@ export class CollectionSubscription
     primaryFailure?: { error: unknown },
   ): void {
     const demand = this.subsetDemands.find(
-      (demand) => demand.options === options,
+      (candidate) => candidate.options === options,
     )
     if (demand) {
       this.releaseDemand(demand, primaryFailure)
     } else if (primaryFailure) {
-      this.recordLoadSubsetError(options, primaryFailure.error, true)
+      this.recordPrimaryLoadSubsetError(options, primaryFailure.error)
     }
   }
 
@@ -1244,12 +1245,28 @@ export class CollectionSubscription
     }
 
     try {
-      this.recordLoadSubsetError(demand.options, primaryFailure.error, true)
+      this.recordPrimaryLoadSubsetError(
+        demand.options,
+        primaryFailure.error,
+      )
     } finally {
       // The failed request remains the public error. A release failure is
       // retained as cleanup debt and may be reported if that later retry fails.
       const index = this.subsetDemands.indexOf(demand)
       if (index !== -1) this.releaseDemandAt(index, false)
+    }
+  }
+
+  /** Keep nested cleanup errors from replacing the failure being delivered. */
+  private recordPrimaryLoadSubsetError(
+    options: LoadSubsetOptions,
+    error: unknown,
+  ): void {
+    this.primaryFailureDeliveryDepth++
+    try {
+      this.recordLoadSubsetError(options, error, true)
+    } finally {
+      this.primaryFailureDeliveryDepth--
     }
   }
 
@@ -1262,7 +1279,10 @@ export class CollectionSubscription
     return !this.unsubscribed
   }
 
-  private releaseDemandAt(index: number, reportReleaseError = true): void {
+  private releaseDemandAt(
+    index: number,
+    reportReleaseError = this.primaryFailureDeliveryDepth === 0,
+  ): void {
     const demand = this.subsetDemands[index]
     if (!demand) return
     const replaySession = this.truncateReplaySession

@@ -500,12 +500,20 @@ describe(`CollectionSubscription status tracking`, () => {
     await collection.cleanup()
   })
 
-  it.each([`failed-first`, `failed-last`] as const)(
-    `re-finds the %s demand after reentrant error delivery`,
-    async (position) => {
+  it.each([
+    { position: `failed-first`, nestedCleanup: `clean` },
+    { position: `failed-first`, nestedCleanup: `throw` },
+    { position: `failed-last`, nestedCleanup: `clean` },
+    { position: `failed-last`, nestedCleanup: `throw` },
+  ] as const)(
+    `re-finds the $position demand after reentrant $nestedCleanup cleanup`,
+    async ({ position, nestedCleanup }) => {
       const primaryFailure = new Error(`request failed after acquisition`)
+      const cleanupFailure = new Error(`nested cleanup failed`)
       const loaded: Array<LoadSubsetOptions> = []
       const unloaded: Array<LoadSubsetOptions> = []
+      const reported: Array<unknown> = []
+      let caughtCleanup: unknown
       const collection = createCollection<{ id: string }>({
         id: `reentrant-primary-release-${position}`,
         getKey: ({ id }) => id,
@@ -518,7 +526,16 @@ describe(`CollectionSubscription status tracking`, () => {
                 loaded.push(options)
                 return true
               },
-              unloadSubset: (options) => unloaded.push(options),
+              unloadSubset: (options) => {
+                unloaded.push(options)
+                if (
+                  nestedCleanup === `throw` &&
+                  options === loaded[0] &&
+                  unloaded.filter((entry) => entry === loaded[0]).length === 1
+                ) {
+                  throw cleanupFailure
+                }
+              },
             }
           },
         },
@@ -553,8 +570,13 @@ describe(`CollectionSubscription status tracking`, () => {
           releaseSecond = release
         },
       })
-      subscription.on(`loadSubset:error`, () => {
-        subscription.releaseSnapshot(firstWhere)
+      subscription.on(`loadSubset:error`, ({ error }) => {
+        reported.push(error)
+        try {
+          subscription.releaseSnapshot(firstWhere)
+        } catch (cleanupError) {
+          caughtCleanup = cleanupError
+        }
       })
 
       if (position === `failed-first`) {
@@ -564,9 +586,22 @@ describe(`CollectionSubscription status tracking`, () => {
         releaseSecond!({ error: primaryFailure })
         expect(unloaded).toEqual([loaded[0], loaded[1]])
       }
+      expect(subscription.lastError).toBe(primaryFailure)
+      expect(reported).toEqual([primaryFailure])
+      expect(caughtCleanup).toBe(
+        nestedCleanup === `throw` ? cleanupFailure : undefined,
+      )
 
       subscription.unsubscribe()
-      expect(unloaded).toEqual([loaded[0], loaded[1]])
+      expect(unloaded).toEqual(
+        nestedCleanup === `throw`
+          ? position === `failed-first`
+            ? [loaded[0], loaded[0], loaded[1]]
+            : [loaded[0], loaded[1], loaded[0]]
+          : [loaded[0], loaded[1]],
+      )
+      expect(subscription.lastError).toBe(primaryFailure)
+      expect(reported).toEqual([primaryFailure])
       await collection.cleanup()
     },
   )

@@ -1078,7 +1078,8 @@ explicitly removed.
         cleanup must re-find the same logical demand instead of unloading its
         successor or leaving the failed one live. A Cartesian witness now
         crosses whether the failed demand comes before or after the demand
-        removed by the listener.
+        removed by the listener, and whether that nested release succeeds or
+        becomes cleanup debt without replacing the primary public error.
   - [x] Strengthen the provisional cleanup-debt witness: assert the exact
         options unload twice, no unrelated lease unloads, successful retry
         clears debt, and the primary stored error remains unchanged. The
