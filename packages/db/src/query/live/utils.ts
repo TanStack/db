@@ -190,7 +190,7 @@ export function reconcileChangesForD2<
 export function trackBiggestSentValue(
   changes: Array<ChangeMessage<any, string | number>>,
   current: unknown | undefined,
-  sentRows: { has(key: string | number): boolean },
+  sentRows: { has: (key: string | number) => boolean },
   comparator: (a: any, b: any) => number,
 ): { biggest: unknown; shouldResetLoadKey: boolean } {
   if (
@@ -268,6 +268,7 @@ export function computeSubscriptionOrderByHints(
 /** Owns the conservative provider-loading policy for one ordered source. */
 export class OrderedSourceLoader {
   private pending: Promise<unknown> | undefined
+  private hasRequestedSource = false
   private fullSource = false
   private fullSourceFailed = false
   private failed = false
@@ -328,7 +329,9 @@ export class OrderedSourceLoader {
     if (!this.info.dataNeeded) return this.pending
     const count = Math.max(
       this.info.dataNeeded(),
-      this.failed ? this.info.offset + this.info.limit : 0,
+      this.failed || !this.hasRequestedSource
+        ? this.info.offset + this.info.limit
+        : 0,
     )
     if (this.pending) return this.pending
     if (count > 0) this.loadPage(count, true)
@@ -347,6 +350,7 @@ export class OrderedSourceLoader {
           this.observe(result, false, true)
         },
       })
+      this.hasRequestedSource = true
     } catch (error) {
       this.fullSource = false
       this.fullSourceFailed = true
@@ -366,6 +370,7 @@ export class OrderedSourceLoader {
       trackLoadSubsetPromise: false,
       onLoadSubsetResult: (result) => this.observe(result, refine),
     })
+    this.hasRequestedSource = true
     this.lastPrefixCount = count
   }
 
@@ -393,7 +398,10 @@ export class OrderedSourceLoader {
   }
 
   private loadPage(count: number, refine: boolean): void {
-    const biggest = this.getBiggest()
+    // Rows observed before the first provider request do not prove ordered
+    // source coverage. In particular, a row inserted while limit is zero must
+    // not become the cursor when that window first opens.
+    const biggest = this.hasRequestedSource ? this.getBiggest() : undefined
     let minValues: Array<unknown> | undefined
     if (biggest !== undefined) {
       const value = this.info.valueExtractorForRawRow(
@@ -421,6 +429,7 @@ export class OrderedSourceLoader {
         trackLoadSubsetPromise: false,
         onLoadSubsetResult: (result) => this.observe(result, refine),
       })
+      this.hasRequestedSource = true
     } catch (error) {
       this.failed = true
       this.lastPage = undefined
@@ -434,7 +443,6 @@ export class OrderedSourceLoader {
     isFullSource = false,
   ): Promise<void> {
     const generation = this.generation
-    let tracked: Promise<void>
     const complete = (): void => {
       if (this.pending === tracked) this.pending = undefined
       if (!this.active || generation !== this.generation) return
@@ -449,7 +457,7 @@ export class OrderedSourceLoader {
       this.loadMore()
     }
     const request = result instanceof Promise ? result : Promise.resolve()
-    tracked = request
+    const tracked = request
       .then(complete)
       .then(() => undefined)
       .catch((error: unknown) => {

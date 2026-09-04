@@ -559,7 +559,11 @@ behind the active replay barrier.
 Successful settlement proves only that the exact request finished and that its
 writes were applied. It does not prove source exhaustion or broader coverage.
 Ordered loading reaches a fixed point from public rows and exact request
-identity; it must not invent source extent from a requested limit. A finite
+identity; it must not invent source extent from a requested limit. A local row
+seen before the first ordered source request is not a continuation
+boundary. This matters when a zero-sized window admits live source changes
+before it opens: the first nonzero window must still request its prefix from
+the start. A finite
 prefix that still cannot fill the local window falls back once to a full-source
 load rather than repeating the same request or inferring exhaustion. This also
 lets multi-column windows revalidate after a non-boundary row leaves. If the

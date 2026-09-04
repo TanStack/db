@@ -69,20 +69,23 @@ type PaginationWindow = {
 
 type PaginationScenario = {
   ranks: ReadonlyArray<number>
+  keeps?: ReadonlyArray<boolean>
   direction: `asc` | `desc`
   windows: ReadonlyArray<PaginationWindow>
   explicitPublicKeyOrder?: boolean
   includeFilter?: boolean
   reverseInsertion?: boolean
+  reverseProviderTies?: boolean
 }
 
 type PaginationAction =
   | ({ type: `window` } & PaginationWindow)
-  | { type: `put`; id: number; rank: number }
+  | { type: `put`; id: number; rank: number; keep?: boolean }
   | { type: `delete`; id: number }
 
 type PaginationStateScenario = {
   ranks: ReadonlyArray<number>
+  keeps?: ReadonlyArray<boolean>
   direction: `asc` | `desc`
   initialWindow: PaginationWindow
   actions: ReadonlyArray<PaginationAction>
@@ -90,6 +93,11 @@ type PaginationStateScenario = {
   includeFilter?: boolean
   reverseInsertion?: boolean
 }
+
+type PaginationStructure = Pick<
+  PaginationScenario,
+  `explicitPublicKeyOrder` | `includeFilter` | `reverseInsertion`
+>
 
 type PendingCursorLoad = {
   options: LoadSubsetOptions
@@ -136,23 +144,58 @@ type PendingHistoryScenario = {
   secondRank: number
 }
 
-const scenarioArbitrary: fc.Arbitrary<PaginationScenario> = fc.record({
-  ranks: fc.array(fc.integer({ min: -2, max: 2 }), {
+const initialRowsArbitrary = fc.array(
+  fc.record({
+    rank: fc.integer({ min: -2, max: 2 }),
+    keep: fc.boolean(),
+  }),
+  {
     minLength: 1,
     maxLength: 12,
-  }),
-  direction: fc.constantFrom(`asc`, `desc`),
+  },
+)
+
+const scenarioPayloadArbitrary: fc.Arbitrary<PaginationScenario> = fc
+  .record({
+    rows: initialRowsArbitrary,
+    direction: fc.constantFrom(`asc`, `desc`),
+    reverseProviderTies: fc.boolean(),
+    windows: fc.array(
+      fc.record({
+        offset: fc.integer({ min: 0, max: 12 }),
+        limit: fc.integer({ min: 0, max: 8 }),
+      }),
+      { minLength: 1, maxLength: 12 },
+    ),
+  })
+  .map(({ rows, ...scenario }) => ({
+    ...scenario,
+    ranks: rows.map(({ rank }) => rank),
+    keeps: rows.map(({ keep }) => keep),
+  }))
+
+const paginationStructures: ReadonlyArray<PaginationStructure> = [
+  ...[false, true].flatMap((explicitPublicKeyOrder) =>
+    [false, true].flatMap((includeFilter) =>
+      [false, true].map((reverseInsertion) => ({
+        explicitPublicKeyOrder,
+        includeFilter,
+        reverseInsertion,
+      })),
+    ),
+  ),
+]
+
+const paginationStructureArbitrary: fc.Arbitrary<PaginationStructure> =
+  fc.record({
   explicitPublicKeyOrder: fc.boolean(),
   includeFilter: fc.boolean(),
   reverseInsertion: fc.boolean(),
-  windows: fc.array(
-    fc.record({
-      offset: fc.integer({ min: 0, max: 12 }),
-      limit: fc.integer({ min: 0, max: 8 }),
-    }),
-    { minLength: 1, maxLength: 12 },
-  ),
-})
+  })
+
+const scenarioArbitrary: fc.Arbitrary<PaginationScenario> = fc
+  .tuple(scenarioPayloadArbitrary, paginationStructureArbitrary)
+  .map(([scenario, structure]) => ({ ...scenario, ...structure }))
 
 const windowArbitrary: fc.Arbitrary<PaginationWindow> = fc.record({
   offset: fc.integer({ min: 0, max: 12 }),
@@ -173,6 +216,7 @@ const paginationActionArbitrary: fc.Arbitrary<PaginationAction> = fc.oneof(
       type: fc.constant(`put` as const),
       id: fc.integer({ min: 1, max: 16 }),
       rank: fc.integer({ min: -2, max: 2 }),
+      keep: fc.boolean(),
     }),
   },
   {
@@ -184,23 +228,25 @@ const paginationActionArbitrary: fc.Arbitrary<PaginationAction> = fc.oneof(
   },
 )
 
-const stateScenarioArbitrary: fc.Arbitrary<PaginationStateScenario> = fc.record(
-  {
-    ranks: fc.array(fc.integer({ min: -2, max: 2 }), {
-      minLength: 1,
-      maxLength: 12,
-    }),
+const stateScenarioPayloadArbitrary: fc.Arbitrary<PaginationStateScenario> = fc
+  .record({
+    rows: initialRowsArbitrary,
     direction: fc.constantFrom(`asc`, `desc`),
-    explicitPublicKeyOrder: fc.boolean(),
-    includeFilter: fc.boolean(),
-    reverseInsertion: fc.boolean(),
     initialWindow: windowArbitrary,
     actions: fc.array(paginationActionArbitrary, {
       minLength: 1,
       maxLength: 20,
     }),
-  },
-)
+  })
+  .map(({ rows, ...scenario }) => ({
+    ...scenario,
+    ranks: rows.map(({ rank }) => rank),
+    keeps: rows.map(({ keep }) => keep),
+  }))
+
+const stateScenarioArbitrary: fc.Arbitrary<PaginationStateScenario> = fc
+  .tuple(stateScenarioPayloadArbitrary, paginationStructureArbitrary)
+  .map(([scenario, structure]) => ({ ...scenario, ...structure }))
 
 const pendingMutationScenarioArbitrary: fc.Arbitrary<PendingMutationScenario> =
   fc
@@ -468,7 +514,7 @@ async function runPaginationScenario(
   const rows = scenario.ranks.map((rank, index) => ({
     id: index + 1,
     rank,
-    keep: isKeptRow(index + 1),
+    keep: scenario.keeps?.[index] ?? isKeptRow(index + 1),
   }))
   const initialRows = scenario.reverseInsertion ? [...rows].reverse() : rows
   const expectedRows = visibleRows(rows, scenario.includeFilter)
@@ -500,17 +546,17 @@ async function runPaginationScenario(
 
   try {
     await live.preload()
-    expect(Array.from(live.values(), ({ id }) => id)).toEqual(
-      referenceWindow(expectedRows, scenario.direction, initialWindow),
+    expect(Array.from(live.values(), ({ id, rank }) => ({ id, rank }))).toEqual(
+      referenceWindowRows(expectedRows, scenario.direction, initialWindow),
     )
 
     for (const window of scenario.windows.slice(1)) {
       const result = live.utils.setWindow(window)
       if (result instanceof Promise) await result
 
-      expect(Array.from(live.values(), ({ id }) => id)).toEqual(
-        referenceWindow(expectedRows, scenario.direction, window),
-      )
+      expect(
+        Array.from(live.values(), ({ id, rank }) => ({ id, rank })),
+      ).toEqual(referenceWindowRows(expectedRows, scenario.direction, window))
     }
   } finally {
     await cleanupAll(live, source)
@@ -693,7 +739,11 @@ async function runPaginationStateScenario(
   const rows = new Map<number, PageRow>(
     scenario.ranks.map((rank, index) => [
       index + 1,
-      { id: index + 1, rank, keep: isKeptRow(index + 1) },
+      {
+        id: index + 1,
+        rank,
+        keep: scenario.keeps?.[index] ?? isKeptRow(index + 1),
+      },
     ]),
   )
   const initialRows = [...rows.values()]
@@ -768,7 +818,7 @@ async function runPaginationStateScenario(
         const row = {
           id: action.id,
           rank: action.rank,
-          keep: isKeptRow(action.id),
+          keep: action.keep ?? isKeptRow(action.id),
         }
         const type = rows.has(action.id) ? `update` : `insert`
         rows.set(action.id, row)
@@ -806,19 +856,22 @@ async function runOnDemandPaginationScenario(
   const authoritativeRows = scenario.ranks.map((rank, index) => ({
     id: index + 1,
     rank,
-    keep: isKeptRow(index + 1),
+    keep: scenario.keeps?.[index] ?? isKeptRow(index + 1),
   }))
   const expectedRows = visibleRows(authoritativeRows, scenario.includeFilter)
   const directionFactor = scenario.direction === `asc` ? 1 : -1
   const orderedRows = [...authoritativeRows].sort(
     (left, right) =>
       (left.rank - right.rank) * directionFactor ||
-      (left.id - right.id) * (scenario.reverseInsertion ? -1 : 1),
+      (left.id - right.id) *
+        (scenario.explicitPublicKeyOrder === false &&
+        scenario.reverseProviderTies
+          ? -1
+          : 1),
   )
   const deliveredIds = new Set<number>()
   const loads: Array<LoadSubsetOptions> = []
   const initialWindow = scenario.windows[0]!
-  let currentWindow = initialWindow
 
   const source = createCollection<PageRow>({
     id: `pagination-on-demand-oracle-source-${collectionSequence++}`,
@@ -834,11 +887,14 @@ async function runOnDemandPaginationScenario(
           loadSubset: (options: LoadSubsetOptions) => {
             loads.push({ ...options })
             const requested = rowsForLoadSubset(orderedRows, options)
+            const delivered = scenario.reverseInsertion
+              ? [...requested].reverse()
+              : requested
 
             const settled = new Promise<void>((resolve) => {
               queueMicrotask(() => {
                 begin()
-                for (const row of requested) {
+                for (const row of delivered) {
                   if (deliveredIds.has(row.id)) continue
                   deliveredIds.add(row.id)
                   write({ type: `insert`, value: { ...row } })
@@ -870,48 +926,79 @@ async function runOnDemandPaginationScenario(
       .select(({ row }) => ({ id: row.id, rank: row.rank }))
   })
   const publications: Array<{
-    window: PaginationWindow
-    ids: Array<number>
+    rows: Array<{ id: number; rank: number }>
   }> = []
+  let lastPublishedRows: Array<{ id: number; rank: number }> = []
   const publicationSubscription = live.subscribeChanges(
     () => {
-      publications.push({
-        window: { ...currentWindow },
-        ids: Array.from(live.values(), ({ id }) => id),
-      })
+      const rows = Array.from(live.values(), ({ id, rank }) => ({ id, rank }))
+      if (JSON.stringify(rows) !== JSON.stringify(lastPublishedRows)) {
+        publications.push({ rows })
+        lastPublishedRows = rows
+      }
     },
     { includeInitialState: false },
   )
 
   try {
-    await live.preload()
+    const preloadPublicationCount = publications.length
+    const preload = live.preload()
+    expect(Array.from(live.values())).toHaveLength(0)
+    await preload
     expect(live.status).toBe(`ready`)
     expect(live.utils.lastSubsetError).toBeUndefined()
     if (initialWindow.limit > 0) {
       expect(loads.length).toBeGreaterThan(0)
     }
     try {
-      expect(Array.from(live.values(), ({ id }) => id)).toEqual(
-        referenceWindow(expectedRows, scenario.direction, initialWindow),
+      expect(
+        Array.from(live.values(), ({ id, rank }) => ({ id, rank })),
+      ).toEqual(
+        referenceWindowRows(expectedRows, scenario.direction, initialWindow),
       )
     } catch (error) {
       throw new TraceAssertionError(0, error)
     }
+    const initialExpected = referenceWindowRows(
+      expectedRows,
+      scenario.direction,
+      initialWindow,
+    )
+    expect(publications.length - preloadPublicationCount).toBe(
+      initialExpected.length > 0 ? 1 : 0,
+    )
+    if (initialExpected.length > 0) {
+      expect(publications.at(-1)?.rows).toEqual(initialExpected)
+    }
 
     for (const [index, window] of scenario.windows.slice(1).entries()) {
-      currentWindow = window
+      const before = Array.from(live.values(), ({ id, rank }) => ({ id, rank }))
+      const publicationCount = publications.length
       const result = live.utils.setWindow(window)
+      if (result instanceof Promise) {
+        expect(
+          Array.from(live.values(), ({ id, rank }) => ({ id, rank })),
+        ).toEqual(before)
+      }
       if (result instanceof Promise) await result
       expect(live.status).toBe(`ready`)
       expect(live.utils.lastSubsetError).toBeUndefined()
 
       try {
-        expect(Array.from(live.values(), ({ id }) => id)).toEqual(
-          referenceWindow(expectedRows, scenario.direction, window),
-        )
+        expect(
+          Array.from(live.values(), ({ id, rank }) => ({ id, rank })),
+        ).toEqual(referenceWindowRows(expectedRows, scenario.direction, window))
       } catch (error) {
         throw new TraceAssertionError(index + 1, error)
       }
+      const after = referenceWindowRows(
+        expectedRows,
+        scenario.direction,
+        window,
+      )
+      const changed = JSON.stringify(before) !== JSON.stringify(after)
+      expect(publications.length - publicationCount).toBe(changed ? 1 : 0)
+      if (changed) expect(publications.at(-1)?.rows).toEqual(after)
     }
 
     const expectedOrderBy = [
@@ -943,33 +1030,8 @@ async function runOnDemandPaginationScenario(
         expect(load.offset).toBeUndefined()
       }
     }
-    for (const publication of publications) {
-      const expected = referenceWindow(
-        expectedRows,
-        scenario.direction,
-        publication.window,
-      )
-      expect(publication.ids).toEqual(expected.slice(0, publication.ids.length))
-    }
-    if (
-      scenario.windows.some(
-        (window) =>
-          referenceWindow(expectedRows, scenario.direction, window)
-            .length > 0,
-      )
-    ) {
-      expect(publications.length).toBeGreaterThan(0)
-    }
-    if (publications.length > 0) {
-      expect(publications.at(-1)?.ids).toEqual(
-        referenceWindow(expectedRows, scenario.direction, currentWindow),
-      )
-    }
     expect(loads.length).toBeLessThanOrEqual(
       scenario.windows.length * (expectedRows.length + 2),
-    )
-    expect(publications.length).toBeLessThanOrEqual(
-      loads.length + scenario.windows.length,
     )
   } finally {
     publicationSubscription.unsubscribe()
@@ -2059,6 +2121,46 @@ describe(`pagination recomputation oracle`, () => {
     })
   })
 
+  it.each([
+    {
+      name: `enters the filter`,
+      keeps: [false, true],
+      action: { type: `put` as const, id: 1, rank: 0, keep: true },
+      expected: [1, 2],
+    },
+    {
+      name: `leaves the filter`,
+      keeps: [true, true],
+      action: { type: `put` as const, id: 1, rank: 0, keep: false },
+      expected: [2],
+    },
+  ])(`updates a row that $name`, async ({ keeps, action, expected }) => {
+    const scenario: PaginationStateScenario = {
+      ranks: [0, 1],
+      keeps,
+      direction: `asc`,
+      includeFilter: true,
+      explicitPublicKeyOrder: true,
+      reverseInsertion: false,
+      initialWindow: { offset: 0, limit: 2 },
+      actions: [action],
+    }
+    await runPaginationStateScenario(scenario)
+
+    const finalRows = scenario.ranks.map((rank, index) => ({
+      id: index + 1,
+      rank,
+      keep: index === 0 ? action.keep : keeps[index],
+    }))
+    expect(
+      referenceWindow(
+        visibleRows(finalRows, true),
+        scenario.direction,
+        scenario.initialWindow,
+      ),
+    ).toEqual(expected)
+  })
+
   it(`discovered trace: loads an on-demand window after a zero limit`, async () => {
     await runOnDemandPaginationScenario({
       ranks: [0, 0],
@@ -2952,6 +3054,30 @@ describe(`pagination recomputation oracle`, () => {
     await runOnDemandPaginationScenario(scenario)
   })
 
+  it.each(
+    paginationStructures.map((structure, index) => ({
+      name: `key=${structure.explicitPublicKeyOrder ? `explicit` : `implicit`}, filter=${structure.includeFilter ? `on` : `off`}, insertion=${structure.reverseInsertion ? `reverse` : `forward`}`,
+      structure,
+      index,
+    })),
+  )(`covers $name`, async ({ structure, index }) => {
+    const cellRuns = Math.max(1, Math.ceil(transitionScenarioRuns / 8))
+    await fc.assert(
+      fc.asyncProperty(scenarioPayloadArbitrary, async (scenario) => {
+        const complete = { ...scenario, ...structure }
+        await runPaginationScenario(complete)
+        await runOnDemandPaginationScenario(complete)
+      }),
+      { numRuns: cellRuns, seed: 16_570 + index },
+    )
+    await fc.assert(
+      fc.asyncProperty(stateScenarioPayloadArbitrary, async (scenario) => {
+        await runPaginationStateScenario({ ...scenario, ...structure })
+      }),
+      { numRuns: cellRuns, seed: 16_580 + index },
+    )
+  })
+
   fcTest.prop([scenarioArbitrary], {
     numRuns: orderedScenarioRuns,
     seed: 1657,
@@ -3000,6 +3126,22 @@ describe(`pagination recomputation oracle`, () => {
       actions: [{ type: `put`, id: 1, rank: 1 }],
     }
     await runPaginationStateScenario(scenario)
+  })
+
+  it(`opens an implicit tie window from zero at the lowest public key`, async () => {
+    await runPaginationStateScenario({
+      ranks: [0],
+      direction: `asc`,
+      explicitPublicKeyOrder: false,
+      includeFilter: false,
+      reverseInsertion: false,
+      initialWindow: { offset: 0, limit: 0 },
+      actions: [
+        { type: `put`, id: 2, rank: 0, keep: false },
+        { type: `window`, offset: 0, limit: 1 },
+        { type: `delete`, id: 1 },
+      ],
+    })
   })
 
   it(`ignores an out-of-window insert when refilling after a delete`, async () => {

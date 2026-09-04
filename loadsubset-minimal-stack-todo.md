@@ -943,9 +943,16 @@ explicitly removed.
       `setWindow()` operation. The old test discarded that promise and observed
       page three while it was still in flight. The pagination oracle now varies
       explicit versus implicit public-key tie-breaking, real filter membership,
-      and insertion order across static, on-demand, and mutation histories. It
-      pins the three-page and filtered-mutation cases; the full 104-test oracle
-      and corrected regression are green.
+      provider tie order, and insertion order independently across static,
+      on-demand, and mutation histories. Its eight-cell structural matrix is
+      guaranteed rather than sampled, updates can cross the filter boundary,
+      assertions compare full projected rows, and each async operation permits
+      only one semantic publication of its exact completed window. It pins the
+      three-page and filtered-mutation cases. The new structural cell found a
+      real zero-window defect: a live row seen before the first provider request
+      became the cursor and hid an earlier authoritative row when the window
+      opened. The loader now starts its first request at the source prefix; the
+      full 115-test oracle and corrected regressions are green.
 - [x] Preserve explicit `undefined` bounds in `BasicIndex` range and cursor
       queries; absence and the indexed nullish value are distinct public
       inputs. Both index types now derive their executable comparator from
