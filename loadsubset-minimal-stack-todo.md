@@ -902,13 +902,14 @@ explicitly removed.
       green.
 - [x] Bound the remaining ancestor-context explosion. A hostile cyclic graph
       can encode exponentially many valid ancestor histories, so memoization
-      alone cannot make every input cheap. Hashing now rejects after 512
-      additional ancestor-context variants for one object, or after bounded
-      cache matching and adoption work, instead of stalling a graph turn. The
-      34-node regression fell from hundreds of milliseconds to a bounded
-      failure. Large simple rings, 600 independent multi-context cyclic
-      components, recovery after rejection, and the supported
-      context-separation laws remain green.
+      alone cannot make every input cheap. Hashing now bounds recursion depth,
+      first-traversal graph bookkeeping, and traversal-cache matching and
+      adoption instead of stalling a graph turn. Cache entries publish only
+      after the whole hash succeeds, so retrying a rejected value cannot warm
+      its way past a guard. Hostile context, cache-adoption, dense-ancestor, and
+      deep-recursion regressions now fail with the deliberate safety error;
+      600-node rings, 600 independent multi-context cyclic components, and the
+      supported context-separation laws remain green.
 - [x] Defer functional projections over bare Collection includes until bucket
       references become public facades. The callback can now return an opaque
       wrapper around the Collection without retaining compiler state; child

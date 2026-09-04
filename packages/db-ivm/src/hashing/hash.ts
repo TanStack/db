@@ -23,10 +23,11 @@ const CYCLE_MARKER = randomHash()
 
 // A cyclic subgraph can be reached under exponentially many distinct active
 // ancestor contexts, and checking or adopting cached traversals can itself do
-// too much work. Bound both costs instead of letting one row monopolize the
-// graph turn. The context cap is per object so disjoint cycles remain linear.
-const MAX_CYCLIC_CONTEXT_VARIANTS = 512
+// too much work. Bound cache work, graph-context bookkeeping, and recursion
+// depth instead of letting one row monopolize the graph turn.
 const MAX_CYCLIC_CACHE_WORK = 65_536
+const MAX_GRAPH_CONTEXT_WORK = 1_000_000
+const MAX_STRUCTURAL_HASH_DEPTH = 768
 
 const temporalTypes = new Set([
   `Temporal.Duration`,
@@ -63,6 +64,9 @@ type HashContext = {
   frames: Array<HashFrame>
   traversalHashes: WeakMap<object, Array<TraversalHash>>
   cyclicCacheWork: number
+  graphContextWork: number
+  pendingHashes: WeakMap<object, number>
+  pendingHashEntries: Array<[object, number]>
 }
 
 type HashDependency = {
@@ -85,25 +89,39 @@ type TraversalHash = Pick<
 
 export function hash(input: any): number {
   const hasher = new MurmurHashStream()
-  updateHasher(hasher, input, {
+  const context: HashContext = {
     activeObjects: new Map(),
     activeOrder: [],
     cyclicObjects: new Set(),
     frames: [],
     traversalHashes: new WeakMap(),
     cyclicCacheWork: 0,
-  })
+    graphContextWork: 0,
+    pendingHashes: new WeakMap(),
+    pendingHashEntries: [],
+  }
+  updateHasher(hasher, input, context)
+  for (const [object, valueHash] of context.pendingHashEntries) {
+    hashCache.set(object, valueHash)
+  }
   return hasher.digest()
 }
 
 function hashObject(input: object, context: HashContext): number {
-  const cachedHash = hashCache.get(input)
+  const cachedHash = hashCache.get(input) ?? context.pendingHashes.get(input)
   if (cachedHash !== undefined) {
     return cachedHash
   }
 
+  if (context.activeOrder.length >= MAX_STRUCTURAL_HASH_DEPTH) {
+    throw new RangeError(`Cyclic value is too complex to hash safely`)
+  }
+
   const startIndex = context.activeOrder.length
-  for (const frame of context.frames) frame.visitedObjects.add(input)
+  for (const frame of context.frames) {
+    consumeGraphContextWork(context)
+    frame.visitedObjects.add(input)
+  }
   const frame: HashFrame = {
     startIndex,
     visitedObjects: new Set([input]),
@@ -165,13 +183,11 @@ function hashObject(input: object, context: HashContext): number {
 
   if (context.cyclicObjects.has(input)) {
     const traversalHashes = context.traversalHashes.get(input) ?? []
-    if (traversalHashes.length > MAX_CYCLIC_CONTEXT_VARIANTS) {
-      throw new RangeError(`Cyclic value is too complex to hash safely`)
-    }
     traversalHashes.push({ valueHash, ...frame })
     context.traversalHashes.set(input, traversalHashes)
   } else {
-    hashCache.set(input, valueHash)
+    context.pendingHashes.set(input, valueHash)
+    context.pendingHashEntries.push([input, valueHash])
   }
   return valueHash
 }
@@ -275,11 +291,13 @@ function getCachedHash(input: object, context: HashContext): number {
   const activeIndex = context.activeObjects.get(input)
   if (activeIndex !== undefined) {
     for (let index = activeIndex; index < context.activeOrder.length; index++) {
+      consumeGraphContextWork(context)
       context.cyclicObjects.add(context.activeOrder[index]!)
     }
     for (const frame of context.frames) {
+      consumeGraphContextWork(context)
       if (activeIndex < frame.startIndex) {
-        addDependency(frame, input, activeIndex - frame.startIndex)
+        addDependency(frame, input, activeIndex - frame.startIndex, context)
       }
     }
     const hasher = new MurmurHashStream()
@@ -288,7 +306,7 @@ function getCachedHash(input: object, context: HashContext): number {
     return hasher.digest()
   }
 
-  const valueHash = hashCache.get(input)
+  const valueHash = hashCache.get(input) ?? context.pendingHashes.get(input)
   if (valueHash !== undefined) return valueHash
 
   const startIndex = context.activeOrder.length
@@ -332,15 +350,17 @@ function findReusableTraversalHash(
   return undefined
 }
 
-function addDependency(frame: HashFrame, object: object, offset: number): void {
-  if (
-    !frame.externalDependencies.some(
-      (dependency) =>
-        dependency.object === object && dependency.offset === offset,
-    )
-  ) {
-    frame.externalDependencies.push({ object, offset })
+function addDependency(
+  frame: HashFrame,
+  object: object,
+  offset: number,
+  context: HashContext,
+): void {
+  for (const dependency of frame.externalDependencies) {
+    consumeGraphContextWork(context)
+    if (dependency.object === object && dependency.offset === offset) return
   }
+  frame.externalDependencies.push({ object, offset })
 }
 
 /** Merge a reused subtree's graph footprint into every active parent frame. */
@@ -357,7 +377,12 @@ function adoptTraversalHash(
       consumeCyclicCacheWork(context)
       const activeIndex = context.activeObjects.get(dependency.object)!
       if (activeIndex < frame.startIndex) {
-        addDependency(frame, dependency.object, activeIndex - frame.startIndex)
+        addDependency(
+          frame,
+          dependency.object,
+          activeIndex - frame.startIndex,
+          context,
+        )
       }
       for (
         let index = activeIndex;
@@ -374,6 +399,13 @@ function adoptTraversalHash(
 function consumeCyclicCacheWork(context: HashContext): void {
   context.cyclicCacheWork++
   if (context.cyclicCacheWork > MAX_CYCLIC_CACHE_WORK) {
+    throw new RangeError(`Cyclic value is too complex to hash safely`)
+  }
+}
+
+function consumeGraphContextWork(context: HashContext): void {
+  context.graphContextWork++
+  if (context.graphContextWork > MAX_GRAPH_CONTEXT_WORK) {
     throw new RangeError(`Cyclic value is too complex to hash safely`)
   }
 }

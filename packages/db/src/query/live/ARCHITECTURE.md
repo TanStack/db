@@ -233,12 +233,14 @@ directly and never invokes an accessor merely to find private state. D2 hashes
 enumerable symbol keys and uses exact local-symbol identity plus registry keys
 for registered symbols. Its structural hash records cyclic back-references and
 memoizes a repeated cyclic subgraph only when the same external ancestors hold
-the same relative positions. A cyclic value with too many additional
-ancestor-context variants is rejected at a fixed per-object budget instead of
-consuming exponential work. Cache matching and adoption have a separate work
-budget. These guards do not penalize large simple rings or independent cyclic
-components. Symbol-only changes and supported cycles therefore cannot
-disappear or overflow before publication. Neither
+the same relative positions. Structural hashing has fixed limits on recursion
+depth, graph-context bookkeeping, and traversal-cache matching and adoption;
+it rejects values that exceed them instead of stalling a graph turn or
+overflowing the JavaScript stack. A failed hash does not publish partial cache
+entries, so retrying the same value cannot bypass a guard. The accepted-size
+cycle tests are regression floors, not an unbounded topology guarantee.
+Symbol-only changes and supported cycles therefore cannot disappear before
+publication. Neither
 boundary mutates values retained by D2. Compiler-created
 parent contexts use a separate internal
 envelope that keeps projected user aliases apart from the equality identity

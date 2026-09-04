@@ -330,18 +330,70 @@ describe(`hash`, () => {
     })
 
     it(`bounds internal work when adopting cached cyclic traversals`, () => {
-      const size = 300
-      const nodes = Array.from(
-        { length: size },
-        (_, value) => ({ value }) as Record<string, unknown>,
-      )
-      for (let index = 0; index < size; index++) {
-        const next = nodes[(index + 1) % size]!
-        nodes[index]!.left = { next }
-        nodes[index]!.right = { next }
+      const createGraph = (size: number) => {
+        const nodes = Array.from(
+          { length: size },
+          (_, value) => ({ value }) as Record<string, unknown>,
+        )
+        for (let index = 0; index < size; index++) {
+          const next = nodes[(index + 1) % size]!
+          nodes[index]!.left = { next }
+          nodes[index]!.right = { next }
+        }
+        return nodes[0]
       }
 
-      expect(() => hash(nodes[0])).toThrow(RangeError)
+      expect(() => hash(createGraph(20))).not.toThrow()
+      expect(() => hash(createGraph(300))).toThrow(
+        `Cyclic value is too complex to hash safely`,
+      )
+    })
+
+    it(`does not warm structural caches when a hash is rejected`, () => {
+      const shared: Record<string, unknown> = {
+        payload: Array.from({ length: 66_000 }, (_, value) => ({ value })),
+      }
+      const left = { next: shared }
+      const right = { next: shared }
+      shared.back = left
+      const root = { left, right }
+
+      expect(() => hash(root)).toThrow(
+        `Cyclic value is too complex to hash safely`,
+      )
+      expect(() => hash(root)).toThrow(
+        `Cyclic value is too complex to hash safely`,
+      )
+    })
+
+    it(`rejects structural recursion before the JavaScript stack overflows`, () => {
+      const ring = Array.from(
+        { length: 800 },
+        (_, value) => ({ value }) as { value: number; next?: unknown },
+      )
+      for (let index = 0; index < ring.length; index++) {
+        ring[index]!.next = ring[(index + 1) % ring.length]
+      }
+
+      expect(() => hash(ring[0])).toThrow(
+        `Cyclic value is too complex to hash safely`,
+      )
+    })
+
+    it(`bounds first-traversal ancestor bookkeeping`, () => {
+      const nodes: Array<Record<string, unknown>> = []
+      for (let index = 0; index < 450; index++) {
+        const node: Record<string, unknown> = { index }
+        if (index > 0) nodes[index - 1]!.next = node
+        for (let ancestor = 0; ancestor < index; ancestor++) {
+          node[`ancestor${ancestor}`] = nodes[ancestor]
+        }
+        nodes.push(node)
+      }
+
+      expect(() => hash(nodes[0])).toThrow(
+        `Cyclic value is too complex to hash safely`,
+      )
     })
 
     it(`should hash arrays`, () => {
