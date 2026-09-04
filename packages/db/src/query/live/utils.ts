@@ -268,7 +268,7 @@ export function computeSubscriptionOrderByHints(
 /** Owns the conservative provider-loading policy for one ordered source. */
 export class OrderedSourceLoader {
   private pending: Promise<unknown> | undefined
-  private hasRequestedSource = false
+  private hasEstablishedSourceCoverage = false
   private fullSource = false
   private fullSourceFailed = false
   private failed = false
@@ -329,7 +329,7 @@ export class OrderedSourceLoader {
     if (!this.info.dataNeeded) return this.pending
     const count = Math.max(
       this.info.dataNeeded(),
-      this.failed || !this.hasRequestedSource
+      this.failed || !this.hasEstablishedSourceCoverage
         ? this.info.offset + this.info.limit
         : 0,
     )
@@ -347,10 +347,9 @@ export class OrderedSourceLoader {
         trackLoadSubsetPromise: false,
         replaceExistingDemand,
         onLoadSubsetResult: (result) => {
-          this.observe(result, false, true)
+          this.observe(result, false, true, true)
         },
       })
-      this.hasRequestedSource = true
     } catch (error) {
       this.fullSource = false
       this.fullSourceFailed = true
@@ -368,9 +367,8 @@ export class OrderedSourceLoader {
       orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
       limit: count,
       trackLoadSubsetPromise: false,
-      onLoadSubsetResult: (result) => this.observe(result, refine),
+      onLoadSubsetResult: (result) => this.observe(result, refine, false, true),
     })
-    this.hasRequestedSource = true
     this.lastPrefixCount = count
   }
 
@@ -401,7 +399,9 @@ export class OrderedSourceLoader {
     // Rows observed before the first provider request do not prove ordered
     // source coverage. In particular, a row inserted while limit is zero must
     // not become the cursor when that window first opens.
-    const biggest = this.hasRequestedSource ? this.getBiggest() : undefined
+    const biggest = this.hasEstablishedSourceCoverage
+      ? this.getBiggest()
+      : undefined
     let minValues: Array<unknown> | undefined
     if (biggest !== undefined) {
       const value = this.info.valueExtractorForRawRow(
@@ -428,11 +428,11 @@ export class OrderedSourceLoader {
         minValues,
         // Local rows seen before the first provider request prove neither a
         // cursor nor a remote offset. Start the first acquisition at zero.
-        offset: this.hasRequestedSource ? undefined : 0,
+        offset: this.hasEstablishedSourceCoverage ? undefined : 0,
         trackLoadSubsetPromise: false,
-        onLoadSubsetResult: (result) => this.observe(result, refine),
+        onLoadSubsetResult: (result) =>
+          this.observe(result, refine, false, true),
       })
-      this.hasRequestedSource = true
     } catch (error) {
       this.failed = true
       this.lastPage = undefined
@@ -444,12 +444,16 @@ export class OrderedSourceLoader {
     result: LoadSubsetRequestResult,
     refine: boolean,
     isFullSource = false,
+    establishesSourceCoverage = false,
   ): Promise<void> {
     const generation = this.generation
     const complete = (): void => {
       if (this.pending === tracked) this.pending = undefined
       if (!this.active || generation !== this.generation) return
       this.failed = false
+      if (establishesSourceCoverage) {
+        this.hasEstablishedSourceCoverage = true
+      }
       if (isFullSource) this.fullSourceFailed = false
       if (refine) {
         this.loadBoundary()

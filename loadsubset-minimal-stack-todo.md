@@ -984,23 +984,38 @@ explicitly removed.
       status events had the same gap. Both status layers now guard each listener
       with a transition revision; regressions cover simple reentry and ABA from
       both generic and specific callbacks.
+- [ ] Stop a subscription status transition when an earlier listener
+      unsubscribes. Clearing the listener map does not stop iteration of the
+      current listener set, so later listeners can run after `unsubscribed`.
+- [ ] Pin one cross-channel trace for generic-before-specific status delivery,
+      including nested ABA reentry, and add the missing Collection-level
+      generic and specific ABA matrix promised by the architecture text.
 - [ ] Close the ordered-pagination oracle gaps found after its runtime fix.
   - [x] Pin the zero-window defect against a true on-demand source and assert
         that its first request has no cursor.
-  - [ ] After that first request rejects or is canceled, retry from offset zero
-        without a cursor; a started request is not established remote coverage.
-  - [ ] Cross the zero-window/local-row case with a nonzero target offset and
+  - [x] After that first request rejects, retry from offset zero without a
+        cursor; a started request is not established remote coverage.
+  - [ ] Cross the same first-request law with cancellation.
+  - [x] Cross the zero-window/local-row case with a nonzero target offset and
         assert the exact finite-prefix request count and shape.
   - [x] Record every on-demand publication callback so an equal duplicate
         cannot hide behind snapshot deduplication. The oracle now checks each
         exact delta and post-callback row set, including the one empty readiness
         wake-up after a real initial acquisition and no wake-up for a zero
         window that requests nothing.
+  - [ ] Derive the zero-window no-load and readiness-wake expectations from the
+        requested semantics, not observed load count, and record callback-time
+        status so a stray empty batch cannot impersonate the ready wake-up.
+  - [ ] Preserve or reject `previousValue` explicitly on every normalized
+        public change; do not discard malformed insert/delete payload fields.
   - [ ] Compare the exact public change batch with the reference before/after
         rows instead of leaving scenario `changes` unasserted.
   - [ ] Give every structural matrix cell a fixed semantic witness: a rank tie,
         mixed filter membership, two meaningful windows, and a real mutation,
         while crossing provider tie order independently.
+  - [ ] Pin and fix both implicit-public-key tie update failures found by the
+        10x state campaign: top-1 equal-rank replacement and offset-1 equal-rank
+        replacement must choose the lowest public key after an update.
 - [ ] Prevent a reentrant truncate started during synchronous replacement
       publication from letting the superseded attempt emit transient `ready`.
 - [ ] Reconcile the joined-recovery readiness wording with the public

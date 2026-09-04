@@ -2294,6 +2294,103 @@ describe(`pagination recomputation oracle`, () => {
     )
   })
 
+  it.each([
+    { offset: 0, limit: 1 },
+    { offset: 2, limit: 1 },
+  ])(
+    `retries the first rejected ordered request for window $offset:$limit from the source prefix`,
+    async (window) => {
+      const authoritativeRows: Array<PageRow> = [
+        { id: 1, rank: 0 },
+        { id: 2, rank: 1 },
+        { id: 3, rank: 2 },
+        { id: 4, rank: 3 },
+      ]
+      const requests: Array<LoadSubsetOptions> = []
+      const firstRequest = createDeferred<void>()
+      const deliveredIds = new Set<number>([4])
+      let begin!: () => void
+      let write!: (message: { type: `insert`; value: PageRow }) => void
+      let commit!: () => void
+      const source = createCollection<PageRow>({
+        id: `pagination-rejected-first-prefix-${collectionSequence++}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: (operations) => {
+            begin = operations.begin
+            write = operations.write
+            commit = operations.commit
+            operations.markReady()
+            return {
+              loadSubset: (options: LoadSubsetOptions) => {
+                requests.push(options)
+                if (requests.length === 1) return firstRequest.promise
+
+                begin()
+                for (const row of rowsForLoadSubset(
+                  authoritativeRows,
+                  options,
+                )) {
+                  if (deliveredIds.has(row.id)) continue
+                  deliveredIds.add(row.id)
+                  write({ type: `insert`, value: { ...row } })
+                }
+                commit()
+                return true
+              },
+            }
+          },
+        },
+      })
+      const live = createLiveQueryCollection((query) =>
+        query
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank, `asc`)
+          .limit(0),
+      )
+
+      try {
+        await live.preload()
+        begin()
+        write({ type: `insert`, value: { ...authoritativeRows[3]! } })
+        commit()
+
+        const requestedPrefix = window.offset + window.limit
+        const failed = live.utils.setWindow(window)
+        expect(failed).toBeInstanceOf(Promise)
+        expect(requests[0]).toMatchObject({
+          offset: 0,
+          limit: requestedPrefix,
+        })
+        expect(requests[0]?.cursor).toBeUndefined()
+        const failure = new Error(`first ordered request failed`)
+        firstRequest.reject(failure)
+        await expect(failed).rejects.toBe(failure)
+
+        const retry = live.utils.setWindow(window)
+        if (retry instanceof Promise) await retry
+        expect(requests[1]).toMatchObject({
+          offset: 0,
+          limit: requestedPrefix,
+        })
+        expect(requests[1]?.cursor).toBeUndefined()
+        expect(requests).toHaveLength(3)
+        expect(requests[2]?.where).toBeDefined()
+        expect(requests[2]?.limit).toBeUndefined()
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual(
+          referenceWindow(authoritativeRows, `asc`, window),
+        )
+      } finally {
+        firstRequest.resolve()
+        await cleanupAll(live, source)
+      }
+    },
+  )
+
   it(`tracks an asynchronous prefix refresh after synchronous satisfaction`, async () => {
     const rows: Array<PageRow> = [
       { id: 1, rank: 1 },

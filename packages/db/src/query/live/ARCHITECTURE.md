@@ -563,7 +563,9 @@ identity; it must not invent source extent from a requested limit. A local row
 seen before the first ordered source request proves neither a continuation
 boundary nor a remote offset. This matters when a zero-sized window admits live
 source changes before it opens: the first nonzero window must still request its
-prefix from the start. A finite
+prefix from the start. Starting that request proves nothing until it succeeds;
+if it rejects, an explicit retry must also start at offset zero without a
+cursor. A finite
 prefix that still cannot fill the local window falls back once to a full-source
 load rather than repeating the same request or inferring exhaustion. This also
 lets multi-column windows revalidate after a non-boundary row leaves. If the
