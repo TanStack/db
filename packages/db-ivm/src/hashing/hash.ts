@@ -23,8 +23,8 @@ const CYCLE_MARKER = randomHash()
 
 // A cyclic subgraph can be reached under exponentially many distinct active
 // ancestor contexts, and checking or adopting cached traversals can itself do
-// too much work. Bound cache work, graph-context bookkeeping, and recursion
-// depth instead of letting one row monopolize the graph turn.
+// too much work. Bound those graph-specific costs: cache matching and adoption,
+// graph-context bookkeeping, and structural recursion depth.
 const MAX_CYCLIC_CACHE_WORK = 65_536
 const MAX_GRAPH_CONTEXT_WORK = 1_000_000
 const MAX_STRUCTURAL_HASH_DEPTH = 768
@@ -106,11 +106,6 @@ export function hash(input: any): number {
 }
 
 function hashObject(input: object, context: HashContext): number {
-  const cachedHash = hashCache.get(input) ?? context.pendingHashes.get(input)
-  if (cachedHash !== undefined) {
-    return cachedHash
-  }
-
   if (context.activeOrder.length >= MAX_STRUCTURAL_HASH_DEPTH) {
     throw new RangeError(
       `Value is too complex to hash safely: structural depth`,

@@ -909,8 +909,11 @@ explicitly removed.
       never enter structural frames, so retrying a rejected value cannot warm
       its way past a guard. Hostile context, cache-adoption, dense-ancestor,
       deep-recursion, same-input retry, and large opaque-leaf regressions now
-      prove the deliberate limits; independently built 600-node rings and 600
-      independent cyclic component graphs retain equal hashes.
+      prove the deliberate limits. Getter probes show that cache-work, depth,
+      and graph-context rejection publish no visited structural child. Buffer,
+      Uint8Array, and File leaves remain opaque at the depth and cache-adoption
+      boundaries; independently built accepted rings, chains, dense graphs,
+      and cyclic component graphs retain equal hashes.
 - [x] Defer functional projections over bare Collection includes until bucket
       references become public facades. The callback can now return an opaque
       wrapper around the Collection without retaining compiler state; child

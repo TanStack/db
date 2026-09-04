@@ -352,13 +352,18 @@ describe(`hash`, () => {
     })
 
     it(`does not warm structural caches when a hash is rejected`, () => {
+      let reads = 0
+      const sentinel = Object.defineProperty({}, `value`, {
+        enumerable: true,
+        get: () => ++reads,
+      })
       const shared: Record<string, unknown> = {
         payload: Array.from({ length: 66_000 }, (_, value) => ({ value })),
       }
       const left = { next: shared }
       const right = { next: shared }
       shared.back = left
-      const root = { left, right }
+      const root = { aSentinel: sentinel, left, right }
 
       expect(() => hash(root)).toThrow(
         `Value is too complex to hash safely: cyclic cache work`,
@@ -366,23 +371,63 @@ describe(`hash`, () => {
       expect(() => hash(root)).toThrow(
         `Value is too complex to hash safely: cyclic cache work`,
       )
+      expect(reads).toBe(2)
     })
 
-    it(`treats large binary values as opaque leaves before structural work`, () => {
-      const ring = Array.from({ length: 700 }, (_, value) => ({
-        value,
-        blobs: Array.from({ length: 4 }, () => new Uint8Array(129)),
-        next: undefined as unknown,
-      }))
-      for (let index = 0; index < ring.length; index++) {
-        ring[index]!.next = ring[(index + 1) % ring.length]
-      }
+    it.each([
+      [`Buffer`, () => Buffer.alloc(129)],
+      [`Uint8Array`, () => new Uint8Array(129)],
+      [`File`, () => new File([`opaque`], `opaque.bin`)],
+    ])(
+      `treats a large %s as an opaque leaf before structural work`,
+      (_name, createLeaf) => {
+        const leaves = Array.from({ length: 700 }, createLeaf)
+        const createRing = () => {
+          const ring = leaves.map((leaf, value) => ({
+            value,
+            leaf,
+            next: undefined as unknown,
+          }))
+          for (let index = 0; index < ring.length; index++) {
+            ring[index]!.next = ring[(index + 1) % ring.length]
+          }
+          return ring[0]
+        }
 
-      expect(() => hash(ring[0])).not.toThrow()
-      expect(() => hash(ring[0])).not.toThrow()
-    })
+        const first = createRing()
+        const expectedHash = hash(first)
+        expect(hash(first)).toBe(expectedHash)
+        expect(hash(createRing())).toBe(expectedHash)
+
+        let atDepthBoundary: unknown = createLeaf()
+        for (let index = 0; index < 768; index++) {
+          atDepthBoundary = { next: atDepthBoundary }
+        }
+        expect(() => hash(atDepthBoundary)).not.toThrow()
+
+        const adoptionLeaves = Array.from({ length: 20 }, createLeaf)
+        const createAdoptionGraph = () => {
+          const nodes = adoptionLeaves.map((leaf, value) => ({
+            value,
+            leaf,
+          })) as Array<Record<string, unknown>>
+          for (let index = 0; index < nodes.length; index++) {
+            const next = nodes[(index + 1) % nodes.length]!
+            nodes[index]!.left = { next }
+            nodes[index]!.right = { next }
+          }
+          return nodes[0]
+        }
+        expect(hash(createAdoptionGraph())).toBe(hash(createAdoptionGraph()))
+      },
+    )
 
     it(`rejects deep structural recursion before the JavaScript stack overflows`, () => {
+      let reads = 0
+      const sentinel = Object.defineProperty({}, `value`, {
+        enumerable: true,
+        get: () => ++reads,
+      })
       const ring = Array.from(
         { length: 800 },
         (_, value) => ({ value }) as { value: number; next?: unknown },
@@ -390,37 +435,72 @@ describe(`hash`, () => {
       for (let index = 0; index < ring.length; index++) {
         ring[index]!.next = ring[(index + 1) % ring.length]
       }
+      Object.defineProperty(ring[0]!, `aSentinel`, {
+        enumerable: true,
+        value: sentinel,
+      })
 
       expect(() => hash(ring[0])).toThrow(
         `Value is too complex to hash safely: structural depth`,
       )
+      expect(() => hash(ring[0])).toThrow(
+        `Value is too complex to hash safely: structural depth`,
+      )
+      expect(reads).toBe(2)
 
-      const root: { next?: unknown } = {}
-      let tail = root
-      for (let index = 0; index < 800; index++) {
-        const next: { next?: unknown } = {}
-        tail.next = next
-        tail = next
+      const createChain = (size: number) => {
+        const root: { next?: unknown } = {}
+        let tail = root
+        for (let index = 0; index < size; index++) {
+          const next: { next?: unknown } = {}
+          tail.next = next
+          tail = next
+        }
+        return root
       }
+      const accepted = createChain(600)
+      expect(hash(structuredClone(accepted))).toBe(hash(accepted))
+
+      const root = createChain(800)
       expect(() => hash(root)).toThrow(
         `Value is too complex to hash safely: structural depth`,
       )
     })
 
     it(`bounds first-traversal ancestor bookkeeping`, () => {
-      const nodes: Array<Record<string, unknown>> = []
-      for (let index = 0; index < 450; index++) {
-        const node: Record<string, unknown> = { index }
-        if (index > 0) nodes[index - 1]!.next = node
-        for (let ancestor = 0; ancestor < index; ancestor++) {
-          node[`ancestor${ancestor}`] = nodes[ancestor]
+      const createGraph = (size: number) => {
+        const nodes: Array<Record<string, unknown>> = []
+        for (let index = 0; index < size; index++) {
+          const node: Record<string, unknown> = { index }
+          if (index > 0) nodes[index - 1]!.next = node
+          for (let ancestor = 0; ancestor < index; ancestor++) {
+            node[`ancestor${ancestor}`] = nodes[ancestor]
+          }
+          nodes.push(node)
         }
-        nodes.push(node)
+        return nodes[0]!
       }
+      const accepted = createGraph(50)
+      expect(hash(structuredClone(accepted))).toBe(hash(accepted))
 
-      expect(() => hash(nodes[0])).toThrow(
+      let reads = 0
+      const sentinel = Object.defineProperty({}, `value`, {
+        enumerable: true,
+        get: () => ++reads,
+      })
+      const rejected = createGraph(450)
+      Object.defineProperty(rejected, `aSentinel`, {
+        enumerable: true,
+        value: sentinel,
+      })
+
+      expect(() => hash(rejected)).toThrow(
         `Value is too complex to hash safely: graph context work`,
       )
+      expect(() => hash(rejected)).toThrow(
+        `Value is too complex to hash safely: graph context work`,
+      )
+      expect(reads).toBe(2)
     })
 
     it(`should hash arrays`, () => {
