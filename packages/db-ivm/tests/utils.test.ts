@@ -293,7 +293,7 @@ describe(`hash`, () => {
 
       expect(() => hash(shared[0])).toThrow(RangeError)
       expect(() => hash(shared[0])).toThrow(
-        `Cyclic value is too complex to hash safely`,
+        /Value is too complex to hash safely/,
       )
 
       const ring = Array.from(
@@ -311,7 +311,7 @@ describe(`hash`, () => {
         cycle.self = cycle
         independent[String(index)] = cycle
       }
-      expect(() => hash(independent)).not.toThrow()
+      expect(hash(structuredClone(independent))).toBe(hash(independent))
 
       const independentDiamonds: Record<string, unknown> = {}
       for (let index = 0; index < 600; index++) {
@@ -322,7 +322,9 @@ describe(`hash`, () => {
         independentDiamonds[`left${index}`] = leftIngress
         independentDiamonds[`right${index}`] = rightIngress
       }
-      expect(() => hash(independentDiamonds)).not.toThrow()
+      expect(hash(structuredClone(independentDiamonds))).toBe(
+        hash(independentDiamonds),
+      )
 
       const small: { self?: unknown } = {}
       small.self = small
@@ -345,7 +347,7 @@ describe(`hash`, () => {
 
       expect(() => hash(createGraph(20))).not.toThrow()
       expect(() => hash(createGraph(300))).toThrow(
-        `Cyclic value is too complex to hash safely`,
+        `Value is too complex to hash safely: cyclic cache work`,
       )
     })
 
@@ -359,14 +361,28 @@ describe(`hash`, () => {
       const root = { left, right }
 
       expect(() => hash(root)).toThrow(
-        `Cyclic value is too complex to hash safely`,
+        `Value is too complex to hash safely: cyclic cache work`,
       )
       expect(() => hash(root)).toThrow(
-        `Cyclic value is too complex to hash safely`,
+        `Value is too complex to hash safely: cyclic cache work`,
       )
     })
 
-    it(`rejects structural recursion before the JavaScript stack overflows`, () => {
+    it(`treats large binary values as opaque leaves before structural work`, () => {
+      const ring = Array.from({ length: 700 }, (_, value) => ({
+        value,
+        blobs: Array.from({ length: 4 }, () => new Uint8Array(129)),
+        next: undefined as unknown,
+      }))
+      for (let index = 0; index < ring.length; index++) {
+        ring[index]!.next = ring[(index + 1) % ring.length]
+      }
+
+      expect(() => hash(ring[0])).not.toThrow()
+      expect(() => hash(ring[0])).not.toThrow()
+    })
+
+    it(`rejects deep structural recursion before the JavaScript stack overflows`, () => {
       const ring = Array.from(
         { length: 800 },
         (_, value) => ({ value }) as { value: number; next?: unknown },
@@ -376,7 +392,18 @@ describe(`hash`, () => {
       }
 
       expect(() => hash(ring[0])).toThrow(
-        `Cyclic value is too complex to hash safely`,
+        `Value is too complex to hash safely: structural depth`,
+      )
+
+      const root: { next?: unknown } = {}
+      let tail = root
+      for (let index = 0; index < 800; index++) {
+        const next: { next?: unknown } = {}
+        tail.next = next
+        tail = next
+      }
+      expect(() => hash(root)).toThrow(
+        `Value is too complex to hash safely: structural depth`,
       )
     })
 
@@ -392,7 +419,7 @@ describe(`hash`, () => {
       }
 
       expect(() => hash(nodes[0])).toThrow(
-        `Cyclic value is too complex to hash safely`,
+        `Value is too complex to hash safely: graph context work`,
       )
     })
 

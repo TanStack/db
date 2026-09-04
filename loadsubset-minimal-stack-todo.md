@@ -904,12 +904,13 @@ explicitly removed.
       can encode exponentially many valid ancestor histories, so memoization
       alone cannot make every input cheap. Hashing now bounds recursion depth,
       first-traversal graph bookkeeping, and traversal-cache matching and
-      adoption instead of stalling a graph turn. Cache entries publish only
-      after the whole hash succeeds, so retrying a rejected value cannot warm
-      its way past a guard. Hostile context, cache-adoption, dense-ancestor, and
-      deep-recursion regressions now fail with the deliberate safety error;
-      600-node rings, 600 independent multi-context cyclic components, and the
-      supported context-separation laws remain green.
+      adoption instead of stalling a graph turn. Structural cache entries
+      publish only after the whole hash succeeds, while opaque reference leaves
+      never enter structural frames, so retrying a rejected value cannot warm
+      its way past a guard. Hostile context, cache-adoption, dense-ancestor,
+      deep-recursion, same-input retry, and large opaque-leaf regressions now
+      prove the deliberate limits; independently built 600-node rings and 600
+      independent cyclic component graphs retain equal hashes.
 - [x] Defer functional projections over bare Collection includes until bucket
       references become public facades. The callback can now return an opaque
       wrapper around the Collection without retaining compiler state; child

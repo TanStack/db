@@ -65,8 +65,7 @@ type HashContext = {
   traversalHashes: WeakMap<object, Array<TraversalHash>>
   cyclicCacheWork: number
   graphContextWork: number
-  pendingHashes: WeakMap<object, number>
-  pendingHashEntries: Array<[object, number]>
+  pendingHashes: Map<object, number>
 }
 
 type HashDependency = {
@@ -97,11 +96,10 @@ export function hash(input: any): number {
     traversalHashes: new WeakMap(),
     cyclicCacheWork: 0,
     graphContextWork: 0,
-    pendingHashes: new WeakMap(),
-    pendingHashEntries: [],
+    pendingHashes: new Map(),
   }
   updateHasher(hasher, input, context)
-  for (const [object, valueHash] of context.pendingHashEntries) {
+  for (const [object, valueHash] of context.pendingHashes) {
     hashCache.set(object, valueHash)
   }
   return hasher.digest()
@@ -114,7 +112,9 @@ function hashObject(input: object, context: HashContext): number {
   }
 
   if (context.activeOrder.length >= MAX_STRUCTURAL_HASH_DEPTH) {
-    throw new RangeError(`Cyclic value is too complex to hash safely`)
+    throw new RangeError(
+      `Value is too complex to hash safely: structural depth`,
+    )
   }
 
   const startIndex = context.activeOrder.length
@@ -135,24 +135,8 @@ function hashObject(input: object, context: HashContext): number {
   try {
     if (input instanceof Date) {
       valueHash = hashDate(input)
-    } else if (
-      // Check if input is a Uint8Array or Buffer
-      (typeof Buffer !== `undefined` && input instanceof Buffer) ||
-      input instanceof Uint8Array
-    ) {
-      // For small Uint8Arrays/Buffers (e.g., ULIDs, UUIDs), hash by content
-      // to enable proper equality comparisons. For large arrays, hash by reference
-      // to avoid performance costs.
-      if (input.byteLength <= UINT8ARRAY_CONTENT_HASH_THRESHOLD) {
-        valueHash = hashUint8Array(input)
-      } else {
-        // Deeply hashing large arrays would be too costly
-        // so we track them by reference and cache them in a weak map
-        return cachedReferenceHash(input)
-      }
-    } else if (input instanceof File) {
-      // Files are always hashed by reference due to their potentially large size
-      return cachedReferenceHash(input)
+    } else if (isBinaryValue(input)) {
+      valueHash = hashUint8Array(input)
     } else if (isTemporal(input)) {
       valueHash = hashTemporal(input)
     } else {
@@ -187,7 +171,6 @@ function hashObject(input: object, context: HashContext): number {
     context.traversalHashes.set(input, traversalHashes)
   } else {
     context.pendingHashes.set(input, valueHash)
-    context.pendingHashEntries.push([input, valueHash])
   }
   return valueHash
 }
@@ -306,6 +289,11 @@ function getCachedHash(input: object, context: HashContext): number {
     return hasher.digest()
   }
 
+  // Opaque leaves cannot contain structural back-references. Resolve them
+  // before entering a traversal frame so their reference cache cannot alter a
+  // failed structural retry's work budget.
+  if (isReferenceHashedObject(input)) return cachedReferenceHash(input)
+
   const valueHash = hashCache.get(input) ?? context.pendingHashes.get(input)
   if (valueHash !== undefined) return valueHash
 
@@ -399,15 +387,33 @@ function adoptTraversalHash(
 function consumeCyclicCacheWork(context: HashContext): void {
   context.cyclicCacheWork++
   if (context.cyclicCacheWork > MAX_CYCLIC_CACHE_WORK) {
-    throw new RangeError(`Cyclic value is too complex to hash safely`)
+    throw new RangeError(
+      `Value is too complex to hash safely: cyclic cache work`,
+    )
   }
 }
 
 function consumeGraphContextWork(context: HashContext): void {
   context.graphContextWork++
   if (context.graphContextWork > MAX_GRAPH_CONTEXT_WORK) {
-    throw new RangeError(`Cyclic value is too complex to hash safely`)
+    throw new RangeError(
+      `Value is too complex to hash safely: graph context work`,
+    )
   }
+}
+
+function isReferenceHashedObject(input: object): boolean {
+  return (
+    input instanceof File ||
+    (isBinaryValue(input) && input.byteLength > UINT8ARRAY_CONTENT_HASH_THRESHOLD)
+  )
+}
+
+function isBinaryValue(input: object): input is Uint8Array {
+  return (
+    (typeof Buffer !== `undefined` && input instanceof Buffer) ||
+    input instanceof Uint8Array
+  )
 }
 
 let nextRefId = 1

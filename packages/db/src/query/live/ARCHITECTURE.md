@@ -236,9 +236,11 @@ memoizes a repeated cyclic subgraph only when the same external ancestors hold
 the same relative positions. Structural hashing has fixed limits on recursion
 depth, graph-context bookkeeping, and traversal-cache matching and adoption;
 it rejects values that exceed them instead of stalling a graph turn or
-overflowing the JavaScript stack. A failed hash does not publish partial cache
-entries, so retrying the same value cannot bypass a guard. The accepted-size
-cycle tests are regression floors, not an unbounded topology guarantee.
+overflowing the JavaScript stack. A failed hash does not publish partial
+structural cache entries, so retrying the same value cannot bypass a guard.
+Opaque reference-hashed leaves are resolved before structural traversal and
+cannot consume or change those budgets. The accepted-size cycle tests are
+regression floors, not an unbounded topology guarantee.
 Symbol-only changes and supported cycles therefore cannot disappear before
 publication. Neither
 boundary mutates values retained by D2. Compiler-created
