@@ -570,6 +570,12 @@ explicitly removed.
 - [x] Derived scheduler publication failure from the presence of the active
       context instead of storing a second boolean. Scheduler, lifecycle, and
       change-event suites are 124/124 green.
+- [x] Treat a changed or deleted row from a finite ordered prefix as loss of
+      source-order authority. The 10x state campaign found implicit-key top-K
+      windows retaining an updated row after it fell below an unseen row. The
+      pinned top-one, offset, and wider tie cases failed first. They now reuse
+      the existing full-source recovery path; the pagination suite is 127/127
+      green and its 10x transition campaign also passes.
 
 ## Remaining execution
 
@@ -1145,9 +1151,12 @@ explicitly removed.
   - [ ] Give every structural matrix cell a fixed semantic witness: a rank tie,
         mixed filter membership, two meaningful windows, and a real mutation,
         while crossing provider tie order independently.
-  - [ ] Pin and fix both implicit-public-key tie update failures found by the
+  - [x] Pin and fix both implicit-public-key tie update failures found by the
         10x state campaign: top-1 equal-rank replacement and offset-1 equal-rank
-        replacement must choose the lowest public key after an update.
+        replacement must choose the lowest public key after an update. A wider
+        descending tie witness covers the same missing-prefix class. A changed
+        or deleted delivered row now invalidates finite source-order coverage
+        and takes the conservative full-source recovery path.
 - [ ] Prevent a reentrant truncate started during synchronous replacement
       publication from letting the superseded attempt emit transient `ready`.
 - [ ] Close the public window-reentrancy follow-up audit:

@@ -467,6 +467,11 @@ export class OrderedSourceLoader {
     this.lastBoundary = undefined
   }
 
+  invalidateSourceOrdering(): void {
+    this.invalidateCursor()
+    this.invalidateSourceCoverage()
+  }
+
   dispose(): void {
     this.active = false
     this.resetCursor()

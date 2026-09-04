@@ -3349,12 +3349,25 @@ describe(`pagination recomputation oracle`, () => {
         const pendingBeforeWiden = pending.length
         const widened = live.utils.setWindow({ offset: 0, limit: 3 })
         await flushPromises()
-        expect(pending.length).toBeGreaterThan(pendingBeforeWiden)
-        expect(
-          pending
-            .slice(pendingBeforeWiden)
-            .some(({ options }) => options.limit === 3),
-        ).toBe(true)
+        if (mutation.type === `insert`) {
+          expect(pending.length).toBeGreaterThan(pendingBeforeWiden)
+          expect(
+            pending
+              .slice(pendingBeforeWiden)
+              .some(({ options }) => options.limit === 3),
+          ).toBe(true)
+        } else {
+          expect(
+            pending.some(
+              ({ options }) =>
+                options.limit === undefined &&
+                options.where === undefined &&
+                options.cursor === undefined,
+            ),
+          ).toBe(true)
+          expect(widened).toBe(true)
+          expect(pending).toHaveLength(pendingBeforeWiden)
+        }
         for (let index = pendingBeforeWiden; index < pending.length; index++) {
           await settle(pending[index]!)
         }
@@ -3660,6 +3673,36 @@ describe(`pagination recomputation oracle`, () => {
     }
     await runPaginationStateScenario(scenario)
   })
+
+  it(`refills an implicit tie window when a visible row moves below it`, async () => {
+    await runPaginationStateScenario({
+      ranks: [0, 0, 0, -1, 0],
+      direction: `desc`,
+      explicitPublicKeyOrder: false,
+      includeFilter: false,
+      reverseInsertion: false,
+      initialWindow: { offset: 0, limit: 4 },
+      actions: [{ type: `put`, id: 1, rank: -2, keep: false }],
+    })
+  })
+
+  it.each([
+    [`top-one`, [0, 0], { offset: 0, limit: 1 }, 1, 1],
+    [`offset`, [0, 0, 1], { offset: 1, limit: 1 }, 2, 2],
+  ] as const)(
+    `refills an implicit %s tie window after a rank update`,
+    async (_name, ranks, initialWindow, id, rank) => {
+      await runPaginationStateScenario({
+        ranks: [...ranks],
+        direction: `asc`,
+        explicitPublicKeyOrder: false,
+        includeFilter: false,
+        reverseInsertion: false,
+        initialWindow,
+        actions: [{ type: `put`, id, rank, keep: false }],
+      })
+    },
+  )
 
   it(`opens an implicit tie window from zero at the lowest public key`, async () => {
     await runPaginationStateScenario({

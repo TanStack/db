@@ -476,6 +476,10 @@ export class CollectionSubscriber<
     changes: Array<ChangeMessage<any, string | number>>,
     comparator: (a: any, b: any) => number,
   ): void {
+    const invalidatesSourceOrdering = changes.some(
+      (change) =>
+        change.type !== `insert` && this.sentToD2Rows.has(change.key),
+    )
     const result = trackBiggestSentValue(
       changes,
       this.biggest,
@@ -483,7 +487,9 @@ export class CollectionSubscriber<
       comparator,
     )
     this.biggest = result.biggest
-    if (result.shouldResetLoadKey) {
+    if (invalidatesSourceOrdering) {
+      this.orderedLoader?.invalidateSourceOrdering()
+    } else if (result.shouldResetLoadKey) {
       this.orderedLoader?.invalidateCursor()
     }
   }
