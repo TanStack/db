@@ -21,6 +21,11 @@ const UINT8ARRAY_MARKER = randomHash()
 const TEMPORAL_MARKER = randomHash()
 const CYCLE_MARKER = randomHash()
 
+// A cyclic subgraph can be reached under exponentially many distinct active
+// ancestor contexts. Reject that adversarial shape instead of letting one row
+// monopolize the graph turn. Ordinary cyclic values use far fewer traversals.
+const MAX_CYCLIC_TRAVERSALS = 512
+
 const temporalTypes = new Set([
   `Temporal.Duration`,
   `Temporal.Instant`,
@@ -55,6 +60,7 @@ type HashContext = {
   cyclicObjects: Set<object>
   frames: Array<HashFrame>
   traversalHashes: WeakMap<object, Array<TraversalHash>>
+  cyclicTraversals: number
 }
 
 type HashDependency = {
@@ -83,6 +89,7 @@ export function hash(input: any): number {
     cyclicObjects: new Set(),
     frames: [],
     traversalHashes: new WeakMap(),
+    cyclicTraversals: 0,
   })
   return hasher.digest()
 }
@@ -155,6 +162,10 @@ function hashObject(input: object, context: HashContext): number {
   }
 
   if (context.cyclicObjects.has(input)) {
+    context.cyclicTraversals++
+    if (context.cyclicTraversals > MAX_CYCLIC_TRAVERSALS) {
+      throw new RangeError(`Cyclic value is too complex to hash safely`)
+    }
     const traversalHashes = context.traversalHashes.get(input) ?? []
     traversalHashes.push({ valueHash, ...frame })
     context.traversalHashes.set(input, traversalHashes)
@@ -276,7 +287,7 @@ function getCachedHash(input: object, context: HashContext): number {
     return hasher.digest()
   }
 
-  let valueHash = hashCache.get(input)
+  const valueHash = hashCache.get(input)
   if (valueHash !== undefined) return valueHash
 
   const startIndex = context.activeOrder.length

@@ -900,6 +900,12 @@ explicitly removed.
       reads to 28; an adversarial shared child proves the cache rejects the
       wrong ancestor context. The full 333-test db-ivm suite and build are
       green.
+- [x] Bound the remaining ancestor-context explosion. A hostile cyclic graph
+      can encode exponentially many valid ancestor histories, so memoization
+      alone cannot make every input cheap. Hashing now rejects after 512 cyclic
+      traversals instead of stalling a graph turn. The 34-node regression fell
+      from hundreds of milliseconds to a bounded failure in 16 ms, while the
+      supported cycle and context-separation laws remain green.
 - [x] Defer functional projections over bare Collection includes until bucket
       references become public facades. The callback can now return an opaque
       wrapper around the Collection without retaining compiler state; child

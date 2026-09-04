@@ -269,6 +269,33 @@ describe(`hash`, () => {
       expect(hash(equalLeft)).toBe(hash(left))
     })
 
+    it(`rejects cyclic graphs with exponentially many ancestor contexts`, () => {
+      const depth = 11
+      const shared = Array.from(
+        { length: depth + 1 },
+        (_, level) => ({ level }) as Record<string, unknown>,
+      )
+      const left = Array.from({ length: depth }, (_, level) => ({
+        side: `left`,
+        level,
+        next: shared[level + 1],
+      }))
+      const right = Array.from({ length: depth }, (_, level) => ({
+        side: `right`,
+        level,
+        next: shared[level + 1],
+      }))
+      for (let level = 0; level < depth; level++) {
+        shared[level]!.left = left[level]
+        shared[level]!.right = right[level]
+        shared[depth]![`left${level}`] = left[level]
+      }
+
+      expect(() => hash(shared[0])).toThrow(
+        `Cyclic value is too complex to hash safely`,
+      )
+    })
+
     it(`should hash arrays`, () => {
       const arr1 = [1, 2, 3]
       const arr2 = [1, 2, 3]
