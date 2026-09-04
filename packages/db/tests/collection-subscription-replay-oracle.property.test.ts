@@ -3072,47 +3072,56 @@ describe(`CollectionSubscription replay oracle`, () => {
     expect(unloads).toEqual([loads[0]])
   })
 
-  it(`does not emit a stale specific status after reentrant release`, async () => {
-    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
-    const load = createDeferred<void>()
-    const collection = createCollection<ReplayRow>({
-      id: `reentrant-specific-status`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      sync: {
-        sync: (operations) => {
-          operations.markReady()
-          return {
-            loadSubset: () => load.promise,
-            unloadSubset: () => {},
-          }
+  it.each([`generic`, `specific`] as const)(
+    `does not emit a stale specific status after reentrant release from a %s listener`,
+    async (reentryEvent) => {
+      const where = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
+      const load = createDeferred<void>()
+      const collection = createCollection<ReplayRow>({
+        id: `reentrant-specific-status`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (operations) => {
+            operations.markReady()
+            return {
+              loadSubset: () => load.promise,
+              unloadSubset: () => {},
+            }
+          },
         },
-      },
-    })
-    const subscription = collection.subscribeChanges(() => {}, {
-      includeInitialState: false,
-    })
-    const observed: Array<{ event: string; current: string }> = []
-    subscription.on(`status:change`, ({ status }) => {
-      if (status === `loadingSubset`) subscription.releaseSnapshot(where)
-    })
-    subscription.on(`status:loadingSubset`, ({ status }) => {
-      observed.push({ event: status, current: subscription.status })
-    })
-    subscription.on(`status:ready`, ({ status }) => {
-      observed.push({ event: status, current: subscription.status })
-    })
+      })
+      const subscription = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      const observed: Array<{ event: string; current: string }> = []
+      if (reentryEvent === `generic`) {
+        subscription.on(`status:change`, ({ status }) => {
+          if (status === `loadingSubset`) subscription.releaseSnapshot(where)
+        })
+      } else {
+        subscription.on(`status:loadingSubset`, () => {
+          subscription.releaseSnapshot(where)
+        })
+      }
+      subscription.on(`status:loadingSubset`, ({ status }) => {
+        observed.push({ event: status, current: subscription.status })
+      })
+      subscription.on(`status:ready`, ({ status }) => {
+        observed.push({ event: status, current: subscription.status })
+      })
 
-    try {
-      subscription.requestSnapshot({ where, optimizedOnly: false })
-      expect(observed).toEqual([{ event: `ready`, current: `ready` }])
-    } finally {
-      load.resolve()
-      await flushPromises()
-      subscription.unsubscribe()
-      await collection.cleanup()
-    }
-  })
+      try {
+        subscription.requestSnapshot({ where, optimizedOnly: false })
+        expect(observed).toEqual([{ event: `ready`, current: `ready` }])
+      } finally {
+        load.resolve()
+        await flushPromises()
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
 
   fcTest.prop([replayScenarioArbitrary], {
     numRuns: generatedRuns,

@@ -517,10 +517,7 @@ export class CollectionSubscription
         // A released demand no longer participates in this replacement. Its
         // cooperative AbortError must not discard rows from active demands.
         if (this.subsetDemands.includes(demand) && !options.signal?.aborted) {
-          const normalized = this.normalizeLoadSubsetPromiseError(
-            result,
-            error,
-          )
+          const normalized = this.normalizeLoadSubsetPromiseError(result, error)
           // Replay completion is observed before the ordinary status listener,
           // so retain the exact normalized error for the completion barrier.
           // The status listener emits the public error event next.
@@ -743,18 +740,22 @@ export class CollectionSubscription
       status: newStatus,
     })
 
-    // A generic listener may synchronously start or release demand. Do not
-    // follow that newer transition with a stale specific event.
+    // A listener may synchronously start or release demand. Do not follow that
+    // newer transition with a stale specific event.
     if (this._status !== newStatus) return
 
     // Emit specific status event
     const eventKey: `status:${SubscriptionStatus}` = `status:${newStatus}`
-    this.emitInner(eventKey, {
-      type: eventKey,
-      subscription: this,
-      previousStatus,
-      status: newStatus,
-    } as SubscriptionEvents[typeof eventKey])
+    this.emitInnerWhile(
+      eventKey,
+      {
+        type: eventKey,
+        subscription: this,
+        previousStatus,
+        status: newStatus,
+      } as SubscriptionEvents[typeof eventKey],
+      () => this._status === newStatus,
+    )
   }
 
   /** Observe an asynchronous subset load and restore status on settlement. */

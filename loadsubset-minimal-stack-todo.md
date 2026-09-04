@@ -965,8 +965,25 @@ explicitly removed.
       object. The replay oracle now observes two logical demands sharing one
       rejecting transport and requires both events, the replay barrier, and
       `lastError` to expose the same normalized instance.
-- [ ] Prevent reentrant specific-status listeners from delivering a stale
-      status event to later listeners.
+  - [ ] Cross this law with ordinary (non-replay) shared loads.
+  - [ ] Preserve event provenance by proving each logical demand emits exactly
+        one event with its own options.
+  - [ ] Cross shared rejection identity with releasing one of two distinct
+        replay demands before the common promise rejects.
+- [x] Prevent reentrant specific-status listeners from delivering a stale
+      status event to later listeners. Specific event delivery now checks the
+      current status before each listener; the regression covers reentry from
+      both generic and specific status callbacks.
+- [ ] Close the ordered-pagination oracle gaps found after its runtime fix.
+  - [ ] Pin the zero-window defect against a true on-demand source and assert
+        that its first request has no cursor.
+  - [ ] Record every on-demand publication callback so an equal duplicate
+        cannot hide behind snapshot deduplication.
+  - [ ] Compare the exact public change batch with the reference before/after
+        rows instead of leaving scenario `changes` unasserted.
+  - [ ] Give every structural matrix cell a fixed semantic witness: a rank tie,
+        mixed filter membership, two meaningful windows, and a real mutation,
+        while crossing provider tie order independently.
 - [ ] Prevent a reentrant truncate started during synchronous replacement
       publication from letting the superseded attempt emit transient `ready`.
 - [ ] Reconcile the joined-recovery readiness wording with the public

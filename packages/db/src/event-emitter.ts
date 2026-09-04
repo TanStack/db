@@ -111,7 +111,17 @@ export class EventEmitter<TEvents extends Record<string, any>> {
     event: T,
     eventPayload: TEvents[T],
   ): void {
-    this.listeners.get(event)?.forEach((listener) => {
+    this.emitInnerWhile(event, eventPayload, () => true)
+  }
+
+  /** Emit until a reentrant callback invalidates the event being delivered. */
+  protected emitInnerWhile<T extends keyof TEvents>(
+    event: T,
+    eventPayload: TEvents[T],
+    isCurrent: () => boolean,
+  ): void {
+    for (const listener of this.listeners.get(event) ?? []) {
+      if (!isCurrent()) break
       try {
         listener(eventPayload)
       } catch (error) {
@@ -120,7 +130,7 @@ export class EventEmitter<TEvents extends Record<string, any>> {
           throw error
         })
       }
-    })
+    }
   }
 
   /**
