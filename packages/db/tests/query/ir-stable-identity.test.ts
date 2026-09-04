@@ -368,6 +368,57 @@ describe(`semantic expression identity`, () => {
     )
   })
 
+  it(`does not retain symbols in strong identity maps when weak symbol keys are supported`, () => {
+    const NativeMap = Map
+    const stronglyStoredSymbols = new Set<symbol>()
+    class TrackingMap<K, V> extends NativeMap<K, V> {
+      override set(key: K, value: V): this {
+        if (typeof key === `symbol`) stronglyStoredSymbols.add(key)
+        return super.set(key, value)
+      }
+    }
+    const local = Symbol(`local`)
+    const registered = Symbol.for(
+      `tanstack-db-runtime-reference-test-${Date.now()}`,
+    )
+
+    vi.stubGlobal(`Map`, TrackingMap)
+    try {
+      const runtime = createRuntimeReferenceIdentityFactory()
+      runtime(local)
+      runtime(registered)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+
+    expect(stronglyStoredSymbols).not.toContain(local)
+    expect(stronglyStoredSymbols).not.toContain(registered)
+  })
+
+  it(`keeps correct symbol identity when weak symbol keys are unavailable`, () => {
+    const NativeWeakMap = WeakMap
+    class ObjectOnlyWeakMap<K extends object, V> extends NativeWeakMap<K, V> {
+      override set(key: K, value: V): this {
+        if (typeof key === `symbol`) {
+          throw new TypeError(`Symbols cannot be weak keys`)
+        }
+        return super.set(key, value)
+      }
+    }
+    const first = Symbol(`value`)
+    const second = Symbol(`value`)
+
+    vi.stubGlobal(`WeakMap`, ObjectOnlyWeakMap)
+    try {
+      const runtime = createRuntimeReferenceIdentityFactory()
+
+      expect(runtime(first)).toEqual(runtime(first))
+      expect(runtime(first)).not.toEqual(runtime(second))
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it(`scopes opaque value identities to their owner`, () => {
     const firstScope = createValueIdentity()
     const secondScope = createValueIdentity()

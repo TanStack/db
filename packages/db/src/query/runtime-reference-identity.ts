@@ -4,25 +4,67 @@ export type RuntimeReferenceIdentity = [
   sequence: number,
 ]
 
+type ReferenceIdStore<TKey> = {
+  get: (key: TKey) => number | undefined
+  set: (key: TKey, value: number) => unknown
+}
+
 export function createRuntimeReferenceIdentityFactory(): (
   value: object | symbol,
 ) => RuntimeReferenceIdentity {
   const referenceIds = new WeakMap<object, number>()
-  const symbolIds = new Map<symbol, number>()
+  let localSymbolIds: ReferenceIdStore<symbol> | undefined
+  let registeredSymbolIds: Map<string, number> | undefined
   let namespace: string | undefined
   let sequence = 0
 
-  return (value) => {
-    namespace ??= createRuntimeReferenceNamespace()
-    let referenceId =
-      typeof value === `symbol` ? symbolIds.get(value) : referenceIds.get(value)
+  const getReferenceId = <TKey>(
+    ids: ReferenceIdStore<TKey>,
+    key: TKey,
+  ): number => {
+    let referenceId = ids.get(key)
     if (referenceId === undefined) {
       referenceId = ++sequence
-      if (typeof value === `symbol`) symbolIds.set(value, referenceId)
-      else referenceIds.set(value, referenceId)
+      ids.set(key, referenceId)
+    }
+    return referenceId
+  }
+
+  return (value) => {
+    namespace ??= createRuntimeReferenceNamespace()
+    let referenceId: number
+    if (typeof value === `symbol`) {
+      const registeredKey = Symbol.keyFor(value)
+      if (registeredKey === undefined) {
+        localSymbolIds ??= createLocalSymbolIdStore()
+        referenceId = getReferenceId(localSymbolIds, value)
+      } else {
+        registeredSymbolIds ??= new Map<string, number>()
+        referenceId = getReferenceId(registeredSymbolIds, registeredKey)
+      }
+    } else {
+      referenceId = getReferenceId(referenceIds, value)
     }
     return [`runtimeReference`, namespace, referenceId]
   }
+}
+
+function createLocalSymbolIdStore(): ReferenceIdStore<symbol> {
+  const weakIds = new WeakMap<
+    object,
+    number
+  >() as unknown as ReferenceIdStore<symbol>
+  const probe = Symbol()
+
+  try {
+    weakIds.set(probe, 0)
+    if (weakIds.get(probe) === 0) return weakIds
+  } catch {
+    // Older runtimes reject symbols as weak keys. Retain them rather than
+    // collapse distinct symbols and corrupt equality.
+  }
+
+  return new Map<symbol, number>()
 }
 
 let runtimeReferenceIdentityFactory:

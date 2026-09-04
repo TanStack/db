@@ -140,11 +140,14 @@ reference identity for other objects, functions, and symbols. These tokens are
 valid only for equality-keyed routing, grouping, and demand. Output values and
 arbitrary function arguments keep their exact runtime identity and value.
 Compiler tokens belong to one compiled graph. This keeps every operator in the
-graph on the same identity relation while allowing its strong symbol table to
-die with the graph. A demand controller owns a separate scope and discards it
-when the controller is cleared. Process-wide query identity and opaque public
-group keys keep their own runtime scope because equivalent query plans and
-retained public keys must survive graph replacement.
+graph on the same identity relation. Objects, functions, and local symbols are
+weakly keyed where the runtime supports weak symbol keys. Older runtimes retain
+local symbols strongly within the scope rather than collapse distinct symbols
+and corrupt equality. Registered symbols use their registry key because the
+runtime registry already retains them. A demand controller owns a separate
+scope and discards it when the controller is cleared. Process-wide query
+identity and opaque public group keys keep their own runtime scope because
+equivalent query plans and retained public keys must survive graph replacement.
 For grouping, the equality token is the D2 group key. The group retains a raw
 value from a currently positive contributor only as the projected
 representative. The representative is chosen by stable source-row identity, so

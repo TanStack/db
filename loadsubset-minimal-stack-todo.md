@@ -619,10 +619,11 @@ explicitly removed.
       from process identity. Two same-description symbols remain distinct, and
       a retained key works after delete/reinsert. Grouping and includes suites
       are 226/226 green.
-- [ ] Bound local-symbol identity retention within long-lived scopes where the
-      runtime supports weak symbol keys. Registered symbols are already held by
-      the global registry; older runtimes need a correctness-preserving strong
-      fallback rather than a lossy identity.
+- [x] Bound local-symbol identity retention within long-lived scopes where the
+      runtime supports weak symbol keys. Local symbols now use weak identity
+      storage when available, registered symbols use their registry strings,
+      and older runtimes keep the correctness-preserving strong fallback. The
+      focused identity suite fails on the old strong maps and passes 54/54.
 - [ ] Make equality auto-index fallback quiet and safe for symbol-valued join
       fields; the symbol-route oracle exposed a comparator throw while the
       query correctly fell back to a full scan.
