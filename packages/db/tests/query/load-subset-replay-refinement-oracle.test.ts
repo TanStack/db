@@ -1,17 +1,171 @@
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
-import { createLiveQueryCollection, eq } from '../../src/query/index.js'
+import {
+  createLiveQueryCollection,
+  eq,
+  toArray,
+} from '../../src/query/index.js'
+import { BasicIndex } from '../../src/indexes/basic-index.js'
+import { evaluateReferenceExpression } from '../reference-expression.js'
 import { flushPromises } from '../utils.js'
 import type {
   ChangeMessageOrDeleteKeyMessage,
   LoadSubsetOptions,
+  SyncConfig,
 } from '../../src/types.js'
 
 type Row = { id: string; version: number }
 type ObservedRow = { sourceId: string; rowKey: string; version: number }
 
 describe(`loadSubset replay refinement`, () => {
+  it(`publishes a successful sibling after a settled failed include route retires`, async () => {
+    type Parent = { id: string; left: number | null; right: number }
+    type Child = { id: number; version: number }
+    let parentSync!: Parameters<SyncConfig<Parent, string>[`sync`]>[0]
+    let childSync!: Parameters<SyncConfig<Child, number>[`sync`]>[0]
+    const failed = createDeferred<void>()
+    const successful = createDeferred<void>()
+    const loads: Array<{ options: LoadSubsetOptions; ids: Array<number> }> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const parents = createCollection<Parent>({
+      id: `settled-peer-parent`,
+      getKey: ({ id }) => id,
+      sync: {
+        sync: (operations) => {
+          parentSync = operations
+          operations.begin()
+          operations.write({
+            type: `insert`,
+            value: { id: `parent`, left: 1, right: 2 },
+          })
+          operations.commit()
+          operations.markReady()
+        },
+      },
+    })
+    const children = createCollection<Child>({
+      id: `settled-peer-children`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      autoIndex: `eager`,
+      defaultIndexType: BasicIndex,
+      sync: {
+        sync: (operations) => {
+          childSync = operations
+          operations.markReady()
+          return {
+            loadSubset: (options) => {
+              const rows = [1, 2]
+                .map((id) => ({ id, version: loads.length < 2 ? 1 : 2 }))
+                .filter(
+                  (row) =>
+                    !options.where ||
+                    evaluateReferenceExpression(options.where, row) === true,
+                )
+              loads.push({ options, ids: rows.map(({ id }) => id) })
+              operations.begin()
+              for (const value of rows)
+                operations.write({ type: `insert`, value })
+              operations.commit()
+              if (loads.length <= 2) return true
+              return rows.some(({ id }) => id === 1)
+                ? failed.promise
+                : successful.promise
+            },
+            unloadSubset: (options) => {
+              unloads.push(options)
+            },
+          }
+        },
+      },
+    })
+    const live = createLiveQueryCollection((q) =>
+      q.from({ parent: parents }).select(({ parent }) => ({
+        id: parent.id,
+        left: toArray(
+          q
+            .from({ leftChild: children })
+            .where(({ leftChild }) => eq(leftChild.id, parent.left)),
+        ),
+        right: toArray(
+          q
+            .from({ rightChild: children })
+            .where(({ rightChild }) => eq(rightChild.id, parent.right)),
+        ),
+      })),
+    )
+    const read = () =>
+      live.toArray.map(({ id, left, right }) => ({
+        id,
+        left: left.map(({ id: key, version }) => ({ id: key, version })),
+        right: right.map(({ id: key, version }) => ({ id: key, version })),
+      }))
+    const publications: Array<ReturnType<typeof read>> = []
+    const subscription = live.subscribeChanges(
+      () => publications.push(read()),
+      { includeInitialState: false },
+    )
+    try {
+      await live.preload()
+      expect(loads.map(({ ids }) => ids)).toEqual([[1], [2]])
+      const initial = [
+        {
+          id: `parent`,
+          left: [{ id: 1, version: 1 }],
+          right: [{ id: 2, version: 1 }],
+        },
+      ]
+      expect(read()).toEqual(initial)
+      publications.length = 0
+      childSync.begin()
+      childSync.truncate()
+      childSync.commit()
+      await flushPromises()
+      expect(loads.slice(2).map(({ ids }) => ids)).toEqual([[1], [2]])
+      failed.reject(new Error(`left replay failed`))
+      successful.resolve()
+      await flushPromises()
+      expect(read()).toEqual(initial)
+      expect(publications).toEqual([])
+      parentSync.begin()
+      parentSync.write({
+        type: `update`,
+        value: { id: `parent`, left: null, right: 2 },
+      })
+      parentSync.commit()
+      await flushPromises()
+      expect(read()).toEqual([
+        { id: `parent`, left: [], right: [{ id: 2, version: 2 }] },
+      ])
+      expect(publications).toEqual([
+        [{ id: `parent`, left: [], right: [{ id: 2, version: 2 }] }],
+      ])
+      expect(loads).toHaveLength(4)
+      expect(unloads).toContain(loads[2]!.options)
+      expect(loads[2]!.options.signal?.aborted).toBe(true)
+      expect(loads[3]!.options.signal?.aborted).toBe(false)
+      childSync.begin()
+      childSync.write({ type: `update`, value: { id: 2, version: 3 } })
+      childSync.commit()
+      await flushPromises()
+      expect(read()).toEqual([
+        { id: `parent`, left: [], right: [{ id: 2, version: 3 }] },
+      ])
+      expect(publications).toHaveLength(2)
+    } finally {
+      failed.resolve()
+      successful.resolve()
+      subscription.unsubscribe()
+      await live.cleanup()
+      await Promise.all([parents.cleanup(), children.cleanup()])
+    }
+    expect(unloads).toHaveLength(loads.length)
+    for (const { options } of loads) {
+      expect(unloads.filter((unloaded) => unloaded === options)).toHaveLength(1)
+    }
+  })
+
   function createHarness(
     sourceId: string,
     initialRows: ReadonlyArray<Row> = [{ id: `row`, version: 1 }],

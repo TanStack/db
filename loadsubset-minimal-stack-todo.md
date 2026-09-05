@@ -1228,9 +1228,11 @@ explicitly removed.
   - [ ] Preserve a surviving demand's successful replay when a different failed
         demand retires after the failed attempt has already settled. Cross
         direct and graph-controlled publication.
-  - [ ] Store each replay failure on its demand or attempt so an unrelated
+  - [x] Store each replay failure on its demand or attempt so an unrelated
         `unloadSubset` failure cannot replace the replay completion error.
-  - [ ] Keep status non-ready while an untracked asynchronous demand acquired
+        The bounded executable witness checks exact error identity and release
+        debt retry; broader ordering permutations remain part of the product.
+  - [x] Keep status non-ready while an untracked asynchronous demand acquired
         reentrantly from `unloadSubset` still gates replay publication.
 - [ ] Reconcile the joined-recovery readiness wording with the public
       multi-source barrier: a single source can become ready before the joined
@@ -1250,12 +1252,13 @@ every row is either green or has a named red witness.
 | Async session fencing                                | 2–4 sessions, 1–2 demands, mixed outcomes, obsolete/current/interleaved settlement                  | green                                                        |
 | Generated async lifecycle histories                  | one pure reducer drives async-pending and sync-success histories with one ordered event trace       | 20 named replay-generation/status reds                       |
 | Row-bearing lifecycle histories                      | independent public-row model over canonical, fixed-seed, and random histories with exact batches    | 4 named publication reds                                     |
-| Replay phase transitions                             | setup/pending/settling/publishing crossed with release, reacquisition, supersession, abort, cleanup | three audit claims remain to reconcile below                 |
+| Replay phase transitions                             | setup/pending/settling/publishing crossed with release, reacquisition, supersession, abort, cleanup | direct settled-peer loss red; graph peer, error ownership, and new-demand readiness witnesses green |
 | Ordered route mechanics                              | page/prefix/boundary/full-source × return/throw/resolve/reject/abort/cleanup                        | green                                                        |
 | Ordered consumer integration                         | Collection/Effect parity, source-local recovery, public-window reentry, sync-session settlement     | 5 named reds                                                 |
 | Ordered generated histories                          | authority, route, barrier, settlement, and session reach                                            | not yet implemented                                          |
 
-The current 44-test red catalog groups into these protocol faults. Multiple
+The earlier 44-test red catalog grouped into these protocol faults. Later
+checkpoints below add witnesses; the final combined census is still pending. Multiple
 matrix cells are deliberate variants of one fault, not separate diagnoses.
 
 | Red class                                 | Named witnesses | Observable failure                                                           |
@@ -1605,7 +1608,7 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
           audit, the catalog has 163 tests: 114 green laws and 49 named reds.
           Hard cardinality and uniqueness assertions prevent an axis from
           shrinking with its own expected set.
-    - [ ] D — Add executable witnesses for the three remaining replay-phase
+    - [x] D — Add executable witnesses for the three remaining replay-phase
           contracts: surviving successful peer, per-attempt failure ownership,
           and reentrant async demand readiness.
       - Direct publication now has a row-bearing named red for retirement
@@ -1613,7 +1616,12 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
         the successful peer too (expected `two=2`, observed empty). The prior
         test retired the failure before peer settlement. Both physical loads,
         all four exact unloads, and final release execute in the new witness.
-        Graph-controlled peer publication remains open. This witness records
+        Graph-controlled peer publication now has a green real-query witness:
+        two includes share one child collection; both replay results settle,
+        the failed include route retires, and the successful sibling publishes
+        once with its replacement row. The failed acquisition aborts/unloads,
+        the successful acquisition stays live, a later child update propagates,
+        and all four physical leases unload exactly once. The direct witness records
         continuation; safe recovery remains an
         allowed implementation choice under the policy above.
       - The reentrant unload/reacquire witness now checks non-ready status,
@@ -1648,6 +1656,11 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
         tracing as well: after initial acquisition, there are zero callbacks
         during replay and one complete replacement callback at settlement.
         Initial acquisition callbacks are outside this replay-specific trace.
+      - Fresh Field Lab audit of `ed48a3a7`: PASS for bounded error ownership
+        and callback tracing. It does not establish all late side-effect
+        silence or all failure permutations. The graph refinement file passes
+        seven tests with the new real-query peer witness. Production remains
+        unchanged.
     - [ ] D — Generate the ordered consumer product over authority, route,
           barrier, settlement, window, and sync-session transitions with checked
           observed reach.
