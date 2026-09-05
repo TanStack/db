@@ -1255,7 +1255,7 @@ every row is either green or has a named red witness.
 | Replay phase transitions                             | setup/pending/settling/publishing crossed with release, reacquisition, supersession, abort, cleanup | direct settled-peer loss red; graph peer, error ownership, and new-demand readiness witnesses green |
 | Ordered route mechanics                              | page/prefix/boundary/full-source × return/throw/resolve/reject/abort/cleanup                        | green                                                        |
 | Ordered consumer integration                         | Collection/Effect parity, source-local recovery, public-window reentry, sync-session settlement     | 5 named reds                                                 |
-| Ordered generated histories                          | authority, route, barrier, settlement, and session reach                                            | not yet implemented                                          |
+| Ordered generated histories                          | 192 checked route/delivery/window/outcome/session/barrier histories; finite/full request shapes     | 136 green cells; 56 cells pin two exact caller-settlement reds |
 
 The earlier 44-test red catalog grouped into these protocol faults. Later
 checkpoints below add witnesses; the final combined census is still pending. Multiple
@@ -1661,11 +1661,53 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
         silence or all failure permutations. The graph refinement file passes
         seven tests with the new real-query peer witness. Production remains
         unchanged.
-    - [ ] D — Generate the ordered consumer product over authority, route,
+      - Fresh Field Lab audit of `3b3244da`: PASS for the graph-peer
+        checkpoint. Two lexical includes own separate subscriptions to the
+        same collection, unlike the direct two-demand witness. The graph green
+        does not erase that direct red. Callback reads and later reactivity are
+        checked; downstream change-message payloads and other settlement
+        schedules are outside this new witness.
+    - [x] D — Generate the ordered consumer product over authority, route,
           barrier, settlement, window, and sync-session transitions with checked
           observed reach.
+      - The real ordered consumer crosses page/prefix/boundary/full-source,
+        provider application before/at settlement, keep/widen, successful/
+        rejected/AbortError settlement, retain/restart, and initial/replay.
+        All 192 cells prove physical requests and terminal lease cleanup before
+        counting reach. Full versus finite describes observed request shape,
+        not an authoritative adapter exhaustion outcome; it is correlated
+        with route, not a fictitious freely crossed axis.
+      - Exact mismatch arrays pin unfinished preload resolving on cleanup
+        (48 cells) and failed initial boundary preload resolving without its
+        error (8 cells). The other 136 cells obey the laws. These are two
+        fault families, not 56 independent bugs. Random campaigns also vary
+        rank origin and spacing. AbortError settlement is distinct from the
+        physical signal abort that cleanup checks.
+      - Replay then window move may publish two complete windows in sequence,
+        or coalesce into one final window. Both obey the documented contract;
+        the oracle rejects partial windows and extra row publications without
+        demanding extra coordination solely to suppress a valid intermediate
+        state. Empty snapshot-completion callbacks are not row publications.
+      - Validation before audit: 195 tests passed, including fixed/random
+        campaigns and the declared-cell guard. An added observed-reach guard
+        brings the file to 196 tests. ESLint passes. The 100× run and fresh
+        loss audit remain pending; no production code changed.
     - [ ] Rerun fixed, random, and 100× lifecycle campaigns; freeze the final
           green/red catalog; then run a fresh Field Lab loss audit.
+
+### Repair choices after the lifecycle gate
+
+These are candidate repair scopes, not completed fixes or proof of root cause.
+
+| Family | Intended next step | Boundary to preserve |
+| --- | --- | --- |
+| Phantom unload, retired readiness participant, synchronous false loading cycle | Local ownership/status repair, red/green each law | No new general recovery state machine |
+| Duplicate-owner snapshot | Local publication repair | Keep valid initial delivery; suppress only duplicate row deltas |
+| Cleanup resolves pending preload; boundary failure resolves preload | Local caller-settlement repair | Reject the right waiter with the original error or explicit cancellation |
+| Direct failed replay peer loss, unrelated writes lost during replacement, retirement publication | Choose one shared retain-and-rebuild path | Preserve valid public snapshot, reject affected callers, retire old work, atomically publish rebuilt state |
+| Synchronous reentry during startup/loader replacement | Prefer explicit detection and recovery if continuing needs more machinery | No half-owned lease, silent success, or hung caller |
+| Untagged writes from non-cooperative obsolete/aborted sources | Keep as an explicit adapter/session boundary decision | Do not pretend a request signal identifies an untagged source write |
+| Replacement delta ordering | Check whether ordering is externally required before repair | Do not impose a total callback order where complete valid snapshots suffice |
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
       behavior, and opaque callback roots.
