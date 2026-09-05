@@ -2222,6 +2222,21 @@ candidate repair scopes, not completed fixes or proof of root cause.
   not implemented or counted as fixed. Do not add callback retention merely
   to satisfy the array-based witness.
 
+- Fresh Field Lab loss audit of `d6bf7fb3` recovered progress hidden by the
+  whole-test counts: the still-red initial-error recovery witness no longer
+  starts physical work early; only its missing result notification remains.
+  This does not add another fixed test. The audit confirmed the two removed
+  failures and all reported counts. It read source/reports without rerunning
+  tests or judging the pending-promise contract; its summary-led scan and JSON
+  provenance limits remain explicit.
+- Additional query controls are unchanged by this gate: source-readiness
+  refinement **7/0**, subset-error matrix **28/16**, both with the fix and with
+  its runtime changes ablated. Exact failed-test names match. Reports:
+  `/tmp/tanstack-initial-error-query-controls.json` and
+  `/tmp/tanstack-initial-error-query-controls-baseline.json`. Restored committed
+  source after comparison. These 16 baseline failures are outside the seven-suite
+  census and must not be counted as new regressions or silently marked fixed.
+
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
       behavior, and opaque callback roots.
