@@ -1679,7 +1679,8 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
         with route, not a fictitious freely crossed axis.
       - Exact mismatch arrays pin unfinished preload resolving on cleanup
         (48 cells) and failed initial boundary preload resolving without its
-        error (8 cells). The other 136 cells obey the laws. These are two
+        error (8 cells). At the initial checkpoint the other 136 cells obeyed
+        its assertions; the later message check below exposes 12 more reds. These were two
         fault families, not 56 independent bugs. Random campaigns also vary
         rank origin and spacing. AbortError settlement is distinct from the
         physical signal abort that cleanup checks.
@@ -1722,8 +1723,9 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
       - Type checking found fixture key-generic errors in this file and the
         earlier graph witness, plus a missing replay-test type import; fixed.
         Package-wide tsc still reports errors in other existing test files.
-        The corrected matrix passes all 196 tests; its final 100× rerun is
-        pending. The combined seven-suite 100× campaign completed at 405
+        The corrected matrix passes all 196 tests, including its final 100×
+        rerun (2,000 fixed plus 2,000 random histories). The combined
+        seven-suite 100× campaign completed at 405
         passing / 54 failing tests before the message-check additions. Of
         those, 49 were the frozen lifecycle reds and four were ordered-work
         reds. One additional random-history mismatch minimized to requesting
@@ -1733,6 +1735,16 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
         release/cleanup/restart/unsubscribe suffix. Do not patch runtime or
         filter the generator until its notification contract is evaluated.
         The lifecycle gate remains open.
+      - Fresh follow-up loss audit of `a0aaeb77` supports preservation of the
+        six earlier audit items. It recovered the stale 136-green summary
+        above (now historical). The callback map checks payload/row membership,
+        not a canonical choice of message key or delta order. Obsolete error
+        identity is checked against successful restart, not a separate current
+        failing attempt. These remain explicit limits, not extra runtime bugs.
+        The auditor verified the final JSON report's 196 passing / zero failing
+        tests; 100× derives from the recorded invocation. The original audit
+        source was an agent message, so its six-item preservation check relies
+        on that supplied record plus direct source inspection.
     - [ ] Rerun fixed, random, and 100× lifecycle campaigns; freeze the final
           green/red catalog; then run a fresh Field Lab loss audit.
 
