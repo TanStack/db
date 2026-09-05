@@ -1241,27 +1241,27 @@ explicitly removed.
 This is the bounded protocol census. Do not add another production patch until
 every row is either green or has a named red witness.
 
-| Protocol slice                                       | Executable coverage                                                                                 | Current result                                         |
-| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| Logical demand start/release and synchronous reentry | 28 start cells, 14 failure-delivery cells, 8 release cells                                          | 4 truncate-during-start status reds; other cells green |
-| Sync acquisition availability                        | 6-phase × 7-entry census: 14 direct cells, 5 delegated cells, 2 blocked cells, 21 true exclusions   | blocked cells name the earlier unavailable-demand red  |
-| Physical retirement                                  | 5 states × 5 causes: 12 executable cells and 13 true exclusions                                     | census complete; executable reds stay named            |
-| Cleanup/restart ownership                            | 20 restart cells plus fixed callback boundaries                                                     | green except the acquisition-availability reds         |
-| Async session fencing                                | 2–4 sessions, 1–2 demands, mixed outcomes, obsolete/current/interleaved settlement                  | green                                                  |
-| Generated async lifecycle histories                  | one pure reducer drives async-pending and sync-success histories with one ordered event trace       | 14 named replay-generation/status reds                 |
-| Row-bearing lifecycle histories                      | independent public-row model over canonical, fixed-seed, and random histories with exact batches    | 4 named publication reds                               |
-| Replay phase transitions                             | setup/pending/settling/publishing crossed with release, reacquisition, supersession, abort, cleanup | three audit claims remain to reconcile below           |
-| Ordered route mechanics                              | page/prefix/boundary/full-source × return/throw/resolve/reject/abort/cleanup                        | green                                                  |
-| Ordered consumer integration                         | Collection/Effect parity, source-local recovery, public-window reentry, sync-session settlement     | 5 named reds                                           |
-| Ordered generated histories                          | authority, route, barrier, settlement, and session reach                                            | not yet implemented                                    |
+| Protocol slice                                       | Executable coverage                                                                                 | Current result                                          |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| Logical demand start/release and synchronous reentry | 28 start cells, 14 failure-delivery cells, 8 release cells                                          | 4 truncate-during-start status reds; other cells green  |
+| Sync loader availability                             | 6 phases × 5 entries: 12 executable cells, 1 blocked cell, 17 true exclusions                       | runtime reach checked; blocked cell has a typed red     |
+| Physical acquisition interaction                     | 5 states × 5 causes: 14 executable cells and 11 true exclusions                                     | distinguishes no-op, abort, retire, preserve, and retry |
+| Cleanup/restart ownership                            | 20 restart cells plus fixed callback boundaries                                                     | green except the acquisition-availability reds          |
+| Async session fencing                                | 2–4 sessions, 1–2 demands, mixed outcomes, obsolete/current/interleaved settlement                  | green                                                   |
+| Generated async lifecycle histories                  | one pure reducer drives async-pending and sync-success histories with one ordered event trace       | 14 named replay-generation/status reds                  |
+| Row-bearing lifecycle histories                      | independent public-row model over canonical, fixed-seed, and random histories with exact batches    | 4 named publication reds                                |
+| Replay phase transitions                             | setup/pending/settling/publishing crossed with release, reacquisition, supersession, abort, cleanup | three audit claims remain to reconcile below            |
+| Ordered route mechanics                              | page/prefix/boundary/full-source × return/throw/resolve/reject/abort/cleanup                        | green                                                   |
+| Ordered consumer integration                         | Collection/Effect parity, source-local recovery, public-window reentry, sync-session settlement     | 5 named reds                                            |
+| Ordered generated histories                          | authority, route, barrier, settlement, and session reach                                            | not yet implemented                                     |
 
-The frozen 36-test red catalog groups into these protocol faults. Multiple
+The current 37-test red catalog groups into these protocol faults. Multiple
 matrix cells are deliberate variants of one fault, not separate diagnoses.
 
 | Red class                                 | Named witnesses | Observable failure                                                           |
 | ----------------------------------------- | --------------- | ---------------------------------------------------------------------------- |
-| Start/failure reentry through truncate    | 6               | false loading/ready transitions or wrong physical retirement                 |
-| Acquisition availability and callback ABA | 12              | demand starts on the wrong loader/session, settles early, or owns no lease   |
+| Start/failure reentry through truncate    | 5               | false loading/ready transitions or missing replay after failure              |
+| Acquisition availability and callback ABA | 14              | demand starts on the wrong loader/session, settles early, or owns no lease   |
 | Obsolete async replay readiness           | 2               | retired work keeps the current subscription from reaching `ready`            |
 | Aborted replay generation                 | 4               | false loading cycles, phantom unload, or a live peer remains stuck loading   |
 | Synchronous replay/restart readiness      | 8               | synchronous work emits a false `loadingSubset -> ready` cycle                |
@@ -1282,7 +1282,7 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
         `reject`) with adapter-start reentry (`none`, release self, release
         peer, unsubscribe, cleanup) and assert the exact request, abort,
         release, error, status, and ownership trace. The finite census covers
-        all 20 start cells and all 10 failure-delivery cells.
+        all 28 start cells and all 14 failure-delivery cells.
   - [x] Cross physical release outcome (`return`, `throw`) with unload reentry
         (`none`, reacquire self, release peer, unsubscribe) and prove logical
         retirement happens once while failed cleanup stays exact retry debt.
@@ -1361,13 +1361,12 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
         separate resource-installation axis, and add session-tagged unload
         assertions to every restart/callback witness. Do not call the phase
         table complete until this census itself fails when a legal cell is
-        omitted. The census now has six phases and seven possible entries: 14
-        direct cells, five delegated cells, two cells blocked by the earlier
-        unavailable-demand defect, and 21 explicit exclusions with reasons.
-        Omitting any cell fails the typed record; omitting a direct or delegated
-        witness fails the registration census. No witness may register itself
-        away from the executable matrix it names. Restart/callback unloads name
-        the adapter session that owns each physical acquisition.
+        omitted. The loader-availability census now has six phases and five
+        entries: 12 executable cells, one cell blocked by the earlier
+        unavailable-demand defect, and 17 explicit exclusions with reasons.
+        Omitting any cell fails the typed record; omitting an executed witness
+        fails the runtime reach census. Restart/callback unloads name the
+        adapter session that owns each physical acquisition.
   - [ ] Keep the ordered-query layer as a consumer of the same protocol. Cross
         page, prefix, boundary, and full-source routes with cancellation,
         failure, retry, and reentrant `setWindow`; do not duplicate ownership
@@ -1448,8 +1447,9 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
         last fully green checkpoint had 86 core lifecycle cells plus 129
         existing subscription/replay tests. The independent-trace checkpoint
         had 109 lifecycle tests: 93 green laws and 16 named reds. The frozen
-        lifecycle catalog now has 147 tests: 111 green laws and 36 named reds.
-        The driver chooses runtime owners and
+        checkpoint had 147 tests: 111 green laws and 36 named reds. Executable
+        acquisition reach and direct-release coverage now bring the catalog to
+        149 tests: 112 green laws and 37 named reds. The driver chooses runtime owners and
         attempts independently from the reducer; the phantom-unload witness
         reaches its unload assertion; abort remains in the green generator
         except for the exact replay class; and red histories no longer count
@@ -1462,9 +1462,9 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
         demand can republish the unchanged row as another insert. A
         non-cooperative source also proved that an acquisition can publish
         after its signal aborts. The phase table distinguishes
-        direct, delegated, blocked, and impossible acquisition cells. A
-        5-state × 5-cause physical-retirement census names all 12 executable
-        transitions and 13 true exclusions. The open classes remain
+        executable, blocked, and impossible loader-availability cells. A
+        5-state × 5-cause physical-interaction census names all 14 executable
+        transitions and 11 true exclusions. The open classes remain
         acquisition availability, phantom ownership/resource retirement,
         replay/abort generation, cleanup/reentry, obsolete publication, and
         preservation of independent source writes across a successful
@@ -1501,8 +1501,54 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
           interleaving.
     - [x] Rerun the full fixed/random lifecycle catalog and freeze its counts:
           111 green laws and 36 named red witnesses across 147 tests.
-    - [ ] Run a fresh Field Lab loss audit on the frozen lifecycle-census
-          commit.
+    - [x] Run a fresh Field Lab loss audit on the frozen lifecycle-census
+          commit. The audit confirmed the exact 147-test count, but rejected
+          the claim that the whole lifecycle gate was complete.
+  - [ ] Close the frozen-census audit ledger before changing production:
+    - [x] A — Make acquisition and physical-interaction coverage prove runtime
+          execution rather than test declaration. Give blocked cells typed red
+          witnesses and update stale 20/10 counts. The census records reach only
+          after the named callback or interaction runs; skipped and early-red
+          tests cannot satisfy it.
+    - [x] A — Split sync-loader availability, subset acquisition, subset
+          unload, and source-session cleanup axes. Reclassify abort-only and
+          debt-preserving interactions that do not retire a lease. Loader
+          availability now has its own phase table; physical interaction names
+          no-acquisition, abort-only, retirement, preserved debt, and retried
+          debt; restart tests retain exact source-session cleanup evidence.
+    - [x] A — Add direct-release witnesses for eager and pre-aborted demands;
+          both currently call `unloadSubset` despite no physical acquisition.
+    - [x] A — Assert exact adapter attempt, signal, session, result kind, and
+          final release in failure-delivery truncate/abort and active-truncate
+          cells. This removed one false red and exposed a narrower one:
+          synchronous failure followed by truncate never starts the retained
+          replacement demand.
+    - [ ] B — Emit and require compound settlement scope × age × outcome and
+          session × replay reach, not independent marginal labels.
+    - [ ] B — Resume full status checking after each exact tolerated red delta,
+          then execute release, cleanup, restart, and unsubscribe suffixes.
+    - [ ] B — Add mixed aborted/live cleanup-restart and complete synchronous
+          replay shapes: same-key owners, last-owner abort, and detached abort.
+    - [ ] B — Derive real-interleaving reach from the observed settlement trace;
+          let a generation publish before a later restart makes it obsolete.
+    - [ ] B — Assert discarded-session signals abort on cleanup and compare
+          every async restart error by exact object identity.
+    - [ ] C — Cross replay barrier phase × source insert/update/delete ×
+          settlement × suffix with checked observed reach. Keep named red
+          regions out of the broad green campaign without filtering away their
+          fixed witnesses.
+    - [ ] C — Model failed/private replacement retirement explicitly; final
+          owner release must not vacuously publish private rows.
+    - [ ] C — Add full lifecycle suffixes for released-obsolete, aborted,
+          visible-row-repeat, and independent-write publication reds.
+    - [ ] D — Add executable witnesses for the three remaining replay-phase
+          contracts: surviving successful peer, per-attempt failure ownership,
+          and reentrant async demand readiness.
+    - [ ] D — Generate the ordered consumer product over authority, route,
+          barrier, settlement, window, and sync-session transitions with checked
+          observed reach.
+    - [ ] Rerun fixed, random, and 100× lifecycle campaigns; freeze the final
+          green/red catalog; then run a fresh Field Lab loss audit.
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
       behavior, and opaque callback roots.
