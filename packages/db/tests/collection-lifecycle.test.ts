@@ -23,6 +23,90 @@ function getChangesManager(collection: object): {
 }
 
 describe(`Collection Lifecycle Management`, () => {
+  it.each(
+    ([`same`, `missing`, `changed`, `empty`] as const).flatMap((shape) =>
+      ([`atomic`, `split`] as const).map((delivery) => ({ shape, delivery })),
+    ),
+  )(
+    `keeps eager restart messages coherent for $shape keys with $delivery commits`,
+    async ({ shape, delivery }) => {
+      type Row = { id: string; version: number }
+      let rows: Array<Row> = [
+        { id: `a`, version: 1 },
+        { id: `b`, version: 1 },
+      ]
+      const collection = createCollection<Row>({
+        getKey: ({ id }) => id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            const batches =
+              delivery === `atomic` ? [rows] : rows.map((row) => [row])
+            for (const batch of batches) {
+              begin()
+              for (const value of batch) write({ type: `insert`, value })
+              commit()
+            }
+            markReady()
+          },
+        },
+      })
+      await collection.preload()
+      const delivered = new Map<string | number, Row>()
+      const read = () =>
+        collection.toArray.map(({ id, version }) => ({ id, version }))
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          for (const change of changes) {
+            if (change.type === `delete`) {
+              expect(delivered.get(change.key)).toEqual({
+                id: change.value.id,
+                version: change.value.version,
+              })
+              delivered.delete(change.key)
+            } else {
+              if (change.type === `insert`)
+                expect(delivered.has(change.key)).toBe(false)
+              else
+                expect(change.previousValue).toMatchObject(
+                  delivered.get(change.key)!,
+                )
+              delivered.set(change.key, {
+                id: change.value.id,
+                version: change.value.version,
+              })
+            }
+          }
+          expect([...delivered.values()]).toEqual(read())
+        },
+        { includeInitialState: true },
+      )
+      try {
+        expect([...delivered.values()]).toEqual(rows)
+        await collection.cleanup()
+        rows =
+          shape === `empty`
+            ? []
+            : shape === `changed`
+              ? [
+                  { id: `c`, version: 2 },
+                  { id: `d`, version: 2 },
+                ]
+              : shape === `missing`
+                ? [{ id: `a`, version: 2 }]
+                : [
+                    { id: `a`, version: 2 },
+                    { id: `b`, version: 2 },
+                  ]
+        await collection.preload()
+        expect(collection.status).toBe(`ready`)
+        expect([...delivered.values()]).toEqual(rows)
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
   it.each([`pending`, `starting`, `ready`, `failed`] as const)(
     `cleanup settles a %s preload without inventing first readiness`,
     async (phase) => {

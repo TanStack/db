@@ -1255,7 +1255,7 @@ every row is either green or has a named red witness.
 | Replay phase transitions                             | setup/pending/settling/publishing crossed with release, reacquisition, supersession, abort, cleanup | direct settled-peer loss red; graph peer, error ownership, and new-demand readiness witnesses green |
 | Ordered route mechanics                              | page/prefix/boundary/full-source × return/throw/resolve/reject/abort/cleanup                        | green                                                        |
 | Ordered consumer integration                         | Collection/Effect parity, source-local recovery, public-window reentry, sync-session settlement     | 5 named reds                                                 |
-| Ordered generated histories                          | 192 checked route/delivery/window/outcome/session/barrier histories; finite/full request shapes     | 180 green cells; 12 cells pin stale-message reds |
+| Ordered generated histories                          | 192 checked route/delivery/window/outcome/session/barrier histories; finite/full request shapes     | 192 green cells; no known-red classifier remains |
 
 The earlier 44-test red catalog grouped into these protocol faults. Later
 checkpoints below add witnesses; the final combined census is still pending. Multiple
@@ -1866,6 +1866,61 @@ These are candidate repair scopes, not completed fixes or proof of root cause.
   100× environment is command provenance, not independently encoded in JSON.
   One-context adjacent-source reading may hide other omissions. This closes
   this local repair, not the remaining lifecycle work.
+
+### Local repair checkpoint: stale eager rows across restart
+
+- Red: remove the final 12-cell ordered classifier. The full-source/replay/
+  restart witness then fails twice: reconstructed callback state retains the
+  old distinct key beside its replacement, including after a later update.
+  Reads themselves show only the replacement. No oracle assertions were cut.
+- Cause: cleanup retains delivered rows, but reconciliation only visits keys
+  present in incoming changes. An old key absent from the replacement never
+  receives a delete. For eager sources, reconcile remaining stale keys against
+  the installed collection while publishing the next batch, including an empty
+  ready batch. Reuse existing retained-row state; add no registry or flag.
+- Boundary control: do not infer absence from partial on-demand state. An
+  unscoped trial fixed the 12 cells but failed 11 previously passing lifecycle
+  tests. Checking installed loader presence also failed: startup can call ready
+  before returning the loader. The final guard uses declared sync mode and
+  leaves active replay publication alone. The original seven-suite pass/fail
+  baseline is restored, without changing those tests or their models.
+- Test gap: same-key replacement reconciled correctly while changed and missing
+  keys did not. Eight direct controls cross same/missing/changed/empty keys with
+  atomic/split eager commits and compare callback state with installed rows
+  after every batch. Seven fail without this fix; all eight pass with it.
+  Reports: `/tmp/tanstack-stale-controls-red.json` and
+  `/tmp/tanstack-stale-controls.json`.
+- Production delta: +12 lines, no new state. Architecture records the eager/
+  on-demand distinction. Existing subscription lint errors remain at unchanged
+  lines (import cycle and four unnecessary-condition diagnostics); the new
+  code and tests add no lint diagnostics.
+- Current default-run census, stable seven-suite scope:
+
+  | Suite | Passing test functions | Failing test functions |
+  | --- | ---: | ---: |
+  | Async lifecycle history | 7 | 20 |
+  | Demand lifecycle | 101 | 20 |
+  | Row publication lifecycle | 7 | 9 |
+  | Subscription replay | 69 | 0 |
+  | Graph replay refinement | 7 | 0 |
+  | Ordered lifecycle | 196 | 0 |
+  | Ordered work | 20 | 4 |
+  | **Total** | **407** | **53** |
+
+  Previously the same runner counts hid 12 exactly classified ordered reds;
+  those now genuinely satisfy the assertions. Test functions are not unique
+  bug counts or uniform matrix cells. Adding the separate lifecycle controls
+  suite gives 461 passing / 53 failing (54/54 lifecycle controls, eight new).
+  Reports: `/tmp/tanstack-lifecycle-progress.json`,
+  `/tmp/tanstack-lifecycle-progress-replay.json`, and
+  `/tmp/tanstack-lifecycle-stale-repair.json`.
+- Ordered 100× passes 196/196: 2,000 fixed and 2,000 random histories plus
+  192 Cartesian cells and coverage guards, now without a known-red classifier.
+  Report: `/tmp/tanstack-stale-100x.json`. Adjacent subscription, live-query,
+  and includes-temporal tests pass 167 with the same six recorded live-query
+  failures (refill retry and synchronous replay normalization), in
+  `/tmp/tanstack-stale-adjacent.json`. The post-commit loss audit follows.
+  No push. Continue reporting this overall census alongside local matrix gains.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar

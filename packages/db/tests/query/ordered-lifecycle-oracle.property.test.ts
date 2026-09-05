@@ -466,32 +466,7 @@ async function assertHistory(scenario: Scenario) {
     scenario.route === `full-source` ? `full` : `finite`,
   )
   expect(result.generation).toBe(scenario.session === `restart` ? 2 : 1)
-  const original = {
-    id: 1,
-    rank: (scenario.rankOffset ?? 0) + (scenario.rankStep ?? 1),
-    version: 1,
-  }
-  const replacement = { ...original, version: 2 }
-  const updated = { ...replacement, rank: replacement.rank - 1 }
-  // Exact known-red observations; all other checkpoints must satisfy the law.
-  const known =
-    scenario.session === `restart` &&
-    scenario.barrier === `replay` &&
-    scenario.route === `full-source`
-      ? [
-          {
-            law: `message-snapshot`,
-            actual: [original, replacement],
-            expected: [replacement],
-          },
-          {
-            law: `message-snapshot`,
-            actual: [original, updated],
-            expected: [updated],
-          },
-        ]
-      : []
-  expect(result.mismatches).toEqual(known)
+  expect(result.mismatches).toEqual([])
   return result
 }
 

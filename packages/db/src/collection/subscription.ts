@@ -1889,6 +1889,18 @@ export class CollectionSubscription
         })
       }
     }
+    // Cleanup discards rows without publishing deletes. Eager sources publish
+    // their installed state; subset sources must first finish reacquisition.
+    if (
+      this.collection.config.syncMode !== `on-demand` &&
+      !this.isBufferingForTruncate
+    ) {
+      for (const [key, value] of this.stalePublishedRows) {
+        if (this.collection.has(key)) continue
+        this.stalePublishedRows.delete(key)
+        reconciled.push({ type: `delete`, key, value })
+      }
+    }
     return reconciled
   }
 

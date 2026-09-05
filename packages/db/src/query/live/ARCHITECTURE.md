@@ -532,6 +532,12 @@ before it queues reacquisition, then reacquires all detached demand through a
 fresh private publication barrier. Settlements from the old session cannot
 publish rows, report errors, or change readiness in the new session.
 
+Eager collections have no subset reacquisition barrier. After cleanup, their
+next public batch reconciles retained subscriber rows against the installed
+state, including deletions for keys that do not return. An empty ready batch
+also reconciles an empty replacement. On-demand sources cannot infer absence
+from their partial installed state; their replay barrier owns replacement.
+
 Its semantic contract is:
 
 > Every active, satisfiable bucket must be served by a settled current demand
