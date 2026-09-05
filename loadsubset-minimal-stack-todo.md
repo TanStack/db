@@ -1829,8 +1829,11 @@ These are candidate repair scopes, not completed fixes or proof of root cause.
   or boundary reads. Lazy demand keeps its own fatal-error path; applying the
   eager path there caused the existing synchronous lazy-start cleanup control
   to fail, so that ownership exclusion remains.
-- Oracle gap: testing only first-request failure cannot distinguish transport
-  success from completion of initial query refinement. The existing product
+- Oracle gap: first-request failure cannot distinguish transport success from
+  completion of initial query refinement. The older four sync/async primary ×
+  boundary controls also reject immediately (`Promise.reject`), so they miss
+  a boundary held pending until the primary's success has cleared tracking.
+  The gated oracle preserves that intervening state. The existing product
   covers both delivery timings, keep/widen, rejection/AbortError, and restart
   versus retained sessions. Only the resolved bug's classifier was removed;
   all row, message, waiter, ownership, and physical-request assertions remain.
@@ -1843,8 +1846,26 @@ These are candidate repair scopes, not completed fixes or proof of root cause.
 - Ordered 100× passes 196/196 test functions: 2,000 fixed and 2,000 random
   histories plus the Cartesian cells and coverage guards. Report:
   `/tmp/tanstack-boundary-100x.json`. Package type checking still reports
-  existing errors in other tests, none in either changed file. A fresh
-  loss audit follows the commit before closing this step. No push.
+  existing errors in other tests, none in either changed file. No push.
+- Additional consumer checks: lifecycle and query-once pass 67/67. Effects
+  pass 67 with two release-retry failures: reentrant disposal and obsolete
+  demand release each observe one unload call instead of two. Removing only
+  this step's production change reproduces both exact assertions; the fix was
+  restored afterwards. Reports: `/tmp/tanstack-boundary-consumers.json`,
+  `/tmp/tanstack-boundary-effects.json`, and
+  `/tmp/tanstack-boundary-effects-baseline.json`. These remain baseline work,
+  not a passing effect-suite claim.
+- Fresh loss audit of `e1fd3951` found no assertion loss. It recovered the
+  delayed-settlement distinction above and two compressed scope details:
+  lazy startup throws through setup so earlier subscriptions are released;
+  incremental lazy failure errors the live query without throwing through an
+  established source commit. The eight repaired cells are retained-session,
+  initial-boundary failures only (2 delivery × 2 window × 2 failure outcomes).
+  Restart and replay variants are neighboring controls, not additional repaired
+  cases. The auditor inspected source and JSON, without executing tests; the
+  100× environment is command provenance, not independently encoded in JSON.
+  One-context adjacent-source reading may hide other omissions. This closes
+  this local repair, not the remaining lifecycle work.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
