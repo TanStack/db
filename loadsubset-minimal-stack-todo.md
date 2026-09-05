@@ -1613,8 +1613,8 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
         the successful peer too (expected `two=2`, observed empty). The prior
         test retired the failure before peer settlement. Both physical loads,
         all four exact unloads, and final release execute in the new witness.
-        Graph-controlled publication and per-attempt error ownership remain
-        open. This witness records continuation; safe recovery remains an
+        Graph-controlled peer publication remains open. This witness records
+        continuation; safe recovery remains an
         allowed implementation choice under the policy above.
       - The reentrant unload/reacquire witness now checks non-ready status,
         absence of ready events, and no new publication both before and after
@@ -1625,7 +1625,14 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
         completion stays pending. Settling the new load publishes `one=2` and
         `two=2`, emits ready once, and all three exact leases unload once.
         This boundary is green.
-      - Validation: replay oracle file passes all 68 tests, including the new
+      - Replay error ownership has a green executable witness at the graph
+        publication-control boundary: the first replay rejects, releasing its
+        pending peer throws a distinct error, and replay completion rejects
+        with the original error object. Late peer success cannot change that
+        settlement. Cleanup retries the failed release and each of four leases
+        is successfully unloaded once. This does not claim every ordering of
+        multiple failures is covered.
+      - Validation: replay oracle file passes all 69 tests, including the new
         exact known-red observation; the peer witness was first run as an ordinary test
         and failed only on the missing successful peer row. No production
         changes in this checkpoint.
@@ -1636,6 +1643,11 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
         on the first pending flush as well as after obsolete settlement. Exact
         release checks prove eventual cleanup, not release timing. Recovery
         remains policy rather than executable proof, and D remains incomplete.
+      - Fresh Field Lab audit of `93967bd5`: PASS for the bounded readiness
+        checkpoint. Its snapshot-only observation limit prompted callback
+        tracing as well: after initial acquisition, there are zero callbacks
+        during replay and one complete replacement callback at settlement.
+        Initial acquisition callbacks are outside this replay-specific trace.
     - [ ] D — Generate the ordered consumer product over authority, route,
           barrier, settlement, window, and sync-session transitions with checked
           observed reach.
