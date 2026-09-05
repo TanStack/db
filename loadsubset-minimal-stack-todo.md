@@ -1255,7 +1255,7 @@ every row is either green or has a named red witness.
 | Replay phase transitions                             | setup/pending/settling/publishing crossed with release, reacquisition, supersession, abort, cleanup | direct settled-peer loss red; graph peer, error ownership, and new-demand readiness witnesses green |
 | Ordered route mechanics                              | page/prefix/boundary/full-source × return/throw/resolve/reject/abort/cleanup                        | green                                                        |
 | Ordered consumer integration                         | Collection/Effect parity, source-local recovery, public-window reentry, sync-session settlement     | 5 named reds                                                 |
-| Ordered generated histories                          | 192 checked route/delivery/window/outcome/session/barrier histories; finite/full request shapes     | 136 green cells; 56 cells pin two exact caller-settlement reds |
+| Ordered generated histories                          | 192 checked route/delivery/window/outcome/session/barrier histories; finite/full request shapes     | 124 green cells; 68 cells pin caller-settlement and stale-message reds |
 
 The earlier 44-test red catalog grouped into these protocol faults. Later
 checkpoints below add witnesses; the final combined census is still pending. Multiple
@@ -1671,7 +1671,7 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
           barrier, settlement, window, and sync-session transitions with checked
           observed reach.
       - The real ordered consumer crosses page/prefix/boundary/full-source,
-        provider application before/at settlement, keep/widen, successful/
+        provider application before settlement/after live success, keep/widen, successful/
         rejected/AbortError settlement, retain/restart, and initial/replay.
         All 192 cells prove physical requests and terminal lease cleanup before
         counting reach. Full versus finite describes observed request shape,
@@ -1690,8 +1690,49 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
         state. Empty snapshot-completion callbacks are not row publications.
       - Validation before audit: 195 tests passed, including fixed/random
         campaigns and the declared-cell guard. An added observed-reach guard
-        brings the file to 196 tests. ESLint passes. The 100× run and fresh
-        loss audit remain pending; no production code changed.
+        brings the file to 196 tests. ESLint passes. The initial 100× run
+        passed all 196 tests (2,000 fixed and 2,000 random histories plus the
+        finite matrix). No production code changed.
+      - Fresh Field Lab audit of `a9909273` supported the bounded matrix and
+        exact two red families, but recovered six scope gaps. Follow-up adds
+        this suite to `test:oracles`, names deferred delivery `after-success`,
+        and asserts application occurs only for live success (or the selected
+        early-write policy). It checks `getWindow()` while pending, after
+        success/failure, and after restart. Callback deltas now reconstruct an
+        independent row map and check insert/delete/update payloads and update
+        previous values, excluding virtual metadata. This map survives with
+        the subscription across source restart; resetting it would invent
+        missing previous rows. Obsolete settlement also preserves status and
+        exact error identity. The scan's omission focus can overstate the
+        significance of intentionally bounded tests; these were test gaps,
+        not six new production bugs.
+      - Explicit remaining limits: this ordered product does not run a
+        separate downstream query, observe every transient status/error event,
+        or stimulate a source after final unsubscribe. Other lifecycle suites
+        cover terminal silence, but no cross-suite claim replaces a missing
+        witness. Failed-operation retain/rebuild remains a policy to implement
+        and test, not a green recovery proof.
+      - The stronger message check found a third red family in 12 cells:
+        full-source restart after replay inserts the replacement under a new
+        key without deleting the old delivered key. Public reads are correct,
+        but a consumer reconstructed from callback messages retains version 1
+        beside version 2, even after the next live update. Exact two-checkpoint
+        mismatch arrays preserve this evidence. The matrix now has 124 green
+        cells and 68 exact-red cells, across three fault families.
+      - Type checking found fixture key-generic errors in this file and the
+        earlier graph witness, plus a missing replay-test type import; fixed.
+        Package-wide tsc still reports errors in other existing test files.
+        The corrected matrix passes all 196 tests; its final 100× rerun is
+        pending. The combined seven-suite 100× campaign completed at 405
+        passing / 54 failing tests before the message-check additions. Of
+        those, 49 were the frozen lifecycle reds and four were ordered-work
+        reds. One additional random-history mismatch minimized to requesting
+        new demand after failed restart (seed 317005625, path
+        `6347:9:11:12:15:13:13:13:13`). It concerns a missing empty callback,
+        not lost rows. A named witness now retains the history and full
+        release/cleanup/restart/unsubscribe suffix. Do not patch runtime or
+        filter the generator until its notification contract is evaluated.
+        The lifecycle gate remains open.
     - [ ] Rerun fixed, random, and 100× lifecycle campaigns; freeze the final
           green/red catalog; then run a fresh Field Lab loss audit.
 
@@ -1708,6 +1749,8 @@ These are candidate repair scopes, not completed fixes or proof of root cause.
 | Synchronous reentry during startup/loader replacement | Prefer explicit detection and recovery if continuing needs more machinery | No half-owned lease, silent success, or hung caller |
 | Untagged writes from non-cooperative obsolete/aborted sources | Keep as an explicit adapter/session boundary decision | Do not pretend a request signal identifies an untagged source write |
 | Replacement delta ordering | Check whether ordering is externally required before repair | Do not impose a total callback order where complete valid snapshots suffice |
+| Full-source restart leaves an old key in callback consumers | Include in restart/publication repair | Correct `toArray` is not enough; delivered messages must reconstruct the same rows |
+| Missing empty notification after failed restart | Evaluate model obligation first | Empty callbacks may be optional; preserve the minimized history until resolved |
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
       behavior, and opaque callback roots.

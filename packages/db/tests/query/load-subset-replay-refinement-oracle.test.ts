@@ -28,7 +28,7 @@ describe(`loadSubset replay refinement`, () => {
     const successful = createDeferred<void>()
     const loads: Array<{ options: LoadSubsetOptions; ids: Array<number> }> = []
     const unloads: Array<LoadSubsetOptions> = []
-    const parents = createCollection<Parent>({
+    const parents = createCollection<Parent, string>({
       id: `settled-peer-parent`,
       getKey: ({ id }) => id,
       sync: {
@@ -44,7 +44,7 @@ describe(`loadSubset replay refinement`, () => {
         },
       },
     })
-    const children = createCollection<Child>({
+    const children = createCollection<Child, number>({
       id: `settled-peer-children`,
       getKey: ({ id }) => id,
       syncMode: `on-demand`,

@@ -10,6 +10,7 @@ import { createTransaction } from '../src/transactions.js'
 import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
 import { flushPromises } from './utils.js'
 import type { Collection } from '../src/collection/index.js'
+import type { CollectionSubscription } from '../src/collection/subscription.js'
 import type { OrderBy } from '../src/query/ir.js'
 import type {
   ChangeMessageOrDeleteKeyMessage,

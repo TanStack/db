@@ -17,7 +17,7 @@ type Row = { id: number; rank: number; version: number }
 type Route = `page` | `prefix` | `boundary` | `full-source`
 type Scenario = {
   route: Route
-  delivery: `before-settlement` | `at-settlement`
+  delivery: `before-settlement` | `after-success`
   window: `keep` | `widen`
   outcome: `resolve` | `reject` | `abort-error`
   session: `retain` | `restart`
@@ -65,7 +65,7 @@ async function observeHistory(scenario: Scenario) {
   const released: Array<LoadSubsetOptions> = []
   const sourceCleanups: Array<number> = []
   const publications: Array<Array<Row>> = []
-  const changes: Array<Array<string>> = []
+  const deliveredRows = new Map<string | number, Row>()
   let generation = 0
   let activeSync!: Sync
   let activeInstalled!: Set<number>
@@ -75,7 +75,7 @@ async function observeHistory(scenario: Scenario) {
   let appliedBeforeSettlement = false
   let replayStarted = false
   let allowTarget = scenario.barrier === `initial`
-  const source = createCollection<Row>({
+  const source = createCollection<Row, number>({
     id: `ordered-history-source-${JSON.stringify(scenario)}`,
     getKey: ({ id }) => id,
     syncMode: `on-demand`,
@@ -154,7 +154,7 @@ async function observeHistory(scenario: Scenario) {
                     throw error
                   },
                 )
-              if (!gated || scenario.delivery === `at-settlement`) await apply()
+              if (!gated || scenario.delivery === `after-success`) await apply()
             })()
           },
           unloadSubset: (options) => {
@@ -182,10 +182,37 @@ async function observeHistory(scenario: Scenario) {
     live.toArray.map(({ id, rank, version }) => ({ id, rank, version }))
   const subscription = live.subscribeChanges(
     (batch) => {
-      changes.push(batch.map(({ type }) => type))
       // subscribeChanges also sends an empty initial-snapshot completion callback.
-      // Keep its trace, but count row publications only when there are row deltas.
-      if (batch.length > 0) publications.push(read())
+      // Count row publications only when there are row deltas.
+      if (batch.length === 0) return
+      for (const change of batch) {
+        const value = {
+          id: change.value.id,
+          rank: change.value.rank,
+          version: change.value.version,
+        }
+        if (change.type === `delete`) {
+          check(`delete-payload`, value, deliveredRows.get(change.key))
+          deliveredRows.delete(change.key)
+        } else {
+          if (change.type === `update`)
+            check(
+              `update-previous`,
+              change.previousValue && {
+                id: change.previousValue.id,
+                rank: change.previousValue.rank,
+                version: change.previousValue.version,
+              },
+              deliveredRows.get(change.key),
+            )
+          else check(`insert-new-key`, deliveredRows.has(change.key), false)
+          deliveredRows.set(change.key, value)
+        }
+      }
+      const byId = (rows: Array<Row>) =>
+        rows.slice().sort((a, b) => a.id - b.id)
+      check(`message-snapshot`, byId([...deliveredRows.values()]), byId(read()))
+      publications.push(read())
     },
     { includeInitialState: false },
   )
@@ -240,6 +267,7 @@ async function observeHistory(scenario: Scenario) {
     if (scenario.barrier === `initial`)
       expect(preload.state.settled).toBe(false)
     expect(read()).toEqual(baseline)
+    check(`pending-window`, live.utils.getWindow(), { offset: 0, limit: 1 })
     expect(publications).toEqual([])
     expect(target!.applied).toBe(scenario.delivery === `before-settlement`)
     appliedBeforeSettlement = target!.applied
@@ -252,6 +280,10 @@ async function observeHistory(scenario: Scenario) {
       move = observe(live.utils.setWindow({ offset: 0, limit: 3 }))
       await flushPromises()
       expect(move.state.settled).toBe(false)
+      check(`pending-move-window`, live.utils.getWindow(), {
+        offset: 0,
+        limit: 1,
+      })
       expect(publications).toEqual([])
     }
     if (scenario.session === `restart`) {
@@ -282,14 +314,28 @@ async function observeHistory(scenario: Scenario) {
       await live.preload()
       expect(generation).toBe(2)
       check(`restarted-window`, read(), referenceWindow(1))
+      check(`restarted-window-options`, live.utils.getWindow(), {
+        offset: 0,
+        limit: 1,
+      })
     }
     const prior = read()
+    const priorStatus = live.status
+    const priorError = live.utils.lastSubsetError
     const callbacksBeforeSettlement = publications.length
     if (scenario.outcome === `resolve`) gate.resolve()
     else gate.reject(failure)
     for (let turn = 0; turn < 8; turn++) await flushPromises()
     expect(targetOutcome).toBe(scenario.outcome)
+    // Deferred application happens only after a live attempt succeeds. Failure
+    // and old-session success must not apply its rows through this provider.
+    expect(target!.applied).toBe(
+      scenario.delivery === `before-settlement` ||
+        (scenario.outcome === `resolve` && scenario.session === `retain`),
+    )
     if (scenario.session === `restart`) {
+      check(`obsolete-status`, live.status, priorStatus)
+      check(`obsolete-error`, live.utils.lastSubsetError === priorError, true)
       check(`obsolete-rows`, read(), prior)
       check(
         `obsolete-publication`,
@@ -309,6 +355,10 @@ async function observeHistory(scenario: Scenario) {
       )
     } else if (scenario.outcome === `resolve`) {
       check(`success-preload`, preload.state, { settled: true })
+      check(`success-window-options`, live.utils.getWindow(), {
+        offset: 0,
+        limit: scenario.window === `widen` ? 3 : 1,
+      })
       if (move) check(`success-window`, move.state, { settled: true })
       check(
         `success-rows`,
@@ -362,6 +412,10 @@ async function observeHistory(scenario: Scenario) {
           { settled: true, error: `target` },
         )
       check(`failure-rows`, read(), baseline)
+      check(`failed-window-options`, live.utils.getWindow(), {
+        offset: 0,
+        limit: 1,
+      })
       check(`failure-publication`, publications, [])
     }
   } finally {
@@ -395,7 +449,7 @@ async function observeHistory(scenario: Scenario) {
     generation,
     coordinates: [
       route,
-      appliedBeforeSettlement ? `before-settlement` : `at-settlement`,
+      appliedBeforeSettlement ? `before-settlement` : `after-success`,
       move ? `widen` : `keep`,
       targetOutcome,
       generation === 2 ? `restart` : `retain`,
@@ -412,6 +466,13 @@ async function assertHistory(scenario: Scenario) {
     scenario.route === `full-source` ? `full` : `finite`,
   )
   expect(result.generation).toBe(scenario.session === `restart` ? 2 : 1)
+  const original = {
+    id: 1,
+    rank: (scenario.rankOffset ?? 0) + (scenario.rankStep ?? 1),
+    version: 1,
+  }
+  const replacement = { ...original, version: 2 }
+  const updated = { ...replacement, rank: replacement.rank - 1 }
   // Exact known-red observations; all other checkpoints must satisfy the law.
   const known =
     scenario.session === `restart` && scenario.barrier === `initial`
@@ -427,7 +488,22 @@ async function assertHistory(scenario: Scenario) {
               expected: { settled: true, error: `target` },
             },
           ]
-        : []
+        : scenario.session === `restart` &&
+            scenario.barrier === `replay` &&
+            scenario.route === `full-source`
+          ? [
+              {
+                law: `message-snapshot`,
+                actual: [original, replacement],
+                expected: [replacement],
+              },
+              {
+                law: `message-snapshot`,
+                actual: [original, updated],
+                expected: [updated],
+              },
+            ]
+          : []
   expect(result.mismatches).toEqual(known)
   return result
 }
@@ -435,7 +511,7 @@ async function assertHistory(scenario: Scenario) {
 describe(`ordered lifecycle product`, () => {
   const observed = new Set<string>()
   const cells: Array<Scenario> = routes.flatMap((route) =>
-    ([`before-settlement`, `at-settlement`] as const).flatMap((delivery) =>
+    ([`before-settlement`, `after-success`] as const).flatMap((delivery) =>
       ([`keep`, `widen`] as const).flatMap((window) =>
         ([`resolve`, `reject`, `abort-error`] as const).flatMap((outcome) =>
           ([`retain`, `restart`] as const).flatMap((session) =>
@@ -470,7 +546,7 @@ describe(`ordered lifecycle product`, () => {
     route: fc.constantFrom(...routes),
     delivery: fc.constantFrom(
       `before-settlement` as const,
-      `at-settlement` as const,
+      `after-success` as const,
     ),
     window: fc.constantFrom(`keep` as const, `widen` as const),
     outcome: fc.constantFrom(
