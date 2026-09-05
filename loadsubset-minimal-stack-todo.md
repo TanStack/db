@@ -1243,8 +1243,8 @@ explicitly removed.
 This is the bounded protocol census. Do not add another production patch until
 every row is either green or has a named red witness.
 
-Latest checkpoint: **499 passing / 23 failing** across 522 test functions.
-The demand suite is **183/0**. Remaining failures: history **9**, publication
+Latest checkpoint: **509 passing / 18 failing** across 527 test functions.
+The demand suite is **187/0**. Remaining failures: history **4**, publication
 **9**, settled-peer replay **1**, ordered work **4**. Counts describe tests,
 not unique confirmed runtime bugs; contract-alignment notes below distinguish
 stale oracle expectations from implementation defects.
@@ -1256,7 +1256,7 @@ stale oracle expectations from implementation defects.
 | Physical acquisition interaction                     | 5 states × 5 causes: 18 executable cells and 7 true exclusions                                      | distinguishes no-op, abort, retire, preserve, discard, retry |
 | Cleanup/restart ownership                            | 20 restart cells plus fixed callback boundaries                                                     | green, including unavailable-loader pending-result cases     |
 | Async session fencing                                | 2–4 sessions, 1–2 demands, mixed outcomes, obsolete/current/interleaved settlement                  | green                                                        |
-| Generated async lifecycle histories                  | one pure reducer drives async-pending and sync-success histories with one ordered event trace       | 18 green / 9 red; queued setup contract reconciled           |
+| Generated async lifecycle histories                  | one pure reducer drives async-pending and sync-success histories with one ordered event trace       | 24 green / 4 pending-readiness reds; synchronous replay filter removed |
 | Row-bearing lifecycle histories                      | independent public-row model over canonical, fixed-seed, and random histories with exact batches    | 4 named publication reds                                     |
 | Replay phase transitions                             | setup/pending/settling/publishing crossed with release, reacquisition, supersession, abort, cleanup | direct settled-peer loss red; graph peer, error ownership, and new-demand readiness witnesses green |
 | Ordered route mechanics                              | page/prefix/boundary/full-source × return/throw/resolve/reject/abort/cleanup                        | green                                                        |
@@ -2380,7 +2380,7 @@ candidate repair scopes, not completed fixes or proof of root cause.
   and sync-reentry controls remain **142/0**, in
   `/tmp/tanstack-history-queued-controls.json`. Prettier and diff checks pass;
   no new full typecheck claim.
-- Next slice: retain the exact owner/acquisition checks and fix the named
+- Previous next slice: retain the exact owner/acquisition checks and fix the named
   unacquired-unload witness. Then reconcile obsolete-transport readiness with
   the cancellation contract; do not assume all nine history reds are distinct
   runtime bugs or that all non-cooperative source behavior is supported.
@@ -2404,6 +2404,49 @@ candidate repair scopes, not completed fixes or proof of root cause.
   existing context. JSON alone does not prove source restoration or seed command
   provenance. Summary-led omission scanning may overemphasize deliberate scope
   limits; neither audit establishes complete lifecycle coverage.
+
+- Fixed pre-aborted replay ownership. The load wrapper skips an already-aborted
+  request, but replay used to promote that non-acquisition to an active lease.
+  A later release or truncate then called unload with options never passed to
+  the adapter. Replay now leaves the owner detached before releasing its old
+  real lease, using existing error/debt handling. Restart excludes canceled
+  detached owners and retires idle queued status; this also prevents duplicate
+  restart callbacks from repeating a canceled-only loading cycle. No new state,
+  registry, or helper; production delta is **+16 net lines**.
+- Oracle first: removed the synchronous history generator's entire owned-replay
+  exclusion before fixing runtime. Fixed seed 1657004 failed after 16 cases and
+  shrank to request/abort/truncate/truncate/abort, exposing an unacquired unload
+  on the second truncate. Added a committed repeated-truncate history with
+  release/unsubscribe suffix. Existing five unacquired-unload histories remain
+  unchanged. The async generator still excludes aborted replay and pending
+  supersession; that is a remaining breadth gap, not a new green claim.
+- Added four exact-lease release controls: unload return/throw × ordinary or
+  reentrant owner release. They check no replacement acquisition, old options
+  identity, ready status, original release-error identity, no phantom unload on
+  logical release, and exactly one retry of a failed real release at unsubscribe.
+  On frozen expanded tests with both runtime changes removed, history+demand
+  give **200/15**, `/tmp/tanstack-aborted-replay-owner-ablation.json`; all four
+  new release controls fail, as do the repeated-truncate witness and widened
+  fixed-seed property. Restored demand suite is **187/0**. This ablation tests
+  the combined fix, not independent necessity of every line or every assertion.
+- Same-seed seven-suite census (1657011): **509/18**, 527 functions, in
+  `/tmp/tanstack-aborted-replay-owner-census.json`. Five prior red histories turn
+  green; five new functions pass (one history plus four release cases). History
+  **24/4**, demand **187/0**, other suites unchanged. Four pending-readiness
+  histories remain red, plus nine publication, one settled-peer replay and four
+  ordered-work failures. These are test counts, not distinct bug counts.
+  Adjacent lifecycle/subscription/sync-reentry controls remain **142/0**, in
+  `/tmp/tanstack-aborted-replay-owner-verified.json` (before the four new release
+  controls, same runtime). Prettier/diff checks pass. Targeted ESLint reports 14
+  errors and five warnings outside edited lines; no clean lint/typecheck claim.
+- Next slice: reconcile obsolete-transport readiness with the cancellation
+  contract, then widen the async aborted-replay generator as its named red
+  boundaries clear. Do not weaken exact ownership or public snapshot checks.
+- Targeted 10× history campaign: **24/4**, same four named readiness failures,
+  `/tmp/tanstack-aborted-replay-owner-random-10x.json`. All four properties pass
+  800 runs each: fixed seeds 1657003/1657004 and fresh random seeds
+  -414294607/-1840047352. The synchronous domain has no replay exclusion; async
+  exclusions remain as noted. This is not the final full-suite 100× campaign.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar

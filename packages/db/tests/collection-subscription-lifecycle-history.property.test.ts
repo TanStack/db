@@ -570,6 +570,17 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
       ],
     },
     {
+      name: `aborted owner across repeated truncate`,
+      history: [
+        { type: `request`, demand: `a` },
+        { type: `abort`, demand: `a` },
+        { type: `truncate` },
+        { type: `truncate` },
+        { type: `release`, demand: `a` },
+        { type: `unsubscribe` },
+      ],
+    },
+    {
       name: `detached last-owner abort across restart`,
       history: [
         { type: `request`, demand: `a` },

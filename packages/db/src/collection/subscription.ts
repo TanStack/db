@@ -319,9 +319,14 @@ export class CollectionSubscription
       return
     }
     const demands = this.subsetDemands.filter(
-      (demand) => demand.acquisitionState === `detached`,
+      (demand) =>
+        demand.acquisitionState === `detached` &&
+        !demand.requestOptions.signal?.aborted,
     )
-    if (demands.length === 0) return
+    if (demands.length === 0) {
+      this.setReadyIfIdle()
+      return
+    }
 
     const attempt: TruncateReplayAttempt = {
       pending: new Set(),
@@ -502,6 +507,17 @@ export class CollectionSubscription
       loadSubsetSession: demand.loadSubsetSession,
       abortController: demand.abortController,
       removeRequestAbortListener: demand.removeRequestAbortListener,
+    }
+    if (demand.requestOptions.signal?.aborted) {
+      // Cancellation retains the logical owner, but acquires no replacement.
+      // Detach before unload can reenter and release that owner.
+      demand.acquisitionState = `detached`
+      try {
+        if (hadPreviousAcquisition) this.releaseOrRetainAcquisition(previous)
+      } catch (error) {
+        attempt.failures.set(demand, normalizeError(error))
+      }
+      return
     }
     const next = this.createSubsetAcquisition(demand)
     const restorePrevious = () => {

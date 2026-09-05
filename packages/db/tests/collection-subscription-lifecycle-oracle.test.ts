@@ -3291,6 +3291,80 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     subscription.unsubscribe()
   })
 
+  it.each(
+    ([`return`, `throw`] as const).flatMap((outcome) =>
+      [false, true].map((releaseSelf) => ({ outcome, releaseSelf })),
+    ),
+  )(
+    `retires only the acquired lease for aborted replay with unload=$outcome, releaseSelf=$releaseSelf`,
+    async ({ outcome, releaseSelf }) => {
+      const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
+      const controller = new AbortController()
+      const failure = new Error(`release failed`)
+      const loads: Array<LoadSubsetOptions> = []
+      const unloads: Array<LoadSubsetOptions> = []
+      const errors: Array<unknown> = []
+      let releaseOwner = () => {}
+      let operations!: Parameters<SyncConfig<{ id: string }, string>[`sync`]>[0]
+      const collection = createCollection<{ id: string }, string>({
+        id: `aborted-replay-release`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (nextOperations) => {
+            operations = nextOperations
+            operations.markReady()
+            return {
+              loadSubset: (options) => {
+                loads.push(options)
+                return true
+              },
+              unloadSubset: (options) => {
+                unloads.push(options)
+                if (unloads.length === 1) {
+                  if (releaseSelf) releaseOwner()
+                  if (outcome === `throw`) throw failure
+                }
+              },
+            }
+          },
+        },
+      })
+      const subscription = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      releaseOwner = () => subscription.releaseSnapshot(where)
+      subscription.on(`loadSubset:error`, ({ error }) => errors.push(error))
+      try {
+        subscription.requestSnapshot({ where, signal: controller.signal })
+        controller.abort()
+        operations.begin()
+        operations.truncate()
+        const receipt = operations.commit()
+        if (receipt !== true) await receipt
+        await flushPromises()
+
+        expect(loads).toHaveLength(1)
+        expect(unloads).toHaveLength(1)
+        expect(unloads[0]).toBe(loads[0])
+        expect(loads[0]!.signal!.aborted).toBe(true)
+        expect(subscription.status).toBe(`ready`)
+        expect(errors).toHaveLength(outcome === `throw` ? 1 : 0)
+        if (outcome === `throw`) expect(errors[0]).toBe(failure)
+
+        releaseOwner()
+        expect(unloads).toHaveLength(1)
+        subscription.unsubscribe()
+        expect(unloads).toHaveLength(outcome === `throw` ? 2 : 1)
+        for (const options of unloads) expect(options).toBe(loads[0])
+        expect(loads).toHaveLength(1)
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
   it(`keeps failed physical release debt out of truncate replay`, async () => {
     const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
     const releaseFailure = new Error(`release failed`)

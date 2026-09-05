@@ -589,29 +589,10 @@ export const publicationLifecycleHistoryArbitrary =
     (history) => !publishesReleasedObsoleteAttempt(history),
   )
 
-function crossesSynchronousReplay(
-  history: ReadonlyArray<LifecycleCommand>,
-): boolean {
-  const model = createLifecycleModel(`sync-success`)
-  for (const command of history) {
-    const replaysOwnedDemand =
-      (command.type === `truncate` &&
-        model.active &&
-        model.owners.length > 0) ||
-      (command.type === `restart` && !model.active && model.owners.length > 0)
-    if (replaysOwnedDemand) {
-      return true
-    }
-    reduceLifecycle(model, command)
-  }
-  return false
-}
-
-export const syncLifecycleHistoryArbitrary = fc
-  .array(lifecycleCommandArbitrary, { minLength: 1, maxLength: 20 })
-  // Fixed histories now cover valid queued replay status. This broad exclusion
-  // remains a coverage gap: remove it after the aborted-owner unload fix.
-  .filter((history) => !crossesSynchronousReplay(history))
+export const syncLifecycleHistoryArbitrary = fc.array(
+  lifecycleCommandArbitrary,
+  { minLength: 1, maxLength: 20 },
+)
 
 export const settle = (
   demand: DemandName,
