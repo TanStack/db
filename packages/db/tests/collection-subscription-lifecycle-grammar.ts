@@ -60,6 +60,7 @@ export type LifecycleAttempt = {
   session: number
   replay: number
   settled: boolean
+  outcome?: `resolve` | `reject`
   gating: boolean
   reportable: boolean
   aborted: boolean
@@ -166,6 +167,9 @@ function startAttempt(
     session: model.session,
     replay: model.replay,
     settled: model.acquisitionMode === `sync-success`,
+    ...(model.acquisitionMode === `sync-success`
+      ? { outcome: `resolve` as const }
+      : {}),
     gating: model.acquisitionMode === `async-pending`,
     reportable: true,
     aborted: false,
@@ -317,6 +321,7 @@ export function reduceLifecycle(
     const attempt = selectAttempt(model, command)
     if (!attempt) return {}
     attempt.settled = true
+    attempt.outcome = command.outcome
     attempt.gating = false
     if (
       command.outcome === `reject` &&
@@ -451,6 +456,7 @@ function crossesPendingReplaySupersession(
   history: ReadonlyArray<LifecycleCommand>,
 ): boolean {
   const model = createLifecycleModel()
+  let hasPendingSupersession = false
   for (const command of history) {
     if (
       command.type === `truncate` &&
@@ -459,22 +465,70 @@ function crossesPendingReplaySupersession(
         attemptId === undefined ? false : !model.attempts[attemptId]!.settled,
       )
     ) {
+      hasPendingSupersession = true
+    }
+    reduceLifecycle(model, command)
+    const currentAttemptIds = new Set(
+      model.owners.flatMap(({ attemptId }) =>
+        attemptId === undefined ? [] : [attemptId],
+      ),
+    )
+    if (
+      hasPendingSupersession &&
+      model.status === `ready` &&
+      model.attempts.some(
+        ({ id, settled }) => !currentAttemptIds.has(id) && !settled,
+      )
+    ) {
       return true
     }
+  }
+  return false
+}
+
+function replaysAbortedDemand(
+  history: ReadonlyArray<LifecycleCommand>,
+): boolean {
+  const model = createLifecycleModel()
+  for (const command of history) {
+    const wouldReplay =
+      (command.type === `truncate` && model.active) ||
+      (command.type === `restart` && !model.active)
+    if (wouldReplay && model.owners.some(({ aborted }) => aborted)) return true
     reduceLifecycle(model, command)
   }
   return false
 }
 
 export const greenLifecycleHistoryArbitrary = fc
-  .array(
-    // Remove this filter when the named abort/replay red turns green.
-    lifecycleCommandArbitrary.filter(({ type }) => type !== `abort`),
-    { minLength: 1, maxLength: 20 },
-  )
-  // Obsolete non-cooperative loads currently keep readiness gated. A focused
-  // red owns that class while other histories continue to fuzz.
+  .array(lifecycleCommandArbitrary, { minLength: 1, maxLength: 20 })
+  // Each excluded transition has a named failing witness below. Abort itself
+  // remains in the green campaign; only replaying its retired owner is red.
+  .filter((history) => !replaysAbortedDemand(history))
   .filter((history) => !crossesPendingReplaySupersession(history))
+
+function publishesReleasedObsoleteAttempt(
+  history: ReadonlyArray<LifecycleCommand>,
+): boolean {
+  const model = createLifecycleModel()
+  for (const command of history) {
+    const effect = reduceLifecycle(model, command)
+    if (
+      command.type === `settle` &&
+      command.outcome === `resolve` &&
+      effect.attemptId !== undefined &&
+      !model.owners.some(({ attemptId }) => attemptId === effect.attemptId)
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+export const publicationLifecycleHistoryArbitrary =
+  greenLifecycleHistoryArbitrary.filter(
+    (history) => !publishesReleasedObsoleteAttempt(history),
+  )
 
 function crossesSynchronousReplay(
   history: ReadonlyArray<LifecycleCommand>,
@@ -510,6 +564,20 @@ export const settle = (
 export const greenLifecycleHistories: ReadonlyArray<
   ReadonlyArray<LifecycleCommand>
 > = [
+  [
+    { type: `request`, demand: `a` },
+    { type: `abort`, demand: `a` },
+    settle(`a`, `current`, `oldest`, `reject`),
+    { type: `release`, demand: `a` },
+  ],
+  [
+    { type: `request`, demand: `a` },
+    { type: `request`, demand: `a` },
+    settle(`a`, `current`, `oldest`, `resolve`),
+    settle(`a`, `current`, `oldest`, `resolve`),
+    { type: `release`, demand: `a` },
+    { type: `release`, demand: `a` },
+  ],
   [
     { type: `request`, demand: `a` },
     { type: `request`, demand: `b` },
@@ -577,4 +645,10 @@ export const abortedRestartHistory: ReadonlyArray<LifecycleCommand> = [
   { type: `abort`, demand: `a` },
   { type: `restart` },
   { type: `release`, demand: `a` },
+]
+
+export const releasedObsoleteResolveHistory: ReadonlyArray<LifecycleCommand> = [
+  { type: `request`, demand: `a` },
+  { type: `release`, demand: `a` },
+  settle(`a`, `obsolete`, `oldest`, `resolve`),
 ]

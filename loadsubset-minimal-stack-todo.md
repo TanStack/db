@@ -1241,17 +1241,19 @@ explicitly removed.
 This is the bounded protocol census. Do not add another production patch until
 every row is either green or has a named red witness.
 
-| Protocol slice                                       | Executable coverage                                                                                 | Current result                                 |
-| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| Logical demand start/release and synchronous reentry | 20 start cells, 10 failure-delivery cells, 8 release cells                                          | green                                          |
-| Sync acquisition availability                        | executable 6-phase × 7-entry census with 15 legal cells and 27 explicit exclusions                  | 8 named reds; adjacent controls green          |
-| Cleanup/restart ownership                            | 20 restart cells plus fixed callback boundaries                                                     | green except the acquisition-availability reds |
-| Async session fencing                                | 2–4 sessions, 1–2 demands, mixed outcomes, obsolete/current/interleaved settlement                  | green                                          |
-| Generated async lifecycle histories                  | one pure reducer drives async-pending and sync-success histories with one ordered event trace        | 5 named replay-generation/status reds          |
-| Replay phase transitions                             | setup/pending/settling/publishing crossed with release, reacquisition, supersession, abort, cleanup | three audit claims remain to reconcile below   |
-| Ordered route mechanics                              | page/prefix/boundary/full-source × return/throw/resolve/reject/abort/cleanup                        | green                                          |
-| Ordered consumer integration                         | Collection/Effect parity, source-local recovery, public-window reentry, sync-session settlement     | 5 named reds                                   |
-| Ordered generated histories                          | authority, route, barrier, settlement, and session reach                                            | not yet implemented                            |
+| Protocol slice                                       | Executable coverage                                                                                 | Current result                                         |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| Logical demand start/release and synchronous reentry | 28 start cells, 14 failure-delivery cells, 8 release cells                                          | 4 truncate-during-start status reds; other cells green |
+| Sync acquisition availability                        | 6-phase × 7-entry census: 16 direct cells, 5 delegated cells, 21 true exclusions                    | 9 named reds; adjacent controls green                  |
+| Physical retirement                                  | 5 states × 5 causes: 15 executable cells and 10 true exclusions                                     | census complete; executable reds stay named            |
+| Cleanup/restart ownership                            | 20 restart cells plus fixed callback boundaries                                                     | green except the acquisition-availability reds         |
+| Async session fencing                                | 2–4 sessions, 1–2 demands, mixed outcomes, obsolete/current/interleaved settlement                  | green                                                  |
+| Generated async lifecycle histories                  | one pure reducer drives async-pending and sync-success histories with one ordered event trace       | 8 named replay-generation/status reds                  |
+| Row-bearing lifecycle histories                      | independent public-row model over canonical, fixed-seed, and random histories                       | 1 released-obsolete publication red                    |
+| Replay phase transitions                             | setup/pending/settling/publishing crossed with release, reacquisition, supersession, abort, cleanup | three audit claims remain to reconcile below           |
+| Ordered route mechanics                              | page/prefix/boundary/full-source × return/throw/resolve/reject/abort/cleanup                        | green                                                  |
+| Ordered consumer integration                         | Collection/Effect parity, source-local recovery, public-window reentry, sync-session settlement     | 5 named reds                                           |
+| Ordered generated histories                          | authority, route, barrier, settlement, and session reach                                            | not yet implemented                                    |
 
 - [ ] Finish the subset-demand lifecycle oracle before accepting more local
       runtime patches. Treat these as one protocol, not separate regressions:
@@ -1429,11 +1431,19 @@ every row is either green or has a named red witness.
         the stricter audit added four red acquisition-availability cells. The
         last fully green checkpoint had 86 core lifecycle cells plus 129
         existing subscription/replay tests. The consolidated checkpoint has
-        The independent-trace checkpoint has 109 lifecycle tests: 93 green
-        laws and 16 named reds. The follow-up added two named status reds. The
-        open classes remain acquisition availability,
-        phantom ownership/resource retirement, replay/abort generation, and
-        cleanup/reentry.
+        The independent-trace checkpoint had 109 lifecycle tests: 93 green
+        laws and 16 named reds. The completed core census now has 133 tests:
+        108 green laws and 25 named reds. The driver chooses runtime owners and
+        attempts independently from the reducer; the phantom-unload witness
+        reaches its unload assertion; abort remains in the green generator
+        except for the exact replay class; and red histories no longer count
+        as passed SUT reach. A row-bearing history model found one additional
+        class: a released non-cooperative acquisition can still publish its
+        obsolete row. The phase table distinguishes delegated executable cells
+        from impossible cells, and a 5-state × 5-cause physical-retirement
+        census names every valid transition. The open classes remain
+        acquisition availability, phantom ownership/resource retirement,
+        replay/abort generation, cleanup/reentry, and obsolete publication.
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
       behavior, and opaque callback roots.
