@@ -45,7 +45,7 @@ describe(`Collection Lifecycle Management`, () => {
         () => undefined,
         (error: unknown) => error,
       )
-      await collection.cleanup()
+      if (phase !== `starting`) await collection.cleanup()
       const result = await preload
       if (phase === `ready`) expect(result).toBeUndefined()
       else if (phase === `failed`) expect(result).toBe(failure)

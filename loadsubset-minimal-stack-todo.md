@@ -1808,6 +1808,15 @@ These are candidate repair scopes, not completed fixes or proof of root cause.
   `sync.ts`'s unchanged `cloneOptions` import; no other errors in these files.
   Package-wide existing test type errors remain separate. A fresh loss audit
   follows this checkpoint. No push.
+- Audit of `489fb3a6` found no deleted ordered assertion or broadened filter.
+  Its count caveat is explicit: 196 passing test functions include 20 exact
+  known-red cells (boundary failure and stale message rows), not 196 entirely
+  correct production histories. It also caught a redundant second cleanup in
+  the synchronous-start control; removed so the first cleanup alone must settle
+  that preload before restart. A throwing adapter cleanup remains outside the
+  new four-phase controls: cancellation precedes teardown, while cleanup
+  failures retain their existing separate host-microtask error path. This is
+  a recorded test limit, not a newly confirmed defect. Audit was source-only.
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
       behavior, and opaque callback roots.
