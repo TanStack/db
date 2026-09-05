@@ -191,6 +191,9 @@ function startAttempt(
   model.reach.add(
     `attempt-replay:${attempt.replay === 0 ? `initial` : `replayed`}`,
   )
+  model.reach.add(
+    `attempt-location:${attempt.session === 0 ? `initial` : `restarted`}:${attempt.replay === 0 ? `initial` : `replayed`}`,
+  )
   model.loads.push({
     id,
     demand: attempt.demand,
@@ -362,6 +365,7 @@ export function reduceLifecycle(
     model.reach.add(`settle-scope:${command.scope}`)
     model.reach.add(`settle-age:${command.age}`)
     model.reach.add(`settle-outcome:${command.outcome}`)
+    model.reach.add(`settle:${command.scope}:${command.age}:${command.outcome}`)
     attempt.settled = true
     attempt.outcome = command.outcome
     attempt.gating = false
@@ -615,6 +619,35 @@ export const settle = (
   age: AttemptAge,
   outcome: `resolve` | `reject`,
 ): LifecycleCommand => ({ type: `settle`, demand, scope, age, outcome })
+
+const compoundSettlementHistories = ([`current`, `obsolete`] as const).flatMap(
+  (scope) =>
+    ([`oldest`, `newest`] as const).flatMap((age) =>
+      ([`resolve`, `reject`] as const).map((outcome) => [
+        { type: `request`, demand: `a` } as const,
+        { type: `request`, demand: `a` } as const,
+        ...(scope === `obsolete`
+          ? ([
+              { type: `release`, demand: `a` },
+              { type: `release`, demand: `a` },
+            ] as const)
+          : []),
+        settle(`a`, scope, age, outcome),
+      ]),
+    ),
+)
+
+export const compoundLifecycleCoverageHistories: ReadonlyArray<
+  ReadonlyArray<LifecycleCommand>
+> = [
+  ...compoundSettlementHistories,
+  [
+    { type: `request`, demand: `a` },
+    settle(`a`, `current`, `oldest`, `resolve`),
+    { type: `truncate` },
+    settle(`a`, `current`, `oldest`, `resolve`),
+  ],
+]
 
 export const greenLifecycleHistories: ReadonlyArray<
   ReadonlyArray<LifecycleCommand>

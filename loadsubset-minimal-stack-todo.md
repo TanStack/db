@@ -1541,7 +1541,11 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
           cleanup ran exactly once, checks cleaned-up status, preserves the
           primary error, and rejects any later attempt, unload, status, or error
           activity.
-    - [ ] B — Emit and require compound settlement scope × age × outcome and
+    - [x] Track A gate — A fresh Field Lab loss audit passed commit `b78b6eda`.
+          The audit reran the 152-test catalog, checked every census guard, and
+          found no remaining Track A proxy reach, invalid exclusion, stale
+          count, or false-green path.
+    - [x] B — Emit and require compound settlement scope × age × outcome and
           session × replay reach, not independent marginal labels.
     - [ ] B — Resume full status checking after each exact tolerated red delta,
           then execute release, cleanup, restart, and unsubscribe suffixes.

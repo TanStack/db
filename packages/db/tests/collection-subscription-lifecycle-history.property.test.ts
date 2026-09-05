@@ -6,6 +6,7 @@ import { Func, PropRef, Value } from '../src/query/ir.js'
 import {
   abortReplayHistory,
   abortedRestartHistory,
+  compoundLifecycleCoverageHistories,
   createLifecycleModel,
   greenLifecycleHistories,
   greenLifecycleHistoryArbitrary,
@@ -366,7 +367,10 @@ if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
 describe(`CollectionSubscription async lifecycle history oracle`, () => {
   it(`covers every required command and cross-phase transition`, async () => {
     const reach = new Set<string>()
-    for (const history of greenLifecycleHistories) {
+    for (const history of [
+      ...greenLifecycleHistories,
+      ...compoundLifecycleCoverageHistories,
+    ]) {
       for (const label of await runHistory(history)) reach.add(label)
     }
     const commands = [
@@ -389,10 +393,21 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
       `settle-age:newest`,
       `settle-outcome:resolve`,
       `settle-outcome:reject`,
+      ...([`current`, `obsolete`] as const).flatMap((scope) =>
+        ([`oldest`, `newest`] as const).flatMap((age) =>
+          ([`resolve`, `reject`] as const).map(
+            (outcome) => `settle:${scope}:${age}:${outcome}`,
+          ),
+        ),
+      ),
       `attempt-session:initial`,
       `attempt-session:restarted`,
       `attempt-replay:initial`,
       `attempt-replay:replayed`,
+      `attempt-location:initial:initial`,
+      `attempt-location:initial:replayed`,
+      `attempt-location:restarted:initial`,
+      `attempt-location:restarted:replayed`,
       `duplicate-owner`,
       `request-while-cleaned`,
       `partial-generation-supersession`,
