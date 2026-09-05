@@ -1280,7 +1280,7 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
 | Independent write during replay           | historical 1; repaired | successful replacement now preserves unrelated source rows written behind its gate |
 | Duplicate-owner snapshot                  | historical 1; repaired | snapshot reads now reuse known private/public rows to avoid duplicate inserts |
 | Aborted acquisition publication           | historical 1    | source must suppress canceled request writes; conforming-source witness green, no core bug claimed fixed |
-| No-acquisition truncate                   | 1               | eager demand is given a phantom unload after truncate and final release      |
+| No-acquisition truncate                   | historical 1; repaired | eager truncate and final release create neither a physical acquisition nor phantom unload |
 
 - [ ] Finish the subset-demand lifecycle oracle before accepting more local
       runtime patches. Treat these as one protocol, not separate regressions:
@@ -2911,6 +2911,21 @@ candidate repair scopes, not completed fixes or proof of root cause.
   old-runtime defect.
 - Restored publication suite **43/0**, default fixed-plus-fresh run,
   `/tmp/tanstack-publication-final-restored.json`. No temporary mutation remains.
+- Fresh Field Lab loss audit of `8d66f43f` checked the frozen source/tests before
+  all 21 named JSON reports. It recovered one stale dashboard status: the
+  no-acquisition truncate row still described a phantom unload. Corrected it to
+  historical/repaired; the existing lifecycle witness asserts zero loads and
+  unloads through truncate and unsubscribe and passes in the final census.
+  It also recovered the compressed intermediate source-assertion census detail:
+  **563/11**, seven post-unsubscribe assertion-domain failures plus four ordered
+  reds; seed 1657011 path `0:1:1:1:3:1:1:1` shrinks to unsubscribe → source upsert
+  a → abort a. This is the already-recorded assertion-range error, not a new
+  defect or the latest result. All stated report totals and explicit seed/path
+  pairs matched; no dropped original witness, suffix, or callback-silence check
+  was found. The scan was sequential/correlated in one fresh agent, not
+  sibling-blind; source-first categories and task framing may steer omissions.
+  No auditor tests run, no correctness endorsement, and no independent proof of
+  successful example counts, environments, or temporary patch restoration.
 - Formatting/diff checks pass. Targeted eslint reports five pre-existing errors
   outside changed lines and two shadow warnings; no standalone typecheck or
   clean lint claim. JSON supports counts/failures/seeds, not successful run counts,
