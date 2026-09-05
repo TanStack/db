@@ -2294,6 +2294,15 @@ candidate repair scopes, not completed fixes or proof of root cause.
   separately but sequentially in one fresh context, not sibling-blind, and did
   not rerun tests. Its summary-led scan may hide material outside that summary.
 
+- Fresh follow-up loss audit of `c5fd5462` found the three assertion changes
+  preserved in the summary. Its recovered omissions were already recorded
+  proof-scope and seed/provenance limits, plus the names behind the five demand
+  failures: four truncate ownership/status cases and one truncate primary-error
+  ownership case. This second audit was source/report-only, sequential in one
+  fresh context, and summary-led. Final post-audit seven-suite rerun remains
+  **483/39**, with exactly the same failed names, in
+  `/tmp/tanstack-recovery-notification-audited-census.json` (seed 1657011).
+
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
       behavior, and opaque callback roots.
