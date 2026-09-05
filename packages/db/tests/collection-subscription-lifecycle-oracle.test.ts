@@ -2189,6 +2189,69 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     await collection.cleanup()
   })
 
+  it.each([false, true])(
+    `ignores a pre-aborted snapshot without changing an existing demand: %s`,
+    async (existingDemand) => {
+      const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
+      const loads: Array<LoadSubsetOptions> = []
+      const unloads: Array<LoadSubsetOptions> = []
+      let publications = 0
+      let results = 0
+      const collection = createCollection<{ id: string }>({
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `row` } })
+            commit()
+            markReady()
+            return {
+              loadSubset: (options) => {
+                loads.push(options)
+                return true
+              },
+              unloadSubset: (options) => unloads.push(options),
+            }
+          },
+        },
+      })
+      const subscription = collection.subscribeChanges(() => publications++, {
+        includeInitialState: false,
+      })
+      try {
+        if (existingDemand) subscription.requestSnapshot({ where })
+        const previousPublications = publications
+        const previousLoads = [...loads]
+        const controller = new AbortController()
+        controller.abort()
+
+        expect(
+          subscription.requestSnapshot({
+            where,
+            signal: controller.signal,
+            replaceExistingDemand: true,
+            onLoadSubsetResult: () => results++,
+          }),
+        ).toBe(false)
+        await flushPromises()
+        expect(publications).toBe(previousPublications)
+        expect(results).toBe(0)
+        expect(loads).toEqual(previousLoads)
+        expect(unloads).toEqual([])
+        if (existingDemand) expect(loads[0]!.signal?.aborted).toBe(false)
+
+        subscription.releaseSnapshot(where)
+        expect(unloads).toEqual(previousLoads)
+        subscription.unsubscribe()
+        expect(unloads).toEqual(previousLoads)
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
   it(`aborts detached demand without creating a physical acquisition`, async () => {
     const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
     const controller = new AbortController()

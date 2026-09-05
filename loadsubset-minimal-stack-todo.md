@@ -2034,6 +2034,35 @@ candidate repair scopes, not completed fixes or proof of root cause.
   and reports only, without rerunning tests; scanning the sources in one agent
   could bias attention across them.
 
+- Repaired pre-aborted snapshot ownership. The sync layer already rejected an
+  aborted request without calling the adapter, but the subscription retained a
+  tentative acquisition and later issued a phantom unload. `requestSnapshot`
+  now returns false before ownership replacement or local publication when the
+  incoming signal is already aborted. One guard condition and comment; no new
+  state. This is an entry cancellation check, not a rule to suppress release of
+  real acquisitions whose signals were aborted later.
+- Red/green: both existing ownership witnesses failed before the guard
+  (`/tmp/tanstack-preabort-step-red.json`, 0/2). Added a two-cell control for
+  absent/existing demand: an aborted replacement must return false, publish no
+  local snapshot, invoke no result callback, and leave any prior acquisition
+  live until its owner releases it. Both controls failed before the guard at
+  the return-value assertion (`/tmp/tanstack-preabort-controls-red.json`, 0/2);
+  later assertions were not reached on that red run. All four now pass. The
+  existing active-abort ownership test remains green, guarding the distinction
+  between cancellation before acquisition and release after acquisition.
+- Latest seven-suite census: **413 passing / 49 failing** in
+  `/tmp/tanstack-preabort-census.json`: exactly two prior failures removed,
+  no new failures, plus two added passing controls. Demand lifecycle is 108/15;
+  the other suites retain their preceding counts, including the unpinned peer
+  replay failure. Adjacent subscription, sync-reentrancy, and lifecycle tests:
+  **142/0**, `/tmp/tanstack-preabort-adjacent.json`. Prettier and diff checks
+  pass. ESLint reports 12 errors and one warning on unchanged lines in the two
+  edited files; this is not a clean lint run. No amplified campaign repeated
+  for this entry guard. The missing law was physical acquisition/release
+  symmetry for cancellation before entry; cancellation during an active load
+  does not test it. Shared replay recovery and the remaining lifecycle failures
+  are still open.
+
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
       behavior, and opaque callback roots.

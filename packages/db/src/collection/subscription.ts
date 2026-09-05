@@ -1320,10 +1320,11 @@ export class CollectionSubscription
    * Returns a boolean indicating if it succeeded.
    * It can only fail if there is no index to fulfill the request
    * and the optimizedOnly option is set to true,
-   * or, the entire state was already loaded.
+   * or, the entire state was already loaded or the request was cancelled.
    */
   requestSnapshot(opts?: RequestSnapshotOptions): boolean {
-    if (this.unsubscribed) return false
+    // Cancel before replacing ownership or publishing a local snapshot.
+    if (this.unsubscribed || opts?.signal?.aborted) return false
     if (this.loadedInitialState) {
       // Subscription was deoptimized so we already sent the entire initial state
       return false
