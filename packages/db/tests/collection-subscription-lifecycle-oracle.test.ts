@@ -2746,6 +2746,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       })
 
       collection.startSyncImmediate()
+      await flushPromises()
       expect.soft(collection.status).toBe(`error`)
       expect.soft(loads).toEqual([])
       expect.soft(observed).toEqual([])
@@ -2889,6 +2890,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
 
       markError(new Error(`initial sync failed`))
 
+      await flushPromises()
       expect.soft(collection.status).toBe(`error`)
       expect.soft(loads.map(({ where }) => where)).toEqual([oldWhere])
 

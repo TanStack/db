@@ -532,6 +532,12 @@ before it queues reacquisition, then reacquires all detached demand through a
 fresh private publication barrier. Settlements from the old session cannot
 publish rows, report errors, or change readiness in the new session.
 
+An initial sync error also leaves newly requested demand detached, even when
+the adapter has installed a loader. Same-session `markReady()` resumes that
+demand; releasing it before recovery creates no physical acquisition or unload.
+Queued reacquisition must not retry a failed attempt merely because both
+loading and ready notifications scheduled it.
+
 Eager collections have no subset reacquisition barrier. After cleanup, their
 next public batch reconciles retained subscriber rows against the installed
 state, including deletions for keys that do not return. An empty ready batch

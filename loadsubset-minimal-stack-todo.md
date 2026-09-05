@@ -2187,6 +2187,41 @@ candidate repair scopes, not completed fixes or proof of root cause.
   with no reruns; its summary-led single scan could bias attention. Exact
   command/ablation provenance remains in this execution log, not the JSON alone.
 
+- Repaired initial-error acquisition gating independently of result notification.
+  New on-demand requests remain detached during source error even if the loader
+  is installed. Both startup and same-session ready recovery schedule the
+  existing detached-demand path. Each queued callback captures the current
+  replay identity so a second notification cannot retry a failed first attempt.
+  Unavailable sources retire the restart loading status without claiming work
+  succeeded. No new stored field. Architecture text now states this boundary.
+- Strengthened the two initial-error traces with a microtask checkpoint before
+  recovery: no physical work may start while error persists. Full demand-suite
+  runtime ablation (source restored exactly to HEAD) was **131/8** in
+  `/tmp/tanstack-initial-error-gate-ablation.json`; restored fix is **133/6** in
+  `/tmp/tanstack-initial-error-gate-verified.json`. Both used seed 1657010.
+  Adjacent lifecycle/subscription/reentrancy tests are **142/0** in the latter
+  report. Latest seven-suite census: **438 passing / 40 failing**,
+  `/tmp/tanstack-initial-error-gate-final-census.json`, exactly the unavailable
+  release and installed-loader error-gating failures removed, none added.
+  Prettier/diff checks pass. The earlier `initial-error-gate-red.json` was not
+  a frozen-source run; use the later ablation as red evidence instead.
+- An intermediate implementation exposed three existing controls: failed sync
+  must retire loading status, and loading-plus-ready notifications must not
+  duplicate a failed acquisition. Both were corrected without weakening tests.
+  The missing testing dimension was persistence of initial error across a
+  queued turn, not just synchronous status at `markError()`.
+- Result notification remains a design decision. The test expects a later
+  `onLoadSubsetResult(true)` after recovery, but production consumers use the
+  callback synchronously: `requestSegment` copies `load.ready` immediately after
+  `requestSnapshot`, and ordered `requestAndObserve` consumes its local
+  `observed` value after the call returns. A late callback would turn the test
+  green without updating those consumers. Proposed contract: synchronously
+  supply a pending promise and settle it after actual acquisition/recovery,
+  reusing the deferred-start pattern. This changes the no-callback-yet oracle
+  expectation and requires cancellation/lifetime controls. Asked the user;
+  not implemented or counted as fixed. Do not add callback retention merely
+  to satisfy the array-based witness.
+
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
       behavior, and opaque callback roots.

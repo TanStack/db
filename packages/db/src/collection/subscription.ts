@@ -247,17 +247,26 @@ export class CollectionSubscription
     this.collectionCleanup = this.collection.on(`status:cleaned-up`, () => {
       this.handleCollectionCleanup()
     })
-    this.collectionRestartCleanup = this.collection.on(`status:loading`, () => {
-      const loadSubsetSession = this.collection._sync.getLoadSubsetSession()
-      if (
-        this.subsetDemands.some(
-          (demand) => demand.acquisitionState === `detached`,
-        )
-      ) {
-        this.setStatus(`loadingSubset`)
-      }
-      queueMicrotask(() => this.restartDetachedDemands(loadSubsetSession))
-    })
+    this.collectionRestartCleanup = this.collection.on(
+      `status:change`,
+      ({ status }) => {
+        if (status !== `loading` && status !== `ready`) return
+        const loadSubsetSession = this.collection._sync.getLoadSubsetSession()
+        const replaySession = this.truncateReplaySession
+        if (
+          this.subsetDemands.some(
+            (demand) => demand.acquisitionState === `detached`,
+          )
+        ) {
+          this.setStatus(`loadingSubset`)
+        }
+        queueMicrotask(() => {
+          if (this.truncateReplaySession === replaySession) {
+            this.restartDetachedDemands(loadSubsetSession)
+          }
+        })
+      },
+    )
   }
 
   /** Detach logical demand from work owned by a discarded sync session. */
@@ -292,7 +301,7 @@ export class CollectionSubscription
     this.setReadyIfIdle()
   }
 
-  /** Reacquire logical demand that survived a Collection cleanup. */
+  /** Acquire detached demand after startup or initial-error recovery. */
   private restartDetachedDemands(loadSubsetSession: number): void {
     if (
       this.unsubscribed ||
@@ -300,7 +309,10 @@ export class CollectionSubscription
     ) {
       return
     }
-    if (this.collection._sync.syncLoadSubsetFn === null) {
+    if (
+      this.collection.status === `error` ||
+      this.collection._sync.syncLoadSubsetFn === null
+    ) {
       this.setReadyIfIdle()
       return
     }
@@ -1170,8 +1182,9 @@ export class CollectionSubscription
       // Ready/error callbacks can run before sync returns its loader. Idle
       // deferred starts still acquire through the sync manager's queue.
       (this.collection.config.syncMode === `on-demand` &&
-        this.collection.status !== `idle` &&
-        this.collection._sync.syncLoadSubsetFn === null)
+        (this.collection.status === `error` ||
+          (this.collection.status !== `idle` &&
+            this.collection._sync.syncLoadSubsetFn === null)))
     ) {
       demand.acquisitionState = `detached`
       this.subsetDemands.push(demand)
