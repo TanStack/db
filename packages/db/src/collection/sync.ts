@@ -852,7 +852,7 @@ export class CollectionSyncManager<
           return true
         }
 
-        request.deferred.resolve(undefined)
+        request.deferred.reject(new LoadSubsetOperationAbortedError())
         return false
       })
       return
@@ -916,7 +916,7 @@ export class CollectionSyncManager<
     const deferredLoadSubsets = this.deferredLoadSubsets
     this.deferredLoadSubsets = []
     for (const request of deferredLoadSubsets) {
-      request.deferred.resolve(undefined)
+      request.deferred.reject(new LoadSubsetOperationAbortedError())
     }
   }
 }

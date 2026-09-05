@@ -2094,6 +2094,40 @@ candidate repair scopes, not completed fixes or proof of root cause.
   cleanup callback reentry, and deferred abandonment remain distinct open laws.
   The oracle gap was treating ready/loading/error as a proxy for physical loader
   installation; the existing phase/entry matrix supplies the three regressions.
+- Fresh Field Lab loss audit of `cf3a29d7`: deferred controls distinguish one
+  exact load/unload after resume from zero of either after release-before-resume;
+  eager controls also assert zero unloads. Successful restart checks no result
+  callback after replay and exact final unloads. Failed restart checks that
+  callback only before recovery, then load/unload counts; invalid return has
+  teardown but no unload assertion. Preserve these limits instead of attributing
+  every assertion to all three tests. Twelve passing randomized cases use new
+  seeds, so the census comparison is of failure-name sets, not identical
+  histories. Audit confirmed counts by source/report inspection only, with no
+  reruns. A single fresh scanner checked sources sequentially after independent
+  scanners hit the thread limit; omissions may reflect deliberate compression,
+  not defects.
+
+- Repaired queued acquisition cancellation. Cleanup and explicit unload removed
+  queued work but resolved its promise as if the adapter had completed it.
+  Both paths now reject with the existing `LoadSubsetOperationAbortedError`;
+  normal resume still resolves. Two expression replacements, no new state.
+  The existing cleanup-before-resume witness was red (0/1) in
+  `/tmp/tanstack-deferred-abandon-red.json`.
+- Expanded that witness into four action cells: cleanup, explicit release,
+  unsubscribe, and resume. This preserves its no-load, promise-shape, settlement,
+  and cleanup-reach assertions and adds a successful-acquisition control.
+  Before the fix: **1 passing / 3 failing** in
+  `/tmp/tanstack-deferred-settlement-red.json`; each cancellation wrongly
+  resolved, while resume passed. The existing deferred ownership test still
+  checks exact load/unload identity and cancellation-before-resume counts.
+- Latest seven-suite census: **420 passing / 45 failing** in
+  `/tmp/tanstack-deferred-settlement-census.json`. The old single cleanup test
+  is replaced by four passing cells (three added tests); no other failing test
+  names changed. Adjacent subscription/reentrancy/lifecycle: **142/0** in
+  `/tmp/tanstack-deferred-settlement-adjacent.json`. Prettier/diff checks pass.
+  This does not fix the separate already-red cleanup-during-resume case, where
+  work has moved out of the pending queue. Missing oracle law: zero adapter
+  calls is not enough; an abandoned request must not report successful work.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar

@@ -2443,51 +2443,65 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     },
   )
 
-  it(`does not settle a deferred demand when cleanup abandons it before resume`, async () => {
-    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
-    const observed: Array<true | Promise<void>> = []
-    let loads = 0
-    const collection = createCollection<{ id: string }>({
-      id: `deferred-start-cleanup-before-resume`,
-      getKey: ({ id }) => id,
-      startSync: false,
-      syncMode: `on-demand`,
-      sync: {
-        sync: ({ markReady }) => {
-          markReady()
-          return {
-            loadSubset: () => {
-              loads++
-              return true
-            },
-          }
+  it.each([`cleanup`, `release`, `unsubscribe`, `resume`] as const)(
+    `settles queued demand according to whether it starts: %s`,
+    async (action) => {
+      const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
+      const observed: Array<true | Promise<void>> = []
+      let loads = 0
+      const collection = createCollection<{ id: string }>({
+        id: `deferred-start-cleanup-before-resume`,
+        getKey: ({ id }) => id,
+        startSync: false,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                loads++
+                return true
+              },
+            }
+          },
         },
-      },
-    })
-    expect(collection._deferSyncStart()).toBe(true)
-    const subscription = collection.subscribeChanges(() => {}, {
-      includeInitialState: false,
-    })
-    subscription.requestSnapshot({
-      where,
-      onLoadSubsetResult: (result) => observed.push(result),
-    })
+      })
+      expect(collection._deferSyncStart()).toBe(true)
+      const subscription = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      subscription.requestSnapshot({
+        where,
+        onLoadSubsetResult: (result) => observed.push(result),
+      })
 
-    await collection.cleanup()
-    await flushPromises()
-    observePhysicalInteraction(`none:cleanup`, `no-acquisition`)
+      if (action === `cleanup`) await collection.cleanup()
+      else if (action === `release`) subscription.releaseSnapshot(where)
+      else if (action === `unsubscribe`) subscription.unsubscribe()
+      else collection._resumeSyncStart()
+      await flushPromises()
+      if (action === `cleanup`) {
+        observePhysicalInteraction(`none:cleanup`, `no-acquisition`)
+      }
 
-    expect(loads).toBe(0)
-    expect(observed).toHaveLength(1)
-    const deferredResult = observed[0]
-    expect(deferredResult).toBeInstanceOf(Promise)
-    if (!(deferredResult instanceof Promise)) {
-      throw new Error(`deferred acquisition did not return a promise`)
-    }
-    await expect(deferredResult).rejects.toMatchObject({ name: `AbortError` })
+      expect(loads).toBe(action === `resume` ? 1 : 0)
+      expect(observed).toHaveLength(1)
+      const deferredResult = observed[0]
+      expect(deferredResult).toBeInstanceOf(Promise)
+      if (!(deferredResult instanceof Promise)) {
+        throw new Error(`deferred acquisition did not return a promise`)
+      }
+      if (action === `resume`)
+        await expect(deferredResult).resolves.toBeUndefined()
+      else
+        await expect(deferredResult).rejects.toMatchObject({
+          name: `AbortError`,
+        })
 
-    subscription.unsubscribe()
-  })
+      subscription.unsubscribe()
+      await collection.cleanup()
+    },
+  )
 
   acquisitionCase(
     [`starting:syncReturn`],
