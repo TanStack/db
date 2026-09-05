@@ -1571,10 +1571,15 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
           every post-initial attempt exactly once in the observed settlement
           trace, and compare each error event by object identity rather than
           Vitest's value equality for `Error` instances.
-    - [ ] C — Cross replay barrier phase × source insert/update/delete ×
-          settlement × suffix with checked observed reach. Keep named red
-          regions out of the broad green campaign without filtering away their
-          fixed witnesses.
+    - [x] C — Cross replay barrier phase × source insert/update/delete ×
+          settlement × suffix with checked observed reach. All 144 cells prove
+          the focal physical source effect, barrier phase, real settlement or
+          still-pending attempt, terminal suffix, and complete command trace
+          before counting reach. The product exposes 21 red cells concentrated
+          in successful replacement of independent private inserts/updates and
+          owner release during a partly settled replay. Public, delete,
+          failed-barrier, and rejection controls remain green. The broad fixed
+          and random campaign still excludes these named red regions.
     - [x] C — Model failed/private replacement retirement explicitly; final
           owner release must not vacuously publish private rows. A non-empty
           failed replacement exposed a new red: final-owner release deletes an
@@ -1583,7 +1588,9 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
           visible-row-repeat, and independent-write publication reds. Each red
           now continues through release, cleanup, restart, and unsubscribe with
           exact soft publication checks. The catalog has 157 tests: 112 green
-          laws and 45 named reds.
+          laws and 45 named reds. The complete product adds one aggregate named
+          red, bringing the frozen catalog to 158 tests: 112 green laws and 46
+          named reds.
     - [ ] D — Add executable witnesses for the three remaining replay-phase
           contracts: surviving successful peer, per-attempt failure ownership,
           and reentrant async demand readiness.
