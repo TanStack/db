@@ -163,6 +163,16 @@ function setStatus(model: LifecycleModel): void {
   }
 }
 
+// Settled failure is not an authoritative replacement. Keep subsequent reads
+// private until the failed owner retires or a new replay succeeds.
+function replacementSucceeded(model: LifecycleModel): boolean {
+  return model.owners.every(
+    ({ attemptId }) =>
+      attemptId === undefined ||
+      model.attempts[attemptId]!.outcome === `resolve`,
+  )
+}
+
 function startAttempt(
   model: LifecycleModel,
   owner: LifecycleOwner,
@@ -343,12 +353,7 @@ export function reduceLifecycle(
     model.reach.add(`effective:release`)
     const [owner] = model.owners.splice(index, 1)
     retireAttempt(model, owner!, true)
-    if (
-      model.publicationBarrierOpen &&
-      model.owners.every(({ attemptId }) =>
-        attemptId === undefined ? true : model.attempts[attemptId]!.settled,
-      )
-    ) {
+    if (model.publicationBarrierOpen && replacementSucceeded(model)) {
       model.publicationBarrierOpen = false
     }
     setStatus(model)
@@ -378,12 +383,7 @@ export function reduceLifecycle(
       model.errors.push({ attemptId: attempt.id, error: attempt.failure })
       model.trace.push({ type: `error`, attemptId: attempt.id })
     }
-    if (
-      model.publicationBarrierOpen &&
-      model.owners.every(({ attemptId }) =>
-        attemptId === undefined ? true : model.attempts[attemptId]!.settled,
-      )
-    ) {
+    if (model.publicationBarrierOpen && replacementSucceeded(model)) {
       model.publicationBarrierOpen = false
     }
     setStatus(model)
@@ -428,12 +428,7 @@ export function reduceLifecycle(
         })
       }
     }
-    if (
-      model.publicationBarrierOpen &&
-      model.owners.every(({ attemptId }) =>
-        attemptId === undefined ? true : model.attempts[attemptId]!.settled,
-      )
-    ) {
+    if (model.publicationBarrierOpen && replacementSucceeded(model)) {
       model.publicationBarrierOpen = false
     }
     setStatus(model)
@@ -479,12 +474,7 @@ export function reduceLifecycle(
     for (const owner of model.owners) {
       if (!owner.aborted) replayLoads.push(startAttempt(model, owner, false))
     }
-    if (
-      model.publicationBarrierOpen &&
-      model.owners.every(({ attemptId }) =>
-        attemptId === undefined ? true : model.attempts[attemptId]!.settled,
-      )
-    ) {
+    if (model.publicationBarrierOpen && replacementSucceeded(model)) {
       model.publicationBarrierOpen = false
     }
     setStatus(model)

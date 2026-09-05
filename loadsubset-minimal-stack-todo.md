@@ -1762,7 +1762,19 @@ These are candidate repair scopes, not completed fixes or proof of root cause.
 | Untagged writes from non-cooperative obsolete/aborted sources | Keep as an explicit adapter/session boundary decision | Do not pretend a request signal identifies an untagged source write |
 | Replacement delta ordering | Check whether ordering is externally required before repair | Do not impose a total callback order where complete valid snapshots suffice |
 | Full-source restart leaves an old key in callback consumers | Include in restart/publication repair | Correct `toArray` is not enough; delivered messages must reconstruct the same rows |
-| Missing empty notification after failed restart | Evaluate model obligation first | Empty callbacks may be optional; preserve the minimized history until resolved |
+| Missing empty notification after failed restart | Resolved: reference-model error | Failed replay keeps later reads private until authoritative success; settlement alone must not reopen it |
+
+### Local repair checkpoint: failed-replay reference contract
+
+- The seed-317005625 mismatch was a model error, not an optional-notification
+  policy. ARCHITECTURE's publication law keeps snapshots private after failed
+  replay. The reducer incorrectly reopened the gate once all owners settled,
+  including rejection. It now requires successful current attempts (or no
+  remaining attempt) at each gate-closing transition.
+- The original minimized history and complete suffix pass without changing
+  production or suppressing callback/trace assertions. The history suite has
+  7 passing tests and the same 20 named runtime reds. No new exception filter.
+- A fresh Field Lab loss audit follows this checkpoint before runtime repair.
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
       behavior, and opaque callback roots.

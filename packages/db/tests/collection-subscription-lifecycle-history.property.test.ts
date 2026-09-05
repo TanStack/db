@@ -587,9 +587,9 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     },
   )
 
-  it(`checks notification semantics when new demand follows failed restart`, async () => {
+  it(`keeps a new snapshot private after failed restart`, async () => {
     // Minimized from seed 317005625 at 100×. The mismatch is an empty
-    // notification, not lost rows; decide its contract before changing runtime.
+    // notification, not lost rows: failed replacement must keep reads private.
     await runHistory(
       [
         { type: `request`, demand: `b` },
