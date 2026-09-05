@@ -1167,7 +1167,10 @@ export class CollectionSubscription
     }
     if (
       this.collection.status === `cleaned-up` ||
-      (this.collection.status === `loading` &&
+      // Ready/error callbacks can run before sync returns its loader. Idle
+      // deferred starts still acquire through the sync manager's queue.
+      (this.collection.config.syncMode === `on-demand` &&
+        this.collection.status !== `idle` &&
         this.collection._sync.syncLoadSubsetFn === null)
     ) {
       demand.acquisitionState = `detached`

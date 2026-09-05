@@ -2071,6 +2071,30 @@ candidate repair scopes, not completed fixes or proof of root cause.
   reruns or lint verification. Sequential scans in one fresh agent can carry
   attention from the first source into the next.
 
+- Repaired demand entry before loader installation. Ready/error callbacks can
+  run inside sync before its return installs `loadSubset`; collection status
+  alone cannot prove an acquisition happened. The existing detached-demand
+  branch now covers non-idle on-demand collections with no installed loader,
+  not only `loading`. Idle deferred starts keep their sync-manager queue;
+  eager mode still bypasses adapter acquisition. No new state or test changes.
+- Three existing red oracle witnesses became green: ready-callback demand on
+  restart, error-callback demand on failed restart, and ready-callback demand
+  when an invalid sync return omits its loader. They assert exact acquisitions,
+  no false result callback, recovery where applicable, and teardown. Red report:
+  `/tmp/tanstack-loader-install-red.json` (0/3). Latest seven-suite census:
+  **416 passing / 46 failing**, `/tmp/tanstack-loader-install-census.json`.
+  Exactly those three prior failures disappeared; none were added. Adjacent
+  subscription/reentrancy/lifecycle tests remain **142/0** in
+  `/tmp/tanstack-loader-install-adjacent.json`. Prettier/diff checks pass.
+- The existing initial-error/same-session-recovery test remains red but now
+  reaches its final result-observer assertion: no false early `true` is emitted,
+  but the observer never receives the actual later result. Keep that missing
+  notification tracked; a stable failure-name set does not mean every failing
+  trace stayed identical. Installed-loader error gating, same-session recovery,
+  cleanup callback reentry, and deferred abandonment remain distinct open laws.
+  The oracle gap was treating ready/loading/error as a proxy for physical loader
+  installation; the existing phase/entry matrix supplies the three regressions.
+
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
       behavior, and opaque callback roots.
