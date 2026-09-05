@@ -219,9 +219,9 @@ function finishReplacement(
   const currentAttempts = lifecycle.owners.flatMap(({ aborted, attemptId }) =>
     aborted || attemptId === undefined ? [] : [lifecycle.attempts[attemptId]!],
   )
-  if (currentAttempts.some(({ outcome }) => outcome === `reject`)) {
-    replacement.failed = true
-  }
+  replacement.failed = currentAttempts.some(
+    ({ outcome }) => outcome === `reject`,
+  )
   if (lifecycle.publicationBarrierOpen) return
   if (replacement.failed) {
     replacement.failed = true
@@ -394,20 +394,6 @@ const sourceMutationArbitrary: fc.Arbitrary<SourceMutation> = fc.record({
   value: fc.integer({ min: 0, max: 5 }),
 })
 
-function mutatesDuringPublicationBarrier(
-  history: ReadonlyArray<PublicationCommand>,
-): boolean {
-  const lifecycle = createLifecycleModel()
-  for (const command of history) {
-    if (command.type === `source`) {
-      if (lifecycle.publicationBarrierOpen) return true
-    } else {
-      reduceLifecycle(lifecycle, command)
-    }
-  }
-  return false
-}
-
 function omitKnownRedVisibleRowRequests(
   history: ReadonlyArray<PublicationCommand>,
 ): Array<PublicationCommand> {
@@ -446,41 +432,6 @@ function omitKnownRedVisibleRowRequests(
   return result
 }
 
-function releasesReplacementBesideIndependentPublicRow(
-  history: ReadonlyArray<PublicationCommand>,
-): boolean {
-  const lifecycle = createLifecycleModel()
-  const publication: PublicationModel = {
-    source: new Map(),
-    visible: new Map(),
-    batches: [],
-    sentKeys: new Set(),
-  }
-  for (const command of history) {
-    const priorPublicationCount = lifecycle.publications
-    const effect =
-      command.type === `source`
-        ? ({} satisfies LifecycleEffect)
-        : reduceLifecycle(lifecycle, command)
-    if (
-      command.type === `release` &&
-      effect.ownerId !== undefined &&
-      publication.replacement &&
-      [...publication.visible.keys()].some((key) => key !== command.demand)
-    ) {
-      return true
-    }
-    projectPublication(
-      publication,
-      lifecycle,
-      command,
-      effect,
-      priorPublicationCount,
-    )
-  }
-  return false
-}
-
 const publicationCommandHistoryArbitrary: fc.Arbitrary<
   Array<PublicationCommand>
 > = greenLifecycleHistoryArbitrary.chain((history) =>
@@ -501,12 +452,7 @@ const publicationCommandHistoryArbitrary: fc.Arbitrary<
       }
       return commands
     })
-    .map(omitKnownRedVisibleRowRequests)
-    .filter(
-      (history) =>
-        !mutatesDuringPublicationBarrier(history) &&
-        !releasesReplacementBesideIndependentPublicRow(history),
-    ),
+    .map(omitKnownRedVisibleRowRequests),
 )
 
 async function runPublicationHistory(

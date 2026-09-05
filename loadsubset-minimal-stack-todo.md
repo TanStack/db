@@ -1243,11 +1243,11 @@ explicitly removed.
 This is the bounded protocol census. Do not add another production patch until
 every row is either green or has a named red witness.
 
-Latest checkpoint: **542 passing / 12 failing** across 554 test functions.
+Latest checkpoint: **551 passing / 6 failing** across 557 test functions.
 The demand suite is **195/0**, and history is **37/0**. The initial-work
 notification mismatch was a model error: readiness and publication have
-different wait sets. Remaining failures: publication **7** (including a new
-retained-row truncate mismatch), settled-peer replay **1**, ordered
+different wait sets. Remaining failures: publication **2** (duplicate snapshot
+delivery and retained-row truncate mismatch), settled-peer replay **0**, ordered
 work **4**. Counts describe tests,
 not unique confirmed runtime bugs; contract-alignment notes below distinguish
 stale oracle expectations from implementation defects.
@@ -1260,8 +1260,8 @@ stale oracle expectations from implementation defects.
 | Cleanup/restart ownership                            | 20 restart cells plus fixed callback boundaries                                                     | green, including unavailable-loader pending-result cases     |
 | Async session fencing                                | 2–4 sessions, 1–2 demands, mixed outcomes, obsolete/current/interleaved settlement                  | green                                                        |
 | Generated async lifecycle histories                  | one pure reducer drives async-pending and sync-success histories with one ordered event trace       | 37 green; readiness/publication membership distinguished; both async exclusions removed |
-| Row-bearing lifecycle histories                      | independent public-row model; exact batches modulo independent-key order; fixed and random histories | 19 green / 7 red; cancellation and delayed-replay expectations reconciled; retained-row truncate witness remains |
-| Replay phase transitions                             | setup/pending/settling/publishing crossed with release, reacquisition, supersession, abort, cleanup | direct settled-peer loss red; graph peer, error ownership, and new-demand readiness witnesses green |
+| Row-bearing lifecycle histories                      | independent public-row model; exact batches modulo independent-key order; fixed and random histories | 24 green / 2 red; independent writes and released-demand scope repaired; retained-row truncate and duplicate snapshot remain |
+| Replay phase transitions                             | setup/pending/settling/publishing crossed with release, reacquisition, supersession, abort, cleanup | 72 green; direct settled-peer recovery and consecutive failure/retry witnesses green |
 | Ordered route mechanics                              | page/prefix/boundary/full-source × return/throw/resolve/reject/abort/cleanup                        | green                                                        |
 | Ordered consumer integration                         | Collection/Effect parity, source-local recovery, public-window reentry, sync-session settlement     | 4 named ordered-work reds; settled-peer replay is counted separately |
 | Ordered generated histories                          | 192 checked route/delivery/window/outcome/session/barrier histories; finite/full request shapes     | 192 green cells; no known-red classifier remains |
@@ -2737,6 +2737,66 @@ candidate repair scopes, not completed fixes or proof of root cause.
   correctness. The parent's diagnostics-only verification is separate from
   the frozen commit audit. The auditor separately inspected that follow-up,
   confirming unchanged comparison rules and the same seven failure names.
+
+### Retained-row replay scope and failure recovery
+
+- Repaired the six existing retained-row/settled-peer failures as one bounded
+  replay step. A request owns acquisition, not the whole direct subscriber's
+  row filter. Successful replay keeps independent source deltas. Release prunes
+  only rows matching that owner and no surviving owner, in both public and
+  private snapshots. Final-owner retirement marks the retained publication for
+  reconciliation with the next real source delta.
+- Failed replay keeps private rows **and their sent-key tracking** together.
+  Restoring only one to the public baseline drops successful peer rows or later
+  retry inserts. Snapshot/pagination position still restores for callers; the
+  ordered offset/cursor return/throw/resolve/reject tests remain unchanged.
+  Runtime diff: **19 added / 26 removed (-7 lines)**, no new fields or state.
+- Corrected two oracle expectations: failed-owner retirement removes that
+  owner's failure from the publication gate; ordinary release outside replay
+  does not evict cached rows unless the adapter writes deletes. The peer witness
+  now asserts retained rows after release and a real source deletion afterward;
+  exact lease counts and cleanup assertions remain.
+- Removed the publication generator's private-source-write and independent-row
+  release exclusions. The existing visible-row snapshot request omission stays
+  pending the named duplicate-delivery red. No test removed or classifier added.
+- Baseline focused report **87/8**:
+  `/tmp/tanstack-retained-row-scope-red.json`. First census after scoped repair
+  **548/6**, `/tmp/tanstack-retained-row-first-census.json` (554 functions).
+  Expanded fresh 10× then found three additional replay-property failures:
+  `/tmp/tanstack-retained-row-expanded-10x.json`, **232/5**. Replays: fixed 1756
+  path `75:19`, fresh -911611698 path `235:18:0:0`, sequential 550351107 path
+  `16:2:1:2:4:4`. These exposed the partial private-state rollback in the proposed
+  patch, not three claimed independent pre-existing defects. All three shrunk
+  histories are now fixed regressions, with suffixes retained.
+- Removing all failure restoration fixed those generated cases but broke four
+  existing ordered cursor/offset cells (**65/4** replay functions,
+  `/tmp/tanstack-replay-private-tracking-10x.json`). Kept the required public
+  snapshot/pagination restoration; removed only the inconsistent row resets.
+- Final targeted 10×, multiplier 10 and replay seed 550351107:
+  `/tmp/tanstack-retained-row-final-10x.json`, **238/2**, 240 functions:
+  publication **24/2**, replay **72/0**, adjacent lifecycle/subscription/reentrancy
+  **142/0**. Generated properties all pass. This is not a wholly green suite,
+  not a fresh-seed claim, and not the queued final 100× campaign.
+- Final seven-suite census, seed 1657011:
+  `/tmp/tanstack-retained-row-final-census.json`, **551/6**, 557 functions:
+  history **37/0**, demand **195/0**, publication **24/2**, replay **72/0**,
+  refinement **7/0**, ordered lifecycle **196/0**, ordered work **20/4**.
+- Red/green controls use the final tests. Temporarily restored subscription.ts
+  exactly to HEAD (verified empty diff): focused **90/8**,
+  `/tmp/tanstack-retained-row-old-runtime-control.json`. It recovers the six
+  repaired named failures plus the two unchanged publication reds. Reintroducing
+  only the sent-key rollback in the proposed fix makes all three new retry
+  witnesses fail (**0/3**, other tests skipped),
+  `/tmp/tanstack-retained-row-tracking-reset-control.json`. Both controls restored.
+- Restored runtime replay suite **72/0** with default fixed-plus-fresh seeds,
+  `/tmp/tanstack-retained-row-restored-replay.json`. Prettier and diff checks
+  pass. Targeted eslint still reports five errors and nine warnings, all outside
+  edited lines; no clean lint or standalone typecheck claim. Reports prove
+  counts/failure traces, not command environment or temporary-patch restoration;
+  those provenance claims depend on the recorded execution commands.
+- Next: loss audit this committed step, then the duplicate snapshot and
+  retained-row truncate cells, then four ordered-work reds. Do not expand the
+  production design to cover unrelated paths while those known cells remain.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar

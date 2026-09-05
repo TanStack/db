@@ -1930,6 +1930,106 @@ describe(`CollectionSubscription replay oracle`, () => {
     },
   )
 
+  it(`keeps private row tracking through consecutive failed replays`, async () => {
+    await runReplayScenario({
+      initialRows: [
+        { id: `one`, value: -2 },
+        { id: `two`, value: 0 },
+      ],
+      demandIds: [`two`],
+      attempts: [
+        {
+          loads: [
+            {
+              demandId: `two`,
+              rows: [],
+              outcome: `reject`,
+              writeBeforeSettlement: true,
+            },
+          ],
+        },
+        {
+          loads: [
+            {
+              demandId: `two`,
+              rows: [],
+              outcome: `reject`,
+              writeBeforeSettlement: true,
+            },
+          ],
+        },
+        {
+          loads: [
+            {
+              demandId: `two`,
+              rows: [{ id: `two`, value: -2 }],
+              outcome: `resolve`,
+              writeBeforeSettlement: true,
+            },
+          ],
+        },
+      ],
+      settlementOrder: [0, 2, 1],
+      settlementPhases: [0, 1, 2],
+      afterSettlement: [],
+    })
+  })
+
+  it(`retains a successful retry after retiring its failed peer`, async () => {
+    await runReplayScenario({
+      initialRows: [{ id: `two`, value: 0 }],
+      demandIds: [`one`, `two`],
+      attempts: [
+        {
+          loads: [
+            {
+              demandId: `one`,
+              rows: [{ id: `one`, value: 1 }],
+              outcome: `reject`,
+              writeBeforeSettlement: false,
+            },
+            {
+              demandId: `two`,
+              rows: [{ id: `two`, value: -1 }],
+              outcome: `reject`,
+              writeBeforeSettlement: false,
+            },
+          ],
+        },
+        {
+          loads: [
+            {
+              demandId: `one`,
+              rows: [{ id: `one`, value: 2 }],
+              outcome: `reject`,
+              writeBeforeSettlement: true,
+            },
+            {
+              demandId: `two`,
+              rows: [{ id: `two`, value: 1 }],
+              outcome: `resolve`,
+              writeBeforeSettlement: false,
+            },
+          ],
+        },
+      ],
+      settlementOrder: [3, 1, 0, 2],
+      settlementPhases: [0, 0, 1, 1],
+      releaseOnLastAttempt: `one`,
+      afterSettlement: [{ type: `request`, demandId: `one` }],
+    })
+  })
+
+  it(`does not republish an identical snapshot after a synchronous replay failure`, async () => {
+    await runSequentialReplayScenario({
+      initialRows: [{ id: `one`, value: 0 }],
+      loads: [
+        { rows: [], outcome: `throw` },
+        { rows: [{ id: `one`, value: 0 }], outcome: `return` },
+      ],
+    })
+  })
+
   it(`keeps a same-key source replacement private after a failed replay`, async () => {
     await runReplayScenario({
       initialRows: [{ id: `one`, value: 1 }],
@@ -3417,6 +3517,13 @@ describe(`CollectionSubscription replay oracle`, () => {
       // must survive failure handling for the now-retired peer.
       survivingRows = sortedRows(visible)
       subscription.releaseSnapshot(secondWhere)
+      // Outside replay, release ends acquisition ownership; this adapter does
+      // not evict its cached rows. The still-live subscriber observes deletion
+      // when the source actually removes the row.
+      expect(sortedRows(visible)).toEqual([{ id: `two`, value: 2 }])
+      begin()
+      write({ type: `delete`, key: `two` })
+      commit()
       expect(sortedRows(visible)).toEqual([])
     } finally {
       failed.resolve()

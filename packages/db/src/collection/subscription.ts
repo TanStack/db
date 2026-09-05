@@ -781,18 +781,14 @@ export class CollectionSubscription
   ): void {
     if (this.truncateReplaySession !== session) return
     session.completion.reject(failure)
-    if (this.options.truncateReplayPublication) {
-      return
-    }
+    if (this.options.truncateReplayPublication) return
     const publicationState = session.publicationState
+    // Keep private rows and their sent-key tracking together for a later retry.
+    // Only the caller's pagination position returns to the public snapshot.
     this.loadedInitialState = publicationState.loadedInitialState
     this.snapshotSent = publicationState.snapshotSent
-    this.sentKeys = new Set(publicationState.sentKeys)
-    this.publishedRows = new Map(publicationState.publishedRows)
-    this.stalePublishedRows = new Map(publicationState.publishedRows)
     this.limitedSnapshotRowCount = publicationState.limitedSnapshotRowCount
     this.lastSentKey = publicationState.lastSentKey
-    session.privateRows = new Map(publicationState.publishedRows)
   }
 
   /** Publish the complete buffered replacement as one subscriber batch. */
@@ -819,25 +815,13 @@ export class CollectionSubscription
     this.stalePublishedRows.clear()
 
     this.applyPrivateChanges(session, retainedDeletes)
-    const activeDemandFilters = this.subsetDemands.map((demand) =>
-      demand.requestOptions.where
-        ? createFilterFunctionFromExpression(demand.requestOptions.where)
-        : undefined,
-    )
-    const finalRows = new Map(session.privateRows)
-    for (const [key, value] of finalRows) {
-      if (!activeDemandFilters.some((filter) => filter?.(value) ?? true)) {
-        finalRows.delete(key)
-      }
-    }
     const replacement = this.createStateDiff(
       session.publicationState.publishedRows,
-      finalRows,
+      session.privateRows,
     )
     try {
       if (replacement.length > 0) this.filteredCallback(replacement)
     } finally {
-      // Buffering records every source key before active-demand filtering.
       // Restore tracking even when a subscriber rejects the replacement.
       this.restorePublishedSnapshotTracking()
       session.completion.resolve()
@@ -1558,7 +1542,7 @@ export class CollectionSubscription
     demand.initialResult?.reject(new LoadSubsetOperationAbortedError())
     const releaseCallbacks = [
       () => this.removeTruncateReplayParticipant(demand),
-      () => this.pruneReleasedReplayRows(),
+      () => this.pruneReleasedReplayRows(demand),
       ...(demand.acquisitionState === `active`
         ? [
             // Adapter release is a supported reentrancy boundary. A demand
@@ -1589,24 +1573,33 @@ export class CollectionSubscription
     }
     this.truncateReplaySession = undefined
     this.truncateReplacementPending = false
-    this.stalePublishedRows.clear()
+    this.stalePublishedRows = new Map(this.publishedRows)
     this.restorePublishedSnapshotTracking()
     this.options.truncateReplayPublication?.succeed()
   }
 
   /** Remove rows owned only by a demand released during private replay. */
-  private pruneReleasedReplayRows(): void {
+  private pruneReleasedReplayRows(released: SubsetDemand): void {
     const session = this.truncateReplaySession
     if (!session) return
+    const releasedFilter = released.requestOptions.where
+      ? createFilterFunctionFromExpression(released.requestOptions.where)
+      : undefined
     const filters = this.subsetDemands.map((demand) =>
       demand.requestOptions.where
         ? createFilterFunctionFromExpression(demand.requestOptions.where)
         : undefined,
     )
+    const isReleasedRow = (value: object) =>
+      (releasedFilter?.(value) ?? true) &&
+      filters.every((filter) => !(filter?.(value) ?? true))
+    // Request ownership does not constrain independent source deltas. Retire
+    // only this demand's rows, from both public and unfinished replacement state.
+    for (const [key, value] of session.privateRows) {
+      if (isReleasedRow(value)) session.privateRows.delete(key)
+    }
     const deletes = [...this.publishedRows]
-      .filter(([, value]) =>
-        filters.every((filter) => !(filter?.(value) ?? true)),
-      )
+      .filter(([, value]) => isReleasedRow(value))
       .map(
         ([key, value]): ChangeMessage<any, any> => ({
           type: `delete`,
