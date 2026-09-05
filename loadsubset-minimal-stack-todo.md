@@ -1972,8 +1972,36 @@ candidate repair scopes, not completed fixes or proof of root cause.
 - Adjacent subscription, sync-reentrancy, and lifecycle tests pass 142/142 in
   `/tmp/tanstack-eager-release-adjacent.json`. ESLint reports only sync.ts's
   pre-existing import cycle at line 17; the guard adds no diagnostic.
-- Full seven-suite 100× run is pending. Commit this bounded repair, then run
-  the agreed fresh Field Lab loss audit. Nothing pushed.
+- First full seven-suite 100× run: 397 passing / 63 failing. The five suites
+  with adequate per-property budgets match their default-run red names; the
+  other 13 failures are replay/ordered-work properties ending at the default
+  5-second timeout, reported as `STACK_TRACE_ERROR`. They do not establish new
+  production defects. Report: `/tmp/tanstack-eager-release-100x.json`. Rerun
+  those two suites with `--testTimeout=120000` before claiming full stress
+  validation; an increased run count also needs an adequate time budget.
+  That budgeted rerun is in progress, with output destined for
+  `/tmp/tanstack-eager-release-100x-budgeted.json`; do not treat its absence as
+  a completed run or claim the amplified suite passed yet.
+  The repair is committed as `31d95d8b`. Nothing pushed.
+- Fresh loss audit of `31d95d8b` found no changed assertion, classifier, or
+  generator exclusion. The truncate witness asserts release counts after
+  truncate and again after final unsubscribe; one test covers two boundaries.
+  These are explicit-eager, ready collections with empty callbacks, so the
+  counters prove physical-call symmetry, not every logical status outcome.
+  Logical teardown being unchanged is a source-diff claim. Reach labels are
+  declared by the helper; actual load/unload counters supply behavioral proof.
+- The symmetric eager bypass is not identical entry behavior: load checks an
+  already-aborted signal first; both eager guards precede deferred-queue work.
+  No new conclusion about aborted-demand ownership follows from this fix.
+  Audit was source/report-only; JSON lacks tested-commit provenance, and the
+  100× report was still unavailable at the auditor's final check. Checkpoint-led
+  scanning can flatten other distinctions. Next: pre-aborted demand ownership.
+- The next two pre-aborted-demand witnesses are reproduced (0 passing / 2
+  failing), without another production change, in
+  `/tmp/tanstack-preaborted-release-red.json`. They are already part of the
+  remaining 50 default-run failures. Keep the run budget aligned with the
+  multiplier in future broad campaigns; do not repeat all amplified suites
+  after every one-line repair when focused and default-census checks suffice.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
