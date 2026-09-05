@@ -2128,6 +2128,14 @@ candidate repair scopes, not completed fixes or proof of root cause.
   This does not fix the separate already-red cleanup-during-resume case, where
   work has moved out of the pending queue. Missing oracle law: zero adapter
   calls is not enough; an abandoned request must not report successful work.
+- Loss audit of `75e2bb51` used an existing auditor because a fresh agent hit
+  the task thread limit; this is not a fresh-context audit. It confirmed the
+  preserved parent assertions and reported counts. Cancellation reds reached
+  the rejection assertion after proving zero loads, one observed result, and
+  promise shape; their final teardown was not reached. Tests require the
+  `AbortError` name, while the exact class is established by the source diff.
+  Twelve passing random cases changed seeds between census runs. The auditor
+  inspected source/reports only; prior audit context could steer its attention.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
