@@ -2137,6 +2137,43 @@ candidate repair scopes, not completed fixes or proof of root cause.
   Twelve passing random cases changed seeds between census runs. The auditor
   inspected source/reports only; prior audit context could steer its attention.
 
+- Repaired adapter retirement across synchronous reentry. Cleanup now clears
+  the installed cleanup/load/unload handles before invoking adapter cleanup.
+  Startup rechecks the existing epoch after loading callbacks and after sync
+  returns; obsolete returned resources are cleaned rather than installed.
+  An obsolete throw still reaches its caller but cannot mark a replacement
+  session as errored. Deferred resume checks the existing session and abort
+  signal before each queued acquisition, including work already removed from
+  the manager's queue. Net production change: +13 lines; no new stored state.
+- Existing oracle red run: 0/3 in
+  `/tmp/tanstack-session-retirement-red.json` (retiring cleanup callback,
+  obsolete resource return, cleanup during deferred resume). Added eight
+  startup controls: loading/ready/adapter-throw/first-ready-effect-throw crossed
+  with no restart/nested restart. Expanded the single deferred-resume witness
+  into loading/ready crossed with cleanup/release/unsubscribe, now checking
+  promise rejection as well as zero physical calls. These six cells preserve
+  the prior ready/cleanup path and add five cases.
+- Runtime ablation restored the preceding behavior (apart from one blank line)
+  with the new tests retained. All 14 new/expanded cases failed; the full demand
+  suite was **115/24** in `/tmp/tanstack-session-retirement-ablation.json`.
+  The restored fix yields **131/8** for that suite. Both runs used
+  `TANSTACK_DB_ORACLE_SEED=1657009`, preserving its generated traces across the
+  comparison. Final seven-suite census: **436 passing / 42 failing** in
+  `/tmp/tanstack-session-retirement-final-census.json`: three preceding failing
+  names removed, none added, with 13 additional test cases. Adjacent
+  subscription/reentrancy/lifecycle tests: **142/0** in
+  `/tmp/tanstack-session-retirement-adjacent.json`. Prettier/diff checks pass.
+- Test-design corrections: status event listeners throw through a microtask,
+  whereas first-ready callbacks can propagate synchronously. The throw control
+  now uses `onFirstReady`, not a status listener. Focused runs pass all 14 case
+  assertions but fail the suite's afterAll reach guard because required cases
+  were filtered out; do not present their process exit as green. The full
+  suite is the validation boundary. Missing oracle law: a generation fence
+  must cover returned resources and queued work, not only late writes; old
+  error delivery must preserve the new session as well as the caller's error.
+  Same-session initial-error recovery notification and shared replay failures
+  remain open. These counts are test functions, not unique defects.
+
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
       behavior, and opaque callback roots.

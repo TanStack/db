@@ -124,6 +124,7 @@ export class CollectionSyncManager<
     const syncEpoch = ++this.syncEpoch
     const isCurrentSync = () => syncEpoch === this.syncEpoch
     this.lifecycle.setStatus(`loading`)
+    if (!isCurrentSync()) return
     let syncEntryActive = true
     let readyEffectFailure: { error: unknown } | undefined
 
@@ -337,6 +338,12 @@ export class CollectionSyncManager<
       )
       syncEntryActive = false
 
+      if (!isCurrentSync()) {
+        syncRes?.cleanup?.()
+        if (readyEffectFailure) throw readyEffectFailure.error
+        return
+      }
+
       // Store cleanup function if provided
       this.syncCleanupFn = syncRes?.cleanup ?? null
 
@@ -355,7 +362,7 @@ export class CollectionSyncManager<
       }
     } catch (error) {
       syncEntryActive = false
-      this.lifecycle.markError(error)
+      if (isCurrentSync()) this.lifecycle.markError(error)
       throw error
     }
     if (readyEffectFailure) throw readyEffectFailure.error
@@ -384,6 +391,7 @@ export class CollectionSyncManager<
     this.syncStartRequested = false
     const deferredLoadSubsets = this.deferredLoadSubsets
     this.deferredLoadSubsets = []
+    const loadSubsetSession = this.loadSubsetSession
 
     try {
       if (shouldStart) {
@@ -399,6 +407,12 @@ export class CollectionSyncManager<
     for (const { options, deferred } of deferredLoadSubsets) {
       const loadSubset = this.syncLoadSubsetFn
       try {
+        if (
+          loadSubsetSession !== this.loadSubsetSession ||
+          options.signal?.aborted
+        ) {
+          throw new LoadSubsetOperationAbortedError()
+        }
         const result = loadSubset?.(options) ?? true
         if (result instanceof Promise) {
           void result.then(
@@ -869,11 +883,12 @@ export class CollectionSyncManager<
     this.syncEpoch++
     this.loadSubsetSession++
     this.rejectPreload?.(new CollectionPreloadAbortedError())
+    const cleanup = this.syncCleanupFn
+    this.syncCleanupFn = null
+    this.syncLoadSubsetFn = null
+    this.syncUnloadSubsetFn = null
     try {
-      if (this.syncCleanupFn) {
-        this.syncCleanupFn()
-        this.syncCleanupFn = null
-      }
+      cleanup?.()
     } catch (error) {
       // Re-throw in a microtask to surface the error after cleanup completes
       queueMicrotask(() => {
@@ -889,8 +904,6 @@ export class CollectionSyncManager<
       })
     }
     this.preloadPromise = null
-    this.syncLoadSubsetFn = null
-    this.syncUnloadSubsetFn = null
     this.syncStartDeferred = false
     this.syncStartRequested = false
     const wasLoadingSubset = this.pendingLoadSubsetPromises.size > 0
