@@ -2384,6 +2384,26 @@ candidate repair scopes, not completed fixes or proof of root cause.
   unacquired-unload witness. Then reconcile obsolete-transport readiness with
   the cancellation contract; do not assume all nine history reds are distinct
   runtime bugs or that all non-cooperative source behavior is supported.
+- Fresh Field Lab source loss audit of `35e300f5` recovered three limits:
+  readiness after setup still requires no pending acquisition; the reducer
+  models the immediate boundary and fully flushed step, not commands during
+  queued setup; and the synchronous random generator still excludes all owned
+  replay. Corrected that filter's stale "false loading" comment, without
+  claiming the filter was removed. The next ownership fix must remove this
+  broad exclusion and rerun fixed/random campaigns. The fixed synchronous
+  replay matrix is green, not yet the randomly generated owned-replay domain.
+  Exact state and trace assertions were preserved; title renames are 2+8+1.
+- Report comparison by the parent (a second fresh scanner hit the agent limit)
+  verified 522 before/after functions after normalizing the 11 renamed titles:
+  no added/removed functions, exactly 11 failing-to-passing outcomes, none in
+  the reverse direction. They are eight synchronous product cases and three
+  synchronous ownership/suffix cases. Truncate/restart mutants introduce eight
+  and nine additional failures respectively, on top of the nine baseline reds;
+  four synchronous product cases in each fail the immediate status assertion.
+  The source audit did not see these reports; the report check used the parent's
+  existing context. JSON alone does not prove source restoration or seed command
+  provenance. Summary-led omission scanning may overemphasize deliberate scope
+  limits; neither audit establishes complete lifecycle coverage.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar

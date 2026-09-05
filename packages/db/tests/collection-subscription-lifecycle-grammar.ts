@@ -609,8 +609,8 @@ function crossesSynchronousReplay(
 
 export const syncLifecycleHistoryArbitrary = fc
   .array(lifecycleCommandArbitrary, { minLength: 1, maxLength: 20 })
-  // Synchronous replay currently emits a false loading cycle. The fixed red
-  // history owns that class until production satisfies the protocol.
+  // Fixed histories now cover valid queued replay status. This broad exclusion
+  // remains a coverage gap: remove it after the aborted-owner unload fix.
   .filter((history) => !crossesSynchronousReplay(history))
 
 export const settle = (
