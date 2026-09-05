@@ -8,7 +8,6 @@ import {
   greenLifecycleHistories,
   publicationLifecycleHistoryArbitrary,
   reduceLifecycle,
-  releasedObsoleteResolveHistory,
 } from './collection-subscription-lifecycle-grammar.js'
 import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
 import { flushPromises } from './utils.js'
@@ -68,7 +67,6 @@ type PublicationModel = {
 }
 type PublicationRunOptions = {
   continueAfterMismatch?: boolean
-  reach?: Set<string>
 }
 
 function recordSourceWrite(publication: PublicationModel, row: Row): void {
@@ -687,7 +685,6 @@ async function runPublicationHistory(
         priorPublicationCount,
       )
       assertPublications(command)
-      options.reach?.add(`command:${command.type}`)
     }
   } finally {
     for (const attempt of attempts.values()) attempt.deferred.resolve()
@@ -707,7 +704,17 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   it(`does not publish rows written by a released obsolete acquisition`, async () => {
     await runPublicationHistory(
       [
-        ...releasedObsoleteResolveHistory,
+        { type: `request`, demand: `a` },
+        { type: `request`, demand: `b` },
+        { type: `release`, demand: `a` },
+        {
+          type: `settle`,
+          demand: `a`,
+          scope: `obsolete`,
+          age: `oldest`,
+          outcome: `resolve`,
+        },
+        { type: `release`, demand: `b` },
         { type: `cleanup` },
         { type: `restart` },
         { type: `unsubscribe` },
@@ -822,31 +829,34 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   })
 
   it(`retires failed private replacement rows when its final owner releases`, async () => {
-    await runPublicationHistory([
-      { type: `source`, demand: `b`, action: `upsert`, value: 7 },
-      { type: `request`, demand: `a` },
-      {
-        type: `settle`,
-        demand: `a`,
-        scope: `current`,
-        age: `oldest`,
-        outcome: `resolve`,
-      },
-      { type: `truncate` },
-      { type: `source`, demand: `b`, action: `upsert`, value: 51 },
-      {
-        type: `settle`,
-        demand: `a`,
-        scope: `current`,
-        age: `oldest`,
-        outcome: `reject`,
-      },
-      { type: `release`, demand: `a` },
-      { type: `source`, demand: `b`, action: `upsert`, value: 8 },
-      { type: `cleanup` },
-      { type: `restart` },
-      { type: `unsubscribe` },
-    ])
+    await runPublicationHistory(
+      [
+        { type: `source`, demand: `b`, action: `upsert`, value: 7 },
+        { type: `request`, demand: `a` },
+        {
+          type: `settle`,
+          demand: `a`,
+          scope: `current`,
+          age: `oldest`,
+          outcome: `resolve`,
+        },
+        { type: `truncate` },
+        { type: `source`, demand: `b`, action: `upsert`, value: 51 },
+        {
+          type: `settle`,
+          demand: `a`,
+          scope: `current`,
+          age: `oldest`,
+          outcome: `reject`,
+        },
+        { type: `release`, demand: `a` },
+        { type: `source`, demand: `b`, action: `upsert`, value: 8 },
+        { type: `cleanup` },
+        { type: `restart` },
+        { type: `unsubscribe` },
+      ],
+      { continueAfterMismatch: true },
+    )
   })
 
   const { multiplier, ...replay } = readOracleRunConfig()
