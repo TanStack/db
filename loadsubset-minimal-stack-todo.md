@@ -1255,7 +1255,7 @@ every row is either green or has a named red witness.
 | Replay phase transitions                             | setup/pending/settling/publishing crossed with release, reacquisition, supersession, abort, cleanup | direct settled-peer loss red; graph peer, error ownership, and new-demand readiness witnesses green |
 | Ordered route mechanics                              | page/prefix/boundary/full-source × return/throw/resolve/reject/abort/cleanup                        | green                                                        |
 | Ordered consumer integration                         | Collection/Effect parity, source-local recovery, public-window reentry, sync-session settlement     | 5 named reds                                                 |
-| Ordered generated histories                          | 192 checked route/delivery/window/outcome/session/barrier histories; finite/full request shapes     | 172 green cells; 20 cells pin boundary-failure and stale-message reds |
+| Ordered generated histories                          | 192 checked route/delivery/window/outcome/session/barrier histories; finite/full request shapes     | 180 green cells; 12 cells pin stale-message reds |
 
 The earlier 44-test red catalog grouped into these protocol faults. Later
 checkpoints below add witnesses; the final combined census is still pending. Multiple
@@ -1817,6 +1817,35 @@ These are candidate repair scopes, not completed fixes or proof of root cause.
   new four-phase controls: cancellation precedes teardown, while cleanup
   failures retain their existing separate host-microtask error path. This is
   a recorded test limit, not a newly confirmed defect. Audit was source-only.
+### Local repair checkpoint: initial ordered boundary failure
+
+- Red: remove the eight boundary-failure expected mismatches from the ordered
+  lifecycle matrix. The focused boundary/after-success/keep/reject/retain/initial
+  case fails because preload resolves instead of rejecting with the exact
+  adapter error. The fixture reaches the real boundary request after a page
+  succeeds; it does not substitute a first-request failure.
+- Fix: use the live query's loading status rather than a flag cleared by the
+  first successful source request. Initial refinement can need further pages
+  or boundary reads. Lazy demand keeps its own fatal-error path; applying the
+  eager path there caused the existing synchronous lazy-start cleanup control
+  to fail, so that ownership exclusion remains.
+- Oracle gap: testing only first-request failure cannot distinguish transport
+  success from completion of initial query refinement. The existing product
+  covers both delivery timings, keep/widen, rejection/AbortError, and restart
+  versus retained sessions. Only the resolved bug's classifier was removed;
+  all row, message, waiter, ownership, and physical-request assertions remain.
+- Focused plus adjacent run: 300 passing / 6 failing, with only the recorded
+  ordered-refill retry and five synchronous replay-normalization failures.
+  Report: `/tmp/tanstack-boundary-green.json`. The ordered suite's 196 passing
+  test functions include 12 exact known-red stale-message cells, not a claim
+  that every history is correct. Production source shrinks by 9 lines after
+  formatting. ESLint passes for both changed code/test files.
+- Ordered 100× passes 196/196 test functions: 2,000 fixed and 2,000 random
+  histories plus the Cartesian cells and coverage guards. Report:
+  `/tmp/tanstack-boundary-100x.json`. Package type checking still reports
+  existing errors in other tests, none in either changed file. A fresh
+  loss audit follows the commit before closing this step. No push.
+
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
       behavior, and opaque callback roots.

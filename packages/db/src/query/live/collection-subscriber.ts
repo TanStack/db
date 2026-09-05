@@ -75,9 +75,6 @@ export class CollectionSubscriber<
 
   private subscribeToChanges(whereExpression?: BasicExpression<boolean>) {
     const orderByInfo = this.getOrderByInfo()
-    let initialSubsetPending =
-      !this.collectionConfigBuilder.isLazySource(this.sourceId) &&
-      orderByInfo?.limit !== 0
 
     // Direct load promise tracking: pipes loadSubset results straight to the
     // live query collection, avoiding the multi-hop deferred promise chain that
@@ -92,16 +89,6 @@ export class CollectionSubscriber<
           throw error
         })
         this.collectionConfigBuilder.trackSubsetLoadPromise(trackedResult)
-        if (initialSubsetPending) {
-          void result.then(
-            () => {
-              initialSubsetPending = false
-            },
-            () => {},
-          )
-        }
-      } else {
-        initialSubsetPending = false
       }
     }
 
@@ -126,7 +113,11 @@ export class CollectionSubscriber<
     const onLoadSubsetError = (event: SubscriptionLoadSubsetErrorEvent) => {
       this.collectionConfigBuilder.recordSubsetError(
         event.error,
-        initialSubsetPending,
+        // Lazy demand owns its fatal-error path. For eager sources, one
+        // successful page does not finish initial ordered refinement.
+        !this.collectionConfigBuilder.isLazySource(this.sourceId) &&
+          this.collectionConfigBuilder.liveQueryCollection?.status ===
+            `loading`,
       )
     }
 
