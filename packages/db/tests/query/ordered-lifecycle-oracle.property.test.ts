@@ -475,35 +475,33 @@ async function assertHistory(scenario: Scenario) {
   const updated = { ...replacement, rank: replacement.rank - 1 }
   // Exact known-red observations; all other checkpoints must satisfy the law.
   const known =
-    scenario.session === `restart` && scenario.barrier === `initial`
-      ? [{ law: `cleanup-preload`, actual: `resolved`, expected: `AbortError` }]
-      : scenario.session === `retain` &&
-          scenario.barrier === `initial` &&
-          scenario.route === `boundary` &&
-          scenario.outcome !== `resolve`
+    scenario.session === `retain` &&
+    scenario.barrier === `initial` &&
+    scenario.route === `boundary` &&
+    scenario.outcome !== `resolve`
+      ? [
+          {
+            law: `failure-preload`,
+            actual: { settled: true, error: `none` },
+            expected: { settled: true, error: `target` },
+          },
+        ]
+      : scenario.session === `restart` &&
+          scenario.barrier === `replay` &&
+          scenario.route === `full-source`
         ? [
             {
-              law: `failure-preload`,
-              actual: { settled: true, error: `none` },
-              expected: { settled: true, error: `target` },
+              law: `message-snapshot`,
+              actual: [original, replacement],
+              expected: [replacement],
+            },
+            {
+              law: `message-snapshot`,
+              actual: [original, updated],
+              expected: [updated],
             },
           ]
-        : scenario.session === `restart` &&
-            scenario.barrier === `replay` &&
-            scenario.route === `full-source`
-          ? [
-              {
-                law: `message-snapshot`,
-                actual: [original, replacement],
-                expected: [replacement],
-              },
-              {
-                law: `message-snapshot`,
-                actual: [original, updated],
-                expected: [updated],
-              },
-            ]
-          : []
+        : []
   expect(result.mismatches).toEqual(known)
   return result
 }

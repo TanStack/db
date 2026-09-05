@@ -520,7 +520,9 @@ demand join readiness or a later replay.
 
 Collection cleanup detaches surviving logical demand from the discarded sync
 session. It aborts that session's physical work and rejects its replay barrier,
-but it does not turn still-owned demand into cleanup debt. Physical
+and rejects an unfinished initial preload with `AbortError`. Cleanup never
+invokes first-ready callbacks; those callbacks belong to the discarded run.
+It does not turn still-owned demand into cleanup debt. Physical
 acquisitions and cleanup debt belong to the sync session that created them;
 cleanup retires both instead of sending an old release to a replacement
 adapter. Demand requested while the Collection is cleaned up remains detached

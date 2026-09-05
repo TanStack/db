@@ -23,6 +23,44 @@ function getChangesManager(collection: object): {
 }
 
 describe(`Collection Lifecycle Management`, () => {
+  it.each([`pending`, `starting`, `ready`, `failed`] as const)(
+    `cleanup settles a %s preload without inventing first readiness`,
+    async (phase) => {
+      let starts = 0
+      const failure = new Error(`initial failure`)
+      const ready = vi.fn()
+      const collection = createCollection<{ id: string }>({
+        getKey: ({ id }) => id,
+        sync: {
+          sync: ({ collection: source, markReady, markError }) => {
+            starts++
+            if (starts > 1 || phase === `ready`) markReady()
+            else if (phase === `failed`) markError(failure)
+            else if (phase === `starting`) void source.cleanup()
+          },
+        },
+      })
+      collection.onFirstReady(ready)
+      const preload = collection.preload().then(
+        () => undefined,
+        (error: unknown) => error,
+      )
+      await collection.cleanup()
+      const result = await preload
+      if (phase === `ready`) expect(result).toBeUndefined()
+      else if (phase === `failed`) expect(result).toBe(failure)
+      else expect(result).toMatchObject({ name: `AbortError` })
+      expect(ready).toHaveBeenCalledTimes(phase === `ready` ? 1 : 0)
+      const restartedReady = vi.fn()
+      collection.onFirstReady(restartedReady)
+      await collection.preload()
+      expect(starts).toBe(2)
+      expect(restartedReady).toHaveBeenCalledOnce()
+      expect(ready).toHaveBeenCalledTimes(phase === `ready` ? 1 : 0)
+      await collection.cleanup()
+    },
+  )
+
   let mockSetTimeout: ReturnType<typeof vi.fn>
   let mockClearTimeout: ReturnType<typeof vi.fn>
   let timeoutCallbacks: Map<number, () => void>
@@ -754,7 +792,7 @@ describe(`Collection Lifecycle Management`, () => {
 
       expect(collection.status).toBe(`cleaned-up`)
       expect(collection._lifecycle.hasBeenReady).toBe(false)
-      expect(firstReadyStatuses).toEqual([`ready`])
+      expect(firstReadyStatuses).toEqual([])
       expect(readyEvent).not.toHaveBeenCalled()
 
       const laterFirstReady = vi.fn()
@@ -833,7 +871,7 @@ describe(`Collection Lifecycle Management`, () => {
 
       expect(syncStarts).toBe(1)
       expect(collection.status).toBe(`ready`)
-      expect(firstReadyStatuses).toEqual([`ready`])
+      expect(firstReadyStatuses).toEqual([])
       expect(lateReadyBatches).toEqual([])
       expect(readyEvent).toHaveBeenCalledOnce()
       lateSubscription!.unsubscribe()

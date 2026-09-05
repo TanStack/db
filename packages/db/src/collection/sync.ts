@@ -1,6 +1,7 @@
 import {
   CollectionConfigurationError,
   CollectionIsInErrorStateError,
+  CollectionPreloadAbortedError,
   DuplicateKeySyncError,
   LoadSubsetOperationAbortedError,
   NoPendingSyncTransactionCommitError,
@@ -62,6 +63,7 @@ export class CollectionSyncManager<
   private syncMode: `eager` | `on-demand`
 
   public preloadPromise: Promise<void> | null = null
+  private rejectPreload?: (error: unknown) => void
   public syncCleanupFn: (() => void) | null = null
   public syncLoadSubsetFn: LoadSubsetFn | null = null
   public syncUnloadSubsetFn: ((options: LoadSubsetOptions) => void) | null =
@@ -571,6 +573,7 @@ export class CollectionSyncManager<
         settled = true
         unsubscribeError()
         unsubscribeReady()
+        if (this.rejectPreload === rejectError) this.rejectPreload = undefined
         resolve()
       }
       const rejectError = (error: unknown) => {
@@ -578,10 +581,12 @@ export class CollectionSyncManager<
         settled = true
         unsubscribeError()
         unsubscribeReady()
+        if (this.rejectPreload === rejectError) this.rejectPreload = undefined
         reject(error)
       }
 
       // Register callback BEFORE starting sync to avoid race condition
+      this.rejectPreload = rejectError
       unsubscribeReady = this.lifecycle.onFirstReady(resolveReady)
       unsubscribeError = this.collection.on(`status:error`, () => {
         if (syncStartState.active) {
@@ -860,6 +865,7 @@ export class CollectionSyncManager<
     // before invoking adapter cleanup or allowing a new session to start.
     this.syncEpoch++
     this.loadSubsetSession++
+    this.rejectPreload?.(new CollectionPreloadAbortedError())
     try {
       if (this.syncCleanupFn) {
         this.syncCleanupFn()

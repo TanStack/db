@@ -1255,7 +1255,7 @@ every row is either green or has a named red witness.
 | Replay phase transitions                             | setup/pending/settling/publishing crossed with release, reacquisition, supersession, abort, cleanup | direct settled-peer loss red; graph peer, error ownership, and new-demand readiness witnesses green |
 | Ordered route mechanics                              | page/prefix/boundary/full-source × return/throw/resolve/reject/abort/cleanup                        | green                                                        |
 | Ordered consumer integration                         | Collection/Effect parity, source-local recovery, public-window reentry, sync-session settlement     | 5 named reds                                                 |
-| Ordered generated histories                          | 192 checked route/delivery/window/outcome/session/barrier histories; finite/full request shapes     | 124 green cells; 68 cells pin caller-settlement and stale-message reds |
+| Ordered generated histories                          | 192 checked route/delivery/window/outcome/session/barrier histories; finite/full request shapes     | 172 green cells; 20 cells pin boundary-failure and stale-message reds |
 
 The earlier 44-test red catalog grouped into these protocol faults. Later
 checkpoints below add witnesses; the final combined census is still pending. Multiple
@@ -1775,6 +1775,39 @@ These are candidate repair scopes, not completed fixes or proof of root cause.
   production or suppressing callback/trace assertions. The history suite has
   7 passing tests and the same 20 named runtime reds. No new exception filter.
 - A fresh Field Lab loss audit follows this checkpoint before runtime repair.
+- Audit of `7d322d75` preserved all commands, assertions, and filters. Its
+  recovered limits: publication and readiness are separate; this witness has
+  empty rows; aborted/overlapping work has separate tests; a local result does
+  not close the broader lifecycle gate. The auditor inspected frozen source
+  without rerunning it. Exact seed/path replay subsequently passed as well.
+
+### Local repair checkpoint: preload cancellation
+
+- Red: remove the cleanup-preload expected mismatch from the ordered matrix.
+  The focused page/restart/initial history fails only because cleanup resolves
+  unfinished preload rather than rejecting it with `AbortError`.
+- Fix: sync cleanup rejects its pending preload before adapter teardown.
+  Settled attempts clear that rejection callback. Lifecycle cleanup discards
+  pending first-ready callbacks instead of invoking them as fake readiness.
+  This does not depend on status listeners surviving reentrant delivery.
+- All 48 initial cleanup cells are now green. Four direct controls cross
+  pending, synchronous-start cleanup, ready, and already-failed preload with
+  a fresh successful restart. Two older tests had expected first-ready delivery
+  during cleanup; they now assert no delivery. Callback cleanup is documented
+  in the public method and architecture contracts.
+- Validation: lifecycle plus ordered suites 242/242 pass; ordered 100× is
+  196/196 (2,000 fixed + 2,000 random histories). Adjacent sync-reentrancy,
+  query-once, includes-temporal, and live-query tests are 150 passing / 6 failing
+  both with and without the two behavioral changes. The unchanged failures
+  are ordered refill retry and five synchronous replay-error-normalization
+  cases. Reports: `/tmp/tanstack-preload-adjacent.json` and
+  `/tmp/tanstack-preload-adjacent-baseline.json`. They remain tracked work,
+  not a claim that the whole adjacent suite is green.
+- Runtime source delta is +3 lines (excluding one public API comment and the
+  architecture text). ESLint reports the existing import cycle through
+  `sync.ts`'s unchanged `cloneOptions` import; no other errors in these files.
+  Package-wide existing test type errors remain separate. A fresh loss audit
+  follows this checkpoint. No push.
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
       behavior, and opaque callback roots.

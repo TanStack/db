@@ -737,6 +737,14 @@ export class SyncTransactionAbortedError extends Error {
   }
 }
 
+/** A collection was cleaned up before its initial preload became ready. */
+export class CollectionPreloadAbortedError extends Error {
+  constructor() {
+    super(`Collection preload was abandoned during cleanup`)
+    this.name = `AbortError`
+  }
+}
+
 /** A subset operation was canceled before its result became visible. */
 export class LoadSubsetOperationAbortedError extends Error {
   constructor() {

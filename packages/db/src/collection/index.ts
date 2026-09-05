@@ -461,6 +461,7 @@ export class CollectionImpl<
    * established first, callbacks registered during or after delivery run
    * immediately. If one throws, the collection remains ready. Direct sync
    * startup rethrows the first failure; preload resolves from ready state.
+   * Cleanup discards pending callbacks without invoking them.
    * @param callback Function to call when the collection first becomes ready
    * @example
    * collection.onFirstReady(() => {

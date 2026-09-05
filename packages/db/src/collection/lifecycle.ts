@@ -291,20 +291,9 @@ export class CollectionLifecycleManager<
       this.hasBeenReady = false
       this.syncError = undefined
 
-      // Call any pending onFirstReady callbacks before clearing them.
-      // This ensures preload() promises resolve during cleanup instead of hanging.
-      const callbacks = [...this.onFirstReadyCallbacks]
+      // Cleanup is not readiness. Sync cleanup rejects pending preload callers;
+      // first-ready listeners belong to the discarded run.
       this.onFirstReadyCallbacks = []
-      callbacks.forEach((callback) => {
-        try {
-          callback()
-        } catch (error) {
-          console.error(
-            `${this.config.id ? `[${this.config.id}] ` : ``}Error in onFirstReady callback during cleanup:`,
-            error,
-          )
-        }
-      })
 
       // Set status to cleaned-up after everything is cleaned up
       // This fires the status:change event to notify listeners
