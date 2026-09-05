@@ -567,8 +567,9 @@ rows themselves.
 The source contract stays abstract: a demand request eventually establishes
 one coherent baseline and identifies when that baseline is complete. Each
 request receives an `AbortSignal`. Cancellation is cooperative at this source
-boundary. Core guarantees that an obsolete request cannot settle current
-readiness. A source that can cancel request-scoped work must honor the signal
+boundary. An obsolete request cannot satisfy current demand. Its settlement
+may release a replay wait, but never substitutes for completion of the current
+acquisition. A source that can cancel request-scoped work must honor the signal
 before installing more rows. A source that cannot cancel an in-flight baseline
 must settle that work; core keeps overlapping replay private until then. Core
 cannot prevent an arbitrary adapter from writing after it ignores both parts
@@ -685,6 +686,9 @@ never settles. A newer truncate aborts prior acquisitions, but publication
 still waits for overlapping work that had already started because some sources
 cannot cancel an in-flight snapshot. Such work must settle and must not install
 rows after observing cancellation. Settled historical attempts are discarded.
+Replacing an acquisition does not release its logical owner. A delayed
+cancellation therefore remains pending; prompt cancellation settles that wait.
+Releasing the owner removes both its current and older work from readiness.
 Core installs each tentative acquisition and binds it to the current replay
 attempt before calling adapter code. A reentrant release or newer truncate can
 therefore see and retire the exact work it supersedes; work returned after that
@@ -810,9 +814,9 @@ create recursive Collection machinery.
    equal current materialization-cell values.
 5. **Total materialization:** every active inline cell has exactly one value,
    including its mode's empty value when its bucket has no rows.
-6. **Stale demand:** an obsolete graph or demand generation cannot settle
-   current readiness, and a conforming source cannot publish its request-scoped
-   rows after cancellation.
+6. **Stale demand:** an obsolete graph cannot settle current readiness, and an
+   obsolete acquisition cannot satisfy current demand. A conforming source
+   cannot publish its request-scoped rows after cancellation.
 7. **Applied settlement:** a successful subset load settles only after its
    establishing sync transactions are visible; a source must not add queue
    priority merely to force the load to settle. Settlement proves no broader

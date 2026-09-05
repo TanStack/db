@@ -1243,8 +1243,9 @@ explicitly removed.
 This is the bounded protocol census. Do not add another production patch until
 every row is either green or has a named red witness.
 
-Latest checkpoint: **509 passing / 18 failing** across 527 test functions.
-The demand suite is **187/0**. Remaining failures: history **4**, publication
+Latest checkpoint: **521 passing / 15 failing** across 536 test functions.
+The demand suite is **187/0**. Remaining failures: history **1** (new empty-
+notification mismatch, not yet a confirmed runtime defect), publication
 **9**, settled-peer replay **1**, ordered work **4**. Counts describe tests,
 not unique confirmed runtime bugs; contract-alignment notes below distinguish
 stale oracle expectations from implementation defects.
@@ -1256,7 +1257,7 @@ stale oracle expectations from implementation defects.
 | Physical acquisition interaction                     | 5 states × 5 causes: 18 executable cells and 7 true exclusions                                      | distinguishes no-op, abort, retire, preserve, discard, retry |
 | Cleanup/restart ownership                            | 20 restart cells plus fixed callback boundaries                                                     | green, including unavailable-loader pending-result cases     |
 | Async session fencing                                | 2–4 sessions, 1–2 demands, mixed outcomes, obsolete/current/interleaved settlement                  | green                                                        |
-| Generated async lifecycle histories                  | one pure reducer drives async-pending and sync-success histories with one ordered event trace       | 24 green / 4 pending-readiness reds; synchronous replay filter removed |
+| Generated async lifecycle histories                  | one pure reducer drives async-pending and sync-success histories with one ordered event trace       | 36 green / 1 new notification mismatch; both async exclusions removed |
 | Row-bearing lifecycle histories                      | independent public-row model over canonical, fixed-seed, and random histories with exact batches    | 4 named publication reds                                     |
 | Replay phase transitions                             | setup/pending/settling/publishing crossed with release, reacquisition, supersession, abort, cleanup | direct settled-peer loss red; graph peer, error ownership, and new-demand readiness witnesses green |
 | Ordered route mechanics                              | page/prefix/boundary/full-source × return/throw/resolve/reject/abort/cleanup                        | green                                                        |
@@ -1271,8 +1272,8 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
 | ----------------------------------------- | --------------- | ---------------------------------------------------------------------------- |
 | Start/failure reentry through truncate    | 0 (5 stale expectations reconciled) | queued replay owns loading; a synchronous throw rolls back the tentative owner |
 | Acquisition availability and callback ABA | 14              | demand starts on the wrong loader/session, settles early, or owns no lease   |
-| Obsolete async replay readiness           | 3               | retired work keeps the current subscription from reaching `ready`            |
-| Aborted replay generation                 | historical 5    | loading contract reconciled; phantom unload fixed; peer pending-readiness witness remains |
+| Obsolete async replay readiness           | historical 3    | delayed cancellation still owes settlement; stale model expectations reconciled |
+| Aborted replay generation                 | historical 5    | loading and delayed-settlement contracts reconciled; phantom unload fixed |
 | Synchronous replay/restart readiness      | historical 12   | queued loading is valid; unacquired-unload suffix fixed; unrestricted synchronous generator passes |
 | Released obsolete publication             | 1               | a non-cooperative retired acquisition can still publish its row              |
 | Independent write during replay           | 1               | successful replacement drops an unrelated source row written behind its gate |
@@ -2464,6 +2465,56 @@ candidate repair scopes, not completed fixes or proof of root cause.
   hashes, transient ablation state, or the 10× invocation; those rely on the
   execution record. Adjacent **142/0** controls are separate, not the verified
   report's full **349/4**, which overlaps history/demand census cases.
+
+- Reconciled the four pending-readiness histories against the existing source
+  contract (ARCHITECTURE source cancellation and overlapping replay sections).
+  Replacing a physical acquisition is not releasing its logical owner. Prompt
+  cancellation settles the old wait; delayed cancellation still owes settlement.
+  Owner release removes its current and older waits; cleanup invalidates the
+  whole source session. The previous model discarded every old wait at truncate
+  even though the fixture deliberately left the old Promise pending. These four
+  greens are model corrections, not runtime fixes. Runtime diff is empty.
+- The pure model and harness now support `manual` settlement and prompt
+  `reject`-on-abort. Added eight fixed cases: cancellation mode × one/two replays
+  × current resolve/reject, with late obsolete settlements and teardown. Both
+  async properties generate cancellation mode as well as command history. Removed
+  aborted-replay and pending-supersession filters; neither async nor synchronous
+  history generation now excludes those transitions. The separate row-bearing
+  publication generator still excludes successful released-obsolete writes.
+  Architecture wording now distinguishes satisfying current demand from
+  releasing an older publication wait; no source success is credited to a
+  replacement merely because obsolete work settled.
+- Mutation controls on the frozen 36-test history suite: dropping old status
+  participants at truncate gives **31/5**, including both one-replay/manual
+  cases, `/tmp/tanstack-history-cancellation-early-ready-final-mutant.json`.
+  Ignoring status settlement when its signal is aborted gives **24/12**,
+  including all eight new cases,
+  `/tmp/tanstack-history-cancellation-stuck-ready-mutant.json`. These are two
+  invalid implementations, not defects in the unchanged baseline. Both restored
+  before verification; tests retain exact ownership, events, errors and signals.
+- Initial same-seed census was **521/14**, 535 functions, in
+  `/tmp/tanstack-history-cancellation-contract-census.json`. The 10× history run
+  then found a new mismatch: seed **1413322355**, path **757:13:15:15:9:9:9**,
+  after 758 examples (six shrink steps). Minimal sequence: request b, truncate,
+  settle current b, request a, settle a, with manual cancellation. Request a
+  emits an extra empty notification while initial b remains pending. This is
+  not a row-loss proof; determine whether initial pre-replay work should keep
+  publication private or only hold status before changing runtime. The new
+  `replacementSucceeded` model includes all gating work, so that scope itself
+  needs a row-bearing/contract check. No exclusion or expected-failure mask added.
+- Preserved the shrunk case with late obsolete settlement and release/unsubscribe
+  suffix as a red fixed test. Final seed-1657011 census **521/15**, 536 functions,
+  `/tmp/tanstack-history-cancellation-pinned-census.json`: history **36/1**,
+  other suites unchanged. Eight new positive cases plus one new red witness;
+  no old tests removed. Adjacent controls **142/0** in
+  `/tmp/tanstack-history-cancellation-adjacent.json`. Prettier/diff checks pass;
+  no new clean full lint/typecheck claim.
+- The 10× report, before the fixed witness was added, is **35/1**,
+  `/tmp/tanstack-history-cancellation-contract-10x.json`: fixed async 1657003,
+  fixed sync 1657004 and fresh sync -252758267 pass 800 runs each; fresh async
+  1413322355 finds the above case. It is not a green campaign or the final 100×
+  run. Next slice: the new initial-cancellation publication boundary, followed
+  by the nine row-bearing publication failures and settled-peer loss.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar

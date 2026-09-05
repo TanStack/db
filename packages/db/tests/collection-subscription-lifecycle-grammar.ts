@@ -91,6 +91,7 @@ export type LifecycleTraceEvent =
 
 export type LifecycleModel = {
   acquisitionMode: `async-pending` | `sync-success`
+  cancellation: `manual` | `reject`
   active: boolean
   unsubscribed: boolean
   session: number
@@ -124,9 +125,11 @@ export function createLifecycleModel(
   acquisitionMode: LifecycleModel[`acquisitionMode`] = `async-pending`,
   failureForAttempt: (attemptId: number) => Error = (attemptId) =>
     new Error(`attempt ${attemptId} failed`),
+  cancellation: LifecycleModel[`cancellation`] = `manual`,
 ): LifecycleModel {
   return {
     acquisitionMode,
+    cancellation,
     active: true,
     unsubscribed: false,
     session: 0,
@@ -167,10 +170,13 @@ function setStatus(model: LifecycleModel, queuedReplay = false): void {
 // Settled failure is not an authoritative replacement. Keep subsequent reads
 // private until the failed owner retires or a new replay succeeds.
 function replacementSucceeded(model: LifecycleModel): boolean {
-  return model.owners.every(
-    ({ attemptId }) =>
-      attemptId === undefined ||
-      model.attempts[attemptId]!.outcome === `resolve`,
+  return (
+    !model.attempts.some(({ gating }) => gating) &&
+    model.owners.every(
+      ({ attemptId }) =>
+        attemptId === undefined ||
+        model.attempts[attemptId]!.outcome === `resolve`,
+    )
   )
 }
 
@@ -227,25 +233,33 @@ function startAttempt(
 function retireAttempt(
   model: LifecycleModel,
   owner: LifecycleOwner,
-  unload: boolean,
-  trace = true,
+  options: { unload: boolean; trace?: boolean; keepPending?: boolean },
 ): void {
   if (owner.attemptId === undefined) return
   const attempt = model.attempts[owner.attemptId]
   owner.attemptId = undefined
   if (!attempt) throw new Error(`model lost attempt`)
-  attempt.gating = false
+  attempt.gating = options.keepPending === true && !attempt.settled
   attempt.reportable = false
-  attempt.aborted = true
-  if (unload) {
+  abortAttempt(model, attempt)
+  if (options.unload) {
     model.unloads.push({ attemptId: attempt.id, handlerSession: model.session })
-    if (trace) {
+    if (options.trace !== false) {
       model.trace.push({
         type: `unload`,
         attemptId: attempt.id,
         handlerSession: model.session,
       })
     }
+  }
+}
+
+function abortAttempt(model: LifecycleModel, attempt: LifecycleAttempt): void {
+  attempt.aborted = true
+  if (model.cancellation === `reject` && !attempt.settled) {
+    attempt.settled = true
+    attempt.outcome = `reject`
+    attempt.gating = false
   }
 }
 
@@ -342,9 +356,10 @@ export function reduceLifecycle(
     owner.aborted = true
     if (owner.attemptId !== undefined) {
       const attempt = model.attempts[owner.attemptId]!
-      attempt.aborted = true
+      abortAttempt(model, attempt)
       attempt.reportable = false
     }
+    setStatus(model)
     return { ownerId: owner.id }
   }
 
@@ -358,7 +373,11 @@ export function reduceLifecycle(
     }
     model.reach.add(`effective:release`)
     const [owner] = model.owners.splice(index, 1)
-    retireAttempt(model, owner!, true)
+    retireAttempt(model, owner!, { unload: true })
+    // Retirement removes the logical owner, including its older transports.
+    for (const attempt of model.attempts) {
+      if (attempt.ownerId === owner!.id) attempt.gating = false
+    }
     if (model.publicationBarrierOpen && replacementSucceeded(model)) {
       model.publicationBarrierOpen = false
     }
@@ -418,7 +437,13 @@ export function reduceLifecycle(
     const replayTrace: Array<LifecycleTraceEvent> = []
     for (const owner of model.owners) {
       const retiredAttemptId = owner.attemptId
-      retireAttempt(model, owner, true, false)
+      // Replacing an acquisition is not releasing its logical owner. A source
+      // that cannot cancel promptly still owes settlement before publication.
+      retireAttempt(model, owner, {
+        unload: true,
+        trace: false,
+        keepPending: true,
+      })
       if (!owner.aborted) {
         const attempt = startAttempt(model, owner, false)
         replayTrace.push({
@@ -460,7 +485,9 @@ export function reduceLifecycle(
     ) {
       model.reach.add(`partial-generation-supersession`)
     }
-    for (const owner of model.owners) retireAttempt(model, owner, false)
+    for (const owner of model.owners)
+      retireAttempt(model, owner, { unload: false })
+    for (const attempt of model.attempts) attempt.gating = false
     model.active = false
     model.publicationBarrierOpen = false
     model.collectionStatus = `cleaned-up`
@@ -505,66 +532,17 @@ export function reduceLifecycle(
   }
 
   model.reach.add(`effective:unsubscribe`)
-  for (const owner of model.owners) retireAttempt(model, owner, true)
+  for (const owner of model.owners)
+    retireAttempt(model, owner, { unload: true })
   model.owners.length = 0
   model.unsubscribed = true
   return {}
 }
 
-function crossesPendingReplaySupersession(
-  history: ReadonlyArray<LifecycleCommand>,
-): boolean {
-  const model = createLifecycleModel()
-  let hasPendingSupersession = false
-  for (const command of history) {
-    if (
-      command.type === `truncate` &&
-      model.active &&
-      model.owners.some(({ attemptId }) =>
-        attemptId === undefined ? false : !model.attempts[attemptId]!.settled,
-      )
-    ) {
-      hasPendingSupersession = true
-    }
-    reduceLifecycle(model, command)
-    const currentAttemptIds = new Set(
-      model.owners.flatMap(({ attemptId }) =>
-        attemptId === undefined ? [] : [attemptId],
-      ),
-    )
-    if (
-      hasPendingSupersession &&
-      model.status === `ready` &&
-      model.attempts.some(
-        ({ id, settled }) => !currentAttemptIds.has(id) && !settled,
-      )
-    ) {
-      return true
-    }
-  }
-  return false
-}
-
-function replaysAbortedDemand(
-  history: ReadonlyArray<LifecycleCommand>,
-): boolean {
-  const model = createLifecycleModel()
-  for (const command of history) {
-    const wouldReplay =
-      (command.type === `truncate` && model.active) ||
-      (command.type === `restart` && !model.active)
-    if (wouldReplay && model.owners.some(({ aborted }) => aborted)) return true
-    reduceLifecycle(model, command)
-  }
-  return false
-}
-
-export const greenLifecycleHistoryArbitrary = fc
-  .array(lifecycleCommandArbitrary, { minLength: 1, maxLength: 20 })
-  // Pending supersession still has named red witnesses. The aborted-replay
-  // filter is now broader than the known failures and remains a coverage gap.
-  .filter((history) => !replaysAbortedDemand(history))
-  .filter((history) => !crossesPendingReplaySupersession(history))
+export const greenLifecycleHistoryArbitrary = fc.array(
+  lifecycleCommandArbitrary,
+  { minLength: 1, maxLength: 20 },
+)
 
 function publishesReleasedObsoleteAttempt(
   history: ReadonlyArray<LifecycleCommand>,

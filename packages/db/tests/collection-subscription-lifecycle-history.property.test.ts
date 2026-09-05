@@ -54,6 +54,7 @@ async function runHistory(
   history: ReadonlyArray<LifecycleCommand>,
   options: {
     acquisitionMode?: `async-pending` | `sync-success`
+    cancellation?: `manual` | `reject`
     continueAfterMismatch?: boolean
   } = {},
 ): Promise<Set<string>> {
@@ -67,7 +68,12 @@ async function runHistory(
     failures.set(attemptId, failure)
     return failure
   }
-  const model = createLifecycleModel(acquisitionMode, failureForAttempt)
+  const cancellation = options.cancellation ?? `manual`
+  const model = createLifecycleModel(
+    acquisitionMode,
+    failureForAttempt,
+    cancellation,
+  )
   const where = {
     a: new Func(`eq`, [new PropRef([`id`]), new Value(`a`)]),
     b: new Func(`eq`, [new PropRef([`id`]), new Value(`b`)]),
@@ -148,6 +154,20 @@ async function runHistory(
               settled: acquisitionMode === `sync-success`,
               current: true,
             })
+            if (deferred && cancellation === `reject`) {
+              options.signal?.addEventListener(
+                `abort`,
+                () => {
+                  const attempt = runtimeAttempts.get(observed.id)!
+                  if (attempt.settled) return
+                  attempt.settled = true
+                  deferred.reject(
+                    new DOMException(`acquisition aborted`, `AbortError`),
+                  )
+                },
+                { once: true },
+              )
+            }
             owner.attemptId = observed.id
             attemptByOptions.set(options, observed.id)
             observedLoads.push(observed)
@@ -413,7 +433,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     expect([...required].filter((label) => !reach.has(label))).toEqual([])
   })
 
-  it(`names the known-red overlapping replay transition without claiming it passed`, () => {
+  it(`names the overlapping replay transition in the model`, () => {
     const model = createLifecycleModel()
     for (const command of pendingSupersessionHistory) {
       reduceLifecycle(model, command)
@@ -440,11 +460,14 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
       name: `duplicate owners after overlapping replay`,
       history: pendingSupersessionHistory,
     },
-  ])(`retires obsolete pending status for $name`, async ({ history }) => {
-    await runHistory(history)
-  })
+  ])(
+    `waits for delayed cancellation settlement for $name`,
+    async ({ history }) => {
+      await runHistory(history)
+    },
+  )
 
-  it(`releases exact current ownership after overlapping replay status diverges`, async () => {
+  it(`releases exact ownership while older replay work is pending`, async () => {
     await runHistory(
       [
         ...pendingSupersessionHistory,
@@ -456,6 +479,53 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
       { continueAfterMismatch: true },
     )
   })
+
+  it.each(
+    ([`manual`, `reject`] as const).flatMap((cancellation) =>
+      ([1, 2] as const).flatMap((replays) =>
+        ([`resolve`, `reject`] as const).map((outcome) => ({
+          cancellation,
+          replays,
+          outcome,
+        })),
+      ),
+    ),
+  )(
+    `tracks $cancellation cancellation across $replays replay(s) ending in $outcome`,
+    async ({ cancellation, replays, outcome }) => {
+      await runHistory(
+        [
+          { type: `request`, demand: `a` },
+          ...Array.from(
+            { length: replays },
+            (): LifecycleCommand => ({ type: `truncate` }),
+          ),
+          {
+            type: `settle`,
+            demand: `a`,
+            scope: `current`,
+            age: `oldest`,
+            outcome,
+          },
+          ...Array.from(
+            { length: replays },
+            (_, index): LifecycleCommand => ({
+              type: `settle`,
+              demand: `a`,
+              scope: `obsolete`,
+              age: `oldest`,
+              outcome: index % 2 === 0 ? `reject` : `resolve`,
+            }),
+          ),
+          { type: `release`, demand: `a` },
+          { type: `cleanup` },
+          { type: `restart` },
+          { type: `unsubscribe` },
+        ],
+        { cancellation },
+      )
+    },
+  )
 
   it.each([
     { name: `truncate replay`, history: abortReplayHistory },
@@ -604,6 +674,43 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     },
   )
 
+  it(`keeps a new snapshot private while initial cancellation is pending`, async () => {
+    // Seed 1413322355, path 757:13:15:15:9:9:9. This checks an extra empty
+    // notification, not row loss; reconcile the publication boundary next.
+    await runHistory(
+      [
+        { type: `request`, demand: `b` },
+        { type: `truncate` },
+        {
+          type: `settle`,
+          demand: `b`,
+          scope: `current`,
+          age: `oldest`,
+          outcome: `resolve`,
+        },
+        { type: `request`, demand: `a` },
+        {
+          type: `settle`,
+          demand: `a`,
+          scope: `current`,
+          age: `oldest`,
+          outcome: `resolve`,
+        },
+        {
+          type: `settle`,
+          demand: `b`,
+          scope: `obsolete`,
+          age: `oldest`,
+          outcome: `resolve`,
+        },
+        { type: `release`, demand: `a` },
+        { type: `release`, demand: `b` },
+        { type: `unsubscribe` },
+      ],
+      { continueAfterMismatch: true },
+    )
+  })
+
   it(`keeps a new snapshot private after failed restart`, async () => {
     // Minimized from seed 317005625 at 100×. The mismatch is an empty
     // notification, not lost rows: failed replacement must keep reads private.
@@ -639,19 +746,23 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
 
   const { multiplier, ...replay } = readOracleRunConfig()
   const runs = 80 * multiplier
+  const cancellationArbitrary = fc.constantFrom(
+    `manual` as const,
+    `reject` as const,
+  )
 
-  fcTest.prop([greenLifecycleHistoryArbitrary], {
+  fcTest.prop([greenLifecycleHistoryArbitrary, cancellationArbitrary], {
     numRuns: runs,
     seed: 1_657_003,
   })(
     `matches the pure lifecycle model for a fixed seed`,
-    async (history) => {
-      await runHistory(history)
+    async (history, cancellation) => {
+      await runHistory(history, { cancellation })
     },
     120_000,
   )
   fcTest.prop(
-    [greenLifecycleHistoryArbitrary],
+    [greenLifecycleHistoryArbitrary, cancellationArbitrary],
     oracleRandomParameters(
       runs,
       replay,
@@ -659,8 +770,8 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     ),
   )(
     `matches the pure lifecycle model for a random or replayed seed`,
-    async (history) => {
-      await runHistory(history)
+    async (history, cancellation) => {
+      await runHistory(history, { cancellation })
     },
     120_000,
   )
