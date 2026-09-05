@@ -66,6 +66,10 @@ type PublicationModel = {
   batches: Array<Array<PublicationChange>>
   sentKeys: Set<DemandName>
 }
+type PublicationRunOptions = {
+  continueAfterMismatch?: boolean
+  reach?: Set<string>
+}
 
 function recordSourceWrite(publication: PublicationModel, row: Row): void {
   const previousVisible = publication.visible.get(row.id)
@@ -145,11 +149,25 @@ function finishReplacement(
   const currentAttempts = lifecycle.owners.flatMap(({ aborted, attemptId }) =>
     aborted || attemptId === undefined ? [] : [lifecycle.attempts[attemptId]!],
   )
-  if (currentAttempts.every(({ outcome }) => outcome === `resolve`)) {
+  if (
+    replacement.failed ||
+    currentAttempts.some(({ outcome }) => outcome === `reject`)
+  ) {
+    replacement.failed = true
+    if (currentAttempts.length === 0) {
+      publication.source = new Map(publication.visible)
+      publication.replacement = undefined
+    }
+  } else if (
+    currentAttempts.length > 0 &&
+    currentAttempts.every(({ outcome }) => outcome === `resolve`)
+  ) {
     publishIfChanged(publication, new Map(replacement.rows))
     publication.replacement = undefined
   } else {
-    replacement.failed = true
+    // Closing a replacement by releasing its final owner retires private work.
+    publication.source = new Map(publication.visible)
+    publication.replacement = undefined
   }
 }
 
@@ -411,7 +429,9 @@ const publicationCommandHistoryArbitrary: fc.Arbitrary<
 
 async function runPublicationHistory(
   history: ReadonlyArray<PublicationCommand>,
+  options: PublicationRunOptions = {},
 ): Promise<void> {
+  const check = options.continueAfterMismatch ? expect.soft : expect
   const lifecycle = createLifecycleModel()
   const publication: PublicationModel = {
     source: new Map(),
@@ -529,7 +549,7 @@ async function runPublicationHistory(
       observedBatches,
       expectedBatches: publication.batches,
     })
-    expect(observedBatches, context).toEqual(publication.batches)
+    check(observedBatches, context).toEqual(publication.batches)
   }
 
   const selectRuntimeAttempt = (
@@ -592,19 +612,19 @@ async function runPublicationHistory(
         const receipt = operations?.commit()
         if (receipt !== true) await receipt
       } else if (command.type === `request`) {
-        expect(effect.ownerId).toBe(unsubscribed ? undefined : runtimeOwner?.id)
+        check(effect.ownerId).toBe(unsubscribed ? undefined : runtimeOwner?.id)
         subscription.requestSnapshot({
           where: where[command.demand],
           signal: runtimeOwner?.controller.signal,
         })
       } else if (command.type === `abort`) {
-        expect(effect.ownerId).toBe(runtimeOwner?.id)
+        check(effect.ownerId).toBe(runtimeOwner?.id)
         if (runtimeOwner) {
           runtimeOwner.aborted = true
           runtimeOwner.controller.abort()
         }
       } else if (command.type === `release`) {
-        expect(effect.ownerId).toBe(runtimeOwner?.id)
+        check(effect.ownerId).toBe(runtimeOwner?.id)
         if (runtimeOwner) {
           if (runtimeOwner.attemptId !== undefined) {
             attempts.get(runtimeOwner.attemptId)!.current = false
@@ -613,7 +633,7 @@ async function runPublicationHistory(
         }
         subscription.releaseSnapshot(where[command.demand])
       } else if (command.type === `settle`) {
-        expect(effect.attemptId).toBe(runtimeAttempt?.id)
+        check(effect.attemptId).toBe(runtimeAttempt?.id)
         if (effect.attemptId !== undefined && runtimeAttempt) {
           runtimeAttempt.settled = true
           const expected = lifecycle.attempts[
@@ -667,6 +687,7 @@ async function runPublicationHistory(
         priorPublicationCount,
       )
       assertPublications(command)
+      options.reach?.add(`command:${command.type}`)
     }
   } finally {
     for (const attempt of attempts.values()) attempt.deferred.resolve()
@@ -684,7 +705,15 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   })
 
   it(`does not publish rows written by a released obsolete acquisition`, async () => {
-    await runPublicationHistory(releasedObsoleteResolveHistory)
+    await runPublicationHistory(
+      [
+        ...releasedObsoleteResolveHistory,
+        { type: `cleanup` },
+        { type: `restart` },
+        { type: `unsubscribe` },
+      ],
+      { continueAfterMismatch: true },
+    )
   })
 
   it(`publishes an authoritative truncate after the final demand is released`, async () => {
@@ -704,48 +733,70 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   })
 
   it(`publishes independent source changes with a successful replay`, async () => {
-    await runPublicationHistory([
-      { type: `request`, demand: `a` },
-      {
-        type: `settle`,
-        demand: `a`,
-        scope: `current`,
-        age: `oldest`,
-        outcome: `resolve`,
-      },
-      { type: `truncate` },
-      { type: `source`, demand: `b`, action: `upsert`, value: 50 },
-      {
-        type: `settle`,
-        demand: `a`,
-        scope: `current`,
-        age: `oldest`,
-        outcome: `resolve`,
-      },
-    ])
+    await runPublicationHistory(
+      [
+        { type: `request`, demand: `a` },
+        {
+          type: `settle`,
+          demand: `a`,
+          scope: `current`,
+          age: `oldest`,
+          outcome: `resolve`,
+        },
+        { type: `truncate` },
+        { type: `source`, demand: `b`, action: `upsert`, value: 50 },
+        {
+          type: `settle`,
+          demand: `a`,
+          scope: `current`,
+          age: `oldest`,
+          outcome: `resolve`,
+        },
+        { type: `release`, demand: `a` },
+        { type: `cleanup` },
+        { type: `restart` },
+        { type: `unsubscribe` },
+      ],
+      { continueAfterMismatch: true },
+    )
   })
 
   it(`does not republish a row already delivered by a live change`, async () => {
-    await runPublicationHistory([
-      { type: `source`, demand: `a`, action: `upsert`, value: 0 },
-      { type: `request`, demand: `b` },
-      { type: `source`, demand: `b`, action: `upsert`, value: 1 },
-      { type: `request`, demand: `b` },
-    ])
+    await runPublicationHistory(
+      [
+        { type: `source`, demand: `a`, action: `upsert`, value: 0 },
+        { type: `request`, demand: `b` },
+        { type: `source`, demand: `b`, action: `upsert`, value: 1 },
+        { type: `request`, demand: `b` },
+        { type: `release`, demand: `b` },
+        { type: `release`, demand: `b` },
+        { type: `cleanup` },
+        { type: `restart` },
+        { type: `unsubscribe` },
+      ],
+      { continueAfterMismatch: true },
+    )
   })
 
   it(`does not publish a non-cooperative acquisition after its signal aborts`, async () => {
-    await runPublicationHistory([
-      { type: `request`, demand: `a` },
-      { type: `abort`, demand: `a` },
-      {
-        type: `settle`,
-        demand: `a`,
-        scope: `current`,
-        age: `oldest`,
-        outcome: `resolve`,
-      },
-    ])
+    await runPublicationHistory(
+      [
+        { type: `request`, demand: `a` },
+        { type: `abort`, demand: `a` },
+        {
+          type: `settle`,
+          demand: `a`,
+          scope: `current`,
+          age: `oldest`,
+          outcome: `resolve`,
+        },
+        { type: `release`, demand: `a` },
+        { type: `cleanup` },
+        { type: `restart` },
+        { type: `unsubscribe` },
+      ],
+      { continueAfterMismatch: true },
+    )
   })
 
   it(`keeps later source changes private after a failed replay`, async () => {
@@ -767,6 +818,34 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
         outcome: `reject`,
       },
       { type: `source`, demand: `b`, action: `upsert`, value: 51 },
+    ])
+  })
+
+  it(`retires failed private replacement rows when its final owner releases`, async () => {
+    await runPublicationHistory([
+      { type: `source`, demand: `b`, action: `upsert`, value: 7 },
+      { type: `request`, demand: `a` },
+      {
+        type: `settle`,
+        demand: `a`,
+        scope: `current`,
+        age: `oldest`,
+        outcome: `resolve`,
+      },
+      { type: `truncate` },
+      { type: `source`, demand: `b`, action: `upsert`, value: 51 },
+      {
+        type: `settle`,
+        demand: `a`,
+        scope: `current`,
+        age: `oldest`,
+        outcome: `reject`,
+      },
+      { type: `release`, demand: `a` },
+      { type: `source`, demand: `b`, action: `upsert`, value: 8 },
+      { type: `cleanup` },
+      { type: `restart` },
+      { type: `unsubscribe` },
     ])
   })
 

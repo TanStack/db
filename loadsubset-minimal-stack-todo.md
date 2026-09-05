@@ -1575,10 +1575,15 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
           settlement × suffix with checked observed reach. Keep named red
           regions out of the broad green campaign without filtering away their
           fixed witnesses.
-    - [ ] C — Model failed/private replacement retirement explicitly; final
-          owner release must not vacuously publish private rows.
-    - [ ] C — Add full lifecycle suffixes for released-obsolete, aborted,
-          visible-row-repeat, and independent-write publication reds.
+    - [x] C — Model failed/private replacement retirement explicitly; final
+          owner release must not vacuously publish private rows. A non-empty
+          failed replacement exposed a new red: final-owner release deletes an
+          unrelated row from the retained public snapshot.
+    - [x] C — Add full lifecycle suffixes for released-obsolete, aborted,
+          visible-row-repeat, and independent-write publication reds. Each red
+          now continues through release, cleanup, restart, and unsubscribe with
+          exact soft publication checks. The catalog has 157 tests: 112 green
+          laws and 45 named reds.
     - [ ] D — Add executable witnesses for the three remaining replay-phase
           contracts: surviving successful peer, per-attempt failure ownership,
           and reentrant async demand readiness.
