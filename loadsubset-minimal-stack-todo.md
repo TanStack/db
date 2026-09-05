@@ -2173,6 +2173,19 @@ candidate repair scopes, not completed fixes or proof of root cause.
   error delivery must preserve the new session as well as the caller's error.
   Same-session initial-error recovery notification and shared replay failures
   remain open. These counts are test functions, not unique defects.
+- Fresh Field Lab loss audit of `c2054562` confirmed the report counts and
+  recovered assertion-order limits. Ablated startup cases stop at session,
+  cleanup, or status checks before replacement load/unload assertions; all six
+  queue cases stop at load count before unload and rejection checks. Those
+  later assertions pass with the fix, but were not independently ablated.
+  The first-ready throw control already propagated the error before the fix;
+  its old failure was missing cleanup, not error delivery. The cleanup-callback
+  witness also proves logical demand survives for exact replacement-adapter
+  acquisition/release with no false immediate result callback. Ablation-to-fix
+  changes 16 case outcomes; parent-to-commit adds 13 cases and fixes three old
+  failures. These are distinct denominators. Audit was source/report-only,
+  with no reruns; its summary-led single scan could bias attention. Exact
+  command/ablation provenance remains in this execution log, not the JSON alone.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
