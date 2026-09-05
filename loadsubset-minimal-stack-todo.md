@@ -2339,6 +2339,24 @@ candidate repair scopes, not completed fixes or proof of root cause.
   names disappear from the same-seed prior **483/39** census; none are added.
   Demand suite is **183/0**. Seed 1657011; Prettier/diff checks pass.
 
+- Fresh Field Lab loss audit of `050911ab` confirmed only tests/ledger changed
+  and all 522 census functions remain. It recovered a useful distinction:
+  queued setup owns a loading interval even when a later throw leaves no owner
+  to acquire. The failed-start case explicitly asserts absence; it does not
+  merely skip replacement checks. Exact releases and terminal cleanup checks
+  (no later attempts/unloads/status; same primary error) remain intact. Both
+  mutants fail the intended inside-reentry or exact-attempt assertions, but
+  cover only those two wrong implementations. Verified demand plus adjacent
+  suites are **325/0** in `/tmp/tanstack-truncate-contract-verified.json`; this
+  overlaps the census by its 183 demand tests, not 325 additional cases.
+  Audit was source/report-only, sequential in one fresh context rather than
+  independently blinded. Reports do not encode transient source mutations or
+  complete command provenance; the audit's omission focus may overemphasize
+  details omitted from the short summary.
+- Next lifecycle slice: compare the history reducer's remaining status
+  expectations with queued replay/setup and obsolete-transport contracts before
+  changing runtime. The 34 remaining red tests are not yet 34 confirmed bugs.
+
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
       behavior, and opaque callback roots.
