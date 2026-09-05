@@ -443,8 +443,8 @@ export function reduceLifecycle(
     const replayTrace: Array<LifecycleTraceEvent> = []
     for (const owner of model.owners) {
       const retiredAttemptId = owner.attemptId
-      // Replacing an acquisition is not releasing its logical owner. A source
-      // that cannot cancel promptly still owes settlement before publication.
+      // Replacing an acquisition is not releasing its logical owner. Delayed
+      // cancellation still holds readiness; replay work also holds publication.
       retireAttempt(model, owner, {
         unload: true,
         trace: false,

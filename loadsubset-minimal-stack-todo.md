@@ -2572,8 +2572,8 @@ candidate repair scopes, not completed fixes or proof of root cause.
   Both mutations restored; subscription.ts has zero diff from HEAD. Other
   settlement orders and later assertions are positive controls, not independently
   isolated mutation proofs.
-- Restored focused suite **232/0**, report success true,
-  `/tmp/tanstack-publication-readiness-model-green.json`. Full seed-1657011 census
+- Pre-mutation focused suite **232/0**, report success true,
+  `/tmp/tanstack-publication-readiness-model-green.json`. Restored seed-1657011 census
   **530/14**, 544 functions, `/tmp/tanstack-publication-readiness-census.json`:
   history **37/0**, demand **195/0**, publication **7/9**, replay **68/1**,
   refinement **7/0**, ordered lifecycle **196/0**, ordered work **20/4**.
@@ -2587,6 +2587,34 @@ candidate repair scopes, not completed fixes or proof of root cause.
   checks pass. Targeted eslint remains **9 errors / 5 warnings**, all outside
   this step's changed lines; no clean lint/typecheck claim. Next: nine
   row-bearing publication failures, then the settled-peer loss.
+
+- Fresh Field Lab loss audit of `7f98dd2a` verified the five report totals and
+  unchanged assertion/command coverage. Recovered limits and corrections:
+  - Publication success still requires every current owner's acquisition to
+    resolve, as well as no pending replay-member attempts. Readiness considers
+    all pending attempts; membership alone does not establish success.
+  - The eight cases also request a second demand after the current first demand
+    settles, checking its empty notification and whether its rows join the
+    still-private replay. They observe direct subscription events projected to
+    id/version plus counters, not downstream queries, every synchronous-read
+    surface, or exact complete row-event batches.
+  - Corrected the stale model comment that said delayed cancellation always
+    blocked publication. Corrected report chronology above: the focused 232/0
+    report predates both mutants; post-mutation green history/demand evidence
+    is in the later full census. Report timestamps verify that order, not the
+    exact transient source changes.
+  - Adjacent reentrancy properties also passed with seeds 1774 and 1720347121.
+    All five reports contain zero pending tests. The overblocking history's
+    exact publication and trace comparisons retain the mismatch through late
+    settlement, both releases, and unsubscribe.
+  Audit scanned committed source first and froze that reading before scanning
+  reports. A second fresh scanner hit the thread limit, so both scans ran
+  sequentially in one fresh agent; no sibling-blind corroboration or test rerun.
+  This can steer report attention toward source-derived categories. JSON does
+  not prove launch commands, multipliers, 800-example counts, source hashes,
+  transient mutation patches/restoration, lint, formatting, or typecheck; those
+  claims retain their execution-record provenance. Audit comments were then
+  recorded in a docs-only follow-up (including the corrected source comment).
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
