@@ -20,7 +20,7 @@ import type {
   LifecycleModel,
 } from './collection-subscription-lifecycle-grammar.js'
 
-type RowKey = DemandName | `c`
+type RowKey = DemandName | `c` | `d`
 type Row = { id: RowKey; value: number }
 type PublicationChange = {
   type: `insert` | `update` | `delete`
@@ -81,6 +81,9 @@ type PublicationObservation = {
   sourceEffect?: SourceEffect
   settlement?: `resolve` | `reject`
   publications: number
+  unloads: number
+  sessions: number
+  collectionStatus: string
 }
 type PublicationMismatch = {
   history: string
@@ -380,7 +383,7 @@ function projectPublication(
 
 const sourceMutationArbitrary: fc.Arbitrary<SourceMutation> = fc.record({
   type: fc.constant(`source` as const),
-  key: fc.constantFrom(`a` as const, `b` as const, `c` as const),
+  key: fc.constantFrom(`a` as const, `b` as const, `c` as const, `d` as const),
   action: fc.constantFrom(`upsert` as const, `delete` as const),
   value: fc.integer({ min: 0, max: 5 }),
 })
@@ -456,6 +459,41 @@ function resolvesAbortedAttempt(
   return false
 }
 
+function releasesReplacementBesideIndependentPublicRow(
+  history: ReadonlyArray<PublicationCommand>,
+): boolean {
+  const lifecycle = createLifecycleModel()
+  const publication: PublicationModel = {
+    source: new Map(),
+    visible: new Map(),
+    batches: [],
+    sentKeys: new Set(),
+  }
+  for (const command of history) {
+    const priorPublicationCount = lifecycle.publications
+    const effect =
+      command.type === `source`
+        ? ({} satisfies LifecycleEffect)
+        : reduceLifecycle(lifecycle, command)
+    if (
+      command.type === `release` &&
+      effect.ownerId !== undefined &&
+      publication.replacement &&
+      [...publication.visible.keys()].some((key) => key !== command.demand)
+    ) {
+      return true
+    }
+    projectPublication(
+      publication,
+      lifecycle,
+      command,
+      effect,
+      priorPublicationCount,
+    )
+  }
+  return false
+}
+
 const publicationCommandHistoryArbitrary: fc.Arbitrary<
   Array<PublicationCommand>
 > = publicationLifecycleHistoryArbitrary.chain((history) =>
@@ -480,7 +518,8 @@ const publicationCommandHistoryArbitrary: fc.Arbitrary<
     .filter(
       (history) =>
         !mutatesDuringPublicationBarrier(history) &&
-        !resolvesAbortedAttempt(history),
+        !resolvesAbortedAttempt(history) &&
+        !releasesReplacementBesideIndependentPublicRow(history),
     ),
 )
 
@@ -506,6 +545,8 @@ async function runPublicationHistory(
     [where.b, `b`],
   ])
   const attempts = new Map<number, RuntimeAttempt>()
+  const attemptForOptions = new Map<unknown, number>()
+  const unloads: Array<number> = []
   const owners: Array<RuntimeOwner> = []
   const sourceRows = new Map<number, Map<RowKey, Row>>()
   const operationsBySession = new Map<number, SyncOperations>()
@@ -549,10 +590,17 @@ async function runPublicationHistory(
               settled: false,
               current: true,
             })
+            attemptForOptions.set(options, id)
             owner.attemptId = id
             return deferred.promise
           },
-          unloadSubset: () => {},
+          unloadSubset: (options) => {
+            const attemptId = attemptForOptions.get(options)
+            if (attemptId === undefined) {
+              throw new Error(`publication unload lost its acquisition`)
+            }
+            unloads.push(attemptId)
+          },
         }
       },
     },
@@ -574,7 +622,7 @@ async function runPublicationHistory(
       )
       for (const change of batch) {
         const id = String(change.key)
-        if (id !== `a` && id !== `b` && id !== `c`) {
+        if (id !== `a` && id !== `b` && id !== `c` && id !== `d`) {
           throw new Error(`publication used an unknown row key`)
         }
         if (change.type === `delete`) visible.delete(id)
@@ -603,30 +651,33 @@ async function runPublicationHistory(
   const assertPublications = (
     command: PublicationCommand,
     commandIndex: number,
+    expectedStart: number,
+    observedStart: number,
   ): void => {
+    const expected = publication.batches.slice(expectedStart)
+    const observed = observedBatches.slice(observedStart)
     const context = JSON.stringify({
       history,
       command,
-      observedBatches,
-      expectedBatches: publication.batches,
+      commandIndex,
+      observed,
+      expected,
     })
     if (
       options.mismatches &&
-      JSON.stringify(observedBatches) !== JSON.stringify(publication.batches)
+      JSON.stringify(observed) !== JSON.stringify(expected)
     ) {
       const historyName = options.historyName ?? JSON.stringify(history)
-      if (!options.mismatches.some(({ history }) => history === historyName)) {
-        options.mismatches.push({
-          history: historyName,
-          commandIndex,
-          command,
-          expected: clonePublicationBatches(publication.batches),
-          observed: clonePublicationBatches(observedBatches),
-        })
-      }
+      options.mismatches.push({
+        history: historyName,
+        commandIndex,
+        command,
+        expected: clonePublicationBatches(expected),
+        observed: clonePublicationBatches(observed),
+      })
       return
     }
-    check(observedBatches, context).toEqual(publication.batches)
+    check(observed, context).toEqual(expected)
   }
 
   const selectRuntimeAttempt = (
@@ -650,6 +701,9 @@ async function runPublicationHistory(
         ({ current, settled }) => current && !settled,
       ).length
       const observedPublicationCount = observedBatches.length
+      const expectedPublicationCount = publication.batches.length
+      const unloadCount = unloads.length
+      const sessionCount = operationsBySession.size
       let executed = false
       let sourceEffect: SourceEffect | undefined
       let settlement: `resolve` | `reject` | undefined
@@ -789,7 +843,12 @@ async function runPublicationHistory(
         effect,
         priorPublicationCount,
       )
-      assertPublications(command, index)
+      assertPublications(
+        command,
+        index,
+        expectedPublicationCount,
+        observedPublicationCount,
+      )
       observations.push({
         index,
         command: command.type,
@@ -799,6 +858,9 @@ async function runPublicationHistory(
         ...(sourceEffect ? { sourceEffect } : {}),
         ...(settlement ? { settlement } : {}),
         publications: observedBatches.length - observedPublicationCount,
+        unloads: unloads.length - unloadCount,
+        sessions: operationsBySession.size - sessionCount,
+        collectionStatus: collection.status,
       })
     }
   } finally {
@@ -812,17 +874,20 @@ async function runPublicationHistory(
 
 type ProductSettlement = `none` | `resolve` | `reject`
 type ProductSuffix = `release` | `cleanup` | `restart` | `unsubscribe`
+type PriorIndependentRow = `absent` | `present`
 type PublicationProductCase = {
   name: string
   phase: PublicationPhase
   sourceEffect: SourceEffect
   settlement: ProductSettlement
   suffix: ProductSuffix
+  priorIndependentRow: PriorIndependentRow
   history: Array<PublicationCommand>
   focalSourceIndex: number
   settlementIndex?: number
   pendingProbeIndex: number
   suffixIndex: number
+  postUnsubscribeProbeIndex: number
 }
 
 const settleCurrent = (
@@ -841,12 +906,16 @@ function createPublicationProductCase(
   sourceEffect: SourceEffect,
   settlement: ProductSettlement,
   suffix: ProductSuffix,
+  priorIndependentRow: PriorIndependentRow,
 ): PublicationProductCase {
   const history: Array<PublicationCommand> = []
   const push = (command: PublicationCommand): number =>
     history.push(command) - 1
   const hasPeer = phase === `private-settling` || phase === `private-failed`
 
+  if (priorIndependentRow === `present`) {
+    push({ type: `source`, key: `d`, action: `upsert`, value: 30 })
+  }
   push({ type: `request`, demand: `a` })
   if (hasPeer) push({ type: `request`, demand: `b` })
   if (phase !== `public`) {
@@ -888,89 +957,212 @@ function createPublicationProductCase(
   } else {
     suffixIndex = push({ type: `unsubscribe` })
   }
+  if (suffix === `cleanup`) push({ type: `restart` })
+  const postUnsubscribeProbeIndex = push({
+    type: `source`,
+    key: `d`,
+    action: `upsert`,
+    value: 99,
+  })
 
   return {
-    name: `${phase}:${sourceEffect}:${settlement}:${suffix}`,
+    name: `${phase}:${sourceEffect}:${settlement}:${suffix}:prior-${priorIndependentRow}`,
     phase,
     sourceEffect,
     settlement,
     suffix,
+    priorIndependentRow,
     history,
     focalSourceIndex,
     ...(settlementIndex === undefined ? {} : { settlementIndex }),
     pendingProbeIndex,
     suffixIndex,
+    postUnsubscribeProbeIndex,
   }
 }
 
-const publicationProductCases = (
-  [`public`, `private-pending`, `private-settling`, `private-failed`] as const
-).flatMap((phase) =>
-  ([`insert`, `update`, `delete`] as const).flatMap((sourceEffect) =>
-    ([`none`, `resolve`, `reject`] as const).flatMap((settlement) =>
-      ([`release`, `cleanup`, `restart`, `unsubscribe`] as const).map(
-        (suffix) =>
-          createPublicationProductCase(phase, sourceEffect, settlement, suffix),
+const publicationPhases = [
+  `public`,
+  `private-pending`,
+  `private-settling`,
+  `private-failed`,
+] as const
+const sourceEffects = [`insert`, `update`, `delete`] as const
+const productSettlements = [`none`, `resolve`, `reject`] as const
+const productSuffixes = [
+  `release`,
+  `cleanup`,
+  `restart`,
+  `unsubscribe`,
+] as const
+const priorIndependentRows = [`absent`, `present`] as const
+
+const publicationProductCases = publicationPhases.flatMap((phase) =>
+  sourceEffects.flatMap((sourceEffect) =>
+    productSettlements.flatMap((settlement) =>
+      productSuffixes.flatMap((suffix) =>
+        priorIndependentRows.map((priorIndependentRow) =>
+          createPublicationProductCase(
+            phase,
+            sourceEffect,
+            settlement,
+            suffix,
+            priorIndependentRow,
+          ),
+        ),
       ),
     ),
   ),
 )
 
-describe(`CollectionSubscription lifecycle publication oracle`, () => {
-  it(`executes the complete row-publication lifecycle product`, async () => {
-    const mismatches: Array<PublicationMismatch> = []
-    const reached = new Set<string>()
+const successfulReplacementCases = publicationProductCases.filter(
+  ({ phase, sourceEffect, settlement }) =>
+    (phase === `private-pending` || phase === `private-settling`) &&
+    sourceEffect !== `delete` &&
+    settlement === `resolve`,
+)
+const replacementOrderingCases = publicationProductCases.filter(
+  ({ phase, sourceEffect, settlement, suffix, priorIndependentRow }) =>
+    (phase === `private-pending` || phase === `private-settling`) &&
+    sourceEffect === `delete` &&
+    settlement === `resolve` &&
+    suffix !== `release` &&
+    priorIndependentRow === `present`,
+)
+const replacementRetirementCases = publicationProductCases.filter(
+  (scenario) =>
+    scenario.phase !== `public` &&
+    scenario.suffix === `release` &&
+    !successfulReplacementCases.includes(scenario) &&
+    !replacementOrderingCases.includes(scenario),
+)
+const publicationControlCases = publicationProductCases.filter(
+  (scenario) =>
+    !successfulReplacementCases.includes(scenario) &&
+    !replacementOrderingCases.includes(scenario) &&
+    !replacementRetirementCases.includes(scenario),
+)
 
-    for (const scenario of publicationProductCases) {
-      const observations = await runPublicationHistory(scenario.history, {
-        historyName: scenario.name,
-        mismatches,
-      })
-      expect(observations).toHaveLength(scenario.history.length)
-      expect(observations[scenario.focalSourceIndex]).toMatchObject({
-        command: `source`,
-        phaseBefore: scenario.phase,
+async function runPublicationProduct(
+  scenarios: ReadonlyArray<PublicationProductCase>,
+): Promise<Array<PublicationMismatch>> {
+  const mismatches: Array<PublicationMismatch> = []
+  const reached = new Set<string>()
+
+  for (const scenario of scenarios) {
+    const observations = await runPublicationHistory(scenario.history, {
+      historyName: scenario.name,
+      mismatches,
+    })
+    expect(observations).toHaveLength(scenario.history.length)
+    expect(observations[scenario.focalSourceIndex]).toMatchObject({
+      command: `source`,
+      phaseBefore: scenario.phase,
+      executed: true,
+      sourceEffect: scenario.sourceEffect,
+    })
+    if (scenario.settlementIndex === undefined) {
+      expect(
+        observations[scenario.pendingProbeIndex]!.pendingAttemptsBefore,
+        scenario.name,
+      ).toBe(1)
+    } else {
+      expect(observations[scenario.settlementIndex]).toMatchObject({
+        command: `settle`,
         executed: true,
-        sourceEffect: scenario.sourceEffect,
+        settlement: scenario.settlement,
+        publications:
+          scenario.settlement === `resolve` &&
+          scenario.phase !== `private-failed`
+            ? 1
+            : 0,
       })
-      if (scenario.settlementIndex === undefined) {
-        expect(
-          observations[scenario.pendingProbeIndex]!.pendingAttemptsBefore,
-          scenario.name,
-        ).toBe(1)
-      } else {
-        expect(observations[scenario.settlementIndex]).toMatchObject({
-          command: `settle`,
-          executed: true,
-          settlement: scenario.settlement,
-          publications:
-            scenario.settlement === `resolve` &&
-            scenario.phase !== `private-failed`
-              ? 1
-              : 0,
-        })
-      }
-      expect(observations[scenario.suffixIndex]).toMatchObject({
-        command: scenario.suffix,
-        executed: true,
-      })
-      reached.add(scenario.name)
     }
 
-    expect(reached).toEqual(
-      new Set(publicationProductCases.map(({ name }) => name)),
+    const suffix = observations[scenario.suffixIndex]!
+    expect(suffix).toMatchObject({
+      command: scenario.suffix,
+      executed: true,
+    })
+    if (scenario.suffix === `release`) {
+      expect(suffix.unloads, scenario.name).toBe(1)
+    } else if (scenario.suffix === `cleanup`) {
+      expect(suffix.collectionStatus, scenario.name).toBe(`cleaned-up`)
+    } else if (scenario.suffix === `restart`) {
+      expect(suffix.sessions, scenario.name).toBe(1)
+    } else {
+      const ownerCount =
+        scenario.phase === `private-settling` ||
+        scenario.phase === `private-failed`
+          ? 2
+          : 1
+      expect(suffix.unloads, scenario.name).toBe(ownerCount)
+    }
+
+    expect(observations[scenario.postUnsubscribeProbeIndex]).toMatchObject({
+      command: `source`,
+      executed: true,
+      publications: 0,
+    })
+    reached.add(scenario.name)
+  }
+
+  expect(reached).toEqual(new Set(scenarios.map(({ name }) => name)))
+  return mismatches
+}
+
+function expectNoPublicationMismatches(
+  mismatches: ReadonlyArray<PublicationMismatch>,
+): void {
+  const summary = mismatches.map(
+    ({ history, commandIndex, command, expected, observed }) => ({
+      history,
+      commandIndex,
+      command,
+      expected,
+      observed,
+    }),
+  )
+  expect(
+    summary,
+    `publication product mismatches: ${JSON.stringify(summary)}`,
+  ).toEqual([])
+}
+
+describe(`CollectionSubscription lifecycle publication oracle`, () => {
+  it(`defines all 288 unique row-publication lifecycle cells`, () => {
+    expect(publicationProductCases).toHaveLength(288)
+    expect(new Set(publicationProductCases.map(({ name }) => name)).size).toBe(
+      288,
     )
-    const mismatchSummary = mismatches.map(
-      ({ history, commandIndex, command }) => ({
-        history,
-        commandIndex,
-        command,
-      }),
+    expect(successfulReplacementCases).toHaveLength(32)
+    expect(replacementOrderingCases).toHaveLength(6)
+    expect(replacementRetirementCases).toHaveLength(46)
+    expect(publicationControlCases).toHaveLength(204)
+  })
+
+  it(`matches row publications for lifecycle control cells`, async () => {
+    expectNoPublicationMismatches(
+      await runPublicationProduct(publicationControlCases),
     )
-    expect(
-      mismatchSummary,
-      `publication product mismatches: ${JSON.stringify(mismatchSummary)}`,
-    ).toEqual([])
+  })
+
+  it(`preserves independent source work when a successful replay publishes`, async () => {
+    expectNoPublicationMismatches(
+      await runPublicationProduct(successfulReplacementCases),
+    )
+  })
+
+  it(`publishes replacement changes in canonical key order`, async () => {
+    expectNoPublicationMismatches(
+      await runPublicationProduct(replacementOrderingCases),
+    )
+  })
+
+  it(`retires incomplete or failed replacement without changing independent public rows`, async () => {
+    expectNoPublicationMismatches(
+      await runPublicationProduct(replacementRetirementCases),
+    )
   })
 
   it(`maps every canonical green lifecycle history to public rows`, async () => {
@@ -1132,6 +1324,21 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
         { type: `cleanup` },
         { type: `restart` },
         { type: `unsubscribe` },
+      ],
+      { continueAfterMismatch: true },
+    )
+  })
+
+  it(`does not delete an independent public row when releasing a restarted demand`, async () => {
+    await runPublicationHistory(
+      [
+        { type: `source`, key: `b`, action: `upsert`, value: 0 },
+        { type: `request`, demand: `a` },
+        { type: `cleanup` },
+        { type: `restart` },
+        { type: `release`, demand: `a` },
+        { type: `unsubscribe` },
+        { type: `source`, key: `b`, action: `upsert`, value: 1 },
       ],
       { continueAfterMismatch: true },
     )

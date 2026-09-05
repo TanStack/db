@@ -1572,14 +1572,15 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
           trace, and compare each error event by object identity rather than
           Vitest's value equality for `Error` instances.
     - [x] C — Cross replay barrier phase × source insert/update/delete ×
-          settlement × suffix with checked observed reach. All 144 cells prove
-          the focal physical source effect, barrier phase, real settlement or
-          still-pending attempt, terminal suffix, and complete command trace
-          before counting reach. The product exposes 21 red cells concentrated
-          in successful replacement of independent private inserts/updates and
-          owner release during a partly settled replay. Public, delete,
-          failed-barrier, and rejection controls remain green. The broad fixed
-          and random campaign still excludes these named red regions.
+          settlement × suffix with checked observed reach. The product also
+          crosses an absent/present independent public row, for 288 unique
+          cells. Each cell proves the focal physical source effect, barrier
+          phase, real settlement or still-pending attempt, adapter unload or
+          source-session effect, terminal status, and post-unsubscribe silence
+          before counting reach. Command-local deltas expose three separate red
+          laws: 32 lost independent-write deltas, six non-canonical replacement
+          batch-order deltas, and 34 retirement deltas across 46 retirement
+          cells. The 204-cell control region is green.
     - [x] C — Model failed/private replacement retirement explicitly; final
           owner release must not vacuously publish private rows. A non-empty
           failed replacement exposed a new red: final-owner release deletes an
@@ -1587,10 +1588,12 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
     - [x] C — Add full lifecycle suffixes for released-obsolete, aborted,
           visible-row-repeat, and independent-write publication reds. Each red
           now continues through release, cleanup, restart, and unsubscribe with
-          exact soft publication checks. The catalog has 157 tests: 112 green
-          laws and 45 named reds. The complete product adds one aggregate named
-          red, bringing the frozen catalog to 158 tests: 112 green laws and 46
-          named reds.
+          exact command-local soft publication checks. The seed-34 restarted
+          release counterexample has its own named witness and the broad random
+          campaign excludes that exact law. After applying the product loss
+          audit, the catalog has 163 tests: 114 green laws and 49 named reds.
+          Hard cardinality and uniqueness assertions prevent an axis from
+          shrinking with its own expected set.
     - [ ] D — Add executable witnesses for the three remaining replay-phase
           contracts: surviving successful peer, per-attempt failure ownership,
           and reentrant async demand readiness.
