@@ -2062,6 +2062,14 @@ candidate repair scopes, not completed fixes or proof of root cause.
   symmetry for cancellation before entry; cancellation during an active load
   does not test it. Shared replay recovery and the remaining lifecycle failures
   are still open.
+- Fresh Field Lab loss audit of `1fb62bdf` recovered two compressed details:
+  the new controls also check that unsubscribe after explicit release adds no
+  second unload; and 12 passing randomized cases use different seeds across
+  the compared census reports. The failure-name comparison is exact, but is
+  not an identical-generated-history replay. Audit confirmed the recorded
+  counts and preserved active-abort control from source/reports, without test
+  reruns or lint verification. Sequential scans in one fresh agent can carry
+  attention from the first source into the next.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
