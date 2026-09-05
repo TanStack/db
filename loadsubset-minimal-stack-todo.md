@@ -2237,6 +2237,41 @@ candidate repair scopes, not completed fixes or proof of root cause.
   source after comparison. These 16 baseline failures are outside the seven-suite
   census and must not be counted as new regressions or silently marked fixed.
 
+- Implemented the user-approved synchronous pending-result contract for demand
+  waiting on an unavailable loader. Both snapshot entry points notify once
+  before returning. One optional deferred result lives on that logical demand,
+  uses the existing recovery publication barrier, and clears after settlement.
+  There is no new recovery queue. Release, abort, unsubscribe, or cleanup rejects
+  the unfinished wait with `AbortError`; retained demand may still reacquire in
+  a later sync session. Production change is **+18 net lines** before comments.
+- The outcome matrix exposed direct replay failure leaving its completion
+  promise pending (query-owned replay already rejected it). Rejection now
+  applies to both forms without exposing partial rows. Original witnesses that
+  equated "not settled" with "no callback" now expect a pending promise. The
+  pure history model records an `unacquired` promise result rather than dropping
+  that event. No state, ownership, or publication checks were removed.
+- Added **44** Cartesian cases: unavailable source (initial error / cleaned-up),
+  snapshot entry (ordinary / limited), success/resolve/reject/throw, and release,
+  unsubscribe, cleanup, or abort before/during acquisition. Limited snapshots
+  have no external-signal parameter, so their abort cells are explicitly excluded.
+  Tests copy the result synchronously, check pending state, private rows before
+  success, exact failure/AbortError, release counts, one callback, and immunity
+  to late transport settlement. Ordered fixtures install their index before
+  error/cleanup: creating an index afterwards either throws or restarts sync.
+- Frozen final-test runtime ablation: **128/55**, with all **44** new cases red,
+  `/tmp/tanstack-recovery-notification-final-ablation.json`; runtime source was
+  exactly the preceding HEAD. Restored run: demand suite **178/5**, adjacent
+  lifecycle/subscription/reentrancy **142/0**, source-readiness **7/0**, and the
+  separate subset-error matrix unchanged at **28/16**, in
+  `/tmp/tanstack-recovery-notification-verified.json`. Seven-suite census is
+  **483 passing / 39 failing** (522 test functions), seed 1657011, in
+  `/tmp/tanstack-recovery-notification-final-census.json`: one old recovery
+  notification failure removed, 44 passing cases added, no new failing tests.
+  Prettier/diff checks pass. Typecheck remains red outside the changed lines,
+  including the pre-existing grammar Set inference at demand-oracle line 329;
+  no diagnostic points to this step's implementation or added tests. This is
+  not a clean repository-wide typecheck claim.
+
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
       behavior, and opaque callback roots.

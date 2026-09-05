@@ -538,6 +538,16 @@ demand; releasing it before recovery creates no physical acquisition or unload.
 Queued reacquisition must not retry a failed attempt merely because both
 loading and ready notifications scheduled it.
 
+Requests waiting for a loader report one pending promise synchronously through
+`onLoadSubsetResult`, including requests made during initial error or after
+cleanup. The callback is not delayed until acquisition: query callers capture
+its result before the snapshot request returns. This promise waits for the
+recovery's publication barrier, not just adapter return. Failure rejects it with
+the replay error; release, external abort, unsubscribe, or another cleanup
+rejects it with `AbortError`. Later transport settlement cannot change that
+outcome. Cleanup may retain logical demand for the next session, but it does
+not retain the old caller's unfinished wait.
+
 Eager collections have no subset reacquisition barrier. After cleanup, their
 next public batch reconciles retained subscriber rows against the installed
 state, including deletions for keys that do not return. An empty ready batch

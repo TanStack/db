@@ -78,7 +78,7 @@ export type LifecycleUnloadEvent = {
 export type LifecycleErrorEvent = { attemptId: number; error: Error }
 export type LifecycleResultKind = `promise` | `true`
 export type LifecycleResultEvent = {
-  attemptId: number
+  attemptId: number | `unacquired`
   resultKind: LifecycleResultKind
 }
 export type LifecycleTraceEvent =
@@ -313,6 +313,11 @@ export function reduceLifecycle(
             ? (`promise` as const)
             : (`true` as const),
       }
+      model.results.push(result)
+      model.trace.push({ type: `result`, ...result })
+    } else {
+      // A waiting owner gets a promise now, without claiming an acquisition.
+      const result = { attemptId: `unacquired`, resultKind: `promise` } as const
       model.results.push(result)
       model.trace.push({ type: `result`, ...result })
     }

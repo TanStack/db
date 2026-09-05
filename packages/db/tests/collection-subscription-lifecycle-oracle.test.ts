@@ -2,6 +2,7 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { afterAll, describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
+import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
 import { flushPromises } from './utils.js'
 import {
@@ -1651,12 +1652,12 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     })
 
     expect(loads).toBe(0)
-    expect(observed).toEqual([])
+    expect(observed).toEqual([expect.any(Promise)])
 
     collection.startSyncImmediate()
     await flushPromises()
     expect(loads).toBe(1)
-    expect(observed).toEqual([])
+    expect(observed).toEqual([expect.any(Promise)])
 
     subscription.unsubscribe()
     await collection.cleanup()
@@ -1798,7 +1799,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         { session: 1, demand: `old` },
         { session: 1, demand: `new` },
       ])
-      expect(observed).toEqual([])
+      expect(observed).toEqual([expect.any(Promise)])
       expect(subscription.status).toBe(`ready`)
 
       removeReadyListener()
@@ -1871,7 +1872,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       await collection.cleanup()
       requestOnError = true
       expect(() => collection.startSyncImmediate()).toThrow(syncFailure)
-      expect(observed).toEqual([])
+      expect(observed).toEqual([expect.any(Promise)])
       expect(collection.status).toBe(`error`)
       expect(loads).toEqual([{ session: 0, demand: `old` }])
 
@@ -1961,7 +1962,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         { session: 1, demand: `old` },
         { session: 1, demand: `new` },
       ])
-      expect(observed).toEqual([])
+      expect(observed).toEqual([expect.any(Promise)])
 
       subscription.unsubscribe()
       expect(unloads).toEqual([
@@ -2553,7 +2554,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       )
       reach(`starting:syncReturn`)
 
-      expect(observed).toEqual([])
+      expect(observed).toEqual([expect.any(Promise)])
       expect(collection.status).toBe(`error`)
       expect(loads.map(({ where }) => where)).toEqual([oldWhere])
 
@@ -2749,7 +2750,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       await flushPromises()
       expect.soft(collection.status).toBe(`error`)
       expect.soft(loads).toEqual([])
-      expect.soft(observed).toEqual([])
+      expect.soft(observed).toEqual([expect.any(Promise)])
 
       recover()
       reach(`unavailable:markReady`)
@@ -2759,11 +2760,189 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       expect(loads.map(({ where: loadedWhere }) => loadedWhere)).toEqual([
         where,
       ])
-      expect(observed).toEqual([true])
+      expect(observed).toEqual([expect.any(Promise)])
+      await expect(observed[0]).resolves.toBeUndefined()
 
       removeErrorListener()
       subscription.unsubscribe()
       await collection.cleanup()
+    },
+  )
+
+  it.each(
+    ([`error`, `cleaned-up`] as const).flatMap((unavailable) =>
+      (
+        [
+          `return`,
+          `resolve`,
+          `reject`,
+          `throw`,
+          `release`,
+          `unsubscribe`,
+          `cleanup`,
+          `abort`,
+        ] as const
+      ).flatMap((outcome) =>
+        (outcome === `release` ||
+        outcome === `unsubscribe` ||
+        outcome === `cleanup` ||
+        outcome === `abort`
+          ? ([`before`, `during`] as const)
+          : ([`during`] as const)
+        ).flatMap((phase) =>
+          // Ordered snapshots do not accept an external AbortSignal.
+          (outcome === `abort`
+            ? ([`snapshot`] as const)
+            : ([`snapshot`, `limited`] as const)
+          ).map((entry) => ({ unavailable, outcome, phase, entry })),
+        ),
+      ),
+    ),
+  )(
+    `observes unavailable demand synchronously: $entry / $unavailable / $outcome / $phase`,
+    async ({ unavailable, outcome, phase, entry }) => {
+      const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
+      const transport = createDeferred<void>()
+      const failure = new Error(`recovery acquisition failed`)
+      const signal = new AbortController()
+      const loads: Array<LoadSubsetOptions> = []
+      const unloads: Array<LoadSubsetOptions> = []
+      const rows = new Map<string | number, { id: string }>()
+      let operations!: Parameters<SyncConfig<{ id: string }>[`sync`]>[0]
+      const collection = createCollection<{ id: string }>({
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (next) => {
+            operations = next
+            return {
+              loadSubset: (options) => {
+                loads.push(options)
+                if (outcome === `throw`) throw failure
+                operations.begin()
+                operations.write({ type: `insert`, value: { id: `row` } })
+                operations.commit()
+                return outcome === `return` ? true : transport.promise
+              },
+              unloadSubset: (options) => unloads.push(options),
+            }
+          },
+        },
+      })
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          for (const change of changes) {
+            if (change.type === `delete`) rows.delete(change.key)
+            else rows.set(change.key, change.value)
+          }
+        },
+        { includeInitialState: false },
+      )
+      let result: true | Promise<void> | undefined
+      let release: (() => void) | undefined
+      const settlements: Array<unknown> = []
+      let callbacks = 0
+      try {
+        if (entry === `limited`) {
+          subscription.setOrderByIndex(
+            collection.createIndex((row) => row.id, { indexType: BTreeIndex }),
+          )
+        }
+        if (unavailable === `error`)
+          operations.markError(new Error(`initial error`))
+        else await collection.cleanup()
+        const onLoadSubsetResult = (
+          value: true | Promise<void>,
+          _options: LoadSubsetOptions,
+          releaseDemand?: () => void,
+        ) => {
+          callbacks++
+          result = value
+          release = releaseDemand
+          if (value instanceof Promise)
+            void value.then(
+              () => settlements.push(`success`),
+              (error: unknown) => settlements.push(error),
+            )
+        }
+        if (entry === `snapshot`) {
+          subscription.requestSnapshot({
+            where,
+            signal: signal.signal,
+            onLoadSubsetResult,
+          })
+        } else {
+          subscription.requestLimitedSnapshot({
+            orderBy: [
+              {
+                expression: new PropRef([`id`]),
+                compareOptions: { direction: `asc`, nulls: `first` },
+              },
+            ],
+            limit: 1,
+            onLoadSubsetResult,
+          })
+        }
+        // Production callers copy the result as soon as requestSnapshot returns.
+        expect(callbacks).toBe(1)
+        expect(result).toBeInstanceOf(Promise)
+        await flushPromises()
+        expect(settlements).toEqual([])
+        expect(loads).toEqual([])
+        const recover = () => {
+          if (unavailable === `cleaned-up`) collection.startSyncImmediate()
+          operations.markReady()
+        }
+        if (phase === `during`) {
+          recover()
+          await flushPromises()
+          expect(loads).toHaveLength(1)
+          if (outcome !== `return` && outcome !== `throw`) {
+            expect(settlements).toEqual([])
+            expect([...rows.values()]).toEqual([])
+          }
+        }
+        if (outcome === `release`) release!()
+        else if (outcome === `unsubscribe`) subscription.unsubscribe()
+        else if (outcome === `cleanup`) await collection.cleanup()
+        else if (outcome === `abort`) signal.abort()
+        else if (outcome === `reject`) transport.reject(failure)
+        else if (outcome === `resolve`) transport.resolve()
+        await flushPromises()
+        if (outcome === `return` || outcome === `resolve`) {
+          expect(settlements).toEqual([`success`])
+          expect([...rows.values()].map(({ id }) => id)).toEqual([`row`])
+        } else if (outcome === `throw` || outcome === `reject`) {
+          expect(settlements).toEqual([failure])
+          expect([...rows.values()]).toEqual([])
+        } else {
+          expect(settlements).toEqual([
+            expect.objectContaining({ name: `AbortError` }),
+          ])
+          expect(unloads).toEqual(
+            phase === `during` &&
+              (outcome === `release` || outcome === `unsubscribe`)
+              ? loads
+              : [],
+          )
+          if (phase === `before` && outcome !== `cleanup`) {
+            recover()
+            await flushPromises()
+            expect(loads).toEqual([])
+          }
+          // Non-cooperative late settlement cannot rewrite the observed outcome.
+          transport.resolve()
+          await flushPromises()
+          expect(settlements).toEqual([
+            expect.objectContaining({ name: `AbortError` }),
+          ])
+        }
+        expect(callbacks).toBe(1)
+      } finally {
+        transport.resolve()
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
     },
   )
 

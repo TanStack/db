@@ -104,6 +104,7 @@ type SubsetAcquisition = {
 type SubsetDemand = SubsetAcquisition & {
   requestOptions: LoadSubsetOptions
   acquisitionState: `starting` | `active` | `detached`
+  initialResult?: Deferred<void>
 }
 
 type TruncateReplayAttempt = {
@@ -286,6 +287,7 @@ export class CollectionSubscription
     this.releaseDebts = []
 
     for (const demand of [...this.subsetDemands]) {
+      demand.initialResult?.reject(new LoadSubsetOperationAbortedError())
       demand.abortController?.abort()
       demand.removeRequestAbortListener?.()
       if (demand.acquisitionState === `starting`) {
@@ -485,6 +487,14 @@ export class CollectionSubscription
     attempt: TruncateReplayAttempt,
     demand: SubsetDemand,
   ): void {
+    const initialResult = demand.initialResult
+    if (initialResult) {
+      // External callers wait for publication, not merely transport return.
+      void session.completion.promise.then(
+        initialResult.resolve,
+        initialResult.reject,
+      )
+    }
     const previousState = demand.acquisitionState
     const hadPreviousAcquisition = previousState === `active`
     const previous: SubsetAcquisition = {
@@ -754,8 +764,8 @@ export class CollectionSubscription
     failure: Error,
   ): void {
     if (this.truncateReplaySession !== session) return
+    session.completion.reject(failure)
     if (this.options.truncateReplayPublication) {
-      session.completion.reject(failure)
       return
     }
     const publicationState = session.publicationState
@@ -1188,7 +1198,17 @@ export class CollectionSubscription
     ) {
       demand.acquisitionState = `detached`
       this.subsetDemands.push(demand)
-      return { demand, result: true, started: false }
+      const initialResult = createDeferred<void>()
+      demand.initialResult = initialResult
+      const abort = () =>
+        initialResult.reject(new LoadSubsetOperationAbortedError())
+      requestOptions.signal?.addEventListener(`abort`, abort, { once: true })
+      const finish = () => {
+        requestOptions.signal?.removeEventListener(`abort`, abort)
+        demand.initialResult = undefined
+      }
+      void initialResult.promise.then(finish, finish)
+      return { demand, result: initialResult.promise, started: false }
     }
     const acquisition = this.createSubsetAcquisition(demand)
     demand.options = acquisition.options
@@ -1391,12 +1411,10 @@ export class CollectionSubscription
     if (!this.isDemandActive(demand)) return false
     if (opts?.where) this.requestedSubsetWhere.set(loadOptions, opts.where)
 
-    // Pass the raw loadSubset result to the caller for external tracking
-    if (started) {
-      opts?.onLoadSubsetResult?.(syncResult, demand.options, (primaryFailure) =>
-        this.releaseDemand(demand, primaryFailure),
-      )
-    }
+    // Report the result synchronously, including a wait for an unavailable loader.
+    opts?.onLoadSubsetResult?.(syncResult, demand.options, (primaryFailure) =>
+      this.releaseDemand(demand, primaryFailure),
+    )
     if (!this.isDemandActive(demand)) return false
 
     if (started) {
@@ -1521,6 +1539,7 @@ export class CollectionSubscription
       removeRequestAbortListener: demand.removeRequestAbortListener,
     }
     this.subsetDemands.splice(index, 1)
+    demand.initialResult?.reject(new LoadSubsetOperationAbortedError())
     const releaseCallbacks = [
       () => this.removeTruncateReplayParticipant(demand),
       () => this.pruneReleasedReplayRows(),
@@ -1791,12 +1810,10 @@ export class CollectionSubscription
     } = this.startSubsetDemand(loadOptions)
     if (!this.isDemandActive(demand)) return
 
-    // Pass the raw loadSubset result to the caller for external tracking
-    if (started) {
-      onLoadSubsetResult?.(syncResult, demand.options, (primaryFailure) =>
-        this.releaseDemand(demand, primaryFailure),
-      )
-    }
+    // Report the result synchronously, including a wait for an unavailable loader.
+    onLoadSubsetResult?.(syncResult, demand.options, (primaryFailure) =>
+      this.releaseDemand(demand, primaryFailure),
+    )
     if (!this.isDemandActive(demand)) return
     if (started) {
       this.observeLoadSubsetResult(
@@ -2028,6 +2045,7 @@ export class CollectionSubscription
       ),
     ]
     for (const demand of this.subsetDemands) {
+      demand.initialResult?.reject(new LoadSubsetOperationAbortedError())
       this.stopDemandStatusParticipants(demand)
       if (demand.acquisitionState === `starting`) {
         demand.abortController?.abort()
