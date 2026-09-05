@@ -76,11 +76,16 @@ export type LifecycleUnloadEvent = {
   handlerSession: number
 }
 export type LifecycleErrorEvent = { attemptId: number; error: Error }
+export type LifecycleResultKind = `promise` | `true`
+export type LifecycleResultEvent = {
+  attemptId: number
+  resultKind: LifecycleResultKind
+}
 export type LifecycleTraceEvent =
   | ({ type: `load` } & LifecycleLoadEvent)
   | ({ type: `unload` } & LifecycleUnloadEvent)
   | { type: `error`; attemptId: number }
-  | { type: `result`; attemptId: number }
+  | ({ type: `result` } & LifecycleResultEvent)
   | { type: `status`; status: string }
   | { type: `publication` }
 
@@ -98,12 +103,13 @@ export type LifecycleModel = {
   loads: Array<LifecycleLoadEvent>
   unloads: Array<LifecycleUnloadEvent>
   errors: Array<LifecycleErrorEvent>
-  results: Array<number>
+  results: Array<LifecycleResultEvent>
   publications: number
   statuses: Array<string>
   status: string
   collectionStatus: `ready` | `cleaned-up`
   lastError?: Error
+  failureForAttempt: (attemptId: number) => Error
   reach: Set<string>
   trace: Array<LifecycleTraceEvent>
 }
@@ -116,6 +122,8 @@ export type LifecycleEffect = {
 
 export function createLifecycleModel(
   acquisitionMode: LifecycleModel[`acquisitionMode`] = `async-pending`,
+  failureForAttempt: (attemptId: number) => Error = (attemptId) =>
+    new Error(`attempt ${attemptId} failed`),
 ): LifecycleModel {
   return {
     acquisitionMode,
@@ -138,6 +146,7 @@ export function createLifecycleModel(
     collectionStatus: `ready`,
     reach: new Set(),
     trace: [],
+    failureForAttempt,
   }
 }
 
@@ -173,9 +182,15 @@ function startAttempt(
     gating: model.acquisitionMode === `async-pending`,
     reportable: true,
     aborted: false,
-    failure: new Error(`attempt ${id} failed`),
+    failure: model.failureForAttempt(id),
   }
   model.attempts.push(attempt)
+  model.reach.add(
+    `attempt-session:${attempt.session === 0 ? `initial` : `restarted`}`,
+  )
+  model.reach.add(
+    `attempt-replay:${attempt.replay === 0 ? `initial` : `replayed`}`,
+  )
   model.loads.push({
     id,
     demand: attempt.demand,
@@ -248,19 +263,24 @@ export function reduceLifecycle(
   model.reach.add(`command:${command.type}`)
   if (model.unsubscribed) {
     if (command.type === `cleanup` && model.active) {
+      model.reach.add(`effective:cleanup`)
       model.active = false
       model.collectionStatus = `cleaned-up`
     } else if (command.type === `restart` && !model.active) {
+      model.reach.add(`effective:restart`)
       model.active = true
       model.session++
       model.replay = 0
       model.publicationBarrierOpen = false
       model.collectionStatus = `ready`
+    } else {
+      model.reach.add(`noop:${command.type}`)
     }
     return { requestResult: false }
   }
 
   if (command.type === `request`) {
+    model.reach.add(`effective:request`)
     if (model.owners.some(({ demand }) => demand === command.demand)) {
       model.reach.add(`duplicate-owner`)
     }
@@ -273,8 +293,15 @@ export function reduceLifecycle(
     model.owners.push(owner)
     if (model.active) {
       const attemptId = startAttempt(model, owner).id
-      model.results.push(attemptId)
-      model.trace.push({ type: `result`, attemptId })
+      const result = {
+        attemptId,
+        resultKind:
+          model.acquisitionMode === `async-pending`
+            ? (`promise` as const)
+            : (`true` as const),
+      }
+      model.results.push(result)
+      model.trace.push({ type: `result`, ...result })
     }
     setStatus(model)
     if (!model.publicationBarrierOpen) {
@@ -288,7 +315,11 @@ export function reduceLifecycle(
     const owner = model.owners.find(
       ({ demand, aborted }) => demand === command.demand && !aborted,
     )
-    if (!owner) return {}
+    if (!owner) {
+      model.reach.add(`noop:abort`)
+      return {}
+    }
+    model.reach.add(`effective:abort`)
     owner.aborted = true
     if (owner.attemptId !== undefined) {
       const attempt = model.attempts[owner.attemptId]!
@@ -302,7 +333,11 @@ export function reduceLifecycle(
     const index = model.owners.findIndex(
       ({ demand }) => demand === command.demand,
     )
-    if (index === -1) return {}
+    if (index === -1) {
+      model.reach.add(`noop:release`)
+      return {}
+    }
+    model.reach.add(`effective:release`)
     const [owner] = model.owners.splice(index, 1)
     retireAttempt(model, owner!, true)
     if (
@@ -319,7 +354,14 @@ export function reduceLifecycle(
 
   if (command.type === `settle`) {
     const attempt = selectAttempt(model, command)
-    if (!attempt) return {}
+    if (!attempt) {
+      model.reach.add(`noop:settle`)
+      return {}
+    }
+    model.reach.add(`effective:settle`)
+    model.reach.add(`settle-scope:${command.scope}`)
+    model.reach.add(`settle-age:${command.age}`)
+    model.reach.add(`settle-outcome:${command.outcome}`)
     attempt.settled = true
     attempt.outcome = command.outcome
     attempt.gating = false
@@ -345,7 +387,11 @@ export function reduceLifecycle(
   }
 
   if (command.type === `truncate`) {
-    if (!model.active) return {}
+    if (!model.active) {
+      model.reach.add(`noop:truncate`)
+      return {}
+    }
+    model.reach.add(`effective:truncate`)
     if (
       model.replay > 0 &&
       model.attempts.some(
@@ -392,7 +438,11 @@ export function reduceLifecycle(
   }
 
   if (command.type === `cleanup`) {
-    if (!model.active) return {}
+    if (!model.active) {
+      model.reach.add(`noop:cleanup`)
+      return {}
+    }
+    model.reach.add(`effective:cleanup`)
     const current = model.attempts.filter(
       ({ session }) => session === model.session,
     )
@@ -411,7 +461,11 @@ export function reduceLifecycle(
   }
 
   if (command.type === `restart`) {
-    if (model.active) return {}
+    if (model.active) {
+      model.reach.add(`noop:restart`)
+      return {}
+    }
+    model.reach.add(`effective:restart`)
     model.active = true
     model.session++
     model.replay = 0
@@ -446,6 +500,7 @@ export function reduceLifecycle(
     return {}
   }
 
+  model.reach.add(`effective:unsubscribe`)
   for (const owner of model.owners) retireAttempt(model, owner, true)
   model.owners.length = 0
   model.unsubscribed = true
@@ -573,7 +628,7 @@ export const greenLifecycleHistories: ReadonlyArray<
   [
     { type: `request`, demand: `a` },
     { type: `request`, demand: `a` },
-    settle(`a`, `current`, `oldest`, `resolve`),
+    settle(`a`, `current`, `newest`, `resolve`),
     settle(`a`, `current`, `oldest`, `resolve`),
     { type: `release`, demand: `a` },
     { type: `release`, demand: `a` },
@@ -605,6 +660,20 @@ export const greenLifecycleHistories: ReadonlyArray<
     { type: `cleanup` },
     { type: `restart` },
     settle(`a`, `current`, `oldest`, `resolve`),
+  ],
+  [
+    { type: `abort`, demand: `a` },
+    { type: `release`, demand: `a` },
+    settle(`a`, `current`, `oldest`, `resolve`),
+    { type: `truncate` },
+    { type: `cleanup` },
+    { type: `truncate` },
+    { type: `cleanup` },
+    { type: `restart` },
+    { type: `restart` },
+    { type: `unsubscribe` },
+    { type: `request`, demand: `b` },
+    { type: `unsubscribe` },
   ],
 ]
 

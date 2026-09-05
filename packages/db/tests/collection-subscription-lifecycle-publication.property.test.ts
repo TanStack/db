@@ -1,4 +1,4 @@
-import { test as fcTest } from '@fast-check/vitest'
+import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
@@ -22,6 +22,19 @@ import type {
 } from './collection-subscription-lifecycle-grammar.js'
 
 type Row = { id: DemandName; value: number }
+type PublicationChange = {
+  type: `insert` | `update` | `delete`
+  key: DemandName
+  value: Row
+  previousValue?: Row
+}
+type SourceMutation = {
+  type: `source`
+  demand: DemandName
+  action: `upsert` | `delete`
+  value: number
+}
+type PublicationCommand = LifecycleCommand | SourceMutation
 type SyncOperations = Parameters<SyncConfig<Row, DemandName>[`sync`]>[0]
 type RuntimeAttempt = {
   id: number
@@ -31,6 +44,7 @@ type RuntimeAttempt = {
   operations: SyncOperations
   deferred: ReturnType<typeof createDeferred<void>>
   settled: boolean
+  current: boolean
 }
 type RuntimeOwner = {
   id: number
@@ -43,17 +57,33 @@ type Replacement = {
   session: number
   replay: number
   rows: Map<DemandName, Row>
+  failed: boolean
 }
 type PublicationModel = {
+  source: Map<DemandName, Row>
   visible: Map<DemandName, Row>
   replacement?: Replacement
-  snapshots: Array<Array<Row>>
+  batches: Array<Array<PublicationChange>>
+  sentKeys: Set<DemandName>
 }
 
-const sortedRows = (rows: ReadonlyMap<DemandName, Row>): Array<Row> =>
-  [...rows.values()]
-    .map((row) => ({ ...row }))
-    .sort((left, right) => left.id.localeCompare(right.id))
+function recordSourceWrite(publication: PublicationModel, row: Row): void {
+  const previousVisible = publication.visible.get(row.id)
+  publication.source.set(row.id, cloneRow(row))
+  publication.visible.set(row.id, cloneRow(row))
+  publication.sentKeys.add(row.id)
+  if (previousVisible?.value === row.value) return
+  publication.batches.push([
+    previousVisible
+      ? {
+          type: `update`,
+          key: row.id,
+          value: cloneRow(row),
+          previousValue: cloneRow(previousVisible),
+        }
+      : { type: `insert`, key: row.id, value: cloneRow(row) },
+  ])
+}
 
 const mapsEqual = (
   left: ReadonlyMap<DemandName, Row>,
@@ -62,13 +92,48 @@ const mapsEqual = (
   left.size === right.size &&
   [...left].every(([id, row]) => right.get(id)?.value === row.value)
 
+function cloneRow(row: Row): Row {
+  return { id: row.id, value: row.value }
+}
+
+function publicationDiff(
+  previous: ReadonlyMap<DemandName, Row>,
+  next: ReadonlyMap<DemandName, Row>,
+): Array<PublicationChange> {
+  const changes: Array<PublicationChange> = []
+  for (const [key, previousValue] of [...previous].sort(([left], [right]) =>
+    left.localeCompare(right),
+  )) {
+    const value = next.get(key)
+    if (!value) {
+      changes.push({ type: `delete`, key, value: cloneRow(previousValue) })
+    } else if (value.value !== previousValue.value) {
+      changes.push({
+        type: `update`,
+        key,
+        value: cloneRow(value),
+        previousValue: cloneRow(previousValue),
+      })
+    }
+  }
+  for (const [key, value] of [...next].sort(([left], [right]) =>
+    left.localeCompare(right),
+  )) {
+    if (!previous.has(key)) {
+      changes.push({ type: `insert`, key, value: cloneRow(value) })
+    }
+  }
+  return changes
+}
+
 function publishIfChanged(
   publication: PublicationModel,
   next: Map<DemandName, Row>,
 ): void {
   if (mapsEqual(publication.visible, next)) return
+  publication.batches.push(publicationDiff(publication.visible, next))
   publication.visible = next
-  publication.snapshots.push(sortedRows(next))
+  publication.sentKeys = new Set(next.keys())
 }
 
 function finishReplacement(
@@ -82,33 +147,98 @@ function finishReplacement(
   )
   if (currentAttempts.every(({ outcome }) => outcome === `resolve`)) {
     publishIfChanged(publication, new Map(replacement.rows))
+    publication.replacement = undefined
+  } else {
+    replacement.failed = true
   }
-  publication.replacement = undefined
 }
 
 function projectPublication(
   publication: PublicationModel,
   lifecycle: LifecycleModel,
-  command: LifecycleCommand,
+  command: PublicationCommand,
   effect: LifecycleEffect,
   priorPublicationCount: number,
 ): void {
-  if (command.type === `truncate` && lifecycle.publicationBarrierOpen) {
-    publication.replacement = {
-      session: lifecycle.session,
-      replay: lifecycle.replay,
-      rows: new Map(),
+  if (
+    command.type === `truncate` &&
+    lifecycle.active &&
+    !lifecycle.unsubscribed
+  ) {
+    const removedRows = [...publication.source].sort(([left], [right]) =>
+      left.localeCompare(right),
+    )
+    publication.source.clear()
+    if (lifecycle.publicationBarrierOpen) {
+      publication.replacement = {
+        session: lifecycle.session,
+        replay: lifecycle.replay,
+        rows: new Map(),
+        failed: false,
+      }
+    } else {
+      publication.replacement = undefined
+      if (removedRows.length > 0) {
+        publication.batches.push(
+          removedRows.map(([key, value]) => ({
+            type: `delete` as const,
+            key,
+            value: cloneRow(value),
+          })),
+        )
+        const next = new Map(publication.visible)
+        for (const [key] of removedRows) {
+          next.delete(key)
+          publication.sentKeys.delete(key)
+        }
+        publication.visible = next
+      }
     }
   } else if (command.type === `restart` && lifecycle.publicationBarrierOpen) {
     publication.replacement = {
       session: lifecycle.session,
       replay: lifecycle.replay,
       rows: new Map(),
+      failed: false,
+    }
+  } else if (
+    command.type === `source` &&
+    lifecycle.active &&
+    !lifecycle.unsubscribed
+  ) {
+    const previousValue = publication.source.get(command.demand)
+    if (command.action === `delete`) {
+      publication.source.delete(command.demand)
+      publication.replacement?.rows.delete(command.demand)
+      if (!publication.replacement && previousValue) {
+        publication.visible.delete(command.demand)
+        publication.sentKeys.delete(command.demand)
+        publication.batches.push([
+          {
+            type: `delete`,
+            key: command.demand,
+            value: cloneRow(previousValue),
+          },
+        ])
+      }
+    } else {
+      const row = {
+        id: command.demand,
+        value: command.value,
+      }
+      if (publication.replacement) {
+        publication.source.set(command.demand, row)
+        publication.replacement.rows.set(command.demand, row)
+      } else {
+        recordSourceWrite(publication, row)
+      }
     }
   } else if (command.type === `cleanup`) {
+    publication.source.clear()
     publication.replacement = undefined
   } else if (command.type === `release`) {
     if (
+      effect.ownerId !== undefined &&
       publication.replacement &&
       !lifecycle.owners.some(({ demand }) => demand === command.demand)
     ) {
@@ -131,12 +261,16 @@ function projectPublication(
         replacement.session === attempt.session &&
         replacement.replay === attempt.replay
       ) {
+        publication.source.set(row.id, row)
         replacement.rows.set(row.id, row)
       } else {
-        const next = new Map(publication.visible)
-        next.set(row.id, row)
-        publishIfChanged(publication, next)
+        recordSourceWrite(publication, row)
       }
+    } else if (command.outcome === `resolve`) {
+      publication.source.set(attempt.demand, {
+        id: attempt.demand,
+        value: attempt.id,
+      })
     }
     finishReplacement(publication, lifecycle)
   }
@@ -146,17 +280,144 @@ function projectPublication(
     index < lifecycle.publications;
     index++
   ) {
-    publication.snapshots.push(sortedRows(publication.visible))
+    const row =
+      command.type === `request` &&
+      lifecycle.active &&
+      lifecycle.owners.filter(({ demand }) => demand === command.demand)
+        .length === 1 &&
+      !publication.sentKeys.has(command.demand)
+        ? publication.source.get(command.demand)
+        : undefined
+    publication.batches.push(
+      row
+        ? [
+            {
+              type: `insert`,
+              key: row.id,
+              value: cloneRow(row),
+            },
+          ]
+        : [],
+    )
+    if (row) publication.sentKeys.add(row.id)
   }
 }
 
+const sourceMutationArbitrary: fc.Arbitrary<SourceMutation> = fc.record({
+  type: fc.constant(`source` as const),
+  demand: fc.constantFrom(`a` as const, `b` as const),
+  action: fc.constantFrom(`upsert` as const, `delete` as const),
+  value: fc.integer({ min: 0, max: 5 }),
+})
+
+function mutatesDuringPublicationBarrier(
+  history: ReadonlyArray<PublicationCommand>,
+): boolean {
+  const lifecycle = createLifecycleModel()
+  for (const command of history) {
+    if (command.type === `source`) {
+      if (lifecycle.publicationBarrierOpen) return true
+    } else {
+      reduceLifecycle(lifecycle, command)
+    }
+  }
+  return false
+}
+
+function omitKnownRedVisibleRowRequests(
+  history: ReadonlyArray<PublicationCommand>,
+): Array<PublicationCommand> {
+  const lifecycle = createLifecycleModel()
+  const sourceRows = new Set<DemandName>()
+  const result: Array<PublicationCommand> = []
+  for (const command of history) {
+    if (command.type === `source`) {
+      result.push(command)
+      if (!lifecycle.active || lifecycle.unsubscribed) continue
+      if (command.action === `delete`) sourceRows.delete(command.demand)
+      else sourceRows.add(command.demand)
+      continue
+    }
+
+    if (command.type === `request` && sourceRows.has(command.demand)) {
+      continue
+    }
+
+    result.push(command)
+    const effect = reduceLifecycle(lifecycle, command)
+    if (command.type === `truncate` && lifecycle.active) sourceRows.clear()
+    if (command.type === `cleanup`) sourceRows.clear()
+    if (
+      command.type === `settle` &&
+      command.outcome === `resolve` &&
+      effect.attemptId !== undefined
+    ) {
+      const attempt = lifecycle.attempts[effect.attemptId]!
+      const isCurrent = lifecycle.owners.some(
+        ({ attemptId }) => attemptId === attempt.id,
+      )
+      if (isCurrent && !attempt.aborted) sourceRows.add(attempt.demand)
+    }
+  }
+  return result
+}
+
+function resolvesAbortedAttempt(
+  history: ReadonlyArray<PublicationCommand>,
+): boolean {
+  const lifecycle = createLifecycleModel()
+  for (const command of history) {
+    if (command.type === `source`) continue
+    const effect = reduceLifecycle(lifecycle, command)
+    if (
+      command.type === `settle` &&
+      command.outcome === `resolve` &&
+      effect.attemptId !== undefined &&
+      lifecycle.attempts[effect.attemptId]?.aborted
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+const publicationCommandHistoryArbitrary: fc.Arbitrary<
+  Array<PublicationCommand>
+> = publicationLifecycleHistoryArbitrary.chain((history) =>
+  fc
+    .array(
+      fc.record({
+        position: fc.integer({ min: 0, max: history.length }),
+        command: sourceMutationArbitrary,
+      }),
+      { minLength: 1, maxLength: 5 },
+    )
+    .map((insertions) => {
+      const commands: Array<PublicationCommand> = [...history]
+      for (const { position, command } of insertions.sort(
+        (left, right) => right.position - left.position,
+      )) {
+        commands.splice(position, 0, command)
+      }
+      return commands
+    })
+    .map(omitKnownRedVisibleRowRequests)
+    .filter(
+      (history) =>
+        !mutatesDuringPublicationBarrier(history) &&
+        !resolvesAbortedAttempt(history),
+    ),
+)
+
 async function runPublicationHistory(
-  history: ReadonlyArray<LifecycleCommand>,
+  history: ReadonlyArray<PublicationCommand>,
 ): Promise<void> {
   const lifecycle = createLifecycleModel()
   const publication: PublicationModel = {
+    source: new Map(),
     visible: new Map(),
-    snapshots: [],
+    batches: [],
+    sentKeys: new Set(),
   }
   const where = {
     a: new Func(`eq`, [new PropRef([`id`]), new Value(`a`)]),
@@ -168,7 +429,7 @@ async function runPublicationHistory(
   ])
   const attempts = new Map<number, RuntimeAttempt>()
   const owners: Array<RuntimeOwner> = []
-  const sourceRows = new Map<number, Set<DemandName>>()
+  const sourceRows = new Map<number, Map<DemandName, Row>>()
   const operationsBySession = new Map<number, SyncOperations>()
   let nextAttemptId = 0
   let nextOwnerId = 0
@@ -184,7 +445,7 @@ async function runPublicationHistory(
       sync: (operations) => {
         const ownSession = ++session
         operationsBySession.set(ownSession, operations)
-        sourceRows.set(ownSession, new Set())
+        sourceRows.set(ownSession, new Map())
         operations.markReady()
         return {
           loadSubset: (options) => {
@@ -208,6 +469,7 @@ async function runPublicationHistory(
               operations,
               deferred,
               settled: false,
+              current: true,
             })
             owner.attemptId = id
             return deferred.promise
@@ -219,10 +481,20 @@ async function runPublicationHistory(
   })
 
   const visible = new Map<DemandName, Row>()
-  const observedSnapshots: Array<Array<Row>> = []
+  const observedBatches: Array<Array<PublicationChange>> = []
   const subscription = collection.subscribeChanges(
     (changes) => {
-      for (const change of changes) {
+      const batch = changes.map(
+        (change): PublicationChange => ({
+          type: change.type,
+          key: change.key,
+          value: cloneRow(change.value),
+          ...(change.previousValue === undefined
+            ? {}
+            : { previousValue: cloneRow(change.previousValue) }),
+        }),
+      )
+      for (const change of batch) {
         const id = String(change.key)
         if (id !== `a` && id !== `b`) {
           throw new Error(`publication used an unknown row key`)
@@ -230,45 +502,45 @@ async function runPublicationHistory(
         if (change.type === `delete`) visible.delete(id)
         else visible.set(id, { id, value: change.value.value })
       }
-      observedSnapshots.push(sortedRows(visible))
+      observedBatches.push(batch)
     },
     { includeInitialState: false },
   )
 
   const writeAttempt = async (attempt: RuntimeAttempt): Promise<void> => {
     const rows = sourceRows.get(attempt.session)
+    const previous = rows?.get(attempt.demand)
+    const value = { id: attempt.demand, value: attempt.id }
     attempt.operations.begin()
     attempt.operations.write({
-      type: rows?.has(attempt.demand) ? `update` : `insert`,
-      value: { id: attempt.demand, value: attempt.id },
+      type: previous ? `update` : `insert`,
+      value,
+      ...(previous ? { previousValue: previous } : {}),
     })
     const receipt = attempt.operations.commit()
     if (receipt !== true) await receipt
-    rows?.add(attempt.demand)
+    rows?.set(attempt.demand, value)
   }
 
-  const assertSnapshots = (command: LifecycleCommand): void => {
-    expect(observedSnapshots, JSON.stringify({ history, command })).toEqual(
-      publication.snapshots,
-    )
+  const assertPublications = (command: PublicationCommand): void => {
+    const context = JSON.stringify({
+      history,
+      command,
+      observedBatches,
+      expectedBatches: publication.batches,
+    })
+    expect(observedBatches, context).toEqual(publication.batches)
   }
 
   const selectRuntimeAttempt = (
     command: Extract<LifecycleCommand, { type: `settle` }>,
   ): RuntimeAttempt | undefined => {
     if (unsubscribed) return undefined
-    const currentAttemptIds = new Set(
-      owners.flatMap(({ attemptId }) =>
-        attemptId === undefined ? [] : [attemptId],
-      ),
-    )
     const candidates = [...attempts.values()].filter(
       (attempt) =>
         !attempt.settled &&
         attempt.demand === command.demand &&
-        (command.scope === `current`
-          ? currentAttemptIds.has(attempt.id)
-          : !currentAttemptIds.has(attempt.id)),
+        attempt.current === (command.scope === `current`),
     )
     return command.age === `oldest` ? candidates[0] : candidates.at(-1)
   }
@@ -295,9 +567,31 @@ async function runPublicationHistory(
         owners.push(runtimeOwner!)
       const runtimeAttempt =
         command.type === `settle` ? selectRuntimeAttempt(command) : undefined
-      const effect = reduceLifecycle(lifecycle, command)
+      const effect =
+        command.type === `source`
+          ? ({} satisfies LifecycleEffect)
+          : reduceLifecycle(lifecycle, command)
 
-      if (command.type === `request`) {
+      if (command.type === `source` && active) {
+        const operations = operationsBySession.get(session)
+        const rows = sourceRows.get(session)
+        const previous = rows?.get(command.demand)
+        operations?.begin()
+        if (command.action === `delete`) {
+          operations?.write({ type: `delete`, key: command.demand })
+          rows?.delete(command.demand)
+        } else {
+          const value = { id: command.demand, value: command.value }
+          operations?.write({
+            type: previous ? `update` : `insert`,
+            value,
+            ...(previous ? { previousValue: previous } : {}),
+          })
+          rows?.set(command.demand, value)
+        }
+        const receipt = operations?.commit()
+        if (receipt !== true) await receipt
+      } else if (command.type === `request`) {
         expect(effect.ownerId).toBe(unsubscribed ? undefined : runtimeOwner?.id)
         subscription.requestSnapshot({
           where: where[command.demand],
@@ -311,7 +605,12 @@ async function runPublicationHistory(
         }
       } else if (command.type === `release`) {
         expect(effect.ownerId).toBe(runtimeOwner?.id)
-        if (runtimeOwner) owners.splice(owners.indexOf(runtimeOwner), 1)
+        if (runtimeOwner) {
+          if (runtimeOwner.attemptId !== undefined) {
+            attempts.get(runtimeOwner.attemptId)!.current = false
+          }
+          owners.splice(owners.indexOf(runtimeOwner), 1)
+        }
         subscription.releaseSnapshot(where[command.demand])
       } else if (command.type === `settle`) {
         expect(effect.attemptId).toBe(runtimeAttempt?.id)
@@ -328,7 +627,12 @@ async function runPublicationHistory(
           }
         }
       } else if (command.type === `truncate` && active) {
-        for (const owner of owners) owner.attemptId = undefined
+        for (const owner of owners) {
+          if (owner.attemptId !== undefined) {
+            attempts.get(owner.attemptId)!.current = false
+          }
+          owner.attemptId = undefined
+        }
         const operations = operationsBySession.get(session)
         operations?.begin()
         operations?.truncate()
@@ -336,13 +640,19 @@ async function runPublicationHistory(
         if (receipt !== true) await receipt
         sourceRows.get(session)?.clear()
       } else if (command.type === `cleanup` && active) {
-        for (const owner of owners) owner.attemptId = undefined
+        for (const owner of owners) {
+          if (owner.attemptId !== undefined) {
+            attempts.get(owner.attemptId)!.current = false
+          }
+          owner.attemptId = undefined
+        }
         await collection.cleanup()
         active = false
       } else if (command.type === `restart` && !active) {
         collection.startSyncImmediate()
         active = true
       } else if (command.type === `unsubscribe`) {
+        for (const attempt of attempts.values()) attempt.current = false
         subscription.unsubscribe()
         unsubscribed = true
         owners.length = 0
@@ -356,7 +666,7 @@ async function runPublicationHistory(
         effect,
         priorPublicationCount,
       )
-      assertSnapshots(command)
+      assertPublications(command)
     }
   } finally {
     for (const attempt of attempts.values()) attempt.deferred.resolve()
@@ -377,10 +687,93 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     await runPublicationHistory(releasedObsoleteResolveHistory)
   })
 
+  it(`publishes an authoritative truncate after the final demand is released`, async () => {
+    await runPublicationHistory([
+      { type: `request`, demand: `b` },
+      {
+        type: `settle`,
+        demand: `b`,
+        scope: `current`,
+        age: `oldest`,
+        outcome: `resolve`,
+      },
+      { type: `release`, demand: `b` },
+      { type: `truncate` },
+      { type: `unsubscribe` },
+    ])
+  })
+
+  it(`publishes independent source changes with a successful replay`, async () => {
+    await runPublicationHistory([
+      { type: `request`, demand: `a` },
+      {
+        type: `settle`,
+        demand: `a`,
+        scope: `current`,
+        age: `oldest`,
+        outcome: `resolve`,
+      },
+      { type: `truncate` },
+      { type: `source`, demand: `b`, action: `upsert`, value: 50 },
+      {
+        type: `settle`,
+        demand: `a`,
+        scope: `current`,
+        age: `oldest`,
+        outcome: `resolve`,
+      },
+    ])
+  })
+
+  it(`does not republish a row already delivered by a live change`, async () => {
+    await runPublicationHistory([
+      { type: `source`, demand: `a`, action: `upsert`, value: 0 },
+      { type: `request`, demand: `b` },
+      { type: `source`, demand: `b`, action: `upsert`, value: 1 },
+      { type: `request`, demand: `b` },
+    ])
+  })
+
+  it(`does not publish a non-cooperative acquisition after its signal aborts`, async () => {
+    await runPublicationHistory([
+      { type: `request`, demand: `a` },
+      { type: `abort`, demand: `a` },
+      {
+        type: `settle`,
+        demand: `a`,
+        scope: `current`,
+        age: `oldest`,
+        outcome: `resolve`,
+      },
+    ])
+  })
+
+  it(`keeps later source changes private after a failed replay`, async () => {
+    await runPublicationHistory([
+      { type: `request`, demand: `a` },
+      {
+        type: `settle`,
+        demand: `a`,
+        scope: `current`,
+        age: `oldest`,
+        outcome: `resolve`,
+      },
+      { type: `truncate` },
+      {
+        type: `settle`,
+        demand: `a`,
+        scope: `current`,
+        age: `oldest`,
+        outcome: `reject`,
+      },
+      { type: `source`, demand: `b`, action: `upsert`, value: 51 },
+    ])
+  })
+
   const { multiplier, ...replay } = readOracleRunConfig()
   const runs = 60 * multiplier
 
-  fcTest.prop([publicationLifecycleHistoryArbitrary], {
+  fcTest.prop([publicationCommandHistoryArbitrary], {
     numRuns: runs,
     seed: 1_657_005,
   })(
@@ -389,7 +782,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     120_000,
   )
   fcTest.prop(
-    [publicationLifecycleHistoryArbitrary],
+    [publicationCommandHistoryArbitrary],
     oracleRandomParameters(
       runs,
       replay,

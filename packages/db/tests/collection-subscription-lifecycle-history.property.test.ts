@@ -25,6 +25,7 @@ import type {
   DemandName,
   LifecycleCommand,
   LifecycleLoadEvent,
+  LifecycleResultEvent,
   LifecycleTraceEvent,
   LifecycleUnloadEvent,
 } from './collection-subscription-lifecycle-grammar.js'
@@ -37,6 +38,7 @@ type RuntimeAttempt = {
   deferred?: ReturnType<typeof createDeferred<void>>
   failure: Error
   settled: boolean
+  current: boolean
 }
 type RuntimeOwner = {
   id: number
@@ -54,7 +56,15 @@ async function runHistory(
   } = {},
 ): Promise<Set<string>> {
   const acquisitionMode = options.acquisitionMode ?? `async-pending`
-  const model = createLifecycleModel(acquisitionMode)
+  const failures = new Map<number, Error>()
+  const failureForAttempt = (attemptId: number): Error => {
+    const existing = failures.get(attemptId)
+    if (existing) return existing
+    const failure = new Error(`attempt ${attemptId} failed`)
+    failures.set(attemptId, failure)
+    return failure
+  }
+  const model = createLifecycleModel(acquisitionMode, failureForAttempt)
   const where = {
     a: new Func(`eq`, [new PropRef([`id`]), new Value(`a`)]),
     b: new Func(`eq`, [new PropRef([`id`]), new Value(`b`)]),
@@ -74,13 +84,15 @@ async function runHistory(
     attemptId: number | `unacquired`
     error: unknown
   }> = []
-  const observedResults: Array<number | `unacquired`> = []
+  const observedResults: Array<
+    LifecycleResultEvent | { attemptId: `unacquired`; resultKind: string }
+  > = []
   const observedStatuses: Array<string> = []
   const observedTrace: Array<
     | LifecycleTraceEvent
     | { type: `unload`; attemptId: `unacquired`; handlerSession: number }
     | { type: `error`; attemptId: `unacquired` }
-    | { type: `result`; attemptId: `unacquired` }
+    | { type: `result`; attemptId: `unacquired`; resultKind: string }
   > = []
   let nextObservedAttemptId = 0
   let nextObservedOwnerId = 0
@@ -129,8 +141,9 @@ async function runHistory(
               demand,
               options,
               deferred,
-              failure: new Error(`attempt ${observed.id} failed`),
+              failure: failureForAttempt(observed.id),
               settled: acquisitionMode === `sync-success`,
+              current: true,
             })
             owner.attemptId = observed.id
             attemptByOptions.set(options, observed.id)
@@ -178,28 +191,18 @@ async function runHistory(
     expect(observedLoads, context).toEqual(model.loads)
     expect(observedUnloads, context).toEqual(model.unloads)
     expect(
-      observedErrors.map(({ attemptId, error }) => ({
-        attemptId,
-        message: error instanceof Error ? error.message : String(error),
-      })),
+      observedErrors.map(({ attemptId }) => attemptId),
       context,
-    ).toEqual(
-      model.errors.map(({ attemptId, error }) => ({
-        attemptId,
-        message: error.message,
-      })),
-    )
+    ).toEqual(model.errors.map(({ attemptId }) => attemptId))
+    for (const [index, { error }] of observedErrors.entries()) {
+      expect(error, context).toBe(model.errors[index]?.error)
+    }
     expect(observedResults, context).toEqual(model.results)
     if (options.traceProjection !== `without-status`) {
       expect(observedStatuses, context).toEqual(model.statuses)
+      expect(subscription.status, context).toBe(model.status)
     }
-    expect(subscription.status, context).toBe(model.status)
-    expect(
-      subscription.lastError instanceof Error
-        ? subscription.lastError.message
-        : undefined,
-      context,
-    ).toBe(model.lastError?.message)
+    expect(subscription.lastError, context).toBe(model.lastError)
     expect(collection.status, context).toBe(model.collectionStatus)
     expect(publications, context).toEqual(
       Array.from({ length: model.publications }, () => []),
@@ -225,18 +228,11 @@ async function runHistory(
     command: Extract<LifecycleCommand, { type: `settle` }>,
   ): RuntimeAttempt | undefined => {
     if (observedUnsubscribed) return undefined
-    const currentAttemptIds = new Set(
-      runtimeOwners.flatMap(({ attemptId }) =>
-        attemptId === undefined ? [] : [attemptId],
-      ),
-    )
     const candidates = [...runtimeAttempts.values()].filter(
       (attempt) =>
         !attempt.settled &&
         attempt.demand === command.demand &&
-        (command.scope === `current`
-          ? currentAttemptIds.has(attempt.id)
-          : !currentAttemptIds.has(attempt.id)),
+        attempt.current === (command.scope === `current`),
     )
     return command.age === `oldest` ? candidates[0] : candidates.at(-1)
   }
@@ -271,11 +267,12 @@ async function runHistory(
         const result = subscription.requestSnapshot({
           where: where[command.demand],
           signal: runtimeOwner?.controller.signal,
-          onLoadSubsetResult: (_result, requestOptions) => {
+          onLoadSubsetResult: (result, requestOptions) => {
             const attemptId =
               attemptByOptions.get(requestOptions) ?? `unacquired`
-            observedResults.push(attemptId)
-            observedTrace.push({ type: `result`, attemptId })
+            const resultKind = result === true ? `true` : `promise`
+            observedResults.push({ attemptId, resultKind })
+            observedTrace.push({ type: `result`, attemptId, resultKind })
           },
         })
         expect(result).toBe(effect.requestResult)
@@ -288,6 +285,9 @@ async function runHistory(
       } else if (command.type === `release`) {
         expect(effect.ownerId).toBe(runtimeOwner?.id)
         if (runtimeOwner) {
+          if (runtimeOwner.attemptId !== undefined) {
+            runtimeAttempts.get(runtimeOwner.attemptId)!.current = false
+          }
           runtimeOwners.splice(runtimeOwners.indexOf(runtimeOwner), 1)
         }
         subscription.releaseSnapshot(where[command.demand])
@@ -305,7 +305,12 @@ async function runHistory(
       } else if (command.type === `truncate`) {
         if (observedActive) {
           observedReplay++
-          for (const owner of runtimeOwners) owner.attemptId = undefined
+          for (const owner of runtimeOwners) {
+            if (owner.attemptId !== undefined) {
+              runtimeAttempts.get(owner.attemptId)!.current = false
+            }
+            owner.attemptId = undefined
+          }
         }
         syncOps?.begin()
         syncOps?.truncate()
@@ -313,7 +318,12 @@ async function runHistory(
         if (receipt !== true) await receipt
       } else if (command.type === `cleanup`) {
         if (observedActive) {
-          for (const owner of runtimeOwners) owner.attemptId = undefined
+          for (const owner of runtimeOwners) {
+            if (owner.attemptId !== undefined) {
+              runtimeAttempts.get(owner.attemptId)!.current = false
+            }
+            owner.attemptId = undefined
+          }
         }
         await collection.cleanup()
         observedActive = false
@@ -324,6 +334,7 @@ async function runHistory(
         }
         collection.startSyncImmediate()
       } else if (command.type === `unsubscribe`) {
+        for (const attempt of runtimeAttempts.values()) attempt.current = false
         subscription.unsubscribe()
         observedUnsubscribed = true
         runtimeOwners.length = 0
@@ -358,23 +369,35 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     for (const history of greenLifecycleHistories) {
       for (const label of await runHistory(history)) reach.add(label)
     }
-    expect(reach).toEqual(
-      new Set([
-        ...[
-          `request`,
-          `abort`,
-          `release`,
-          `settle`,
-          `truncate`,
-          `cleanup`,
-          `restart`,
-          `unsubscribe`,
-        ].map((type) => `command:${type}`),
-        `duplicate-owner`,
-        `request-while-cleaned`,
-        `partial-generation-supersession`,
-      ]),
-    )
+    const commands = [
+      `request`,
+      `abort`,
+      `release`,
+      `settle`,
+      `truncate`,
+      `cleanup`,
+      `restart`,
+      `unsubscribe`,
+    ]
+    const required = new Set([
+      ...commands.map((type) => `command:${type}`),
+      ...commands.map((type) => `effective:${type}`),
+      ...commands.map((type) => `noop:${type}`),
+      `settle-scope:current`,
+      `settle-scope:obsolete`,
+      `settle-age:oldest`,
+      `settle-age:newest`,
+      `settle-outcome:resolve`,
+      `settle-outcome:reject`,
+      `attempt-session:initial`,
+      `attempt-session:restarted`,
+      `attempt-replay:initial`,
+      `attempt-replay:replayed`,
+      `duplicate-owner`,
+      `request-while-cleaned`,
+      `partial-generation-supersession`,
+    ])
+    expect([...required].filter((label) => !reach.has(label))).toEqual([])
   })
 
   it(`names the known-red overlapping replay transition without claiming it passed`, () => {
@@ -408,6 +431,12 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     await runHistory(history)
   })
 
+  it(`releases exact current ownership after overlapping replay status diverges`, async () => {
+    await runHistory(pendingSupersessionHistory, {
+      traceProjection: `without-status`,
+    })
+  })
+
   it.each([
     { name: `truncate replay`, history: abortReplayHistory },
     { name: `cleanup restart`, history: abortedRestartHistory },
@@ -422,29 +451,63 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     await runHistory(abortReplayHistory, { traceProjection: `without-status` })
   })
 
-  it.each([
-    {
-      name: `one-demand truncate`,
-      history: [
-        { type: `request`, demand: `a` },
-        { type: `truncate` },
-      ] satisfies Array<LifecycleCommand>,
-    },
-    {
-      name: `one-demand cleanup restart`,
-      history: [
-        { type: `request`, demand: `a` },
-        { type: `cleanup` },
-        { type: `restart` },
-      ] satisfies Array<LifecycleCommand>,
-    },
-    { name: `multi-demand replay and release`, history: syncLifecycleHistory },
-  ])(
-    `does not create loading work for synchronous $name`,
+  it(`replays a live peer without reacquiring an aborted demand`, async () => {
+    await runHistory([
+      { type: `request`, demand: `a` },
+      { type: `request`, demand: `b` },
+      { type: `abort`, demand: `a` },
+      {
+        type: `settle`,
+        demand: `a`,
+        scope: `current`,
+        age: `oldest`,
+        outcome: `reject`,
+      },
+      { type: `truncate` },
+      {
+        type: `settle`,
+        demand: `b`,
+        scope: `current`,
+        age: `oldest`,
+        outcome: `resolve`,
+      },
+      { type: `release`, demand: `a` },
+      { type: `release`, demand: `b` },
+    ])
+  })
+
+  const syncReplayScenarios = ([`truncate`, `restart`] as const).flatMap(
+    (transition) =>
+      ([1, 2] as const).flatMap((ownerCount) =>
+        ([false, true] as const).map((abortFirst) => {
+          const history: Array<LifecycleCommand> = [
+            { type: `request`, demand: `a` },
+            ...(ownerCount === 2
+              ? ([{ type: `request`, demand: `b` }] as const)
+              : []),
+            ...(abortFirst ? ([{ type: `abort`, demand: `a` }] as const) : []),
+            ...(transition === `truncate`
+              ? ([{ type: `truncate` }] as const)
+              : ([{ type: `cleanup` }, { type: `restart` }] as const)),
+          ]
+          return { transition, ownerCount, abortFirst, history }
+        }),
+      ),
+  )
+
+  it.each(syncReplayScenarios)(
+    `does not create loading work for synchronous $transition with $ownerCount owner(s), abort=$abortFirst`,
     async ({ history }) => {
       await runHistory(history, { acquisitionMode: `sync-success` })
     },
   )
+
+  it(`preserves physical ownership after a synchronous replay status mismatch`, async () => {
+    await runHistory(syncLifecycleHistory, {
+      acquisitionMode: `sync-success`,
+      traceProjection: `without-status`,
+    })
+  })
 
   const { multiplier, ...replay } = readOracleRunConfig()
   const runs = 80 * multiplier

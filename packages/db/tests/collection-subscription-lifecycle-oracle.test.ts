@@ -55,6 +55,7 @@ type AcquisitionWitness =
 type AcquisitionCellDefinition =
   | { kind: `covered` }
   | { kind: `delegated`; witness: AcquisitionWitness }
+  | { kind: `blocked`; reason: string }
   | { kind: `excluded`; reason: string }
 
 const acquisitionCellDefinitions = {
@@ -160,7 +161,10 @@ const acquisitionCellDefinitions = {
     reason: `obsolete returned resources use the resource-installation axis`,
   },
   'unavailable:request': { kind: `covered` },
-  'unavailable:release': { kind: `covered` },
+  'unavailable:release': {
+    kind: `blocked`,
+    reason: `unavailable demand currently starts too early, before release can be observed`,
+  },
   'unavailable:cleanup': {
     kind: `excluded`,
     reason: `cleanup of detached demand is covered by deferred cleanup`,
@@ -169,7 +173,10 @@ const acquisitionCellDefinitions = {
     kind: `excluded`,
     reason: `same-session recovery uses markReady rather than defer resume`,
   },
-  'unavailable:markReady': { kind: `covered` },
+  'unavailable:markReady': {
+    kind: `blocked`,
+    reason: `unavailable demand currently starts too early, before recovery can be observed`,
+  },
   'unavailable:markError': {
     kind: `excluded`,
     reason: `a repeated error leaves acquisition unavailable`,
@@ -199,12 +206,15 @@ const delegatedAcquisitionCells = new Map<AcquisitionCell, AcquisitionWitness>(
       : [],
   ),
 )
+const blockedAcquisitionCells = new Map<AcquisitionCell, string>(
+  Object.entries(acquisitionCellDefinitions).flatMap(([cell, definition]) =>
+    definition.kind === `blocked`
+      ? [[cell as AcquisitionCell, definition.reason]]
+      : [],
+  ),
+)
 const registeredAcquisitionCells = new Set<AcquisitionCell>()
-const registeredAcquisitionWitnesses = new Set<AcquisitionWitness>([
-  `start-reentry-matrix`,
-  `release-reentry-matrix`,
-  `restart-matrix`,
-])
+const registeredAcquisitionWitnesses = new Set<AcquisitionWitness>()
 
 function acquisitionCase(
   cells: ReadonlyArray<AcquisitionCell>,
@@ -213,6 +223,10 @@ function acquisitionCase(
 ): void {
   for (const cell of cells) registeredAcquisitionCells.add(cell)
   it(name, run)
+}
+
+function registerAcquisitionWitness(witness: AcquisitionWitness): void {
+  registeredAcquisitionWitnesses.add(witness)
 }
 
 const physicalAcquisitionStates = [
@@ -279,9 +293,18 @@ const physicalRetirementCellDefinitions = {
     kind: `excluded`,
     reason: `obsolete work was already signaled and retired`,
   },
-  'obsolete:truncate': { kind: `covered` },
-  'obsolete:cleanup': { kind: `covered` },
-  'obsolete:unsubscribe': { kind: `covered` },
+  'obsolete:truncate': {
+    kind: `excluded`,
+    reason: `another truncate retires the current replacement, not already-obsolete work`,
+  },
+  'obsolete:cleanup': {
+    kind: `excluded`,
+    reason: `source cleanup retires the current session; obsolete work was retired once`,
+  },
+  'obsolete:unsubscribe': {
+    kind: `excluded`,
+    reason: `unsubscribe retires current ownership; obsolete work was retired once`,
+  },
   'release-debt:release': {
     kind: `excluded`,
     reason: `logical release already happened; teardown retries physical debt`,
@@ -360,6 +383,55 @@ type AsyncRestartScenario = {
   demands: ReadonlyArray<`a` | `b`>
   generationOutcomes: ReadonlyArray<ReadonlyArray<`resolve` | `reject`>>
   settlementOrder: `obsolete-first` | `current-first` | `interleaved`
+}
+
+const asyncRestartCoverageScenarios = [
+  {
+    demands: [`a`],
+    generationOutcomes: [[`reject`]],
+    settlementOrder: `current-first`,
+  },
+  {
+    demands: [`a`],
+    generationOutcomes: [[`resolve`], [`resolve`]],
+    settlementOrder: `obsolete-first`,
+  },
+  {
+    demands: [`a`, `b`],
+    generationOutcomes: [
+      [`reject`, `resolve`],
+      [`resolve`, `reject`],
+    ],
+    settlementOrder: `current-first`,
+  },
+  {
+    demands: [`a`, `b`],
+    generationOutcomes: [
+      [`resolve`, `resolve`],
+      [`reject`, `reject`],
+      [`resolve`, `resolve`],
+    ],
+    settlementOrder: `interleaved`,
+  },
+] as const satisfies ReadonlyArray<AsyncRestartScenario>
+
+function asyncRestartReach(scenario: AsyncRestartScenario): Set<string> {
+  const current = scenario.generationOutcomes.at(-1) ?? []
+  return new Set([
+    `demands:${scenario.demands.length}`,
+    `sessions:${scenario.generationOutcomes.length + 1}`,
+    ...[...new Set(current)].map((outcome) => `current:${outcome}`),
+    `mixed-current:${new Set(current).size > 1}`,
+    `obsolete-reject:${scenario.generationOutcomes
+      .slice(0, -1)
+      .some((outcomes) => outcomes.includes(`reject`))}`,
+    `order:${scenario.settlementOrder}`,
+    `real-interleaving:${
+      scenario.settlementOrder === `interleaved` &&
+      scenario.demands.length > 1 &&
+      scenario.generationOutcomes.length > 1
+    }`,
+  ])
 }
 
 const asyncRestartScenarioArbitrary: fc.Arbitrary<AsyncRestartScenario> = fc
@@ -683,6 +755,30 @@ async function runAsyncRestartScenario(
  * physical lease exists only if the callback returns.
  */
 describe(`CollectionSubscription demand lifecycle oracle`, () => {
+  it(`executes every required async restart regime`, async () => {
+    const reach = new Set<string>()
+    for (const scenario of asyncRestartCoverageScenarios) {
+      for (const label of asyncRestartReach(scenario)) reach.add(label)
+      await runAsyncRestartScenario(scenario)
+    }
+    const required = [
+      `demands:1`,
+      `demands:2`,
+      `sessions:2`,
+      `sessions:3`,
+      `sessions:4`,
+      `current:resolve`,
+      `current:reject`,
+      `mixed-current:true`,
+      `obsolete-reject:true`,
+      `order:obsolete-first`,
+      `order:current-first`,
+      `order:interleaved`,
+      `real-interleaving:true`,
+    ]
+    expect(required.filter((label) => !reach.has(label))).toEqual([])
+  })
+
   it(`covers every finite start, failure-delivery, and release cell`, () => {
     expect(
       new Set(
@@ -716,6 +812,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       new Set([
         ...legalAcquisitionCells,
         ...delegatedAcquisitionCells.keys(),
+        ...blockedAcquisitionCells.keys(),
         ...excludedAcquisitionCells.keys(),
       ]),
     ).toEqual(allCells)
@@ -745,8 +842,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     `starting:truncate`,
     `starting:cleanup`,
     `starting:unsubscribe`,
-    `active:unsubscribe`,
   ])
+  registerAcquisitionWitness(`start-reentry-matrix`)
 
   it.each(startScenarios)(
     `keeps logical and physical ownership aligned for $outcome × $reentry`,
@@ -890,6 +987,10 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const unloads: Array<LoadSubsetOptions> = []
       const errors: Array<unknown> = []
       const statuses: Array<string> = []
+      const controller = new AbortController()
+      let truncateCount = 0
+      let truncate = () => {}
+      let targetLoadCount = 0
       let subscription!: ReturnType<
         ReturnType<typeof createCollection<{ id: string }>>[`subscribeChanges`]
       >
@@ -899,12 +1000,21 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         getKey: ({ id }) => id,
         syncMode: `on-demand`,
         sync: {
-          sync: ({ markReady }) => {
+          sync: (operations) => {
+            truncate = () => {
+              truncateCount++
+              operations.begin()
+              operations.truncate()
+              operations.commit()
+            }
+            const { markReady } = operations
             markReady()
             return {
               loadSubset: (options) => {
                 loads.push(options)
                 if (options.where === peerWhere) return true
+                targetLoadCount++
+                if (targetLoadCount > 1) return true
                 if (outcome === `throw`) throw failure
                 return pending.promise
               },
@@ -919,7 +1029,11 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       subscription.on(`status:change`, ({ status }) => statuses.push(status))
       subscription.on(`loadSubset:error`, ({ error }) => {
         errors.push(error)
-        if (reentry === `release-self`) {
+        if (reentry === `abort-self`) {
+          controller.abort()
+        } else if (reentry === `truncate`) {
+          truncate()
+        } else if (reentry === `release-self`) {
           subscription.releaseSnapshot(targetWhere)
         } else if (reentry === `release-peer`) {
           subscription.releaseSnapshot(peerWhere)
@@ -933,7 +1047,10 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       subscription.requestSnapshot({ where: peerWhere })
       let thrown: unknown
       try {
-        subscription.requestSnapshot({ where: targetWhere })
+        subscription.requestSnapshot({
+          where: targetWhere,
+          signal: controller.signal,
+        })
       } catch (error) {
         thrown = error
       }
@@ -950,6 +1067,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       expect(thrown).toBe(outcome === `throw` ? failure : undefined)
       expect(errors).toEqual([failure])
       expect(subscription.lastError).toBe(failure)
+      expect(controller.signal.aborted).toBe(reentry === `abort-self`)
+      expect(truncateCount).toBe(Number(reentry === `truncate`))
       expect(unloads.filter((options) => options === targetLoad)).toHaveLength(
         Number(outcome === `reject` && tearsDownTarget),
       )
@@ -975,8 +1094,10 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     },
   )
 
+  registerAcquisitionWitness(`release-reentry-matrix`)
   registerPhysicalRetirementCells([
     `active:release`,
+    `active:unsubscribe`,
     `release-debt:unsubscribe`,
   ])
 
@@ -1979,7 +2100,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   })
 
   acquisitionCase(
-    [`starting:markError`, `unavailable:markReady`],
+    [`starting:markError`],
     `retains demand requested during initial error for same-session recovery`,
     async () => {
       const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
@@ -2094,52 +2215,48 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     },
   )
 
-  acquisitionCase(
-    [`unavailable:release`],
-    `releases unavailable demand without creating a physical acquisition`,
-    async () => {
-      const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
-      const loads: Array<LoadSubsetOptions> = []
-      const unloads: Array<LoadSubsetOptions> = []
-      let markError!: (error: unknown) => void
-      let markReady!: () => void
-      const collection = createCollection<{ id: string }>({
-        id: `release-unavailable-demand`,
-        getKey: ({ id }) => id,
-        startSync: false,
-        syncMode: `on-demand`,
-        sync: {
-          sync: (operations) => {
-            markError = operations.markError
-            markReady = operations.markReady
-            return {
-              loadSubset: (options) => {
-                loads.push(options)
-                return true
-              },
-              unloadSubset: (options) => unloads.push(options),
-            }
-          },
+  it(`releases unavailable demand without creating a physical acquisition`, async () => {
+    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    let markError!: (error: unknown) => void
+    let markReady!: () => void
+    const collection = createCollection<{ id: string }>({
+      id: `release-unavailable-demand`,
+      getKey: ({ id }) => id,
+      startSync: false,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (operations) => {
+          markError = operations.markError
+          markReady = operations.markReady
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return true
+            },
+            unloadSubset: (options) => unloads.push(options),
+          }
         },
-      })
-      collection.startSyncImmediate()
-      const subscription = collection.subscribeChanges(() => {}, {
-        includeInitialState: false,
-      })
+      },
+    })
+    collection.startSyncImmediate()
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
 
-      markError(new Error(`initial sync failed`))
-      subscription.requestSnapshot({ where })
-      subscription.releaseSnapshot(where)
-      markReady()
-      await flushPromises()
+    markError(new Error(`initial sync failed`))
+    subscription.requestSnapshot({ where })
+    subscription.releaseSnapshot(where)
+    markReady()
+    await flushPromises()
 
-      expect(loads).toHaveLength(0)
-      expect(unloads).toHaveLength(0)
+    expect(loads).toHaveLength(0)
+    expect(unloads).toHaveLength(0)
 
-      subscription.unsubscribe()
-      await collection.cleanup()
-    },
-  )
+    subscription.unsubscribe()
+    await collection.cleanup()
+  })
 
   it(`defers demand while an installed loader is in initial error`, async () => {
     const oldWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`old`)])
@@ -2413,7 +2530,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     await collection.cleanup()
   })
 
-  registerPhysicalRetirementCells([`active:truncate`, `active:cleanup`])
+  registerAcquisitionWitness(`restart-matrix`)
+  registerPhysicalRetirementCells([`active:cleanup`])
 
   it.each(restartScenarios)(
     `keeps restart ownership aligned for $outcome × $reentry`,
@@ -2524,12 +2642,6 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       await collection.cleanup()
     },
   )
-
-  registerPhysicalRetirementCells([
-    `obsolete:truncate`,
-    `obsolete:cleanup`,
-    `obsolete:unsubscribe`,
-  ])
 
   it.each(threeGenerationScenarios)(
     `fences three generations for $obsoleteOutcome/$currentOutcome settled $settlementOrder`,
@@ -2724,6 +2836,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     subscription.unsubscribe()
     await collection.cleanup()
   })
+
+  registerPhysicalRetirementCells([`active:truncate`])
 
   it(`enters loading status when a truncate queues replay work`, async () => {
     const replay = createDeferred<void>()

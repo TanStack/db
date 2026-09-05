@@ -1244,16 +1244,31 @@ every row is either green or has a named red witness.
 | Protocol slice                                       | Executable coverage                                                                                 | Current result                                         |
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
 | Logical demand start/release and synchronous reentry | 28 start cells, 14 failure-delivery cells, 8 release cells                                          | 4 truncate-during-start status reds; other cells green |
-| Sync acquisition availability                        | 6-phase × 7-entry census: 16 direct cells, 5 delegated cells, 21 true exclusions                    | 9 named reds; adjacent controls green                  |
-| Physical retirement                                  | 5 states × 5 causes: 15 executable cells and 10 true exclusions                                     | census complete; executable reds stay named            |
+| Sync acquisition availability                        | 6-phase × 7-entry census: 14 direct cells, 5 delegated cells, 2 blocked cells, 21 true exclusions   | blocked cells name the earlier unavailable-demand red  |
+| Physical retirement                                  | 5 states × 5 causes: 12 executable cells and 13 true exclusions                                     | census complete; executable reds stay named            |
 | Cleanup/restart ownership                            | 20 restart cells plus fixed callback boundaries                                                     | green except the acquisition-availability reds         |
 | Async session fencing                                | 2–4 sessions, 1–2 demands, mixed outcomes, obsolete/current/interleaved settlement                  | green                                                  |
-| Generated async lifecycle histories                  | one pure reducer drives async-pending and sync-success histories with one ordered event trace       | 8 named replay-generation/status reds                  |
-| Row-bearing lifecycle histories                      | independent public-row model over canonical, fixed-seed, and random histories                       | 1 released-obsolete publication red                    |
+| Generated async lifecycle histories                  | one pure reducer drives async-pending and sync-success histories with one ordered event trace       | 14 named replay-generation/status reds                 |
+| Row-bearing lifecycle histories                      | independent public-row model over canonical, fixed-seed, and random histories with exact batches    | 4 named publication reds                               |
 | Replay phase transitions                             | setup/pending/settling/publishing crossed with release, reacquisition, supersession, abort, cleanup | three audit claims remain to reconcile below           |
 | Ordered route mechanics                              | page/prefix/boundary/full-source × return/throw/resolve/reject/abort/cleanup                        | green                                                  |
 | Ordered consumer integration                         | Collection/Effect parity, source-local recovery, public-window reentry, sync-session settlement     | 5 named reds                                           |
 | Ordered generated histories                          | authority, route, barrier, settlement, and session reach                                            | not yet implemented                                    |
+
+The frozen 36-test red catalog groups into these protocol faults. Multiple
+matrix cells are deliberate variants of one fault, not separate diagnoses.
+
+| Red class                                 | Named witnesses | Observable failure                                                           |
+| ----------------------------------------- | --------------- | ---------------------------------------------------------------------------- |
+| Start/failure reentry through truncate    | 6               | false loading/ready transitions or wrong physical retirement                 |
+| Acquisition availability and callback ABA | 12              | demand starts on the wrong loader/session, settles early, or owns no lease   |
+| Obsolete async replay readiness           | 2               | retired work keeps the current subscription from reaching `ready`            |
+| Aborted replay generation                 | 4               | false loading cycles, phantom unload, or a live peer remains stuck loading   |
+| Synchronous replay/restart readiness      | 8               | synchronous work emits a false `loadingSubset -> ready` cycle                |
+| Released obsolete publication             | 1               | a non-cooperative retired acquisition can still publish its row              |
+| Independent write during replay           | 1               | successful replacement drops an unrelated source row written behind its gate |
+| Duplicate-owner snapshot                  | 1               | a second owner republishes an unchanged row as a fresh insert                |
+| Aborted acquisition publication           | 1               | a non-cooperative source can publish after its request signal aborts         |
 
 - [ ] Finish the subset-demand lifecycle oracle before accepting more local
       runtime patches. Treat these as one protocol, not separate regressions:
@@ -1346,12 +1361,13 @@ every row is either green or has a named red witness.
         separate resource-installation axis, and add session-tagged unload
         assertions to every restart/callback witness. Do not call the phase
         table complete until this census itself fails when a legal cell is
-        omitted. The census now has six phases, seven possible entries, 15
-        legal executable cells, and 27 explicit exclusions with reasons.
-        Omitting any cell fails the typed record; omitting a legal witness fails
-        the registration census. No witness may register itself outside the
-        test helper. Restart/callback unloads name the adapter session that
-        owns each physical acquisition.
+        omitted. The census now has six phases and seven possible entries: 14
+        direct cells, five delegated cells, two cells blocked by the earlier
+        unavailable-demand defect, and 21 explicit exclusions with reasons.
+        Omitting any cell fails the typed record; omitting a direct or delegated
+        witness fails the registration census. No witness may register itself
+        away from the executable matrix it names. Restart/callback unloads name
+        the adapter session that owns each physical acquisition.
   - [ ] Keep the ordered-query layer as a consumer of the same protocol. Cross
         page, prefix, boundary, and full-source routes with cancellation,
         failure, retry, and reentrant `setWindow`; do not duplicate ownership
@@ -1430,20 +1446,63 @@ every row is either green or has a named red witness.
         recovery gates. The first four coarse restart-entry cells are green;
         the stricter audit added four red acquisition-availability cells. The
         last fully green checkpoint had 86 core lifecycle cells plus 129
-        existing subscription/replay tests. The consolidated checkpoint has
-        The independent-trace checkpoint had 109 lifecycle tests: 93 green
-        laws and 16 named reds. The completed core census now has 133 tests:
-        108 green laws and 25 named reds. The driver chooses runtime owners and
+        existing subscription/replay tests. The independent-trace checkpoint
+        had 109 lifecycle tests: 93 green laws and 16 named reds. The frozen
+        lifecycle catalog now has 147 tests: 111 green laws and 36 named reds.
+        The driver chooses runtime owners and
         attempts independently from the reducer; the phantom-unload witness
         reaches its unload assertion; abort remains in the green generator
         except for the exact replay class; and red histories no longer count
         as passed SUT reach. A row-bearing history model found one additional
         class: a released non-cooperative acquisition can still publish its
-        obsolete row. The phase table distinguishes delegated executable cells
-        from impossible cells, and a 5-state × 5-cause physical-retirement
-        census names every valid transition. The open classes remain
+        obsolete row. Independent source writes found a second publication
+        class: a successful replay can drop an unrelated source row written
+        while its replacement is private. Random-seed variation then found a
+        third publication class: adding a second owner for an already-loaded
+        demand can republish the unchanged row as another insert. A
+        non-cooperative source also proved that an acquisition can publish
+        after its signal aborts. The phase table distinguishes
+        direct, delegated, blocked, and impossible acquisition cells. A
+        5-state × 5-cause physical-retirement census names all 12 executable
+        transitions and 13 true exclusions. The open classes remain
         acquisition availability, phantom ownership/resource retirement,
-        replay/abort generation, cleanup/reentry, and obsolete publication.
+        replay/abort generation, cleanup/reentry, obsolete publication, and
+        preservation of independent source writes across a successful
+        replacement.
+  - [ ] Close the lifecycle-census loss-audit gaps before changing production:
+    - [x] Model an authoritative truncate with no retained demand as a public
+          deletion, and pin the random counterexample that exposed the false
+          green.
+    - [x] Mark `unavailable:markReady` and `unavailable:release` blocked by the
+          earlier unavailable-demand defect instead of claiming unreachable
+          downstream coverage.
+    - [x] Make failure-delivery `abort-self` and `truncate` cells execute their
+          named reentrant action.
+    - [x] Register delegated acquisition matrices beside their executable test
+          declarations rather than in a hand-written witness set.
+    - [x] Register physical-retirement cells only from tests which execute the
+          exact state and cause; add focused witnesses for missing cells.
+    - [x] Record effective transitions, settlement scope/age/outcome, session,
+          and replay reach instead of counting command labels and no-ops.
+    - [x] Compare exact error object identity and exact load result kind
+          (`true` versus Promise) in generated histories.
+    - [x] Give failed replay/private recovery explicit reference-model state;
+          rejection must not collapse into successful barrier completion.
+    - [x] Add mixed aborted/live replay, exhaustive synchronous replay, and
+          post-red suffix witnesses for later release, cleanup, restart, and
+          unsubscribe behavior.
+    - [x] Generate source mutations independently from settlement and compare
+          exact public change batches, including type, key, value,
+          `previousValue`, order, and intermediate batches.
+    - [x] Make runtime attempt selection structurally independent from the
+          reference selector so a shared classifier bug cannot false-green.
+    - [x] Turn async restart statistics into checked reach requirements for
+          demand count, sessions, outcomes, obsolete settlement, and real
+          interleaving.
+    - [x] Rerun the full fixed/random lifecycle catalog and freeze its counts:
+          111 green laws and 36 named red witnesses across 147 tests.
+    - [ ] Run a fresh Field Lab loss audit on the frozen lifecycle-census
+          commit.
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
       behavior, and opaque callback roots.
