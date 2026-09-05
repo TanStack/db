@@ -1272,8 +1272,8 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
 | Start/failure reentry through truncate    | 0 (5 stale expectations reconciled) | queued replay owns loading; a synchronous throw rolls back the tentative owner |
 | Acquisition availability and callback ABA | 14              | demand starts on the wrong loader/session, settles early, or owns no lease   |
 | Obsolete async replay readiness           | 3               | retired work keeps the current subscription from reaching `ready`            |
-| Aborted replay generation                 | 5               | false loading cycles, phantom unload, or a live peer remains stuck loading   |
-| Synchronous replay/restart readiness      | historical 12   | queued loading is valid; one synchronous suffix still exposes an unacquired unload |
+| Aborted replay generation                 | historical 5    | loading contract reconciled; phantom unload fixed; peer pending-readiness witness remains |
+| Synchronous replay/restart readiness      | historical 12   | queued loading is valid; unacquired-unload suffix fixed; unrestricted synchronous generator passes |
 | Released obsolete publication             | 1               | a non-cooperative retired acquisition can still publish its row              |
 | Independent write during replay           | 1               | successful replacement drops an unrelated source row written behind its gate |
 | Duplicate-owner snapshot                  | 1               | a second owner republishes an unchanged row as a fresh insert                |
@@ -2447,6 +2447,23 @@ candidate repair scopes, not completed fixes or proof of root cause.
   800 runs each: fixed seeds 1657003/1657004 and fresh random seeds
   -414294607/-1840047352. The synchronous domain has no replay exclusion; async
   exclusions remain as noted. This is not the final full-suite 100× campaign.
+- Fresh Field Lab loss audit of `ef7e197d` found no removed functions or weakened
+  assertions. It verified five old failures green plus five new passing cases,
+  with no passing-to-failing changes. Ablation splits into history **17/11** and
+  demand **183/4**. Three new release cases fail the first unload count; ordinary
+  return reaches the later logical-release count. Error identity, readiness,
+  and debt retry remain positive controls, not independently ablated proofs.
+  "No synchronous replay exclusion" means the existing domain: two demand names,
+  1–20 commands, synchronous-success acquisitions, flush after each command;
+  it does not add mid-setup interleavings or other loader outcomes. Corrected
+  the stale async-filter rationale and historical dashboard labels. The async
+  exclusion remains an explicit gap for the next slice.
+  Audit scanned sources/reports separately but sequentially in one fresh agent;
+  no tests rerun and no sibling-blind control. Summary-led scanning may miss
+  omissions outside its categories. JSON verifies outcomes/seeds, not source
+  hashes, transient ablation state, or the 10× invocation; those rely on the
+  execution record. Adjacent **142/0** controls are separate, not the verified
+  report's full **349/4**, which overlaps history/demand census cases.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar

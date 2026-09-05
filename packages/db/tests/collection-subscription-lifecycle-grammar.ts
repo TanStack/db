@@ -561,8 +561,8 @@ function replaysAbortedDemand(
 
 export const greenLifecycleHistoryArbitrary = fc
   .array(lifecycleCommandArbitrary, { minLength: 1, maxLength: 20 })
-  // Each excluded transition has a named failing witness below. Abort itself
-  // remains in the green campaign; only replaying its retired owner is red.
+  // Pending supersession still has named red witnesses. The aborted-replay
+  // filter is now broader than the known failures and remains a coverage gap.
   .filter((history) => !replaysAbortedDemand(history))
   .filter((history) => !crossesPendingReplaySupersession(history))
 
