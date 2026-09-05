@@ -2272,6 +2272,28 @@ candidate repair scopes, not completed fixes or proof of root cause.
   no diagnostic points to this step's implementation or added tests. This is
   not a clean repository-wide typecheck claim.
 
+- Fresh Field Lab loss audit of `3b39a8a9` confirmed the saved counts and recovered
+  assertion-strength limits. All 44 ablated cases stop at the first callback
+  count, so they prove the missing synchronous notification, not independent
+  red evidence for every later outcome assertion. The remaining 11 ablation
+  failures are six changed old notification witnesses and five surviving
+  baseline failures. The history reducer models the pending-result event only;
+  the finite matrix, not that reducer, checks its settlement lifecycle.
+- Tightened the matrix after that audit: success records visible rows inside
+  the promise observer; rejection checks Error reference identity; cleanup
+  restarts the collection and proves retained demand reacquires while the old
+  caller still sees AbortError. No runtime change. Demand-suite result remains
+  **178/5**, `/tmp/tanstack-recovery-notification-audit-controls.json`. These
+  added assertions have not each been independently mutation-tested.
+- Census provenance: previous **438/40** used seed 1657010; the **483/39** run
+  used 1657011, so those are not identical generated histories. A further run
+  without a seed override also gave **483/39** with identical failed names,
+  `/tmp/tanstack-recovery-notification-random-census.json`; all 11 random/replayed
+  properties passed with fresh seeds recorded in their names. JSON reports do
+  not encode runtime source hashes. The loss audit scanned source and reports
+  separately but sequentially in one fresh context, not sibling-blind, and did
+  not rerun tests. Its summary-led scan may hide material outside that summary.
+
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
       behavior, and opaque callback roots.

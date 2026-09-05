@@ -2841,6 +2841,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       let result: true | Promise<void> | undefined
       let release: (() => void) | undefined
       const settlements: Array<unknown> = []
+      const visibleOnSuccess: Array<Array<string>> = []
       let callbacks = 0
       try {
         if (entry === `limited`) {
@@ -2861,7 +2862,10 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
           release = releaseDemand
           if (value instanceof Promise)
             void value.then(
-              () => settlements.push(`success`),
+              () => {
+                visibleOnSuccess.push([...rows.values()].map(({ id }) => id))
+                settlements.push(`success`)
+              },
               (error: unknown) => settlements.push(error),
             )
         }
@@ -2911,9 +2915,11 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         await flushPromises()
         if (outcome === `return` || outcome === `resolve`) {
           expect(settlements).toEqual([`success`])
+          expect(visibleOnSuccess).toEqual([[`row`]])
           expect([...rows.values()].map(({ id }) => id)).toEqual([`row`])
         } else if (outcome === `throw` || outcome === `reject`) {
-          expect(settlements).toEqual([failure])
+          expect(settlements).toHaveLength(1)
+          expect(settlements[0]).toBe(failure)
           expect([...rows.values()]).toEqual([])
         } else {
           expect(settlements).toEqual([
@@ -2929,6 +2935,13 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
             recover()
             await flushPromises()
             expect(loads).toEqual([])
+          }
+          if (outcome === `cleanup`) {
+            // Cleanup ends this wait, not the surviving subscription's demand.
+            collection.startSyncImmediate()
+            operations.markReady()
+            await flushPromises()
+            expect(loads).toHaveLength(phase === `before` ? 1 : 2)
           }
           // Non-cooperative late settlement cannot rewrite the observed outcome.
           transport.resolve()
