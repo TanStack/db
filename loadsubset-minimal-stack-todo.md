@@ -2515,6 +2515,34 @@ candidate repair scopes, not completed fixes or proof of root cause.
   1413322355 finds the above case. It is not a green campaign or the final 100×
   run. Next slice: the new initial-cancellation publication boundary, followed
   by the nine row-bearing publication failures and settled-peer loss.
+- Fresh Field Lab loss audit of `06fcad87` found no runtime changes or weakened
+  assertions and verified all six report totals above. It recovered these limits:
+  - The remaining publication-generator filter excludes successful superseded
+    acquisitions even when their logical owner remains, not merely writes after
+    owner release. Its name/earlier summary understates that coverage gap.
+  - Prompt-cancellation cases make later obsolete-settle commands no-ops; manual
+    cases exercise those settlements. The fixed matrix settles current first
+    and then tears down after old settlement; other orders rely on generation.
+  - Cancellation mode is uniform per history, not mixed per acquisition. Required
+    transition/statistics sampling still uses manual mode.
+  - History result checks prove callback identity and Promise/true shape, not
+    settlement of the caller's returned Promise or exact AbortError. Those wait
+    contracts remain in the finite demand matrix, not this history harness.
+  - Both mutants first fail status-history checks; they do not independently
+    prove every later publication/error/teardown assertion. Forced finally
+    settlement/cleanup is unasserted.
+  - The new fixed witness has 12 soft failures: six cumulative empty-publication
+    comparisons plus six trace comparisons. Its other checked fields stay clean;
+    this is one candidate mismatch, not 12 defects. The model uses all gating
+    attempts for publication while architecture distinguishes replay-started
+    work and permits progressive initial visibility. The next probe must
+    distinguish status waits from publication waits before choosing a fix.
+  Audit was read-only source/report work, sequential in one fresh agent rather
+  than sibling-blind. No tests rerun or runtime inspection; summary-led scanning
+  can hide other categories. JSON does not independently bind outcomes to source
+  hashes, transient mutations/restoration, or successful 10× invocation. The
+  matching seed-1657011 counts do not imply identical generated histories after
+  adding the cancellation-mode dimension and removing filters.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
