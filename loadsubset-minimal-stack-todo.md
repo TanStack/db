@@ -1245,7 +1245,7 @@ every row is either green or has a named red witness.
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
 | Logical demand start/release and synchronous reentry | 28 start cells, 14 failure-delivery cells, 8 release cells                                          | 4 truncate-during-start status reds; other cells green       |
 | Sync loader availability                             | 6 phases × 5 entries: 13 executable cells and 17 true exclusions                                    | runtime reach checked through red suffixes                   |
-| Physical acquisition interaction                     | 5 states × 5 causes: 17 executable cells and 8 true exclusions                                      | distinguishes no-op, abort, retire, preserve, discard, retry |
+| Physical acquisition interaction                     | 5 states × 5 causes: 18 executable cells and 7 true exclusions                                      | distinguishes no-op, abort, retire, preserve, discard, retry |
 | Cleanup/restart ownership                            | 20 restart cells plus fixed callback boundaries                                                     | green except the acquisition-availability reds               |
 | Async session fencing                                | 2–4 sessions, 1–2 demands, mixed outcomes, obsolete/current/interleaved settlement                  | green                                                        |
 | Generated async lifecycle histories                  | one pure reducer drives async-pending and sync-success histories with one ordered event trace       | 14 named replay-generation/status reds                       |
@@ -1255,7 +1255,7 @@ every row is either green or has a named red witness.
 | Ordered consumer integration                         | Collection/Effect parity, source-local recovery, public-window reentry, sync-session settlement     | 5 named reds                                                 |
 | Ordered generated histories                          | authority, route, barrier, settlement, and session reach                                            | not yet implemented                                          |
 
-The current 37-test red catalog groups into these protocol faults. Multiple
+The current 38-test red catalog groups into these protocol faults. Multiple
 matrix cells are deliberate variants of one fault, not separate diagnoses.
 
 | Red class                                 | Named witnesses | Observable failure                                                           |
@@ -1269,6 +1269,7 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
 | Independent write during replay           | 1               | successful replacement drops an unrelated source row written behind its gate |
 | Duplicate-owner snapshot                  | 1               | a second owner republishes an unchanged row as a fresh insert                |
 | Aborted acquisition publication           | 1               | a non-cooperative source can publish after its request signal aborts         |
+| No-acquisition truncate                   | 1               | eager demand is given a phantom unload after truncate and final release      |
 
 - [ ] Finish the subset-demand lifecycle oracle before accepting more local
       runtime patches. Treat these as one protocol, not separate regressions:
@@ -1287,7 +1288,7 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
         (`none`, reacquire self, release peer, unsubscribe) and prove logical
         retirement happens once while failed cleanup stays exact retry debt.
         The finite census covers all eight release cells.
-  - [x] Cross replay phase (`setup`, `pending`, `settling`, `publishing`) with
+  - [ ] Cross replay phase (`setup`, `pending`, `settling`, `publishing`) with
         release, reacquisition, truncate supersession, and cleanup. Assert the
         full status/publication trace, not only the settled row set. The new
         lifecycle suite adds cleanup-during-pending, external abort,
@@ -1448,8 +1449,8 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
         had 109 lifecycle tests: 93 green laws and 16 named reds. The frozen
         checkpoint had 147 tests: 111 green laws and 36 named reds. Executable
         acquisition reach and direct-release coverage now bring the catalog to
-        151 tests: 114 green laws and 37 named reds. The driver chooses runtime owners and
-        attempts independently from the reducer; the phantom-unload witness
+        152 tests: 114 green laws and 38 named reds. The driver chooses runtime
+        owners and attempts independently from the reducer; the phantom-unload witness
         reaches its unload assertion; abort remains in the green generator
         except for the exact replay class; and red histories no longer count
         as passed SUT reach. A row-bearing history model found one additional
@@ -1462,8 +1463,8 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
         non-cooperative source also proved that an acquisition can publish
         after its signal aborts. The phase table distinguishes
         executable and impossible loader-availability cells. A 5-state ×
-        5-cause physical-interaction census names all 17 executable transitions
-        and eight true exclusions. The open classes remain
+        5-cause physical-interaction census names all 18 executable transitions
+        and seven true exclusions. The open classes remain
         acquisition availability, phantom ownership/resource retirement,
         replay/abort generation, cleanup/reentry, obsolete publication, and
         preservation of independent source writes across a successful
@@ -1528,6 +1529,13 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
           unavailable recovery past its first red with soft assertions, check
           both target and peer suffixes, and record exact source-session cleanup
           across restart.
+    - [x] A — Apply the second checkpoint's loss audit: make eager truncate a
+          legal no-acquisition cell with its own red witness; record loader
+          availability only inside the callback or entry point that proves it;
+          require the same terminal attempt, abort, unload, and cleanup suffix
+          for all 14 failure-delivery cells; and tag restart unloads with the
+          adapter session captured when their handler was installed. The full
+          catalog now has 152 tests: 114 green laws and 38 named reds.
     - [ ] B — Emit and require compound settlement scope × age × outcome and
           session × replay reach, not independent marginal labels.
     - [ ] B — Resume full status checking after each exact tolerated red delta,
