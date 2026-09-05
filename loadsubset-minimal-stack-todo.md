@@ -2025,6 +2025,14 @@ candidate repair scopes, not completed fixes or proof of root cause.
   `/tmp/tanstack-eager-release-100x-budgeted.json`. This clears the timeout
   uncertainty; it does not make the known-red suites green or validate a
   production repair for the newly unpinned assertion.
+- Fresh Field Lab loss audit of `60fded61` recovered two compressed details:
+  that 100× rerun covers only the two previously timed-out suites (93 tests),
+  and its 89 passes still include the old expected-empty witness. The new
+  peer-retention failure occurs at the final assertion after cleanup and exact
+  unload checks, so those checks were reached; this does not locate the runtime
+  cause. The audit found no removed surrounding assertion. It inspected source
+  and reports only, without rerunning tests; scanning the sources in one agent
+  could bias attention across them.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
