@@ -1278,7 +1278,7 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
 | Aborted replay generation                 | historical 5    | loading and delayed-settlement contracts reconciled; phantom unload fixed |
 | Synchronous replay/restart readiness      | historical 12   | queued loading is valid; unacquired-unload suffix fixed; unrestricted synchronous generator passes |
 | Released obsolete publication             | historical 1    | unsupported untagged canceled writes; conforming-source witness green; source/core ablations remain red |
-| Independent write during replay           | 1               | successful replacement drops an unrelated source row written behind its gate |
+| Independent write during replay           | historical 1; repaired | successful replacement now preserves unrelated source rows written behind its gate |
 | Duplicate-owner snapshot                  | 1               | a second owner republishes an unchanged row as a fresh insert                |
 | Aborted acquisition publication           | historical 1    | source must suppress canceled request writes; conforming-source witness green, no core bug claimed fixed |
 | No-acquisition truncate                   | 1               | eager demand is given a phantom unload after truncate and final release      |
@@ -2797,6 +2797,26 @@ candidate repair scopes, not completed fixes or proof of root cause.
 - Next: loss audit this committed step, then the duplicate snapshot and
   retained-row truncate cells, then four ordered-work reds. Do not expand the
   production design to cover unrelated paths while those known cells remain.
+
+- Fresh Field Lab loss audit of `85e5d4d1` recovered one stale reduction: the
+  older red-class table still described independent source writes as broken.
+  Updated that row to historical/repaired. All nine named report totals and
+  three seed/path witnesses match; no further supported missing test or cleanup
+  suffix found. Fixed properties retain their own seeds; environment seed
+  overrides apply to random/replayed properties, not every test in the census.
+  The audit scanned code/tests before reports in one fresh agent, a sequential
+  correlated fallback rather than sibling-blind scans. Source-first framing and
+  the parent's saved-key observation could steer its attention. No auditor test
+  execution; no correctness endorsement or independent verification of command
+  environments/multipliers/temporary patch restoration.
+- Separately removed the now-unread `publicationState.sentKeys` set: its type,
+  two copies, and one delete. Live private sent-key tracking remains. Follow-up
+  census `/tmp/tanstack-retained-row-no-saved-keys-census.json` is **551/6**, with
+  exactly the same six failing names. Auditor inspected this four-line removal
+  and report separately; it is correlated follow-up evidence, not part of the
+  frozen commit. Combined runtime change is **19 added / 30 removed (-11)**,
+  with one fewer saved set and no new state. Formatting and diff checks pass.
+  Next concrete work remains the two publication cells, then four ordered reds.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar

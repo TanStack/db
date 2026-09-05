@@ -88,7 +88,6 @@ type TruncateReplayPublicationControl = Readonly<{
 type TruncatePublicationState = {
   loadedInitialState: boolean
   snapshotSent: boolean
-  sentKeys: Set<string | number>
   publishedRows: Map<string | number, object>
   limitedSnapshotRowCount: number
   lastSentKey: string | number | undefined
@@ -341,7 +340,6 @@ export class CollectionSubscription
       publicationState: {
         loadedInitialState: this.loadedInitialState,
         snapshotSent: this.snapshotSent,
-        sentKeys: new Set(this.sentKeys),
         publishedRows: new Map(this.publishedRows),
         limitedSnapshotRowCount: this.limitedSnapshotRowCount,
         lastSentKey: this.lastSentKey,
@@ -406,7 +404,6 @@ export class CollectionSubscription
         publicationState: {
           loadedInitialState: this.loadedInitialState,
           snapshotSent: this.snapshotSent,
-          sentKeys: new Set(this.sentKeys),
           publishedRows: new Map(this.publishedRows),
           limitedSnapshotRowCount: this.limitedSnapshotRowCount,
           lastSentKey: this.lastSentKey,
@@ -1611,7 +1608,6 @@ export class CollectionSubscription
 
     for (const { key } of deletes) {
       session.publicationState.publishedRows.delete(key)
-      session.publicationState.sentKeys.delete(key)
       // A fully loaded snapshot normally stops per-change sent-key tracking.
       // Release still retires these keys, so a later demand must be able to
       // publish them again from the retained source state.
