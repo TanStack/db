@@ -1536,6 +1536,11 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
           for all 14 failure-delivery cells; and tag restart unloads with the
           adapter session captured when their handler was installed. The full
           catalog now has 152 tests: 114 green laws and 38 named reds.
+    - [x] A — Make the common failure-delivery suffix truly terminal. Each of
+          the 14 cells now performs final collection cleanup, proves the source
+          cleanup ran exactly once, checks cleaned-up status, preserves the
+          primary error, and rejects any later attempt, unload, status, or error
+          activity.
     - [ ] B — Emit and require compound settlement scope × age × outcome and
           session × replay reach, not independent marginal labels.
     - [ ] B — Resume full status checking after each exact tolerated red delta,

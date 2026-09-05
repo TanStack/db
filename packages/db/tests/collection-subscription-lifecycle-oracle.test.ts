@@ -974,6 +974,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         result: `peer-return` | `throw` | `pending` | `replay-return`
       }> = []
       const unloads: Array<LoadSubsetOptions> = []
+      const sourceCleanupSessions: Array<number> = []
       const errors: Array<unknown> = []
       const statuses: Array<string> = []
       const controller = new AbortController()
@@ -1026,6 +1027,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
                 return pending.promise
               },
               unloadSubset: (options) => unloads.push(options),
+              cleanup: () => sourceCleanupSessions.push(0),
             }
           },
         },
@@ -1172,7 +1174,17 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       expect.soft(unloads).toHaveLength(expectedUnloads)
       expect.soft(peerLoad.signal?.aborted).toBe(true)
       expect.soft(targetLoad.signal?.aborted).toBe(true)
+      const terminalAttempts = [...attempts]
+      const terminalUnloads = [...unloads]
+      const terminalStatuses = [...statuses]
       await collection.cleanup()
+      expect.soft(sourceCleanupSessions).toEqual([0])
+      expect.soft(collection.status).toBe(`cleaned-up`)
+      expect.soft(errors).toEqual([failure])
+      expect.soft(subscription.lastError).toBe(failure)
+      expect.soft(attempts).toEqual(terminalAttempts)
+      expect.soft(unloads).toEqual(terminalUnloads)
+      expect.soft(statuses).toEqual(terminalStatuses)
       observedFailureDeliverySuffixes.add(`${outcome}:${reentry}`)
     },
   )
