@@ -10,6 +10,7 @@ import {
   createLifecycleModel,
   greenLifecycleHistories,
   greenLifecycleHistoryArbitrary,
+  mixedAbortedRestartHistory,
   pendingSupersessionHistory,
   reduceLifecycle,
   syncLifecycleHistory,
@@ -53,10 +54,11 @@ async function runHistory(
   history: ReadonlyArray<LifecycleCommand>,
   options: {
     acquisitionMode?: `async-pending` | `sync-success`
-    traceProjection?: `all` | `without-status`
+    continueAfterMismatch?: boolean
   } = {},
 ): Promise<Set<string>> {
   const acquisitionMode = options.acquisitionMode ?? `async-pending`
+  const check = options.continueAfterMismatch ? expect.soft : expect
   const failures = new Map<number, Error>()
   const failureForAttempt = (attemptId: number): Error => {
     const existing = failures.get(attemptId)
@@ -189,36 +191,26 @@ async function runHistory(
       observedTrace,
       expectedTrace: model.trace,
     })
-    expect(observedLoads, context).toEqual(model.loads)
-    expect(observedUnloads, context).toEqual(model.unloads)
-    expect(
+    check(observedLoads, context).toEqual(model.loads)
+    check(observedUnloads, context).toEqual(model.unloads)
+    check(
       observedErrors.map(({ attemptId }) => attemptId),
       context,
     ).toEqual(model.errors.map(({ attemptId }) => attemptId))
     for (const [index, { error }] of observedErrors.entries()) {
-      expect(error, context).toBe(model.errors[index]?.error)
+      check(error, context).toBe(model.errors[index]?.error)
     }
-    expect(observedResults, context).toEqual(model.results)
-    if (options.traceProjection !== `without-status`) {
-      expect(observedStatuses, context).toEqual(model.statuses)
-      expect(subscription.status, context).toBe(model.status)
-    }
-    expect(subscription.lastError, context).toBe(model.lastError)
-    expect(collection.status, context).toBe(model.collectionStatus)
-    expect(publications, context).toEqual(
+    check(observedResults, context).toEqual(model.results)
+    check(observedStatuses, context).toEqual(model.statuses)
+    check(subscription.status, context).toBe(model.status)
+    check(subscription.lastError, context).toBe(model.lastError)
+    check(collection.status, context).toBe(model.collectionStatus)
+    check(publications, context).toEqual(
       Array.from({ length: model.publications }, () => []),
     )
-    const projectTrace = <T extends { type: string }>(
-      trace: ReadonlyArray<T>,
-    ) =>
-      options.traceProjection === `without-status`
-        ? trace.filter(({ type }) => type !== `status`)
-        : [...trace]
-    expect(projectTrace(observedTrace), context).toEqual(
-      projectTrace(model.trace),
-    )
+    check(observedTrace, context).toEqual(model.trace)
     for (const attempt of model.attempts) {
-      expect(
+      check(
         runtimeAttempts.get(attempt.id)?.options.signal?.aborted,
         context,
       ).toBe(attempt.aborted)
@@ -262,7 +254,7 @@ async function runHistory(
         command.type === `settle` ? selectRuntimeAttempt(command) : undefined
       const effect = reduceLifecycle(model, command)
       if (command.type === `request`) {
-        expect(effect.ownerId).toBe(
+        check(effect.ownerId).toBe(
           model.unsubscribed ? undefined : runtimeOwner?.id,
         )
         const result = subscription.requestSnapshot({
@@ -276,15 +268,15 @@ async function runHistory(
             observedTrace.push({ type: `result`, attemptId, resultKind })
           },
         })
-        expect(result).toBe(effect.requestResult)
+        check(result).toBe(effect.requestResult)
       } else if (command.type === `abort`) {
-        expect(effect.ownerId).toBe(runtimeOwner?.id)
+        check(effect.ownerId).toBe(runtimeOwner?.id)
         if (runtimeOwner) {
           runtimeOwner.aborted = true
           runtimeOwner.controller.abort()
         }
       } else if (command.type === `release`) {
-        expect(effect.ownerId).toBe(runtimeOwner?.id)
+        check(effect.ownerId).toBe(runtimeOwner?.id)
         if (runtimeOwner) {
           if (runtimeOwner.attemptId !== undefined) {
             runtimeAttempts.get(runtimeOwner.attemptId)!.current = false
@@ -293,7 +285,7 @@ async function runHistory(
         }
         subscription.releaseSnapshot(where[command.demand])
       } else if (command.type === `settle`) {
-        expect(effect.attemptId).toBe(runtimeAttempt?.id)
+        check(effect.attemptId).toBe(runtimeAttempt?.id)
         if (effect.attemptId === undefined) {
           // Neither model found an effective settlement.
         } else if (!runtimeAttempt?.deferred) {
@@ -447,9 +439,16 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   })
 
   it(`releases exact current ownership after overlapping replay status diverges`, async () => {
-    await runHistory(pendingSupersessionHistory, {
-      traceProjection: `without-status`,
-    })
+    await runHistory(
+      [
+        ...pendingSupersessionHistory,
+        { type: `cleanup` },
+        { type: `restart` },
+        { type: `release`, demand: `a` },
+        { type: `unsubscribe` },
+      ],
+      { continueAfterMismatch: true },
+    )
   })
 
   it.each([
@@ -463,7 +462,15 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   )
 
   it(`does not release an unacquired replacement after an aborted demand replays`, async () => {
-    await runHistory(abortReplayHistory, { traceProjection: `without-status` })
+    await runHistory(
+      [
+        ...abortReplayHistory,
+        { type: `cleanup` },
+        { type: `restart` },
+        { type: `unsubscribe` },
+      ],
+      { continueAfterMismatch: true },
+    )
   })
 
   it(`replays a live peer without reacquiring an aborted demand`, async () => {
@@ -489,6 +496,12 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
       { type: `release`, demand: `a` },
       { type: `release`, demand: `b` },
     ])
+  })
+
+  it(`restarts a live peer without reacquiring an aborted demand and completes teardown`, async () => {
+    await runHistory(mixedAbortedRestartHistory, {
+      continueAfterMismatch: true,
+    })
   })
 
   const syncReplayScenarios = ([`truncate`, `restart`] as const).flatMap(
@@ -520,9 +533,59 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   it(`preserves physical ownership after a synchronous replay status mismatch`, async () => {
     await runHistory(syncLifecycleHistory, {
       acquisitionMode: `sync-success`,
-      traceProjection: `without-status`,
+      continueAfterMismatch: true,
     })
   })
+
+  it.each([
+    {
+      name: `same-key owners across truncate`,
+      history: [
+        { type: `request`, demand: `a` },
+        { type: `request`, demand: `a` },
+        { type: `truncate` },
+        { type: `release`, demand: `a` },
+        { type: `release`, demand: `a` },
+        { type: `cleanup` },
+        { type: `restart` },
+        { type: `unsubscribe` },
+      ],
+    },
+    {
+      name: `same-key owners across restart`,
+      history: [
+        { type: `request`, demand: `a` },
+        { type: `request`, demand: `a` },
+        { type: `cleanup` },
+        { type: `restart` },
+        { type: `release`, demand: `a` },
+        { type: `release`, demand: `a` },
+        { type: `unsubscribe` },
+      ],
+    },
+    {
+      name: `detached last-owner abort across restart`,
+      history: [
+        { type: `request`, demand: `a` },
+        { type: `cleanup` },
+        { type: `abort`, demand: `a` },
+        { type: `restart` },
+        { type: `release`, demand: `a` },
+        { type: `unsubscribe` },
+      ],
+    },
+  ] satisfies ReadonlyArray<{
+    name: string
+    history: ReadonlyArray<LifecycleCommand>
+  }>)(
+    `continues through the full synchronous replay suffix for $name`,
+    async ({ history }) => {
+      await runHistory(history, {
+        acquisitionMode: `sync-success`,
+        continueAfterMismatch: true,
+      })
+    },
+  )
 
   const { multiplier, ...replay } = readOracleRunConfig()
   const runs = 80 * multiplier

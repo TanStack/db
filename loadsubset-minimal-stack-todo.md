@@ -1248,23 +1248,23 @@ every row is either green or has a named red witness.
 | Physical acquisition interaction                     | 5 states × 5 causes: 18 executable cells and 7 true exclusions                                      | distinguishes no-op, abort, retire, preserve, discard, retry |
 | Cleanup/restart ownership                            | 20 restart cells plus fixed callback boundaries                                                     | green except the acquisition-availability reds               |
 | Async session fencing                                | 2–4 sessions, 1–2 demands, mixed outcomes, obsolete/current/interleaved settlement                  | green                                                        |
-| Generated async lifecycle histories                  | one pure reducer drives async-pending and sync-success histories with one ordered event trace       | 14 named replay-generation/status reds                       |
+| Generated async lifecycle histories                  | one pure reducer drives async-pending and sync-success histories with one ordered event trace       | 20 named replay-generation/status reds                       |
 | Row-bearing lifecycle histories                      | independent public-row model over canonical, fixed-seed, and random histories with exact batches    | 4 named publication reds                                     |
 | Replay phase transitions                             | setup/pending/settling/publishing crossed with release, reacquisition, supersession, abort, cleanup | three audit claims remain to reconcile below                 |
 | Ordered route mechanics                              | page/prefix/boundary/full-source × return/throw/resolve/reject/abort/cleanup                        | green                                                        |
 | Ordered consumer integration                         | Collection/Effect parity, source-local recovery, public-window reentry, sync-session settlement     | 5 named reds                                                 |
 | Ordered generated histories                          | authority, route, barrier, settlement, and session reach                                            | not yet implemented                                          |
 
-The current 38-test red catalog groups into these protocol faults. Multiple
+The current 44-test red catalog groups into these protocol faults. Multiple
 matrix cells are deliberate variants of one fault, not separate diagnoses.
 
 | Red class                                 | Named witnesses | Observable failure                                                           |
 | ----------------------------------------- | --------------- | ---------------------------------------------------------------------------- |
 | Start/failure reentry through truncate    | 5               | false loading/ready transitions or missing replay after failure              |
 | Acquisition availability and callback ABA | 14              | demand starts on the wrong loader/session, settles early, or owns no lease   |
-| Obsolete async replay readiness           | 2               | retired work keeps the current subscription from reaching `ready`            |
-| Aborted replay generation                 | 4               | false loading cycles, phantom unload, or a live peer remains stuck loading   |
-| Synchronous replay/restart readiness      | 8               | synchronous work emits a false `loadingSubset -> ready` cycle                |
+| Obsolete async replay readiness           | 3               | retired work keeps the current subscription from reaching `ready`            |
+| Aborted replay generation                 | 5               | false loading cycles, phantom unload, or a live peer remains stuck loading   |
+| Synchronous replay/restart readiness      | 12              | synchronous work emits a false `loadingSubset -> ready` cycle                |
 | Released obsolete publication             | 1               | a non-cooperative retired acquisition can still publish its row              |
 | Independent write during replay           | 1               | successful replacement drops an unrelated source row written behind its gate |
 | Duplicate-owner snapshot                  | 1               | a second owner republishes an unchanged row as a fresh insert                |
@@ -1449,7 +1449,7 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
         had 109 lifecycle tests: 93 green laws and 16 named reds. The frozen
         checkpoint had 147 tests: 111 green laws and 36 named reds. Executable
         acquisition reach and direct-release coverage now bring the catalog to
-        152 tests: 114 green laws and 38 named reds. The driver chooses runtime
+        156 tests: 112 green laws and 44 named reds. The driver chooses runtime
         owners and attempts independently from the reducer; the phantom-unload witness
         reaches its unload assertion; abort remains in the green generator
         except for the exact replay class; and red histories no longer count
@@ -1547,9 +1547,12 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
           count, or false-green path.
     - [x] B — Emit and require compound settlement scope × age × outcome and
           session × replay reach, not independent marginal labels.
-    - [ ] B — Resume full status checking after each exact tolerated red delta,
+    - [x] B — Resume full status checking after each exact tolerated red delta,
           then execute release, cleanup, restart, and unsubscribe suffixes.
-    - [ ] B — Add mixed aborted/live cleanup-restart and complete synchronous
+          Known-red histories now use exact soft assertions instead of deleting
+          status from the comparison, so later lifecycle actions still run and
+          remain fully checked.
+    - [x] B — Add mixed aborted/live cleanup-restart and complete synchronous
           replay shapes: same-key owners, last-owner abort, and detached abort.
     - [ ] B — Derive real-interleaving reach from the observed settlement trace;
           let a generation publish before a later restart makes it obsolete.

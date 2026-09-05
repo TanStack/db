@@ -749,6 +749,19 @@ export const abortedRestartHistory: ReadonlyArray<LifecycleCommand> = [
   { type: `release`, demand: `a` },
 ]
 
+export const mixedAbortedRestartHistory: ReadonlyArray<LifecycleCommand> = [
+  { type: `request`, demand: `a` },
+  { type: `request`, demand: `b` },
+  { type: `abort`, demand: `a` },
+  settle(`a`, `current`, `oldest`, `reject`),
+  { type: `cleanup` },
+  { type: `restart` },
+  settle(`b`, `current`, `oldest`, `resolve`),
+  { type: `release`, demand: `a` },
+  { type: `release`, demand: `b` },
+  { type: `unsubscribe` },
+]
+
 export const releasedObsoleteResolveHistory: ReadonlyArray<LifecycleCommand> = [
   { type: `request`, demand: `a` },
   { type: `release`, demand: `a` },
