@@ -388,25 +388,6 @@ const asyncRestartCoverageScenarios = [
   },
 ] as const satisfies ReadonlyArray<AsyncRestartScenario>
 
-function asyncRestartReach(scenario: AsyncRestartScenario): Set<string> {
-  const current = scenario.generationOutcomes.at(-1) ?? []
-  return new Set([
-    `demands:${scenario.demands.length}`,
-    `sessions:${scenario.generationOutcomes.length + 1}`,
-    ...[...new Set(current)].map((outcome) => `current:${outcome}`),
-    `mixed-current:${new Set(current).size > 1}`,
-    `obsolete-reject:${scenario.generationOutcomes
-      .slice(0, -1)
-      .some((outcomes) => outcomes.includes(`reject`))}`,
-    `order:${scenario.settlementOrder}`,
-    `real-interleaving:${
-      scenario.settlementOrder === `interleaved` &&
-      scenario.demands.length > 1 &&
-      scenario.generationOutcomes.length > 1
-    }`,
-  ])
-}
-
 const asyncRestartScenarioArbitrary: fc.Arbitrary<AsyncRestartScenario> = fc
   .uniqueArray(fc.constantFrom(`a` as const, `b` as const), {
     minLength: 1,
@@ -446,7 +427,7 @@ if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
         `obsolete-reject=${generationOutcomes
           .slice(0, -1)
           .some((outcomes) => outcomes.includes(`reject`))}`,
-        `order=${
+        `requested-order=${
           settlementOrder === `interleaved` && !realizesInterleaving
             ? `degenerate-interleaved`
             : settlementOrder
@@ -459,7 +440,7 @@ if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
 
 async function runAsyncRestartScenario(
   scenario: AsyncRestartScenario,
-): Promise<void> {
+): Promise<Set<string>> {
   type DemandName = `a` | `b`
   type Row = { id: DemandName; version: number }
   type Attempt = {
@@ -467,6 +448,12 @@ async function runAsyncRestartScenario(
     demand: DemandName
     options: LoadSubsetOptions
     deferred: ReturnType<typeof createDeferred<void>>
+  }
+  type SettlementEvent = {
+    session: number
+    demand: DemandName
+    outcome: `resolve` | `reject`
+    activeSession: number
   }
   const where = {
     a: new Func(`eq`, [new PropRef([`id`]), new Value(`a`)]),
@@ -482,12 +469,36 @@ async function runAsyncRestartScenario(
   const statuses: Array<string> = []
   const visible = new Map<string | number, Row>()
   const unloads: Array<{ session: number; demand: DemandName }> = []
+  const settlements: Array<SettlementEvent> = []
+  const settledAttempts = new Set<Attempt>()
+  const publishedBeforeRetirement = new Set<number>()
   const failures = scenario.generationOutcomes.map((_, generation) =>
     scenario.demands.map(
       (demand) => new Error(`session ${generation + 1} ${demand} failed`),
     ),
   )
   let session = -1
+
+  const outcomeFor = (attempt: Attempt) =>
+    scenario.generationOutcomes[attempt.session - 1]![
+      scenario.demands.indexOf(attempt.demand)
+    ]!
+  const failureFor = (attempt: Attempt) =>
+    failures[attempt.session - 1]![scenario.demands.indexOf(attempt.demand)]!
+
+  const settleAttempt = async (attempt: Attempt): Promise<void> => {
+    const outcome = outcomeFor(attempt)
+    if (outcome === `resolve`) attempt.deferred.resolve()
+    else attempt.deferred.reject(failureFor(attempt))
+    await flushPromises()
+    settlements.push({
+      session: attempt.session,
+      demand: attempt.demand,
+      outcome,
+      activeSession: session,
+    })
+    settledAttempts.add(attempt)
+  }
 
   const collection = createCollection<Row>({
     id: `async-restart-lifecycle`,
@@ -577,7 +588,13 @@ async function runAsyncRestartScenario(
       generation < scenario.generationOutcomes.length;
       generation++
     ) {
+      const discardedSession = session
       await collection.cleanup()
+      for (const attempt of attempts.filter(
+        ({ session: attemptSession }) => attemptSession === discardedSession,
+      )) {
+        expect(attempt.options.signal?.aborted).toBe(true)
+      }
       collection.startSyncImmediate()
       await flushPromises()
       const expectedSession = generation + 1
@@ -598,6 +615,30 @@ async function runAsyncRestartScenario(
           })),
         ).flat(),
       )
+
+      const publishesBeforeLaterRestart =
+        scenario.settlementOrder === `interleaved` &&
+        generation === 0 &&
+        scenario.generationOutcomes.length > 1 &&
+        scenario.generationOutcomes[generation]!.every(
+          (outcome) => outcome === `resolve`,
+        )
+      if (publishesBeforeLaterRestart) {
+        const publicationCount = publications.length
+        for (const attempt of attempts.filter(
+          ({ session: attemptSession }) => attemptSession === expectedSession,
+        )) {
+          await settleAttempt(attempt)
+        }
+        const expectedRows = [...scenario.demands]
+          .sort((a, b) => a.localeCompare(b))
+          .map((id) => ({ id, version: expectedSession + 1 }))
+        expect(
+          [...visible.values()].sort((a, b) => a.id.localeCompare(b.id)),
+        ).toEqual(expectedRows)
+        expect(publications.slice(publicationCount)).toEqual([expectedRows])
+        publishedBeforeRetirement.add(expectedSession)
+      }
     }
 
     const currentSession = scenario.generationOutcomes.length
@@ -615,7 +656,10 @@ async function runAsyncRestartScenario(
       ).flat(),
     )
     const obsolete = attempts.filter(
-      ({ session: value }) => value > 0 && value < currentSession,
+      (attempt) =>
+        attempt.session > 0 &&
+        attempt.session < currentSession &&
+        !settledAttempts.has(attempt),
     )
     const current = attempts.filter(
       ({ session: value }) => value === currentSession,
@@ -633,22 +677,21 @@ async function runAsyncRestartScenario(
                   : left.demand.localeCompare(right.demand),
               )
 
-    const outcomeFor = (attempt: Attempt) =>
-      scenario.generationOutcomes[attempt.session - 1]![
-        scenario.demands.indexOf(attempt.demand)
-      ]!
-    const failureFor = (attempt: Attempt) =>
-      failures[attempt.session - 1]![scenario.demands.indexOf(attempt.demand)]!
     const settledCurrent: Array<Attempt> = []
     const publicationTraceStart = publications.length
     const statusTraceStart = statuses.length
+    const retainedVersion = publishedBeforeRetirement.size
+      ? Math.max(...publishedBeforeRetirement) + 1
+      : 1
     const assertObservableState = () => {
       const currentComplete = settledCurrent.length === current.length
       const currentSucceeded = current.every(
         (attempt) => outcomeFor(attempt) === `resolve`,
       )
       const visibleVersion =
-        currentComplete && currentSucceeded ? currentSession + 1 : 1
+        currentComplete && currentSucceeded
+          ? currentSession + 1
+          : retainedVersion
       const expectedRows = [...scenario.demands]
         .sort((a, b) => a.localeCompare(b))
         .map((id) => ({ id, version: visibleVersion }))
@@ -675,10 +718,7 @@ async function runAsyncRestartScenario(
     }
 
     for (const attempt of orderedAttempts) {
-      const outcome = outcomeFor(attempt)
-      if (outcome === `resolve`) attempt.deferred.resolve()
-      else attempt.deferred.reject(failureFor(attempt))
-      await flushPromises()
+      await settleAttempt(attempt)
       if (attempt.session === currentSession) settledCurrent.push(attempt)
       assertObservableState()
     }
@@ -686,7 +726,9 @@ async function runAsyncRestartScenario(
     const currentSucceeded = current.every(
       (attempt) => outcomeFor(attempt) === `resolve`,
     )
-    const expectedVersion = currentSucceeded ? currentSession + 1 : 1
+    const expectedVersion = currentSucceeded
+      ? currentSession + 1
+      : retainedVersion
     expect(
       [...visible.values()].sort((a, b) => a.id.localeCompare(b.id)),
     ).toEqual(
@@ -708,14 +750,59 @@ async function runAsyncRestartScenario(
       expect(subscription.lastError).toBe(expectedErrors.at(-1)?.error)
     }
     expect(subscription.status).toBe(`ready`)
+    for (const attempt of current) {
+      expect(attempt.options.signal?.aborted).toBe(false)
+    }
+
+    const finalScopes = settlements.map(({ session: attemptSession }) =>
+      attemptSession === currentSession ? `current` : `obsolete`,
+    )
+    const firstCurrent = finalScopes.indexOf(`current`)
+    const lastCurrent = finalScopes.lastIndexOf(`current`)
+    const firstObsolete = finalScopes.indexOf(`obsolete`)
+    const lastObsolete = finalScopes.lastIndexOf(`obsolete`)
+    const observedOrder =
+      firstCurrent === -1 || firstObsolete === -1
+        ? undefined
+        : lastObsolete < firstCurrent
+          ? `obsolete-first`
+          : lastCurrent < firstObsolete
+            ? `current-first`
+            : `interleaved`
+    const currentOutcomes = settlements
+      .filter(
+        ({ session: attemptSession }) => attemptSession === currentSession,
+      )
+      .map(({ outcome }) => outcome)
+    const reach = new Set([
+      `demands:${new Set(attempts.map(({ demand }) => demand)).size}`,
+      `sessions:${new Set(attempts.map(({ session }) => session)).size}`,
+      ...[...new Set(currentOutcomes)].map((outcome) => `current:${outcome}`),
+      `mixed-current:${new Set(currentOutcomes).size > 1}`,
+      `obsolete-reject:${settlements.some(
+        ({ session: attemptSession, outcome }) =>
+          attemptSession < currentSession && outcome === `reject`,
+      )}`,
+      ...(observedOrder ? [`order:${observedOrder}`] : []),
+      `real-interleaving:${settlements.some(
+        ({ session: attemptSession, activeSession }) =>
+          attemptSession < currentSession &&
+          activeSession === attemptSession &&
+          publishedBeforeRetirement.has(attemptSession),
+      )}`,
+    ])
 
     subscription.unsubscribe()
+    for (const attempt of current) {
+      expect(attempt.options.signal?.aborted).toBe(true)
+    }
     expect(unloads).toEqual(
       scenario.demands.map((demand) => ({
         session: currentSession,
         demand,
       })),
     )
+    return reach
   } finally {
     subscription.unsubscribe()
     await collection.cleanup()
@@ -731,8 +818,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   it(`executes every required async restart regime`, async () => {
     const reach = new Set<string>()
     for (const scenario of asyncRestartCoverageScenarios) {
-      for (const label of asyncRestartReach(scenario)) reach.add(label)
-      await runAsyncRestartScenario(scenario)
+      for (const label of await runAsyncRestartScenario(scenario)) {
+        reach.add(label)
+      }
     }
     const required = [
       `demands:1`,
@@ -3313,7 +3401,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     seed: 1_657_002,
   })(
     `fences async demand settlements across restart generations for a fixed seed`,
-    runAsyncRestartScenario,
+    async (scenario) => {
+      await runAsyncRestartScenario(scenario)
+    },
     120_000,
   )
 
@@ -3326,7 +3416,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     ),
   )(
     `fences async demand settlements across restart generations for a random or replayed seed`,
-    runAsyncRestartScenario,
+    async (scenario) => {
+      await runAsyncRestartScenario(scenario)
+    },
     120_000,
   )
 })

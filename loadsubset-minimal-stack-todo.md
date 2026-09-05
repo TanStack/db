@@ -1554,10 +1554,18 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
           remain fully checked.
     - [x] B — Add mixed aborted/live cleanup-restart and complete synchronous
           replay shapes: same-key owners, last-owner abort, and detached abort.
-    - [ ] B — Derive real-interleaving reach from the observed settlement trace;
+    - [x] B — Derive real-interleaving reach from the observed settlement trace;
           let a generation publish before a later restart makes it obsolete.
-    - [ ] B — Assert discarded-session signals abort on cleanup and compare
+          The async restart driver now settles and publishes a successful
+          intermediate generation before replacing it. Demand count, session
+          count, outcome, final scope, order, and real interleaving are derived
+          from observed attempts and settlements, not scenario labels.
+    - [x] B — Assert discarded-session signals abort on cleanup and compare
           every async restart error by exact object identity.
+          Every cleanup checks all options owned by the discarded session;
+          current options stay live until unsubscribe and then abort. Reported
+          errors are compared to the unique error allocated for that exact
+          session and demand.
     - [ ] C — Cross replay barrier phase × source insert/update/delete ×
           settlement × suffix with checked observed reach. Keep named red
           regions out of the broad green campaign without filtering away their
