@@ -45,15 +45,9 @@ const acquisitionEntries = [
 type AcquisitionPhase = (typeof acquisitionPhases)[number]
 type AcquisitionEntry = (typeof acquisitionEntries)[number]
 type AcquisitionCell = `${AcquisitionPhase}:${AcquisitionEntry}`
-type BlockedAcquisitionWitness = `unavailable-mark-ready`
 
 type AcquisitionCellDefinition =
   | { kind: `covered` }
-  | {
-      kind: `blocked`
-      reason: string
-      witness: BlockedAcquisitionWitness
-    }
   | { kind: `excluded`; reason: string }
 
 const acquisitionCellDefinitions = {
@@ -129,11 +123,7 @@ const acquisitionCellDefinitions = {
     kind: `excluded`,
     reason: `same-session recovery uses markReady rather than defer resume`,
   },
-  'unavailable:markReady': {
-    kind: `blocked`,
-    reason: `unavailable demand currently starts too early, before recovery can be observed`,
-    witness: `unavailable-mark-ready`,
-  },
+  'unavailable:markReady': { kind: `covered` },
   'unavailable:markError': {
     kind: `excluded`,
     reason: `a repeated error leaves acquisition unavailable`,
@@ -156,23 +146,7 @@ const excludedAcquisitionCells = new Map<AcquisitionCell, string>(
       : [],
   ),
 )
-const blockedAcquisitionCells = new Map<
-  AcquisitionCell,
-  { reason: string; witness: BlockedAcquisitionWitness }
->(
-  Object.entries(acquisitionCellDefinitions).flatMap(([cell, definition]) =>
-    definition.kind === `blocked`
-      ? [
-          [
-            cell as AcquisitionCell,
-            { reason: definition.reason, witness: definition.witness },
-          ],
-        ]
-      : [],
-  ),
-)
 const observedAcquisitionCells = new Set<AcquisitionCell>()
-const observedBlockedAcquisitionWitnesses = new Set<BlockedAcquisitionWitness>()
 
 function acquisitionCase(
   cells: ReadonlyArray<AcquisitionCell>,
@@ -184,12 +158,6 @@ function acquisitionCase(
       for (const cell of cells) observedAcquisitionCells.add(cell)
     }),
   )
-}
-
-function observeBlockedAcquisitionWitness(
-  witness: BlockedAcquisitionWitness,
-): void {
-  observedBlockedAcquisitionWitnesses.add(witness)
 }
 
 const physicalAcquisitionStates = [
@@ -215,6 +183,7 @@ type PhysicalInteraction =
   | `abort-only`
   | `retire`
   | `preserve-debt`
+  | `discard-debt`
   | `retry-debt`
 type PhysicalInteractionCellDefinition =
   | { kind: `covered`; interaction: PhysicalInteraction }
@@ -226,16 +195,16 @@ const physicalInteractionCellDefinitions = {
     interaction: `no-acquisition`,
   },
   'none:abort': {
-    kind: `excluded`,
-    reason: `aborting detached logical demand retires no physical acquisition`,
+    kind: `covered`,
+    interaction: `no-acquisition`,
   },
   'none:truncate': {
     kind: `excluded`,
     reason: `replay can replace only an acquired physical lease`,
   },
   'none:cleanup': {
-    kind: `excluded`,
-    reason: `cleanup of detached demand owns no physical lease`,
+    kind: `covered`,
+    interaction: `no-acquisition`,
   },
   'none:unsubscribe': {
     kind: `covered`,
@@ -248,8 +217,8 @@ const physicalInteractionCellDefinitions = {
   'starting:unsubscribe': { kind: `covered`, interaction: `retire` },
   'active:release': { kind: `covered`, interaction: `retire` },
   'active:abort': {
-    kind: `excluded`,
-    reason: `abort signals active work; release or session retirement owns unload`,
+    kind: `covered`,
+    interaction: `abort-only`,
   },
   'active:truncate': { kind: `covered`, interaction: `retire` },
   'active:cleanup': { kind: `covered`, interaction: `retire` },
@@ -286,22 +255,45 @@ const physicalInteractionCellDefinitions = {
     kind: `covered`,
     interaction: `preserve-debt`,
   },
-  'release-debt:cleanup': { kind: `covered`, interaction: `retry-debt` },
+  'release-debt:cleanup': { kind: `covered`, interaction: `discard-debt` },
   'release-debt:unsubscribe': { kind: `covered`, interaction: `retry-debt` },
 } satisfies Record<PhysicalInteractionCell, PhysicalInteractionCellDefinition>
 
-const requiredPhysicalInteractionCells = new Set<PhysicalInteractionCell>(
+const requiredPhysicalInteractions = new Map<
+  PhysicalInteractionCell,
+  PhysicalInteraction
+>(
   Object.entries(physicalInteractionCellDefinitions).flatMap(
     ([cell, definition]) =>
-      definition.kind === `covered` ? [cell as PhysicalInteractionCell] : [],
+      definition.kind === `covered`
+        ? [[cell as PhysicalInteractionCell, definition.interaction]]
+        : [],
   ),
 )
-const observedPhysicalInteractionCells = new Set<PhysicalInteractionCell>()
+const observedPhysicalInteractions = new Map<
+  PhysicalInteractionCell,
+  PhysicalInteraction
+>()
 
-function observePhysicalInteractionCells(
-  cells: ReadonlyArray<PhysicalInteractionCell>,
+function observePhysicalInteraction(
+  cell: PhysicalInteractionCell,
+  interaction: PhysicalInteraction,
 ): void {
-  for (const cell of cells) observedPhysicalInteractionCells.add(cell)
+  observedPhysicalInteractions.set(cell, interaction)
+}
+
+const requiredSourceSessionBoundaries = new Set([
+  `active-cleanup`,
+  `restart-installed`,
+  `cleanup-callback-reentry`,
+  `obsolete-resource-return`,
+] as const)
+type SourceSessionBoundary =
+  typeof requiredSourceSessionBoundaries extends Set<infer T> ? T : never
+const observedSourceSessionBoundaries = new Set<SourceSessionBoundary>()
+
+function observeSourceSessionBoundary(boundary: SourceSessionBoundary): void {
+  observedSourceSessionBoundaries.add(boundary)
 }
 
 const startOutcomes = [`return`, `throw`, `resolve`, `reject`] as const
@@ -781,11 +773,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       ),
     )
     expect(
-      new Set([
-        ...legalAcquisitionCells,
-        ...blockedAcquisitionCells.keys(),
-        ...excludedAcquisitionCells.keys(),
-      ]),
+      new Set([...legalAcquisitionCells, ...excludedAcquisitionCells.keys()]),
     ).toEqual(allCells)
   })
 
@@ -802,13 +790,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
 
   afterAll(() => {
     expect(observedAcquisitionCells).toEqual(legalAcquisitionCells)
-    expect(observedBlockedAcquisitionWitnesses).toEqual(
-      new Set(
-        [...blockedAcquisitionCells.values()].map(({ witness }) => witness),
-      ),
-    )
-    expect(observedPhysicalInteractionCells).toEqual(
-      requiredPhysicalInteractionCells,
+    expect(observedPhysicalInteractions).toEqual(requiredPhysicalInteractions)
+    expect(observedSourceSessionBoundaries).toEqual(
+      requiredSourceSessionBoundaries,
     )
   })
 
@@ -926,7 +910,12 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
                   : reentry === `cleanup`
                     ? `starting:cleanup`
                     : undefined
-      if (interaction) observePhysicalInteractionCells([interaction])
+      if (interaction) {
+        observePhysicalInteraction(
+          interaction,
+          reentry === `abort-self` ? `abort-only` : `retire`,
+        )
+      }
 
       expect(thrown).toBe(outcome === `throw` ? failure : undefined)
       expect(targetLoad.signal?.aborted).toBe(
@@ -1070,6 +1059,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const targetAttempts = attempts.filter(
         ({ options }) => options.where === targetWhere,
       )
+      const peerAttempts = attempts.filter(
+        ({ options }) => options.where === peerWhere,
+      )
       const tearsDownTarget =
         reentry === `release-self` || reentry === `unsubscribe`
 
@@ -1113,8 +1105,10 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       if (reentry === `abort-self`) {
         expect.soft(targetLoad.signal?.aborted).toBe(true)
         expect.soft(targetAttempts).toHaveLength(1)
+        expect.soft(peerAttempts).toHaveLength(1)
       }
       const replacement = targetAttempts[1]?.options
+      const peerReplacement = peerAttempts[1]?.options
       if (reentry === `truncate`) {
         expect.soft(targetLoad.signal?.aborted).toBe(true)
         expect.soft(targetAttempts).toHaveLength(2)
@@ -1122,6 +1116,13 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         expect.soft(replacement?.where).toBe(targetWhere)
         expect.soft(targetAttempts[1]?.session).toBe(0)
         expect.soft(targetAttempts[1]?.result).toBe(`replay-return`)
+        expect.soft(peerLoad.signal?.aborted).toBe(true)
+        expect.soft(peerAttempts).toHaveLength(2)
+        expect.soft(peerReplacement).not.toBe(peerLoad)
+        expect.soft(peerReplacement?.where).toBe(peerWhere)
+        expect.soft(peerAttempts[1]?.session).toBe(0)
+        expect.soft(peerAttempts[1]?.result).toBe(`peer-return`)
+        expect.soft(unloads).toHaveLength(outcome === `reject` ? 2 : 1)
       }
       if (reentry === `cleanup`) {
         expect.soft(collection.status).toBe(`cleaned-up`)
@@ -1131,10 +1132,23 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       }
 
       subscription.unsubscribe()
-      if (replacement) {
+      if (reentry === `abort-self`) {
+        expect
+          .soft(unloads.filter((options) => options === targetLoad))
+          .toHaveLength(Number(outcome === `reject`))
+        expect
+          .soft(unloads.filter((options) => options === peerLoad))
+          .toHaveLength(1)
+        expect.soft(unloads).toHaveLength(outcome === `reject` ? 2 : 1)
+      }
+      if (reentry === `truncate` && replacement && peerReplacement) {
         expect
           .soft(unloads.filter((options) => options === replacement))
           .toHaveLength(1)
+        expect
+          .soft(unloads.filter((options) => options === peerReplacement))
+          .toHaveLength(1)
+        expect.soft(unloads).toHaveLength(outcome === `reject` ? 4 : 3)
       }
       await collection.cleanup()
     },
@@ -1203,13 +1217,10 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       } catch (error) {
         thrown = error
       }
-      observePhysicalInteractionCells([
-        `active:release`,
-        ...(reentry === `unsubscribe` ? [`active:unsubscribe` as const] : []),
-        ...(outcome === `throw` && reentry === `unsubscribe`
-          ? [`release-debt:unsubscribe` as const]
-          : []),
-      ])
+      observePhysicalInteraction(`active:release`, `retire`)
+      if (reentry === `unsubscribe`) {
+        observePhysicalInteraction(`active:unsubscribe`, `retire`)
+      }
 
       expect(thrown).toBe(outcome === `throw` ? releaseFailure : undefined)
       expect(oldTargetLoad.signal?.aborted).toBe(true)
@@ -1240,6 +1251,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
           : unloads.filter((options) => options === replacement),
       ).toHaveLength(Number(reentry === `reacquire-self`))
       expect(unloads.filter((options) => options === peerLoad)).toHaveLength(1)
+      if (outcome === `throw` && reentry === `unsubscribe`) {
+        observePhysicalInteraction(`release-debt:unsubscribe`, `retry-debt`)
+      }
       await collection.cleanup()
     },
   )
@@ -1795,6 +1809,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       requestDuringCleanup = true
       await collection.cleanup()
       reached()
+      observeSourceSessionBoundary(`cleanup-callback-reentry`)
       collection.startSyncImmediate()
       await flushPromises()
 
@@ -1846,7 +1861,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       subscription.requestSnapshot()
       reached()
       subscription.unsubscribe()
-      observePhysicalInteractionCells([`none:unsubscribe`])
+      observePhysicalInteraction(`none:unsubscribe`, `no-acquisition`)
 
       expect(loads).toBe(0)
       expect(unloads).toBe(0)
@@ -1883,7 +1898,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
 
     subscription.requestSnapshot({ where })
     subscription.releaseSnapshot(where)
-    observePhysicalInteractionCells([`none:release`])
+    observePhysicalInteraction(`none:release`, `no-acquisition`)
 
     expect(loads).toBe(0)
     expect(unloads).toBe(0)
@@ -1929,7 +1944,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       await flushPromises()
       reached()
       subscription.unsubscribe()
-      observePhysicalInteractionCells([`none:unsubscribe`])
+      observePhysicalInteraction(`none:unsubscribe`, `no-acquisition`)
 
       expect(loads).toBe(0)
       expect(unloads).toBe(0)
@@ -1975,13 +1990,96 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     })
     await flushPromises()
     subscription.releaseSnapshot(where)
-    observePhysicalInteractionCells([`none:release`])
+    observePhysicalInteraction(`none:release`, `no-acquisition`)
 
     expect(loads).toBe(0)
     expect(unloads).toBe(0)
     expect(errors).toEqual([])
 
     subscription.unsubscribe()
+    await collection.cleanup()
+  })
+
+  it(`aborts detached demand without creating a physical acquisition`, async () => {
+    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
+    const controller = new AbortController()
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const collection = createCollection<{ id: string }>({
+      id: `detached-abort-without-acquisition`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return true
+            },
+            unloadSubset: (options) => unloads.push(options),
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+
+    await collection.cleanup()
+    subscription.requestSnapshot({ where, signal: controller.signal })
+    controller.abort()
+    await flushPromises()
+    observePhysicalInteraction(`none:abort`, `no-acquisition`)
+
+    expect(loads).toEqual([])
+    expect(unloads).toEqual([])
+
+    subscription.unsubscribe()
+    await collection.cleanup()
+  })
+
+  it(`keeps an aborted active acquisition until its owner retires`, async () => {
+    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
+    const controller = new AbortController()
+    const pending = createDeferred<void>()
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const collection = createCollection<{ id: string }>({
+      id: `active-abort-before-release`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return pending.promise
+            },
+            unloadSubset: (options) => unloads.push(options),
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+
+    subscription.requestSnapshot({ where, signal: controller.signal })
+    const acquisition = loads[0]!
+    controller.abort()
+    await flushPromises()
+    observePhysicalInteraction(`active:abort`, `abort-only`)
+
+    expect(loads).toEqual([acquisition])
+    expect(acquisition.signal?.aborted).toBe(true)
+    expect(unloads).toEqual([])
+
+    pending.resolve()
+    await flushPromises()
+    subscription.unsubscribe()
+    expect(unloads).toEqual([acquisition])
     await collection.cleanup()
   })
 
@@ -2123,6 +2221,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
 
     await collection.cleanup()
     await flushPromises()
+    observePhysicalInteraction(`none:cleanup`, `no-acquisition`)
 
     expect(loads).toBe(0)
     expect(observed).toHaveLength(1)
@@ -2228,6 +2327,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     await collection.cleanup()
     cleanOnReady = true
     collection.startSyncImmediate()
+    observeSourceSessionBoundary(`obsolete-resource-return`)
 
     expect(collection.status).toBe(`cleaned-up`)
     expect(cleanupSessions).toEqual([0, 1])
@@ -2238,7 +2338,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   })
 
   acquisitionCase(
-    [`starting:markError`],
+    [`starting:markError`, `unavailable:markReady`],
     `retains demand requested during initial error for same-session recovery`,
     async (reached) => {
       const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
@@ -2288,13 +2388,12 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       })
 
       collection.startSyncImmediate()
-      reached()
-      observeBlockedAcquisitionWitness(`unavailable-mark-ready`)
-      expect(collection.status).toBe(`error`)
-      expect(loads).toEqual([])
-      expect(observed).toEqual([])
+      expect.soft(collection.status).toBe(`error`)
+      expect.soft(loads).toEqual([])
+      expect.soft(observed).toEqual([])
 
       recover()
+      reached()
       await flushPromises()
 
       expect(collection.status).toBe(`ready`)
@@ -2309,52 +2408,45 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     },
   )
 
-  acquisitionCase(
-    [`on-demand:markError`],
-    `re-enables an installed loader after same-session initial recovery`,
-    async (reached) => {
-      const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
-      const loads: Array<LoadSubsetOptions> = []
-      let markError!: (error: unknown) => void
-      let markReady!: () => void
-      const collection = createCollection<{ id: string }>({
-        id: `installed-loader-error-ready-recovery`,
-        getKey: ({ id }) => id,
-        startSync: false,
-        syncMode: `on-demand`,
-        sync: {
-          sync: (operations) => {
-            markError = operations.markError
-            markReady = operations.markReady
-            return {
-              loadSubset: (options) => {
-                loads.push(options)
-                return true
-              },
-              unloadSubset: () => {},
-            }
-          },
+  it(`re-enables an installed loader after same-session initial recovery`, async () => {
+    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
+    const loads: Array<LoadSubsetOptions> = []
+    let markError!: (error: unknown) => void
+    let markReady!: () => void
+    const collection = createCollection<{ id: string }>({
+      id: `installed-loader-error-ready-recovery`,
+      getKey: ({ id }) => id,
+      startSync: false,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (operations) => {
+          markError = operations.markError
+          markReady = operations.markReady
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return true
+            },
+            unloadSubset: () => {},
+          }
         },
-      })
-      collection.startSyncImmediate()
-      const subscription = collection.subscribeChanges(() => {}, {
-        includeInitialState: false,
-      })
+      },
+    })
+    collection.startSyncImmediate()
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
 
-      markError(new Error(`initial sync failed`))
-      markReady()
-      subscription.requestSnapshot({ where })
-      reached()
+    markError(new Error(`initial sync failed`))
+    markReady()
+    subscription.requestSnapshot({ where })
 
-      expect(collection.status).toBe(`ready`)
-      expect(loads.map(({ where: loadedWhere }) => loadedWhere)).toEqual([
-        where,
-      ])
+    expect(collection.status).toBe(`ready`)
+    expect(loads.map(({ where: loadedWhere }) => loadedWhere)).toEqual([where])
 
-      subscription.unsubscribe()
-      await collection.cleanup()
-    },
-  )
+    subscription.unsubscribe()
+    await collection.cleanup()
+  })
 
   it(`releases unavailable demand without creating a physical acquisition`, async () => {
     const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
@@ -2399,53 +2491,58 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     await collection.cleanup()
   })
 
-  it(`defers demand while an installed loader is in initial error`, async () => {
-    const oldWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`old`)])
-    const newWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`new`)])
-    const loads: Array<LoadSubsetOptions> = []
-    let markError!: (error: unknown) => void
-    let markReady!: () => void
-    const collection = createCollection<{ id: string }>({
-      id: `installed-loader-initial-error`,
-      getKey: ({ id }) => id,
-      startSync: false,
-      syncMode: `on-demand`,
-      sync: {
-        sync: (operations) => {
-          markError = operations.markError
-          markReady = operations.markReady
-          return {
-            loadSubset: (options) => {
-              loads.push(options)
-              return true
-            },
-            unloadSubset: () => {},
-          }
+  acquisitionCase(
+    [`on-demand:markError`],
+    `defers demand while an installed loader is in initial error`,
+    async (reached) => {
+      const oldWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`old`)])
+      const newWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`new`)])
+      const loads: Array<LoadSubsetOptions> = []
+      let markError!: (error: unknown) => void
+      let markReady!: () => void
+      const collection = createCollection<{ id: string }>({
+        id: `installed-loader-initial-error`,
+        getKey: ({ id }) => id,
+        startSync: false,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (operations) => {
+            markError = operations.markError
+            markReady = operations.markReady
+            return {
+              loadSubset: (options) => {
+                loads.push(options)
+                return true
+              },
+              unloadSubset: () => {},
+            }
+          },
         },
-      },
-    })
-    collection.startSyncImmediate()
-    const subscription = collection.subscribeChanges(() => {}, {
-      includeInitialState: false,
-    })
-    subscription.requestSnapshot({ where: oldWhere })
-    const removeErrorListener = collection.on(`status:error`, () => {
-      subscription.requestSnapshot({ where: newWhere })
-    })
+      })
+      collection.startSyncImmediate()
+      const subscription = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      subscription.requestSnapshot({ where: oldWhere })
+      const removeErrorListener = collection.on(`status:error`, () => {
+        subscription.requestSnapshot({ where: newWhere })
+      })
 
-    markError(new Error(`initial sync failed`))
+      markError(new Error(`initial sync failed`))
+      reached()
 
-    expect(collection.status).toBe(`error`)
-    expect(loads.map(({ where }) => where)).toEqual([oldWhere])
+      expect.soft(collection.status).toBe(`error`)
+      expect.soft(loads.map(({ where }) => where)).toEqual([oldWhere])
 
-    markReady()
-    await flushPromises()
-    expect(loads.map(({ where }) => where)).toEqual([oldWhere, newWhere])
+      markReady()
+      await flushPromises()
+      expect(loads.map(({ where }) => where)).toEqual([oldWhere, newWhere])
 
-    removeErrorListener()
-    subscription.unsubscribe()
-    await collection.cleanup()
-  })
+      removeErrorListener()
+      subscription.unsubscribe()
+      await collection.cleanup()
+    },
+  )
 
   it(`does not run a deferred acquisition after resume is cleaned up reentrantly`, async () => {
     const loads: Array<LoadSubsetOptions> = []
@@ -2580,13 +2677,14 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     expect(() => subscription.releaseSnapshot(where)).toThrow(releaseFailure)
 
     await collection.cleanup()
-    observePhysicalInteractionCells([`release-debt:cleanup`])
     expect(unloads).toBe(1)
     expect(sourceCleanups).toBe(1)
+    observeSourceSessionBoundary(`active-cleanup`)
 
     await collection.cleanup()
     expect(unloads).toBe(1)
     expect(sourceCleanups).toBe(1)
+    observePhysicalInteraction(`release-debt:cleanup`, `discard-debt`)
     subscription.unsubscribe()
   })
 
@@ -2623,11 +2721,11 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     operations.truncate()
     const receipt = operations.commit()
     if (receipt !== true) await receipt
-    observePhysicalInteractionCells([`release-debt:truncate`])
     expect(unloads).toBe(1)
 
     subscription.unsubscribe()
     expect(unloads).toBe(2)
+    observePhysicalInteraction(`release-debt:truncate`, `preserve-debt`)
     await collection.cleanup()
   })
 
@@ -2687,6 +2785,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       void pending.promise.catch(() => {})
       const loads: Array<{ session: number; demand: DemandName }> = []
       const unloads: Array<{ session: number; demand: DemandName }> = []
+      const sourceCleanups: Array<number> = []
       const errors: Array<unknown> = []
       let session = -1
       let ranReentry = false
@@ -2701,6 +2800,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         sync: {
           sync: ({ markReady }) => {
             session++
+            const adapterSession = session
             markReady()
             return {
               loadSubset: (options) => {
@@ -2729,6 +2829,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
                 if (!demand) throw new Error(`unknown restart demand`)
                 unloads.push({ session, demand })
               },
+              cleanup: () => sourceCleanups.push(adapterSession),
             }
           },
         },
@@ -2741,9 +2842,11 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       subscription.requestSnapshot({ where: peerWhere })
 
       await collection.cleanup()
-      observePhysicalInteractionCells([`active:cleanup`])
+      expect(sourceCleanups).toEqual([0])
+      observePhysicalInteraction(`active:cleanup`, `retire`)
       collection.startSyncImmediate()
       await flushPromises()
+      observeSourceSessionBoundary(`restart-installed`)
       if (outcome === `resolve`) pending.resolve()
       if (outcome === `reject`) pending.reject(failure)
       await flushPromises()
@@ -2777,6 +2880,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         ...(peerStarts ? [{ session: 1, demand: `peer` as const }] : []),
       ])
       await collection.cleanup()
+      expect(sourceCleanups).toEqual([0, 1])
     },
   )
 
@@ -2976,6 +3080,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
 
   it(`enters loading status when a truncate queues replay work`, async () => {
     const replay = createDeferred<void>()
+    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
     let begin!: () => void
     let commit!: () => void
     let truncate!: () => void
@@ -3004,13 +3109,13 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     const subscription = collection.subscribeChanges(() => {}, {
       includeInitialState: false,
     })
-    subscription.requestSnapshot()
+    subscription.requestSnapshot({ where })
     const original = loads[0]!
 
     begin()
     truncate()
     commit()
-    observePhysicalInteractionCells([`active:truncate`])
+    observePhysicalInteraction(`active:truncate`, `retire`)
 
     expect(loads).toHaveLength(1)
     expect(subscription.status).toBe(`loadingSubset`)
@@ -3019,15 +3124,16 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     const replacement = loads[1]!
     expect(loads).toHaveLength(2)
     expect(original.signal?.aborted).toBe(true)
-    expect(unloads.filter((options) => options === original)).toHaveLength(1)
+    expect(unloads).toEqual([original])
     expect(replacement).not.toBe(original)
-    expect(replacement.where).toBe(original.where)
+    expect(replacement.where).toBe(where)
+    expect(replacement.signal?.aborted).toBe(false)
     replay.resolve()
     await flushPromises()
     expect(subscription.status).toBe(`ready`)
 
     subscription.unsubscribe()
-    expect(unloads.filter((options) => options === replacement)).toHaveLength(1)
+    expect(unloads).toEqual([original, replacement])
     await collection.cleanup()
   })
 
