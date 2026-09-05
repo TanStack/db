@@ -1750,18 +1750,19 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
 
 ### Repair choices after the lifecycle gate
 
-These are candidate repair scopes, not completed fixes or proof of root cause.
+Rows marked resolved have the red/green checkpoints below. Other rows remain
+candidate repair scopes, not completed fixes or proof of root cause.
 
 | Family | Intended next step | Boundary to preserve |
 | --- | --- | --- |
 | Phantom unload, retired readiness participant, synchronous false loading cycle | Local ownership/status repair, red/green each law | No new general recovery state machine |
 | Duplicate-owner snapshot | Local publication repair | Keep valid initial delivery; suppress only duplicate row deltas |
-| Cleanup resolves pending preload; boundary failure resolves preload | Local caller-settlement repair | Reject the right waiter with the original error or explicit cancellation |
+| Cleanup resolves pending preload; boundary failure resolves preload | Resolved: local caller-settlement repairs | Reject the right waiter with the original error or explicit cancellation |
 | Direct failed replay peer loss, unrelated writes lost during replacement, retirement publication | Choose one shared retain-and-rebuild path | Preserve valid public snapshot, reject affected callers, retire old work, atomically publish rebuilt state |
 | Synchronous reentry during startup/loader replacement | Prefer explicit detection and recovery if continuing needs more machinery | No half-owned lease, silent success, or hung caller |
 | Untagged writes from non-cooperative obsolete/aborted sources | Keep as an explicit adapter/session boundary decision | Do not pretend a request signal identifies an untagged source write |
 | Replacement delta ordering | Check whether ordering is externally required before repair | Do not impose a total callback order where complete valid snapshots suffice |
-| Full-source restart leaves an old key in callback consumers | Include in restart/publication repair | Correct `toArray` is not enough; delivered messages must reconstruct the same rows |
+| Full-source restart leaves an old key in callback consumers | Resolved: eager replacement reconciliation | Correct `toArray` is not enough; delivered messages must reconstruct the same rows |
 | Missing empty notification after failed restart | Resolved: reference-model error | Failed replay keeps later reads private until authoritative success; settlement alone must not reopen it |
 
 ### Local repair checkpoint: failed-replay reference contract
@@ -1884,8 +1885,10 @@ These are candidate repair scopes, not completed fixes or proof of root cause.
   before returning the loader. The final guard uses declared sync mode and
   leaves active replay publication alone. The original seven-suite pass/fail
   baseline is restored, without changing those tests or their models.
-- Test gap: same-key replacement reconciled correctly while changed and missing
-  keys did not. Eight direct controls cross same/missing/changed/empty keys with
+- Test gap: atomic same-key replacement reconciled correctly while changed and
+  missing keys did not. Split same-key replacement also failed: its first commit
+  temporarily omits a retained key, which must be deleted before a later commit
+  reinserts it. Eight direct controls cross same/missing/changed/empty keys with
   atomic/split eager commits and compare callback state with installed rows
   after every batch. Seven fail without this fix; all eight pass with it.
   Reports: `/tmp/tanstack-stale-controls-red.json` and
@@ -1909,7 +1912,13 @@ These are candidate repair scopes, not completed fixes or proof of root cause.
 
   Previously the same runner counts hid 12 exactly classified ordered reds;
   those now genuinely satisfy the assertions. Test functions are not unique
-  bug counts or uniform matrix cells. Adding the separate lifecycle controls
+  bug counts or uniform matrix cells. One separate replay witness still pins
+  the known loss of successful peer rows after failed-peer retirement
+  (`collection-subscription-replay-oracle.property.test.ts`, test beginning
+  near line 3348). It passes by asserting the known bad empty result. Report
+  **407 runner passes / 53 failures / 1 separately pinned defect witness**,
+  not 407 proven-correct runtime scenarios. Some passes are model reach or
+  coverage guards rather than runtime histories. Adding the lifecycle controls
   suite gives 461 passing / 53 failing (54/54 lifecycle controls, eight new).
   Reports: `/tmp/tanstack-lifecycle-progress.json`,
   `/tmp/tanstack-lifecycle-progress-replay.json`, and
@@ -1921,6 +1930,24 @@ These are candidate repair scopes, not completed fixes or proof of root cause.
   failures (refill retry and synchronous replay normalization), in
   `/tmp/tanstack-stale-adjacent.json`. The post-commit loss audit follows.
   No push. Continue reporting this overall census alongside local matrix gains.
+- The 53 failing test names match the pre-fix census after removing random-seed
+  suffixes. Package type checks report only existing errors outside the changed
+  files. Passing counts do not imply those remaining failures are resolved.
+- Fresh Field Lab loss audit of `21554b4e` found no dropped assertions and
+  recovered the same/atomic versus same/split distinction now recorded above.
+  The repaired ordered observer subscribes to the eager public live-query
+  collection; its underlying provider is still on-demand. The mode guard acts
+  at the publishing collection, not transitively on all its sources.
+- Cost limit: no new state does not mean no new work. An eligible batch scans
+  remaining stale keys, with an early return once that map is empty. No benchmark
+  was run for this scan. Empty atomic controls commit an empty batch; empty
+  split controls call ready without a commit, exercising its empty event.
+- Audit provenance: source and report inspection only. JSON proves test-function
+  counts, while the 2,000 + 2,000 history count also relies on the recorded 100×
+  command setting and property configuration. The parent independently found
+  the separately pinned replay defect during census inspection. Checkpoint-led
+  scanning may miss distinctions outside this repair; this is not a claim of
+  complete lifecycle correctness. Next local group: ownership/status repairs.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
