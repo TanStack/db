@@ -1897,7 +1897,7 @@ candidate repair scopes, not completed fixes or proof of root cause.
   on-demand distinction. Existing subscription lint errors remain at unchanged
   lines (import cycle and four unnecessary-condition diagnostics); the new
   code and tests add no lint diagnostics.
-- Current default-run census, stable seven-suite scope:
+- Default-run census at the stale-row repair checkpoint, stable seven-suite scope:
 
   | Suite | Passing test functions | Failing test functions |
   | --- | ---: | ---: |
@@ -1948,6 +1948,32 @@ candidate repair scopes, not completed fixes or proof of root cause.
   the separately pinned replay defect during census inspection. Checkpoint-led
   scanning may miss distinctions outside this repair; this is not a claim of
   complete lifecycle correctness. Next local group: ownership/status repairs.
+
+### Local repair checkpoint: eager physical release symmetry
+
+- Red: the three existing lifecycle-oracle witnesses for eager unsubscribe,
+  explicit release, and truncate each call the adapter's unload despite zero
+  adapter loads. Focused run: 0 passing / 3 failing, in
+  `/tmp/tanstack-eager-release-red.json`.
+- Fix: `CollectionSyncManager.unloadSubset` bypasses eager mode just as
+  `loadSubset` already does. One executable guard, one comment, no new state.
+  Logical subscription teardown remains unchanged. This resolves eager phantom
+  release only; pre-aborted, detached, and reentrant acquisition reds remain
+  separate work. Do not infer physical acquisition from a successful no-op.
+- Test gap: load/unload symmetry must use actual adapter-call counts, not the
+  success result of core's request wrapper. These three counters were already
+  red in the lifecycle grammar, so no new classifier, generator exclusion, or
+  assertion change was needed for this repair.
+- Updated stable seven-suite census: **410 runner passes / 50 failures / one
+  separately pinned replay-defect witness within the passes**. Demand lifecycle
+  moves from 101/20 to 104/17; all other suite counts are unchanged, including
+  ordered lifecycle 196/0 test functions and 192/0 Cartesian cells. Report:
+  `/tmp/tanstack-eager-release-census.json`.
+- Adjacent subscription, sync-reentrancy, and lifecycle tests pass 142/142 in
+  `/tmp/tanstack-eager-release-adjacent.json`. ESLint reports only sync.ts's
+  pre-existing import cycle at line 17; the guard adds no diagnostic.
+- Full seven-suite 100× run is pending. Commit this bounded repair, then run
+  the agreed fresh Field Lab loss audit. Nothing pushed.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar

@@ -843,6 +843,9 @@ export class CollectionSyncManager<
    * @param options Options that identify what data is being unloaded
    */
   public unloadSubset(options: LoadSubsetOptions): void {
+    // Eager loading bypasses subset acquisition, so there is no lease to release.
+    if (this.syncMode === `eager`) return
+
     if (this.syncStartDeferred) {
       this.deferredLoadSubsets = this.deferredLoadSubsets.filter((request) => {
         if (request.options !== options) {
