@@ -6,7 +6,7 @@ import { Func, PropRef, Value } from '../src/query/ir.js'
 import {
   createLifecycleModel,
   greenLifecycleHistories,
-  publicationLifecycleHistoryArbitrary,
+  greenLifecycleHistoryArbitrary,
   reduceLifecycle,
 } from './collection-subscription-lifecycle-grammar.js'
 import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
@@ -43,6 +43,7 @@ type RuntimeAttempt = {
   session: number
   operations: SyncOperations
   deferred: ReturnType<typeof createDeferred<void>>
+  signal: AbortSignal | undefined
   settled: boolean
   current: boolean
 }
@@ -138,6 +139,16 @@ function clonePublicationBatches(
         ? { previousValue: cloneRow(change.previousValue) }
         : {}),
     })),
+  )
+}
+
+function normalizePublicationOrder(
+  batches: ReadonlyArray<ReadonlyArray<PublicationChange>>,
+): Array<Array<PublicationChange>> {
+  // Distinct keys have no canonical delivery order within one callback.
+  // Keep callback boundaries and stable order among changes to the same key.
+  return clonePublicationBatches(batches).map((batch) =>
+    batch.sort((left, right) => left.key.localeCompare(right.key)),
   )
 }
 
@@ -344,11 +355,6 @@ function projectPublication(
       } else {
         recordSourceWrite(publication, row)
       }
-    } else if (command.outcome === `resolve`) {
-      publication.source.set(attempt.demand, {
-        id: attempt.demand,
-        value: attempt.id,
-      })
     }
     finishReplacement(publication, lifecycle)
   }
@@ -440,25 +446,6 @@ function omitKnownRedVisibleRowRequests(
   return result
 }
 
-function resolvesAbortedAttempt(
-  history: ReadonlyArray<PublicationCommand>,
-): boolean {
-  const lifecycle = createLifecycleModel()
-  for (const command of history) {
-    if (command.type === `source`) continue
-    const effect = reduceLifecycle(lifecycle, command)
-    if (
-      command.type === `settle` &&
-      command.outcome === `resolve` &&
-      effect.attemptId !== undefined &&
-      lifecycle.attempts[effect.attemptId]?.aborted
-    ) {
-      return true
-    }
-  }
-  return false
-}
-
 function releasesReplacementBesideIndependentPublicRow(
   history: ReadonlyArray<PublicationCommand>,
 ): boolean {
@@ -496,7 +483,7 @@ function releasesReplacementBesideIndependentPublicRow(
 
 const publicationCommandHistoryArbitrary: fc.Arbitrary<
   Array<PublicationCommand>
-> = publicationLifecycleHistoryArbitrary.chain((history) =>
+> = greenLifecycleHistoryArbitrary.chain((history) =>
   fc
     .array(
       fc.record({
@@ -518,7 +505,6 @@ const publicationCommandHistoryArbitrary: fc.Arbitrary<
     .filter(
       (history) =>
         !mutatesDuringPublicationBarrier(history) &&
-        !resolvesAbortedAttempt(history) &&
         !releasesReplacementBesideIndependentPublicRow(history),
     ),
 )
@@ -587,6 +573,7 @@ async function runPublicationHistory(
               session: ownSession,
               operations,
               deferred,
+              signal: options.signal,
               settled: false,
               current: true,
             })
@@ -634,6 +621,9 @@ async function runPublicationHistory(
   )
 
   const writeAttempt = async (attempt: RuntimeAttempt): Promise<void> => {
+    // Cancellation fences request-scoped writes at the adapter boundary.
+    // Transport may settle later; it must not publish canceled snapshot rows.
+    if (attempt.signal?.aborted) return
     const rows = sourceRows.get(attempt.session)
     const previous = rows?.get(attempt.demand)
     const value = { id: attempt.demand, value: attempt.id }
@@ -654,8 +644,12 @@ async function runPublicationHistory(
     expectedStart: number,
     observedStart: number,
   ): void => {
-    const expected = publication.batches.slice(expectedStart)
-    const observed = observedBatches.slice(observedStart)
+    const expected = normalizePublicationOrder(
+      publication.batches.slice(expectedStart),
+    )
+    const observed = normalizePublicationOrder(
+      observedBatches.slice(observedStart),
+    )
     const context = JSON.stringify({
       history,
       command,
@@ -1130,6 +1124,67 @@ function expectNoPublicationMismatches(
 }
 
 describe(`CollectionSubscription lifecycle publication oracle`, () => {
+  it.each([
+    `none`,
+    `missing`,
+    `duplicate`,
+    `value`,
+    `previous-value`,
+    `split`,
+    `merge`,
+    `same-key-order`,
+  ] as const)(
+    `normalizes only independent change order with corruption: %s`,
+    (corruption) => {
+      const baseline: Array<Array<PublicationChange>> = [
+        [
+          {
+            type: `update`,
+            key: `a`,
+            value: { id: `a`, value: 1 },
+            previousValue: { id: `a`, value: 0 },
+          },
+          { type: `delete`, key: `b`, value: { id: `b`, value: 0 } },
+          { type: `insert`, key: `c`, value: { id: `c`, value: 1 } },
+        ],
+        [
+          {
+            type: `update`,
+            key: `a`,
+            value: { id: `a`, value: 2 },
+            previousValue: { id: `a`, value: 1 },
+          },
+          { type: `delete`, key: `a`, value: { id: `a`, value: 2 } },
+        ],
+      ]
+      const permutations = [
+        [0, 1, 2],
+        [0, 2, 1],
+        [1, 0, 2],
+        [1, 2, 0],
+        [2, 0, 1],
+        [2, 1, 0],
+      ]
+      for (const permutation of permutations) {
+        const candidate = clonePublicationBatches(baseline)
+        const changes = candidate[0]!
+        if (corruption === `value`) changes[0]!.value.value++
+        if (corruption === `previous-value`) changes[0]!.previousValue!.value++
+        candidate[0] = permutation.map((index) => changes[index]!)
+        if (corruption === `missing`) candidate[0].pop()
+        if (corruption === `duplicate`) candidate[0].push(changes[0]!)
+        if (corruption === `split`)
+          candidate.splice(1, 0, candidate[0].splice(1))
+        if (corruption === `merge`) candidate.splice(0, 2, candidate.flat())
+        if (corruption === `same-key-order`) candidate[1]!.reverse()
+        const actual = normalizePublicationOrder(candidate)
+        const expected = normalizePublicationOrder(baseline)
+        if (corruption === `none`) expect(actual).toEqual(expected)
+        else expect(actual).not.toEqual(expected)
+      }
+    },
+  )
+
   it(`defines all 288 unique row-publication lifecycle cells`, () => {
     expect(publicationProductCases).toHaveLength(288)
     expect(new Set(publicationProductCases.map(({ name }) => name)).size).toBe(
@@ -1153,7 +1208,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     )
   })
 
-  it(`publishes replacement changes in canonical key order`, async () => {
+  it(`publishes complete replacement batches regardless of independent key order`, async () => {
     expectNoPublicationMismatches(
       await runPublicationProduct(replacementOrderingCases),
     )
@@ -1171,7 +1226,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     }
   })
 
-  it(`does not publish rows written by a released obsolete acquisition`, async () => {
+  it(`suppresses canceled source writes when a released acquisition settles`, async () => {
     await runPublicationHistory(
       [
         { type: `request`, demand: `a` },
@@ -1255,7 +1310,7 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     )
   })
 
-  it(`does not publish a non-cooperative acquisition after its signal aborts`, async () => {
+  it(`suppresses canceled source writes when an aborted acquisition settles`, async () => {
     await runPublicationHistory(
       [
         { type: `request`, demand: `a` },
@@ -1339,6 +1394,78 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
         { type: `release`, demand: `a` },
         { type: `unsubscribe` },
         { type: `source`, key: `b`, action: `upsert`, value: 1 },
+      ],
+      { continueAfterMismatch: true },
+    )
+  })
+
+  it(`keeps a restarted snapshot private while canceled replay work settles`, async () => {
+    // Seed 2018803696, path 65:10:2:10:13:12:12:0:0:0. A canceled-only
+    // truncate does not discharge the earlier replay's publication wait.
+    await runPublicationHistory(
+      [
+        { type: `source`, key: `a`, action: `upsert`, value: 0 },
+        { type: `cleanup` },
+        { type: `request`, demand: `b` },
+        { type: `restart` },
+        { type: `abort`, demand: `b` },
+        { type: `truncate` },
+        { type: `request`, demand: `a` },
+        {
+          type: `settle`,
+          demand: `a`,
+          scope: `current`,
+          age: `oldest`,
+          outcome: `resolve`,
+        },
+        {
+          type: `settle`,
+          demand: `b`,
+          scope: `obsolete`,
+          age: `oldest`,
+          outcome: `resolve`,
+        },
+        { type: `release`, demand: `a` },
+        { type: `release`, demand: `b` },
+        { type: `unsubscribe` },
+      ],
+      { continueAfterMismatch: true },
+    )
+  })
+
+  it(`matches retained rows across an empty restart and canceled-only truncates`, async () => {
+    // Seed 2018803696, path 65:29:0:0:0. The first mismatch is a retained
+    // row deletion at truncate; classify this boundary before changing runtime.
+    await runPublicationHistory(
+      [
+        { type: `source`, key: `a`, action: `upsert`, value: 0 },
+        { type: `release`, demand: `a` },
+        { type: `cleanup` },
+        { type: `restart` },
+        { type: `request`, demand: `b` },
+        { type: `restart` },
+        { type: `abort`, demand: `b` },
+        { type: `abort`, demand: `b` },
+        { type: `truncate` },
+        { type: `truncate` },
+        { type: `request`, demand: `b` },
+        {
+          type: `settle`,
+          demand: `b`,
+          scope: `current`,
+          age: `oldest`,
+          outcome: `resolve`,
+        },
+        {
+          type: `settle`,
+          demand: `b`,
+          scope: `obsolete`,
+          age: `oldest`,
+          outcome: `resolve`,
+        },
+        { type: `release`, demand: `b` },
+        { type: `release`, demand: `b` },
+        { type: `unsubscribe` },
       ],
       { continueAfterMismatch: true },
     )

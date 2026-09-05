@@ -439,7 +439,13 @@ export function reduceLifecycle(
     // Replay setup is asynchronous even when every acquisition is synchronous
     // or canceled. Logical owners queue setup; live owners start acquisitions.
     setStatus(model, model.owners.length > 0)
-    model.publicationBarrierOpen = model.owners.some(({ aborted }) => !aborted)
+    // A canceled-only truncate starts no new work, but cannot end a prior
+    // replay's publication wait while that owner still owes settlement.
+    model.publicationBarrierOpen =
+      model.owners.some(({ aborted }) => !aborted) ||
+      model.attempts.some(
+        ({ gating, inReplacement }) => gating && inReplacement,
+      )
     const replayTrace: Array<LifecycleTraceEvent> = []
     for (const owner of model.owners) {
       const retiredAttemptId = owner.attemptId
@@ -549,29 +555,6 @@ export const greenLifecycleHistoryArbitrary = fc.array(
   lifecycleCommandArbitrary,
   { minLength: 1, maxLength: 20 },
 )
-
-function publishesReleasedObsoleteAttempt(
-  history: ReadonlyArray<LifecycleCommand>,
-): boolean {
-  const model = createLifecycleModel()
-  for (const command of history) {
-    const effect = reduceLifecycle(model, command)
-    if (
-      command.type === `settle` &&
-      command.outcome === `resolve` &&
-      effect.attemptId !== undefined &&
-      !model.owners.some(({ attemptId }) => attemptId === effect.attemptId)
-    ) {
-      return true
-    }
-  }
-  return false
-}
-
-export const publicationLifecycleHistoryArbitrary =
-  greenLifecycleHistoryArbitrary.filter(
-    (history) => !publishesReleasedObsoleteAttempt(history),
-  )
 
 export const syncLifecycleHistoryArbitrary = fc.array(
   lifecycleCommandArbitrary,
