@@ -308,6 +308,9 @@ async function runHistory(
         syncOps?.begin()
         syncOps?.truncate()
         const receipt = syncOps?.commit()
+        if (observedActive && !observedUnsubscribed && model.owners.length) {
+          check(subscription.status).toBe(`loadingSubset`)
+        }
         if (receipt !== true) await receipt
       } else if (command.type === `cleanup`) {
         if (observedActive) {
@@ -321,11 +324,14 @@ async function runHistory(
         await collection.cleanup()
         observedActive = false
       } else if (command.type === `restart`) {
+        const queuesReplay =
+          !observedActive && !observedUnsubscribed && model.owners.length > 0
         if (!observedActive) {
           observedReplay = 0
           observedActive = true
         }
         collection.startSyncImmediate()
+        if (queuesReplay) check(subscription.status).toBe(`loadingSubset`)
       } else if (command.type === `unsubscribe`) {
         for (const attempt of runtimeAttempts.values()) attempt.current = false
         subscription.unsubscribe()
@@ -455,7 +461,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     { name: `truncate replay`, history: abortReplayHistory },
     { name: `cleanup restart`, history: abortedRestartHistory },
   ])(
-    `does not create loading work for an aborted demand on $name`,
+    `queues replay without reacquiring an aborted demand on $name`,
     async ({ history }) => {
       await runHistory(history)
     },
@@ -524,13 +530,13 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
   )
 
   it.each(syncReplayScenarios)(
-    `does not create loading work for synchronous $transition with $ownerCount owner(s), abort=$abortFirst`,
+    `settles queued synchronous $transition with $ownerCount owner(s), abort=$abortFirst`,
     async ({ history }) => {
       await runHistory(history, { acquisitionMode: `sync-success` })
     },
   )
 
-  it(`preserves physical ownership after a synchronous replay status mismatch`, async () => {
+  it(`preserves physical ownership across queued synchronous replay`, async () => {
     await runHistory(syncLifecycleHistory, {
       acquisitionMode: `sync-success`,
       continueAfterMismatch: true,

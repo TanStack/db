@@ -1243,8 +1243,8 @@ explicitly removed.
 This is the bounded protocol census. Do not add another production patch until
 every row is either green or has a named red witness.
 
-Latest checkpoint: **488 passing / 34 failing** across 522 test functions.
-The demand suite is **183/0**. Remaining failures: history **20**, publication
+Latest checkpoint: **499 passing / 23 failing** across 522 test functions.
+The demand suite is **183/0**. Remaining failures: history **9**, publication
 **9**, settled-peer replay **1**, ordered work **4**. Counts describe tests,
 not unique confirmed runtime bugs; contract-alignment notes below distinguish
 stale oracle expectations from implementation defects.
@@ -1256,7 +1256,7 @@ stale oracle expectations from implementation defects.
 | Physical acquisition interaction                     | 5 states × 5 causes: 18 executable cells and 7 true exclusions                                      | distinguishes no-op, abort, retire, preserve, discard, retry |
 | Cleanup/restart ownership                            | 20 restart cells plus fixed callback boundaries                                                     | green, including unavailable-loader pending-result cases     |
 | Async session fencing                                | 2–4 sessions, 1–2 demands, mixed outcomes, obsolete/current/interleaved settlement                  | green                                                        |
-| Generated async lifecycle histories                  | one pure reducer drives async-pending and sync-success histories with one ordered event trace       | 20 named replay-generation/status reds                       |
+| Generated async lifecycle histories                  | one pure reducer drives async-pending and sync-success histories with one ordered event trace       | 18 green / 9 red; queued setup contract reconciled           |
 | Row-bearing lifecycle histories                      | independent public-row model over canonical, fixed-seed, and random histories with exact batches    | 4 named publication reds                                     |
 | Replay phase transitions                             | setup/pending/settling/publishing crossed with release, reacquisition, supersession, abort, cleanup | direct settled-peer loss red; graph peer, error ownership, and new-demand readiness witnesses green |
 | Ordered route mechanics                              | page/prefix/boundary/full-source × return/throw/resolve/reject/abort/cleanup                        | green                                                        |
@@ -1273,7 +1273,7 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
 | Acquisition availability and callback ABA | 14              | demand starts on the wrong loader/session, settles early, or owns no lease   |
 | Obsolete async replay readiness           | 3               | retired work keeps the current subscription from reaching `ready`            |
 | Aborted replay generation                 | 5               | false loading cycles, phantom unload, or a live peer remains stuck loading   |
-| Synchronous replay/restart readiness      | 12              | synchronous work emits a false `loadingSubset -> ready` cycle                |
+| Synchronous replay/restart readiness      | historical 12   | queued loading is valid; one synchronous suffix still exposes an unacquired unload |
 | Released obsolete publication             | 1               | a non-cooperative retired acquisition can still publish its row              |
 | Independent write during replay           | 1               | successful replacement drops an unrelated source row written behind its gate |
 | Duplicate-owner snapshot                  | 1               | a second owner republishes an unchanged row as a fresh insert                |
@@ -2353,9 +2353,37 @@ candidate repair scopes, not completed fixes or proof of root cause.
   independently blinded. Reports do not encode transient source mutations or
   complete command provenance; the audit's omission focus may overemphasize
   details omitted from the short summary.
-- Next lifecycle slice: compare the history reducer's remaining status
-  expectations with queued replay/setup and obsolete-transport contracts before
-  changing runtime. The 34 remaining red tests are not yet 34 confirmed bugs.
+- Reconciled the history reducer's queued setup phase, without changing runtime.
+  Logical owners queue replay even when all source calls return synchronously
+  or all owners have aborted. The reducer now emits loading before replay loads
+  and readiness after setup/acquisition completion. The harness also asserts
+  loading immediately after truncate commit or sync restart, before flushing
+  microtasks. Exact load/unload identities, errors, signals, result callbacks,
+  publication counts, ordered traces, and soft-asserted teardown suffixes stay.
+  Renamed 11 test titles that described queued loading as a defect; no test
+  functions were added or removed. This corrects the oracle, not 11 runtime bugs.
+- Same-seed seven-suite census: **499/23**, 522 functions, in
+  `/tmp/tanstack-history-queued-census.json` (1657011). History is **18/9**, up
+  from **7/20**; the other six suite counts are unchanged. The remaining nine
+  histories cover four pending-readiness witnesses and five unacquired-unload
+  witnesses. Correcting status exposes those release failures later in the
+  same histories; they remain red rather than accepting phantom unloads.
+- Two separate temporary runtime mutations with frozen corrected tests:
+  removing truncate's queued-loading transition gives history **10/17**, in
+  `/tmp/tanstack-history-truncate-status-mutant.json`; removing the restart
+  listener's queued-loading transition gives **9/18**, in
+  `/tmp/tanstack-history-restart-status-mutant.json`. All four synchronous
+  truncate or restart product cases, respectively, fail the immediate boundary
+  assertion. These probe two specific invalid implementations, not every later
+  ownership assertion. Both mutations were restored before the census; runtime
+  diff against the preceding commit is empty. Adjacent lifecycle, subscription,
+  and sync-reentry controls remain **142/0**, in
+  `/tmp/tanstack-history-queued-controls.json`. Prettier and diff checks pass;
+  no new full typecheck claim.
+- Next slice: retain the exact owner/acquisition checks and fix the named
+  unacquired-unload witness. Then reconcile obsolete-transport readiness with
+  the cancellation contract; do not assume all nine history reds are distinct
+  runtime bugs or that all non-cooperative source behavior is supported.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar

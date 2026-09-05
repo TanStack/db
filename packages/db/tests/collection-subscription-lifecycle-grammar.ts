@@ -150,10 +150,11 @@ export function createLifecycleModel(
   }
 }
 
-function setStatus(model: LifecycleModel): void {
+function setStatus(model: LifecycleModel, queuedReplay = false): void {
   if (model.unsubscribed) return
   const status =
-    model.active && model.attempts.some(({ gating }) => gating)
+    model.active &&
+    (queuedReplay || model.attempts.some(({ gating }) => gating))
       ? `loadingSubset`
       : `ready`
   if (status !== model.status) {
@@ -410,6 +411,9 @@ export function reduceLifecycle(
       model.reach.add(`overlapping-replay`)
     }
     model.replay++
+    // Replay setup is asynchronous even when every acquisition is synchronous
+    // or canceled. Logical owners queue setup; live owners start acquisitions.
+    setStatus(model, model.owners.length > 0)
     model.publicationBarrierOpen = model.owners.some(({ aborted }) => !aborted)
     const replayTrace: Array<LifecycleTraceEvent> = []
     for (const owner of model.owners) {
@@ -436,8 +440,8 @@ export function reduceLifecycle(
     if (model.publicationBarrierOpen && replacementSucceeded(model)) {
       model.publicationBarrierOpen = false
     }
-    setStatus(model)
     model.trace.push(...replayTrace)
+    setStatus(model)
     return {}
   }
 
@@ -475,6 +479,7 @@ export function reduceLifecycle(
     model.replay = 0
     model.publicationBarrierOpen = model.owners.some(({ aborted }) => !aborted)
     model.collectionStatus = `ready`
+    setStatus(model, model.owners.length > 0)
     const replayLoads: Array<LifecycleLoadEvent> = []
     for (const owner of model.owners) {
       if (!owner.aborted) replayLoads.push(startAttempt(model, owner, false))
@@ -482,7 +487,6 @@ export function reduceLifecycle(
     if (model.publicationBarrierOpen && replacementSucceeded(model)) {
       model.publicationBarrierOpen = false
     }
-    setStatus(model)
     if (!model.unsubscribed) {
       model.publications++
       model.trace.push({ type: `publication` })
@@ -496,6 +500,7 @@ export function reduceLifecycle(
         replay: load.replay,
       })
     }
+    setStatus(model)
     return {}
   }
 
