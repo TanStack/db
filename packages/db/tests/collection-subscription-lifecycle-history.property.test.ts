@@ -674,9 +674,9 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     },
   )
 
-  it(`keeps a new snapshot private while initial cancellation is pending`, async () => {
-    // Seed 1413322355, path 757:13:15:15:9:9:9. This checks an extra empty
-    // notification, not row loss; reconcile the publication boundary next.
+  it(`publishes a new snapshot while canceled initial work still holds readiness`, async () => {
+    // Seed 1413322355, path 757:13:15:15:9:9:9. This checks an empty snapshot
+    // notification: initial readiness is not a replacement publication gate.
     await runHistory(
       [
         { type: `request`, demand: `b` },

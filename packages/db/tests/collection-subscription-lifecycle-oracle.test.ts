@@ -3561,6 +3561,162 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     },
   )
 
+  it.each(
+    ([`initial`, `replay`] as const).flatMap((origin) =>
+      ([`resolve`, `reject`] as const).flatMap((oldOutcome) =>
+        ([`old-first`, `current-first`] as const).map((order) => ({
+          origin,
+          oldOutcome,
+          order,
+        })),
+      ),
+    ),
+  )(
+    `separates publication from readiness for pending $origin work, $oldOutcome, $order`,
+    async ({ origin, oldOutcome, order }) => {
+      type Row = { id: string; version: number }
+      const where = {
+        a: new Func(`eq`, [new PropRef([`id`]), new Value(`a`)]),
+        b: new Func(`eq`, [new PropRef([`id`]), new Value(`b`)]),
+      }
+      const loads: Array<{
+        options: LoadSubsetOptions
+        deferred: ReturnType<typeof createDeferred<void>>
+      }> = []
+      const unloads: Array<LoadSubsetOptions> = []
+      const errors: Array<unknown> = []
+      const visible = new Map<string | number, Row>()
+      let emptyBatches = 0
+      let replacementChanges = 0
+      let operations!: Parameters<SyncConfig<Row, string>[`sync`]>[0]
+      const collection = createCollection<Row, string>({
+        id: `publication-readiness-boundary`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (nextOperations) => {
+            operations = nextOperations
+            operations.markReady()
+            return {
+              loadSubset: (options) => {
+                const deferred = createDeferred<void>()
+                void deferred.promise.catch(() => {})
+                loads.push({ options, deferred })
+                return deferred.promise
+              },
+              unloadSubset: (options) => {
+                unloads.push(options)
+              },
+            }
+          },
+        },
+      })
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          if (changes.length === 0) emptyBatches++
+          for (const change of changes) {
+            if (change.type === `delete`) visible.delete(change.key)
+            else {
+              visible.set(change.key, {
+                id: change.value.id,
+                version: change.value.version,
+              })
+              if (change.value.id === `b` && change.value.version === 2)
+                replacementChanges++
+            }
+          }
+        },
+        { includeInitialState: false },
+      )
+      subscription.on(`loadSubset:error`, ({ error }) => errors.push(error))
+      const write = async (id: string, version: number) => {
+        operations.begin()
+        operations.write({
+          type: collection.has(id) ? `update` : `insert`,
+          value: { id, version },
+        })
+        const receipt = operations.commit()
+        if (receipt !== true) await receipt
+      }
+      const truncate = async () => {
+        operations.begin()
+        operations.truncate()
+        const receipt = operations.commit()
+        if (receipt !== true) await receipt
+        await flushPromises()
+      }
+      const settle = async (
+        attempt: (typeof loads)[number],
+        outcome: `resolve` | `reject`,
+        id = `b`,
+      ) => {
+        // The source cannot cancel transport promptly, but must suppress its
+        // canceled writes. Late settlement does not install an obsolete row.
+        if (outcome === `resolve`) {
+          if (!attempt.options.signal?.aborted) await write(id, 2)
+          attempt.deferred.resolve()
+        } else attempt.deferred.reject(new Error(`obsolete source failed`))
+        await flushPromises()
+      }
+      try {
+        subscription.requestSnapshot({ where: where.b })
+        await write(`b`, 0)
+        if (origin === `replay`) {
+          loads[0]!.deferred.resolve()
+          await flushPromises()
+          await truncate()
+        }
+        const old = loads.at(-1)!
+        await truncate()
+        const current = loads.at(-1)!
+        expect(old.options.signal?.aborted).toBe(true)
+        expect([...visible.values()]).toEqual([{ id: `b`, version: 0 }])
+        if (order === `old-first`) {
+          await settle(old, oldOutcome)
+          expect(subscription.status).toBe(`loadingSubset`)
+          expect([...visible.values()]).toEqual([{ id: `b`, version: 0 }])
+        }
+        await settle(current, `resolve`)
+        const privateReplay = origin === `replay` && order === `current-first`
+        expect([...visible.values()]).toEqual([
+          { id: `b`, version: privateReplay ? 0 : 2 },
+        ])
+        expect(subscription.status).toBe(
+          order === `old-first` ? `ready` : `loadingSubset`,
+        )
+        const emptyBeforeRequest = emptyBatches
+        subscription.requestSnapshot({ where: where.a })
+        expect(emptyBatches - emptyBeforeRequest).toBe(privateReplay ? 0 : 1)
+        await settle(loads.at(-1)!, `resolve`, `a`)
+        expect([...visible.values()]).toEqual(
+          privateReplay
+            ? [{ id: `b`, version: 0 }]
+            : [
+                { id: `b`, version: 2 },
+                { id: `a`, version: 2 },
+              ],
+        )
+        if (order === `current-first`) await settle(old, oldOutcome)
+        expect([...visible.values()]).toEqual([
+          { id: `b`, version: 2 },
+          { id: `a`, version: 2 },
+        ])
+        expect(subscription.status).toBe(`ready`)
+        expect(errors).toEqual([])
+        expect(replacementChanges).toBe(1)
+        subscription.unsubscribe()
+        expect(unloads).toHaveLength(loads.length)
+        for (const { options } of loads)
+          expect(unloads.filter((value) => value === options)).toHaveLength(1)
+      } finally {
+        for (const { deferred } of loads) deferred.resolve()
+        await flushPromises()
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
   it.each(threeGenerationScenarios)(
     `fences three generations for $obsoleteOutcome/$currentOutcome settled $settlementOrder`,
     async ({ obsoleteOutcome, currentOutcome, settlementOrder }) => {

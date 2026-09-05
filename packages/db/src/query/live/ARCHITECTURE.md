@@ -689,6 +689,10 @@ rows after observing cancellation. Settled historical attempts are discarded.
 Replacing an acquisition does not release its logical owner. A delayed
 cancellation therefore remains pending; prompt cancellation settles that wait.
 Releasing the owner removes both its current and older work from readiness.
+An ordinary acquisition started before replay may still hold subscription
+readiness after its replacement publishes. It is not a replay publication
+participant: its canceled writes must stop at the source boundary. Work started
+inside replay, including an older overlapping replay, does hold publication.
 Core installs each tentative acquisition and binds it to the current replay
 attempt before calling adapter code. A reentrant release or newer truncate can
 therefore see and retire the exact work it supersedes; work returned after that

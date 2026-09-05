@@ -1243,10 +1243,11 @@ explicitly removed.
 This is the bounded protocol census. Do not add another production patch until
 every row is either green or has a named red witness.
 
-Latest checkpoint: **521 passing / 15 failing** across 536 test functions.
-The demand suite is **187/0**. Remaining failures: history **1** (new empty-
-notification mismatch, not yet a confirmed runtime defect), publication
-**9**, settled-peer replay **1**, ordered work **4**. Counts describe tests,
+Latest checkpoint: **530 passing / 14 failing** across 544 test functions.
+The demand suite is **195/0**, and history is **37/0**. The initial-work
+notification mismatch was a model error: readiness and publication have
+different wait sets. Remaining failures: publication **9**, settled-peer replay
+**1**, ordered work **4**. Counts describe tests,
 not unique confirmed runtime bugs; contract-alignment notes below distinguish
 stale oracle expectations from implementation defects.
 
@@ -1257,7 +1258,7 @@ stale oracle expectations from implementation defects.
 | Physical acquisition interaction                     | 5 states × 5 causes: 18 executable cells and 7 true exclusions                                      | distinguishes no-op, abort, retire, preserve, discard, retry |
 | Cleanup/restart ownership                            | 20 restart cells plus fixed callback boundaries                                                     | green, including unavailable-loader pending-result cases     |
 | Async session fencing                                | 2–4 sessions, 1–2 demands, mixed outcomes, obsolete/current/interleaved settlement                  | green                                                        |
-| Generated async lifecycle histories                  | one pure reducer drives async-pending and sync-success histories with one ordered event trace       | 36 green / 1 new notification mismatch; both async exclusions removed |
+| Generated async lifecycle histories                  | one pure reducer drives async-pending and sync-success histories with one ordered event trace       | 37 green; readiness/publication membership distinguished; both async exclusions removed |
 | Row-bearing lifecycle histories                      | independent public-row model over canonical, fixed-seed, and random histories with exact batches    | 4 named publication reds                                     |
 | Replay phase transitions                             | setup/pending/settling/publishing crossed with release, reacquisition, supersession, abort, cleanup | direct settled-peer loss red; graph peer, error ownership, and new-demand readiness witnesses green |
 | Ordered route mechanics                              | page/prefix/boundary/full-source × return/throw/resolve/reject/abort/cleanup                        | green                                                        |
@@ -2543,6 +2544,49 @@ candidate repair scopes, not completed fixes or proof of root cause.
   hashes, transient mutations/restoration, or successful 10× invocation. The
   matching seed-1657011 counts do not imply identical generated histories after
   adding the cancellation-mode dimension and removing filters.
+
+- Reconciled the initial-cancellation publication witness without a runtime
+  change. Initial/progressive work can owe readiness settlement after a replay
+  publishes; work started inside replay holds its publication gate. The pure
+  model records this membership at acquisition start, independently of runtime
+  callbacks. Kept the shrunk sequence, late settlement, teardown, and all exact
+  event assertions; renamed it to state the corrected contract.
+- Added eight independent row-bearing cases: initial/replay origin × obsolete
+  resolve/reject × old-first/current-first settlement. They assert retained and
+  replacement rows, readiness, empty snapshot notifications, one replacement
+  change, no obsolete error delivery, and exactly one unload per acquisition.
+  The source suppresses canceled writes but allows delayed transport settlement.
+  These cases do not claim safety for a source that ignores cancellation and
+  continues writing. The fixture initially copied collection metadata into its
+  expected public row; explicit id/version projection corrected that fixture
+  error. The filtered probe passed all eight assertions but failed the suite's
+  afterAll coverage guard; full-suite green below replaces that partial result.
+- Frozen-test mutation controls: ignoring older replay attempts gives **230/2**,
+  `/tmp/tanstack-publication-early-replay-mutant.json`; both replay/current-first
+  cases fail on premature version-2 rows. Enrolling all readiness participants
+  into each new replay gives **229/3**,
+  `/tmp/tanstack-publication-overblocked-initial-mutant.json`; both initial/
+  current-first cases fail on retained version-0 rows, and the shrunk history
+  fails its notification comparison. The latter mutation converts prior
+  rejection to settlement so it isolates over-blocking, not failure poisoning.
+  Both mutations restored; subscription.ts has zero diff from HEAD. Other
+  settlement orders and later assertions are positive controls, not independently
+  isolated mutation proofs.
+- Restored focused suite **232/0**, report success true,
+  `/tmp/tanstack-publication-readiness-model-green.json`. Full seed-1657011 census
+  **530/14**, 544 functions, `/tmp/tanstack-publication-readiness-census.json`:
+  history **37/0**, demand **195/0**, publication **7/9**, replay **68/1**,
+  refinement **7/0**, ordered lifecycle **196/0**, ordered work **20/4**.
+  Eight added positive cases and one model correction account for the entire
+  change from 521/15; no old test removed or runtime bug claimed fixed.
+- Targeted 10× plus adjacent controls **179/0**, report success true,
+  `/tmp/tanstack-publication-readiness-10x-adjacent.json`: history **37/0** and
+  adjacent **142/0**. All four history properties passed 800 examples each:
+  fixed async 1657003, fresh async 1689398723, fixed sync 1657004, fresh sync
+  -1972925180. This is not the queued final 100× campaign. Prettier and diff
+  checks pass. Targeted eslint remains **9 errors / 5 warnings**, all outside
+  this step's changed lines; no clean lint/typecheck claim. Next: nine
+  row-bearing publication failures, then the settled-peer loss.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar

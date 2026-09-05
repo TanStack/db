@@ -62,6 +62,7 @@ export type LifecycleAttempt = {
   settled: boolean
   outcome?: `resolve` | `reject`
   gating: boolean
+  inReplacement: boolean
   reportable: boolean
   aborted: boolean
   failure: Error
@@ -171,7 +172,9 @@ function setStatus(model: LifecycleModel, queuedReplay = false): void {
 // private until the failed owner retires or a new replay succeeds.
 function replacementSucceeded(model: LifecycleModel): boolean {
   return (
-    !model.attempts.some(({ gating }) => gating) &&
+    !model.attempts.some(
+      ({ gating, inReplacement }) => gating && inReplacement,
+    ) &&
     model.owners.every(
       ({ attemptId }) =>
         attemptId === undefined ||
@@ -197,6 +200,9 @@ function startAttempt(
       ? { outcome: `resolve` as const }
       : {}),
     gating: model.acquisitionMode === `async-pending`,
+    // Initial/progressive acquisition can hold readiness without joining the
+    // authoritative replacement's publication boundary.
+    inReplacement: model.publicationBarrierOpen,
     reportable: true,
     aborted: false,
     failure: model.failureForAttempt(id),
