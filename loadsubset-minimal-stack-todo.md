@@ -1566,6 +1566,11 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
           current options stay live until unsubscribe and then abort. Reported
           errors are compared to the unique error allocated for that exact
           session and demand.
+    - [x] B — Apply the restart-interleaving loss audit: exclude already
+          settled intermediate attempts from the later settlement plan, require
+          every post-initial attempt exactly once in the observed settlement
+          trace, and compare each error event by object identity rather than
+          Vitest's value equality for `Error` instances.
     - [ ] C — Cross replay barrier phase × source insert/update/delete ×
           settlement × suffix with checked observed reach. Keep named red
           regions out of the broad green campaign without filtering away their

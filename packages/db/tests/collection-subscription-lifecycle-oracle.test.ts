@@ -450,6 +450,7 @@ async function runAsyncRestartScenario(
     deferred: ReturnType<typeof createDeferred<void>>
   }
   type SettlementEvent = {
+    attempt: Attempt
     session: number
     demand: DemandName
     outcome: `resolve` | `reject`
@@ -492,6 +493,7 @@ async function runAsyncRestartScenario(
     else attempt.deferred.reject(failureFor(attempt))
     await flushPromises()
     settlements.push({
+      attempt,
       session: attempt.session,
       demand: attempt.demand,
       outcome,
@@ -671,6 +673,7 @@ async function runAsyncRestartScenario(
           ? [...current, ...obsolete]
           : attempts
               .filter(({ session: value }) => value > 0)
+              .filter((attempt) => !settledAttempts.has(attempt))
               .sort((left, right) =>
                 left.demand === right.demand
                   ? right.session - left.session
@@ -698,14 +701,20 @@ async function runAsyncRestartScenario(
       expect(
         [...visible.values()].sort((a, b) => a.id.localeCompare(b.id)),
       ).toEqual(expectedRows)
-      const expectedErrors = settledCurrent
-        .filter((attempt) => outcomeFor(attempt) === `reject`)
-        .map((attempt) => ({
-          demand: attempt.demand,
-          error: failureFor(attempt),
-        }))
-      expect(errors).toEqual(expectedErrors)
-      expect(subscription.lastError).toBe(expectedErrors.at(-1)?.error)
+      const expectedFailedAttempts = settledCurrent.filter(
+        (attempt) => outcomeFor(attempt) === `reject`,
+      )
+      expect(errors.map(({ demand }) => demand)).toEqual(
+        expectedFailedAttempts.map(({ demand }) => demand),
+      )
+      for (const [index, { error }] of errors.entries()) {
+        expect(error).toBe(failureFor(expectedFailedAttempts[index]!))
+      }
+      expect(subscription.lastError).toBe(
+        expectedFailedAttempts.length
+          ? failureFor(expectedFailedAttempts.at(-1)!)
+          : undefined,
+      )
       expect(subscription.status).toBe(
         currentComplete ? `ready` : `loadingSubset`,
       )
@@ -740,14 +749,18 @@ async function runAsyncRestartScenario(
       expect(errors).toEqual([])
       expect(subscription.lastError).toBeUndefined()
     } else {
-      const expectedErrors = settledCurrent
-        .filter((attempt) => outcomeFor(attempt) === `reject`)
-        .map((attempt) => ({
-          demand: attempt.demand,
-          error: failureFor(attempt),
-        }))
-      expect(errors).toEqual(expectedErrors)
-      expect(subscription.lastError).toBe(expectedErrors.at(-1)?.error)
+      const expectedFailedAttempts = settledCurrent.filter(
+        (attempt) => outcomeFor(attempt) === `reject`,
+      )
+      expect(errors.map(({ demand }) => demand)).toEqual(
+        expectedFailedAttempts.map(({ demand }) => demand),
+      )
+      for (const [index, { error }] of errors.entries()) {
+        expect(error).toBe(failureFor(expectedFailedAttempts[index]!))
+      }
+      expect(subscription.lastError).toBe(
+        failureFor(expectedFailedAttempts.at(-1)!),
+      )
     }
     expect(subscription.status).toBe(`ready`)
     for (const attempt of current) {
@@ -774,6 +787,13 @@ async function runAsyncRestartScenario(
         ({ session: attemptSession }) => attemptSession === currentSession,
       )
       .map(({ outcome }) => outcome)
+    expect(new Set(settlements.map(({ attempt }) => attempt)).size).toBe(
+      settlements.length,
+    )
+    expect(settlements).toHaveLength(
+      attempts.filter(({ session: attemptSession }) => attemptSession > 0)
+        .length,
+    )
     const reach = new Set([
       `demands:${new Set(attempts.map(({ demand }) => demand)).size}`,
       `sessions:${new Set(attempts.map(({ session }) => session)).size}`,
