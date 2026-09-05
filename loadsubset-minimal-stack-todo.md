@@ -1619,12 +1619,23 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
       - The reentrant unload/reacquire witness now checks non-ready status,
         absence of ready events, and no new publication both before and after
         obsolete work settles while the reacquired load is pending. All three
-        existing timing cases pass. This covers the existing tracked demand;
-        the distinct untracked-demand boundary remains open.
-      - Validation: replay oracle file passes all 67 tests, including the new
-        expected failure; the new witness was first run as an ordinary test
+        existing timing cases pass. A separate row-bearing witness now covers
+        a distinct demand acquired inside old-lease unload: the original replay
+        settles first, the public row stays `one=1`, no ready event occurs, and
+        completion stays pending. Settling the new load publishes `one=2` and
+        `two=2`, emits ready once, and all three exact leases unload once.
+        This boundary is green.
+      - Validation: replay oracle file passes all 68 tests, including the new
+        exact known-red observation; the peer witness was first run as an ordinary test
         and failed only on the missing successful peer row. No production
         changes in this checkpoint.
+      - Fresh Field Lab audit of `5a1b211f`: PASS for the bounded checkpoint,
+        with two recovered assertion gaps now addressed. The peer witness pins
+        the precise missing-row result instead of wrapping setup/cleanup in
+        `it.fails`; the tracked reacquisition case now checks publication silence
+        on the first pending flush as well as after obsolete settlement. Exact
+        release checks prove eventual cleanup, not release timing. Recovery
+        remains policy rather than executable proof, and D remains incomplete.
     - [ ] D — Generate the ordered consumer product over authority, route,
           barrier, settlement, window, and sync-session transitions with checked
           observed reach.
