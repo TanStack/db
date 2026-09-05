@@ -1273,6 +1273,17 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
 
 - [ ] Finish the subset-demand lifecycle oracle before accepting more local
       runtime patches. Treat these as one protocol, not separate regressions:
+  - Recovery policy (user decision): a red transition may be implemented as
+    detection followed by stopping the affected collection and rebuilding it.
+    Seamless continuation is not required for every exceptional interleaving.
+    Before changing a red expectation, name its detection boundary and prove
+    the recovery trace: retain a valid public snapshot, settle affected callers
+    with an explicit error, retire old work, and publish a complete rebuilt
+    snapshot before reporting ready. An arbitrary throw, an unresolved promise,
+    leaked ownership, or partial publication is still a failure. Keep the
+    original failing witness and add recovery assertions; do not classify any
+    exception as success. Each red law needs an explicit choice of continuation
+    or recovery before production changes.
   - [x] Model the logical demand states `absent`, `starting`, `active`, and
         `retired`, independently from physical acquisition state and cleanup
         debt. The production protocol records `starting`, `active`, and
@@ -1597,6 +1608,23 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
     - [ ] D — Add executable witnesses for the three remaining replay-phase
           contracts: surviving successful peer, per-attempt failure ownership,
           and reentrant async demand readiness.
+      - Direct publication now has a row-bearing named red for retirement
+        after both replay results settle: releasing the failed demand removes
+        the successful peer too (expected `two=2`, observed empty). The prior
+        test retired the failure before peer settlement. Both physical loads,
+        all four exact unloads, and final release execute in the new witness.
+        Graph-controlled publication and per-attempt error ownership remain
+        open. This witness records continuation; safe recovery remains an
+        allowed implementation choice under the policy above.
+      - The reentrant unload/reacquire witness now checks non-ready status,
+        absence of ready events, and no new publication both before and after
+        obsolete work settles while the reacquired load is pending. All three
+        existing timing cases pass. This covers the existing tracked demand;
+        the distinct untracked-demand boundary remains open.
+      - Validation: replay oracle file passes all 67 tests, including the new
+        expected failure; the new witness was first run as an ordinary test
+        and failed only on the missing successful peer row. No production
+        changes in this checkpoint.
     - [ ] D — Generate the ordered consumer product over authority, route,
           barrier, settlement, window, and sync-session transitions with checked
           observed reach.
