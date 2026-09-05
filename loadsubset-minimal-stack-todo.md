@@ -1263,7 +1263,7 @@ stale oracle expectations from implementation defects.
 | Row-bearing lifecycle histories                      | independent public-row model; exact batches modulo independent-key order; fixed and random histories | 19 green / 7 red; cancellation and delayed-replay expectations reconciled; retained-row truncate witness remains |
 | Replay phase transitions                             | setup/pending/settling/publishing crossed with release, reacquisition, supersession, abort, cleanup | direct settled-peer loss red; graph peer, error ownership, and new-demand readiness witnesses green |
 | Ordered route mechanics                              | page/prefix/boundary/full-source × return/throw/resolve/reject/abort/cleanup                        | green                                                        |
-| Ordered consumer integration                         | Collection/Effect parity, source-local recovery, public-window reentry, sync-session settlement     | 5 named reds                                                 |
+| Ordered consumer integration                         | Collection/Effect parity, source-local recovery, public-window reentry, sync-session settlement     | 4 named ordered-work reds; settled-peer replay is counted separately |
 | Ordered generated histories                          | 192 checked route/delivery/window/outcome/session/barrier histories; finite/full request shapes     | 192 green cells; no known-red classifier remains |
 
 The earlier 44-test red catalog grouped into these protocol faults. Later
@@ -2709,6 +2709,34 @@ candidate repair scopes, not completed fixes or proof of root cause.
   eslint reports the existing grammar error and three existing shadow warnings,
   not a clean lint/typecheck run. Next: the seven publication failures together
   (retained-row truth/retirement and duplicate delivery), then settled-peer replay.
+
+- Fresh Field Lab loss audit of `b9a326ac` verified all 15 named report totals
+  and suite splits, and found no deleted old history or teardown. It recovered:
+  - Normalization affects every publication comparison, not only the six
+    ordering cells. The controls cover fixed a/b/c keys, not arbitrary key
+    identity. Frozen diagnostics also normalized order; the follow-up now
+    preserves raw expected/observed batches in messages while comparing the
+    same normalized batches. Its focused report remains **19/7**,
+    `/tmp/tanstack-publication-boundary-raw-diagnostics.json`.
+  - The early-publication mutant first fails the new pinned witness at truncate
+    (index 5), with an unexpected deletion of retained a, not at the later empty
+    snapshot notification. The dropped-update ordering test reports all six
+    cells; the first expected update a plus delete d but observed only delete d.
+  - Census random-or-replayed properties all use seed 1657011; this is not a new
+    fresh campaign. The fresh publication seed and the failing original-seed
+    rerun are separate evidence. Passing JSON entries do not contain run counts,
+    multiplier/environment, exact mutation patches or restoration, or lint and
+    typecheck results. Those claims (including 600/800 examples and omission of
+    a replay path) depend on the execution commands, not JSON alone.
+  - Corrected the stale dashboard's five ordered-integration reds to four;
+    settled-peer replay is counted separately.
+  Source scan was frozen before report scanning in the same fresh agent. No
+  tests rerun by the auditor; this sequential correlated fallback is not
+  sibling-blind, and source-first categories may steer the report scan. These
+  are recovered scope/provenance limits, not a claim of complete lifecycle
+  correctness. The parent's diagnostics-only verification is separate from
+  the frozen commit audit. The auditor separately inspected that follow-up,
+  confirming unchanged comparison rules and the same seven failure names.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar

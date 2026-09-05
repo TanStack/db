@@ -644,34 +644,32 @@ async function runPublicationHistory(
     expectedStart: number,
     observedStart: number,
   ): void => {
-    const expected = normalizePublicationOrder(
-      publication.batches.slice(expectedStart),
-    )
-    const observed = normalizePublicationOrder(
-      observedBatches.slice(observedStart),
-    )
+    const expectedBatches = publication.batches.slice(expectedStart)
+    const observed = observedBatches.slice(observedStart)
+    const expected = normalizePublicationOrder(expectedBatches)
+    const normalizedObserved = normalizePublicationOrder(observed)
     const context = JSON.stringify({
       history,
       command,
       commandIndex,
       observed,
-      expected,
+      expected: expectedBatches,
     })
     if (
       options.mismatches &&
-      JSON.stringify(observed) !== JSON.stringify(expected)
+      JSON.stringify(normalizedObserved) !== JSON.stringify(expected)
     ) {
       const historyName = options.historyName ?? JSON.stringify(history)
       options.mismatches.push({
         history: historyName,
         commandIndex,
         command,
-        expected: clonePublicationBatches(expected),
+        expected: clonePublicationBatches(expectedBatches),
         observed: clonePublicationBatches(observed),
       })
       return
     }
-    check(observed, context).toEqual(expected)
+    check(normalizedObserved, context).toEqual(expected)
   }
 
   const selectRuntimeAttempt = (
