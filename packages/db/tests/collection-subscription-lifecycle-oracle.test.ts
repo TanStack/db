@@ -937,6 +937,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const statuses: Array<string> = []
       const controller = new AbortController()
       let didReenter = false
+      let statusAtTruncate: string | undefined
       let truncate!: () => void
       let runReentry = () => {}
 
@@ -983,6 +984,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
           controller.abort()
         } else if (reentry === `truncate`) {
           truncate()
+          statusAtTruncate = subscription.status
         } else if (reentry === `release-self`) {
           subscription.releaseSnapshot(targetWhere)
         } else if (reentry === `release-peer`) {
@@ -1004,6 +1006,13 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         thrown = error
       }
 
+      if (reentry === `truncate`) {
+        // The old acquisition is obsolete, but the queued replacement still
+        // owns a loading interval until its setup and work finish.
+        expect(statusAtTruncate).toBe(`loadingSubset`)
+        expect(subscription.status).toBe(`loadingSubset`)
+        expect(loads).toHaveLength(1)
+      }
       const targetLoad = loads.find(({ where }) => where === targetWhere)!
       const peerLoad = loads.find(({ where }) => where === peerWhere)
       const targetWasReleased =
@@ -1056,10 +1065,22 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
           : [],
       )
       expect(statuses).toEqual(
-        (outcome === `resolve` || outcome === `reject`) && !targetWasReleased
+        reentry === `truncate` ||
+          ((outcome === `resolve` || outcome === `reject`) &&
+            !targetWasReleased)
           ? [`loadingSubset`, `ready`]
           : [],
       )
+      if (reentry === `truncate`) {
+        // A synchronous throw never acquired an owner to replay. Returned work
+        // retains logical demand, even when its first transport later rejects.
+        expect(loads).toHaveLength(outcome === `throw` ? 1 : 2)
+        if (outcome !== `throw`) {
+          expect(loads[1]).not.toBe(targetLoad)
+          expect(loads[1]?.where).toBe(targetWhere)
+          expect(loads[1]?.signal?.aborted).toBe(false)
+        }
+      }
 
       subscription.unsubscribe()
       await collection.cleanup()
@@ -1234,11 +1255,17 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const peerReplacement = peerAttempts[1]?.options
       if (reentry === `truncate`) {
         expect.soft(targetLoad.signal?.aborted).toBe(true)
-        expect.soft(targetAttempts).toHaveLength(2)
-        expect.soft(replacement).not.toBe(targetLoad)
-        expect.soft(replacement?.where).toBe(targetWhere)
-        expect.soft(targetAttempts[1]?.session).toBe(0)
-        expect.soft(targetAttempts[1]?.result).toBe(`replay-return`)
+        // Error delivery may request replay, but it cannot turn a failed
+        // synchronous start into an owned acquisition. Only the peer survives.
+        expect.soft(targetAttempts).toHaveLength(outcome === `reject` ? 2 : 1)
+        if (outcome === `reject`) {
+          expect.soft(replacement).not.toBe(targetLoad)
+          expect.soft(replacement?.where).toBe(targetWhere)
+          expect.soft(targetAttempts[1]?.session).toBe(0)
+          expect.soft(targetAttempts[1]?.result).toBe(`replay-return`)
+        } else {
+          expect.soft(replacement).toBeUndefined()
+        }
         expect.soft(peerLoad.signal?.aborted).toBe(true)
         expect.soft(peerAttempts).toHaveLength(2)
         expect.soft(peerReplacement).not.toBe(peerLoad)
@@ -1256,7 +1283,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
 
       subscription.unsubscribe()
       const replays = reentry === `truncate`
-      expect.soft(targetAttempts).toHaveLength(replays ? 2 : 1)
+      expect
+        .soft(targetAttempts)
+        .toHaveLength(replays && outcome === `reject` ? 2 : 1)
       expect.soft(peerAttempts).toHaveLength(replays ? 2 : 1)
       expect
         .soft(unloads.filter((options) => options === targetLoad))
@@ -1279,7 +1308,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const expectedUnloads =
         reentry === `cleanup`
           ? 0
-          : (outcome === `reject` ? 2 : 1) + (replays ? 2 : 0)
+          : (outcome === `reject` ? 2 : 1) * (replays ? 2 : 1)
       expect.soft(unloads).toHaveLength(expectedUnloads)
       expect.soft(peerLoad.signal?.aborted).toBe(true)
       expect.soft(targetLoad.signal?.aborted).toBe(true)

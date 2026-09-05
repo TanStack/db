@@ -1243,12 +1243,18 @@ explicitly removed.
 This is the bounded protocol census. Do not add another production patch until
 every row is either green or has a named red witness.
 
+Latest checkpoint: **488 passing / 34 failing** across 522 test functions.
+The demand suite is **183/0**. Remaining failures: history **20**, publication
+**9**, settled-peer replay **1**, ordered work **4**. Counts describe tests,
+not unique confirmed runtime bugs; contract-alignment notes below distinguish
+stale oracle expectations from implementation defects.
+
 | Protocol slice                                       | Executable coverage                                                                                 | Current result                                               |
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| Logical demand start/release and synchronous reentry | 28 start cells, 14 failure-delivery cells, 8 release cells                                          | 4 truncate-during-start status reds; other cells green       |
+| Logical demand start/release and synchronous reentry | 28 start cells, 14 failure-delivery cells, 8 release cells                                          | green; queued replay status and failed-start rollback expectations reconciled |
 | Sync loader availability                             | 6 phases × 5 entries: 13 executable cells and 17 true exclusions                                    | runtime reach checked through red suffixes                   |
 | Physical acquisition interaction                     | 5 states × 5 causes: 18 executable cells and 7 true exclusions                                      | distinguishes no-op, abort, retire, preserve, discard, retry |
-| Cleanup/restart ownership                            | 20 restart cells plus fixed callback boundaries                                                     | green except the acquisition-availability reds               |
+| Cleanup/restart ownership                            | 20 restart cells plus fixed callback boundaries                                                     | green, including unavailable-loader pending-result cases     |
 | Async session fencing                                | 2–4 sessions, 1–2 demands, mixed outcomes, obsolete/current/interleaved settlement                  | green                                                        |
 | Generated async lifecycle histories                  | one pure reducer drives async-pending and sync-success histories with one ordered event trace       | 20 named replay-generation/status reds                       |
 | Row-bearing lifecycle histories                      | independent public-row model over canonical, fixed-seed, and random histories with exact batches    | 4 named publication reds                                     |
@@ -1263,7 +1269,7 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
 
 | Red class                                 | Named witnesses | Observable failure                                                           |
 | ----------------------------------------- | --------------- | ---------------------------------------------------------------------------- |
-| Start/failure reentry through truncate    | 5               | false loading/ready transitions or missing replay after failure              |
+| Start/failure reentry through truncate    | 0 (5 stale expectations reconciled) | queued replay owns loading; a synchronous throw rolls back the tentative owner |
 | Acquisition availability and callback ABA | 14              | demand starts on the wrong loader/session, settles early, or owns no lease   |
 | Obsolete async replay readiness           | 3               | retired work keeps the current subscription from reaching `ready`            |
 | Aborted replay generation                 | 5               | false loading cycles, phantom unload, or a live peer remains stuck loading   |
@@ -2302,6 +2308,36 @@ candidate repair scopes, not completed fixes or proof of root cause.
   fresh context, and summary-led. Final post-audit seven-suite rerun remains
   **483/39**, with exactly the same failed names, in
   `/tmp/tanstack-recovery-notification-audited-census.json` (seed 1657011).
+
+- Reconciled five stale truncate expectations; **no production change**. A
+  canceled old acquisition does not remove the queued replacement's loading
+  interval. The start matrix now captures status immediately inside truncate
+  reentry, before the returning Promise can create its own loading status, and
+  checks the queued and replacement load counts. A synchronous startup throw
+  rolls back its tentative owner even when its error callback queues truncate;
+  the surviving peer replays, but the failed owner is not resurrected. This is
+  the existing architecture's synchronous-throw rule, not a new recovery policy.
+  Rejection after a returned acquisition still retains demand for replay.
+- Preserved signal, primary-error, peer, exact acquisition identity and final
+  release checks. Replacement assertions now distinguish rejected acquired
+  work from a thrown start that never acquired; final unload totals reflect
+  those distinct owners. These five changes are oracle corrections, not five
+  claimed runtime bug fixes. The earlier catalog's "false status" and "missing
+  replay" labels were misleading because it grouped physical cancellation with
+  logical retirement, and synchronous throw with asynchronous rejection.
+- Mutation controls prove both intended rules remain enforced. Removing only
+  truncate's queued-loading transition gives **177/6**, including all four
+  start/truncate cases, in `/tmp/tanstack-truncate-queued-status-final-mutant.json`.
+  Keeping a failed startup owner detached instead of rolling it back gives
+  **181/2**, both throw/truncate paths, in
+  `/tmp/tanstack-truncate-failed-owner-final-mutant.json`. Mutations were run
+  separately on frozen tests, then fully restored; production source matches
+  the preceding commit. They are deliberate invalid implementations, not
+  evidence of bugs in that preceding commit.
+- Restored seven-suite census: **488/34**, all 522 functions retained, in
+  `/tmp/tanstack-truncate-contract-final-census.json`. Exactly those five failed
+  names disappear from the same-seed prior **483/39** census; none are added.
+  Demand suite is **183/0**. Seed 1657011; Prettier/diff checks pass.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
