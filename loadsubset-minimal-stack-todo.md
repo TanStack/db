@@ -2003,6 +2003,29 @@ candidate repair scopes, not completed fixes or proof of root cause.
   multiplier in future broad campaigns; do not repeat all amplified suites
   after every one-line repair when focused and default-census checks suffice.
 
+- Removed the expected-bad replay assertion: `retains successful peer rows
+  after failed replay demand retires` now expects the successful peer's
+  replacement row (`two`, value 2), not the observed empty result. Setup,
+  retained-old-snapshot checks, final release, and exact unload counts remain.
+  No runtime change: shared replay recovery still needs repair. The test is
+  an ordinary failing assertion, not skipped or marked as an expected failure.
+  Its suite is **68 passing / 1 failing** in
+  `/tmp/tanstack-unpinned-peer-replay.json`.
+- Latest stable seven-suite census: **409 passing / 51 failing**, with no
+  separately pinned runtime-defect witness counted as passing. This moves one
+  already-known defect from the passing column into the failing column; it is
+  not a new runtime regression. Compared with the preceding 410/50 report,
+  the only added failure is that peer-retention assertion; no failures vanished.
+  Report: `/tmp/tanstack-unpinned-peer-census.json`. Counts are test functions,
+  including model/reach guards, not distinct defects or uniform runtime cells.
+- The earlier 100× budgeted rerun completed before this assertion change:
+  **89 passing / 4 failing**, all four matching existing ordered-work failures.
+  All 13 properties that timed out at the default five seconds completed with
+  `--testTimeout=120000`. Report:
+  `/tmp/tanstack-eager-release-100x-budgeted.json`. This clears the timeout
+  uncertainty; it does not make the known-red suites green or validate a
+  production repair for the newly unpinned assertion.
+
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
       behavior, and opaque callback roots.

@@ -3342,10 +3342,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
-  // Known red: failure restoration loses the successful peer's private rows.
-  // This records the continuation contract; explicit safe recovery may replace
-  // it once the lifecycle model specifies and verifies that recovery trace.
-  it(`records the known loss of successful peer rows after settled failure retirement`, async () => {
+  it(`retains successful peer rows after failed replay demand retires`, async () => {
     let begin!: () => void
     let write!: (
       message: ChangeMessageOrDeleteKeyMessage<ReplayRow, string>,
@@ -3431,10 +3428,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     for (const load of loads) {
       expect(unloads.filter((options) => options === load)).toHaveLength(1)
     }
-    // Pin only the known-red observation. Setup and cleanup errors must fail.
-    // Continuation would retain [{ id: `two`, value: 2 }]; explicit safe
-    // recovery may replace that requirement once its trace is specified.
-    expect(survivingRows).toEqual([])
+    expect(survivingRows).toEqual([{ id: `two`, value: 2 }])
   })
 
   it(`keeps replay completion failure separate from a peer release failure`, async () => {
