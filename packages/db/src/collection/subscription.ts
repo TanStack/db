@@ -376,15 +376,12 @@ export class CollectionSubscription
    * authoritative replay succeeds.
    */
   private handleTruncate() {
-    const demandsToReload = [...this.subsetDemands]
-
-    // Only buffer if there's an actual loadSubset handler that can do async work.
-    // Without a loadSubset handler, there's nothing to re-request and no reason to buffer.
-    // This prevents unnecessary buffering in eager sync mode or when loadSubset isn't implemented.
+    // Without a loader, replay only reconciles rows retained across cleanup.
     const hasLoadSubsetHandler = this.collection._sync.syncLoadSubsetFn !== null
+    const demandsToReload = hasLoadSubsetHandler ? [...this.subsetDemands] : []
 
-    // If there are no subsets to reload OR no loadSubset handler, just reset state
-    if (demandsToReload.length === 0 || !hasLoadSubsetHandler) {
+    // Retained rows still need the committed replacement even without demand.
+    if (demandsToReload.length === 0 && this.stalePublishedRows.size === 0) {
       this.snapshotSent = false
       this.loadedInitialState = false
       this.limitedSnapshotRowCount = 0
@@ -1450,8 +1447,10 @@ export class CollectionSubscription
     }
 
     // Only send changes that have not been sent yet
+    const knownRows =
+      this.truncateReplaySession?.privateRows ?? this.publishedRows
     const filteredSnapshot = snapshot.filter(
-      (change) => !this.sentKeys.has(change.key),
+      (change) => !this.sentKeys.has(change.key) && !knownRows.has(change.key),
     )
 
     // Add keys to sentKeys BEFORE calling callback to prevent race condition.

@@ -1243,11 +1243,10 @@ explicitly removed.
 This is the bounded protocol census. Do not add another production patch until
 every row is either green or has a named red witness.
 
-Latest checkpoint: **551 passing / 6 failing** across 557 test functions.
+Latest checkpoint: **570 passing / 4 failing** across 574 test functions.
 The demand suite is **195/0**, and history is **37/0**. The initial-work
 notification mismatch was a model error: readiness and publication have
-different wait sets. Remaining failures: publication **2** (duplicate snapshot
-delivery and retained-row truncate mismatch), settled-peer replay **0**, ordered
+different wait sets. Remaining failures: publication **0**, settled-peer replay **0**, ordered
 work **4**. Counts describe tests,
 not unique confirmed runtime bugs; contract-alignment notes below distinguish
 stale oracle expectations from implementation defects.
@@ -1260,7 +1259,7 @@ stale oracle expectations from implementation defects.
 | Cleanup/restart ownership                            | 20 restart cells plus fixed callback boundaries                                                     | green, including unavailable-loader pending-result cases     |
 | Async session fencing                                | 2–4 sessions, 1–2 demands, mixed outcomes, obsolete/current/interleaved settlement                  | green                                                        |
 | Generated async lifecycle histories                  | one pure reducer drives async-pending and sync-success histories with one ordered event trace       | 37 green; readiness/publication membership distinguished; both async exclusions removed |
-| Row-bearing lifecycle histories                      | independent public-row model; exact batches modulo independent-key order; fixed and random histories | 24 green / 2 red; independent writes and released-demand scope repaired; retained-row truncate and duplicate snapshot remain |
+| Row-bearing lifecycle histories                      | independent public-row model; exact batches modulo independent-key order; fixed and random histories | 43 green / 0 red; duplicate snapshots and retained-row reset repaired; live source truth checked independently; no visible-row request omission remains |
 | Replay phase transitions                             | setup/pending/settling/publishing crossed with release, reacquisition, supersession, abort, cleanup | 72 green; direct settled-peer recovery and consecutive failure/retry witnesses green |
 | Ordered route mechanics                              | page/prefix/boundary/full-source × return/throw/resolve/reject/abort/cleanup                        | green                                                        |
 | Ordered consumer integration                         | Collection/Effect parity, source-local recovery, public-window reentry, sync-session settlement     | 4 named ordered-work reds; settled-peer replay is counted separately |
@@ -1279,7 +1278,7 @@ matrix cells are deliberate variants of one fault, not separate diagnoses.
 | Synchronous replay/restart readiness      | historical 12   | queued loading is valid; unacquired-unload suffix fixed; unrestricted synchronous generator passes |
 | Released obsolete publication             | historical 1    | unsupported untagged canceled writes; conforming-source witness green; source/core ablations remain red |
 | Independent write during replay           | historical 1; repaired | successful replacement now preserves unrelated source rows written behind its gate |
-| Duplicate-owner snapshot                  | 1               | a second owner republishes an unchanged row as a fresh insert                |
+| Duplicate-owner snapshot                  | historical 1; repaired | snapshot reads now reuse known private/public rows to avoid duplicate inserts |
 | Aborted acquisition publication           | historical 1    | source must suppress canceled request writes; conforming-source witness green, no core bug claimed fixed |
 | No-acquisition truncate                   | 1               | eager demand is given a phantom unload after truncate and final release      |
 
@@ -2817,6 +2816,106 @@ candidate repair scopes, not completed fixes or proof of root cause.
   frozen commit. Combined runtime change is **19 added / 30 removed (-11)**,
   with one fewer saved set and no new state. Formatting and diff checks pass.
   Next concrete work remains the two publication cells, then four ordered reds.
+
+### Snapshot identity and authoritative retained-row reset
+
+- Baseline publication suite **24/2**,
+  `/tmp/tanstack-publication-final-two-red.json`. The duplicate snapshot is a
+  runtime bug: unrestricted subscriptions skip per-event sent-key tracking, but
+  snapshot filtering consulted only that set. Reuse the existing private/public
+  row map as well. Fixed named witness plus replay/subscription suite: **160/1**,
+  `/tmp/tanstack-snapshot-known-rows-probe.json`; only retained-row reset remains.
+- Removed `omitKnownRedVisibleRowRequests` entirely. No publication command is
+  rewritten or filtered by a known-red exclusion now. The underlying bounded
+  lifecycle generator still defines legal histories; this does not claim every
+  possible history or query form is generated.
+- The canceled-only reset witness was false-red: the model deleted only resident
+  source rows after cleanup, ignoring retained public rows. Authoritative reset
+  without pending acquisition replaces the whole published snapshot. Corrected
+  that rule, keeping the original witness and all its suffix commands.
+- Crossed empty reset with restart/no restart and absent/canceled ownership
+  (four fixed cells). This exposed a real runtime gap: with no remaining demand,
+  a reset skipped reconciliation and retained old rows indefinitely. Existing
+  replay state now handles that empty replacement after commit. No new field,
+  token, or tracker. No-loader sources start no phantom acquisition.
+- The unrestricted 10× probe was **27/3**,
+  `/tmp/tanstack-publication-unrestricted-probe.json`: the new no-owner cell and
+  both generated properties found retained-row reset. Fixed seed 1657005 failed
+  after 165 examples, path `164:18`; fresh seed 333468655 after 60, path
+  `59:13:0:0:0`. Kept both full shrunk histories, including no-op commands, and
+  added reacquisition/settlement/release/unsubscribe suffixes. After runtime fix,
+  targeted 10× using replay override 333468655 was **244/0**,
+  `/tmp/tanstack-publication-retained-reset-10x.json` (publication 30, replay 72,
+  adjacent 142).
+- Added six fixed same-commit replacement cells: absent/canceled owner ×
+  identical row/changed row/different key. The fixture and pure model both accept
+  an explicit truncate replacement row; exact batch comparisons prohibit a
+  temporary empty publication. This replacement payload is fixed-matrix coverage,
+  not a new random-generator dimension. Fresh 10× publication **38/0**, fixed
+  seed 1657005 plus fresh 2086674390 (600 examples each),
+  `/tmp/tanstack-publication-atomic-reset-10x.json`. Interim census **565/4**,
+  `/tmp/tanstack-publication-complete-census.json`, 569 functions.
+- Loaderless controls initially used an invalid on-demand fixture: four
+  configuration errors, not runtime regressions (**565/8** interim census,
+  `/tmp/tanstack-publication-loaderless-census.json`). Correct eager configuration
+  then exposed the model's source-authority boundary (**38/4** publication,
+  `/tmp/tanstack-publication-eager-controls.json`): this fixture marks its complete
+  empty source ready at restart, so it must remove retained rows then, not wait
+  for a later truncate. Corrected that fixture-specific expectation and kept all
+  four controls, now named for eager restart. They are not random eager-history
+  coverage or evidence of a new eager bug. **42/0**,
+  `/tmp/tanstack-publication-eager-contract-controls.json`.
+- Red/green: temporarily restored subscription.ts exactly to HEAD, verified by
+  empty runtime diff. Final tests **35/7**,
+  `/tmp/tanstack-publication-final-old-runtime-control.json`: duplicate snapshot,
+  empty no-owner reset, different-key atomic replacement, both pinned reset
+  histories, and both generated properties fail. Earlier 38-test control **31/7**
+  is `/tmp/tanstack-publication-old-runtime-control.json`. Restored the proposed
+  runtime afterward; no control code remains. Restored adjacent run before eager
+  additions **252/0**, `/tmp/tanstack-publication-restored-adjacent.json`.
+- Final seven-suite census with random-property seed override 1657011:
+  `/tmp/tanstack-publication-final-census.json`, **569/4**, 573 functions: history
+  37/0, demand 195/0, publication 42/0, replay 72/0, refinement 7/0, ordered
+  lifecycle 196/0, ordered work 20/4. Fixed properties retain their fixed seeds.
+  Production diff **7 added / 8 removed (-1 line)**; reuses existing state.
+  Four ordered-work reds remain; no claim of full suite correctness or final
+  100× completion. Next: commit/loss audit, then ordered consumer recovery.
+
+- Later fresh 10× **41/1**, `/tmp/tanstack-publication-final-fresh-10x.json`,
+  found a model source/publication conflation after 592 examples: fresh seed
+  1337491191, path `591:20:1:8:8:8:7:7`. Final-owner retirement copied retained
+  visible rows into model source state, inventing rows deleted by truncate.
+  Removed both such copies; retained the full witness and a real source-update
+  suffix. Replay **43/0**, `/tmp/tanstack-publication-source-truth-replay-10x.json`.
+  This is an oracle correction, not another runtime fix.
+- Added direct model-versus-collection source-row equality while subscribed.
+  Initial unrestricted assertion was out of range after unsubscribe: the source
+  keeps processing commands but the publication model intentionally stops.
+  `/tmp/tanstack-publication-source-truth-fresh-10x.json` was **36/7**, including
+  fixed seed 1657005 path `0:1:0:0:2:2:2:3:3:3:2` and fresh -2130962936 path
+  `11:1:0:1:0:0`; both shrink to post-unsubscribe source work. Bounded the new
+  source equality to live subscriptions without removing any command or the
+  existing post-unsubscribe callback-silence assertions. These were assertion
+  domain errors, not seven new runtime defects.
+- Latest targeted 10× **43/0** with override 1337491191 and fixed 1657005,
+  `/tmp/tanstack-publication-source-truth-bounded-10x.json` (600 examples each).
+  Latest seven-suite census **570/4**, 574 functions,
+  `/tmp/tanstack-publication-bounded-source-final-census.json`; same suite splits
+  as above except publication now 43/0. Intermediate expanded source-assertion
+  census is `/tmp/tanstack-publication-source-truth-census.json`, not the latest
+  checkpoint. No final 100× claim.
+- Repeated the old-runtime control after the source-truth assertion and newest
+  witness: **36/7**, `/tmp/tanstack-publication-source-truth-old-runtime-control.json`.
+  Runtime matched HEAD exactly during the control and was restored afterward.
+  The same seven failures remain; the new model witness does not claim a new
+  old-runtime defect.
+- Restored publication suite **43/0**, default fixed-plus-fresh run,
+  `/tmp/tanstack-publication-final-restored.json`. No temporary mutation remains.
+- Formatting/diff checks pass. Targeted eslint reports five pre-existing errors
+  outside changed lines and two shadow warnings; no standalone typecheck or
+  clean lint claim. JSON supports counts/failures/seeds, not successful run counts,
+  environment overrides, temporary patch identity/restoration, or lint results;
+  those rely on the recorded execution commands.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar

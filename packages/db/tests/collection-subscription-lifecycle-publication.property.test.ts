@@ -34,7 +34,10 @@ type SourceMutation = {
   action: `upsert` | `delete`
   value: number
 }
-type PublicationCommand = LifecycleCommand | SourceMutation
+type PublicationCommand =
+  | Exclude<LifecycleCommand, { type: `truncate` }>
+  | { type: `truncate`; replacement?: Row }
+  | SourceMutation
 type SyncOperations = Parameters<SyncConfig<Row, RowKey>[`sync`]>[0]
 type RuntimeAttempt = {
   id: number
@@ -94,6 +97,7 @@ type PublicationMismatch = {
   observed: Array<Array<PublicationChange>>
 }
 type PublicationRunOptions = {
+  withoutLoader?: boolean
   continueAfterMismatch?: boolean
   historyName?: string
   mismatches?: Array<PublicationMismatch>
@@ -226,7 +230,6 @@ function finishReplacement(
   if (replacement.failed) {
     replacement.failed = true
     if (currentAttempts.length === 0) {
-      publication.source = new Map(publication.visible)
       publication.replacement = undefined
     }
   } else if (
@@ -236,8 +239,7 @@ function finishReplacement(
     publishIfChanged(publication, new Map(replacement.rows))
     publication.replacement = undefined
   } else {
-    // Closing a replacement by releasing its final owner retires private work.
-    publication.source = new Map(publication.visible)
+    // Retire private publication work, not the source's independently applied state.
     publication.replacement = undefined
   }
 }
@@ -248,40 +250,31 @@ function projectPublication(
   command: PublicationCommand,
   effect: LifecycleEffect,
   priorPublicationCount: number,
+  eagerRestart: boolean,
 ): void {
   if (
     command.type === `truncate` &&
     lifecycle.active &&
     !lifecycle.unsubscribed
   ) {
-    const removedRows = [...publication.source].sort(([left], [right]) =>
-      left.localeCompare(right),
-    )
     publication.source.clear()
+    if (command.replacement) {
+      publication.source.set(
+        command.replacement.id,
+        cloneRow(command.replacement),
+      )
+    }
     if (lifecycle.publicationBarrierOpen) {
       publication.replacement = {
         session: lifecycle.session,
         replay: lifecycle.replay,
-        rows: new Map(),
+        rows: new Map(publication.source),
         failed: false,
       }
     } else {
       publication.replacement = undefined
-      if (removedRows.length > 0) {
-        publication.batches.push(
-          removedRows.map(([key, value]) => ({
-            type: `delete` as const,
-            key,
-            value: cloneRow(value),
-          })),
-        )
-        const next = new Map(publication.visible)
-        for (const [key] of removedRows) {
-          next.delete(key)
-          publication.sentKeys.delete(key)
-        }
-        publication.visible = next
-      }
+      // An authoritative reset also removes rows retained across cleanup.
+      publishIfChanged(publication, new Map(publication.source))
     }
   } else if (command.type === `restart` && lifecycle.publicationBarrierOpen) {
     publication.replacement = {
@@ -359,6 +352,18 @@ function projectPublication(
     finishReplacement(publication, lifecycle)
   }
 
+  // This fixture marks an eager restart ready with its complete (empty) source.
+  // Unlike on-demand restart, that is authority to retire the retained snapshot.
+  if (
+    eagerRestart &&
+    command.type === `restart` &&
+    lifecycle.publications > priorPublicationCount &&
+    !mapsEqual(publication.visible, publication.source)
+  ) {
+    publishIfChanged(publication, new Map(publication.source))
+    priorPublicationCount++
+  }
+
   for (
     let index = priorPublicationCount;
     index < lifecycle.publications;
@@ -394,44 +399,6 @@ const sourceMutationArbitrary: fc.Arbitrary<SourceMutation> = fc.record({
   value: fc.integer({ min: 0, max: 5 }),
 })
 
-function omitKnownRedVisibleRowRequests(
-  history: ReadonlyArray<PublicationCommand>,
-): Array<PublicationCommand> {
-  const lifecycle = createLifecycleModel()
-  const sourceRows = new Set<RowKey>()
-  const result: Array<PublicationCommand> = []
-  for (const command of history) {
-    if (command.type === `source`) {
-      result.push(command)
-      if (!lifecycle.active || lifecycle.unsubscribed) continue
-      if (command.action === `delete`) sourceRows.delete(command.key)
-      else sourceRows.add(command.key)
-      continue
-    }
-
-    if (command.type === `request` && sourceRows.has(command.demand)) {
-      continue
-    }
-
-    result.push(command)
-    const effect = reduceLifecycle(lifecycle, command)
-    if (command.type === `truncate` && lifecycle.active) sourceRows.clear()
-    if (command.type === `cleanup`) sourceRows.clear()
-    if (
-      command.type === `settle` &&
-      command.outcome === `resolve` &&
-      effect.attemptId !== undefined
-    ) {
-      const attempt = lifecycle.attempts[effect.attemptId]!
-      const isCurrent = lifecycle.owners.some(
-        ({ attemptId }) => attemptId === attempt.id,
-      )
-      if (isCurrent && !attempt.aborted) sourceRows.add(attempt.demand)
-    }
-  }
-  return result
-}
-
 const publicationCommandHistoryArbitrary: fc.Arbitrary<
   Array<PublicationCommand>
 > = greenLifecycleHistoryArbitrary.chain((history) =>
@@ -451,8 +418,7 @@ const publicationCommandHistoryArbitrary: fc.Arbitrary<
         commands.splice(position, 0, command)
       }
       return commands
-    })
-    .map(omitKnownRedVisibleRowRequests),
+    }),
 )
 
 async function runPublicationHistory(
@@ -491,13 +457,14 @@ async function runPublicationHistory(
   const collection = createCollection<Row, RowKey>({
     id: `generated-lifecycle-publication`,
     getKey: ({ id }) => id,
-    syncMode: `on-demand`,
+    syncMode: options.withoutLoader ? `eager` : `on-demand`,
     sync: {
       sync: (operations) => {
         const ownSession = ++session
         operationsBySession.set(ownSession, operations)
         sourceRows.set(ownSession, new Map())
         operations.markReady()
+        if (options.withoutLoader) return
         return {
           loadSubset: (options) => {
             const demand = demandForWhere.get(options.where)
@@ -748,9 +715,20 @@ async function runPublicationHistory(
         const operations = operationsBySession.get(session)
         operations?.begin()
         operations?.truncate()
+        if (command.replacement) {
+          operations?.write({
+            type: `insert`,
+            value: cloneRow(command.replacement),
+          })
+        }
         const receipt = operations?.commit()
         if (receipt !== true) await receipt
         sourceRows.get(session)?.clear()
+        if (command.replacement) {
+          sourceRows
+            .get(session)
+            ?.set(command.replacement.id, cloneRow(command.replacement))
+        }
       } else if (command.type === `cleanup` && active) {
         executed = true
         for (const owner of owners) {
@@ -780,7 +758,22 @@ async function runPublicationHistory(
         command,
         effect,
         priorPublicationCount,
+        options.withoutLoader ?? false,
       )
+      // Public retention never rewrites the independently installed source.
+      // The publication model stops tracking source commands after unsubscribe;
+      // its callback-silence assertions below still cover that suffix.
+      if (!lifecycle.unsubscribed)
+        check(
+          [...(active ? collection.values() : [])]
+            .map(cloneRow)
+            .sort((left, right) => left.id.localeCompare(right.id)),
+          `source state after command ${index}: ${JSON.stringify(command)}`,
+        ).toEqual(
+          [...publication.source.values()].sort((left, right) =>
+            left.id.localeCompare(right.id),
+          ),
+        )
       assertPublications(
         command,
         index,
@@ -1378,8 +1371,8 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
   })
 
   it(`matches retained rows across an empty restart and canceled-only truncates`, async () => {
-    // Seed 2018803696, path 65:29:0:0:0. The first mismatch is a retained
-    // row deletion at truncate; classify this boundary before changing runtime.
+    // Seed 2018803696, path 65:29:0:0:0 exposed the model's missing retained-row
+    // deletion: an authoritative empty reset is not limited to resident rows.
     await runPublicationHistory(
       [
         { type: `source`, key: `a`, action: `upsert`, value: 0 },
@@ -1413,6 +1406,157 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       ],
       { continueAfterMismatch: true },
     )
+  })
+
+  it.each(
+    [false, true].flatMap((restart) =>
+      [false, true].map((canceledOwner) => ({ restart, canceledOwner })),
+    ),
+  )(
+    `publishes an authoritative empty reset: %j`,
+    async ({ restart, canceledOwner }) => {
+      await runPublicationHistory([
+        { type: `source`, key: `a`, action: `upsert`, value: 0 },
+        ...(restart
+          ? [{ type: `cleanup` } as const, { type: `restart` } as const]
+          : []),
+        ...(canceledOwner
+          ? [
+              { type: `request`, demand: `b` } as const,
+              { type: `abort`, demand: `b` } as const,
+            ]
+          : []),
+        { type: `truncate` },
+        { type: `truncate` },
+        { type: `request`, demand: `a` },
+        {
+          type: `settle`,
+          demand: `a`,
+          scope: `current`,
+          age: `oldest`,
+          outcome: `resolve`,
+        },
+        { type: `release`, demand: `a` },
+        { type: `release`, demand: `b` },
+        { type: `unsubscribe` },
+      ])
+    },
+  )
+
+  it.each(
+    [false, true].flatMap((canceledOwner) =>
+      (
+        [
+          { id: `a`, value: 0 },
+          { id: `a`, value: 1 },
+          { id: `c`, value: 2 },
+        ] satisfies Array<Row>
+      ).map((replacement) => ({ canceledOwner, replacement })),
+    ),
+  )(
+    `installs a retained-row replacement atomically: %j`,
+    async ({ canceledOwner, replacement }) => {
+      await runPublicationHistory([
+        { type: `source`, key: `a`, action: `upsert`, value: 0 },
+        { type: `cleanup` },
+        { type: `restart` },
+        ...(canceledOwner
+          ? [
+              { type: `request`, demand: `b` } as const,
+              { type: `abort`, demand: `b` } as const,
+            ]
+          : []),
+        { type: `truncate`, replacement },
+        { type: `source`, key: replacement.id, action: `upsert`, value: 3 },
+        { type: `release`, demand: `b` },
+        { type: `unsubscribe` },
+      ])
+    },
+  )
+
+  it.each([
+    undefined,
+    { id: `a`, value: 0 },
+    { id: `a`, value: 1 },
+    { id: `c`, value: 2 },
+  ] satisfies Array<Row | undefined>)(
+    `publishes eager restart before a later source reset: %j`,
+    async (replacement) => {
+      await runPublicationHistory(
+        [
+          { type: `source`, key: `a`, action: `upsert`, value: 0 },
+          { type: `cleanup` },
+          { type: `restart` },
+          { type: `truncate`, replacement },
+          { type: `source`, key: `a`, action: `upsert`, value: 3 },
+          { type: `unsubscribe` },
+        ],
+        { withoutLoader: true },
+      )
+    },
+  )
+
+  it(`resets retained rows after no-op cleanup and release commands`, async () => {
+    // Seed 1657005, path 164:18 after removing the visible-row request omission.
+    await runPublicationHistory([
+      { type: `source`, key: `a`, action: `upsert`, value: 1 },
+      { type: `cleanup` },
+      { type: `cleanup` },
+      { type: `release`, demand: `b` },
+      { type: `restart` },
+      { type: `truncate` },
+      { type: `request`, demand: `a` },
+      { type: `release`, demand: `a` },
+      { type: `request`, demand: `a` },
+      {
+        type: `settle`,
+        demand: `a`,
+        scope: `current`,
+        age: `oldest`,
+        outcome: `resolve`,
+      },
+      { type: `release`, demand: `a` },
+      { type: `unsubscribe` },
+    ])
+  })
+
+  it(`resets retained rows after the last replay owner retires`, async () => {
+    // Seed 333468655, path 59:13:0:0:0.
+    await runPublicationHistory([
+      { type: `source`, key: `a`, action: `upsert`, value: 0 },
+      { type: `request`, demand: `b` },
+      { type: `truncate` },
+      { type: `release`, demand: `b` },
+      { type: `truncate` },
+      { type: `release`, demand: `a` },
+      { type: `truncate` },
+      { type: `request`, demand: `a` },
+      {
+        type: `settle`,
+        demand: `a`,
+        scope: `current`,
+        age: `oldest`,
+        outcome: `resolve`,
+      },
+      { type: `release`, demand: `a` },
+      { type: `unsubscribe` },
+    ])
+  })
+
+  it(`does not restore source rows when the final replay owner retires`, async () => {
+    // Seed 1337491191, path 591:20:1:8:8:8:7:7.
+    await runPublicationHistory([
+      { type: `source`, key: `a`, action: `upsert`, value: 0 },
+      { type: `restart` },
+      { type: `truncate` },
+      { type: `source`, key: `a`, action: `upsert`, value: 0 },
+      { type: `request`, demand: `b` },
+      { type: `truncate` },
+      { type: `release`, demand: `b` },
+      { type: `source`, key: `a`, action: `delete`, value: 0 },
+      { type: `source`, key: `a`, action: `upsert`, value: 1 },
+      { type: `unsubscribe` },
+    ])
   })
 
   const { multiplier, ...replay } = readOracleRunConfig()
