@@ -880,7 +880,7 @@ export class CollectionSyncManager<
   public cleanup(): void {
     // Invalidate callbacks retained by asynchronous work from this session
     // before invoking adapter cleanup or allowing a new session to start.
-    this.syncEpoch++
+    const cleanupEpoch = ++this.syncEpoch
     this.loadSubsetSession++
     this.rejectPreload?.(new CollectionPreloadAbortedError())
     const cleanup = this.syncCleanupFn
@@ -890,6 +890,9 @@ export class CollectionSyncManager<
     try {
       cleanup?.()
     } catch (error) {
+      // Keep failed cleanup retryable, but never overwrite a replacement
+      // session installed by reentrant adapter code.
+      if (this.syncEpoch === cleanupEpoch) this.syncCleanupFn = cleanup
       // Re-throw in a microtask to surface the error after cleanup completes
       queueMicrotask(() => {
         if (error instanceof Error) {

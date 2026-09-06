@@ -476,72 +476,83 @@ describe(`loadSubset failure matrix`, () => {
     },
   )
 
-  it(`retries live cleanup after an undefined failure survives demand retirement`, async () => {
-    const parent = createStaticSource(`undefined-cleanup-retry-parent`, [row])
-    let unloadCount = 0
-    const child = createCollection<Row>({
-      id: `undefined-cleanup-retry-child`,
-      getKey: (item) => item.id,
-      syncMode: `on-demand`,
-      autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
-      sync: {
-        sync: ({ markReady }) => {
-          markReady()
-          return {
-            loadSubset: () => true,
-            unloadSubset: () => {
-              unloadCount++
-              if (unloadCount <= 2) throw undefined
-            },
-          }
+  it.each([undefined, NaN, new Error(`release failed`)])(
+    `retries live cleanup after %s survives demand retirement`,
+    async (failure) => {
+      const parent = createStaticSource(`undefined-cleanup-retry-parent`, [row])
+      let unloadCount = 0
+      const child = createCollection<Row>({
+        id: `undefined-cleanup-retry-child`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => true,
+              unloadSubset: () => {
+                unloadCount++
+                if (unloadCount <= 2) throw failure
+              },
+            }
+          },
         },
-      },
-    })
-    const live = createLiveQueryCollection((q) =>
-      q
-        .from({ item: parent })
-        .leftJoin({ child }, ({ item, child: childRow }) =>
-          eq(item.id, childRow.parentId),
-        ),
-    )
-    const originalQueueMicrotask = globalThis.queueMicrotask
-    const queuedMicrotasks: Array<() => void> = []
+      })
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ item: parent })
+          .leftJoin({ child }, ({ item, child: childRow }) =>
+            eq(item.id, childRow.parentId),
+          ),
+      )
+      const originalQueueMicrotask = globalThis.queueMicrotask
+      const queuedMicrotasks: Array<() => void> = []
 
-    try {
-      await live.preload()
-
-      parent.utils.begin()
-      parent.utils.write({ type: `delete`, value: row })
-      parent.utils.commit()
-      await flushFailures()
-
-      expect(unloadCount).toBe(1)
-      expect(live.utils.lastSubsetError).toBeInstanceOf(Error)
-
-      globalThis.queueMicrotask = (callback) => {
-        queuedMicrotasks.push(callback)
-      }
-      await live.cleanup()
-      expect(unloadCount).toBe(2)
-      expect(queuedMicrotasks).toHaveLength(1)
-
-      let cleanupError: unknown
       try {
-        queuedMicrotasks[0]!()
-      } catch (error) {
-        cleanupError = error
-      }
-      expect(cleanupError).toBeInstanceOf(SyncCleanupError)
-      expect((cleanupError as Error).message).toContain(`error: undefined`)
+        await live.preload()
 
-      await live.cleanup()
-      expect(unloadCount).toBe(3)
-    } finally {
-      globalThis.queueMicrotask = originalQueueMicrotask
-      await Promise.all([live.cleanup(), parent.cleanup(), child.cleanup()])
-    }
-  })
+        parent.utils.begin()
+        parent.utils.write({ type: `delete`, value: row })
+        parent.utils.commit()
+        await flushFailures()
+
+        expect(unloadCount).toBe(1)
+        expect(live.utils.lastSubsetError).toBeInstanceOf(Error)
+
+        globalThis.queueMicrotask = (callback) => {
+          queuedMicrotasks.push(callback)
+        }
+        await live.cleanup()
+        expect(unloadCount).toBe(2)
+        expect(queuedMicrotasks).toHaveLength(1)
+
+        let cleanupError: unknown
+        try {
+          queuedMicrotasks[0]!()
+        } catch (error) {
+          cleanupError = error
+        }
+        expect(cleanupError).toBeInstanceOf(SyncCleanupError)
+        expect((cleanupError as Error).message).toContain(
+          failure instanceof Error ? failure.message : String(failure),
+        )
+        if (failure instanceof Error)
+          expect((cleanupError as Error).cause).toBe(failure)
+
+        await live.cleanup()
+        expect(unloadCount).toBe(3)
+        expect(parent.subscriberCount).toBe(0)
+        expect(child.subscriberCount).toBe(0)
+        await live.cleanup()
+        expect(unloadCount).toBe(3)
+      } finally {
+        globalThis.queueMicrotask = originalQueueMicrotask
+        await Promise.all([live.cleanup(), parent.cleanup(), child.cleanup()])
+      }
+    },
+  )
 
   it(`preserves a synchronous ordered error after reentrant cleanup`, async () => {
     const error = new Error(`ordered load failed after cleanup`)

@@ -529,7 +529,9 @@ invokes first-ready callbacks; those callbacks belong to the discarded run.
 It does not turn still-owned demand into cleanup debt. Physical
 acquisitions and cleanup debt belong to the sync session that created them;
 cleanup retires both instead of sending an old release to a replacement
-adapter. Demand requested while the Collection is cleaned up remains detached
+adapter. A failed adapter cleanup callback remains retryable only while that
+retirement is current; it cannot replace a newer session's cleanup callback.
+Demand requested while the Collection is cleaned up remains detached
 rather than pretending that a physical acquisition succeeded. When the
 Collection starts a new sync session, the subscription enters `loadingSubset`
 before it queues reacquisition, then reacquires all detached demand through a

@@ -28,6 +28,57 @@ describe(`Collection Error Handling`, () => {
   })
 
   describe(`Cleanup Error Handling`, () => {
+    it.each([false, true])(
+      `retries failed cleanup only before replacement, nested restart=%s`,
+      async (restart) => {
+        const failure = new Error(`cleanup failed`)
+        const cleanups: Array<number> = []
+        let session = 0
+        const collection = createCollection<{ id: string }>({
+          id: `failed-cleanup-session-${restart}`,
+          getKey: ({ id }) => id,
+          sync: {
+            sync: ({ markReady }) => {
+              const currentSession = session++
+              markReady()
+              return () => {
+                cleanups.push(currentSession)
+                if (cleanups.length !== 1) return
+                if (restart) {
+                  void collection.cleanup()
+                  collection.startSyncImmediate()
+                }
+                throw failure
+              }
+            },
+          },
+        })
+
+        collection.startSyncImmediate()
+        try {
+          await collection.cleanup()
+          expect(cleanups).toEqual([0])
+          expect(mockQueueMicrotask).toHaveBeenCalledTimes(1)
+          let reportedError: unknown
+          try {
+            mockQueueMicrotask.mock.calls[0]![0]()
+          } catch (error) {
+            reportedError = error
+          }
+          expect(reportedError).toBeInstanceOf(SyncCleanupError)
+          expect((reportedError as Error).cause).toBe(failure)
+
+          await collection.cleanup()
+          expect(cleanups).toEqual(restart ? [0, 1] : [0, 0])
+          await collection.cleanup()
+          expect(cleanups).toHaveLength(2)
+          expect(mockQueueMicrotask).toHaveBeenCalledTimes(1)
+        } finally {
+          await collection.cleanup()
+        }
+      },
+    )
+
     it(`should complete cleanup successfully even when sync cleanup function throws an Error`, async () => {
       const collection = createCollection<{ id: string; name: string }>({
         id: `error-test-collection`,
@@ -319,9 +370,11 @@ describe(`Collection Error Handling`, () => {
         },
       })
       const preload = collection.preload()
-
+      const cancelled = expect(preload).rejects.toMatchObject({
+        name: `AbortError`,
+      })
       await collection.cleanup()
-      await preload
+      await cancelled
       markError()
 
       expect(collection.status).toBe(`cleaned-up`)
@@ -347,9 +400,11 @@ describe(`Collection Error Handling`, () => {
       const preload = collection.preload()
       expect(sessions).toHaveLength(1)
       const first = sessions[0]!
-
+      const cancelled = expect(preload).rejects.toMatchObject({
+        name: `AbortError`,
+      })
       await collection.cleanup()
-      await preload
+      await cancelled
       const restartedPreload = collection.preload()
       expect(sessions).toHaveLength(2)
       const second = sessions[1]!
@@ -379,8 +434,11 @@ describe(`Collection Error Handling`, () => {
 
       const firstPreload = collection.preload()
       const first = sessions[0]!
+      const cancelled = expect(firstPreload).rejects.toMatchObject({
+        name: `AbortError`,
+      })
       await collection.cleanup()
-      await firstPreload
+      await cancelled
 
       const secondPreload = collection.preload()
       const second = sessions[1]!

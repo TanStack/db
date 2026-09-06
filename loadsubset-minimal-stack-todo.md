@@ -1247,8 +1247,8 @@ Latest checkpoint: **601 passing / 0 failing** across 601 test functions.
 The demand suite is **199/0**, and history is **37/0**. The initial-work
 notification mismatch was a model error: readiness and publication have
 different wait sets. Remaining failures: publication **0**, settled-peer replay **0**, ordered
-work **0**. The wider adjacent run has another **4 failing functions**:
-one live cleanup-retry and three window-behavior assertions. Six ordered incremental
+work **0**. The wider adjacent run has another **3 failing functions**:
+three window-behavior assertions. Live cleanup retry is repaired below. Six ordered incremental
 failure cells now reach the intended post-startup phase and pass; no runtime
 change was needed for those cells. These are separately queued below. Counts describe tests,
 not unique confirmed runtime bugs; contract-alignment notes below distinguish
@@ -3016,6 +3016,7 @@ candidate repair scopes, not completed fixes or proof of root cause.
       Six live ordered cells are reconciled below; nine failures remain.
       The release-error reentry step below resolves another five assertions;
       four remain: live cleanup retry and three window-behavior cases.
+      Live cleanup retry is now repaired; only the three window cases remain.
 
 ### Ordered work bounds and tie-boundary retention
 
@@ -3257,6 +3258,52 @@ candidate repair scopes, not completed fixes or proof of root cause.
   - `retries live cleanup after an undefined failure survives demand retirement`:
     two unloads, expected three. These remain assertion failures awaiting
     diagnosis, not four confirmed distinct runtime defects.
+
+- Continuation audit of `41290dd4` found no supported omission in the identity
+  assertion follow-up or its three reports. This reused the prior auditor after
+  a fresh scanner hit the thread limit, so prior framing and source-first order
+  may hide omissions. It verified function/suite success distinctions, retained
+  suffixes, and seed labels, but did not inspect the verbose hook-failure output
+  or run tests. No independent runtime/command/lint/typecheck endorsement.
+
+### Failed live cleanup retry
+
+- Clearing adapter hooks before cleanup was required for session reentry, but
+  also discarded a throwing cleanup callback permanently. Retain that failed
+  callback only if the existing sync epoch still identifies this retirement.
+  A reentrant replacement keeps its own callback. Load/unload hooks stay
+  detached. **4 production lines added / 1 removed**, no stored state added.
+- Expanded the old undefined-throw witness to undefined/NaN/Error, preserving
+  error surfacing and two failed unloads, then proving successful explicit
+  cleanup retry, zero source subscribers, and no duplicate release on a later
+  cleanup. Error instances also keep their cause identity. Before runtime fix:
+  **0/3**, `/tmp/tanstack-live-cleanup-retry-expanded-red.json`.
+- Added cleanup-handle controls with/without a nested replacement session.
+  Before fix **1/1**, `/tmp/tanstack-cleanup-handle-session-red.json`:
+  same-retirement retry is missing, while replacement ownership already passes.
+  They assert original error cause, callback session IDs, retry/no-repeat, and
+  one surfaced error. These check cleanup-handle ownership, not full nested
+  restart data/readiness coherence.
+- First runtime with full error/error-matrix suites **60/3**,
+  `/tmp/tanstack-live-cleanup-retry-green.json`: all five cleanup controls pass;
+  three old session-isolation tests stop at abandoned preload rejection. They
+  expected cleanup to resolve unfinished preload, contrary to the established
+  AbortError contract. Exact old-runtime ablation (empty sync.ts diff verified)
+  gives **56/7**, `/tmp/tanstack-live-cleanup-retry-old-runtime.json`: the same
+  three preload assertions plus four cleanup retry witnesses fail. Restored
+  the runtime; no control remains.
+- Correct those three setup assumptions by observing the pending preload's
+  AbortError before cleanup, then awaiting that assertion before exercising
+  stale callbacks. All original stale-error/transaction assertions remain.
+  Final adjacent run **126/0**, success true:
+  `/tmp/tanstack-live-cleanup-retry-final-adjacent.json` (errors 17, subscription
+  63, error matrix 46). No runtime change was needed for those setup errors.
+- Eleven-suite checkpoint with seed override 1657011 **877/3**:
+  `/tmp/tanstack-live-cleanup-retry-census.json`. Bounded **601/0** and adjacent
+  **276/3**; the same three pagination window failure names remain. The three
+  collection-error setup corrections came afterward and are covered by the
+  final adjacent run. Prettier/diff pass; no new lint/typecheck or final 100×
+  claim. The architecture now states the failed-cleanup callback's epoch bound.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
