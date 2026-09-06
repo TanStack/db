@@ -350,7 +350,6 @@ export class CollectionSubscriber<
       orderByInfo,
       subscription,
       this.alias,
-      () => this.biggest,
       (result, holdPublication) => {
         if (result instanceof Promise) {
           this.collectionConfigBuilder.trackOrderedLoadPromise(

@@ -688,11 +688,24 @@ acquisition instead of letting its queued success erase the failure.
 A later explicit window operation has a new generation and may retry from the
 safe source boundary.
 
-An explicit window move establishes the requested source prefix from zero.
-Live inserts may fill the local top-K without delivering earlier source rows,
-so local row count alone cannot prove the new window. This uses the existing
-indexed prefix path, not a full-source recovery or another retained frontier.
-Ordinary forward refill within an operation can still use a cursor.
+The ordered loader retains one settled loading boundary, separately from the
+largest live row sent to D2. After a successful finite acquisition, it reads at
+most the requested limit within that request's filtered, ordered range. That
+range's last available row can advance the boundary; an unrelated live outlier
+cannot advance it merely by entering D2. This relies on the adapter fulfilling
+the exact ordered request, not just resolving after an arbitrary partial write.
+An empty range does not invent a boundary or prove source exhaustion.
+
+An explicit window move counts current rows at or before that boundary in the
+requested prefix. It acquires only the missing portion, with both cursor and
+offset derived from that confirmed range, not from all observed rows. These
+reads reuse the Collection's indexed snapshot code; they retain no page list
+or second row index. Transfer checks and local-read work are separate costs:
+counting a long prefix can still revisit its rows. Boundary-read failures use
+the same authoritative recovery path as failed acquisitions. Deletes and
+source-order changes invalidate finite coverage as described below. Cleanup
+and truncate discard the boundary; replay establishes an authoritative source
+replacement instead of reviving a stale cursor.
 
 An initial ordered load or imperative window move includes every page,
 tie-boundary request, and forward refill needed to reach its fixed point. Its
@@ -938,20 +951,20 @@ create recursive Collection machinery.
 
 ## Executable contracts
 
-| Contract                                                                    | Test suite                                                                   |
-| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| State equivalence, route lifecycle, transition history, and batch partition | `packages/db/tests/query/includes-oracle.property.test.ts`                   |
-| Joined multiplicity, alias identity, and null-key normalization             | `packages/db/tests/query/includes-query-shape-oracle.test.ts`                |
-| Demand, cancellation, and progressive timing                                | `packages/db/tests/query/includes-temporal-oracle.test.ts`                   |
-| Optimistic confirmation, rollback, and later reactivity                     | `packages/db/tests/query/includes-optimistic-oracle.property.test.ts`        |
-| Coherent layered publication                                                | `packages/db/tests/query/includes-publication-oracle.test.ts`                |
-| Collection facades, event coherence, and route activation                   | `packages/db/tests/query/includes-collection-oracle.property.test.ts`        |
-| Correlated physical work                                                    | `packages/db/tests/query/includes-work-counter-oracle.test.ts`               |
-| Route-context discovery and transport across recursive and join boundaries  | `packages/db/tests/query/includes-context-transport-oracle.test.ts`          |
-| Functional projection timing, output preservation, and bounded view isolation | `packages/db/tests/query/includes-functional-projection-oracle.test.ts` |
-| Cross-formulation equivalence and reference-sensitive route identity        | `packages/db/tests/query/includes-cross-formulation-oracle.property.test.ts` |
-| Query-db ownership                                                          | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`      |
-| Reachable nested shape                                                      | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts`    |
+| Contract                                                                      | Test suite                                                                   |
+| ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| State equivalence, route lifecycle, transition history, and batch partition   | `packages/db/tests/query/includes-oracle.property.test.ts`                   |
+| Joined multiplicity, alias identity, and null-key normalization               | `packages/db/tests/query/includes-query-shape-oracle.test.ts`                |
+| Demand, cancellation, and progressive timing                                  | `packages/db/tests/query/includes-temporal-oracle.test.ts`                   |
+| Optimistic confirmation, rollback, and later reactivity                       | `packages/db/tests/query/includes-optimistic-oracle.property.test.ts`        |
+| Coherent layered publication                                                  | `packages/db/tests/query/includes-publication-oracle.test.ts`                |
+| Collection facades, event coherence, and route activation                     | `packages/db/tests/query/includes-collection-oracle.property.test.ts`        |
+| Correlated physical work                                                      | `packages/db/tests/query/includes-work-counter-oracle.test.ts`               |
+| Route-context discovery and transport across recursive and join boundaries    | `packages/db/tests/query/includes-context-transport-oracle.test.ts`          |
+| Functional projection timing, output preservation, and bounded view isolation | `packages/db/tests/query/includes-functional-projection-oracle.test.ts`      |
+| Cross-formulation equivalence and reference-sensitive route identity          | `packages/db/tests/query/includes-cross-formulation-oracle.property.test.ts` |
+| Query-db ownership                                                            | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`      |
+| Reachable nested shape                                                        | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts`    |
 
 Each oracle identifies the first divergent checkpoint and compares either the
 whole result or one exact structural difference. Correlated-materialization

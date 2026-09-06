@@ -619,12 +619,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       // For ordered aliases with an index, trigger the initial limited snapshot.
       // This loads only the top N rows rather than the entire collection.
       if (orderByInfo) {
-        const loader = new OrderedSourceLoader(
-          orderByInfo,
-          subscription,
-          alias,
-          () => this.biggestSentValue.get(sourceId),
-        )
+        const loader = new OrderedSourceLoader(orderByInfo, subscription, alias)
         this.orderedLoaders.set(sourceId, loader)
         loader.start()
       }

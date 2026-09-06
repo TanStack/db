@@ -284,6 +284,7 @@ export function computeSubscriptionOrderByHints(
 export class OrderedSourceLoader {
   private pending: Promise<unknown> | undefined
   private hasEstablishedSourceCoverage = false
+  private sourceBoundary: Record<string, unknown> | undefined
   private needsFullSourceRecovery = false
   private requesting = false
   private fullSource = false
@@ -302,7 +303,6 @@ export class OrderedSourceLoader {
     private readonly info: OrderByOptimizationInfo,
     private readonly subscription: CollectionSubscription,
     private readonly alias: string,
-    private readonly getBiggest: () => unknown,
     private readonly onResult: (
       result: LoadSubsetRequestResult,
       holdPublication: boolean,
@@ -380,15 +380,20 @@ export class OrderedSourceLoader {
       return this.pending
     }
     if (!this.info.dataNeeded) return this.pending
-    const count = Math.max(
+    let count = Math.max(
       this.info.dataNeeded(),
-      this.failed ||
-        !this.hasEstablishedSourceCoverage ||
-        windowOperationGeneration !== undefined
+      this.failed || !this.hasEstablishedSourceCoverage
         ? this.info.offset + this.info.limit
         : 0,
     )
     if (this.pending) return this.pending
+    if (
+      windowOperationGeneration !== undefined &&
+      this.sourceBoundary !== undefined
+    ) {
+      const needed = this.info.offset + this.info.limit
+      count = Math.max(count, needed - this.countAcquiredRows())
+    }
     if (count > 0) {
       this.loadPage(count, true, windowOperationGeneration)
     }
@@ -467,6 +472,7 @@ export class OrderedSourceLoader {
     this.pending = undefined
     this.hasLastBoundary = false
     this.lastBoundary = undefined
+    this.sourceBoundary = undefined
     this.invalidateCursor()
   }
 
@@ -489,6 +495,17 @@ export class OrderedSourceLoader {
     this.resetCursor()
   }
 
+  private countAcquiredRows(): number {
+    return this.subscription
+      .readOrderedSnapshot({
+        orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
+        limit: this.info.offset + this.info.limit,
+      })
+      .filter(
+        ({ value }) => this.info.comparator(value, this.sourceBoundary) <= 0,
+      ).length
+  }
+
   private loadPage(
     count: number,
     refine: boolean,
@@ -498,16 +515,11 @@ export class OrderedSourceLoader {
     // Rows observed before the first provider request do not prove ordered
     // source coverage. In particular, a row inserted while limit is zero must
     // not become the cursor when that window first opens.
-    // Live inserts can fill a window without filling the source prefix.
-    const startsFromSourcePrefix =
-      !this.hasEstablishedSourceCoverage ||
-      windowOperationGeneration !== undefined
-    const biggest = !startsFromSourcePrefix ? this.getBiggest() : undefined
+    const startsFromSourcePrefix = this.sourceBoundary === undefined
+    const biggest = this.sourceBoundary
     let minValues: Array<unknown> | undefined
     if (biggest !== undefined) {
-      const value = this.info.valueExtractorForRawRow(
-        biggest as Record<string, unknown>,
-      )
+      const value = this.info.valueExtractorForRawRow(biggest)
       if (!canExpressCursorOrder(this.info.orderBy, [value])) {
         this.loadPrefix(
           this.info.offset + this.info.limit,
@@ -535,7 +547,7 @@ export class OrderedSourceLoader {
             minValues,
             // Local rows seen before the first provider request prove neither
             // a cursor nor a remote offset. Start the first acquisition at zero.
-            offset: startsFromSourcePrefix ? 0 : undefined,
+            offset: startsFromSourcePrefix ? 0 : this.countAcquiredRows(),
             trackLoadSubsetPromise: false,
             onLoadSubsetResult,
           })
@@ -561,6 +573,7 @@ export class OrderedSourceLoader {
     isFullSource = false,
     establishesSourceCoverage = false,
     windowOperationGeneration?: number,
+    options?: LoadSubsetOptions,
   ): Promise<void> {
     const generation = this.generation
     const complete = (): void => {
@@ -570,6 +583,19 @@ export class OrderedSourceLoader {
       this.failedWindowOperationGeneration = undefined
       if (establishesSourceCoverage) {
         this.hasEstablishedSourceCoverage = true
+        // Source delivery can invalidate the in-flight prefix marker.
+        if (options?.orderBy && !options.cursor) {
+          this.lastPrefixCount = options.limit
+        }
+        if (!isFullSource && options?.orderBy) {
+          try {
+            this.sourceBoundary =
+              this.subscription.readOrderedSnapshot(options).at(-1)?.value ??
+              this.sourceBoundary
+          } catch (error) {
+            fail(error)
+          }
+        }
       }
       if (isFullSource) {
         this.fullSourceFailed = false
@@ -585,33 +611,29 @@ export class OrderedSourceLoader {
     }
     const settlesAsync = result instanceof Promise
     const request = settlesAsync ? result : Promise.resolve()
-    const tracked = request.then(
-      () => {
-        complete()
-      },
-      (error: unknown) => {
-        if (this.pending === tracked) this.pending = undefined
-        if (!this.active) return
-        // A failed request may already have written only part of its result.
-        // None of those rows is a safe continuation boundary.
-        this.invalidateSourceCoverage()
-        if (generation !== this.generation) return
-        if (isFullSource) {
-          // A failed request proves no full-source coverage. An explicit
-          // window move or later replay may retry it, but an ordinary graph
-          // pass must not start an eager retry loop.
-          this.fullSourceFailed = true
-        }
-        this.failed = true
-        this.failedWindowOperationGeneration = windowOperationGeneration
-        this.releaseFailedAcquisition = releaseAcquisition
-        this.lastPage = undefined
-        this.lastPrefixCount = undefined
-        this.hasLastBoundary = false
-        this.lastBoundary = undefined
-        throw error
-      },
-    )
+    const fail = (error: unknown) => {
+      if (this.pending === tracked) this.pending = undefined
+      if (!this.active) return
+      // A failed request may already have written only part of its result.
+      // None of those rows is a safe continuation boundary.
+      this.invalidateSourceCoverage()
+      if (generation !== this.generation) return
+      if (isFullSource) {
+        // A failed request proves no full-source coverage. An explicit
+        // window move or later replay may retry it, but an ordinary graph
+        // pass must not start an eager retry loop.
+        this.fullSourceFailed = true
+      }
+      this.failed = true
+      this.failedWindowOperationGeneration = windowOperationGeneration
+      this.releaseFailedAcquisition = releaseAcquisition
+      this.lastPage = undefined
+      this.lastPrefixCount = undefined
+      this.hasLastBoundary = false
+      this.lastBoundary = undefined
+      throw error
+    }
+    const tracked = request.then(complete, fail)
     this.pending = tracked
     void tracked.catch(() => {})
     // Register each request separately. The operation tracker observes the
@@ -627,17 +649,17 @@ export class OrderedSourceLoader {
   private loadBoundary(
     windowOperationGeneration?: number,
   ): Promise<unknown> | undefined {
-    const biggest = this.getBiggest()
+    const biggest = this.sourceBoundary
     if (biggest === undefined) return
-    const value = this.info.valueExtractorForRawRow(
-      biggest as Record<string, unknown>,
-    )
+    const value = this.info.valueExtractorForRawRow(biggest)
     const orderBy = normalizeOrderByPaths(this.info.orderBy, this.alias)
     if (!canExpressCursorOrder(orderBy.slice(0, 1), [value])) {
       this.loadFullSource(false, windowOperationGeneration)
       return this.pending
     }
-    if (this.hasLastBoundary && Object.is(this.lastBoundary, value)) return
+    if (this.hasLastBoundary && Object.is(this.lastBoundary, value)) {
+      return this.loadMore()
+    }
     const where = buildCursorCurrent(orderBy, [value])
     if (!where) {
       this.loadFullSource(false, windowOperationGeneration)
@@ -671,6 +693,7 @@ export class OrderedSourceLoader {
 
   private invalidateSourceCoverage(): void {
     this.hasEstablishedSourceCoverage = false
+    this.sourceBoundary = undefined
     this.needsFullSourceRecovery = true
   }
 
@@ -766,6 +789,7 @@ export class OrderedSourceLoader {
         isFullSource,
         establishesSourceCoverage,
         windowOperationGeneration,
+        observed.options,
       )
     } catch (error) {
       const normalized = normalizeError(error)

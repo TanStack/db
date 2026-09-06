@@ -12,7 +12,7 @@ import type {
   LoadSubsetRequestResult,
 } from '../../src/types.js'
 
-type RequestOptions = {
+type RequestOptions = LoadSubsetOptions & {
   onLoadSubsetResult?: (
     result: LoadSubsetRequestResult,
     acquisition: LoadSubsetOptions,
@@ -59,6 +59,45 @@ function createOrderByInfo(
 }
 
 describe(`OrderedSourceLoader`, () => {
+  it(`recovers authoritatively when reading a settled boundary fails`, async () => {
+    const failure = new Error(`boundary read failed`)
+    const requests: Array<{ method: string; options: RequestOptions }> = []
+    const released: Array<LoadSubsetOptions> = []
+    const request = (method: string, options: RequestOptions) => {
+      requests.push({ method, options })
+      options.onLoadSubsetResult?.(Promise.resolve(), options, () =>
+        released.push(options),
+      )
+    }
+    const subscription = {
+      setOrderByIndex: () => {},
+      readOrderedSnapshot: () => {
+        throw failure
+      },
+      requestLimitedSnapshot: (options: RequestOptions) =>
+        request(`limited`, options),
+      requestSnapshot: (options: RequestOptions) =>
+        request(`snapshot`, options),
+    } as unknown as CollectionSubscription
+    const loader = new OrderedSourceLoader(
+      createOrderByInfo(),
+      subscription,
+      `row`,
+    )
+    loader.start()
+    await expect(loader.pendingPromise).rejects.toBe(failure)
+    loader.loadMore()
+    expect(requests).toHaveLength(1)
+    await loader.loadMore(1)
+    expect(released).toEqual([requests[0]!.options])
+    expect(requests.map(({ method }) => method)).toEqual([
+      `limited`,
+      `snapshot`,
+    ])
+    expect(requests[1]!.options.limit).toBeUndefined()
+    loader.dispose()
+  })
+
   const asyncRouteCells = (
     [`page`, `prefix`, `boundary`, `full-source`] as const
   ).flatMap((route) =>
@@ -92,6 +131,8 @@ describe(`OrderedSourceLoader`, () => {
         const controller = new AbortController()
         const acquisition: LoadSubsetOptions = {
           signal: controller.signal,
+          orderBy: options.orderBy,
+          limit: options.limit,
         }
         const deferred = createDeferred()
         requests.push({ method, options, acquisition, controller, deferred })
@@ -100,6 +141,8 @@ describe(`OrderedSourceLoader`, () => {
         )
       }
       const subscription = {
+        readOrderedSnapshot: () =>
+          route === `boundary` ? [{ value: { rank: 1 } }] : [],
         setOrderByIndex: () => {},
         requestLimitedSnapshot: (options: RequestOptions) =>
           request(`limited`, options),
@@ -113,9 +156,7 @@ describe(`OrderedSourceLoader`, () => {
             ? { requiresFullSource: true }
             : {},
       )
-      const loader = new OrderedSourceLoader(info, subscription, `row`, () =>
-        route === `boundary` ? { rank: 1 } : undefined,
-      )
+      const loader = new OrderedSourceLoader(info, subscription, `row`)
 
       loader.start()
       if (route === `boundary`) {
@@ -181,9 +222,13 @@ describe(`OrderedSourceLoader`, () => {
     const request = (options: RequestOptions) => {
       const next = createDeferred()
       requests.push(next)
-      options.onLoadSubsetResult?.(next.promise, {})
+      options.onLoadSubsetResult?.(next.promise, {
+        orderBy: options.orderBy,
+        limit: options.limit,
+      })
     }
     const subscription = {
+      readOrderedSnapshot: () => (biggest ? [{ value: biggest }] : []),
       setOrderByIndex: () => {},
       requestLimitedSnapshot: request,
       requestSnapshot: request,
@@ -193,7 +238,6 @@ describe(`OrderedSourceLoader`, () => {
       info,
       subscription,
       `row`,
-      () => biggest,
       (promise) => {
         if (!(promise instanceof Promise)) return
         const participant = { settled: false }
@@ -273,12 +317,7 @@ describe(`OrderedSourceLoader`, () => {
         requestSnapshot: (options: RequestOptions) =>
           request(`snapshot`, options),
       } as unknown as CollectionSubscription
-      const loader = new OrderedSourceLoader(
-        info,
-        subscription,
-        `row`,
-        () => undefined,
-      )
+      const loader = new OrderedSourceLoader(info, subscription, `row`)
 
       expect(() => loader.start()).toThrow(failure)
       await Promise.resolve()
@@ -314,7 +353,6 @@ describe(`OrderedSourceLoader`, () => {
       createOrderByInfo({ index: undefined }),
       subscription,
       `row`,
-      () => undefined,
     )
 
     expect(() => loader.start()).toThrow(failure)
@@ -369,7 +407,6 @@ describe(`OrderedSourceLoader`, () => {
       createOrderByInfo({ index: undefined }),
       subscription,
       `row`,
-      () => undefined,
     )
 
     try {
@@ -438,7 +475,6 @@ describe(`OrderedSourceLoader`, () => {
         createOrderByInfo({ index: undefined }),
         subscription,
         `row`,
-        () => undefined,
       )
       const notCaught = Symbol(`not caught`)
       let caught: unknown = notCaught
@@ -482,7 +518,6 @@ describe(`OrderedSourceLoader`, () => {
       createOrderByInfo({ index: undefined }),
       subscription,
       `row`,
-      () => undefined,
       () => {
         if (!failObserver) return
         failObserver = false
@@ -530,7 +565,6 @@ describe(`OrderedSourceLoader`, () => {
       createOrderByInfo({ index: undefined }),
       subscription,
       `row`,
-      () => undefined,
     )
 
     loader.start()
@@ -548,16 +582,15 @@ describe(`OrderedSourceLoader`, () => {
     const methods: Array<string> = []
     let failBoundary = true
     const subscription = {
+      readOrderedSnapshot: () => [{ value: { rank: 1 } }],
       setOrderByIndex: () => {},
       releaseLoadSubset: () => {},
-      requestLimitedSnapshot: (options: {
-        onLoadSubsetResult?: (
-          result: true,
-          acquisition: LoadSubsetOptions,
-        ) => void
-      }) => {
+      requestLimitedSnapshot: (options: RequestOptions) => {
         methods.push(`limited`)
-        options.onLoadSubsetResult?.(true, {})
+        options.onLoadSubsetResult?.(true, {
+          orderBy: options.orderBy,
+          limit: options.limit,
+        })
       },
       requestSnapshot: (options: {
         onLoadSubsetResult?: (
@@ -577,7 +610,6 @@ describe(`OrderedSourceLoader`, () => {
       createOrderByInfo(),
       subscription,
       `row`,
-      () => ({ rank: 1 }),
     )
 
     loader.start()

@@ -4373,7 +4373,8 @@ candidate repair scopes, not completed fixes or proof of root cause.
   Red JSON strips the nested row-diff cause; verbose pinned evidence has the
   wrong-row case, while under-fill detail needs a separate verbose rerun.
   Reused source-first audit, no reruns or merge/readiness endorsement.
-- [ ] Full repaired100x campaign and explicit-prefix transfer-cost assessment.
+- [x] Full repaired100x campaign and explicit-prefix transfer-cost assessment
+  finished; the remaining publication failure and transfer repair are below.
   No size-pass completion; whole branch now +3,225 net source lines at68366eca.
 
 ### Raw subscription changes after private replay retirement
@@ -4401,10 +4402,10 @@ candidate repair scopes, not completed fixes or proof of root cause.
   three report scopes. No supported omissions found. Reused sequential source-
   first context can inherit framing; no reruns, environment or new campaign
   verification, and no merge endorsement.
-- [ ] Fresh full100x campaign running at `d7f4b9d6`, overrides unset,
+- [x] Fresh full100x campaign finished at `d7f4b9d6`, overrides unset,
   `/tmp/tanstack-minimal-oracles-repaired-100x.json` and matching `.log`.
-  Runtime/tests remain frozen until exit. JSON-only reporter avoids the earlier
-  verbose request-warning/reporting load. Do not call this green before exit.
+  Runtime/tests stayed frozen until exit. JSON-only reporter avoids the earlier
+  verbose request-warning/reporting load. Result:1,375 passed/1 failed, below.
 
 ### Prefix-fetch cost gate: candidate is not merge-ready
 
@@ -4421,7 +4422,7 @@ candidate repair scopes, not completed fixes or proof of root cause.
   physical network work, latency, memory, or a comparison of separately built
   db-ivm artifacts. Candidate still passes the disturbed-source witnesses;
   baseline does not. Request-count checks alone miss this regression.
-- [ ] **Design choice pending:** the five-line fix is a correctness baseline,
+- [x] **Design choice resolved below:** the five-line fix is a correctness baseline,
   not a landing recommendation. Recommended next investigation: preserve normal
   cursor continuation and recover only when source changes invalidate its
   prefix proof. Do not infer that observed high-water rows prove acquisition
@@ -4442,14 +4443,14 @@ candidate repair scopes, not completed fixes or proof of root cause.
   `/tmp/tanstack-pagination-transfer-red.json`. The fixture receives source
   rows already in requested order; projection removes virtual metadata from
   comparisons. Earlier fixture-only failures were corrected before this red.
-- [ ] Keep a settled acquisition boundary, not the live high-water row. Check
+- [x] Keep a settled acquisition boundary, not the live high-water row. Check
   the exact requested range after settlement; scope continuation to that range.
   Reuse the existing failure/replay invalidation and publication barrier.
   Preserve the16 intervening-insert cases and the broader lifecycle matrices.
-- [ ] Verify ordinary transfer stays linear; include outlier arrivals during
+- [x] Verify a bounded ordinary-transfer regression; include outlier arrivals during
   acquisition, backward/shrink moves, filters, ties and source-order changes.
   Measure source lines and indexed read work separately from transfer volume.
-- [ ] Commit each step and run the standing Field Lab loss audit against its
+- [ ] Commit the implementation step and run the standing Field Lab loss audit against its
   frozen evidence and todo reduction. No push or merge-readiness claim yet.
 - [x] Prior full100x run finished: **1,375 passed / 1 failed**, at runtime
   `d7f4b9d6`. Publication random seed1678102822, path3298:20; last command
@@ -4457,3 +4458,68 @@ candidate repair scopes, not completed fixes or proof of root cause.
   cleanup/restart, private a5, release, no-op restart. Full nine-command trace
   remains in `/tmp/tanstack-minimal-oracles-repaired-100x.json`. Classification
   remains open; this is not a green full campaign or a pagination failure.
+
+#### Boundary implementation and evidence
+
+- Test-first commit `3a877188`:8 volume failures,152 filtered. Loss audit
+  recovered that all ten row checks passed before the volume failure, while
+  the later cursor assertion was not reached. Volume is selected rows
+  recomputed from recorded provider requests, including repeated selections;
+  the provider suppresses duplicate installed IDs. Not actual writes or bytes.
+  Static unique numeric ranks, ten windows, two page sizes: this is a bounded
+  regression, not an asymptotic proof or a ties/mutation matrix. Audit reused
+  source-first context, no reruns or merge endorsement; omission-focused
+  scanning may overstate intentional fixture limits.
+- Runtime retains one settled boundary row. Subscription reads the applied
+  exact ordered range through existing snapshot code, without starting demand.
+  Continuations derive both cursor and offset from the confirmed prefix;
+  ordinary live high-water rows no longer supply that boundary. Existing
+  ordering invalidation, authoritative recovery and publication barriers stay.
+  A prefix delivered by its own in-flight request is remembered at settlement,
+  preventing source-delivery invalidation from fetching that prefix twice.
+- Preserved the16 settled intervening-insert controls. Added24 cells:
+  asc/desc × insertion before/after response × rank0.5/100 × predicate-cursor,
+  offset-only and opaque-row-key continuation. The offset widening exposed
+  four wrong-row cases in the first prototype (12 green/4 red);
+  `/tmp/tanstack-boundary-offset-red.json`. Explicit confirmed offsets repaired
+  them. The opaque-key extension passed24/0 without an additional runtime fix;
+  `/tmp/tanstack-boundary-key-red.json` is named red but contains no failures.
+  It models key continuation; it is not an end-to-end TrailBase test.
+- Boundary-read failure: a throw initially failed to retire/recover the
+  acquisition (1 red in `/tmp/tanstack-boundary-read-failure-red.json`). It now
+  uses the existing failed-acquisition path. The unit keeps ordinary graph
+  retries suppressed and verifies explicit retry releases the failed lease
+  before requesting authoritative recovery.
+- First pagination100x prototype:173 green/3 red in
+  `/tmp/tanstack-boundary-pagination-100x.json`, fixed seeds16577/1659 and
+  random -716796249. All reduced to4 requests exceeding a3-request bound on a
+  one-visible-row source. New8-cell underfill matrix:6 green/2 red,
+  `/tmp/tanstack-boundary-underfill-red.json`. Request trace shows the duplicate
+  finite prefix, not wrong output. Skipping multi-column tie refinement was
+  tried and rejected: locale fallback and later-order-term mutation controls
+  failed. Restoring refinement and remembering the settled prefix repairs the
+  duplicate without weakening those controls. Focused pagination/loader/work
+  gate:263/0 in `/tmp/tanstack-boundary-final-gates-v3.json`.
+- Synthetic transfer probe now selects110 rows instead of560 for both ten
+  10-row pages and widening10→100, with20 requests,9 cursors,100 unique rows
+  installed. `/tmp/tanstack-boundary-transfer-probe.jsonl`; executable probe
+  `/tmp/tanstack-prefix-cost.KpBvcn/probe.mjs`. This probe reads2450 rows during
+  28 boundary lookups. No CPU/latency/bundle benchmark; local prefix reads can
+  revisit rows. The separate eight regression tests permit120 selections for
+  100 rows, including their tie probes; do not equate that fixture with110.
+- Current source delta:+38 net production lines relative to `3a877188`,
+  excluding architecture Markdown. No page history, second index or subset
+  algebra added. This does not meet the whole-branch below-main size target.
+- Final pagination100x:192/0, no skips, including fixed and fresh random
+  properties; `/tmp/tanstack-boundary-pagination-100x-v3.json`. Complete1x
+  oracle/loader run:1448/0 across25 files, no skips;
+  `/tmp/tanstack-boundary-complete-1x-v3.json`. Seed/path/property overrides
+  unset; multiplier100 and1 respectively, runtime/tests frozen through exit.
+  These counts overlap; do not sum them. Earlier full1x1400/0 report
+  `/tmp/tanstack-boundary-final-oracles.json` predates the underfill repair and
+  opaque-key extension; do not present it as final validation of those edits.
+- Scoped ESLint passes for loader utils, loader unit tests and pagination
+  oracle. Package tsc still exits2 on existing test diagnostics (including
+  fast-check direction inference at pagination lines167/240), no `src/`
+  diagnostics in `/tmp/tanstack-boundary-types-v3.txt`. Not a green package
+  typecheck, whole-repository lint pass or full100x campaign.

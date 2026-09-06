@@ -1130,9 +1130,17 @@ async function runOnDemandPaginationScenario(
         expect(load.offset).toBeUndefined()
       }
     }
-    expect(loads.length).toBeLessThanOrEqual(
-      scenario.windows.length * (expectedRows.length + 2),
-    )
+    expect(
+      loads.length,
+      JSON.stringify(
+        loads.map(({ limit, offset, cursor, where }) => ({
+          limit,
+          offset,
+          cursor,
+          where,
+        })),
+      ),
+    ).toBeLessThanOrEqual(scenario.windows.length * (expectedRows.length + 2))
     assertLoads?.(loads)
   } finally {
     publicationSubscription.unsubscribe()
@@ -1350,6 +1358,8 @@ async function runPendingMutationScenario(
   scenario: PendingMutationScenario,
   timing: `before-response` | `after-response`,
   finalLimitAfterMutation?: number,
+  explicitPublicKeyOrder = true,
+  transport: `cursor` | `offset` | `key` = `cursor`,
 ): Promise<void> {
   const rows = new Map<number, PageRow>(
     scenario.ranks.map((rank, index) => [index + 1, { id: index + 1, rank }]),
@@ -1398,13 +1408,16 @@ async function runPendingMutationScenario(
       },
     },
   })
-  const live = createLiveQueryCollection((query) =>
-    query
+  const live = createLiveQueryCollection((query) => {
+    const ordered = query
       .from({ row: source })
       .orderBy(({ row }) => row.rank, scenario.direction)
-      .orderBy(({ row }) => row.id, `asc`)
-      .limit(scenario.responseOutcome === `reject` ? 1 : scenario.limit),
-  )
+    return (
+      explicitPublicKeyOrder
+        ? ordered.orderBy(({ row }) => row.id, `asc`)
+        : ordered
+    ).limit(scenario.responseOutcome === `reject` ? 1 : scenario.limit)
+  })
   const outstanding: Array<Promise<unknown>> = []
 
   const applyMutation = () => {
@@ -1439,8 +1452,21 @@ async function runPendingMutationScenario(
           limit: rows.size,
         },
       )
+      const options = { ...request.options }
+      if (transport !== `cursor`) {
+        // Model providers whose opaque continuation token is indexed by the
+        // last fetched row key, rather than by the predicate expression.
+        if (transport === `key` && options.cursor) {
+          const boundary = orderedRows.findIndex(
+            ({ id }) => id === options.cursor!.lastKey,
+          )
+          expect(boundary).toBeGreaterThanOrEqual(0)
+          options.offset = boundary + 1
+        }
+        options.cursor = undefined
+      }
       begin()
-      for (const row of rowsForLoadSubset(orderedRows, request.options)) {
+      for (const row of rowsForLoadSubset(orderedRows, options)) {
         if (deliveredIds.has(row.id)) continue
         deliveredIds.add(row.id)
         write({ type: `insert`, value: { ...row } })
@@ -1463,17 +1489,17 @@ async function runPendingMutationScenario(
       if (timing === `after-response`) {
         applyMutation()
         await flushPromises()
-        if (finalLimitAfterMutation !== undefined) {
-          finalLimit = finalLimitAfterMutation
-          const widened = live.utils.setWindow({
-            offset: 0,
-            limit: finalLimit,
-          })
-          if (widened instanceof Promise) outstanding.push(widened)
-        }
-        await settlePending()
-        await Promise.all(outstanding)
       }
+      if (finalLimitAfterMutation !== undefined) {
+        finalLimit = finalLimitAfterMutation
+        const widened = live.utils.setWindow({
+          offset: 0,
+          limit: finalLimit,
+        })
+        if (widened instanceof Promise) outstanding.push(widened)
+      }
+      await settlePending()
+      await Promise.all(outstanding)
     } else {
       await preload
       await flushPromises()
@@ -2498,14 +2524,16 @@ describe(`pagination recomputation oracle`, () => {
         commit()
         await flushPromises()
         const failedReplayRequests = requests.slice(beforeFailedReplay)
-        // Explicit window moves now acquire a prefix from zero. Find the
-        // replayed four-row acquisition, not a cursor-shaped request.
+        // The settled first row permits a three-row continuation. Replay
+        // must preserve that exact demand even after its first attempt fails.
         const replayedFailedRequest = failedReplayRequests.find(
-          ({ limit }) => limit === 4,
+          ({ limit, cursor }) => limit === 3 && cursor !== undefined,
         )
         expect(replayedFailedRequest).toBeDefined()
-        expect(replayedFailedRequest).toMatchObject({ offset: 0, limit: 4 })
-        expect(replayedFailedRequest?.cursor).toBeUndefined()
+        expect(replayedFailedRequest).toMatchObject({ offset: 1, limit: 3 })
+        expect(replayedFailedRequest?.cursor).toEqual(
+          requests[initialRequestCount]?.cursor,
+        )
 
         const releasesBeforeRetry = unloaded.length
         const requestsBeforeRetry = requests.length
@@ -3837,6 +3865,28 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it.each(
+    [`asc`, `desc`].flatMap((direction) =>
+      [false, true].flatMap((explicitPublicKeyOrder) =>
+        [false, true].map((includeFilter) => ({
+          direction: direction as `asc` | `desc`,
+          explicitPublicKeyOrder,
+          includeFilter,
+        })),
+      ),
+    ),
+  )(
+    `bounds requests for an underfilled source: $direction, explicit key=$explicitPublicKeyOrder, filter=$includeFilter`,
+    async (structure) => {
+      await runOnDemandPaginationScenario({
+        ...structure,
+        ranks: [0, 0],
+        keeps: [true, false],
+        windows: [{ offset: 0, limit: 3 }],
+      })
+    },
+  )
+
+  it.each(
     paginationStructures.map((structure, index) => ({
       name: `key=${structure.explicitPublicKeyOrder ? `explicit` : `implicit`}, filter=${structure.includeFilter ? `on` : `off`}, insertion=${structure.reverseInsertion ? `reverse` : `forward`}`,
       structure,
@@ -3938,11 +3988,14 @@ describe(`pagination recomputation oracle`, () => {
         // Count every provider-returned row, including duplicates and tie
         // probes. Request counts alone cannot detect repeated growing prefixes.
         const returnedRows = requests.reduce(
-          (total, request) => total + rowsForLoadSubset(ordered, request).length,
+          (total, request) =>
+            total + rowsForLoadSubset(ordered, request).length,
           0,
         )
         expect(returnedRows).toBeLessThanOrEqual(rows.length + 2 * pageCount)
-        expect(requests.some((request) => request.cursor !== undefined)).toBe(true)
+        expect(requests.some((request) => request.cursor !== undefined)).toBe(
+          true,
+        )
       } finally {
         await live.cleanup()
         await source.cleanup()
@@ -3981,6 +4034,39 @@ describe(`pagination recomputation oracle`, () => {
         includeFilter: false,
         reverseInsertion: false,
       })
+    },
+  )
+
+  it.each(
+    ([`asc`, `desc`] as const).flatMap((direction) =>
+      ([`before-response`, `after-response`] as const).flatMap((timing) =>
+        [0.5, 100].flatMap((rank) =>
+          ([`cursor`, `offset`, `key`] as const).map((transport) => ({
+            direction,
+            timing,
+            rank,
+            transport,
+          })),
+        ),
+      ),
+    ),
+  )(
+    `keeps live observations separate from a settled acquisition: %j`,
+    async ({ direction, timing, rank, transport }) => {
+      const sign = direction === `asc` ? 1 : -1
+      await runPendingMutationScenario(
+        {
+          ranks: [0, sign, 2 * sign, 3 * sign],
+          direction,
+          limit: 1,
+          mutation: { type: `insert`, row: { id: 9, rank: sign * rank } },
+          responseOutcome: `resolve`,
+        },
+        timing,
+        3,
+        false,
+        transport,
+      )
     },
   )
 

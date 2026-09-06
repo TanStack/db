@@ -1608,6 +1608,26 @@ export class CollectionSubscription
     this.filteredCallback(deletes)
   }
 
+  /** Read the applied rows in an ordered acquisition without starting demand. */
+  readOrderedSnapshot(
+    options: LoadSubsetOptions,
+  ): Array<ChangeMessage<Record<string, unknown>, string | number>> {
+    const predicates = [
+      this.options.whereExpression,
+      options.where,
+      options.cursor?.whereFrom,
+    ].filter((where) => where !== undefined)
+    const snapshot = this.collection.currentStateAsChanges({
+      orderBy: options.orderBy,
+      limit: options.limit,
+      where:
+        predicates.length > 0
+          ? predicates.reduce((left, right) => and(left, right))
+          : undefined,
+    })
+    return Array.isArray(snapshot) ? snapshot : []
+  }
+
   /**
    * Sends a snapshot that fulfills the `where` clause and all rows are bigger or equal to the cursor.
    * Requires a range index to be set with `setOrderByIndex` prior to calling this method.
