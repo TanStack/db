@@ -70,6 +70,39 @@ class Projection {
 }
 
 describe(`functional include projection boundary grammar`, () => {
+  it(`preserves a scalar result when a functional projection drops its include`, async () => {
+    const parents = createControlledCollection(`scalar-projection-parent`, [
+      { id: 1 },
+    ])
+    const children = createControlledCollection(`scalar-projection-child`, [
+      { id: 10, parentId: 1 },
+    ])
+    const live = createLiveQueryCollection((q) => {
+      const included = q
+        .from({ parent: parents.collection })
+        .select(({ parent }) => ({
+          id: parent.id,
+          children: toArray(
+            q
+              .from({ child: children.collection })
+              .where(({ child }) => eq(child.parentId, parent.id)),
+          ),
+        }))
+      const scalar = q.from({ row: included }).fn.select(({ row }) => row.id)
+      return q
+        .from({ result: scalar })
+        .select(({ result }) => ({ value: result }))
+    })
+    try {
+      await live.preload()
+      expect(live.toArray.map((row) => row.value)).toEqual([1])
+    } finally {
+      await live.cleanup()
+      await parents.collection.cleanup()
+      await children.collection.cleanup()
+    }
+  })
+
   it(`preserves opaque-root fields without include materialization`, async () => {
     const parents = createControlledCollection(`opaque-root-control`, [
       { id: 1 },

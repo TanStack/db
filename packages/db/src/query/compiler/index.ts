@@ -635,12 +635,14 @@ export function compileQuery(
             sourceAlias,
             include.resultPath,
           )
-        : [
-            {
-              path: [sourceAlias, ...include.resultPath],
-              guards: [],
-            },
-          ]
+        : query.fnSelect
+          ? []
+          : [
+              {
+                path: [sourceAlias, ...include.resultPath],
+                guards: [],
+              },
+            ]
 
     if (projectedPaths.length === 0) {
       continue
@@ -990,9 +992,7 @@ export function compileQuery(
         if (
           selectResults &&
           typeof selectResults === `object` &&
-          (includesResults.length > 0 ||
-            Array.isArray(selectResults) ||
-            isPlainObject(selectResults))
+          (Array.isArray(selectResults) || isPlainObject(selectResults))
         ) {
           selected = Array.isArray(selectResults)
             ? [...selectResults]
@@ -1001,7 +1001,7 @@ export function compileQuery(
           if (routing) {
             selected[INCLUDES_ROUTING] = routing
           }
-          if (includesResults.length > 0) {
+          if (directIncludes.length > 0) {
             Object.defineProperty(selected, FN_SELECT_STATE, {
               value: {
                 sourceRow: namespacedRow,

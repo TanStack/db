@@ -263,9 +263,9 @@ then wrap or pass through the Collection without capturing compiler state;
 child-only changes continue through that stable facade without republishing the
 parent.
 
-Functional projections retain include input paths from QueryRef sources as well
-as union branches. This private source-row state is independent of whether the
-callback returns a plain record or an opaque root object.
+Include paths describe a functional projection's input, not its arbitrary
+output. A callback may drop or rename a field, or return a scalar. Its input
+paths must not be attached to that output by a downstream QueryRef consumer.
 
 Every valid plan is checked as a Collection, `toArray`, and `materialize`
 include at initial load, after a parent-route update, and after a child update.

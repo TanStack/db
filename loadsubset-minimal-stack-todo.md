@@ -1262,10 +1262,13 @@ not unique confirmed runtime bugs; contract-alignment notes below distinguish
 stale oracle expectations from implementation defects.
 
 The queued functional-projection matrix is now a separate red baseline:
-**20 green / 36 red** (54 product cells plus two controls). Its adjacent
+**21 green / 36 red** (54 product cells plus three controls). Its adjacent
 includes suites remain **124/0**. This does not replace the twelve-suite
 lifecycle scope above or count 36 distinct defects. No runtime changed while
-adding this matrix; its four failure families are recorded below.
+adding this matrix; its five failure families are recorded below. The first
+projection-state repair was withdrawn after a new scalar-output control proved
+it regressed existing behavior. The shared input/output boundary is next;
+do not read the earlier candidate's passing assertions as current repairs.
 
 | Protocol slice                                       | Executable coverage                                                                                 | Current result                                               |
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
@@ -3517,13 +3520,13 @@ candidate repair scopes, not completed fixes or proof of root cause.
   2. [ ] Concrete Collection facades can still be unready when the callback
      reads them. The union/Collection/record trace distinguishes an actual
      facade with `ready: false` from a non-facade placeholder.
-  3. [x] Functional projection over QueryRef and recursive QueryRef sources
+  3. [ ] Functional projection over QueryRef and recursive QueryRef sources
      loses materialized children and derived scalars; equivalent expression
      projections retain them. Do not repair only the already-covered union.
-  4. [x] Opaque functional root results lose rematerialization. Check selected
+  4. [ ] Opaque functional root results lose rematerialization. Check selected
      fields and children, not a new guarantee about root prototypes. Existing
      nested opaque-wrapper regressions remain intact.
-  5. [x] Inline child updates must rerun functional projections. The frozen
+  5. [ ] Inline child updates must rerun functional projections. The frozen
      report has 20 zero-call reach failures: QueryRef / recursive QueryRef ×
      array / materialized × record / opaque-root × empty / populated (16),
      plus union × array / materialized × opaque-root × empty / populated (4).
@@ -3560,7 +3563,7 @@ candidate repair scopes, not completed fixes or proof of root cause.
 - Scope limit: opaque roots here are callback outputs. Opaque callback input
   roots and chained functional selectors are not a declared product dimension.
   Do not claim those covered or infer a defect without a bounded witness.
-- [x] First shared-path repair retains QueryRef include input paths when the
+- Withdrawn candidate `159d7c73` retained QueryRef include input paths when the
   projection is functional, and attaches the existing projection state for all
   compiled includes, including opaque root results. No new state or registry;
   compiler diff is 12 added / 12 removed lines including two import-order lint
@@ -3568,9 +3571,9 @@ candidate repair scopes, not completed fixes or proof of root cause.
   condition; the measured net production change is zero.
   `/tmp/tanstack-projection-source-state.json` remains **144/36**, success false,
   but every public-form, content, scalar, identity and callback-reach assertion
-  now passes. The remaining failures are the early placeholder and unready
-  facade observations (families 1–2). Checkmarks on families 3–5 mean those
-  assertions passed in this bounded product, not that functional cells are green.
+  passed on that candidate. The remaining failures were early placeholder and unready
+  facade observations (families 1–2). Families 3–5 passed only in that bounded
+  product, not in all functional consumers; their checkmarks are now reopened.
   No test assertions were removed or weakened.
 - Wider adjacent validation: `/tmp/tanstack-projection-source-adjacent.json`
   **342/0**, no skips, success true, across nine includes/facade suites. This
@@ -3581,6 +3584,47 @@ candidate repair scopes, not completed fixes or proof of root cause.
   **940/0**, no skips, success true, the same twelve-suite census with
   `TANSTACK_DB_ORACLE_SEED=1657011`. This is not the final 100× campaign or a
   full DB typecheck pass.
+- [x] Post-commit Field Lab loss audit of `159d7c73` recovered a distribution
+  change hidden by the unchanged 144/36 count: real unready facades became
+  visible in all twelve Collection-valued functional cells, versus two before.
+  This was newly reached behavior, not ten additional defects. The reused
+  source-first auditor verified unchanged tests, counts and net compiler lines;
+  prior framing/order can hide omissions. It ran no tests and gave no broader
+  consumer-compatibility endorsement.
+- [x] Compatibility control caught a regression in that candidate: a QueryRef
+  functional projection which drops its include and returns `row.id`, consumed
+  by a further QueryRef, returned `{ row: { children: [...] } }` instead of 1.
+  `/tmp/tanstack-projection-scalar-control.json`: **0/1, 56 skipped**, success
+  false on the candidate. Restoring the prior three compiler hunks gives
+  `/tmp/tanstack-projection-scalar-old-runtime.json`: **1/0, 56 skipped**, success
+  true. Keep the control and withdraw the semantic patch rather than add a
+  scalar-only workaround. Import-order lint corrections remain. This raises the
+  oracle to 57 functions, not the original 56; its 54-cell product is unchanged.
+- Restored-runtime validation: `/tmp/tanstack-projection-withdrawn-baseline.json`
+  **363/36**, no skips, success false: new projection suite **21/36**, the nine
+  unchanged adjacent suites **342/0**. Relative to `cbea7f15`, the only compiler
+  changes left are two import moves, **2 added / 2 removed** lines. No semantic
+  runtime change or production growth remains. Compiler/new-suite ESLint and
+  Prettier checks pass; full DB typecheck and final multiplier remain open.
+- Next implementation plan, replacing the withdrawn shortcut:
+  1. Define the projection boundary as materialized input → callback → arbitrary
+     output. Keep source include paths on the input side; never infer output
+     paths for an opaque function. Existing QueryRef/union adapters consume the
+     projected relation, not a placeholder to repair after projection.
+  2. Before editing runtime, extend the compatibility controls to renamed and
+     dropped include fields, scalar/atomic results, and a chained selector.
+     Cross relevant forms, retain update phases and callback-time observations.
+     Add custom-key and downstream order/distinct controls where the builder
+     accepts those compositions. Reject unsupported plans explicitly only when
+     that is their established contract, not to hide a new regression.
+  3. Place inline projection after input materialization in the existing graph.
+     Resolve Collection inputs at the existing coherent facade boundary; prove
+     key/order/downstream consumers see the actual output before moving calls.
+     Preserve multi-field completeness, rollback and callback error identity.
+     Do not add a second result registry or a parallel dependency tracker.
+  4. Require both the original product and compatibility controls to improve,
+     then rerun includes/facade and lifecycle contracts. Commit the bounded step
+     and run its loss audit; do not keep a candidate that regresses a control.
 - [ ] Callback timing repair must account for custom public keys, downstream
   selectors/order/distinct, multiple include fields and nested facade readiness.
   A placeholder record cannot stand in for the callback's output at those
