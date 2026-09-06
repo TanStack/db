@@ -3418,16 +3418,23 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       })
       try {
         subscription.requestSnapshot({ where })
-        expect(() => subscription.releaseSnapshot(where)).toThrow(failure)
+        let releaseError: unknown
+        try {
+          subscription.releaseSnapshot(where)
+        } catch (error) {
+          releaseError = error
+        }
+        expect(releaseError).toBe(failure)
         // Adapter reentry is still inside unload and cannot retry it. Error
         // delivery is after unload throws: teardown must see a retryable lease.
         const initialAttempts = reentry === `adapter` ? 1 : 2
         expect(unloads).toHaveLength(initialAttempts)
         expect(collection.subscriberCount).toBe(0)
         if (reentry === `error-listener`) expect(errors[0]).toBe(failure)
-        expect(nestedFailures).toEqual(
-          reentry === `error-listener` && failures === 2 ? [failure] : [],
-        )
+        const nestedFailureExpected =
+          reentry === `error-listener` && failures === 2
+        expect(nestedFailures).toHaveLength(nestedFailureExpected ? 1 : 0)
+        if (nestedFailureExpected) expect(nestedFailures[0]).toBe(failure)
         if (unloads.length <= failures) {
           if (unloads.length < failures) {
             expect(() => subscription.unsubscribe()).toThrow(failure)

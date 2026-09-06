@@ -3227,6 +3227,37 @@ candidate repair scopes, not completed fixes or proof of root cause.
   reports 13 errors and one warning, all on unchanged statements outside this
   patch; no clean-lint or standalone typecheck claim.
 
+- Fresh Field Lab loss audit of `4adb7b90` recovered three compressed details:
+  focused reds each skip 195 functions (including both seeded properties);
+  `toEqual([failure])` and `toThrow(failure)` do not prove Error reference
+  identity; and the four remaining stopping assertions needed exact names.
+  Source delta, counts, and preserved suffixes otherwise match. One fresh
+  sequential source-first scanner, not sibling-blind; framing and reading order
+  may hide other omissions. No auditor tests or broad correctness endorsement.
+  JSON does not prove environment, historical restoration, lint/typecheck,
+  multipliers, or successful example counts.
+- Audit follow-up strengthens both outer and nested release errors with
+  `toBe(failure)`. Focused `/tmp/tanstack-release-error-reentry-identity-followup.json`
+  has **4 passing functions / 195 skipped**, but is **not a successful suite**:
+  the unconditional afterAll coverage census rejects the skipped coverage.
+  A verbose rerun confirmed that hook failure. The earlier two focused red
+  reports likewise are not full-suite results; their individual failures remain
+  valid witnesses. Full demand rerun after this assertion change is **199/0**,
+  success true, `/tmp/tanstack-release-error-reentry-identity-full.json`;
+  executed fixed/random seeds 1657002/1147159702. Original frozen audit does not
+  cover this follow-up. Ordinary subscription suite also **63/0**, success true,
+  `/tmp/tanstack-release-error-reentry-subscription-adjacent.json`.
+- Remaining exact witnesses (from the eleven-suite checkpoint):
+  - `rejects a window move reentered from the initial ordered request`:
+    nested result is true, expected undefined.
+  - `rejects a window move reentered from a public change callback`:
+    nested result is true, expected undefined.
+  - `does not settle a window move after its sync session is cleaned up`:
+    result is true, expected a Promise.
+  - `retries live cleanup after an undefined failure survives demand retirement`:
+    two unloads, expected three. These remain assertion failures awaiting
+    diagnosis, not four confirmed distinct runtime defects.
+
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
       behavior, and opaque callback roots.
