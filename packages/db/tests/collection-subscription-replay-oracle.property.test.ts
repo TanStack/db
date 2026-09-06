@@ -2231,6 +2231,96 @@ describe(`CollectionSubscription replay oracle`, () => {
     })
   })
 
+  it.each(
+    [false, true].flatMap((supersede) =>
+      [`throw`, `reject`].map((failureMode) => ({ supersede, failureMode })),
+    ),
+  )(
+    `drops released failure references: superseded=$supersede, $failureMode`,
+    async ({ supersede, failureMode }) => {
+      let begin!: () => void
+      let commit!: () => void
+      let truncate!: () => void
+      const pendingPeer = createDeferred<void>()
+      const replacement = createDeferred<void>()
+      const failure = new Error(`failed owner`)
+      let loads = 0
+      const collection = createCollection<ReplayRow>({
+        id: `released-replay-failure-${supersede}-${failureMode}`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (operations) => {
+            begin = operations.begin
+            commit = operations.commit
+            truncate = operations.truncate
+            operations.markReady()
+            return {
+              loadSubset: () => {
+                loads++
+                if (loads <= 2) return true
+                if (loads === 3) {
+                  if (failureMode === `throw`) throw failure
+                  return Promise.reject(failure)
+                }
+                return loads === 4 ? pendingPeer.promise : replacement.promise
+              },
+              unloadSubset: () => {},
+            }
+          },
+        },
+      })
+      const subscription = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      const failedWhere = new Func(`eq`, [
+        new PropRef([`id`]),
+        new Value(`one`),
+      ])
+      const peerWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`two`)])
+      const replaySource = async () => {
+        begin()
+        truncate()
+        commit()
+        await flushPromises()
+      }
+
+      try {
+        subscription.requestSnapshot({
+          where: failedWhere,
+          optimizedOnly: false,
+        })
+        subscription.requestSnapshot({ where: peerWhere, optimizedOnly: false })
+        await replaySource()
+        // This is a retained-state witness, not a row oracle or GC benchmark.
+        // Public rows cannot reveal a released owner held by an old error map.
+        // Adapt this witness if the replay representation changes again.
+        const failures = (
+          subscription as unknown as {
+            truncateReplaySession: {
+              currentAttempt: { failures: Map<unknown, Error> }
+            }
+          }
+        ).truncateReplaySession.currentAttempt.failures
+        expect([...failures.values()]).toEqual([failure])
+        if (supersede) await replaySource()
+        subscription.releaseSnapshot(failedWhere)
+        expect(failures.size).toBe(0)
+        expect(subscription.status).toBe(`loadingSubset`)
+        replacement.resolve()
+        pendingPeer.resolve()
+        await flushPromises()
+        expect(subscription.status).toBe(`ready`)
+      } finally {
+        replacement.resolve()
+        pendingPeer.resolve()
+        await flushPromises()
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
   it(`does not start a queued replay after a newer truncate supersedes it`, async () => {
     let begin!: () => void
     let commit!: () => void

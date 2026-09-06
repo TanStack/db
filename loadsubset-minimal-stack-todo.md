@@ -36,7 +36,7 @@ current as review findings, oracle laws, and implementation choices change.
   production lines. Fresh100x integration gate passes1582/0 across26 files,
   exit0, no skipped tests or reported runner errors. Integration loss audit
   complete; final campaign report audit complete.
-- Still open: whole-branch size goal (+3102 net package-source lines against
+- Still open: whole-branch size goal (+3103 net package-source lines against
   fixedmain68366eca), final coherence/review and
   RFC/PR/changeset reconciliation. Older unchecked entries are phase records;
   reconcile them with later evidence before treating them as current bugs.
@@ -56,11 +56,12 @@ current as review findings, oracle laws, and implementation choices change.
   Expanded28-file1x and full100x gates1729/0; W4 loss audit complete. Total W1–W4
   savings153 source lines/2362 minified/477 gzip bytes; source gap3119.
 - W5 flattens replay pending state, with retained-attempt eligibility restored
-  after the loss audit:17 more source lines removed,145 minified/34 gzip
-  diagnostic bytes removed. Expanded integration1731/0 at1x, package types pass.
-  Expanded reentry matrix catches both refactor regressions; baseline and final
-  implementation pass3/3. Final post-commit audit and focused100x pending.
-  Combined W1–W5 savings170 lines/2507 minified/511 gzip bytes,source gap3102.
+  after loss audits:16 more source lines removed,116 minified/27 gzip diagnostic
+  bytes removed. Expanded integration1735/0 at1x, package types pass. Reentry
+  matrix3/3 and retention matrix4/4 restore pre-W5 behavior. Focused lifecycle
+  100x444/0 atbaa2163f preceded the final one-line failure-pruning repair; final
+  repair audit pending. Combined W1–W5 savings169 lines/2478 minified/504 gzip
+  bytes,source gap3103. No push. Group-by baseline142/0, code unchanged.
 
 
 ## Chosen design
@@ -5509,8 +5510,42 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   JSON/log. Ordinary package tsc passes (`-retention-types.log`). Changed-file
   lint retains the same five source errors/seven test shadow warnings; no new
   suppression. No test removed or expected-failure classifier introduced.
-- [ ] Follow-up commit, then source-to-implementation loss audit of the repair.
-- [ ] Focused replay/lifecycle100x on the corrected frozen implementation.
+- [x] Follow-up commitbaa2163f, then source-to-implementation loss audit.
+  Eligibility and counter-balance repair preserved the recovered distinction.
+  One further retention loss: original release deleted the owner's failure from
+  all retained attempts; new loop cleared only currentAttempt. Older A with
+  failed X and pending Y remained reachable through Y after B superseded A and
+  X released. This did not poison publication, but retained X/error unnecessarily.
+  Dropping rule: outcome-relevant failure cleanup erased reference cleanup.
+  Source-only finding; reused/nonblind scan, no heap/run-count validation.
+- [x] Focused replay/lifecycle100x on frozenbaa2163f:444/0,5 files,exit0,
+  no skips/reported runner errors,396.97s. Fixed corpora/fresh seeds, same five
+  files as focused442 gate plus expanded2 cases. Exact flags same full100x
+  command above; `/tmp/tanstack-weight-replay-final-100.{json,log}`. This precedes
+  the final failure-pruning line; it is not a final-head100x claim.
+
+#### W5 final failure-reference cleanup
+
+- Add4 retention cells: current/older retained attempt × sync throw/async reject.
+  One owner fails, another stays pending; optionally supersede replay, then
+  release the failed owner. Assert its captured failure map is empty while the
+  live peer still holds readiness. This intentionally uses a narrow private
+  state witness: rows cannot expose this retention difference. It measures
+  removed references, not heap size or GC, and must adapt with future topology.
+- baa2163f runtime:2pass/2fail (both older-attempt cells retain one entry).
+  Pre-W5 runtime81a1b348 passes4/4. One line in the existing pending-participant
+  release walk clears that owner's failure from each retained attempt; no new
+  traversal or retained state. Final4/4. Logs
+  `/tmp/tanstack-weight-replay-failure-retention-{red,baseline,green}.log`.
+- Final expanded integration1735/0,28 files,exit0,no skips/reported runner errors,
+  multiplier1,fixed corpus/fresh seeds. Ordinary package tsc passes. Logs/JSON
+  `/tmp/tanstack-weight-replay-final-full`, `-final-types.log`, `-final-lint.log`.
+  Same five pre-existing subscription lint errors/seven shadow warnings; no
+  suppression. Final W5 source42added/58removed,net16. DB diagnostic bundle
+  345718→345602 (-116),gzip97685→97658 (-27);DB-IVM unchanged. Combined pass169
+  source lines/2478 minified/504 gzip bytes removed; fixed-main source gap3103.
+  `/tmp/tanstack-weight-replay-final-bundle.json`, same synthetic-build caveats.
+- [ ] Commit final cleanup, then final bounded source loss audit.
 
 ### Next source-weight candidate (read-only during W5 gate)
 
@@ -5531,3 +5566,7 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   candidate yet. Hashing/equality inspection found different structural versus
   runtime identity contracts; shared-looking type checks alone do not justify
   combining them or deleting bounded cyclic traversal guarantees.
+- Existing group-by baseline atbaa2163f:126 query integration tests plus9
+  compiler/7 builder tests,142/0 across3 files,exit0. Reports/logs
+  `/tmp/tanstack-weight-group-by-baseline` and `-group-by-contract-baseline`.
+  These runs establish a baseline, not a complete cross-formulation oracle.

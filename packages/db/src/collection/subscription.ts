@@ -714,6 +714,7 @@ export class CollectionSubscription
     if (!session) return
     session.currentAttempt.failures.delete(demand)
     for (const pending of session.pending) {
+      pending.attempt.failures.delete(demand)
       if (pending.demand === demand) {
         session.pending.delete(pending)
         pending.attempt.pendingCount--
