@@ -688,8 +688,11 @@ acquisition instead of letting its queued success erase the failure.
 A later explicit window operation has a new generation and may retry from the
 safe source boundary.
 
-The ordered loader retains one settled loading boundary, separately from the
-largest live row sent to D2. After a successful finite acquisition, it reads at
+The ordered loader retains one settled loading boundary, independently of
+live rows sent to D2. It derives invalidation from the existing contribution
+rows rather than tracking a second largest-row cursor. New keys may reopen
+refinement, while duplicate delivery and order-equal updates do not. After a
+successful finite acquisition, it reads at
 most the requested limit within that request's filtered, ordered range. That
 range's last available row can advance the boundary; an unrelated live outlier
 cannot advance it merely by entering D2. This relies on the adapter fulfilling

@@ -851,66 +851,112 @@ describe(`ordered source work oracle`, () => {
     },
   )
 
-  it(`does not refetch when a visible row changes outside the ordering key`, async () => {
-    let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
-    let loads = 0
-    const rows = rowsForScenario({
-      middleCount: 1,
-      middleEligible: true,
-      lastEligible: true,
-      tied: false,
-      direction: `asc`,
-    })
-    const source = createCollection<Row, number>({
-      id: `ordered-value-update`,
-      getKey: (row) => row.id,
-      syncMode: `on-demand`,
-      startSync: true,
-      autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
-      sync: {
-        sync: (operations) => {
-          sync = operations
-          operations.markReady()
-          return {
-            loadSubset: async () => {
-              loads++
-              if (loads > 1) return
-              operations.begin()
-              for (const row of rows) {
-                operations.write({ type: `insert`, value: { ...row } })
-              }
-              const receipt = operations.commit()
-              if (receipt !== true) await receipt
-            },
-          }
+  it.each(
+    ([`collection`, `effect`] as const).flatMap((consumer) =>
+      [2, 5].flatMap((limit) =>
+        ([`first`, `last`] as const).flatMap((position) =>
+          ([`asc`, `desc`] as const).map((direction) => ({
+            consumer,
+            limit,
+            position,
+            direction,
+          })),
+        ),
+      ),
+    ),
+  )(
+    `does not refetch when a visible row changes outside the ordering key: %j`,
+    async ({ consumer, limit, position, direction }) => {
+      let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
+      let loads = 0
+      const rows = rowsForScenario({
+        middleCount: 1,
+        middleEligible: true,
+        lastEligible: true,
+        tied: false,
+        direction,
+      })
+      const source = createCollection<Row, number>({
+        id: `ordered-value-update`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: (operations) => {
+            sync = operations
+            operations.markReady()
+            return {
+              loadSubset: async () => {
+                loads++
+                if (loads > 1) return
+                operations.begin()
+                for (const row of rows) {
+                  operations.write({ type: `insert`, value: { ...row } })
+                }
+                const receipt = operations.commit()
+                if (receipt !== true) await receipt
+              },
+            }
+          },
         },
-      },
-    })
-    const live = createLiveQueryCollection((q) =>
-      q
-        .from({ row: source })
-        .orderBy(({ row }) => row.rank)
-        .limit(2),
-    )
+      })
+      const query = (q: InitialQueryBuilder) =>
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank, direction)
+          .limit(limit)
+      const effectRows = new Map<number, Row>()
+      const live =
+        consumer === `collection` ? createLiveQueryCollection(query) : undefined
+      const effect =
+        consumer === `effect`
+          ? createEffect<Row, number>({
+              query,
+              onBatch: (events) => {
+                for (const event of events) {
+                  if (event.type === `exit`) effectRows.delete(event.key)
+                  else effectRows.set(event.key, event.value)
+                }
+              },
+            })
+          : undefined
+      const readRows = () =>
+        (live ? [...live.values()] : [...effectRows.values()])
+          .map(({ id, rank, eligible, label }) => ({
+            id,
+            rank,
+            eligible,
+            label,
+          }))
+          .sort(compareRows(direction))
 
-    try {
-      await live.preload()
-      await flushPromises()
-      const loadCount = loads
-      const row = source.get(1)!
-      sync.begin({ immediate: true })
-      sync.write({ type: `update`, value: { ...row, label: `changed` } })
-      sync.commit()
-      await flushPromises()
+      try {
+        if (live) await live.preload()
+        await flushPromises()
+        const expected = [...rows].sort(compareRows(direction)).slice(0, limit)
+        expect(readRows()).toEqual(expected)
+        const loadCount = loads
+        const row = position === `first` ? expected[0]! : expected.at(-1)!
+        sync.begin({ immediate: true })
+        sync.write({ type: `update`, value: { ...row, label: `changed` } })
+        sync.commit()
+        await flushPromises()
 
-      expect(loads).toBe(loadCount)
-      expect(live.get(1)?.label).toBe(`changed`)
-    } finally {
-      await live.cleanup()
-      await source.cleanup()
-    }
-  })
+        expect(readRows()).toEqual(
+          expected.map((value) =>
+            value.id === row.id ? { ...value, label: `changed` } : value,
+          ),
+        )
+        expect(loads).toBe(loadCount)
+      } finally {
+        if (effect) await effect.dispose()
+        if (live) await live.cleanup()
+        await source.cleanup()
+      }
+    },
+  )
 
   it.each([
     {

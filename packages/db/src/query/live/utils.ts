@@ -184,69 +184,6 @@ export function reconcileChangesForD2<
 }
 
 /**
- * Track the biggest value seen in a stream of changes, used for cursor-based
- * pagination in ordered subscriptions. Moving or deleting an emitted row
- * invalidates finite source coverage, even if the local window remains full.
- * Other boundary changes only reset the cursor.
- */
-export function trackBiggestSentValue(
-  changes: Array<ChangeMessage<any, string | number>>,
-  current: unknown | undefined,
-  sentRows: ReadonlyMap<string | number, unknown>,
-  comparator: (a: any, b: any) => number,
-): {
-  biggest: unknown
-  shouldResetLoadKey: boolean
-  invalidatesSourceOrdering: boolean
-} {
-  const invalidatesSourceOrdering = changes.some((change) => {
-    const previous = sentRows.get(change.key)
-    if (change.type === `insert` || previous === undefined) return false
-    return change.type === `delete` || comparator(previous, change.value) !== 0
-  })
-  if (
-    current !== undefined &&
-    changes.some((change) => {
-      const previous =
-        change.type === `update` ? change.previousValue : change.value
-      return change.type !== `insert` && comparator(current, previous) === 0
-    })
-  ) {
-    // Once the last emitted order boundary is deleted or updated, the next
-    // request must start from the beginning. This also covers equal-order
-    // ties, where the tracked row itself is not distinguishable by the source
-    // comparator.
-    return {
-      biggest: undefined,
-      shouldResetLoadKey: true,
-      invalidatesSourceOrdering,
-    }
-  }
-
-  let biggest = current
-  let shouldResetLoadKey = false
-
-  for (const change of changes) {
-    if (change.type === `delete`) continue
-
-    const isNewKey = !sentRows.has(change.key)
-
-    if (biggest === undefined) {
-      biggest = change.value
-      shouldResetLoadKey = true
-    } else if (comparator(biggest, change.value) < 0) {
-      biggest = change.value
-      shouldResetLoadKey = true
-    } else if (isNewKey) {
-      // New key at same sort position — allow another load if needed
-      shouldResetLoadKey = true
-    }
-  }
-
-  return { biggest, shouldResetLoadKey, invalidatesSourceOrdering }
-}
-
-/**
  * Compute orderBy/limit subscription hints for an alias.
  * Returns normalised orderBy and effective limit suitable for passing to
  * `subscribeChanges`, or `undefined` values when the query's orderBy cannot
@@ -313,6 +250,30 @@ export class OrderedSourceLoader {
 
   get pendingPromise(): Promise<unknown> | undefined {
     return this.pending
+  }
+
+  /** Derive invalidation from actual contributions, not a second cursor. */
+  onSourceChanges(
+    changes: Array<ChangeMessage<Record<string, unknown>, string | number>>,
+    sentRows: ReadonlyMap<string | number, Record<string, unknown>> | undefined,
+  ): void {
+    let hasNewRows = false
+    for (const change of changes) {
+      const previous = sentRows?.get(change.key)
+      if (
+        change.type !== `insert` &&
+        previous !== undefined &&
+        (change.type === `delete` ||
+          this.info.comparator(previous, change.value) !== 0)
+      ) {
+        this.invalidateSourceOrdering()
+        return
+      }
+      if (change.type !== `delete` && previous === undefined) hasNewRows = true
+    }
+    // New keys, including ties, may need another page. Duplicate delivery or
+    // an order-equal update cannot invalidate an already attempted request.
+    if (hasNewRows) this.invalidateCursor()
   }
 
   start(): void {

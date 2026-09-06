@@ -10,15 +10,14 @@ import { normalizeExpressionPaths } from './compiler/expressions.js'
 import { getCollectionBuilder } from './live/collection-registry.js'
 import { SubsetDemandController } from './live/subset-demand-controller.js'
 import {
+  OrderedSourceLoader,
   buildQueryFromConfig,
   computeSubscriptionOrderByHints,
   extractCollectionSources,
   extractCollectionsFromQuery,
-  OrderedSourceLoader,
   reconcileChangesForD2,
   sendChangesToInput,
   splitUpdates,
-  trackBiggestSentValue,
 } from './live/utils.js'
 import type { RootStreamBuilder } from '@tanstack/db-ivm'
 import type { Collection } from '../collection/index.js'
@@ -390,7 +389,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   > = {}
 
   // Ordered subscription state for cursor-based loading
-  private readonly biggestSentValue = new Map<string, any>()
   private readonly orderedLoaders = new Map<string, OrderedSourceLoader>()
 
   // Subscription management
@@ -552,13 +550,18 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       const orderByInfo = this.getOrderByInfoForSource(sourceId)
 
       // Build the change callback — for ordered aliases, split updates into
-      // delete+insert and track the biggest sent value for cursor positioning.
+      // delete+insert and invalidate loading state from changed contributions.
       const changeCallback = orderByInfo
         ? (changes: Array<ChangeMessage<any, string | number>>) => {
             if (pendingBuffers.has(sourceId)) {
               pendingBuffers.get(sourceId)!.push(changes)
             } else {
-              this.trackSentValues(sourceId, changes, orderByInfo.comparator)
+              this.orderedLoaders
+                .get(sourceId)
+                ?.onSourceChanges(
+                  changes,
+                  this.sentToD2RowsBySource.get(sourceId),
+                )
               const split = [...splitUpdates(changes)]
               this.handleSourceChanges(sourceId, split)
             }
@@ -683,7 +686,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       // through handleSourceChanges directly (not back into this buffer).
       for (const changes of buffer) {
         if (orderByInfo) {
-          this.trackSentValues(sourceId, changes, orderByInfo.comparator)
+          this.orderedLoaders
+            .get(sourceId)
+            ?.onSourceChanges(changes, this.sentToD2RowsBySource.get(sourceId))
           const split = [...splitUpdates(changes)]
           this.sendChangesToD2(sourceId, split)
         } else {
@@ -957,30 +962,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     }
   }
 
-  /**
-   * Track the biggest value sent for a given ordered alias.
-   * Used for cursor-based pagination in loadNextItems.
-   */
-  private trackSentValues(
-    sourceId: string,
-    changes: Array<ChangeMessage<any, string | number>>,
-    comparator: (a: any, b: any) => number,
-  ): void {
-    const sentRows = this.sentToD2RowsBySource.get(sourceId) ?? new Map()
-    const result = trackBiggestSentValue(
-      changes,
-      this.biggestSentValue.get(sourceId),
-      sentRows,
-      comparator,
-    )
-    this.biggestSentValue.set(sourceId, result.biggest)
-    if (result.invalidatesSourceOrdering) {
-      this.orderedLoaders.get(sourceId)?.invalidateSourceOrdering()
-    } else if (result.shouldResetLoadKey) {
-      this.orderedLoaders.get(sourceId)?.invalidateCursor()
-    }
-  }
-
   /** Tear down subscriptions and clear state */
   dispose(): void {
     if (this.disposed && this.unsubscribeCallbacks.size === 0) return
@@ -1012,7 +993,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.lazySources.clear()
     this.demand.clear()
     this.builderDependencies.clear()
-    this.biggestSentValue.clear()
     for (const loader of this.orderedLoaders.values()) loader.dispose()
     this.orderedLoaders.clear()
 

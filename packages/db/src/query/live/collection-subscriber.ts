@@ -5,7 +5,6 @@ import {
   reconcileChangesForD2,
   sendChangesToInput,
   splitUpdates,
-  trackBiggestSentValue,
 } from './utils.js'
 import { SubsetDemandController } from './subset-demand-controller.js'
 import type { Collection } from '../../collection/index.js'
@@ -35,12 +34,6 @@ export class CollectionSubscriber<
   TContext extends Context,
   TResult extends object = GetResult<TContext>,
 > {
-  // Keep track of the biggest value we've sent so far (needed for orderBy optimization)
-  private biggest: any = undefined
-
-  // Track the most recent ordered load request key (cursor + window).
-  // This avoids infinite loops from cached data re-writes while still allowing
-  // window moves or new keys at the same cursor value to trigger new requests.
   // Track deferred promises for subscription loading states
   private subscriptionLoadingPromises = new Map<
     CollectionSubscription,
@@ -302,7 +295,7 @@ export class CollectionSubscriber<
       if (!subscription) return
       const changesArray = Array.isArray(changes) ? changes : [...changes]
 
-      this.trackSentValues(changesArray, orderByInfo.comparator)
+      this.orderedLoader?.onSourceChanges(changesArray, this.sentToD2Rows)
 
       // Split live updates into a delete of the old value and an insert of the new value
       const splittedChanges = splitUpdates(changesArray)
@@ -334,7 +327,6 @@ export class CollectionSubscriber<
     // Reset ordered-load state on truncate. Keep exact D2 rows until the
     // replacement publication retracts or replaces them.
     const truncateUnsubscribe = this.collection.on(`truncate`, () => {
-      this.biggest = undefined
       this.orderedLoader?.resetCursor()
     })
 
@@ -459,24 +451,6 @@ export class CollectionSubscriber<
       return info
     }
     return undefined
-  }
-
-  private trackSentValues(
-    changes: Array<ChangeMessage<any, string | number>>,
-    comparator: (a: any, b: any) => number,
-  ): void {
-    const result = trackBiggestSentValue(
-      changes,
-      this.biggest,
-      this.sentToD2Rows,
-      comparator,
-    )
-    this.biggest = result.biggest
-    if (result.invalidatesSourceOrdering) {
-      this.orderedLoader?.invalidateSourceOrdering()
-    } else if (result.shouldResetLoadKey) {
-      this.orderedLoader?.invalidateCursor()
-    }
   }
 
   private ensureLoadingPromise(subscription: CollectionSubscription) {

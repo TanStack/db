@@ -5297,6 +5297,59 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   errors. Fixed corpus and fresh random seeds; multiplier1. No tests changed.
   `/tmp/tanstack-weight-teardown.json` and `.log`. Ordinary package tsc exits0
   (`-types.log`). W3 has not yet had a new100x run or all-adapter verification.
-- [ ] Commit W3 then Field Lab source-to-implementation loss audit; verify
-  release order, first-error delivery, all-owner retirement, reentrant debt
-  membership checks, one-shot notification and callback clearing.
+- [x] Commitf2207d22 then Field Lab loss audit: no supported lost constraint.
+  Snapshot/membership-at-invocation checks retain reentrant debt behavior;
+  existing debts precede new acquisitions, all logical demand retires before
+  unload, and notification/listener clearing remain later steps after errors.
+  Internal source-listener removers only remove captured registrations; clearing
+  their fields first drops no supported callback behavior. First exact failure
+  uses the existing helper; event-listener errors still go to host microtasks.
+  Test named 'unsubscribe clears event listeners' asserts no status events,
+  not direct map emptiness; implementation explicitly clears it. Reused,
+  non-blind candidate-author scan of code/assertions, no report validation,
+  reruns or readiness verdict; familiarity can hide out-of-model cases.
+  Changed-file lint retains the same five diagnostics recorded at W1 (one
+  cycle/four unnecessary conditions), no new suppression.
+
+### W4 — remove the second pagination cursor — 2026-09-06
+
+- [x] Before production edits, expand the existing non-sort-update work law
+  from one case to16: Collection/Effect × full/underfilled window × first/last
+  visible row × ascending/descending. Both rows and provider-call count are
+  checked. Initial fixture compared public virtual metadata with bare Row;
+  all16 stopped there. Project the same four Row fields used elsewhere in the
+  oracle, leaving metadata outside this work law. That fixture red is NOT a
+  runtime bug (`/tmp/tanstack-weight-tracker-red.log`).
+- Confirmed red on f2207d22 runtime:12 pass/4 fail, all failures underfilled ×
+  last-visible row × both consumers/directions. Updating only label preserves
+  rows but increases provider calls3→4. `/tmp/tanstack-weight-tracker-red-confirmed.log`.
+  Existing test covered a full window/nonboundary row, so the old largest-row
+  tracker reset stayed invisible: no demand for an extra page. Test gap was
+  consumer/window occupancy/update-position dimensions, not reference rows.
+- OrderedSourceLoader.onSourceChanges now derives invalidation from the
+  existing sent-to-D2 rows. Known deletes/order-changing updates invalidate
+  finite coverage; new keys reopen exact refinement; duplicate delivery and
+  order-equal updates do not reset requests. Remove trackBiggestSentValue,
+  CollectionSubscriber.biggest, Effect.biggestSentValue, and both wrapper
+  methods. The settled sourceBoundary remains the only loading boundary;
+  existing D2 contribution maps remain unchanged. No new retained row state.
+  Update architecture wording; no public API change or test deletion.
+- Green: all16 new matrix cells pass (46 unrelated tests filtered in targeted
+  run), `/tmp/tanstack-weight-tracker-green.log`. Expanded integration includes
+  original subscription/Effect units:1729/0,28 files,exit0,no skips/reported
+  runner errors,multiplier1,fixed corpora/fresh random seeds. Full report/log
+  `/tmp/tanstack-weight-tracker-full`. Initial tsc found an overly broad map
+  value type; make it Record<string,unknown>, matching contribution rows.
+  Final ordinary package tsc exits0 (`-types-final.log`). Changed-file lint
+  now leaves only the pre-existing Effect attempt/prefer-const diagnostic;
+  sorted the touched import but did not rewrite disposal (`-lint-final.log`).
+- Production delta35 added/120 removed, net85 lines, excluding architecture.
+  Diagnostic DB bundle346493→345718 minified (-775),97974→97685 gzip (-289);
+  DB-IVM unchanged. Same controlled build caveats, not CI/application payload.
+  `/tmp/tanstack-weight-tracker-bundle.json`. Combined W1–W4:153 source lines,
+  2362 minified/477 gzip bytes removed. Fixed-main source gap3119 remains.
+  No heap or throughput benchmark; two redundant retained boundary holders and
+  their update scans are gone, not the authoritative pagination boundary.
+- [ ] Commit W4 then Field Lab loss audit against source-tracker obligations
+  and the red/green oracle change. Run the expanded full integration100x with
+  code/tests frozen before moving to the larger replay-state candidate.
