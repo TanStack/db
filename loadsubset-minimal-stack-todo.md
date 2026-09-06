@@ -4631,7 +4631,8 @@ candidate repair scopes, not completed fixes or proof of root cause.
   `/tmp/tanstack-publication-raw-truncate-formatted.json`. This repeats the
   suite, not another69 independent tests. The report audit recovered this
   omitted checkpoint, lost by compressing the record to “then formatted.”
-- [ ] Broader100x clean-exit gate at667ec972, all24 files from test:oracles plus the
+- [x] Broader100x clean-exit attempt at667ec972 (failed historical run; follow-up
+  gate closed at31ec4d15 below), all24 files from test:oracles plus the
   loader unit suite, coverage off, timeout600000, overrides unset. Outputs:
   `/tmp/tanstack-minimal-full-100x-raw-truncate.json` and matching `.log`.
   Completed1469/0, no skips, JSON success:true, **process exit1**. JSON-only
@@ -4706,10 +4707,10 @@ candidate repair scopes, not completed fixes or proof of root cause.
   reporter log. Replay:1/0,70 filtered. These overlap earlier tests, not new
   independent test totals. The final process-exit field was not retained in
   the resumed tool output; assertion counts and log are the recorded evidence.
-- [ ] Full-suite clean-process gate remains open separately from model repair:
-  do not suppress unhandled errors or loosen assertions to work around the
-  worker-reporting timeouts. The prior1468/1 report remains a historical failed
-  run; focused verification does not replace a corrected whole-suite run.
+- [x] Full-suite clean-process follow-up closed by the31ec4d15 thread-worker
+  run below, separately from model repair. No unhandled errors suppressed or
+  assertions loosened. The prior1468/1 report remains a historical failed run;
+  focused verification alone did not replace a corrected whole-suite run.
 - Fresh source loss audit recovered the split unchanged-write transition:
   source storage and retained-key removal still happen before the equality
   return; consumer visible/sent keys and callbacks do not. Snapshot delivery
@@ -4786,6 +4787,25 @@ candidate repair scopes, not completed fixes or proof of root cause.
   seeds together is not a single-variable causal proof. Threads provide one
   observed clean runner path; do not claim the underlying forks bug is fixed
   or that all future campaigns will pass. Earlier failed exits remain evidence.
-- [ ] Commit this step, then fresh Field Lab loss audit of source reports
-  against this frozen record; preserve recovered distinctions without widening
-  the gate claim.
+- [x] Committed e9ca64ab, then fresh Field Lab loss audit against its frozen
+  Current checkpoint and Full100x runner isolation sections. Two isolated
+  scanners each read one full report pair; coordinator read focused isolation
+  first, then the reduction. No code inspection, edits, reruns or readiness
+  assessment. The supplied headline outcomes make this source-first, not fully
+  blind; omission-focused scanning can overstate deliberate compression.
+- Recovered reporter disagreement: forks JSON says success:true, all assertions
+  passed, and has no unhandled-error field. Its log reports two runner errors
+  and warns they may cause false positives, without identifying an affected
+  assertion. Combined outcome compression must not erase either observation.
+- Recovered count limits:1471 result entries,1470 distinct file/fullName pairs.
+  Pagination entries181/182 both say “keeps finite public keys before NaN
+  across insertion order”; reports alone cannot distinguish duplicate runs
+  from distinct cases sharing a title. Focused isolation repeats two existing
+  properties; log and JSON are two views of one run, not independent evidence.
+  JSON reports48 suites versus25 physical files (focused:2 suites/1 file).
+- Recovered stack context: active run root is this worktree; Vitest timeout
+  frames resolve through codex-loadsubset-refinement-oracle/node_modules.
+  Shared dependency path is an observation, not a timeout cause. Reports alone
+  cannot establish SHA, effective settings, exits or generated-example totals;
+  retain command evidence.100x scales opted-in property runs, not every named
+  deterministic test100 times. No gate or correctness claim widened by audit.
