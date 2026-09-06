@@ -4194,7 +4194,14 @@ candidate repair scopes, not completed fixes or proof of root cause.
   `/tmp/tanstack-facade-boundary-{adjacent,lifecycle}.json`. Test ESLint passes;
   package tsc exits 2 without changed-test diagnostics in
   `/tmp/tanstack-facade-two-stage-types.txt`; no full type pass claimed.
-- [ ] Commit and loss-audit this step.
+- [x] Commit `f0c55b5a`, then standing Field Lab loss audit. No supported
+  omission or overclaim found: three two-stage and two remote-metadata cells,
+  preserved assertions, exact failure and second-prepare reach, all three
+  reports, unchanged runtime, type limits and remaining gates match. Reused
+  sequential source-first context was not fresh/blind; no test rerun,
+  seed/environment/provenance/lint verification or merge-readiness endorsement.
+  Root committed rerun **205/0**, no skips, in
+  `/tmp/tanstack-facade-boundary-committed.json`; Prettier check passes.
 - [ ] Measure copying/retention bounds before the queued 100x campaign and
   size/refactoring pass. Whole branch remains above main; tests passing does
   not waive the size target or establish full API/performance parity.
