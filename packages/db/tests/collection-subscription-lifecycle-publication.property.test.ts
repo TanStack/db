@@ -233,7 +233,9 @@ function finishReplacement(
       publication.replacement = undefined
     }
   } else if (
-    currentAttempts.length > 0 &&
+    // A canceled-only reset can establish an empty replacement once older
+    // transports settle. Releasing every owner instead retires the work.
+    lifecycle.owners.length > 0 &&
     currentAttempts.every(({ outcome }) => outcome === `resolve`)
   ) {
     publishIfChanged(publication, new Map(replacement.rows))
@@ -276,7 +278,11 @@ function projectPublication(
       // An authoritative reset also removes rows retained across cleanup.
       publishIfChanged(publication, new Map(publication.source))
     }
-  } else if (command.type === `restart` && lifecycle.publicationBarrierOpen) {
+  } else if (
+    command.type === `restart` &&
+    lifecycle.publications > priorPublicationCount &&
+    lifecycle.publicationBarrierOpen
+  ) {
     publication.replacement = {
       session: lifecycle.session,
       replay: lifecycle.replay,
@@ -1061,6 +1067,59 @@ function expectNoPublicationMismatches(
 }
 
 describe(`CollectionSubscription lifecycle publication oracle`, () => {
+  it(`reconciles a repeated reset after the last replay owner aborts`, async () => {
+    await runPublicationHistory([
+      { type: `source`, key: `a`, action: `upsert`, value: 0 },
+      { type: `request`, demand: `a` },
+      { type: `truncate` },
+      { type: `abort`, demand: `a` },
+      { type: `truncate` },
+      {
+        type: `settle`,
+        demand: `a`,
+        scope: `obsolete`,
+        age: `newest`,
+        outcome: `resolve`,
+      },
+      { type: `cleanup` },
+    ])
+  })
+
+  it(`keeps independent source rows when a replay settles after redundant restart calls`, async () => {
+    await runPublicationHistory([
+      { type: `source`, key: `a`, action: `upsert`, value: 0 },
+      { type: `request`, demand: `a` },
+      {
+        type: `settle`,
+        demand: `b`,
+        scope: `current`,
+        age: `oldest`,
+        outcome: `reject`,
+      },
+      { type: `truncate` },
+      { type: `source`, key: `b`, action: `upsert`, value: 1 },
+      { type: `restart` },
+      {
+        type: `settle`,
+        demand: `b`,
+        scope: `current`,
+        age: `newest`,
+        outcome: `reject`,
+      },
+      { type: `restart` },
+      {
+        type: `settle`,
+        demand: `a`,
+        scope: `current`,
+        age: `oldest`,
+        outcome: `resolve`,
+      },
+      { type: `truncate` },
+      { type: `request`, demand: `b` },
+      { type: `cleanup` },
+    ])
+  })
+
   it.each([
     `none`,
     `missing`,

@@ -4293,15 +4293,14 @@ candidate repair scopes, not completed fixes or proof of root cause.
 
 ### 100x campaign and next size target
 
-- [ ] Running against runtime/test commit `93c3c2d0` with multiplier100,
+- [x] Completed against runtime/test commit `93c3c2d0` with multiplier100,
   seed/path/property overrides unset: fixed structural corpora plus fresh
   random seeds. Full `pnpm test:oracles`, coverage off, per-test/hook timeout
   600000ms. Logs `/tmp/tanstack-minimal-oracles-100x.log`; final JSON
-  `/tmp/tanstack-minimal-oracles-100x.json`. Do not call this complete until
-  process exit and report counts are checked. Production/test files frozen.
-  Interim failures name pagination's fixed-seed transitions and subscription
-  publication's fixed/random histories. Preserve the full run and shrinking
-  output before classifying; these are not yet diagnosed runtime bugs.
+  `/tmp/tanstack-minimal-oracles-100x.json`. Exit1: **1,352 passed / 3 failed**,
+  no skips, plus two worker `onTaskUpdate` reporting timeouts. Runtime and tests
+  stayed frozen during the campaign. All three assertion failures reproduce
+  independently without those worker errors. This is not a green campaign.
 - [x] Remeasure the fixed main checkpoint `68366eca`:49 source files,
   5,301 added/2,081 removed = **+3,220 net**. Same baseline/scope as earlier;
   excludes Markdown and includes root-level source files, not only nested TS.
@@ -4311,3 +4310,34 @@ candidate repair scopes, not completed fixes or proof of root cause.
   Inspect those lifecycle responsibilities and duplication first during the
   queued coherence/refactoring pass. This inventory identifies where growth
   lives, not proof that the lines are removable or any contract can be dropped.
+
+### 100x findings: publication model and pagination prefix
+
+- [x] Pin both publication histories in the existing driver. Seed1657005,
+  path1554:2:3:6:12:12:0:0: source row, request, truncate, abort, truncate,
+  obsolete resolve, cleanup. Seed712591281, path881:35:4:4: independent source
+  row arrives during replay; redundant restarts must not erase it. Both red
+  in `/tmp/tanstack-100x-pinned-red.txt` with production unchanged.
+- [x] Correct two model transitions only. A no-op restart cannot clear private
+  replacement rows. A canceled-only authoritative reset can finish after older
+  transports settle without starting a new successful acquisition; releasing
+  all owners still retires the work. Existing cancellation, failed replacement,
+  release, callback-batch, value and source-state assertions remain.
+  Normal-scale publication suite **45/0**, including the 288-cell control
+  function. No runtime change for these two failures.
+- [x] Publication-only100x rerun: **44/1**, random seed712591281 passes;
+  fixed1657005 reaches a later failure at run5997, path5996:33:6:14:5:8.
+  `/tmp/tanstack-100x-publication-repaired.json`. The original two pinned
+  histories pass. New trace: cleanup, request b, restart, private source d0,
+  abort/release b, then source d4. Runtime emits update(d0→d4), model insert(d4):
+  the subscriber never received d0. Full shrink includes no-op commands and is
+  preserved in the JSON. Classification/repair queued; do not call100x green.
+- [ ] Pagination seed1658 shrank to rows1(rank0),2(rank1); insert3(rank1), move
+  to offset1/limit1, no-op update1. Checkpoint2 shows row3 instead of row2.
+  The generalized asc/desc × implicit/explicit key order × tied/distinct insert
+  matrix is **4 red / 4 green** on baseline: implicit order fails even without
+  ties. Preserve all eight cases, not just the original shrink.
+- [ ] Repair the ordered loader's false prefix proof. A filled graph window
+  after a live insert does not establish a complete source prefix. An explicit
+  window move must reacquire that prefix; do not add more retained cursor state.
+  Candidate verification and per-step loss audit pending. No size-pass completion.
