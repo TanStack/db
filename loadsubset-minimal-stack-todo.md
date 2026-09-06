@@ -8,14 +8,16 @@ current as review findings, oracle laws, and implementation choices change.
 - Pagination transfer repair committed at88fad51b:110 selected rows instead
   of560 in the bounded traversal probe, +38 net production lines. Its focused
  100x and broader1x gates pass; assumptions and local-read costs are below.
-- Remaining publication witness corrected in the test model at667ec972:
+- Initial publication witness corrected in the test model at667ec972:
   raw future source events differ from held-snapshot replacements. Production
   unchanged. Publication100x69/0 and the original failing seed replay pass.
-- Full100x oracle/loader run at667ec972 has1469 passing assertions and none
-  failed, but exited1 despite JSON success:true. A diagnostic rerun is pending
-  with normal error reporting and test console logging suppressed. Do not call
-  the full campaign green. Post-commit loss audits are complete; runtime/tests
-  remain frozen during verification.
+- Full100x at667ec972 first had1469 passing assertions but unexplained exit1.
+  Diagnostic rerun had1468/1 and two Vitest onTaskUpdate reporting timeouts.
+  Its new model-state mismatch was pinned and repaired at ec87d43d with a new
+  per-command consumer-state invariant (production unchanged). Publication100x
+  now passes71/0; the failing seed replay passes1/0 (70 filtered). Fresh source
+  and report loss audits are complete, with recovered limits recorded below.
+  Do not call the full campaign green: its clean-process gate remains open.
 - Still open: whole-branch size goal (+3263 net package-source lines against
   fixedmain68366eca), package test type diagnostics, final coherence/review and
   RFC/PR/changeset reconciliation. Older unchecked entries are phase records;
@@ -4691,6 +4693,43 @@ candidate repair scopes, not completed fixes or proof of root cause.
   `/tmp/tanstack-publication-consumer-state-green.json`. This is normal scale,
   not the100x follow-up. These changes close the audit's unasserted consumer-
   map gap for this driver; they do not turn raw events into D2 input deltas.
-- [ ] Commit then loss audit and publication100x. Full-suite clean-process gate
-  remains open separately from model repair: do not suppress unhandled errors
-  or loosen assertions to work around the worker-reporting timeouts.
+- [x] Commit ec87d43d; normal-scale71/0 exited0 and scoped ESLint has0 errors
+  with the same two no-shadow warnings. Fresh isolated source/report loss
+  audits dispatched against the committed reduction.
+- [x] Publication100x at ec87d43d (fixed+fresh random, overrides unset) and
+  replay87900852/path3937. Reports `/tmp/tanstack-publication-consumer-state-100x.json`
+  and `/tmp/tanstack-publication-consumer-state-replay.json`. Focused100x:71/0,
+  no skips, fixed1657005 and random823474284, no worker errors in its normal
+  reporter log. Replay:1/0,70 filtered. These overlap earlier tests, not new
+  independent test totals. The final process-exit field was not retained in
+  the resumed tool output; assertion counts and log are the recorded evidence.
+- [ ] Full-suite clean-process gate remains open separately from model repair:
+  do not suppress unhandled errors or loosen assertions to work around the
+  worker-reporting timeouts. The prior1468/1 report remains a historical failed
+  run; focused verification does not replace a corrected whole-suite run.
+- Fresh source loss audit recovered the split unchanged-write transition:
+  source storage and retained-key removal still happen before the equality
+  return; consumer visible/sent keys and callbacks do not. Snapshot delivery
+  updates visible, retained and sent keys only inside the existing active,
+  single-owner, unsent, resident-row gate, not for every requested row.
+- The invariant compares callback-folded consumer rows with independent model
+  consumer rows, not with source rows. It runs after each command, including
+  unsubscribe/no-ops and diagnostic batch mismatches, but not final teardown.
+  The13-command witness has no effective restart or explicit settlement; the
+  second has real cleanup/restart but no explicit settlement either.
+- Fresh report loss audit recovered that seed87900852 stopped after3938 cases,
+  with endOnFailure and zero shrinks: this is not a minimized history. Failure
+  at command9 does not establish its restart/unsubscribe/release suffix. Red
+  controls fail earlier at commands4/5 and do not establish their suffixes.
+  Full reports contain25 result files, not the48 nested-suite count. Normal
+  green71/0 used random-118846606; runs overlap and log/JSON are one run.
+- Worker errors are separate from assertion failures. Vitest warns they may
+  affect passing results, but the reports identify no particular affected
+  assertion and do not explain the initial JSON-only exit1. Report evidence
+  alone cannot prove multiplier, environment, SHA or exit; those require the
+  command record. The frozen checkpoint was stale relative to its own later
+  follow-up; the current checkpoint above now reflects both completed runs.
+- Audit limits: fresh isolated source-first and report-only scanners; no
+  reruns/edits or sibling-source inspection. Briefings named headline findings;
+  omission-focused scans can overstate deliberate compression. These audits
+  recover evidence, not a whole-PR readiness or universal correctness claim.
