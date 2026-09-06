@@ -4091,5 +4091,11 @@ candidate repair scopes, not completed fixes or proof of root cause.
   changed-test diagnostics in `/tmp/tanstack-facade-retained-api-types.txt`.
   Source size stays +3,220 against `68366eca`; no adjacent/lifecycle rerun
   claimed for this test-only step, no new performance evidence.
-- [ ] Commit, then run standing Field Lab loss audit before the lifecycle
-  boundary step. Subscription/failure/cleanup and async gates remain open.
+- [x] Commit `a6ef1a19`, then run standing Field Lab loss audit. No supported
+  omission or overclaim found: all prior assertions, both capture scopes,
+  per-read index limitation, two186/0 reports, and empty production diff match
+  the reduction. Reused, sequential source-first context was not fresh/blind;
+  prior framing may steer attention. No tests or live implementation review;
+  optional types not inspected. Reports do not prove commands/environment or
+  intermediate source provenance. Subscription/failure/cleanup and async
+  gates remain open; this audit is not merge-readiness evidence.
