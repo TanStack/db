@@ -5079,3 +5079,67 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   evidence, not reports alone, establishes revision, environment and exits.
   Report-level grouping can hide individual test differences; no testcase
   completeness or readiness assessment. No edits, reruns or source inspection.
+
+### Code-weight identification pass — 2026-09-06
+
+- [x] Freeze runtime/tests at247dc8d2; no runtime edits in this pass. Compare
+  against fixed main68366eca, not a moving main. Package source excluding
+  Markdown remains +5355/-2083, net3272; DBsrc net2809. Subscription (+917)
+  and ordered-loader utils (+515) account for about44% of total net growth.
+  Growth selects inspection targets; it does not prove the code is redundant.
+- Measure three things separately: source added/deleted, controlled minified
+  and gzip bytes, and the number of independently owned facts/transition paths.
+  File moves, shorter names, removed comments, and weakened tests do not count
+  as architectural simplification. For each state field, trace who creates,
+  reads, resets and retires it, which law requires it, and whether another
+  owner already stores the same fact. Prefer deleting a responsibility over
+  moving it behind a new abstraction. No new generic framework for two users.
+- Controlled diagnostic bundle baseline: esbuild0.20.2, browser/ES2022/ESM,
+  minified all-entry exports, external package dependencies, no source maps,
+  identical options for both frozen git trees. DB:310374→348080 minified bytes,
+  88767→98162 gzip bytes (+9395). DB-IVM:27574→30220 minified,
+  8262→9133 gzip (+871). Script `/tmp/tanstack-measure-source-bundle.cjs`,
+  report `/tmp/tanstack-weight-baseline.json`. These separate package results
+  are not summed into an application payload estimate. This is not the CI
+  compressed-size/Vite artifact measurement or a tree-shaken consumer build.
+  Temporary script/report are diagnostic artifacts, not committed tooling.
+- Two read-only reviewers supplied the candidates below: a fresh subscription
+  reviewer and a reused ordered-loader reviewer. Neither implemented or ran
+  these reductions. Estimates are hypotheses, can overlap, and must not be
+  summed as achieved savings. They do not yet explain how to remove3272 lines.
+
+| Candidate | Estimated net lines removed | Contract and deletion gate |
+| --- | --- | --- |
+| Demand holds one physical acquisition object instead of inheriting/copying its fields |40–70| Preserve startup reentry, no unload after sync throw, old-lease retention on failed replacement, new-lease retirement, and session invalidation. Subscription lifecycle/history oracle plus replacement/cleanup units. |
+| One ordered-request wrapper owns repeated failure bookkeeping |25–45| All four routes × throw/reject/abort/dispose; preserve provisional sync versus retained async acquisition, failure-before-cleanup ordering, original error, release debt, and obsolete-generation isolation. |
+| Reuse existing runAllCallbacks in unsubscribe |20–35| Logical retirement/debt registration before external callbacks; unload order and reentrant membership checks; clear listeners despite errors; repeated unsubscribe retries debt without repeating logical teardown. |
+| Remove legacy biggest-sent-row tracker now that confirmed sourceBoundary owns cursors |40–65| Collection/Effect parity; sent-row deletion/order changes invalidate finite coverage, new keys clear retry markers, duplicate/order-equal delivery does not advance cursors or trigger unnecessary work. Preserve underfilled/empty, outlier, atomic/split and unknown-key cases. |
+| Flatten historical replay attempts into session pending participants plus current-attempt failures |30–60| Separate state-model change: older overlapping transports still block publication even after cancellation; unfinished/reentrant replay setup stays a barrier; participants identify acquisitions, not merely promises; ordinary prereplay work differs from work acquired during replay. |
+
+- [ ] Start with acquisition composition, then shared failure transitions and
+  existing teardown helper. Test the old row tracker separately across both
+  Collection and Effect. Treat replay flattening as a larger internal design
+  change: state its invariants and counterexamples before implementing it.
+  Read-only pointers: subscription.ts SubsetDemand, replay startup/replacement,
+  releaseDemandAt/unsubscribe; live/utils.ts trackBiggestSentValue and
+  OrderedSourceLoader request methods; live/collection-subscriber.ts and
+  effect.ts tracker consumers. Current source is frozen247dc8d2.
+- Do not merge builder pendingOrderedLoads with sync operation promises just
+  because both track waits: superseded operations stop absorbing future work,
+  old work may still block publication, and ordinary background readiness need
+  not block publication. Do not remove sentKeys/privateRows or the confirmed
+  source boundary. Do not replace cheap pagination with repeated full-prefix
+  fetching. Any public-contract change or material tradeoff needs a separate
+  decision, not a cleanup label.
+- [ ] For each implemented reduction: record exact deleted state/branches and
+  measured source/bundle delta; retain meaningful tests; run targeted laws for
+  rows/events/errors/ownership/restart, work counts and retained state; add a
+  red test first if a new bug appears. Commit separately, then subagent loss
+  audit. Run the frozen full1x and fresh100x oracle/loader+live-query gate at
+  the integration milestone and ordinary package types separately. Adapter
+  suites and actual CI-size build remain separate gates, not inferred from DB
+  oracle success. Reassess candidates if line savings add state, fetching,
+  retention or failure ambiguity elsewhere. Below-main weight is not achieved.
+- [ ] Commit this identification record, then bounded source-to-plan Field Lab
+  loss audit. Existing agent slots require reused scanners; label the audit
+  non-blind and do not treat it as fresh implementation verification.
