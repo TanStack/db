@@ -319,13 +319,13 @@ export class CollectionSubscriber<
         // Recovery favors a simple, authoritative rebuild over resuming a
         // fragile cursor. The retained full-source demand is replayed on later
         // truncates, so this adds at most one demand per subscription.
-        queueMicrotask(() => {
-          try {
-            this.orderedLoader?.loadFullSource()
-          } catch {
-            // requestSnapshot already records the subscription-scoped error.
-          }
-        })
+        // Queue startup inside the publication barrier too: a synchronous
+        // throw establishes no acquisition for the replay to wait on.
+        const loader = this.orderedLoader
+        this.collectionConfigBuilder.trackOrderedLoadPromise(
+          Promise.resolve().then(() => loader?.loadFullSource()),
+          true,
+        )
       }),
     })
     subscriptionHolder.current = subscription

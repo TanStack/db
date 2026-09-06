@@ -1243,11 +1243,11 @@ explicitly removed.
 This is the bounded protocol census. Do not add another production patch until
 every row is either green or has a named red witness.
 
-Latest checkpoint: **593 passing / 1 failing** across 594 test functions.
+Latest checkpoint: **597 passing / 0 failing** across 597 test functions.
 The demand suite is **195/0**, and history is **37/0**. The initial-work
 notification mismatch was a model error: readiness and publication have
 different wait sets. Remaining failures: publication **0**, settled-peer replay **0**, ordered
-work **1**. The wider adjacent run has another **15 failing functions** (also
+work **0**. The wider adjacent run has another **15 failing functions** (also
 red on the pre-step runtime); these are separately queued below. Counts describe tests,
 not unique confirmed runtime bugs; contract-alignment notes below distinguish
 stale oracle expectations from implementation defects.
@@ -1263,7 +1263,7 @@ stale oracle expectations from implementation defects.
 | Row-bearing lifecycle histories                      | independent public-row model; exact batches modulo independent-key order; fixed and random histories | 43 green / 0 red; duplicate snapshots and retained-row reset repaired; live source truth checked independently; no visible-row request omission remains |
 | Replay phase transitions                             | setup/pending/settling/publishing crossed with release, reacquisition, supersession, abort, cleanup | 72 green; direct settled-peer recovery and consecutive failure/retry witnesses green |
 | Ordered route mechanics                              | page/prefix/boundary/full-source × return/throw/resolve/reject/abort/cleanup                        | green                                                        |
-| Ordered consumer integration                         | Collection/Effect parity, source-local recovery, public-window reentry, sync-session settlement     | 1 ordered-work red: synchronous recovery publication; adjacent failures separately queued |
+| Ordered consumer integration                         | Collection/Effect parity, source-local recovery, public-window reentry, sync-session settlement     | bounded census green; synchronous recovery publication repaired; adjacent failures separately queued |
 | Ordered generated histories                          | 192 checked route/delivery/window/outcome/session/barrier histories; finite/full request shapes     | 192 green cells; no known-red classifier remains |
 
 The earlier 44-test red catalog grouped into these protocol faults. Later
@@ -3003,7 +3003,8 @@ candidate repair scopes, not completed fixes or proof of root cause.
   counts, temporary patch restoration, or lint results.
 - [x] Distinguish valid finite walks from duplicate tie-boundary acquisition;
       correct the work bound and repair boundary retention (next section).
-- [ ] Resolve synchronous full-source recovery publication (one bounded red).
+- [x] Resolve synchronous full-source recovery publication, including retry,
+      partial ordinary updates, and queued cleanup controls (next section).
 - [ ] Reconcile/fix the fifteen pre-existing adjacent failures before claiming
       broad green: two Effect release-retry assertions; three pagination
       reentry/session-return assertions; six live ordered incremental failure
@@ -3065,6 +3066,68 @@ candidate repair scopes, not completed fixes or proof of root cause.
   successful example counts, timeout settings, runtime restoration, lint, or
   typecheck. The matrix-only report's random property was skipped, so its seed
   label is not an executed campaign.
+
+### Queued ordered recovery publication
+
+- A synchronous full-source startup throw rolls back its tentative logical
+  demand and returns no acquisition promise. The earlier finite replay may
+  still complete, so merely recording the subscription error allowed its
+  partial rows to reach the public query. Keep the queued startup inside the
+  existing ordered-publication guard using a tracked Promise instead of a
+  fire-and-forget microtask with a swallowed throw. A failed startup keeps the
+  public snapshot; a later attempt resets the guard and successful replay
+  publishes the replacement. Async acquisition remains owned by replay.
+- Capture the scheduling loader in that task; cleanup disposes it rather than
+  letting queued work consult a later replacement loader. No new stored state,
+  helper, or production lines: **7 added / 7 removed**. Architecture now records
+  startup's publication participation and loader ownership explicitly.
+- Recovery matrix is now pending success plus sync/async × one/two failures.
+  All failure variants retry to success. Kept the original retained-rank and
+  no-publication assertions, exact error identity, no escaped callback errors,
+  complete final source/query rows, request counts, and exact one-release per
+  established acquisition. Added same-order payload updates while failed:
+  both row values and publication count remain old, no automatic retry starts,
+  and final recovery exposes the updated payload in one publication. After a
+  repeated failure, recheck retained rows, publication count, and exact error.
+- Added two queued cleanup controls, with/without later restart. No queued
+  source request runs after cleanup; restart can preload normally with no
+  full-source request or stale error. These controls already pass on the old
+  runtime; they are not additional repaired bugs. They do not execute a
+  replacement loader before the old task drains, so capture ownership is also
+  a source-level guarantee, not a separately red/green-tested ABA witness.
+- Expanded recovery matrix before production changes **3/2**,
+  `/tmp/tanstack-ordered-sync-publication-expanded-red.json`: both sync cases
+  publish `[0, 0.5, 2, 3]` instead of retaining `[1, 2, 3, 4]`. First proposed
+  runtime **5/0**, `/tmp/tanstack-ordered-sync-publication-first-green.json`.
+  Initial eleven-suite run **857/15**,
+  `/tmp/tanstack-ordered-sync-publication-census.json`, before the two queued
+  cleanup controls and later payload assertions. Focused final behavior with
+  suffixes/controls **7/0**, `/tmp/tanstack-ordered-sync-publication-suffixes.json`.
+- Red control: temporarily restored the sole edited runtime file exactly to
+  `af727940` (empty git diff verified), keeping the expanded tests. **5/2**,
+  `/tmp/tanstack-ordered-sync-publication-old-runtime-control.json`: same two
+  wrong-publication failures; both cleanup controls and async variants pass.
+  Restored the runtime afterward; no temporary control remains.
+- Final eleven-suite run, override 1657011:
+  `/tmp/tanstack-ordered-sync-publication-final-census.json`, **859/15**.
+  Bounded seven suites **597/0**: history 37, demand 195, publication 43,
+  replay 72, refinement 7, ordered lifecycle 196, ordered work 47. Adjacent
+  **262/15**: loader 31/0, Effect 67/2, pagination 130/3, error matrix 34/10.
+  All fifteen adjacent failure names persist; no new failure names relative to
+  `/tmp/tanstack-ordered-isolation-final-census.json`.
+- Fresh targeted 10× with `--testTimeout=60000`, no replay override:
+  `/tmp/tanstack-ordered-sync-publication-fresh-10x.json`, **243/0**. Ordered
+  lifecycle fixed/random seeds 93471/925069818; ordered consumer fixed/random
+  seeds 17801/-2109404373. Successful example counts come from command/config,
+  not JSON function totals. This is not the final 100× or the whole repo suite.
+- Renamed the cleanup fixture row to remove the only new lint warning, then
+  repeated focused tests **7/0**,
+  `/tmp/tanstack-ordered-sync-publication-final-focused.json`. Prettier/diff
+  checks pass. Targeted lint still has three pre-existing test errors (imports,
+  assertion, optional chain), no new warnings; no standalone typecheck or
+  clean-lint claim. A lint process overlapped the old-runtime control, so its
+  source-file snapshot is not independently established by that first output;
+  the final lint rerun used the restored runtime.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar

@@ -1569,26 +1569,102 @@ describe(`ordered source work oracle`, () => {
     }
   })
 
+  it.each([false, true])(
+    `cancels queued ordered recovery on cleanup (restart=%s)`,
+    async (restart) => {
+      const seedRow: Row = { id: 1, rank: 1, eligible: true, label: `retained` }
+      let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
+      let installed = false
+      const requests: Array<LoadSubsetOptions> = []
+      const source = createCollection<Row, number>({
+        id: `queued-recovery-cleanup-${harnessId++}`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: (operations) => {
+            sync = operations
+            operations.markReady()
+            return {
+              loadSubset: (options) => {
+                requests.push(options)
+                if (installed) return true
+                installed = true
+                operations.begin()
+                operations.write({ type: `insert`, value: seedRow })
+                return operations.commit()
+              },
+              unloadSubset: () => {},
+            }
+          },
+        },
+      })
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank)
+          .limit(1),
+      )
+      try {
+        await live.preload()
+        const initialRequests = requests.length
+        sync.begin()
+        sync.truncate()
+        installed = false
+        expect(sync.commit()).toBe(true)
+        await live.cleanup()
+        await flushPromises()
+        expect(requests).toHaveLength(initialRequests)
+        if (restart) {
+          await live.preload()
+          expect(live.toArray.map(({ id }) => id)).toEqual([1])
+          expect(live.utils.lastSubsetError).toBeUndefined()
+          expect(requests.length).toBeGreaterThan(initialRequests)
+        }
+        expect(
+          requests.filter(
+            ({ where, limit }) => where === undefined && limit === undefined,
+          ),
+        ).toEqual([])
+      } finally {
+        await Promise.all([live.cleanup(), source.cleanup()])
+      }
+    },
+  )
+
   it.each([
     { name: `until full-source recovery settles`, failure: undefined },
     {
       name: `when full-source recovery throws synchronously`,
       failure: {
         mode: `sync` as const,
+        attempts: 1,
         error: new Error(`full-source recovery failed`),
+      },
+    },
+    {
+      name: `after two synchronous full-source recovery failures`,
+      failure: {
+        mode: `sync` as const,
+        attempts: 2,
+        error: new Error(`full-source recovery failed twice`),
       },
     },
     {
       name: `after asynchronous full-source recovery retries`,
       failure: {
         mode: `async` as const,
+        attempts: 1,
         error: new Error(`full-source recovery rejected`),
       },
     },
     {
       name: `after two asynchronous full-source recovery failures`,
       failure: {
-        mode: `async-twice` as const,
+        mode: `async` as const,
+        attempts: 2,
         error: new Error(`full-source recovery rejected twice`),
       },
     },
@@ -1643,14 +1719,8 @@ describe(`ordered source work oracle`, () => {
                 options.where === undefined && options.limit === undefined
               if (recovering && isFullSource) {
                 fullSourceRequests++
-                if (failure?.mode === `sync`) throw failure.error
-                const failuresBeforeSuccess =
-                  failure?.mode === `async-twice` ? 2 : 1
-                if (
-                  (failure?.mode === `async` ||
-                    failure?.mode === `async-twice`) &&
-                  fullSourceRequests <= failuresBeforeSuccess
-                ) {
+                if (failure && fullSourceRequests <= failure.attempts) {
+                  if (failure.mode === `sync`) throw failure.error
                   acquisitions.push(options)
                   return Promise.reject(failure.error)
                 }
@@ -1737,36 +1807,51 @@ describe(`ordered source work oracle`, () => {
       if (failure) {
         expect(live.utils.lastSubsetError).toBe(failure.error)
         expect(escapedErrors).toEqual([])
-        if (failure.mode === `async` || failure.mode === `async-twice`) {
-          const retryCount = failure.mode === `async-twice` ? 2 : 1
-          for (let retry = 0; retry < retryCount; retry++) {
-            installed.clear()
-            sync.begin()
-            sync.truncate()
-            const retryReceipt = sync.commit()
-            if (retryReceipt !== true) await retryReceipt
-            await vi.waitFor(() => expect(fullSourceRequests).toBe(retry + 2))
+        truth[0] = { ...truth[0]!, label: `updated during failed recovery` }
+        sync.begin()
+        sync.write({ type: `update`, value: truth[0] })
+        const updateReceipt = sync.commit()
+        if (updateReceipt !== true) await updateReceipt
+        await flushPromises()
+        expect(live.toArray.map(({ rank }) => rank)).toEqual([1, 2, 3, 4])
+        expect(live.get(1)?.label).toBe(`row-1`)
+        expect(publications).toHaveLength(publicationCount)
+        expect(fullSourceRequests).toBe(1)
+        const retryCount = failure.attempts
+        for (let retry = 0; retry < retryCount; retry++) {
+          installed.clear()
+          sync.begin()
+          sync.truncate()
+          const retryReceipt = sync.commit()
+          if (retryReceipt !== true) await retryReceipt
+          await vi.waitFor(() => expect(fullSourceRequests).toBe(retry + 2))
+          if (retry + 1 < retryCount) {
+            for (let index = 0; index < 4; index++) await flushPromises()
+            expect(live.toArray.map(({ rank }) => rank)).toEqual([1, 2, 3, 4])
+            expect(publications).toHaveLength(publicationCount)
+            expect(live.utils.lastSubsetError).toBe(failure.error)
+            expect(escapedErrors).toEqual([])
           }
-          await vi.waitFor(() =>
-            expect(source.toArray.map(({ rank }) => rank).sort()).toEqual([
-              0, 0.5, 1, 1.5, 2, 3,
-            ]),
-          )
-          await vi.waitFor(() =>
-            expect(live.toArray.map(({ rank }) => rank)).toEqual([
-              0, 0.5, 1, 1.5,
-            ]),
-          )
-          expect(fullSourceRequests).toBe(retryCount + 1)
         }
+        await vi.waitFor(() =>
+          expect(source.toArray.map(({ rank }) => rank).sort()).toEqual([
+            0, 0.5, 1, 1.5, 2, 3,
+          ]),
+        )
+        await vi.waitFor(() =>
+          expect(live.toArray.map(({ rank }) => rank)).toEqual([
+            0, 0.5, 1, 1.5,
+          ]),
+        )
+        expect(fullSourceRequests).toBe(retryCount + 1)
+        expect(live.get(1)?.label).toBe(`updated during failed recovery`)
       } else {
         fullSource.resolve()
         await flushPromises()
         expect(live.toArray.map(({ rank }) => rank)).toEqual([0, 0.5, 1, 1.5])
       }
-      if (!failure || failure.mode !== `sync`) {
-        expect(publications.slice(publicationCount)).toEqual([[0, 0.5, 1, 1.5]])
-      }
+      expect(publications.slice(publicationCount)).toEqual([[0, 0.5, 1, 1.5]])
+      expect(escapedErrors).toEqual([])
     } finally {
       queueMicrotaskSpy?.mockRestore()
       fullSource.resolve()

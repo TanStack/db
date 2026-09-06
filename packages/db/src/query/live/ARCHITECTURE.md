@@ -675,7 +675,11 @@ source and keeps the last complete public snapshot until it settles; an update
 that compares equal under the source order does not broaden demand. Mutations
 that arrive during a barrier join the private state and publish with the
 completed replacement; a failed operation keeps them private until retry or
-restart. The loader tracks each sequential request as a bounded participant,
+restart. Queued ordered-repair startup joins this barrier before invoking the
+adapter, so a synchronous throw cannot publish a partial replacement merely
+because it returned no acquisition promise. The queued task belongs to the
+loader that scheduled it, not a replacement created after cleanup.
+The loader tracks each sequential request as a bounded participant,
 not every recursive suffix of a long refinement chain.
 
 A truncate replay is one publication barrier. Every acquisition started while
