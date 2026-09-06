@@ -2985,9 +2985,22 @@ candidate repair scopes, not completed fixes or proof of root cause.
   Replayed with seed -1475725790, multiplier 10 and `--testTimeout=60000`:
   **219/2**, `/tmp/tanstack-ordered-isolation-replay-10x.json`. Both properties
   pass in roughly six seconds; only the same two named ordered-work failures
-  remain. Ordered lifecycle's fixed seed is 93471. This changes test budget,
-  not runtime behavior, generated inputs, or expectations. Successful example
+  remain. Ordered lifecycle's fixed seed is 93471. Consumer inputs retain their
+  seeds, but lifecycle's random seed changed from -1515386861 to -1475725790
+  through the suite-wide override; this is not an identical-input lifecycle
+  replay. Both lifecycle random runs pass. No runtime or expectation change.
+  Successful example
   counts rely on the recorded command/config, not JSON test totals.
+- Fresh Field Lab loss audit of `8b018f9a` recovered the lifecycle-random seed
+  distinction above. All nine source reports' totals matched; no additional
+  supported code/test omission was found. All fifteen adjacent failures persist
+  from control to final; six Effect ordered error cells become green. The old
+  source-isolation witness failed on final rows; the strengthened control fails
+  earlier on no new acquisition (`2 > 2`). This was one fresh sequential scanner,
+  source diff before reports, not sibling-blind. Framing/order can preserve the
+  chosen categories at the expense of other omissions. No auditor test execution,
+  correctness endorsement, or independent proof of commands, successful example
+  counts, temporary patch restoration, or lint results.
 - [ ] Resolve repeated continuation and synchronous full-source recovery
       publication (two bounded ordered-work reds).
 - [ ] Reconcile/fix the fifteen pre-existing adjacent failures before claiming
