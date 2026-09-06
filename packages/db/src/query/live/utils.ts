@@ -407,28 +407,19 @@ export class OrderedSourceLoader {
     if (!this.active || this.fullSource) return
     this.fullSourceFailed = false
     this.fullSource = true
-    try {
-      this.requestAndObserve(
-        (onLoadSubsetResult) => {
-          this.subscription.requestSnapshot({
-            trackLoadSubsetPromise: false,
-            replaceExistingDemand,
-            onLoadSubsetResult,
-          })
-        },
-        false,
-        true,
-        true,
-        windowOperationGeneration,
-      )
-    } catch (error) {
-      this.invalidateSourceCoverage()
-      this.fullSource = false
-      this.fullSourceFailed = true
-      this.failed = true
-      this.failedWindowOperationGeneration = windowOperationGeneration
-      throw error
-    }
+    this.requestAndObserve(
+      (onLoadSubsetResult) => {
+        this.subscription.requestSnapshot({
+          trackLoadSubsetPromise: false,
+          replaceExistingDemand,
+          onLoadSubsetResult,
+        })
+      },
+      false,
+      true,
+      true,
+      windowOperationGeneration,
+    )
   }
 
   private loadPrefix(
@@ -443,27 +434,20 @@ export class OrderedSourceLoader {
       }
       return
     }
-    try {
-      this.requestAndObserve(
-        (onLoadSubsetResult) => {
-          this.subscription.requestSnapshot({
-            orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
-            limit: count,
-            trackLoadSubsetPromise: false,
-            onLoadSubsetResult,
-          })
-        },
-        refine,
-        false,
-        true,
-        windowOperationGeneration,
-      )
-    } catch (error) {
-      this.invalidateSourceCoverage()
-      this.failed = true
-      this.failedWindowOperationGeneration = windowOperationGeneration
-      throw error
-    }
+    this.requestAndObserve(
+      (onLoadSubsetResult) => {
+        this.subscription.requestSnapshot({
+          orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
+          limit: count,
+          trackLoadSubsetPromise: false,
+          onLoadSubsetResult,
+        })
+      },
+      refine,
+      false,
+      true,
+      windowOperationGeneration,
+    )
     this.lastPrefixCount = count
   }
 
@@ -538,32 +522,24 @@ export class OrderedSourceLoader {
       return
     }
     this.lastPage = { count, boundary }
-    try {
-      this.requestAndObserve(
-        (onLoadSubsetResult) => {
-          this.subscription.requestLimitedSnapshot({
-            orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
-            limit: count,
-            minValues,
-            // Local rows seen before the first provider request prove neither
-            // a cursor nor a remote offset. Start the first acquisition at zero.
-            offset: startsFromSourcePrefix ? 0 : this.countAcquiredRows(),
-            trackLoadSubsetPromise: false,
-            onLoadSubsetResult,
-          })
-        },
-        refine,
-        false,
-        true,
-        windowOperationGeneration,
-      )
-    } catch (error) {
-      this.invalidateSourceCoverage()
-      this.failed = true
-      this.failedWindowOperationGeneration = windowOperationGeneration
-      this.lastPage = undefined
-      throw error
-    }
+    this.requestAndObserve(
+      (onLoadSubsetResult) => {
+        this.subscription.requestLimitedSnapshot({
+          orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
+          limit: count,
+          minValues,
+          // Local rows seen before the first provider request prove neither
+          // a cursor nor a remote offset. Start the first acquisition at zero.
+          offset: startsFromSourcePrefix ? 0 : this.countAcquiredRows(),
+          trackLoadSubsetPromise: false,
+          onLoadSubsetResult,
+        })
+      },
+      refine,
+      false,
+      true,
+      windowOperationGeneration,
+    )
   }
 
   private observe(
@@ -667,28 +643,19 @@ export class OrderedSourceLoader {
     }
     this.hasLastBoundary = true
     this.lastBoundary = value
-    try {
-      return this.requestAndObserve(
-        (onLoadSubsetResult) => {
-          this.subscription.requestSnapshot({
-            where,
-            trackLoadSubsetPromise: false,
-            onLoadSubsetResult,
-          })
-        },
-        false,
-        false,
-        false,
-        windowOperationGeneration,
-      )
-    } catch (error) {
-      this.invalidateSourceCoverage()
-      this.hasLastBoundary = false
-      this.lastBoundary = undefined
-      this.failed = true
-      this.failedWindowOperationGeneration = windowOperationGeneration
-      throw error
-    }
+    return this.requestAndObserve(
+      (onLoadSubsetResult) => {
+        this.subscription.requestSnapshot({
+          where,
+          trackLoadSubsetPromise: false,
+          onLoadSubsetResult,
+        })
+      },
+      false,
+      false,
+      false,
+      windowOperationGeneration,
+    )
   }
 
   private invalidateSourceCoverage(): void {
@@ -712,14 +679,27 @@ export class OrderedSourceLoader {
       this.generation++
       this.pending = undefined
     }
-    this.invalidateSourceCoverage()
-    this.failed = true
-    this.failedWindowOperationGeneration = windowOperationGeneration
-    if (isFullSource) this.fullSourceFailed = true
+    this.failSynchronousRequest(isFullSource, windowOperationGeneration)
     try {
       observed.release({ error })
     } catch {
       // releaseLoadSubset retains cleanup debt for a later retry.
+    }
+  }
+
+  private failSynchronousRequest(
+    isFullSource: boolean,
+    windowOperationGeneration?: number,
+  ): void {
+    this.invalidateSourceCoverage()
+    this.invalidateCursor()
+    this.hasLastBoundary = false
+    this.lastBoundary = undefined
+    this.failed = true
+    this.failedWindowOperationGeneration = windowOperationGeneration
+    if (isFullSource) {
+      this.fullSource = false
+      this.fullSourceFailed = true
     }
   }
 
@@ -771,10 +751,7 @@ export class OrderedSourceLoader {
           windowOperationGeneration,
         )
       } else {
-        this.invalidateSourceCoverage()
-        this.failed = true
-        this.failedWindowOperationGeneration = windowOperationGeneration
-        if (isFullSource) this.fullSourceFailed = true
+        this.failSynchronousRequest(isFullSource, windowOperationGeneration)
       }
       throw normalized
     } finally {

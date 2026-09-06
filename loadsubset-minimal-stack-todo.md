@@ -5214,3 +5214,40 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   This scales opted-in property runs, not every deterministic cell100 times.
   This is the focused W1 stress gate, not a rerun of all26 files at100x.
   No tests, classifiers or production code changed during verification.
+
+### W2 — synchronous ordered-request failure ownership — 2026-09-06
+
+- [x] Remove route-level catch blocks from full-source, prefix, page and
+  boundary requests. requestAndObserve's existing catches own failure through
+  one failSynchronousRequest transition. Provisional-acquisition retirement
+  invokes that transition before release; raw startup throws use it without
+  inventing an acquired lease. No new fields or public contracts.
+- Keep asynchronous observe failure separate: retain the acquisition for replay
+  or explicit retry, preserve its generation guards, and do not eagerly clear
+  fullSource as synchronous failure does. Preserve cancellation of provisional
+  settlement when the internal result observer throws. All synchronous failure
+  routes now clear page/prefix/boundary retry markers before cleanup, rather
+  than route-specific partial clearing while the exception unwinds. The
+  requesting guard still prevents reentrant replacement; recovery still uses
+  one authoritative request. No change to successful pagination/refinement.
+- Actual production delta:76 added/99 removed, net23 lines removed vs W1.
+  Four catch/rethrow copies replaced by one transition; scope does not merge
+  the distinct async ownership state or operation/publication trackers.
+  DB diagnostic bundle347165→346671 minified (-494),98043→98008 gzip (-35);
+  DB-IVM unchanged. Same esbuild options and external-dependency caveat as W1.
+  `/tmp/tanstack-weight-request-bundle.json`. Combined W1/W2:41 net source
+  lines and1409 minified/154 gzip bytes removed. Fixed-main source gap3231;
+  this is still far from the below-main goal, not a claimed large reduction.
+- Focused loader/ordered-lifecycle/ordered-work/pagination/Effect:544 passed,
+  0 failed,5 files,exit0 at1x, fixed corpus and fresh random seeds. No test
+  edits. Existing cases cover four async routes, callback-before-throw startup,
+  later boundary throw, internal observer failure, failed local boundary read,
+  reentrant cleanup, original error identity and long-chain promise retention.
+  `/tmp/tanstack-weight-request.json` and `.log`. Ordinary package tsc and
+  changed-file eslint both exit0 (`-types.log`, `-lint.log` same prefix).
+- Full26-file integration1x:1582/0,exit0,no skips/reported runner errors;
+  `/tmp/tanstack-weight-request-full.json` and `.log`.
+- [ ] Focused ordered/pagination100x is running with code frozen.
+  Commit the reduction then source-to-implementation Field
+  Lab loss audit against the request-wrapper candidate and its restored proof
+  obligations. Do not infer all-adapter or full-branch100x results from these.
