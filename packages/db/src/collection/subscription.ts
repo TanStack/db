@@ -110,7 +110,6 @@ type SubsetDemand = {
 type TruncateReplayAttempt = {
   pendingCount: number
   setupComplete: boolean
-  failures: Map<SubsetDemand, Error>
 }
 
 type TruncateReplaySession = {
@@ -120,6 +119,7 @@ type TruncateReplaySession = {
   pending: Set<{ demand: SubsetDemand; attempt: TruncateReplayAttempt }>
   pendingSetups: number
   currentAttempt: TruncateReplayAttempt
+  failures: Map<SubsetDemand, Error>
   completion: Deferred<void>
 }
 
@@ -333,7 +333,6 @@ export class CollectionSubscription
     const attempt: TruncateReplayAttempt = {
       pendingCount: 0,
       setupComplete: false,
-      failures: new Map(),
     }
     const currentRows = this.collection.currentStateAsChanges({
       optimizedOnly: false,
@@ -355,6 +354,7 @@ export class CollectionSubscription
       pending: new Set(),
       pendingSetups: 1,
       currentAttempt: attempt,
+      failures: new Map(),
       completion: createReplayCompletion(),
     }
     this.truncateReplaySession = session
@@ -397,7 +397,6 @@ export class CollectionSubscription
     const attempt: TruncateReplayAttempt = {
       pendingCount: 0,
       setupComplete: false,
-      failures: new Map(),
     }
     let session = this.truncateReplaySession
     if (!session) {
@@ -414,6 +413,7 @@ export class CollectionSubscription
         pending: new Set(),
         pendingSetups: 0,
         currentAttempt: attempt,
+        failures: new Map(),
         completion: createReplayCompletion(),
       }
       this.truncateReplaySession = session
@@ -423,6 +423,7 @@ export class CollectionSubscription
     // Setup itself holds publication: adapter/status callbacks may reenter
     // before a request returns its promise and joins the pending set.
     session.pendingSetups++
+    session.failures.clear()
     session.currentAttempt = attempt
     this.setStatus(`loadingSubset`)
 
@@ -492,6 +493,14 @@ export class CollectionSubscription
     demand: SubsetDemand,
   ): void {
     const initialResult = demand.initialResult
+    const isCurrentAttempt = () =>
+      this.truncateReplaySession === session &&
+      session.currentAttempt === attempt
+    const fail = (error: unknown) => {
+      if (isCurrentAttempt() && this.isDemandActive(demand)) {
+        session.failures.set(demand, normalizeError(error))
+      }
+    }
     if (initialResult) {
       // External callers wait for publication, not merely transport return.
       void session.completion.promise.then(
@@ -509,7 +518,7 @@ export class CollectionSubscription
       try {
         if (hadPreviousAcquisition) this.releaseOrRetainAcquisition(previous)
       } catch (error) {
-        attempt.failures.set(demand, normalizeError(error))
+        fail(error)
       }
       return
     }
@@ -519,10 +528,6 @@ export class CollectionSubscription
       demand.acquisition = previous
       demand.acquisitionState = previousState
     }
-    const isCurrentAttempt = () =>
-      this.truncateReplaySession === session &&
-      session.currentAttempt === attempt
-
     demand.acquisition = next
     if (!hadPreviousAcquisition) demand.acquisitionState = `starting`
 
@@ -547,7 +552,7 @@ export class CollectionSubscription
         }
       }
       if (demandRemains && isCurrentAttempt()) {
-        attempt.failures.set(demand, normalizeError(error))
+        fail(error)
       }
       return
     }
@@ -561,7 +566,7 @@ export class CollectionSubscription
           hadPreviousAcquisition ? previous : next,
         )
       } catch (error) {
-        attempt.failures.set(demand, normalizeError(error))
+        fail(error)
       }
       return
     }
@@ -576,7 +581,7 @@ export class CollectionSubscription
       try {
         this.releaseOrRetainAcquisition(next)
       } catch (error) {
-        attempt.failures.set(demand, normalizeError(error))
+        fail(error)
       }
       return
     }
@@ -598,7 +603,7 @@ export class CollectionSubscription
       try {
         this.releaseOrRetainAcquisition(previous)
       } catch (error) {
-        attempt.failures.set(demand, normalizeError(error))
+        fail(error)
       }
       return
     }
@@ -611,7 +616,7 @@ export class CollectionSubscription
       try {
         this.releaseOrRetainAcquisition(next)
       } catch (error) {
-        attempt.failures.set(demand, normalizeError(error))
+        fail(error)
       }
       return
     }
@@ -641,7 +646,7 @@ export class CollectionSubscription
       }
       this.recordLoadSubsetError(demand.acquisition.options, error, true)
       this.stopStatusParticipant(statusParticipant)
-      attempt.failures.set(demand, normalizeError(error))
+      fail(error)
     }
   }
 
@@ -697,11 +702,12 @@ export class CollectionSubscription
         // cooperative AbortError must not discard rows from active demands.
         if (
           this.truncateReplaySession === session &&
+          session.currentAttempt === attempt &&
           this.isLoadSubsetSessionCurrent(session.loadSubsetSession) &&
           this.subsetDemands.includes(demand)
         ) {
           const normalized = this.normalizeLoadSubsetPromiseError(result, error)
-          attempt.failures.set(demand, normalized)
+          session.failures.set(demand, normalized)
         }
         this.settleTruncateReplay(session, pending)
       },
@@ -712,9 +718,8 @@ export class CollectionSubscription
   private removeTruncateReplayParticipant(demand: SubsetDemand): void {
     const session = this.truncateReplaySession
     if (!session) return
-    session.currentAttempt.failures.delete(demand)
+    session.failures.delete(demand)
     for (const pending of session.pending) {
-      pending.attempt.failures.delete(demand)
       if (pending.demand === demand) {
         session.pending.delete(pending)
         pending.attempt.pendingCount--
@@ -727,8 +732,8 @@ export class CollectionSubscription
     if (this.truncateReplaySession !== session) return
     if (session.pendingSetups > 0 || session.pending.size > 0) return
 
-    const activeFailure = [...session.currentAttempt.failures].find(
-      ([demand]) => this.subsetDemands.includes(demand),
+    const activeFailure = [...session.failures].find(([demand]) =>
+      this.subsetDemands.includes(demand),
     )
     try {
       if (activeFailure) {
@@ -1192,7 +1197,7 @@ export class CollectionSubscription
           this.truncateReplaySession === replaySession &&
           replaySession.currentAttempt === replayAttempt
         ) {
-          replayAttempt.failures.set(demand, normalizeError(error))
+          replaySession.failures.set(demand, normalizeError(error))
         }
         this.subsetDemands.splice(demandIndex, 1)
       }

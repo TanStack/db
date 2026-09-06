@@ -36,7 +36,7 @@ current as review findings, oracle laws, and implementation choices change.
   production lines. Fresh100x integration gate passes1582/0 across26 files,
   exit0, no skipped tests or reported runner errors. Integration loss audit
   complete; final campaign report audit complete.
-- Still open: whole-branch size goal (+3103 net package-source lines against
+- Still open: whole-branch size goal (+3108 net package-source lines against
   fixedmain68366eca), final coherence/review and
   RFC/PR/changeset reconciliation. Older unchecked entries are phase records;
   reconcile them with later evidence before treating them as current bugs.
@@ -56,12 +56,13 @@ current as review findings, oracle laws, and implementation choices change.
   Expanded28-file1x and full100x gates1729/0; W4 loss audit complete. Total W1–W4
   savings153 source lines/2362 minified/477 gzip bytes; source gap3119.
 - W5 flattens replay pending state, with retained-attempt eligibility restored
-  after loss audits:16 more source lines removed,116 minified/27 gzip diagnostic
-  bytes removed. Expanded integration1735/0 at1x, package types pass. Reentry
-  matrix3/3 and retention matrix4/4 restore pre-W5 behavior. Focused lifecycle
+  after loss audits:11 more source lines removed,204 minified/13 gzip diagnostic
+  bytes removed. Expanded integration1736/0 at1x, package types pass. Reentry
+  matrix3/3 and retention matrix5/5 restore pre-W5 behavior. Focused lifecycle
   100x444/0 atbaa2163f preceded the final one-line failure-pruning repair; final
-  repair audit pending. Combined W1–W5 savings169 lines/2478 minified/504 gzip
-  bytes,source gap3103. No push. Group-by baseline142/0, code unchanged.
+  current-session-failure-map audit/replay stress pending. Combined W1–W5
+  savings164 lines/2566 minified/490 gzip bytes,source gap3108. No push.
+  Group-by baseline142/0, code unchanged.
 
 
 ## Chosen design
@@ -5545,7 +5546,43 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   345718→345602 (-116),gzip97685→97658 (-27);DB-IVM unchanged. Combined pass169
   source lines/2478 minified/504 gzip bytes removed; fixed-main source gap3103.
   `/tmp/tanstack-weight-replay-final-bundle.json`, same synthetic-build caveats.
-- [ ] Commit final cleanup, then final bounded source loss audit.
+- [x] Commit00cb21d9, then bounded source loss audit. Recovered setup-only
+  retention: A fails X; while starting Y, Y starts extra Z; Z truncates to B
+  and releases X before returning. No A participant exists during release;
+  returning Z then enrolls in setup-incomplete A and retains A's X/error.
+  The old registry reached A during release. Pending-only scanning did not.
+  Source-only finding, not a publication/GC claim. Reused nonblind audit;
+  omission focus can emphasize bounded retention without measuring its cost.
+
+#### W5 final model — one current-session failure map
+
+- Extend retention witness to setup-only retention (sync failure only; native
+  async rejection happens after setup). Witness follows frames reachable from
+  current replay state, not an externally captured map already discarded by
+  production. It reads both old registry and new pending representations for
+  controlled baseline comparison. Five cells: current/pending × throw/reject,
+  plus setup-only throw. On00cb21d9,4pass/1fail: old failed owner remains stored;
+  original81a1b348 passes5/5. `/tmp/tanstack-weight-replay-setup-retention-{red,baseline}.log`.
+- Remove attempt-owned failure maps entirely. The session owns one current
+  failure map, cleared when a newer attempt begins. Synchronous failure writes
+  use a local current-attempt/active-owner guard; async rejection likewise
+  checks current attempt. Old callbacks can settle pending work but cannot
+  change current outcome or retain historical errors. Release clears one map,
+  with no historical failure-pruning pass. Pending counts/setup flags remain
+  solely for retained-startup eligibility, not outcome state.
+- Both boundary matrices8/8 pass, `/tmp/tanstack-weight-replay-current-failures-green.log`.
+  Expanded integration1736/0,28files,exit0,no skips/reported runner errors,
+  multiplier1,fixed corpora/fresh seeds. Ordinary package tsc passes; same known
+  lint errors/warnings. `/tmp/tanstack-weight-replay-session-failures-full` JSON/log,
+  `-session-failures-types.log`, `-session-failures-lint.log`.
+- Final W5 source62added/73removed,net11. DB diagnostic bundle345718→345514
+  (-204),gzip97685→97672 (-13);DB-IVM unchanged. Different line/minified/gzip
+  savings are expected; these are controlled synthetic measurements, not app
+  payload. `/tmp/tanstack-weight-replay-session-failures-bundle.json`.
+  Combined W1–W5 savings164 source lines/2566 minified/490 gzip bytes;source gap3108.
+  Prior16/17/32-line values are intermediate rejected representations.
+- [ ] Commit current-session failures, then bounded source loss audit.
+- [ ] Final replay-oracle100x; prior broader100x gates remain version-specific.
 
 ### Next source-weight candidate (read-only during W5 gate)
 
