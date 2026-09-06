@@ -33,7 +33,9 @@ current as review findings, oracle laws, and implementation choices change.
   All four groups closed; expanded26-file normal-scale gate1582/0, exit0.
   The broader lifecycle oracle caught a U2 cleanup regression, repaired by
   invalidating the old window generation at teardown. Total growth this pass9
-  production lines. Fresh100x integration gate and final loss audit follow.
+  production lines. Fresh100x integration gate passes1582/0 across26 files,
+  exit0, no skipped tests or reported runner errors. Integration loss audit
+  complete; final campaign report audit follows.
 - Still open: whole-branch size goal (+3272 net package-source lines against
   fixedmain68366eca), final coherence/review and
   RFC/PR/changeset reconciliation. Older unchecked entries are phase records;
@@ -5026,5 +5028,47 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   and4 new fixture assertions (`/tmp/tanstack-u-final-oracles.json`/`.log`).
   Final changed-test lint and ordinary package tsc exit0. Production delta
   across U1–U4 is9 lines in builder (one boolean plus existing generation
-  invalidation); no tests removed or skipped in the full run. Commit/audit and
-  fresh100x integration run follow before returning to size/coherence work.
+  invalidation); no tests removed or skipped in the full run. Committed2f8b8b29,
+  then fresh Field Lab integration loss audit; fresh100x integration passed.
+  Audit recovered: four fixture reds had already passed exact rejection but
+  stopped before later privacy checks. Throw/reject varies later refinement
+  after synchronous writes and async page settlement, not synchronous window
+  startup. New callbacks record row snapshots, not event payloads/downstream
+  consumers; the original unit assertions remain. Lifecycle reds specifically
+  cross widen/restart/initial with4 routes ×2 write timings ×3 outcomes; fixed
+  shrink93471/2:2:2 and random644136231/2:0:2:2. Normal green used a fresh random
+  seed, not exact random-shrink replay. Source-first sequential fresh scanner,
+  no edits/reruns/readiness claim; omission focus can overstate compression.
+  Rechecked fixed-baseline size excluding Markdown:5355 added/2083 removed,
+  net3272 package source lines; DBsrc alone2809. Subscription.ts contributes
+  net917 and ordered loader/utils.ts515. Their1432 lines are about44% of total
+  net growth, an inspection priority rather than proof of removable code.
+
+### U1–U4 integration stress gate — 2026-09-06
+
+- [x] Runtime and tests frozen at2f8b8b29. Full100x oracle/loader campaign plus
+  live-query units:1582 passed/0 failed,26 files,no skips,exit0 in395.97s.
+  No reported unhandled errors. `/tmp/tanstack-u-full100.json` and `.log`.
+  Fixed structural corpora and fresh random seeds; multiplier scales opted-in
+  property runs, not every deterministic test100 times. No assertions weakened
+  or runner errors ignored. Exact command from packages/db:
+
+  ```sh
+  env -u TANSTACK_DB_ORACLE_SEED -u TANSTACK_DB_ORACLE_PATH \
+    -u TANSTACK_DB_ORACLE_PROPERTY TANSTACK_DB_ORACLE_RUNS_MULTIPLIER=100 \
+    pnpm exec vitest run oracle \
+    tests/collection-subscription-lifecycle-history.property.test.ts \
+    tests/collection-subscription-lifecycle-publication.property.test.ts \
+    tests/query/ordered-source-loader.test.ts \
+    tests/query/live-query-collection.test.ts \
+    --coverage.enabled=false --testTimeout=600000 \
+    --pool=threads --maxWorkers=4 --minWorkers=4 --silent \
+    --reporter=default --reporter=json \
+    --outputFile.json=/tmp/tanstack-u-full100.json
+  ```
+
+- Scope remains DB oracle/loader files plus live-query units, not all DB tests,
+  adapter suites, the monorepo, coverage measurement or merge readiness.
+  Ordinary package tsc exits0 separately (`/tmp/tanstack-u-final-types.log`).
+  No push. Next is the queued code-size/coherence review, including the
+  remaining IndexInterface cursor declaration mismatch and builder lint debt.
