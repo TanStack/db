@@ -36,7 +36,7 @@ current as review findings, oracle laws, and implementation choices change.
   production lines. Fresh100x integration gate passes1582/0 across26 files,
   exit0, no skipped tests or reported runner errors. Integration loss audit
   complete; final campaign report audit complete.
-- Still open: whole-branch size goal (+3231 net package-source lines against
+- Still open: whole-branch size goal (+3119 net package-source lines against
   fixedmain68366eca), final coherence/review and
   RFC/PR/changeset reconciliation. Older unchecked entries are phase records;
   reconcile them with later evidence before treating them as current bugs.
@@ -49,7 +49,12 @@ current as review findings, oracle laws, and implementation choices change.
   across4 files,exit0. W2 synchronous ordered-request failure consolidation is
   committed at704a402f:23 more lines and494 minified/35 gzip bytes removed;
   focused544/0 and broader1582/0 at1x, ordered/pagination100x443/0. Types and
-  changed-file lint pass. Whole-source gap is3231; W2 loss audit complete.
+  changed-file lint pass. W2 loss audit complete. W3 teardown helper reuse is
+  committed atf2207d22 (-27 lines,1645 tests green,loss audit complete).
+  W4 removes the second pagination cursor at5e61e9ca (-85 lines), with an
+  oracle-confirmed extra-fetch defect repaired (4 red→16 green matrix cells).
+  Expanded28-file1x and full100x gates1729/0; W4 loss audit complete. Total W1–W4
+  savings153 source lines/2362 minified/477 gzip bytes; source gap3119.
 
 
 ## Chosen design
@@ -5350,6 +5355,62 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   2362 minified/477 gzip bytes removed. Fixed-main source gap3119 remains.
   No heap or throughput benchmark; two redundant retained boundary holders and
   their update scans are gone, not the authoritative pagination boundary.
-- [ ] Commit W4 then Field Lab loss audit against source-tracker obligations
-  and the red/green oracle change. Run the expanded full integration100x with
-  code/tests frozen before moving to the larger replay-state candidate.
+- [x] Commit5e61e9ca then Field Lab source-to-implementation loss audit: no
+  supported lost constraint. Both consumers classify before update splitting
+  and contribution mutation, including Effect startup buffering. Actual source
+  boundary acquisition, cursor construction and bounded reads are unchanged;
+  outlier/linear-transfer/unknown-key/atomic-split obligations remain separate.
+  Logs confirm12pass/4fail extra fetch3→4, then16green/46filtered. New matrix
+  deliberately supplies all three rows on its first provider call and ignores
+  request options: it isolates non-sort-update work, NOT exact acquisition or
+  bounded transfer. Existing pagination transfer assertions still own that
+  proof. No edits/reruns/full-run or size validation by scanner. Reused/nonblind
+  authorship can favor the representation; omission focus can overvalue normal
+  summary compression. No readiness verdict. Rebuilt frozen git source confirms
+  recorded bytes (`/tmp/tanstack-weight-tracker-bundle-final.json`).
+- [x] Expanded full integration100x on frozen5e61e9ca runtime/tests:1729/0,
+  28 files,no skips/no reported runner errors,exit0 in398.75s. Fixed corpora and
+  fresh random seeds; multiplier scales opted-in properties, not every test.
+  Source/tests stayed frozen through completion; only this log changed.
+  `/tmp/tanstack-weight-w1-w4-100.json` and `.log`. Exact command from packages/db:
+
+  ```sh
+  env -u TANSTACK_DB_ORACLE_SEED -u TANSTACK_DB_ORACLE_PATH \
+    -u TANSTACK_DB_ORACLE_PROPERTY TANSTACK_DB_ORACLE_RUNS_MULTIPLIER=100 \
+    pnpm exec vitest run oracle tests/collection-subscription.test.ts \
+    tests/collection-subscription-lifecycle-history.property.test.ts \
+    tests/collection-subscription-lifecycle-publication.property.test.ts \
+    tests/query/ordered-source-loader.test.ts \
+    tests/query/live-query-collection.test.ts tests/effect.test.ts \
+    --coverage.enabled=false --testTimeout=600000 --pool=threads \
+    --maxWorkers=4 --minWorkers=4 --silent --reporter=default --reporter=json \
+    --outputFile.json=/tmp/tanstack-weight-w1-w4-100.json
+  ```
+
+  Gate covers DB oracles plus named subscription/loader/live-query/Effect units,
+  not every DB unit or adapter suite, coverage, heap benchmarks or readiness.
+  No push. Four deletion candidates complete; W5 remains a separate state-model
+  change. New testing found a work defect, not another row-correctness failure.
+
+### W5 preparation (read-only while W1–W4 stress runs)
+
+- Current replay state owns per-attempt pending/failure sets plus setupComplete,
+  an attempt registry, and currentAttempt. Old-attempt pruning appears in new
+  replay, settlement and demand release; readiness/publication scan the registry.
+  Proposed reduction remains one session pending-acquisition set, current
+  failures, and an explicit setup barrier. The oracle's flat model is precedent,
+  not proof that synchronous production reentry can omit the setup barrier.
+- Before implementing, trace the registration boundary: an acquisition can
+  start inside replay and return after a newer truncate. Its captured attempt
+  controls failure attribution, but its overlapping work may still hold the
+  session's publication barrier. Preserve logical release removing all of that
+  owner's work, even when promises are shared, and ordinary prereplay readiness
+  not joining publication. Do not drop current membership guards merely because
+  an attempt registry is removed. This is a proof obligation, not a newly
+  confirmed bug or an implemented design.
+- Source-size inventory at5e61e9ca still leads with subscription+872 and ordered
+  utils+453. Other growth to inspect after W5: group-by+246, config-builder+223,
+  D2 hash+216, route metadata+180, compiler index+155, PowerSync+144,
+  bucket-facade+133, equality-value identity+113. These are net lines against
+  fixed main68366eca, not removable-line estimates. The first five candidates
+  are not a complete plan to meet the whole-branch size goal; retain that gap.
