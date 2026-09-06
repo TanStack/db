@@ -1743,7 +1743,7 @@ describe(`createLiveQueryCollection`, () => {
       let syncOps!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
       const acquisitions: Array<LoadSubsetOptions> = []
       const releases: Array<LoadSubsetOptions> = []
-      const source = createCollection<Row>({
+      const source = createCollection<Row, number>({
         id: `ordered-full-source-retry-source`,
         getKey: (row) => row.id,
         syncMode: `on-demand`,
@@ -1820,7 +1820,7 @@ describe(`createLiveQueryCollection`, () => {
       let loadCount = 0
       let syncOps!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
       const publications: Array<Array<number>> = []
-      const source = createCollection<Row>({
+      const source = createCollection<Row, number>({
         id: `ordered-full-source-replay-recovery-source`,
         getKey: (row) => row.id,
         syncMode: `on-demand`,
@@ -1898,7 +1898,7 @@ describe(`createLiveQueryCollection`, () => {
       const replayGate = createDeferred<void>()
       let recovering = false
       let syncOps!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
-      const source = createCollection<Row>({
+      const source = createCollection<Row, number>({
         id: `ordered-window-during-replay-source`,
         getKey: (row) => row.id,
         syncMode: `on-demand`,
@@ -1928,7 +1928,10 @@ describe(`createLiveQueryCollection`, () => {
         },
       })
       const live = createLiveQueryCollection((q) =>
-        q.from({ row: source }).orderBy(({ row }) => row.rank).limit(2),
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank)
+          .limit(2),
       )
 
       try {
@@ -1975,7 +1978,7 @@ describe(`createLiveQueryCollection`, () => {
       let recovering = false
       let syncOps!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
       const publications: Array<Array<number>> = []
-      const source = createCollection<Row>({
+      const source = createCollection<Row, number>({
         id: `ordered-replay-window-cleanup-source`,
         getKey: (row) => row.id,
         syncMode: `on-demand`,
@@ -1996,7 +1999,10 @@ describe(`createLiveQueryCollection`, () => {
         },
       })
       const live = createLiveQueryCollection((q) =>
-        q.from({ row: source }).orderBy(({ row }) => row.rank).limit(2),
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank)
+          .limit(2),
       )
       const subscription = live.subscribeChanges(() => {
         publications.push(Array.from(live.values(), ({ id }) => id))
@@ -2051,7 +2057,7 @@ describe(`createLiveQueryCollection`, () => {
       let recovering = false
       let recoveryLoads = 0
       let syncOps!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
-      const source = createCollection<Row>({
+      const source = createCollection<Row, number>({
         id: `ordered-window-after-failed-replay-source`,
         getKey: (row) => row.id,
         syncMode: `on-demand`,
@@ -2076,7 +2082,10 @@ describe(`createLiveQueryCollection`, () => {
         },
       })
       const live = createLiveQueryCollection((q) =>
-        q.from({ row: source }).orderBy(({ row }) => row.rank).limit(2),
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank)
+          .limit(2),
       )
 
       try {
@@ -2101,13 +2110,15 @@ describe(`createLiveQueryCollection`, () => {
     })
 
     it.each(
-      ([
-        { label: `Error`, value: new Error(`replay failed`) },
-        { label: `undefined`, value: undefined },
-        { label: `NaN`, value: Number.NaN },
-        { label: `false`, value: false },
-        { label: `object`, value: { reason: `replay failed` } },
-      ] as const).flatMap(({ label, value }) =>
+      (
+        [
+          { label: `Error`, value: new Error(`replay failed`) },
+          { label: `undefined`, value: undefined },
+          { label: `NaN`, value: Number.NaN },
+          { label: `false`, value: false },
+          { label: `object`, value: { reason: `replay failed` } },
+        ] as const
+      ).flatMap(({ label, value }) =>
         ([`throw`, `reject`] as const).map((delivery) => ({
           delivery,
           label,
@@ -2122,7 +2133,7 @@ describe(`createLiveQueryCollection`, () => {
         let recovering = false
         let replayCalls = 0
         let syncOps!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
-        const source = createCollection<Row>({
+        const source = createCollection<Row, number>({
           id: `ordered-normalized-${delivery}-${String(value)}-source`,
           getKey: (row) => row.id,
           syncMode: `on-demand`,
@@ -2148,7 +2159,10 @@ describe(`createLiveQueryCollection`, () => {
           },
         })
         const live = createLiveQueryCollection((q) =>
-          q.from({ row: source }).orderBy(({ row }) => row.rank).limit(1),
+          q
+            .from({ row: source })
+            .orderBy(({ row }) => row.rank)
+            .limit(1),
         )
 
         try {
@@ -2181,7 +2195,7 @@ describe(`createLiveQueryCollection`, () => {
     it(`ignores queued replay setup after cleanup`, async () => {
       type Row = { id: number; rank: number }
       let syncOps!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
-      const source = createCollection<Row>({
+      const source = createCollection<Row, number>({
         id: `ordered-replay-success-after-cleanup-source`,
         getKey: (row) => row.id,
         syncMode: `on-demand`,
@@ -2199,7 +2213,10 @@ describe(`createLiveQueryCollection`, () => {
         },
       })
       const live = createLiveQueryCollection((q) =>
-        q.from({ row: source }).orderBy(({ row }) => row.rank).limit(1),
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank)
+          .limit(1),
       )
       const queued: Array<() => void> = []
 
@@ -2247,7 +2264,10 @@ describe(`createLiveQueryCollection`, () => {
         },
       })
       const live = createLiveQueryCollection((q) =>
-        q.from({ row: source }).orderBy(({ row }) => row.rank).limit(2),
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank)
+          .limit(2),
       )
 
       try {
@@ -2289,7 +2309,10 @@ describe(`createLiveQueryCollection`, () => {
         },
       })
       const live = createLiveQueryCollection((q) =>
-        q.from({ row: source }).orderBy(({ row }) => row.rank).limit(1),
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank)
+          .limit(1),
       )
 
       try {
@@ -2349,7 +2372,10 @@ describe(`createLiveQueryCollection`, () => {
         },
       })
       const live = createLiveQueryCollection((q) =>
-        q.from({ row: source }).orderBy(({ row }) => row.rank).limit(1),
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank)
+          .limit(1),
       )
 
       try {
@@ -2414,7 +2440,10 @@ describe(`createLiveQueryCollection`, () => {
         },
       })
       const live = createLiveQueryCollection((q) =>
-        q.from({ row: source }).orderBy(({ row }) => row.rank).limit(1),
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank)
+          .limit(1),
       )
 
       try {
@@ -2464,7 +2493,10 @@ describe(`createLiveQueryCollection`, () => {
         },
       })
       const live = createLiveQueryCollection((q) =>
-        q.from({ row: source }).orderBy(({ row }) => row.rank).limit(1),
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank)
+          .limit(1),
       )
 
       try {
@@ -2518,7 +2550,10 @@ describe(`createLiveQueryCollection`, () => {
         },
       })
       const live = createLiveQueryCollection((q) =>
-        q.from({ row: source }).orderBy(({ row }) => row.rank).limit(1),
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank)
+          .limit(1),
       )
 
       try {
@@ -2532,7 +2567,7 @@ describe(`createLiveQueryCollection`, () => {
 
         failPage = true
         await expect(
-          Promise.resolve().then(() =>
+          Promise.resolve().then<true | void>(() =>
             live.utils.setWindow({ offset: 0, limit: 3 }),
           ),
         ).rejects.toBe(failure)
@@ -2570,21 +2605,22 @@ describe(`createLiveQueryCollection`, () => {
         },
       })
       const live = createLiveQueryCollection((q) =>
-        q.from({ row: source }).orderBy(({ row }) => row.rank).limit(2),
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank)
+          .limit(2),
       )
 
       try {
         await live.preload()
         const publications: Array<Array<{ type: string; key: unknown }>> = []
         const subscription = live.subscribeChanges((changes) => {
-          publications.push(
-            changes.map(({ type, key }) => ({ type, key })),
-          )
+          publications.push(changes.map(({ type, key }) => ({ type, key })))
         })
 
         failPage = true
         await expect(
-          Promise.resolve().then(() =>
+          Promise.resolve().then<true | void>(() =>
             live.utils.setWindow({ offset: 1, limit: 2 }),
           ),
         ).rejects.toBe(failure)
@@ -2638,7 +2674,10 @@ describe(`createLiveQueryCollection`, () => {
         },
       })
       const live = createLiveQueryCollection((q) =>
-        q.from({ row: source }).orderBy(({ row }) => row.rank).limit(1),
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank)
+          .limit(1),
       )
 
       try {
@@ -2646,9 +2685,7 @@ describe(`createLiveQueryCollection`, () => {
         expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
         const publications: Array<Array<{ type: string; key: unknown }>> = []
         const subscription = live.subscribeChanges((changes) => {
-          publications.push(
-            changes.map(({ type, key }) => ({ type, key })),
-          )
+          publications.push(changes.map(({ type, key }) => ({ type, key })))
         })
 
         await expect(
@@ -2691,7 +2728,10 @@ describe(`createLiveQueryCollection`, () => {
         },
       })
       const live = createLiveQueryCollection((q) =>
-        q.from({ row: source }).orderBy(({ row }) => row.rank).limit(1),
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank)
+          .limit(1),
       )
 
       try {

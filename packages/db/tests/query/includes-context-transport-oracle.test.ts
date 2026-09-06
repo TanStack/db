@@ -1540,7 +1540,8 @@ async function runNamespaceCollisionCell({
     location === `parent-alias`
       ? createLiveQueryCollection((q) =>
           q.from({ [name]: parents.collection }).select((sources) => {
-            const parent = sources[name]
+            // This computed alias names the sole, non-optional main source.
+            const parent = sources[name]!
             const correlated = q
               .from({ child: children.collection })
               .where(({ child }) =>
@@ -1549,46 +1550,56 @@ async function runNamespaceCollisionCell({
                   eq(child.token, parent.token),
                 ),
               )
-            const rows = (() => {
+            const forms = (() => {
               switch (boundary) {
                 case `direct`:
-                  return correlated.select(({ child }) => ({
-                    id: child.id,
-                    value: child.label,
-                  }))
+                  return includeInEveryForm(
+                    correlated.select(({ child }) => ({
+                      id: child.id,
+                      value: child.label,
+                    })),
+                  )
                 case `query-ref`: {
                   const projected = correlated.select(({ child }) => ({
                     id: child.id,
                     parentGroup: child.parentGroup,
                     label: child.label,
                   }))
-                  return q
-                    .from({ result: projected })
-                    .where(({ result }) => eq(result.parentGroup, parent.group))
-                    .select(({ result }) => ({
-                      id: result.id,
-                      value: result.label,
-                    }))
+                  return includeInEveryForm(
+                    q
+                      .from({ result: projected })
+                      .where(({ result }) =>
+                        eq(result.parentGroup, parent.group),
+                      )
+                      .select(({ result }) => ({
+                        id: result.id,
+                        value: result.label,
+                      })),
+                  )
                 }
                 case `join`:
-                  return correlated
-                    .innerJoin({ tag: tags.collection }, ({ child, tag }) =>
-                      eq(child.id, tag.id),
-                    )
-                    .select(({ child }) => ({
-                      id: child.id,
-                      value: child.label,
-                    }))
+                  return includeInEveryForm(
+                    correlated
+                      .innerJoin({ tag: tags.collection }, ({ child, tag }) =>
+                        eq(child.id, tag.id),
+                      )
+                      .select(({ child }) => ({
+                        id: child.id,
+                        value: child.label,
+                      })),
+                  )
                 case `group`:
-                  return correlated
-                    .groupBy(({ child }) => [child.id, child.label])
-                    .select(({ child }) => ({
-                      id: child.id,
-                      value: child.label,
-                    }))
+                  return includeInEveryForm(
+                    correlated
+                      .groupBy(({ child }) => [child.id, child.label])
+                      .select(({ child }) => ({
+                        id: child.id,
+                        value: child.label,
+                      })),
+                  )
               }
             })()
-            return { id: parent.id, ...includeInEveryForm(rows) }
+            return { id: parent.id, ...forms }
           }),
         )
       : createLiveQueryCollection((q) =>
@@ -1601,46 +1612,56 @@ async function runNamespaceCollisionCell({
                   eq(child.token, parent.token),
                 ),
               )
-            const rows = (() => {
+            const forms = (() => {
               switch (boundary) {
                 case `direct`:
-                  return correlated.select(({ child }) => ({
-                    id: child.id,
-                    [name]: child.label,
-                  }))
+                  return includeInEveryForm(
+                    correlated.select(({ child }) => ({
+                      id: child.id,
+                      [name]: child.label,
+                    })),
+                  )
                 case `query-ref`: {
                   const projected = correlated.select(({ child }) => ({
                     id: child.id,
                     parentGroup: child.parentGroup,
                     label: child.label,
                   }))
-                  return q
-                    .from({ result: projected })
-                    .where(({ result }) => eq(result.parentGroup, parent.group))
-                    .select(({ result }) => ({
-                      id: result.id,
-                      [name]: result.label,
-                    }))
+                  return includeInEveryForm(
+                    q
+                      .from({ result: projected })
+                      .where(({ result }) =>
+                        eq(result.parentGroup, parent.group),
+                      )
+                      .select(({ result }) => ({
+                        id: result.id,
+                        [name]: result.label,
+                      })),
+                  )
                 }
                 case `join`:
-                  return correlated
-                    .innerJoin({ tag: tags.collection }, ({ child, tag }) =>
-                      eq(child.id, tag.id),
-                    )
-                    .select(({ child }) => ({
-                      id: child.id,
-                      [name]: child.label,
-                    }))
+                  return includeInEveryForm(
+                    correlated
+                      .innerJoin({ tag: tags.collection }, ({ child, tag }) =>
+                        eq(child.id, tag.id),
+                      )
+                      .select(({ child }) => ({
+                        id: child.id,
+                        [name]: child.label,
+                      })),
+                  )
                 case `group`:
-                  return correlated
-                    .groupBy(({ child }) => [child.id, child.label])
-                    .select(({ child }) => ({
-                      id: child.id,
-                      [name]: child.label,
-                    }))
+                  return includeInEveryForm(
+                    correlated
+                      .groupBy(({ child }) => [child.id, child.label])
+                      .select(({ child }) => ({
+                        id: child.id,
+                        [name]: child.label,
+                      })),
+                  )
               }
             })()
-            return { id: parent.id, ...includeInEveryForm(rows) }
+            return { id: parent.id, ...forms }
           }),
         )
 
@@ -1743,13 +1764,11 @@ async function runPublicSurfaceCell({
   const secondPayload = { token: `second` }
   const userSymbol = Symbol(`user-owned`)
   const createAdversarialPayload = (marker: string) => {
-    const value: Record<PropertyKey, unknown> = { safe: marker }
-    Object.defineProperty(value, `__proto__`, {
-      value: { marker },
-      enumerable: true,
-      configurable: true,
-      writable: true,
-    })
+    const value: {
+      safe: string
+      __proto__: { marker: string }
+      row?: unknown
+    } = { safe: marker, [`__proto__`]: { marker } }
     return value
   }
   const firstAdversarial = createAdversarialPayload(`first`)
@@ -1982,9 +2001,7 @@ async function runPublicSurfaceCell({
         expect(
           (rows[0] as any).payload[userSymbol],
           materializationForms[index],
-        ).toBe(
-          child.symbols[userSymbol],
-        )
+        ).toBe(child.symbols[userSymbol])
         expect((rows[0] as any).payload.row.child.id).toBe(child.id)
       }
       return

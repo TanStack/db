@@ -21,8 +21,12 @@ current as review findings, oracle laws, and implementation choices change.
   1471/0,25 files, no skips, no reported unhandled errors, exit0. No production,
   test or committed runner-config changes. Child-process timeout cause remains
   unproven; the controlled runner checks and exact working command are below.
+- Package test typecheck now passes (30 errors→0), with no runtime code growth.
+  The expanded affected-file run found8 existing live-query unit failures in
+  four named groups outside the earlier oracle-only gate. The unmodified test
+  file reproduces all8. Reconcile those next; details and reports below.
 - Still open: whole-branch size goal (+3263 net package-source lines against
-  fixedmain68366eca), package test type diagnostics, final coherence/review and
+  fixedmain68366eca), the four unit-failure groups, final coherence/review and
   RFC/PR/changeset reconciliation. Older unchecked entries are phase records;
   reconcile them with later evidence before treating them as current bugs.
 
@@ -4809,3 +4813,78 @@ candidate repair scopes, not completed fixes or proof of root cause.
   cannot establish SHA, effective settings, exits or generated-example totals;
   retain command evidence.100x scales opted-in property runs, not every named
   deterministic test100 times. No gate or correctness claim widened by audit.
+
+### Package test-type gate — 2026-09-06
+
+- [x] Fresh baseline at d6de62b4: `pnpm exec tsc --noEmit --pretty false` in
+  packages/db exits2 with30 diagnostics, all in tests. Full output:
+  `/tmp/tanstack-minimal-types-red.txt`. This compiles ordinary test files;
+  Vitest's “Type Errors no errors” did not establish that gate.
+- [x] Preserve literal generator directions, finite failure-suffix types,
+  unknown error capture and the existing middle-count4 deterministic case.
+  Narrow callback row keys with the existing a/b/c/d guard before constructing
+  typed publication events. All batch/source/consumer assertions remain.
+- [x] Use precise numeric collection key parameters and explicit Promise result
+  unions. Construct each namespace-collision materialization form while its
+  query context is still concrete instead of passing a union of incompatible
+  query builders. The sole computed main alias is non-optional. Give adversarial
+  payloads precise fields with a computed __proto__ data property, preserving
+  ordinary prototype and enumerable/configurable/writable descriptors.
+- [x] Correct BaseIndex take/takeReversed bounds from row-key TKey to unknown
+  indexed value, matching both concrete implementations. Preserve explicit
+  undefined cursor tests through the abstract interface; pass the required
+  empty range-options object. This is an API declaration correction, not a
+  runtime fix. TypeScript transpileModule confirms identical base-index emitted
+  JavaScript against d6de62b4; source diff is2 added/2 removed lines, net0.
+- [x] Automatic-snapshot reentrant-unsubscribe regression now uses public
+  subscriberCount and a subsequent source write with no callback, rather than
+  private _changes access. A runtime instance guard narrows the adapter's
+  optional generic subscription before calling unsubscribe. Load/unload and
+  repeated-unsubscribe assertions remain. This replaces a private-membership
+  assertion with public behavior; it is not an internal-map equality proof.
+- [x] Scoped lint cleanup uses const subscriptions (explicit type for captured
+  self references), correct import placement and expression-builder references
+  without unnecessary assertions/optional chaining. Formatter also normalizes
+  existing layout in touched files. No tests removed or marked skipped, no any
+  added, no compiler/lint exclusions added.
+- [x] Final package tsc exits0, empty `/tmp/tanstack-minimal-types-final.txt`.
+  Scoped ESLint exits0:0 errors,3 existing no-shadow warnings in
+  `/tmp/tanstack-minimal-types-final-lint.txt`. Earlier scoped lint had13 errors;
+  preserve its `/tmp/tanstack-minimal-types-lint.txt` record.
+- [x] Affected8-file test run at1x:765 pass/8 fail, no skips, exit1; seven files
+  pass and live-query-collection.test.ts has85 pass/8 fail. Reports
+  `/tmp/tanstack-minimal-types-final-tests.json` and `.log`. Initial pre-lint
+  run had the same totals in `/tmp/tanstack-minimal-types-tests-green.json`
+  and `.log` (filename is not a green-outcome claim). No reported runner errors.
+- [x] Run d6de62b4's unmodified live-query unit test source in a temporary sibling
+  file against this unchanged runtime:85 pass/8 fail, no skips, exit1; identical
+  failing full names. `/tmp/tanstack-minimal-types-baseline-tests.json` and
+  `.log`. Temporary copy removed afterward; original test retained. This proves
+  those failures predate the type repairs, not whether fixtures or runtime are
+  wrong. No expectations/classifiers were loosened to hide them.
+- [ ] Commit type step, then fresh source/report Field Lab loss audit before
+  moving to the unit-failure groups. Earlier1471-pass100x gate covers its stated
+  oracle/loader files at31ec4d15; it is not a whole-unit-suite green claim or a
+  fresh100x run of this type-cleanup commit.
+
+#### Next: four existing live-query unit-failure groups
+
+Classify each against the chosen contract and corresponding oracle before
+changing runtime or an expectation. These are8 failing assertions, not8 newly
+confirmed runtime bugs. Keep the list bounded before returning to code-size work.
+
+- [ ] U1 — `retries the same ordered refill after a transient rejection`:
+  retry performs4 loads; old assertion expects5. Check whether reduced transfer
+  legitimately removed one acquisition, using exact request/row evidence.
+- [ ] U2 — `publishes a window after its failed full-source demand replays
+  successfully`: rows become visible after successful truncate replay where
+  the unit expects[] until explicit window retry. Reconcile the failed-window
+  publication barrier with the replay oracle and architecture law.
+- [ ] U3 — `uses one normalized error for a 'throw' replay failure` across
+  Error/undefined/NaN/false/object (5 cells): waiting window resolvesundefined
+  instead of rejecting with reportedError. Compare synchronous-failure timing
+  and operation enrollment with existing replay/error oracle coverage.
+- [ ] U4 — `keeps partial ordered source work private when later refinement
+  rejects`: window promise resolves instead of rejecting. Confirm that the
+  fixture still reaches its intended failing refinement under the new loading
+  boundary; preserve publication/row assertions either way.

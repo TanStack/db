@@ -159,7 +159,7 @@ export abstract class BaseIndex<
   abstract lookup(operation: IndexOperation, value: any): Set<TKey>
   abstract take(
     n: number,
-    from: TKey,
+    from: unknown,
     filterFn?: (key: TKey) => boolean,
   ): Array<TKey>
   abstract takeFromStart(
@@ -168,7 +168,7 @@ export abstract class BaseIndex<
   ): Array<TKey>
   abstract takeReversed(
     n: number,
-    from: TKey,
+    from: unknown,
     filterFn?: (key: TKey) => boolean,
   ): Array<TKey>
   abstract takeReversedFromEnd(

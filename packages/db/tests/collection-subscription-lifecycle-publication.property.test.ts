@@ -562,21 +562,22 @@ async function runPublicationHistory(
   const observedBatches: Array<Array<PublicationChange>> = []
   const subscription = collection.subscribeChanges(
     (changes) => {
-      const batch = changes.map(
-        (change): PublicationChange => ({
+      const batch = changes.map((change): PublicationChange => {
+        const key = change.key
+        if (key !== `a` && key !== `b` && key !== `c` && key !== `d`) {
+          throw new Error(`publication used an unknown row key`)
+        }
+        return {
           type: change.type,
-          key: change.key,
+          key,
           value: cloneRow(change.value),
           ...(change.previousValue === undefined
             ? {}
             : { previousValue: cloneRow(change.previousValue) }),
-        }),
-      )
-      for (const change of batch) {
-        const id = String(change.key)
-        if (id !== `a` && id !== `b` && id !== `c` && id !== `d`) {
-          throw new Error(`publication used an unknown row key`)
         }
+      })
+      for (const change of batch) {
+        const id = change.key
         if (change.type === `delete`) visible.delete(id)
         else visible.set(id, { id, value: change.value.value })
       }

@@ -167,7 +167,7 @@ const initialRowsArbitrary = fc.array(
 const scenarioPayloadArbitrary: fc.Arbitrary<PaginationScenario> = fc
   .record({
     rows: initialRowsArbitrary,
-    direction: fc.constantFrom(`asc`, `desc`),
+    direction: fc.constantFrom(`asc` as const, `desc` as const),
     reverseProviderTies: fc.boolean(),
     windows: fc.array(
       fc.record({
@@ -240,7 +240,7 @@ const paginationActionArbitrary: fc.Arbitrary<PaginationAction> = fc.oneof(
 const stateScenarioPayloadArbitrary: fc.Arbitrary<PaginationStateScenario> = fc
   .record({
     rows: initialRowsArbitrary,
-    direction: fc.constantFrom(`asc`, `desc`),
+    direction: fc.constantFrom(`asc` as const, `desc` as const),
     initialWindow: windowArbitrary,
     actions: fc.array(paginationActionArbitrary, {
       minLength: 1,

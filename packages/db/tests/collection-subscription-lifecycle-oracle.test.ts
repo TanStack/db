@@ -10,6 +10,7 @@ import {
   oracleRandomParameters,
   readOracleRunConfig,
 } from './oracle-config.js'
+import type { CollectionSubscription } from '../src/collection/subscription.js'
 import type { LoadSubsetOptions, SyncConfig } from '../src/types.js'
 
 type StartOutcome = `return` | `throw` | `resolve` | `reject`
@@ -326,7 +327,9 @@ const failureScenarios = ([`throw`, `reject`] as const).flatMap((outcome) =>
 )
 type FailureDeliverySuffix = `${`throw` | `reject`}:${StartReentry}`
 const requiredFailureDeliverySuffixes = new Set<FailureDeliverySuffix>(
-  failureScenarios.map(({ outcome, reentry }) => `${outcome}:${reentry}`),
+  failureScenarios.map(
+    ({ outcome, reentry }) => `${outcome}:${reentry}` as const,
+  ),
 )
 const observedFailureDeliverySuffixes = new Set<FailureDeliverySuffix>()
 
@@ -1111,9 +1114,6 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       let truncateCount = 0
       let truncate = () => {}
       let targetLoadCount = 0
-      let subscription!: ReturnType<
-        ReturnType<typeof createCollection<{ id: string }>>[`subscribeChanges`]
-      >
 
       const collection = createCollection<{ id: string }>({
         id: `demand-failure-${outcome}-${reentry}`,
@@ -1162,9 +1162,12 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
           },
         },
       })
-      subscription = collection.subscribeChanges(() => {}, {
-        includeInitialState: false,
-      })
+      const subscription: CollectionSubscription = collection.subscribeChanges(
+        () => {},
+        {
+          includeInitialState: false,
+        },
+      )
       subscription.on(`status:change`, ({ status }) => statuses.push(status))
       subscription.on(`loadSubset:error`, ({ error }) => {
         errors.push(error)
@@ -1778,7 +1781,6 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const observed: Array<unknown> = []
       let session = -1
       let requestOnReady = false
-      let subscription!: ReturnType<typeof collection.subscribeChanges>
       const collection = createCollection<{ id: string }>({
         id: `restart-ready-reentry`,
         getKey: ({ id }) => id,
@@ -1804,9 +1806,12 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
           },
         },
       })
-      subscription = collection.subscribeChanges(() => {}, {
-        includeInitialState: false,
-      })
+      const subscription: CollectionSubscription = collection.subscribeChanges(
+        () => {},
+        {
+          includeInitialState: false,
+        },
+      )
       const removeReadyListener = collection.on(`status:ready`, () => {
         if (!requestOnReady) return
         requestOnReady = false
@@ -1857,7 +1862,6 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const observed: Array<unknown> = []
       let session = -1
       let requestOnError = false
-      let subscription!: ReturnType<typeof collection.subscribeChanges>
       const collection = createCollection<{ id: string }>({
         id: `restart-error-reentry`,
         getKey: ({ id }) => id,
@@ -1884,9 +1888,12 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
           },
         },
       })
-      subscription = collection.subscribeChanges(() => {}, {
-        includeInitialState: false,
-      })
+      const subscription: CollectionSubscription = collection.subscribeChanges(
+        () => {},
+        {
+          includeInitialState: false,
+        },
+      )
       const removeErrorListener = collection.on(`status:error`, () => {
         if (!requestOnError) return
         requestOnError = false
@@ -1940,7 +1947,6 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const observed: Array<unknown> = []
       let session = -1
       let requestDuringCleanup = false
-      let subscription!: ReturnType<typeof collection.subscribeChanges>
       const collection = createCollection<{ id: string }>({
         id: `adapter-cleanup-reentry`,
         getKey: ({ id }) => id,
@@ -1976,9 +1982,12 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
           },
         },
       })
-      subscription = collection.subscribeChanges(() => {}, {
-        includeInitialState: false,
-      })
+      const subscription: CollectionSubscription = collection.subscribeChanges(
+        () => {},
+        {
+          includeInitialState: false,
+        },
+      )
       subscription.requestSnapshot({ where: oldWhere })
 
       requestDuringCleanup = true
@@ -2543,7 +2552,6 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const observed: Array<unknown> = []
       let session = 0
       let requestOnReady = false
-      let subscription!: ReturnType<typeof collection.subscribeChanges>
       const collection = createCollection<{ id: string }>({
         id: `ready-before-invalid-on-demand-return`,
         getKey: ({ id }) => id,
@@ -2563,9 +2571,12 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
           },
         },
       })
-      subscription = collection.subscribeChanges(() => {}, {
-        includeInitialState: false,
-      })
+      const subscription: CollectionSubscription = collection.subscribeChanges(
+        () => {},
+        {
+          includeInitialState: false,
+        },
+      )
       const removeReadyListener = collection.on(`status:ready`, () => {
         if (!requestOnReady) return
         requestOnReady = false
@@ -2733,7 +2744,6 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const observed: Array<unknown> = []
       let syncSession = 0
       let recover!: () => void
-      let subscription!: ReturnType<typeof collection.subscribeChanges>
       const collection = createCollection<{ id: string }>({
         id: `sync-entry-error-ready-recovery`,
         getKey: ({ id }) => id,
@@ -2764,9 +2774,12 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
           },
         },
       })
-      subscription = collection.subscribeChanges(() => {}, {
-        includeInitialState: false,
-      })
+      const subscription: CollectionSubscription = collection.subscribeChanges(
+        () => {},
+        {
+          includeInitialState: false,
+        },
+      )
       await collection.cleanup()
       const removeErrorListener = collection.on(`status:error`, () => {
         subscription.requestSnapshot({
@@ -3376,7 +3389,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const failure = new Error(`physical release failed`)
       const loads: Array<LoadSubsetOptions> = []
       const unloads: Array<LoadSubsetOptions> = []
-      const errors: Array<Error> = []
+      const errors: Array<unknown> = []
       const nestedFailures: Array<unknown> = []
       let releaseOwner = () => {}
       const collection = createCollection<{ id: string }>({
@@ -3554,9 +3567,6 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const errors: Array<unknown> = []
       let session = -1
       let ranReentry = false
-      let subscription!: ReturnType<
-        ReturnType<typeof createCollection<{ id: string }>>[`subscribeChanges`]
-      >
 
       const collection = createCollection<{ id: string }>({
         id: `restart-${outcome}-${reentry}`,
@@ -3599,9 +3609,12 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
           },
         },
       })
-      subscription = collection.subscribeChanges(() => {}, {
-        includeInitialState: false,
-      })
+      const subscription: CollectionSubscription = collection.subscribeChanges(
+        () => {},
+        {
+          includeInitialState: false,
+        },
+      )
       subscription.on(`loadSubset:error`, ({ error }) => errors.push(error))
       subscription.requestSnapshot({ where: targetWhere })
       subscription.requestSnapshot({ where: peerWhere })

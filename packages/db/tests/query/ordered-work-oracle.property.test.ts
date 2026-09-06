@@ -4,7 +4,6 @@ import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createEffect } from '../../src/query/effect.js'
-import type { InitialQueryBuilder } from '../../src/query/builder/index.js'
 import { getLoadSubsetDemandKey } from '../../src/query/ir-stable-identity.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import { eq, gte } from '../../src/query/builder/functions.js'
@@ -14,6 +13,7 @@ import {
 } from '../oracle-config.js'
 import { evaluateReferenceExpression } from '../reference-expression.js'
 import { flushPromises } from '../utils.js'
+import type { InitialQueryBuilder } from '../../src/query/builder/index.js'
 import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
 
 type Row = {
@@ -26,7 +26,7 @@ type Row = {
 type Marker = { id: number; rowId: number }
 
 type Scenario = {
-  middleCount: 0 | 1 | 2 | 3
+  middleCount: number
   middleEligible: boolean
   lastEligible: boolean
   tied: boolean
@@ -223,7 +223,7 @@ async function observeConsumer(
       .leftJoin({ marker: markerSource }, ({ row, marker }) =>
         eq(row.id, marker.rowId),
       )
-      .where(({ row, marker }) => eq(row.id, marker!.rowId))
+      .where(({ row, marker }) => eq(row.id, marker.rowId))
       .orderBy(({ row }) => row.rank, scenario.direction)
     return (rowToDelete ? ordered.orderBy(({ row }) => row.id, `asc`) : ordered)
       .limit(2)
@@ -1309,7 +1309,7 @@ describe(`ordered source work oracle`, () => {
         .select(({ row, child }) => ({
           id: row.id,
           rank: row.rank,
-          childId: child?.id,
+          childId: child.id,
         })),
     )
 

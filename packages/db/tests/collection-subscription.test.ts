@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
 import { createCollection } from '../src/collection/index.js'
+import { CollectionSubscription } from '../src/collection/subscription.js'
 import { createDeferred } from '../src/deferred.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
@@ -1286,16 +1287,26 @@ describe(`CollectionSubscription status tracking`, () => {
   it(`does not register a subscription closed during its automatic snapshot`, async () => {
     const loads: Array<LoadSubsetOptions> = []
     const unloads: Array<LoadSubsetOptions> = []
+    const onChange = vi.fn()
+    let writeAfterUnsubscribe = () => {}
     const collection = createCollection<{ id: string }>({
       id: `closed-during-automatic-snapshot`,
       getKey: ({ id }) => id,
       syncMode: `on-demand`,
       sync: {
-        sync: ({ markReady }) => {
+        sync: ({ begin, write, commit, markReady }) => {
+          writeAfterUnsubscribe = () => {
+            begin()
+            write({ type: `insert`, value: { id: `later` } })
+            commit()
+          }
           markReady()
           return {
             loadSubset: (options) => {
               loads.push(options)
+              if (!(options.subscription instanceof CollectionSubscription)) {
+                throw new Error(`automatic snapshot requires its subscription`)
+              }
               options.subscription.unsubscribe()
               return true
             },
@@ -1305,16 +1316,15 @@ describe(`CollectionSubscription status tracking`, () => {
       },
     })
 
-    const subscription = collection.subscribeChanges(() => {}, {
+    const subscription = collection.subscribeChanges(onChange, {
       includeInitialState: true,
     })
 
     expect(loads).toHaveLength(1)
     expect(unloads).toEqual(loads)
-    expect(collection._changes.changeSubscriptions.has(subscription)).toBe(
-      false,
-    )
-    expect(collection._changes.activeSubscribersCount).toBe(0)
+    expect(collection.subscriberCount).toBe(0)
+    writeAfterUnsubscribe()
+    expect(onChange).not.toHaveBeenCalled()
 
     subscription.unsubscribe()
     expect(unloads).toHaveLength(1)
@@ -1465,8 +1475,9 @@ describe(`CollectionSubscription status tracking`, () => {
     const index = collection.createIndex((row) => row.rank, {
       indexType: BTreeIndex,
     })
-    let subscription!: ReturnType<typeof collection.subscribeChanges>
-    subscription = collection.subscribeChanges(() => subscription.unsubscribe())
+    const subscription: CollectionSubscription = collection.subscribeChanges(
+      () => subscription.unsubscribe(),
+    )
     subscription.setOrderByIndex(index)
 
     try {
@@ -1503,9 +1514,6 @@ describe(`CollectionSubscription status tracking`, () => {
     type Row = { id: string; rank: number }
     const pending = createDeferred<void>()
     let resultCallbacks = 0
-    let subscription!: ReturnType<
-      ReturnType<typeof createCollection<Row>>[`subscribeChanges`]
-    >
     const collection = createCollection<Row>({
       id: `limited-adapter-unsubscribe`,
       getKey: ({ id }) => id,
@@ -1525,7 +1533,9 @@ describe(`CollectionSubscription status tracking`, () => {
     const index = collection.createIndex((row) => row.rank, {
       indexType: BTreeIndex,
     })
-    subscription = collection.subscribeChanges(() => {})
+    const subscription: CollectionSubscription = collection.subscribeChanges(
+      () => {},
+    )
     subscription.setOrderByIndex(index)
 
     try {
@@ -1551,9 +1561,6 @@ describe(`CollectionSubscription status tracking`, () => {
 
   it(`does not release one acquisition twice during nested unsubscribe`, async () => {
     const unloads: Array<LoadSubsetOptions> = []
-    let subscription!: ReturnType<
-      ReturnType<typeof createCollection<{ id: string }>>[`subscribeChanges`]
-    >
     let reentered = false
     const collection = createCollection<{ id: string }>({
       id: `nested-unsubscribe-release`,
@@ -1575,9 +1582,12 @@ describe(`CollectionSubscription status tracking`, () => {
         },
       },
     })
-    subscription = collection.subscribeChanges(() => {}, {
-      includeInitialState: false,
-    })
+    const subscription: CollectionSubscription = collection.subscribeChanges(
+      () => {},
+      {
+        includeInitialState: false,
+      },
+    )
 
     try {
       subscription.requestSnapshot({ optimizedOnly: false })
