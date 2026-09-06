@@ -102,6 +102,102 @@ class Projection {
 }
 
 describe(`functional projection output compatibility`, () => {
+  it.each([`expression`, `plain`, `opaque`, `closure`] as const)(
+    `keeps one live facade across a same-route parent update through a %s holder`,
+    async (holder) => {
+      const parents = createControlledCollection(`draft-identity-parent`, [
+        { id: 1, groupId: 1, label: `first` },
+        { id: 2, groupId: 1, label: `second` },
+      ])
+      const childSource = createControlledCollection(`draft-identity-child`, [
+        { id: 10, groupId: 1 },
+      ])
+      class Holder<T> {
+        constructor(readonly children: T) {}
+      }
+      const query = createLiveQueryCollection((q) => {
+        const source = q.from({
+          row: q.from({ parent: parents.collection }).select(({ parent }) => ({
+            id: parent.id,
+            label: parent.label,
+            children: q
+              .from({ child: childSource.collection })
+              .where(({ child }) => eq(child.groupId, parent.groupId)),
+          })),
+        })
+        if (holder === `expression`)
+          return source.select(({ row }) => ({
+            id: row.id,
+            label: row.label,
+            box: { children: row.children },
+          }))
+        return source.fn.select(({ row }) => {
+          const captured = row.children
+          return {
+            id: row.id,
+            label: row.label,
+            box:
+              holder === `plain`
+                ? { children: row.children }
+                : holder === `opaque`
+                  ? new Holder(row.children)
+                  : {
+                      get children() {
+                        return captured
+                      },
+                    },
+          }
+        })
+      })
+      try {
+        await query.preload()
+        const held = query.get(1)!.box.children
+        expect
+          .soft(
+            held.toArray.map((child) => child.id),
+            `initial rows`,
+          )
+          .toEqual([10])
+        expect
+          .soft(query.get(2)!.box.children, `initial shared identity`)
+          .toBe(held)
+        parents.write(`update`, { id: 1, groupId: 1, label: `changed` })
+        expect
+          .soft(query.get(1)!.label, `parent update is visible`)
+          .toBe(`changed`)
+        expect
+          .soft(
+            query.get(1)!.box.children,
+            `updated parent keeps shared facade`,
+          )
+          .toBe(held)
+        expect
+          .soft(
+            query.get(2)!.box.children,
+            `unchanged parent keeps shared facade`,
+          )
+          .toBe(held)
+        childSource.write(`insert`, { id: 11, groupId: 1 })
+        for (const facade of [
+          held,
+          query.get(1)!.box.children,
+          query.get(2)!.box.children,
+        ]) {
+          expect
+            .soft(
+              facade.toArray.map((child) => child.id).sort(),
+              `retained view stays live`,
+            )
+            .toEqual([10, 11])
+        }
+      } finally {
+        await query.cleanup()
+        await parents.collection.cleanup()
+        await childSource.collection.cleanup()
+      }
+    },
+  )
+
   it.each([`rows`, `index`, `callback-read`] as const)(
     `keeps held facade %s unchanged when a later projection throws`,
     async (surface) => {

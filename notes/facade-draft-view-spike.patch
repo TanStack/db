@@ -1,0 +1,459 @@
+diff --git a/packages/db/src/query/compiler/index.ts b/packages/db/src/query/compiler/index.ts
+index a2b00a67..7d5f7726 100644
+--- a/packages/db/src/query/compiler/index.ts
++++ b/packages/db/src/query/compiler/index.ts
+@@ -10,6 +10,10 @@ import {
+ } from '@tanstack/db-ivm'
+ import { optimizeQuery } from '../optimizer.js'
+ import { materializeCompilation } from '../live/materialized-pipeline.js'
++import {
++  facadeProjections,
++  stageFacadeProjection,
++} from '../live/facade-projection.js'
+ import {
+   createParentContext,
+   createValueIdentity,
+@@ -621,10 +625,7 @@ export function compileQuery(
+     ...directIncludes,
+     ...sourceIncludes.map(({ include }) => include),
+   ]
+-  const materializeSelectInput =
+-    !!query.fnSelect &&
+-    inputIncludes.length > 0 &&
+-    inputIncludes.every(isInlineInclude)
++  const materializeSelectInput = !!query.fnSelect && inputIncludes.length > 0
+   let includesResults: Array<IncludesCompilationResult> = !query.select
+     ? [...directIncludes]
+     : []
+@@ -1017,7 +1018,7 @@ export function compileQuery(
+         ],
+       ),
+     ) as ResultStream
+-    pipeline = materializeCompilation({
++    const materializedInput = materializeCompilation({
+       pipeline: inputPipeline,
+       includes: includesResults,
+       valueIdentity,
+@@ -1025,7 +1026,11 @@ export function compileQuery(
+       sourceWhereClauses,
+       aliasToCollectionId,
+       aliasRemapping,
+-    }).pipeline.pipe(
++    })
++    const projectedInput = inputIncludes.every(isInlineInclude)
++      ? materializedInput.pipeline
++      : stageFacadeProjection(mainCollectionId, materializedInput)
++    pipeline = projectedInput.pipe(
+       map(([key, [value]]) => {
+         const row = { ...value }
+         delete row[INCLUDES_ROUTING]
+@@ -1045,45 +1050,48 @@ export function compileQuery(
+       return selected
+     }
+     // Handle functional select - apply the function to transform the row
+-    pipeline = pipeline.pipe(
+-      map(([key, namespacedRow]) => {
+-        const callbackRow = sourceCarriesInternalRouteState
+-          ? (stripInternalCallbackMetadata(namespacedRow) as NamespacedRow)
+-          : namespacedRow
+-        const selectResults = fnSelect(callbackRow)
+-        let selected = selectResults
+-        if (
+-          selectResults &&
+-          typeof selectResults === `object` &&
+-          (Array.isArray(selectResults) || isPlainObject(selectResults))
+-        ) {
+-          selected = Array.isArray(selectResults)
+-            ? [...selectResults]
+-            : { ...selectResults }
+-          const routing = (namespacedRow as any)[INCLUDES_ROUTING]
+-          if (routing) {
+-            selected[INCLUDES_ROUTING] = routing
+-          }
+-          if (includesResults.length > 0) {
+-            Object.defineProperty(selected, FN_SELECT_STATE, {
+-              value: {
+-                sourceRow: namespacedRow,
+-                fnSelect,
+-              },
+-              enumerable: true,
+-              configurable: true,
+-            })
+-          }
++    const projectRow = (namespacedRow: NamespacedRow) => {
++      const callbackRow = sourceCarriesInternalRouteState
++        ? (stripInternalCallbackMetadata(namespacedRow) as NamespacedRow)
++        : namespacedRow
++      const selectResults = fnSelect(callbackRow)
++      let selected = selectResults
++      if (
++        selectResults &&
++        typeof selectResults === `object` &&
++        (Array.isArray(selectResults) || isPlainObject(selectResults))
++      ) {
++        selected = Array.isArray(selectResults)
++          ? [...selectResults]
++          : { ...selectResults }
++        const routing = (namespacedRow as any)[INCLUDES_ROUTING]
++        if (routing) {
++          selected[INCLUDES_ROUTING] = routing
+         }
+-        return [
+-          key,
+-          {
+-            ...namespacedRow,
+-            $selected: selected,
+-          },
+-        ] as [string, typeof namespacedRow & { $selected: any }]
+-      }),
+-    )
++        if (includesResults.length > 0) {
++          Object.defineProperty(selected, FN_SELECT_STATE, {
++            value: {
++              sourceRow: namespacedRow,
++              fnSelect,
++            },
++            enumerable: true,
++            configurable: true,
++          })
++        }
++      }
++      return {
++        ...namespacedRow,
++        $selected: selected,
++      }
++    }
++    pipeline =
++      facadeProjections(pipeline.graph).length > 0
++        ? pipeline.pipe(
++            reduce((rows) =>
++              rows.map(([row, weight]) => [projectRow(row), weight]),
++            ),
++          )
++        : pipeline.pipe(map(([key, row]) => [key, projectRow(row)]))
+   } else if (query.select) {
+     pipeline = processSelect(pipeline, query.select, allInputs)
+   } else {
+diff --git a/packages/db/src/query/live/bucket-facade-adapter.ts b/packages/db/src/query/live/bucket-facade-adapter.ts
+index 5748c841..f538878d 100644
+--- a/packages/db/src/query/live/bucket-facade-adapter.ts
++++ b/packages/db/src/query/live/bucket-facade-adapter.ts
+@@ -24,6 +24,14 @@ const PRIVATE_RESULT_KEYS = new Set<PropertyKey>([
+   FN_SELECT_STATE,
+ ])
+ 
++const publishedFacades = new WeakMap<object, object>()
++
++function unwrapDraftFacade(value: unknown): unknown {
++  return value !== null && typeof value === `object`
++    ? (publishedFacades.get(value) ?? value)
++    : value
++}
++
+ type FacadeSync = Parameters<SyncConfig<any>[`sync`]>[0]
+ 
+ type PendingRow = {
+@@ -74,6 +82,9 @@ export class BucketFacadeAdapter {
+   private readonly entries = new Map<string, Map<string, FacadeEntry>>()
+   private readonly retiredEntries = new Map<string, Map<string, FacadeEntry>>()
+   private resolvedValues = new WeakMap<object, unknown>()
++  private draftValues = new WeakMap<object, unknown>()
++  private draftViews = new Map<object, object>()
++  private draftEpoch = { active: true }
+ 
+   constructor(
+     private readonly parentId: string,
+@@ -106,6 +117,107 @@ export class BucketFacadeAdapter {
+     return this.pending.size > 0 || this.pendingActivity.size > 0
+   }
+ 
++  // Prototype: a distinct input view reads copied rows. Public Collections and
++  // their indexes are not mutated while a projection is evaluated.
++  resolveDraft<T>(value: T): T {
++    if (value === null || typeof value !== `object`) return value
++    if (isBucketFacadeRef(value)) {
++      const { edgeId, bucketKey } = value[BUCKET_FACADE_REF]
++      const entry = this.getEntry(edgeId, bucketKey)
++      const existing = this.draftViews.get(entry.collection)
++      if (existing) return existing as T
++      const epoch = this.draftEpoch
++      const rows = () => {
++        const result = new Map<string | number, object>(
++          entry.collection.entries(),
++        )
++        if ((this.pendingActivity.get(edgeId)?.get(bucketKey) ?? 0) < 0) {
++          return new Map<string | number, object>()
++        }
++        for (const change of this.pending
++          .get(edgeId)
++          ?.get(bucketKey)
++          ?.values() ?? []) {
++          const key = change.value.publicKey as string | number
++          if (change.deletes > change.inserts) result.delete(key)
++          else result.set(key, this.resolveDraft(change.value.value))
++        }
++        const order = this.compilations.find(
++          (item) => item.edgeId === edgeId,
++        )?.hasOrderBy
++        if (!order) return result
++        const orderFor = (key: string | number) =>
++          this.pending.get(edgeId)?.get(bucketKey)?.get(serializeValue(key))
++            ?.value.order ?? entry.currentOrder.get(key)
++        return new Map(
++          [...result].sort(([left], [right]) => {
++            const a = orderFor(left)
++            const b = orderFor(right)
++            return a === b
++              ? 0
++              : a === undefined
++                ? 1
++                : b === undefined
++                  ? -1
++                  : a < b
++                    ? -1
++                    : 1
++          }),
++        )
++      }
++      const shell = Object.assign(
++        Object.create(Object.getPrototypeOf(entry.collection)),
++        {
++          id: entry.collection.id,
++          config: entry.collection.config,
++        },
++      )
++      const view = new Proxy(shell, {
++        get(_target, property) {
++          if (epoch.active) {
++            if (property === `toArray`) return [...rows().values()]
++            if (property === `size`) return rows().size
++            if (property === `get`)
++              return (key: string | number) => rows().get(key)
++            if (property === `has`)
++              return (key: string | number) => rows().has(key)
++            if (property === `keys`) return () => rows().keys()
++            if (property === `values`) return () => rows().values()
++            if (property === `entries`) return () => rows().entries()
++            if (property === `isReady`) return () => true
++            if (property === `status`) return `ready`
++          }
++          const member: unknown = Reflect.get(
++            entry.collection,
++            property,
++            entry.collection,
++          )
++          return typeof member === `function` && property !== `constructor`
++            ? member.bind(entry.collection)
++            : member
++        },
++      })
++      this.draftViews.set(entry.collection, view)
++      publishedFacades.set(view, entry.collection)
++      return view as T
++    }
++    const existing = this.draftValues.get(value)
++    if (existing !== undefined) return existing as T
++    const resolved = transformPublicContainers(
++      value,
++      (leaf) => (isBucketFacadeRef(leaf) ? this.resolveDraft(leaf) : leaf),
++      PRIVATE_RESULT_KEYS,
++    )
++    this.draftValues.set(value, resolved)
++    return resolved as T
++  }
++
++  publishDrafts(): void {
++    this.draftEpoch.active = false
++    this.draftEpoch = { active: true }
++    this.draftViews.clear()
++  }
++
+   flush(): FacadePublication {
+     const snapshot = this.snapshot()
+     const deferredEntries = new Set<FacadeEntry>()
+@@ -476,6 +588,8 @@ export class BucketFacadeAdapter {
+ 
+   private resolveValue(value: unknown): unknown {
+     if (value === null || typeof value !== `object`) return value
++    const published = publishedFacades.get(value)
++    if (published) return published
+     const cached = this.resolvedValues.get(value)
+     if (cached !== undefined) return cached
+     if (isBucketFacadeRef(value)) {
+@@ -506,7 +620,10 @@ export class BucketFacadeAdapter {
+     if (Array.isArray(value) || isPlainObject(value)) {
+       const result = transformPublicContainers(
+         value,
+-        (leaf) => (isBucketFacadeRef(leaf) ? this.resolveValue(leaf) : leaf),
++        (leaf) =>
++          isBucketFacadeRef(leaf)
++            ? this.resolveValue(leaf)
++            : unwrapDraftFacade(leaf),
+         PRIVATE_RESULT_KEYS,
+       )
+       this.resolvedValues.set(value, result)
+diff --git a/packages/db/src/query/live/collection-config-builder.ts b/packages/db/src/query/live/collection-config-builder.ts
+index 9c892ee3..a3e932db 100644
+--- a/packages/db/src/query/live/collection-config-builder.ts
++++ b/packages/db/src/query/live/collection-config-builder.ts
+@@ -19,6 +19,7 @@ import { getCollectionBuilder } from './collection-registry.js'
+ import { LIVE_QUERY_INTERNAL } from './internal.js'
+ import { materializeCompilation } from './materialized-pipeline.js'
+ import { BucketFacadeAdapter } from './bucket-facade-adapter.js'
++import { facadeProjections } from './facade-projection.js'
+ import {
+   buildQueryFromConfig,
+   extractCollectionFromSource,
+@@ -607,8 +608,14 @@ export class CollectionConfigBuilder<
+       if (syncState.subscribedToAllCollections) {
+         let callbackCalled = false
+         const drainGraph = () => {
+-          while (syncState.graph.pendingWork()) {
++          const projections = facadeProjections(syncState.graph)
++          while (
++            syncState.graph.pendingWork() ||
++            projections.some((stage) => stage.hasWork())
++          ) {
+             syncState.graph.run()
++            const next = projections.find((stage) => stage.hasWork())
++            next?.advance()
+             if (!isCurrentSession()) return false
+             callback?.()
+             if (!isCurrentSession()) return false
+@@ -1077,12 +1084,17 @@ export class CollectionConfigBuilder<
+       },
+     )
+     syncState.unsubscribeCallbacks.add(() => bucketFacades.cleanup())
++    const projections = facadeProjections(graph)
++    for (const stage of projections)
++      syncState.unsubscribeCallbacks.add(() => stage.cleanup())
+ 
+     // Flush pending changes and reset the accumulator.
+     // Called at the end of each graph run to commit all accumulated changes.
+     syncState.flushPendingChanges = () => {
+       const hasParentChanges = pendingChanges.size > 0
+-      const hasChildChanges = bucketFacades.hasPendingChanges()
++      const hasChildChanges =
++        bucketFacades.hasPendingChanges() ||
++        projections.some((stage) => stage.hasPublication())
+ 
+       if (!hasParentChanges && !hasChildChanges) {
+         return
+@@ -1103,6 +1115,7 @@ export class CollectionConfigBuilder<
+         | ReturnType<Collection[`_deferPublication`]>
+         | undefined
+       try {
++        for (const stage of projections) stage.prepare()
+         facadePublication = bucketFacades.flush()
+         rootPublication = hasParentChanges
+           ? config.collection._deferPublication()
+@@ -1136,14 +1149,21 @@ export class CollectionConfigBuilder<
+       } catch (error) {
+         rootPublication?.discard()
+         facadePublication?.rollback()
++        for (const stage of [...projections].reverse()) stage.rollback()
+         throw error
+       }
+       pendingChanges = new Map()
++      for (const stage of projections) {
++        stage.reveal()
++        syncState.messagesCount += stage.messages
++        stage.messages = 0
++      }
+ 
+       let publicationError: unknown
+       for (const publish of [
+         rootPublication?.publish,
+         facadePublication.publish,
++        ...projections.map((stage) => () => stage.publish()),
+       ]) {
+         if (!publish) continue
+         try {
+diff --git a/packages/db/src/query/live/facade-projection.ts b/packages/db/src/query/live/facade-projection.ts
+new file mode 100644
+index 00000000..22f75222
+--- /dev/null
++++ b/packages/db/src/query/live/facade-projection.ts
+@@ -0,0 +1,82 @@
++import { MultiSet } from '@tanstack/db-ivm'
++import { BucketFacadeAdapter } from './bucket-facade-adapter.js'
++import type { MaterializedCompilation } from './materialized-pipeline.js'
++import type { FacadePublication } from './bucket-facade-adapter.js'
++import type { ID2 } from '@tanstack/db-ivm'
++import type { ResultStream } from '../../types.js'
++
++const stages = new WeakMap<ID2, Array<FacadeProjection>>()
++
++export function facadeProjections(graph: ID2): Array<FacadeProjection> {
++  return stages.get(graph) ?? []
++}
++
++export function stageFacadeProjection(
++  id: string,
++  input: MaterializedCompilation,
++) {
++  const stage = new FacadeProjection(id, input)
++  const graph = input.pipeline.graph
++  const existing = stages.get(graph) ?? []
++  existing.push(stage)
++  stages.set(graph, existing)
++  return stage.pipeline
++}
++
++class FacadeProjection {
++  readonly pipeline: ResultStream
++  private readonly reader
++  private readonly adapter: BucketFacadeAdapter
++  private publication: FacadePublication | undefined
++  messages = 0
++
++  constructor(id: string, input: MaterializedCompilation) {
++    this.reader = input.pipeline.connectReader()
++    this.pipeline =
++      input.pipeline.graph.newInput<[unknown, [unknown, string | undefined]]>()
++    this.adapter = new BucketFacadeAdapter(id, input.facades, (count) => {
++      this.messages += count
++    })
++  }
++
++  hasWork(): boolean {
++    return !this.reader.isEmpty()
++  }
++  hasPublication(): boolean {
++    return this.adapter.hasPendingChanges()
++  }
++
++  advance(): void {
++    const combined = new MultiSet(
++      this.reader.drain().flatMap((batch) => batch.getInner()),
++    ).consolidate()
++    this.pipeline.writer.sendData(
++      combined.map(([key, [value, order]]) => [
++        key,
++        [this.adapter.resolveDraft(value), order],
++      ]),
++    )
++  }
++
++  prepare(): void {
++    this.publication = this.adapter.flush()
++    this.publication.prepare()
++  }
++
++  reveal(): void {
++    this.adapter.publishDrafts()
++  }
++  publish(): void {
++    this.publication?.publish()
++    this.publication = undefined
++  }
++  rollback(): void {
++    this.publication?.rollback()
++    this.publication = undefined
++    this.adapter.publishDrafts()
++  }
++  cleanup(): void {
++    this.rollback()
++    this.adapter.cleanup()
++  }
++}

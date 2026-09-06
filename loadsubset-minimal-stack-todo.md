@@ -1261,14 +1261,18 @@ change was needed for those cells. These are separately queued below. Counts des
 not unique confirmed runtime bugs; contract-alignment notes below distinguish
 stale oracle expectations from implementation defects.
 
-The functional-projection suite is now **129 green / 24 red** (144 product
-cells plus nine controls/census functions), up from the frozen **85/63**
+The functional-projection suite is now **130 green / 27 red** (144 product
+cells plus thirteen controls/census functions), up from the frozen **85/63**
 specification. The inline input boundary repairs 42 cells; two later controls
 pass without a runtime change. The 21 original remaining failures are
 Collection-valued. Three new isolation probes also fail during initial preload
 on that boundary, before reaching their later assertions. A withdrawn snapshot
 candidate passed the original 150 tests but failed two isolation checks; its
-success is not a landed repair.
+success is not a landed repair. The separate-view follow-up adds one passing
+expression control and three functional controls that fail earlier on null
+input in the restored baseline. Its candidate reaches **155/2**, with only
+class/closure handle-identity assertions failing, but remains archived rather
+than installed in production. These candidate counts are not current repairs.
 The latest four adjacent suites are **147/0**; the wider eleven-suite inline
 checkpoint remains **370/0**.
 These counts do not replace the twelve-suite lifecycle scope above or count
@@ -3867,10 +3871,11 @@ candidate repair scopes, not completed fixes or proof of root cause.
   The pre-spike branch remains **+3,095 net executable source lines** against
   origin/main `68366eca`, not below main. Final test lint/format passes; the
   candidate package type check and source lint are not claimed green.
-- [ ] Before implementing another candidate, define a separate draft input
+- [x] Before implementing another candidate, define a separate draft input
   view that leaves public facade state and indexes untouched. Pin retained
   handle identity and opaque callback-output behavior first. No new API ban
-  or global coordination layer is approved by this experiment.
+  or global coordination layer is approved by this experiment. Follow-up
+  trial is recorded below; hidden-handle identity remains an open decision.
 - [ ] Only after this isolation gate passes, run async/cleanup/nested boundary
   probes, the lifecycle census, and the queued 100x campaign; then measure
   whether old machinery can be deleted rather than layered over.
@@ -3891,3 +3896,29 @@ candidate repair scopes, not completed fixes or proof of root cause.
   5,119 added / 2,024 removed across 48 executable source files. Final restored
   TypeScript exits 2, with no diagnostic for the expanded projection oracle
   (`/tmp/tanstack-facade-snapshot-restored-types.txt`). No full type pass claimed.
+
+### Separate draft input view: hidden-handle contract gate
+
+- [x] Try the approved separate-view candidate. Record and replayable source:
+  `notes/facade-draft-view-spike.md` and `.patch`. It fixes the first spike's
+  row/index/callback isolation probes without changing public Collection state
+  during projection. All **153 prior tests pass** on the final candidate.
+- [x] Pin a missing generator dimension: a non-correlating parent update while
+  another parent shares the same route. Cross expression selection and plain,
+  class, and exact-handle closure outputs. Include later child insertion to
+  separate live contents from object identity. Final candidate **155/2**;
+  the class and closure holders alone lose updated-parent `===` identity.
+  Both still show correct live rows. No old assertions removed or classifiers
+  broadened. Adjacent eleven suites **370/0**.
+- [x] Preserve the production candidate as a patch and restore the prior
+  production baseline. Expanded executable oracle is **130/27**, no skips.
+  The added expression control passes; the three new functional controls stop
+  on null child input before reaching identity assertions. They are not three
+  newly confirmed baseline runtime defects. Production size increase retained:
+  **zero**. Candidate cost: **+227 net source lines**, old machinery still
+  present. No bundle, memory, or performance improvement proved.
+- [ ] Ask for the intended class/closure handle contract before more runtime
+  work. Stable `===` identity remains normative unless explicitly changed.
+  A live-view choice would still require full draft API/lifecycle checks; it
+  would not make this prototype production-ready.
+- [ ] Post-commit Field Lab loss audit of this frozen checkpoint.
