@@ -3950,8 +3950,16 @@ candidate repair scopes, not completed fixes or proof of root cause.
 - [x] Measure all six source files, including the new module: **+119 net**,
   108 less than the prior +227 candidate. Whole branch **+3,214 net** against
   `68366eca`, still above main. No bundle/memory/performance claim.
-- [ ] Commit this bounded replacement, then run the standing Field Lab loss
-  audit against the source, assertion changes, reports, and frozen reduction.
+- [x] Commit the bounded replacement as `8a89139c`, then run the standing
+  Field Lab loss audit. It recovered a stale architecture introduction that
+  still called the suite red; local boundary/table updates had missed that
+  opening warning. Corrected it without closing the unproved gates. All six
+  source diffs, assertion-preservation, red/green reach, six reports, and size
+  traces match the reduction. This reused, sequential source-first auditor
+  was not fresh or sibling-blind; prior framing may hide omissions. It ran
+  no tests and did not inspect optional types or the post-freeze rerun. The
+  audit does not establish merge readiness. Root-agent committed rerun is
+  **158/0**, no skips (`/tmp/tanstack-facade-slim-committed.json`).
 - [ ] Complete draft API parity and async/failure/cleanup gates listed in the
   note before claiming the Collection view complete. The green broad census
   is not targeted coverage of every new continuation transition.

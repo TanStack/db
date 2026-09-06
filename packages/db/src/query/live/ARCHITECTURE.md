@@ -11,9 +11,9 @@ The central rule is simple:
 > Collection boundaries.
 
 The correlated-materialization oracle suites listed below are behavioral
-contracts for this design. The functional-projection suite still exposes known
-Collection-valued boundary failures; it must not be reported as green. Suites
-for adjacent planner and query-db ownership boundaries may also contain exact
+contracts for this design. The bounded functional-projection suite passes;
+the wider draft-view API and async/failure gates below remain open. Suites for
+adjacent planner and query-db ownership boundaries may also contain exact
 classifiers for defects outside this graph.
 
 ## Scope
