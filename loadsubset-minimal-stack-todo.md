@@ -4396,4 +4396,35 @@ candidate repair scopes, not completed fixes or proof of root cause.
   no-shadow warnings. Package tsc still exits2; includes the preexisting
   publication callback key `string|number`→RowKey diagnostic, not introduced
   by these changes. `/tmp/tanstack-100x-repairs-types.txt`.
-- [ ] Commit, per-step loss audit, then record full repaired100x result.
+- [x] Commit `d7f4b9d6`; loss audit preserves the raw-future-event versus
+  reconstructable-input boundary, retained-public-value precedence and the
+  three report scopes. No supported omissions found. Reused sequential source-
+  first context can inherit framing; no reruns, environment or new campaign
+  verification, and no merge endorsement.
+- [ ] Fresh full100x campaign running at `d7f4b9d6`, overrides unset,
+  `/tmp/tanstack-minimal-oracles-repaired-100x.json` and matching `.log`.
+  Runtime/tests remain frozen until exit. JSON-only reporter avoids the earlier
+  verbose request-warning/reporting load. Do not call this green before exit.
+
+### Prefix-fetch cost gate: candidate is not merge-ready
+
+- [x] Controlled synthetic provider probe against pre-fix DB source archived
+  from `ec2ec796` and candidate `d7f4b9d6`. Same100 rows, ten10-row pages or
+  widening10→100, async provider, no intervening mutations, same installed
+  dependency runtime. Both variants assert each visible window against a plain
+  array slice. Source/test files in the campaign were not changed.
+- [x] Both histories: baseline **110 returned rows / 20 requests / 9 cursor
+  requests**, candidate **560 returned rows / 20 requests / 0 cursor requests**;
+ 100 unique rows installed in both. About5.1x provider row volume. Evidence:
+  `/tmp/tanstack-prefix-cost.KpBvcn/probe.mjs`, `baseline.jsonl`, `candidate.jsonl`.
+  This counts rows an uncached synthetic provider selects, not wire bytes,
+  physical network work, latency, memory, or a comparison of separately built
+  db-ivm artifacts. Candidate still passes the disturbed-source witnesses;
+  baseline does not. Request-count checks alone miss this regression.
+- [ ] **Design choice pending:** the five-line fix is a correctness baseline,
+  not a landing recommendation. Recommended next investigation: preserve normal
+  cursor continuation and recover only when source changes invalidate its
+  prefix proof. Do not infer that observed high-water rows prove acquisition
+  coverage, or silently add another state machine. User was asked whether to
+  spend a little more code on the narrower policy rather than accept repeated
+  prefixes. Hold this gate separately from oracle green and source-size goals.
