@@ -189,10 +189,13 @@ class WindowCoordinator {
     })
   }
 
-  isLeaseSatisfied(lease: symbol, minimumLimit: number): boolean {
+  getLeaseResult(lease: symbol, minimumLimit: number): WindowResult | false {
     const limit = this.leases.get(lease)
     if (limit === undefined || limit < minimumLimit) return false
     const desiredLimit = this.getDesiredLimit()
+    // getWindow reports settled state; the current lease may still be loading.
+    if (this.pending && this.pending.limit === desiredLimit)
+      return this.pending.promise
     const currentWindow = this.target.utils?.getWindow?.()
     return (
       currentWindow === undefined ||
@@ -353,7 +356,6 @@ class WindowCoordinator {
     this.pending = { generation, limit, promise }
     return promise
   }
-
 }
 
 const windowCoordinators = new WeakMap<object, WindowCoordinator>()
@@ -910,11 +912,9 @@ class LiveQueryWindowControllerImpl<
 
   private ensureLeaseActive(pageCount: number): WindowResult {
     const minimumLimit = pageCount * this.pageSize + 1
-    if (
-      this.leaseActive &&
-      this.coordinator?.isLeaseSatisfied(this.lease, minimumLimit)
-    ) {
-      return true
+    if (this.leaseActive) {
+      const result = this.coordinator?.getLeaseResult(this.lease, minimumLimit)
+      if (result) return result
     }
     return this.activateLease(pageCount)
   }

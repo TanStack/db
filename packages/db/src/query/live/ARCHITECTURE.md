@@ -658,6 +658,10 @@ have advanced, so core does not try to reconstruct the old window over that
 new state. A later successful retry publishes the coherent replacement. A
 superseding window also waits for older source work that still gates
 publication; it does not report success until its own chosen window is visible.
+Window controllers treat `getWindow()` as settled state, not the current lease
+request. An overlapping preload joins its lease's pending window promise rather
+than replacing it with the smaller committed page count. Lease release may also
+settle asynchronously; completion, not the release call, establishes its window.
 Partial window options inherit omitted fields from the active requested window,
 or from the last settled window when no move is active. Collection cleanup
 rejects a pending window operation with `AbortError`; it cannot report success

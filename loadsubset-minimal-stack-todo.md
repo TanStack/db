@@ -1252,10 +1252,10 @@ Latest checkpoint: **601 passing / 0 failing** across 601 test functions.
 The demand suite is **199/0**, and history is **37/0**. The initial-work
 notification mismatch was a model error: readiness and publication have
 different wait sets. Remaining failures: publication **0**, settled-peer replay **0**, ordered
-work **0**. The eleven-suite checkpoint is **883/0** (601 bounded plus 282
-adjacent); the three window-behavior assertions now pass. A separate full
-window-controller run is **48/7**; all seven failures also occur on the prior
-runtime and are named below. Live cleanup retry is repaired below. Six ordered incremental
+work **0**. The twelve-suite checkpoint is **940/0** (601 bounded plus 339
+adjacent), including the expanded window controller **57/0**. Its seven prior
+failures are reconciled below: six contract/timing expectations and one pending
+preload defect, now covered by two outcome cells. Live cleanup retry is repaired below. Six ordered incremental
 failure cells now reach the intended post-startup phase and pass; no runtime
 change was needed for those cells. These are separately queued below. Counts describe tests,
 not unique confirmed runtime bugs; contract-alignment notes below distinguish
@@ -3377,13 +3377,13 @@ candidate repair scopes, not completed fixes or proof of root cause.
   plus the two late-waiter cells. Restored all four files; no ablation remains.
   The seven are a separate follow-up, not seven newly introduced or confirmed
   distinct defects:
-  - [ ] `restores the initial operator window when a graph run throws`
-  - [ ] `does not shrink the physical window when preload overlaps a page fetch`
-  - [ ] `reset does not inherit a superseded expansion failure`
-  - [ ] `coordinates the physical window across multiple controllers`
-  - [ ] `restores the query's initial window after the last lease is released`
-  - [ ] `retains the original baseline when its first restoration throws`
-  - [ ] `retains the original baseline when its first restoration rejects`
+  - [x] `restores the initial operator window when a graph run throws`
+  - [x] `does not shrink the physical window when preload overlaps a page fetch`
+  - [x] `reset does not inherit a superseded expansion failure`
+  - [x] `coordinates the physical window across multiple controllers`
+  - [x] `restores the query's initial window after the last lease is released`
+  - [x] `retains the original baseline when its first restoration throws`
+  - [x] `retains the original baseline when its first restoration rejects`
 - Diff check and targeted formatting pass. No new full lint/typecheck or final
   100× claim. No push.
 - Field Lab loss audit of `c4e8207c` recovered the two focused skip counts,
@@ -3401,7 +3401,64 @@ candidate repair scopes, not completed fixes or proof of root cause.
   Reverted the three temporary await insertions and verified a clean worktree
   before this record edit. This suggests stale synchronous timing assumptions,
   not a repair or proof of every intermediate snapshot. Keep the four entries
-  open until their settled-state assertions are updated with explicit reach.
+  open at that checkpoint; their settled-state assertions are now updated below.
+
+### Controller settled-window contract
+
+- Closed the seven named controller assertions without restoring private-graph
+  rollback machinery. Four release/restoration tests now prove the intended
+  `setWindow` call, await that exact returned settlement, and check both the
+  reported window and its selected row fields. They do not call preload or
+  issue another request to make restoration happen. A polling draft reached
+  automatic `gcTime: 1` cleanup after the last listener left; exact settlement
+  avoids confusing later cleanup with restoration failure.
+- The graph-throw test no longer demands a second private operator mutation
+  and a second rollback throw. That behavior was deliberately removed by the
+  retained-public-snapshot design. It preserves exact original-error identity,
+  proves the settled window and full prior rows survive, and exercises an
+  ordinary successful retry to the larger window. Retry/restoration row checks
+  compare selected `id`/`n` fields; they are not metadata-surface assertions.
+- The real-source reset test now crosses success/rejection while source work
+  still gates publication. It arms the deferred request only after preload,
+  checks acquisition reach, proves reset remains pending and old rows remain
+  visible, then checks both outcomes. Failure preserves exact error identity
+  for reset and expansion; explicit reset retry succeeds and later expansion
+  still works. The fixture evaluates predicates/cursor branches independently,
+  honors limits/offset, and awaits commit receipts instead of treating every
+  predicate as an empty result. The existing mocked reset-generation test
+  remains, now labeled as controller-only rather than a source-barrier proof.
+- One runtime defect: an overlapping preload treated `getWindow()`'s settled
+  limit as current desired state, overwrote its larger pending lease with the
+  smaller committed page count, and started a second window request. The
+  coordinator now returns its existing pending promise for a matching lease.
+  No new stored state. Runtime diff **7 added / 7 removed**, including one
+  removed blank line; substantive code/comment delta is +1 line.
+- Expanded that preload witness across resolve/reject at the controller's
+  `setWindow` boundary. Both calls are observed before assertions; assert one
+  window request and an unfinished preload, then same failure or success,
+  committed page count, retry after failure, final IDs, and settled window.
+  This controlled promise wrapper tests coordinator behavior, not adapter
+  transaction/publication atomicity; real-source reset cases cover that
+  separate boundary. Architecture states pending-lease joins and async release.
+- Report sequence (all full controller files, no skips):
+  - `/tmp/tanstack-controller-contract-red.json`: **48/8**, success false.
+    Five additional stops came from draft full-object row comparisons or
+    polling past GC, not five new runtime defects.
+  - `/tmp/tanstack-controller-aligned-red.json`: **53/3**, success false.
+    Only two preload witnesses and the old reset-success expectation remain.
+  - `/tmp/tanstack-controller-pending-green.json`: **55/1**, success false.
+    Preload fix passes both cases; old reset expectation remains.
+  - `/tmp/tanstack-controller-contract-final.json`: **57/0**, success true.
+  - `/tmp/tanstack-controller-final-old-runtime.json`: **55/2**, success false.
+    Final tests with the controller runtime exactly at `74ba989c` (empty diff
+    verified) fail only at the two preload request-count assertions. These
+    reds do not reach settlement/retry suffixes. All other updated contracts
+    pass without a runtime change. Restored the fix; no ablation remains.
+- Final twelve-suite run, seed override 1657011: **940/0**, no skips, success
+  true, `/tmp/tanstack-controller-final-census.json`. Bounded **601/0**, adjacent
+  **339/0**, with controller **57/0** and pagination **136/0**. Prettier and diff
+  check pass; no full lint/typecheck, final 100×, or universal-correctness claim.
+  Post-commit Field Lab loss audit follows this frozen step. No push.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
