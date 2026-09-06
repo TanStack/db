@@ -5159,3 +5159,38 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
     :1849 keeps the old lease when replacement fails; :1765,1913,2182,2259
     cover shared promises/setup/overlap/reentrant truncate; :292,673,941,1010,
     1562 cover teardown/debt. All pointers refer to runtime/tests247dc8d2.
+
+### W1 — acquisition composition — 2026-09-06
+
+- [x] SubsetDemand now holds one SubsetAcquisition reference. Replay,
+  replacement and release capture that object instead of reconstructing four
+  fields; install/restore swaps the reference. Acquisition state remains a
+  separate logical lifecycle fact. Cleanup installs detached request metadata
+  instead of mutating the old physical lease. Unsubscribe collects acquisition
+  objects rather than treating logical demands as physical leases.
+  No test changes, fetching changes, new public API or generic helper.
+- Actual delta:44 added/62 removed, net18 source lines removed, below the
+  estimated40–70. Longer field paths/formatting offset the deleted copying.
+  Controlled DB bundle:348080→347165 minified bytes (-915),98162→98043 gzip
+  (-119); DB-IVM unchanged. Same diagnostic options as the frozen baseline,
+  not CI/application size. `/tmp/tanstack-weight-acquisition-bundle.json`;
+  temporary script accepts revision arguments and working-tree reads now.
+  Whole package-source gap to fixed main is now3254 net lines, not below main.
+- Memory scope: each logical demand retains an acquisition object; the old
+  fields were inline in the demand. Release/replay no longer allocate shallow
+  lease copies, and release debt retains the physical object, not a logical
+  demand. This changes object layout, not row retention policy or asymptotic
+  state. No heap/throughput benchmark was run; do not claim measured memory win.
+- Focused five-file subscription units/lifecycle/history/publication/replay
+  gate442/0,exit0. Full26-file oracle/loader+live-query gate1582/0,exit0,
+  no skipped tests/reported runner errors; fixed corpus and fresh random seeds,
+  multiplier1. JSON/logs `/tmp/tanstack-weight-acquisition` and
+  `/tmp/tanstack-weight-acquisition-full`. Ordinary package tsc exits0 in
+  `/tmp/tanstack-weight-acquisition-types.log`. These are not all DB/adapter
+  tests or a new100x run. Last100x result still belongs to pre-W1 runtime.
+- Changed-file eslint exits1: one import cycle and four unnecessary conditions.
+  Baseline stdin lint reports the same five diagnostics; typed stdin checks
+  can consult the current program, so this is not an isolated baseline proof.
+  No lint suppression or unrelated cleanup added. Diff whitespace check passes.
+- [ ] Commit W1 then source-to-implementation Field Lab loss audit; preserve
+  ownership, startup/reentrant release, replacement-failure and session laws.
