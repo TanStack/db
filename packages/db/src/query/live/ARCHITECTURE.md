@@ -11,8 +11,8 @@ The central rule is simple:
 > Collection boundaries.
 
 The correlated-materialization oracle suites listed below are behavioral
-contracts for this design. The bounded functional-projection suite passes;
-the wider draft-view API and async/failure gates below remain open. Suites for
+contracts for this design. The functional-projection suite now pins two
+draft-index failures; other draft-view API and async/failure gates remain open. Suites for
 adjacent planner and query-db ownership boundaries may also contain exact
 classifiers for defects outside this graph.
 
@@ -273,6 +273,12 @@ views must still expose that bucket's later public changes. Expression-only
 projections continue to share the stable public facade. Child-only updates do
 not rerun scalar projections or republish parents merely to update a view.
 
+Collection helper methods use the temporary view as their receiver, so
+iteration, `forEach`, `map`, and `state` reuse the existing Collection code
+while reading the staged rows. Creating an index during a callback still
+indexes the public snapshot, not those rows. That boundary remains red;
+neither a private-index lifecycle nor a new API restriction is approved.
+
 Include paths describe a functional projection's input, not its arbitrary
 output. A callback may drop or rename a field, or return a scalar. Its input
 paths must not be attached to that output by a downstream QueryRef consumer.
@@ -283,7 +289,7 @@ downstream keys, distinct, ordering, and QueryRef consumers see the callback's
 actual output. The compiler owns the validated callback wrapper. Inline-only
 inputs need no Collection continuation. Queries without includes keep their
 original pipeline unless they consume a staged input elsewhere in the graph.
-The bounded projection oracle now passes; draft index/subscription creation,
+The projection oracle pins draft index creation failures; subscription creation,
 virtual-property parity, and asynchronous failure/cleanup around these views
 remain verification gates, not guarantees established by that suite.
 

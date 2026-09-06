@@ -1261,16 +1261,22 @@ change was needed for those cells. These are separately queued below. Counts des
 not unique confirmed runtime bugs; contract-alignment notes below distinguish
 stale oracle expectations from implementation defects.
 
-The functional-projection suite is now **158 green / 0 red** (144 product
-cells plus fourteen controls/census functions). The same revised tests on
+The functional-projection suite is now **182 green / 2 red** (144 product
+cells, fourteen controls/census functions, and 26 read-API cells). The API
+extension started at **174/10**; correcting two receiver expressions fixes
+iteration, forEach, map, and state in both order modes with zero net source
+growth. Only draft-time index creation remains red. All 158 prior tests still
+pass; no assertions or classifiers changed in this step.
+Before the read-API extension, the same 158 tests on
 baseline production are **130/28**; those baseline reds stop on incomplete
 Collection-valued input. Only the updated-parent identity assertion for
 separate functional calls changed by user decision; expression identity,
 unchanged-parent identity, live contents, and isolation assertions remain.
 The smaller continuation replaces the old deferred-callback machinery.
 The captured-method isolation extension first failed on that candidate
-(**157/1**) and now passes. The latest eleven adjacent suites pass **370/0**;
-the twelve-suite lifecycle census also reran **940/0** with no skips.
+(**157/1**) and now passes. The latest eleven adjacent suites reran **370/0**;
+the twelve-suite lifecycle checkpoint remains **940/0** from the preceding
+slim-replacement step, not a rerun after this two-expression change.
 These are bounded test counts, not unique bugs or proof of the full draft
 Collection API. Draft index/subscription creation, virtual properties,
 async failure/cleanup, performance, and the 100x campaign remain queued.
@@ -3964,3 +3970,41 @@ candidate repair scopes, not completed fixes or proof of root cause.
   note before claiming the Collection view complete. The green broad census
   is not targeted coverage of every new continuation transition.
 - [ ] Then run the queued 100x campaign and size/refactoring pass.
+
+### Draft read-API product: helper receiver repaired, index gate open
+
+- [x] Add 13 read surfaces × unordered/descending order, each checking initial
+  callback output, a route move, and a retained view after child insertion.
+  Surfaces: toArray, get, has, size, keys, values, entries, iterator, forEach,
+  map, state, $key, and newly created index lookup. Expected keys/order come
+  from the fixture, not another Collection method. This verifies $key only,
+  not all virtual properties or arbitrary key types.
+- [x] Red run against `531ee32f`: **174/10**. Iterator, forEach, map, state,
+  and index creation each fail in both order modes. Existing tests mostly
+  read toArray and direct methods; they omitted helpers that call other
+  Collection methods through their receiver.
+- [x] Change getter and method receivers from the public Collection to the
+  temporary view. Existing helpers now consume its staged entries rather
+  than an old public snapshot. No new helper implementations or private
+  index state: **2 source lines added / 2 removed**, net zero. Result
+  **182/2**. All 158 earlier tests remain unchanged and passing. Both index
+  cells stay directly red; nothing is skipped or expected-failure classified.
+- [x] Rerun eleven adjacent suites: **370/0**. Reports:
+  `/tmp/tanstack-facade-api-{red,v1,adjacent}.json`; no skips. Targeted source
+  and test ESLint/Prettier pass after renaming a shadowed test local. Package
+  tsc exits 2 with no changed-file diagnostics in
+  `/tmp/tanstack-facade-api-types.txt`; no full type pass claimed. Twelve-suite
+  lifecycle **940/0** remains the preceding step's result, not a fresh rerun.
+- [ ] Commit this bounded repair and run the standing Field Lab loss audit.
+- [ ] Decide draft-time index creation before implementing more machinery.
+  Its manager belongs to the public Collection, so immediate lookup during
+  the callback sees the old snapshot (empty in these activation cases).
+  Private index creation with failure cleanup versus a clear rejection of
+  createIndex inside a projection is a design choice. No restriction is yet
+  implemented or approved. Public post-publication indexes retain their
+  existing adjacent/isolation coverage; these failures do not refute it.
+- [ ] Subscription creation, other virtual properties, async publication,
+  cleanup/retry, and remaining gates in `notes/facade-slim-replacement.md`
+  remain queued. These API cells add no async/cleanup reach. Whole-branch
+  source remains **+3,214** against `68366eca` (+119 for the slim replacement),
+  with no current bundle/performance claim and no 100x campaign yet.

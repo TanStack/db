@@ -607,7 +607,7 @@ function createDraftView(
       if (property === `isReady`) return () => true
       if (property === `status`) return `ready`
     }
-    return Reflect.get(collection, property, collection)
+    return Reflect.get(collection, property, view)
   }
   const view = new Proxy(shell, {
     get(_target, property) {
@@ -616,7 +616,7 @@ function createDraftView(
         ? (...args: Array<unknown>) =>
             Reflect.apply(
               member(property) as (...values: Array<unknown>) => unknown,
-              collection,
+              view,
               args,
             )
         : value

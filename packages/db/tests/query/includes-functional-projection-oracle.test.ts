@@ -102,6 +102,137 @@ class Projection {
 }
 
 describe(`functional projection output compatibility`, () => {
+  const readSurfaces = [
+    `toArray`,
+    `get`,
+    `has`,
+    `size`,
+    `keys`,
+    `values`,
+    `entries`,
+    `iterator`,
+    `forEach`,
+    `map`,
+    `state`,
+    `virtual-key`,
+    `index`,
+  ] as const
+  it.each(
+    readSurfaces.flatMap((surface) =>
+      [false, true].map((ordered) => ({ surface, ordered })),
+    ),
+  )(
+    `reads $surface from the current projection input (ordered=$ordered)`,
+    async ({ surface, ordered }) => {
+      const parents = createControlledCollection(`read-api-parent`, [
+        { id: 1, groupId: 1 },
+      ])
+      const children = createControlledCollection(`read-api-child`, [
+        { id: 10, groupId: 1 },
+        { id: 11, groupId: 1 },
+        { id: 20, groupId: 2 },
+        { id: 21, groupId: 2 },
+      ])
+      const query = createLiveQueryCollection((q) =>
+        q
+          .from({
+            row: q.from({ parent: parents.collection }).select(({ parent }) => {
+              const childQuery = q
+                .from({ child: children.collection })
+                .where(({ child }) => eq(child.groupId, parent.groupId))
+              return {
+                id: parent.id,
+                groupId: parent.groupId,
+                children: ordered
+                  ? childQuery.orderBy(({ child }) => child.id, `desc`)
+                  : childQuery,
+              }
+            }),
+          })
+          .fn.select(({ row }) => {
+            const view = row.children
+            const expectedKeys = [row.groupId * 10, row.groupId * 10 + 1]
+            let ids: Array<number | string>
+            switch (surface) {
+              case `toArray`:
+                ids = view.toArray.map((child) => child.id)
+                break
+              case `get`:
+                ids = expectedKeys.flatMap((key) => view.get(key)?.id ?? [])
+                break
+              case `has`:
+                ids = expectedKeys.filter((key) => view.has(key))
+                break
+              case `size`:
+                ids = [view.size]
+                break
+              case `keys`:
+                ids = [...view.keys()]
+                break
+              case `values`:
+                ids = [...view.values()].map((child) => child.id)
+                break
+              case `entries`:
+                ids = [...view.entries()].map(([key]) => key)
+                break
+              case `iterator`:
+                ids = [...view].map(([key]) => key)
+                break
+              case `forEach`:
+                ids = []
+                view.forEach((child) => ids.push(child.id))
+                break
+              case `map`:
+                ids = view.map((child) => child.id)
+                break
+              case `state`:
+                ids = [...view.state.keys()]
+                break
+              case `virtual-key`:
+                ids = view.toArray.map((child) => child.$key)
+                break
+              case `index`: {
+                const index = view.createIndex((child) => child.id, {
+                  indexType: BasicIndex,
+                })
+                ids = expectedKeys.flatMap((key) => [
+                  ...index.lookup(`eq`, key),
+                ])
+                break
+              }
+            }
+            return { id: row.id, ids, children: view }
+          }),
+      )
+      const expected = (group: number) => {
+        if (surface === `size`) return [2]
+        const ids = [group * 10, group * 10 + 1]
+        return ordered && ![`get`, `has`, `index`].includes(surface)
+          ? ids.reverse()
+          : ids
+      }
+      try {
+        await query.preload()
+        expect
+          .soft(query.get(1)!.ids, `initial callback input`)
+          .toEqual(expected(1))
+        parents.write(`update`, { id: 1, groupId: 2 })
+        expect
+          .soft(query.get(1)!.ids, `moved callback input`)
+          .toEqual(expected(2))
+        const held = query.get(1)!.children
+        children.write(`insert`, { id: 22, groupId: 2 })
+        expect(held.toArray.map((child) => child.id)).toEqual(
+          ordered ? [22, 21, 20] : [20, 21, 22],
+        )
+      } finally {
+        await query.cleanup()
+        await parents.collection.cleanup()
+        await children.collection.cleanup()
+      }
+    },
+  )
+
   it.each([`expression`, `plain`, `opaque`, `closure`] as const)(
     `keeps retained views live across a same-route parent update through a %s holder`,
     async (holder) => {
