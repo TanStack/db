@@ -1289,9 +1289,9 @@ restart with expression controls. Two-stage success/callback/prepare failure
 and remote virtual metadata now pass. Their products are bounded, not an
 exhaustive cross of async/optimistic/nested/subscription histories. Copying and
 retention now have the bounded checks below. The broader 1x oracle command
-reports **1,349 green / 6 red**, all six in collection-state-retention; they
-reproduce before the snapshot change. Classify/repair that separate gate before
-the 100x run. Do not combine this command's count with the projection count.
+is **1,355 green / 0 red**, after aligning stale restart event expectations.
+The six preceding failures reproduced before the snapshot change; no runtime
+repair was needed for them. Do not combine this count with the projection count.
 The slim replacement plus guard is **+125 net lines** (+119 replacement,
 zero for helper receivers, +6 guard), down from the archived +227 candidate.
 Whole-branch executable source is still **+3,220 net lines**
@@ -4249,3 +4249,26 @@ candidate repair scopes, not completed fixes or proof of root cause.
   These are not six diagnosed runtime bugs. Next classify both differences.
 - [ ] Then run the queued100x campaign and size/refactoring pass. No full-suite
   green, 100x completion, universal correctness or below-main size claim.
+
+### Broad oracle gate: restart event expectations
+
+- [x] The six failures reproduce with pre-snapshot production. Five witnesses
+  stop where they expected an empty ready batch after restart; retained eager
+  subscriptions now retract the old rows they delivered. This is the existing
+  ARCHITECTURE eager-restart reconciliation contract, not a new policy.
+- [x] Update the history model's restart batch to delete the trigger row.
+  These subscriptions requested no initial state, so only that row was known
+  to them. Keep fixture-derived rows, values, key and prior-value assertions.
+  Update the optimistic witness to expect the same old-session deletion.
+- [x] All12 retention tests pass, including the full optimistic confirmation
+  trace, the parked receipt, its timeline and no-early-confirmation checks.
+  The apparent extra metadata update in the failure display did not require a
+  fix: the test's mutable publication array also changes in finally when a
+  failed assertion releases the mutation. This is diagnostic output, not an
+  independently reproduced early publication. `/tmp/tanstack-retention-aligned.txt`.
+- [x] Full oracle command now **1,355/0**, no skips, fixed seed1657011 at1x:
+  `/tmp/tanstack-facade-work-oracles-green.json`. All prior assertions remain
+  except the two explicit obsolete empty-batch expectations. No runtime edit.
+  ESLint/Prettier pass; tsc exits2, no changed-test/source/probe diagnostics in
+  `/tmp/tanstack-retention-aligned-types.txt`; no whole-package type pass.
+- [ ] Commit and Field Lab loss audit, then100x campaign.

@@ -291,7 +291,16 @@ async function runRetentionHistory(
             ),
           },
           {
-            changes: [],
+            // This subscriber observed the trigger, but did not request the
+            // earlier initial state. Restart retracts its known old-session row.
+            changes: [
+              {
+                type: `delete`,
+                key: expectedTriggerRow.id,
+                row: expectedTriggerRow,
+                previousRow: undefined,
+              },
+            ],
             rows: [],
           },
           {
@@ -657,7 +666,7 @@ it(`publishes a virtual-state update when a restarted optimistic row is confirme
         changes: [{ type: `insert`, key: 1, value: remoteRow(1) }],
         rows: [remoteRow(1)],
       },
-      { changes: [], rows: [] },
+      { changes: [{ type: `delete`, key: 1, value: remoteRow(1) }], rows: [] },
       {
         changes: [{ type: `insert`, key: 2, value: localRow(2) }],
         rows: [localRow(2)],
