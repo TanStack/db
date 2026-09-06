@@ -3769,7 +3769,17 @@ candidate repair scopes, not completed fixes or proof of root cause.
   +53 count preceded explicit symbol-routing typing. No bundle-size delta is
   claimed. Inline input materialization still does D2 work if the callback
   later drops the value; no-includes queries keep their existing pipeline.
-- [ ] Post-commit Field Lab loss audit for this inline step.
+- [x] Post-commit Field Lab loss audit of `bac6a6af` versus `178dc461` found
+  no supported omission or overclaim. It checked source before reports and
+  reduction: all 148 projection names remain, with 21 array and 21 materialized
+  cells repaired and no newly failing cells; validation ownership, recursive
+  exclusions, hard-assertion stopping point, and the +58 line delta are retained.
+  The auditor was reused, not fresh or sibling-blind; prior framing and the
+  source-first order may hide omissions. It ran no tests and did not inspect
+  optional build/type transcripts. JSON alone does not prove seed environment,
+  exact ablation/restoration, formatting, commands, or multipliers. Those come
+  from the execution record above, not this audit. This is source-to-summary
+  preservation evidence, not fresh runtime endorsement.
 - [ ] Repair the remaining Collection-valued boundary separately. Do not
   infer scalar dependency tracking from a live facade or claim the inline
   guard fixes mixed subtrees. Functional WHERE consuming includes, opaque
