@@ -295,9 +295,10 @@ The projection oracle checks the draft index guard and subscriptions created
 during a callback or after publication across synchronous success, callback
 failure, flush failure, and cleanup/restart. Pending child loads cover success,
 rejection, and obsolete settlement after restart, with expression controls.
-Remaining virtual-property parity, deeper continuation interactions, and
-copying/retention bounds remain verification gates, not guarantees established
-by that suite.
+Two chained continuations cover synchronous success, second-callback failure,
+and second-prepare failure. Retained readers check remote virtual metadata.
+These bounded cases do not establish every async/optimistic/nested API cross;
+copying/retention bounds also remain a verification gate.
 
 Every valid plan is checked as a Collection, `toArray`, and `materialize`
 include at initial load, after a parent-route update, and after a child update.

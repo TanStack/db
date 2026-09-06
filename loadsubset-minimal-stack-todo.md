@@ -1261,10 +1261,10 @@ change was needed for those cells. These are separately queued below. Counts des
 not unique confirmed runtime bugs; contract-alignment notes below distinguish
 stale oracle expectations from implementation defects.
 
-The functional-projection suite is now **200 green / 0 red** (144 product
-cells, fourteen controls/census functions, 26 read-API cells, and two uncaught
-index-guard cases, plus six subscription/failure/restart and eight pending-load
-cells). The API
+The functional-projection suite is now **205 green / 0 red** (144 product
+cells, fourteen controls/census functions, 28 read-API cells, and two uncaught
+index-guard cases, plus six subscription/failure/restart, eight pending-load,
+and three two-stage cells). The API
 extension started at **174/10**; correcting two receiver expressions fixes
 iteration, forEach, map, and state in both order modes with zero net source
 growth. The user then approved a clear error for draft-time index creation.
@@ -1280,13 +1280,15 @@ unchanged-parent identity, live contents, and isolation assertions remain.
 The smaller continuation replaces the old deferred-callback machinery.
 The captured-method isolation extension first failed on that candidate
 (**157/1**) and now passes. The latest eleven adjacent suites reran **370/0**;
-the twelve-suite lifecycle checkpoint remains **940/0** from the preceding
-slim-replacement step, not a rerun after this two-expression change.
+the twelve lifecycle suites now rerun **940/0** after all boundary extensions
+below. Both fresh reports use fixed seed `1657011` and have no skips.
 These are bounded test counts, not unique bugs or proof of the full draft
 Collection API. Six synchronous subscription/failure/restart cells now pass;
 eight pending-load cells cover resolve/reject and obsolete completion after
-restart with expression controls. Remaining virtual properties, deeper
-continuations, performance, and the 100x campaign remain queued.
+restart with expression controls. Two-stage success/callback/prepare failure
+and remote virtual metadata now pass. Their products are bounded, not an
+exhaustive cross of async/optimistic/nested/subscription histories. Copying and
+retention bounds, broader campaign, and the 100x run remain queued.
 The slim replacement plus guard is **+125 net lines** (+119 replacement,
 zero for helper receivers, +6 guard), down from the archived +227 candidate.
 Whole-branch executable source is still **+3,220 net lines**
@@ -4160,6 +4162,39 @@ candidate repair scopes, not completed fixes or proof of root cause.
   `/tmp/tanstack-facade-async-boundary-{v1,final}.json`; final includes the two
   audit-recovered stronger failure assertions. No runtime changes or new bug.
   Package tsc exits 2 with no changed-test diagnostics in `...-types.txt`.
-  Correct the new import order before commit; no full type pass claimed.
-- [ ] Commit and run standing Field Lab loss audit. Nested continuations,
-  remaining virtual properties, copying/retention bounds and 100x remain open.
+  ESLint passes after correcting import order; no full type pass claimed.
+- [x] Commit `e00472e3`, then run standing Field Lab loss audit. No supported
+  omission or overclaim found. Eight-cell reach, the two recovered assertion
+  fixes, preserved tests, both reports, unchanged runtime and the cooperative
+  adapter limitation match. Reused sequential source-first context was not
+  fresh/blind; no test rerun, environment/lint/provenance verification, or
+  merge-readiness endorsement. Nested, virtual, copying/retention and 100x
+  remained open at this checkpoint.
+
+### Two continuation stages and remote virtual properties
+
+- [x] Add three two-stage cells. The first callback consumes children; a
+  following projection retains that view and adds peers; the second callback
+  reads both. Check callback order and fixture-derived input rows on initial
+  publication and parent movement. Success retires both old views. A second
+  callback failure or prepare failure after two stages preserves both old
+  public views and root identity. Cleanup/preload rebuilds both current views.
+- [x] The flush seam counts real prepare calls and throws after the second,
+  not the first. Error identity and the two-call reach are asserted. This is
+  a synchronous two-stage boundary, not nested async or an arbitrary-depth law.
+- [x] Add unordered/descending remote-metadata cells to the existing retained
+  reader product: `$collectionId` remains the upstream source ID, `$synced`
+  is true and `$origin` is remote at callback/publication/insert/delete reads.
+  Empty retired routes have no metadata values to check. No optimistic-metadata
+  parity claim is made by these cells.
+- [x] Projection suite **205/0**, no skips, in
+  `/tmp/tanstack-facade-two-stage-v1.json`. No production change or new bug.
+- [x] Fresh eleven adjacent suites **370/0** and twelve lifecycle suites
+  **940/0**, no skips, fixed seed `1657011` in
+  `/tmp/tanstack-facade-boundary-{adjacent,lifecycle}.json`. Test ESLint passes;
+  package tsc exits 2 without changed-test diagnostics in
+  `/tmp/tanstack-facade-two-stage-types.txt`; no full type pass claimed.
+- [ ] Commit and loss-audit this step.
+- [ ] Measure copying/retention bounds before the queued 100x campaign and
+  size/refactoring pass. Whole branch remains above main; tests passing does
+  not waive the size target or establish full API/performance parity.

@@ -106,6 +106,135 @@ class Projection {
 }
 
 describe(`functional projection output compatibility`, () => {
+  it.each([`none`, `callback`, `flush`] as const)(
+    `keeps two continuation stages coherent through %s failure`,
+    async (failureAt) => {
+      const parents = createControlledCollection(`two-stage-parent`, [
+        { id: 1, groupId: 1 },
+      ])
+      const children = createControlledCollection(`two-stage-child`, [
+        { id: 10, groupId: 1 },
+        { id: 20, groupId: 2 },
+      ])
+      const peers = createControlledCollection(`two-stage-peer`, [
+        { id: 100, groupId: 1 },
+        { id: 200, groupId: 2 },
+      ])
+      const trace: Array<string> = []
+      const failure = new Error(`second continuation ${failureAt} failure`)
+      let failing = false
+      let prepared = 0
+      const originalFlush = BucketFacadeAdapter.prototype.flush
+      const flush =
+        failureAt === `flush`
+          ? vi
+              .spyOn(BucketFacadeAdapter.prototype, `flush`)
+              .mockImplementation(function (this: BucketFacadeAdapter) {
+                const publication = originalFlush.call(this)
+                return {
+                  ...publication,
+                  prepare: () => {
+                    publication.prepare()
+                    if (failing && ++prepared === 2) throw failure
+                  },
+                }
+              })
+          : undefined
+      const query = createLiveQueryCollection((q) => {
+        const included = q
+          .from({ parent: parents.collection })
+          .select(({ parent }) => ({
+            id: parent.id,
+            groupId: parent.groupId,
+            children: q
+              .from({ child: children.collection })
+              .where(({ child }) => eq(child.groupId, parent.groupId)),
+          }))
+        const first = q.from({ row: included }).fn.select(({ row }) => {
+          trace.push(`first:${row.groupId}`)
+          expect(row.children.toArray.map((child) => child.id)).toEqual([
+            row.groupId * 10,
+          ])
+          return { id: row.id, groupId: row.groupId, children: row.children }
+        })
+        const added = q.from({ row: first }).select(({ row }) => ({
+          id: row.id,
+          groupId: row.groupId,
+          children: row.children,
+          peers: q
+            .from({ peer: peers.collection })
+            .where(({ peer }) => eq(peer.groupId, row.groupId)),
+        }))
+        return q.from({ row: added }).fn.select(({ row }) => {
+          trace.push(`second:${row.groupId}`)
+          expect(row.children.toArray.map((child) => child.id)).toEqual([
+            row.groupId * 10,
+          ])
+          expect(row.peers.toArray.map((peer) => peer.id)).toEqual([
+            row.groupId * 100,
+          ])
+          if (failing && failureAt === `callback`) throw failure
+          return {
+            id: row.id,
+            groupId: row.groupId,
+            children: row.children,
+            peers: row.peers,
+          }
+        })
+      })
+      try {
+        await query.preload()
+        expect(trace).toEqual([`first:1`, `second:1`])
+        const original = query.get(1)!
+        failing = failureAt !== `none`
+        let thrown: unknown
+        try {
+          parents.write(`update`, { id: 1, groupId: 2 })
+        } catch (error) {
+          thrown = error
+        }
+        expect(trace).toEqual([`first:1`, `second:1`, `first:2`, `second:2`])
+        if (failing) {
+          expect(thrown).toBe(failure)
+          expect(query.get(1)).toBe(original)
+          expect(original.children.toArray.map((child) => child.id)).toEqual([
+            10,
+          ])
+          expect(original.peers.toArray.map((peer) => peer.id)).toEqual([100])
+          if (failureAt === `flush`) expect(prepared).toBe(2)
+        } else {
+          expect(thrown).toBeUndefined()
+          expect(original.children.toArray).toEqual([])
+          expect(original.peers.toArray).toEqual([])
+          expect(
+            query.get(1)!.children.toArray.map((child) => child.id),
+          ).toEqual([20])
+          expect(query.get(1)!.peers.toArray.map((peer) => peer.id)).toEqual([
+            200,
+          ])
+        }
+        await query.cleanup()
+        failing = false
+        await query.preload()
+        expect(query.get(1)!.children.toArray.map((child) => child.id)).toEqual(
+          [20],
+        )
+        expect(query.get(1)!.peers.toArray.map((peer) => peer.id)).toEqual([
+          200,
+        ])
+        expect(original.children.toArray).toEqual([])
+        expect(original.peers.toArray).toEqual([])
+      } finally {
+        failing = false
+        flush?.mockRestore()
+        await query.cleanup()
+        await parents.collection.cleanup()
+        await children.collection.cleanup()
+        await peers.collection.cleanup()
+      }
+    },
+  )
+
   it.each(
     ([`expression`, `functional`] as const).flatMap((projection) =>
       ([`resolve`, `reject`, `cleanup-resolve`, `cleanup-reject`] as const).map(
@@ -415,6 +544,7 @@ describe(`functional projection output compatibility`, () => {
     `map`,
     `state`,
     `virtual-key`,
+    `virtual-metadata`,
     `index`,
   ] as const
   it.each(
@@ -497,6 +627,14 @@ describe(`functional projection output compatibility`, () => {
                   break
                 case `virtual-key`:
                   ids = view.toArray.map((child) => child.$key)
+                  break
+                case `virtual-metadata`:
+                  ids = view.toArray.map((child) => {
+                    expect(child.$collectionId).toBe(children.collection.id)
+                    expect(child.$synced).toBe(true)
+                    expect(child.$origin).toBe(`remote`)
+                    return child.id
+                  })
                   break
                 case `index`: {
                   // Capturing the method is safe. Calling it on private input is not.
