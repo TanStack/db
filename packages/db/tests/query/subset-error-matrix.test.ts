@@ -536,7 +536,7 @@ describe(`loadSubset failure matrix`, () => {
         }
         expect(cleanupError).toBeInstanceOf(SyncCleanupError)
         expect((cleanupError as Error).message).toContain(
-          failure instanceof Error ? failure.message : String(failure),
+          `error: ${failure instanceof Error ? failure.message : String(failure)}`,
         )
         if (failure instanceof Error)
           expect((cleanupError as Error).cause).toBe(failure)

@@ -3305,6 +3305,25 @@ candidate repair scopes, not completed fixes or proof of root cause.
   final adjacent run. Prettier/diff pass; no new lint/typecheck or final 100×
   claim. The architecture now states the failed-cleanup callback's epoch bound.
 
+- Field Lab loss audit of `75537a20`, using the existing auditor because of
+  the thread limit, recovered focused skip counts (expanded red 43; handle red
+  15), and assertion reach: the reds stop at missing-retry counts before later
+  zero-subscriber/no-repeat checks. Final green reaches those suffixes. It also
+  caught the parameterized message assertion losing the `error: ` prefix.
+  Restored that prefix for all three values, then reran the entire error matrix:
+  **46/0**, success true, `/tmp/tanstack-live-cleanup-retry-message-followup.json`.
+  Frozen audit preceded this one-line assertion repair. Counts, production
+  delta, and three remaining window names otherwise matched. No auditor tests
+  or runtime endorsement; same-context framing and source order may hide
+  omissions, and reports do not prove command/ablation/formatting provenance.
+- Next window investigation must distinguish initial request, later refinement,
+  public graph publication, and cleanup during an actual new acquisition.
+  The builder currently guards only an explicit active window operation; the
+  loader separately holds its synchronous `requesting` flag. A startup-only
+  guard would not prove asynchronous refinement reentry safe. Add request-reach
+  checks before treating the cleanup test's synchronous `true` as a runtime
+  failure. No window implementation or expectation changed in this step.
+
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
       behavior, and opaque callback roots.
