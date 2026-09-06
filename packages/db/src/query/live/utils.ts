@@ -307,7 +307,9 @@ export class OrderedSourceLoader {
       result: LoadSubsetRequestResult,
       holdPublication: boolean,
     ) => void = () => {},
-  ) {}
+  ) {
+    this.info.isRequesting = () => this.requesting
+  }
 
   get pendingPromise(): Promise<unknown> | undefined {
     return this.pending

@@ -1247,8 +1247,10 @@ Latest checkpoint: **601 passing / 0 failing** across 601 test functions.
 The demand suite is **199/0**, and history is **37/0**. The initial-work
 notification mismatch was a model error: readiness and publication have
 different wait sets. Remaining failures: publication **0**, settled-peer replay **0**, ordered
-work **0**. The wider adjacent run has another **3 failing functions**:
-three window-behavior assertions. Live cleanup retry is repaired below. Six ordered incremental
+work **0**. The eleven-suite checkpoint is **883/0** (601 bounded plus 282
+adjacent); the three window-behavior assertions now pass. A separate full
+window-controller run is **48/7**; all seven failures also occur on the prior
+runtime and are named below. Live cleanup retry is repaired below. Six ordered incremental
 failure cells now reach the intended post-startup phase and pass; no runtime
 change was needed for those cells. These are separately queued below. Counts describe tests,
 not unique confirmed runtime bugs; contract-alignment notes below distinguish
@@ -1269,7 +1271,7 @@ stale oracle expectations from implementation defects.
 | Ordered generated histories                          | 192 checked route/delivery/window/outcome/session/barrier histories; finite/full request shapes     | 192 green cells; no known-red classifier remains |
 
 The earlier 44-test red catalog grouped into these protocol faults. Later
-checkpoints below add witnesses; the final combined census is still pending. Multiple
+checkpoints below add witnesses; the broader final campaign is still pending. Multiple
 matrix cells are deliberate variants of one fault, not separate diagnoses.
 
 | Red class                                 | Named witnesses | Observable failure                                                           |
@@ -3323,6 +3325,59 @@ candidate repair scopes, not completed fixes or proof of root cause.
   guard would not prove asynchronous refinement reentry safe. Add request-reach
   checks before treating the cleanup test's synchronous `true` as a runtime
   failure. No window implementation or expectation changed in this step.
+
+### Window reentry and cleanup-before-wait
+
+- Reentry checked only an active explicit window move, missing startup source
+  requests, later refinement after asynchronous settlement, and public graph
+  callbacks. Read the loader's existing synchronous request guard through a
+  callback on its compiled order information, and use the builder's existing
+  graph-running guard. Reject before changing top-K. This adds one read-through
+  callback, not an independent mutable lifecycle flag.
+- Cleanup rejected an existing waiter but did not retain the cancellation for
+  a waiter attached later. Store AbortError in the operation's existing error
+  fields. Already-completed operations remain successful. Total runtime delta
+  across four files: **15 added / 3 removed = +12 lines**. Architecture records
+  both boundaries. No new queue, registry, or lifecycle counter.
+- Expanded startup reentry into request 1/2 × sync/async delivery. The async
+  refinement witness asserts that the first page settled. All four retain the
+  window and rows, then prove a later ordinary expansion succeeds. Public
+  callback reentry remains covered. Cleanup during acquisition now checks that
+  the cleanup trigger fired and completed before checking cancellation.
+- Added waiter-before/after-cleanup × pending/no-pending operation cells.
+  Wait-before with no pending work is the already-completed positive control.
+  Superseded waiters already rejected correctly; changed the old successful
+  settlement expectation to AbortError and observe both rejections before
+  cleanup. No runtime repair is claimed for that stale expectation.
+- Expanded pagination before the fix: **0/6**,
+  `/tmp/tanstack-window-phases-red.json`. Final focused old-runtime control:
+  **3/8, 180 skipped**, `/tmp/tanstack-window-boundaries-old-runtime.json`.
+  All four runtime files matched HEAD before that control. Six pagination
+  witnesses stop at missing reentry rejection or missing cancellation; two
+  late-waiter cells stop at undefined instead of AbortError. The cleanup-reach
+  assertions pass on the old runtime. Green tests reach the later recovery
+  suffixes; the focused control is not a whole-suite success claim.
+- Restored runtime, final eleven-suite run with seed override 1657011:
+  **883/0**, no skips, success true,
+  `/tmp/tanstack-window-boundaries-census.json`. Bounded **601/0**, adjacent
+  **282/0**, including pagination **136/0**. The earlier focused waiter run is
+  **5/0** (`/tmp/tanstack-window-waiter-matrix-green.json`), not the full file.
+- Full controller file: **48/7**, no skips, success false,
+  `/tmp/tanstack-window-controller-adjacent.json`. Repeating with all four
+  runtime files exactly at HEAD gives **46/9**, no skips, success false,
+  `/tmp/tanstack-window-controller-old-runtime.json`: the same seven failures
+  plus the two late-waiter cells. Restored all four files; no ablation remains.
+  The seven are a separate follow-up, not seven newly introduced or confirmed
+  distinct defects:
+  - [ ] `restores the initial operator window when a graph run throws`
+  - [ ] `does not shrink the physical window when preload overlaps a page fetch`
+  - [ ] `reset does not inherit a superseded expansion failure`
+  - [ ] `coordinates the physical window across multiple controllers`
+  - [ ] `restores the query's initial window after the last lease is released`
+  - [ ] `retains the original baseline when its first restoration throws`
+  - [ ] `retains the original baseline when its first restoration rejects`
+- Diff check passes. No new full lint/typecheck or final 100× claim. Post-commit
+  Field Lab loss audit follows this frozen step; no push.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar

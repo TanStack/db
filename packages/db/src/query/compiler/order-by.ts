@@ -41,6 +41,8 @@ export type OrderByOptimizationInfo = {
   /** Index on the first orderBy column - used for lazy loading */
   index?: IndexInterface<string | number>
   dataNeeded?: () => number
+  /** Reads the source loader's synchronous request guard, when installed. */
+  isRequesting?: () => boolean
   /** Whether local operators can discard or reorder the provider's prefix. */
   requiresFullSource: boolean
 }

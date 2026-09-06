@@ -609,31 +609,45 @@ describe(`createLiveQueryWindowController`, () => {
     }
   })
 
-  it(`cleanup settles the active load operation before another sync session`, async () => {
-    const lq = makeOrderedLiveQuery(makeSource(), 2)
-    await lq.preload()
+  it.each(
+    [false, true].flatMap((waitBeforeCleanup) =>
+      [false, true].map((pendingLoad) => ({ waitBeforeCleanup, pendingLoad })),
+    ),
+  )(
+    `cleanup cancels unfinished operations with waitFirst=$waitBeforeCleanup, pending=$pendingLoad`,
+    async ({ waitBeforeCleanup, pendingLoad }) => {
+      const lq = makeOrderedLiveQuery(makeSource(), 2)
+      await lq.preload()
 
-    let resolveLoad!: () => void
-    const load = new Promise<void>((resolve) => {
-      resolveLoad = resolve
-    })
-    const operation = lq._sync.beginLoadSubsetOperation()
-    lq._sync.trackLoadPromise(load)
-    const waiting = Promise.resolve(operation.wait())
-    let settled = false
-    void waiting.then(() => {
-      settled = true
-    })
+      let resolveLoad!: () => void
+      const load = new Promise<void>((resolve) => {
+        resolveLoad = resolve
+      })
+      const operation = lq._sync.beginLoadSubsetOperation()
+      if (pendingLoad) lq._sync.trackLoadPromise(load)
+      const beforeCleanup = waitBeforeCleanup ? operation.wait() : undefined
+      const observe = (result: true | Promise<void>) =>
+        Promise.resolve(result).then(
+          () => undefined,
+          (error: unknown) => error,
+        )
+      const observedBefore =
+        beforeCleanup === undefined ? undefined : observe(beforeCleanup)
+      lq._sync.cleanup()
+      const observed = observedBefore ?? observe(operation.wait())
+      const outcome = await observed
+      if (waitBeforeCleanup && !pendingLoad) {
+        expect(beforeCleanup).toBe(true)
+        expect(outcome).toBeUndefined()
+      } else {
+        expect(outcome).toMatchObject({ name: `AbortError` })
+      }
 
-    lq._sync.cleanup()
-    await Promise.resolve()
-
-    expect(settled).toBe(true)
-
-    resolveLoad()
-    await waiting
-    await lq.cleanup()
-  })
+      resolveLoad()
+      expect(await observed).toBe(outcome)
+      await lq.cleanup()
+    },
+  )
 
   it(`cleanup settles every superseded load operation`, async () => {
     const lq = makeOrderedLiveQuery(makeSource(), 2)
@@ -649,10 +663,10 @@ describe(`createLiveQueryWindowController`, () => {
     lq._sync.trackLoadPromise(secondLoad)
     const secondWaiting = Promise.resolve(secondOperation.wait())
     const settled = [false, false]
-    void firstWaiting.then(() => {
+    void firstWaiting.catch(() => {
       settled[0] = true
     })
-    void secondWaiting.then(() => {
+    void secondWaiting.catch(() => {
       settled[1] = true
     })
 
@@ -660,7 +674,8 @@ describe(`createLiveQueryWindowController`, () => {
     await Promise.resolve()
 
     expect(settled).toEqual([true, true])
-    await Promise.all([firstWaiting, secondWaiting])
+    await expect(firstWaiting).rejects.toMatchObject({ name: `AbortError` })
+    await expect(secondWaiting).rejects.toMatchObject({ name: `AbortError` })
     await lq.cleanup()
   })
 

@@ -638,6 +638,9 @@ those writes still belong to the failed window operation and cannot retry it.
 A public `setWindow()` call made from inside that synchronous operation throws
 `SetWindowReentrancyError`; it must not claim that a nested window settled after
 the loader suppressed its work.
+The guard reads the loader's existing synchronous request state for initial
+and later refinement requests, including requests after an asynchronous page.
+It also rejects window changes during graph publication, before mutating top-K.
 A synchronous result callback is provisional until the whole snapshot request
 returns: a later local read or publication throw fails and retires that
 acquisition instead of letting its queued success erase the failure.
@@ -659,6 +662,8 @@ Partial window options inherit omitted fields from the active requested window,
 or from the last settled window when no move is active. Collection cleanup
 rejects a pending window operation with `AbortError`; it cannot report success
 after discarding the graph and requested window.
+That error belongs to the operation even if cleanup precedes registration of
+its waiter. Cleanup does not retroactively cancel an already completed operation.
 Window-operation generations stay monotonic across cleanup and restart, so a
 late rejection from an abandoned session cannot reset the replacement
 session's requested window.

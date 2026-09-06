@@ -302,7 +302,13 @@ export class CollectionConfigBuilder<
     if (!windowFn) {
       throw new SetWindowRequiresOrderByError()
     }
-    if (this.activeWindowOperation) {
+    if (
+      this.activeWindowOperation ||
+      this.isGraphRunning ||
+      Object.values(this.optimizableOrderByCollections).some((info) =>
+        info.isRequesting?.(),
+      )
+    ) {
       throw new SetWindowReentrancyError()
     }
 

@@ -925,7 +925,9 @@ export class CollectionSyncManager<
       if (!operation.completed) {
         operation.completed = true
         operation.pending.clear()
-        operation.deferred?.reject(new LoadSubsetOperationAbortedError())
+        operation.hasError = true
+        operation.error = new LoadSubsetOperationAbortedError()
+        operation.deferred?.reject(operation.error)
       }
     }
     this.loadSubsetOperations.clear()
