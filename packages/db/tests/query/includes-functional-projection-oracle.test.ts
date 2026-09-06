@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
+import { createCollection } from '../../src/collection/index.js'
+import { createDeferred } from '../../src/deferred.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { BucketFacadeAdapter } from '../../src/query/live/bucket-facade-adapter.js'
 import {
@@ -7,6 +9,7 @@ import {
   materialize,
   toArray,
 } from '../../src/query/index.js'
+import { flushPromises } from '../utils.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 
 const boundaries = [`query-ref`, `recursive-query-ref`, `union`] as const
@@ -103,6 +106,135 @@ class Projection {
 }
 
 describe(`functional projection output compatibility`, () => {
+  it.each(
+    ([`expression`, `functional`] as const).flatMap((projection) =>
+      ([`resolve`, `reject`, `cleanup-resolve`, `cleanup-reject`] as const).map(
+        (settlement) => ({ projection, settlement }),
+      ),
+    ),
+  )(
+    `$projection projection fences $settlement of a pending child load`,
+    async ({ projection, settlement }) => {
+      const parents = createControlledCollection(`pending-parent`, [
+        { id: 1, groupId: 1 },
+      ])
+      const requests: Array<{
+        gate: ReturnType<typeof createDeferred<void>>
+        signal: AbortSignal | undefined
+      }> = []
+      const children = createCollection<{ id: number; groupId: number }>({
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => ({
+            loadSubset: ({ signal }) => {
+              const gate = createDeferred<void>()
+              requests.push({ gate, signal })
+              return gate.promise.then(async () => {
+                if (signal?.aborted) return
+                begin()
+                write({ type: `insert`, value: { id: 10, groupId: 1 } })
+                await commit()
+                markReady()
+              })
+            },
+          }),
+        },
+      })
+      const captured: Array<Pick<typeof children, `toArray`>> = []
+      const query = createLiveQueryCollection((q) => {
+        const source = q.from({
+          row: q.from({ parent: parents.collection }).select(({ parent }) => ({
+            id: parent.id,
+            children: q
+              .from({ child: children })
+              .where(({ child }) => eq(child.groupId, parent.groupId)),
+          })),
+        })
+        return projection === `expression`
+          ? source.select(({ row }) => row)
+          : source.fn.select(({ row }) => {
+              captured.push(row.children)
+              return { id: row.id, children: row.children }
+            })
+      })
+      const failure = new Error(`pending child failed`)
+      // Attach both outcomes immediately; no pending-length assertion may
+      // leave a rejected preload promise unobserved.
+      const preload = () => {
+        const result: { settled: boolean; error?: unknown } = { settled: false }
+        const observed = query.preload().then(
+          () => {
+            result.settled = true
+          },
+          (error) => {
+            result.settled = true
+            result.error = error
+          },
+        )
+        return { result, observed }
+      }
+      try {
+        const initial = preload()
+        await flushPromises()
+        expect(requests).toHaveLength(1)
+        expect(initial.result.settled).toBe(false)
+        expect(query.isReady()).toBe(false)
+        const held = query.get(1)!.children
+        expect(held.toArray).toEqual([])
+        if (projection === `functional`) expect(captured).toHaveLength(1)
+        const obsoleteViews = [...captured, held]
+
+        if (settlement.startsWith(`cleanup`)) {
+          await query.cleanup()
+          await children.cleanup()
+          await initial.observed
+          expect(initial.result.error).toMatchObject({ name: `AbortError` })
+          expect(requests[0]!.signal?.aborted).toBe(true)
+          const restarted = preload()
+          await flushPromises()
+          expect(requests).toHaveLength(2)
+          const current = query.get(1)!.children
+          if (settlement === `cleanup-reject`) requests[0]!.gate.reject(failure)
+          else requests[0]!.gate.resolve()
+          await flushPromises()
+          expect(
+            restarted.result.settled,
+            `obsolete completion cannot finish preload`,
+          ).toBe(false)
+          expect(query.isReady()).toBe(false)
+          expect(current.toArray).toEqual([])
+          requests[1]!.gate.resolve()
+          await restarted.observed
+          expect(restarted.result.error).toBeUndefined()
+          expect(query.isReady()).toBe(true)
+          expect(current.toArray.map((child) => child.id)).toEqual([10])
+          for (const view of obsoleteViews) expect(view.toArray).toEqual([])
+        } else {
+          if (settlement === `reject`) requests[0]!.gate.reject(failure)
+          else requests[0]!.gate.resolve()
+          await initial.observed
+          if (settlement === `reject`) {
+            expect(initial.result.error).toBe(failure)
+            expect(query.isReady()).toBe(false)
+            expect(held.toArray).toEqual([])
+          } else {
+            expect(initial.result.error).toBeUndefined()
+            expect(query.isReady()).toBe(true)
+            expect(held.toArray.map((child) => child.id)).toEqual([10])
+            for (const view of captured)
+              expect(view.toArray.map((child) => child.id)).toEqual([10])
+          }
+        }
+      } finally {
+        await query.cleanup()
+        for (const { gate } of requests) gate.resolve()
+        await children.cleanup()
+        await parents.collection.cleanup()
+      }
+    },
+  )
+
   it.each(
     ([`draft`, `published`] as const).flatMap((subscribeAt) =>
       ([`none`, `callback`, `flush`] as const).map((failureAt) => ({
@@ -201,7 +333,13 @@ describe(`functional projection output compatibility`, () => {
         failing = failureAt !== `none`
         const move = () => parents.write(`update`, { id: 1, groupId: 2 })
         if (failing) {
-          expect(move).toThrow(failure)
+          let thrown: unknown
+          try {
+            move()
+          } catch (error) {
+            thrown = error
+          }
+          expect(thrown).toBe(failure)
           expect(query.get(1), `root rollback`).toBe(originalRow)
           expect(ids(first), `old subscriber rollback`).toEqual([10, 11])
           expect(first.batches.length, `no partial public events`).toBe(
@@ -212,6 +350,10 @@ describe(`functional projection output compatibility`, () => {
             expect(
               ids(observers[1]!),
               `failed subscriber sees no private rows`,
+            ).toEqual([])
+            expect(
+              observers[1]!.batches.flat(),
+              `no transient private changes`,
             ).toEqual([])
           }
           if (failureAt === `flush`) expect(flushReached).toBe(true)

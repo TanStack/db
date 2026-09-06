@@ -293,9 +293,11 @@ inputs need no Collection continuation. Queries without includes keep their
 original pipeline unless they consume a staged input elsewhere in the graph.
 The projection oracle checks the draft index guard and subscriptions created
 during a callback or after publication across synchronous success, callback
-failure, flush failure, and cleanup/restart. Remaining virtual-property parity
-and asynchronous publication/failure around these views remain verification
-gates, not guarantees established by that suite.
+failure, flush failure, and cleanup/restart. Pending child loads cover success,
+rejection, and obsolete settlement after restart, with expression controls.
+Remaining virtual-property parity, deeper continuation interactions, and
+copying/retention bounds remain verification gates, not guarantees established
+by that suite.
 
 Every valid plan is checked as a Collection, `toArray`, and `materialize`
 include at initial load, after a parent-route update, and after a child update.

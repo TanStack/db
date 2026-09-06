@@ -1261,9 +1261,10 @@ change was needed for those cells. These are separately queued below. Counts des
 not unique confirmed runtime bugs; contract-alignment notes below distinguish
 stale oracle expectations from implementation defects.
 
-The functional-projection suite is now **192 green / 0 red** (144 product
+The functional-projection suite is now **200 green / 0 red** (144 product
 cells, fourteen controls/census functions, 26 read-API cells, and two uncaught
-index-guard cases, plus six subscription/failure/restart cells). The API
+index-guard cases, plus six subscription/failure/restart and eight pending-load
+cells). The API
 extension started at **174/10**; correcting two receiver expressions fixes
 iteration, forEach, map, and state in both order modes with zero net source
 growth. The user then approved a clear error for draft-time index creation.
@@ -1283,8 +1284,9 @@ the twelve-suite lifecycle checkpoint remains **940/0** from the preceding
 slim-replacement step, not a rerun after this two-expression change.
 These are bounded test counts, not unique bugs or proof of the full draft
 Collection API. Six synchronous subscription/failure/restart cells now pass;
-remaining virtual properties, async failure/cleanup, performance, and the
-100x campaign remain queued.
+eight pending-load cells cover resolve/reject and obsolete completion after
+restart with expression controls. Remaining virtual properties, deeper
+continuations, performance, and the 100x campaign remain queued.
 The slim replacement plus guard is **+125 net lines** (+119 replacement,
 zero for helper receivers, +6 guard), down from the archived +227 candidate.
 Whole-branch executable source is still **+3,220 net lines**
@@ -4125,7 +4127,39 @@ candidate repair scopes, not completed fixes or proof of root cause.
   green checks, not a red/green production repair. ESLint passes. Initial tsc
   found an untyped spy receiver; after annotation, tsc still exits 2 but has
   no changed-test diagnostic in `...-types-final.txt`. No full type pass.
-- [ ] Commit this step, then run the standing Field Lab loss audit.
+- [x] Commit `7f810911`, then run the standing Field Lab loss audit. It found
+  two compressed assertion scopes: final empty subscription state did not
+  exclude transient events, and toThrow(error) checked its message rather than
+  identity. The next test step now checks the failed subscriber's entire
+  flattened change history is empty and the caught object is the sentinel.
+  All 200 tests still pass. Dropping rules were final-state/event-history and
+  error-message/identity compression. Reused sequential source-first context
+  was not fresh/blind; no runtime rerun or merge-readiness endorsement.
 - [ ] Async demand settlement, nested continuations, remaining virtual props,
   copying/retention bounds, and 100x campaign remain open. No new production
   size, bundle/performance, adjacent, or broad lifecycle result is claimed.
+
+### Pending child loads: settle, reject, cleanup, obsolete settlement
+
+- [x] Add eight cells: expression control versus functional Collection-valued
+  input, crossed with success, rejection, cleanup/late success, cleanup/late
+  rejection. The source is truly on-demand and commits rows only after the
+  controlled promise resolves. Initial preload is observed immediately on both
+  outcomes and remains unsettled while the child request is pending.
+- [x] Check the progressively published empty child view becomes live with
+  child 10 on success, including the view captured inside the functional
+  callback. Rejection preserves an empty view and rejects preload with the
+  same error. Do not require a child update to rerun scalar projections.
+- [x] Cleanup rejects the old preload with AbortError and aborts its request.
+  Restart query and child source, settle the obsolete request while the new
+  one is pending, then settle the new one. Old completion cannot ready the
+  new query; retained old views stay empty while the current view fills.
+  The fake adapter honors cancellation before writing. This is not a test
+  of a misbehaving adapter writing stale rows after abort.
+- [x] Full suite **200/0**, no skips, in
+  `/tmp/tanstack-facade-async-boundary-{v1,final}.json`; final includes the two
+  audit-recovered stronger failure assertions. No runtime changes or new bug.
+  Package tsc exits 2 with no changed-test diagnostics in `...-types.txt`.
+  Correct the new import order before commit; no full type pass claimed.
+- [ ] Commit and run standing Field Lab loss audit. Nested continuations,
+  remaining virtual properties, copying/retention bounds and 100x remain open.
