@@ -36,7 +36,7 @@ current as review findings, oracle laws, and implementation choices change.
   production lines. Fresh100x integration gate passes1582/0 across26 files,
   exit0, no skipped tests or reported runner errors. Integration loss audit
   complete; final campaign report audit complete.
-- Still open: whole-branch size goal (+3108 net package-source lines against
+- Still open: whole-branch size goal (+2967 net package-source lines against
   fixedmain68366eca), final coherence/review and
   RFC/PR/changeset reconciliation. Older unchecked entries are phase records;
   reconcile them with later evidence before treating them as current bugs.
@@ -66,8 +66,9 @@ current as review findings, oracle laws, and implementation choices change.
 - W6 shared group-by pipeline implemented:141 net production lines removed,
   880 minified/246 gzip diagnostic bytes removed. New direct-production matrix
   30/30 on original and reduced pipelines; removing grouped wrapper ref rewriting
-  fails3 cells (restored). Integration1705/0,28 files at1x. Post-commit source
-  audits and focused stress pending. Combined savings305 lines/3446 minified/
+  fails3 cells (restored). Committed9d595a43. Integration1705/0,28 files at1x;
+  focused100x263/0,4 files; types/lint pass. Both source audits complete.
+  Combined savings305 lines/3446 minified/
   736 gzip bytes; current fixed-main source gap2967.
 
 
@@ -5673,7 +5674,48 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   all-entry-export esbuild measurement, not a consumer app or throughput result.
   `/tmp/tanstack-weight-group-shared-bundle.json`. Combined W1–W6 savings305
   source lines/3446 minified/736 gzip bytes;fixed-main gap2967. Goal remains open.
-- [ ] Commit then separately audit original single-group and grouped branches
-  against the frozen reduction with Field Lab Hidden-signal recovery assay.
-- [ ] Focused includes context/equality stress with100x property multiplier;
-  deterministic group-by matrix is not itself multiplied100 times.
+- [x] Commit9d595a43 then separately audit original single-group and grouped
+  branches against that frozen reduction with Field Lab Hidden-signal recovery
+  assay. Two fresh source-first agents, no sibling conclusions shared before
+  their scans. Both return no supported lost semantics or asymptotic work bound.
+  Keyed trace covers validation, equality/raw representatives, selected output,
+  internal/public keys, routes and HAVING (old278–729→new278–588). Global trace
+  covers bypassed validation, constant/route keys, aggregates, selected output,
+  metadata and coerced/sanitized HAVING (old364–515→new364–587). Constant-work
+  difference: global output allocates two temporary arrays and at most one route
+  push; no new retained index/state, input-row clone or D2 stage. No throughput
+  or allocation benchmark. Do not call this zero extra allocation.
+  Limits: static source/assertion scans, not whole-program proof or readiness
+  verdict. The operation can overvalue textual differences or mistake preserved
+  text for preserved runtime behavior. The global scanner saw an adjoining
+  original branch in a source range; isolation was therefore imperfect.
+  Each mode has15 matrix cells×5 checkpoints,30 total cells, not30 keyed cells.
+  New matrix alone does not prove multicolumn/opaque/correlated/sanitized callback
+  behavior; retained integration/oracle suites supply separate bounded coverage.
+- [x] Focused100x at9d595a43:263/0,4 files,exit0,21.27s,no skips or reported
+  runner errors. Includes context-transport/cross-formulation and production
+  group-by/query group-by suites. Fixed corpora plus fresh random seeds; seed,
+  path and property overrides unset. Multiplier applies to opted-in properties,
+  not every deterministic case100 times. Report
+  `/tmp/tanstack-weight-group-shared-100.{json,log}`.
+- Final frozen-source1x repeat:1705/0,28 files,exit0,10.76s,no skips/reported
+  runner errors. Final package tsc and changed-file eslint pass. Null HAVING
+  fixture uses a typed comparison that evaluates to null, not a raw null typed
+  as Boolean IR. Final30-cell original-function control passes30/0; working
+  source restored byte-for-byte to9d595a43 afterward. Committed-source bundle
+  confirms344634/97426 for DB,30220/9133 for DB-IVM:
+  `/tmp/tanstack-weight-group-shared-committed-bundle.json`.
+
+### Next bounded weight candidates (not implemented)
+
+- Group mapping returns a cloned group-expression array which no caller reads;
+  only its selected-alias Map is consumed. Check that validation need not retain
+  a copy, then return the map directly without the result-wrapper interface.
+- getHavingEvaluationRow and getWrappedAggregateEvaluationRow construct the
+  same parent context plus selected row; three callers differ only in which
+  selected record they pass. Share the concrete row assembly without introducing
+  a general expression framework. Preserve parent-context decoding and callback
+  sanitation. fields.prefix also has no consumer; verify before removing it.
+- These are small source-read candidates, not yet test-backed reductions or
+  measured savings. Larger remaining growth is still subscription lifecycle
+  and live-query loading, whose separate contracts must not be erased for size.
