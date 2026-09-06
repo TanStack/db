@@ -40,6 +40,9 @@ current as review findings, oracle laws, and implementation choices change.
   fixedmain68366eca), final coherence/review and
   RFC/PR/changeset reconciliation. Older unchecked entries are phase records;
   reconcile them with later evidence before treating them as current bugs.
+- Size identification plan committed at efd299e2: five deletion candidates,
+  controlled bundle baseline and per-candidate laws recorded below. Two
+  post-commit source-to-plan audits complete; no runtime reductions applied yet.
 
 
 ## Chosen design
@@ -5140,6 +5143,19 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   suites and actual CI-size build remain separate gates, not inferred from DB
   oracle success. Reassess candidates if line savings add state, fetching,
   retention or failure ambiguity elsewhere. Below-main weight is not achieved.
-- [ ] Commit this identification record, then bounded source-to-plan Field Lab
-  loss audit. Existing agent slots require reused scanners; label the audit
-  non-blind and do not treat it as fresh implementation verification.
+- [x] Commit efd299e2, then two bounded source-to-plan Field Lab loss audits,
+  each scanning only its own report before the frozen plan. No candidate,
+  estimate or main contract distinction lost. Both scanners were reused and
+  non-blind; authorship/omission focus can overvalue normal summary compression.
+  Neither evaluated feasibility/readiness or edited/reran tests. Recovered
+  proof obligations and source anchors, retained here for implementation:
+  - Shared failure handling must cover successful provisional callback followed
+    by local-read/publication failure, and bounded promise retention across a
+    long refinement chain. These had become generic lifecycle/retention labels.
+  - Replay oracle already has a flat session pending model at
+    collection-subscription-replay-oracle.property.test.ts:578,633,644–650;
+    that precedent does not prove synchronous reentry (lifecycle suite needed).
+  - Exact anchors compressed to suite names: collection-subscription.test.ts
+    :1849 keeps the old lease when replacement fails; :1765,1913,2182,2259
+    cover shared promises/setup/overlap/reentrant truncate; :292,673,941,1010,
+    1562 cover teardown/debt. All pointers refer to runtime/tests247dc8d2.
