@@ -4450,7 +4450,7 @@ candidate repair scopes, not completed fixes or proof of root cause.
 - [x] Verify a bounded ordinary-transfer regression; include outlier arrivals during
   acquisition, backward/shrink moves, filters, ties and source-order changes.
   Measure source lines and indexed read work separately from transfer volume.
-- [ ] Commit the implementation step and run the standing Field Lab loss audit against its
+- [x] Commit the implementation step (`88fad51b`) and run the standing Field Lab loss audit against its
   frozen evidence and todo reduction. No push or merge-readiness claim yet.
 - [x] Prior full100x run finished: **1,375 passed / 1 failed**, at runtime
   `d7f4b9d6`. Publication random seed1678102822, path3298:20; last command
@@ -4523,3 +4523,45 @@ candidate repair scopes, not completed fixes or proof of root cause.
   fast-check direction inference at pagination lines167/240), no `src/`
   diagnostics in `/tmp/tanstack-boundary-types-v3.txt`. Not a green package
   typecheck, whole-repository lint pass or full100x campaign.
+
+#### Post-commit boundary loss audit
+
+- Runtime/test source track recovered the adapter assumption already explicit
+  in ARCHITECTURE: the boundary is read from current matching Collection rows,
+  not a provider cursor or request-tagged row set. It requires exact ordered
+  request fulfillment. The snapshot combines subscription/request predicates
+  with cursor.whereFrom, order and limit; it does not replay an offset or the
+  whereCurrent tie branch. Mechanism compression dropped this from the TODO.
+- The24 cells use successful loads, inserts only, unique numeric ranks,
+  implicit single-column order, initial1→final3 and serial settlements. Their
+  final-row assertion does not separately prove transient publication/callback
+  coherence or transport-path reach. The key fixture requires lastKey in the
+  current authoritative array and converts it to an offset; no opaque token
+  encoding/expiry, deleted boundary key or key movement. Matrix/category labels
+  hid those fixed dimensions; broader suites remain separate evidence.
+- The failure unit uses a stub and proves the settlement-time read's rejection
+  identity, retry suppression and explicit release/unbounded recovery request.
+  It does not assert recovered rows/publications or failures from the separate
+  countAcquiredRows reads. Summarizing one location as all read failures would
+  overclaim. These are test limits, not newly confirmed production bugs.
+- Source-first reused agent context; no edits/reruns/report verification or
+  merge endorsement. Omission-focused scanning can overstate deliberate
+  fixture limits. A separate report track audits evidence counts and probes.
+- Report track recovered exact red reach: all four offset failures are rank100
+  with offset-only transport, both directions/timings, at checkpoint0;
+  12 passed/4 failed/160 filtered. Underfill failures require explicit key plus
+  filter, both directions;6 passed/2 failed/176 filtered. Aggregate counts had
+  dropped these conjunctions/stopping points. The key report has168 filtered.
+  Final192/0 and1448/0 counts/scopes match. Probe row checks cover the nine
+  post-preload windows, not an independent preload assertion; static100 unique
+  ascending ranks. Reports alone cannot prove command environment, SHA,560-row
+  comparison baseline, source-line totals or process exit. Separate report-only
+  reused scanner, no sibling-source inspection/reruns or full100x endorsement.
+- Rechecked whole-package source size against fixedmain68366eca: +5344/-2081,
+  **+3263 net**, excluding Markdown; DBsrc alone+2800. The below-main goal is
+  not met. Committed-head synthetic probe records remain110 selections,
+ 20 requests,9 cursors,100 installed,28 boundary reads/2450 get calls:
+  `/tmp/tanstack-boundary-transfer-88fad51b.jsonl`. The standalone process
+  remained alive on timers after both records; stopped that exact probe with
+  SIGTERM (exit143). This is output/assertion evidence, not a clean-exit probe.
+  Both final Vitest runs exited0 independently.
