@@ -3452,13 +3452,32 @@ candidate repair scopes, not completed fixes or proof of root cause.
   - `/tmp/tanstack-controller-final-old-runtime.json`: **55/2**, success false.
     Final tests with the controller runtime exactly at `74ba989c` (empty diff
     verified) fail only at the two preload request-count assertions. These
-    reds do not reach settlement/retry suffixes. All other updated contracts
+    reds do not reach the subsequent pending-state assertion or the
+    settlement/retry suffixes. All other updated contracts
     pass without a runtime change. Restored the fix; no ablation remains.
 - Final twelve-suite run, seed override 1657011: **940/0**, no skips, success
   true, `/tmp/tanstack-controller-final-census.json`. Bounded **601/0**, adjacent
   **339/0**, with controller **57/0** and pagination **136/0**. Prettier and diff
   check pass; no full lint/typecheck, final 100×, or universal-correctness claim.
-  Post-commit Field Lab loss audit follows this frozen step. No push.
+  No push.
+- Field Lab loss audit of `f2c7af87` recovered one compressed reach limit: the
+  two old-runtime preload reds stop at the request-count assertion before
+  `preloadSettled === false`, not only before settlement/retry. Corrected that
+  record above. All six reports, contract-change labels, runtime delta, and
+  preserved assertions otherwise match the frozen step. Reused auditor due
+  thread limit; prior framing and source-first order may hide omissions. No
+  auditor tests or runtime endorsement. Reports do not prove commands,
+  ablation/restoration, formatting, or multipliers. This record correction
+  follows the frozen audit.
+- Next-step baseline only: the two existing `outer fn.select` regressions pass
+  **2/0, 26 skipped**, success true,
+  `/tmp/tanstack-functional-projection-existing-baseline.json`. This is not the
+  complete includes suite or a completed projection matrix. Preserve both
+  regressions when generalizing. The bare-union case filters null/undefined
+  callback values before checking facade shape, and checks facade contents
+  after preload rather than readiness at callback entry. The next matrix must
+  distinguish a valid branch without an include from a premature placeholder,
+  and observe callback-time values directly rather than discard those samples.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
