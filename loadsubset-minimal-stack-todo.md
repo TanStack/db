@@ -17,7 +17,10 @@ current as review findings, oracle laws, and implementation choices change.
   per-command consumer-state invariant (production unchanged). Publication100x
   now passes71/0; the failing seed replay passes1/0 (70 filtered). Fresh source
   and report loss audits are complete, with recovered limits recorded below.
-  Do not call the full campaign green: its clean-process gate remains open.
+  Full100x clean-process gate now passes at31ec4d15 with thread workers:
+  1471/0,25 files, no skips, no reported unhandled errors, exit0. No production,
+  test or committed runner-config changes. Child-process timeout cause remains
+  unproven; the controlled runner checks and exact working command are below.
 - Still open: whole-branch size goal (+3263 net package-source lines against
   fixedmain68366eca), package test type diagnostics, final coherence/review and
   RFC/PR/changeset reconciliation. Older unchecked entries are phase records;
@@ -4733,3 +4736,56 @@ candidate repair scopes, not completed fixes or proof of root cause.
   reruns/edits or sibling-source inspection. Briefings named headline findings;
   omission-focused scans can overstate deliberate compression. These audits
   recover evidence, not a whole-PR readiness or universal correctness claim.
+
+### Full100x runner isolation — 2026-09-06
+
+- [x] Freeze runtime/tests at31ec4d15. Confirm the prior full-run file inventory
+  exactly matches all24 files in packages/db test:oracles plus
+  tests/query/ordered-source-loader.test.ts:25 files, no omissions/extras.
+- [x] Read installed Vitest3.2.4 runner code: worker onTaskUpdate is an RPC with
+  a separate60000ms default deadline. testTimeout does not change that deadline.
+  This locates the reported failure, not its cause. No node_modules edits.
+- [x] Repeat full100x with child-process workers capped at2 (min/max2):1471/0,
+  no skips,25 files, **two onTaskUpdate timeouts and exit1**,731.32s. Reduced
+  parallelism did not fix the runner exit. Reports:
+  `/tmp/tanstack-minimal-full-100x-two-workers.json` and matching `.log`.
+- [x] Isolate both synchronous lifecycle properties at100x:2/0,35 filtered,
+  exit0,217.10s, no reported unhandled errors. Fixed1657004 and random-373156140,
+  individual durations106.88s/108.97s. Driver yields a real setTimeout after
+  each command already; do not add speculative inter-history yields. These
+  observations refute duration alone as a sufficient cause, not every possible
+  full-run interaction. Reports `/tmp/tanstack-sync-history-rpc-isolation.json`
+  and `.log`.
+- [x] Full100x with thread workers (min/max4): **1471/0,25 files, no skips,
+  no reported unhandled errors, process exit0**,376.92s. Reports
+  `/tmp/tanstack-minimal-full-100x-threads.json` and `.log`. File and assertion
+  inventories match the child-process run after removing seed labels. Fixed
+  seeds remain; fresh random seeds are recorded in each assertion name. Long
+  lifecycle properties still take79–84s and pass; no deadline was relaxed.
+- Working command, cwd this worktree's packages/db:
+
+  ```sh
+  env -u TANSTACK_DB_ORACLE_SEED -u TANSTACK_DB_ORACLE_PATH \
+    -u TANSTACK_DB_ORACLE_PROPERTY TANSTACK_DB_ORACLE_RUNS_MULTIPLIER=100 \
+    pnpm exec vitest run oracle \
+    tests/collection-subscription-lifecycle-history.property.test.ts \
+    tests/collection-subscription-lifecycle-publication.property.test.ts \
+    tests/query/ordered-source-loader.test.ts \
+    --coverage.enabled=false --testTimeout=600000 \
+    --pool=threads --maxWorkers=4 --minWorkers=4 --silent \
+    --reporter=default --reporter=json \
+    --outputFile.json=/tmp/tanstack-minimal-full-100x-threads.json
+  ```
+
+- Gate closed for this DB oracle/loader campaign, not the whole monorepo or
+  adapter suites, ordinary package tsc, coverage measurement, size target or
+  merge readiness. Vitest's “Type Errors no errors” is not a replacement for
+  the outstanding package test-type diagnostics. No production/test/config
+  changes, no ignored unhandled errors, no reduced assertions or run counts.
+- Diagnosis limit: changing pool, worker count, scheduling and fresh random
+  seeds together is not a single-variable causal proof. Threads provide one
+  observed clean runner path; do not claim the underlying forks bug is fixed
+  or that all future campaigns will pass. Earlier failed exits remain evidence.
+- [ ] Commit this step, then fresh Field Lab loss audit of source reports
+  against this frozen record; preserve recovered distinctions without widening
+  the gate claim.
