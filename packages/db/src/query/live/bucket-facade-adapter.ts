@@ -613,12 +613,18 @@ function createDraftView(
     get(_target, property) {
       const value = member(property)
       return typeof value === `function` && property !== `constructor`
-        ? (...args: Array<unknown>) =>
-            Reflect.apply(
+        ? (...args: Array<unknown>) => {
+            if (readDraft && property === `createIndex`) {
+              throw new Error(
+                `createIndex() cannot run on a temporary Collection inside fn.select(). Create the index on the published child Collection instead.`,
+              )
+            }
+            return Reflect.apply(
               member(property) as (...values: Array<unknown>) => unknown,
               view,
               args,
             )
+          }
         : value
     },
   })

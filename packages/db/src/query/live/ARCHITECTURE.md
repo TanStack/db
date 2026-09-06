@@ -11,8 +11,8 @@ The central rule is simple:
 > Collection boundaries.
 
 The correlated-materialization oracle suites listed below are behavioral
-contracts for this design. The functional-projection suite now pins two
-draft-index failures; other draft-view API and async/failure gates remain open. Suites for
+contracts for this design. The bounded functional-projection suite passes;
+other draft-view API and async/failure gates remain open. Suites for
 adjacent planner and query-db ownership boundaries may also contain exact
 classifiers for defects outside this graph.
 
@@ -275,9 +275,11 @@ not rerun scalar projections or republish parents merely to update a view.
 
 Collection helper methods use the temporary view as their receiver, so
 iteration, `forEach`, `map`, and `state` reuse the existing Collection code
-while reading the staged rows. Creating an index during a callback still
-indexes the public snapshot, not those rows. That boundary remains red;
-neither a private-index lifecycle nor a new API restriction is approved.
+while reading the staged rows. Calling `createIndex()` on a temporary input
+throws a clear error directing the caller to the published child Collection.
+The guard checks invocation, not method access: a captured method works after
+publication. No private index state is created. This restriction does not
+affect index creation on published child Collections.
 
 Include paths describe a functional projection's input, not its arbitrary
 output. A callback may drop or rename a field, or return a scalar. Its input
@@ -289,7 +291,7 @@ downstream keys, distinct, ordering, and QueryRef consumers see the callback's
 actual output. The compiler owns the validated callback wrapper. Inline-only
 inputs need no Collection continuation. Queries without includes keep their
 original pipeline unless they consume a staged input elsewhere in the graph.
-The projection oracle pins draft index creation failures; subscription creation,
+The projection oracle checks the draft index guard; subscription creation,
 virtual-property parity, and asynchronous failure/cleanup around these views
 remain verification gates, not guarantees established by that suite.
 

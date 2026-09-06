@@ -1261,12 +1261,16 @@ change was needed for those cells. These are separately queued below. Counts des
 not unique confirmed runtime bugs; contract-alignment notes below distinguish
 stale oracle expectations from implementation defects.
 
-The functional-projection suite is now **182 green / 2 red** (144 product
-cells, fourteen controls/census functions, and 26 read-API cells). The API
+The functional-projection suite is now **186 green / 0 red** (144 product
+cells, fourteen controls/census functions, 26 read-API cells, and two uncaught
+index-guard cases). The API
 extension started at **174/10**; correcting two receiver expressions fixes
 iteration, forEach, map, and state in both order modes with zero net source
-growth. Only draft-time index creation remains red. All 158 prior tests still
-pass; no assertions or classifiers changed in this step.
+growth. The user then approved a clear error for draft-time index creation.
+Its revised four rejection cases are **182/4** before the guard and **186/0**
+afterward. They replace the two draft lookup expectations with exact errors
+and post-publication index controls, not a private-index implementation.
+All 158 earlier tests still pass. No skip or expected-failure classifier added.
 Before the read-API extension, the same 158 tests on
 baseline production are **130/28**; those baseline reds stop on incomplete
 Collection-valued input. Only the updated-parent identity assertion for
@@ -1280,8 +1284,9 @@ slim-replacement step, not a rerun after this two-expression change.
 These are bounded test counts, not unique bugs or proof of the full draft
 Collection API. Draft index/subscription creation, virtual properties,
 async failure/cleanup, performance, and the 100x campaign remain queued.
-The current source step is **+119 net lines**, down from the archived +227
-candidate. Whole-branch executable source is still **+3,214 net lines**
+The slim replacement plus guard is **+125 net lines** (+119 replacement,
+zero for helper receivers, +6 guard), down from the archived +227 candidate.
+Whole-branch executable source is still **+3,220 net lines**
 against main checkpoint `68366eca`; the below-main target is not met.
 
 | Protocol slice                                       | Executable coverage                                                                                 | Current result                                               |
@@ -4008,12 +4013,12 @@ candidate repair scopes, not completed fixes or proof of root cause.
   no tests and did not inspect optional types or post-freeze rerun. This is
   not merge-readiness evidence. Root committed rerun is **182/2**, no skips,
   in `/tmp/tanstack-facade-api-committed.json`.
-- [ ] Decide draft-time index creation before implementing more machinery.
+- [x] Decide draft-time index creation before implementing more machinery.
   Its manager belongs to the public Collection, so immediate lookup during
   the callback sees the old snapshot (empty in these activation cases).
   Private index creation with failure cleanup versus a clear rejection of
-  createIndex inside a projection is a design choice. No restriction is yet
-  implemented or approved. Public post-publication indexes retain their
+  createIndex inside a projection was a design choice. User approved the clear
+  rejection; implementation and red/green below. Public indexes retain their
   existing adjacent/isolation coverage; these failures do not refute it.
 - [ ] Subscription creation, other virtual properties, async publication,
   cleanup/retry, and remaining gates in `notes/facade-slim-replacement.md`
@@ -4021,4 +4026,34 @@ candidate repair scopes, not completed fixes or proof of root cause.
   source remains **+3,214** against `68366eca` (+119 for the slim replacement),
   with no current bundle/performance claim and no 100x campaign yet.
 - [ ] Extend post-publication checks to repeat the selected read API, not
-  only toArray, after choosing the draft index contract.
+  only toArray. The index surface now has its explicit published lookup control;
+  the other read surfaces still need this extension.
+
+### Approved narrow index guard
+
+- [x] User chose “Yes clear error”: reject createIndex on a temporary
+  Collection input, but permit it on the published child Collection. Do not
+  create or maintain private index state.
+- [x] Revise the two order-mode index cells to require the exact error and
+  zero created indexes during initial and moved callbacks. Keep their input
+  row and later live-view assertions using ordinary reads. A method captured
+  during the callback then creates a working index after publication, with
+  lookups for both original keys and the later inserted child.
+- [x] Add initial/update uncaught-error cases. Preload rejects with the exact
+  error and publishes no root row; a later parent update throws that error
+  while preserving the original public row and its existing child index.
+  Red **182/4** becomes green **186/0**. The baseline four failures specifically
+  show missing rejection, not a failure of the allowed post-publication path.
+  Reports: `/tmp/tanstack-facade-index-guard-{red,green}.json`, no skips.
+- [x] Implement invocation-time guard: **8 source lines added / 2 removed**,
+  net **+6**. Merely capturing createIndex remains legal, and promotion turns
+  off the guard. Total slim replacement is now +125; full branch +3,220
+  against `68366eca`. No new index cache, ownership, or rollback state.
+- [x] Eleven adjacent suites pass **370/0**, no skips, with fixed seed
+  `1657011` (`/tmp/tanstack-facade-index-guard-adjacent.json`). Targeted ESLint
+  and Prettier pass. Package tsc still exits 2, with no changed-file diagnostic
+  in `/tmp/tanstack-facade-index-guard-types.txt`; no full type pass claimed.
+  The 940/0 lifecycle checkpoint is historical, not rerun for this guard.
+- [ ] Commit and run standing Field Lab loss audit.
+- [ ] Async/cleanup, non-key virtual properties, subscription creation,
+  repeated read API after publication, and 100x campaign remain queued.

@@ -102,6 +102,7 @@ class Projection {
 }
 
 describe(`functional projection output compatibility`, () => {
+  const draftIndexError = `createIndex() cannot run on a temporary Collection inside fn.select(). Create the index on the published child Collection instead.`
   const readSurfaces = [
     `toArray`,
     `get`,
@@ -122,7 +123,7 @@ describe(`functional projection output compatibility`, () => {
       [false, true].map((ordered) => ({ surface, ordered })),
     ),
   )(
-    `reads $surface from the current projection input (ordered=$ordered)`,
+    `enforces the $surface read boundary for projection inputs (ordered=$ordered)`,
     async ({ surface, ordered }) => {
       const parents = createControlledCollection(`read-api-parent`, [
         { id: 1, groupId: 1 },
@@ -133,6 +134,7 @@ describe(`functional projection output compatibility`, () => {
         { id: 20, groupId: 2 },
         { id: 21, groupId: 2 },
       ])
+      let checkPublishedIndex: (() => void) | undefined
       const query = createLiveQueryCollection((q) =>
         q
           .from({
@@ -192,12 +194,23 @@ describe(`functional projection output compatibility`, () => {
                 ids = view.toArray.map((child) => child.$key)
                 break
               case `index`: {
-                const index = view.createIndex((child) => child.id, {
-                  indexType: BasicIndex,
-                })
-                ids = expectedKeys.flatMap((key) => [
-                  ...index.lookup(`eq`, key),
-                ])
+                // Capturing the method is safe. Calling it on private input is not.
+                const createIndex = view.createIndex.bind(view)
+                expect(() =>
+                  createIndex((child) => child.id, {
+                    indexType: BasicIndex,
+                  }),
+                ).toThrow(new Error(draftIndexError))
+                expect(view.indexes.size).toBe(0)
+                checkPublishedIndex = () => {
+                  const index = createIndex((child) => child.id, {
+                    indexType: BasicIndex,
+                  })
+                  for (const key of expectedKeys)
+                    expect(index.lookup(`eq`, key)).toEqual(new Set([key]))
+                  expect(index.lookup(`eq`, 22)).toEqual(new Set([22]))
+                }
+                ids = expectedKeys.flatMap((key) => view.get(key)?.id ?? [])
                 break
               }
             }
@@ -225,6 +238,66 @@ describe(`functional projection output compatibility`, () => {
         expect(held.toArray.map((child) => child.id)).toEqual(
           ordered ? [22, 21, 20] : [20, 21, 22],
         )
+        checkPublishedIndex?.()
+      } finally {
+        await query.cleanup()
+        await parents.collection.cleanup()
+        await children.collection.cleanup()
+      }
+    },
+  )
+
+  it.each([`initial`, `update`] as const)(
+    `reports uncaught draft index creation during %s without publishing partial rows`,
+    async (phase) => {
+      const parents = createControlledCollection(`index-guard-parent`, [
+        { id: 1, revision: 0 },
+      ])
+      const children = createControlledCollection(`index-guard-child`, [
+        { id: 10, parentId: 1 },
+      ])
+      let rejectIndex = phase === `initial`
+      const query = createLiveQueryCollection((q) =>
+        q
+          .from({
+            row: q
+              .from({ parent: parents.collection })
+              .select(({ parent }) => ({
+                id: parent.id,
+                revision: parent.revision,
+                children: q
+                  .from({ child: children.collection })
+                  .where(({ child }) => eq(child.parentId, parent.id)),
+              })),
+          })
+          .fn.select(({ row }) => {
+            if (rejectIndex)
+              row.children.createIndex((child) => child.id, {
+                indexType: BasicIndex,
+              })
+            return row
+          }),
+      )
+      try {
+        if (phase === `initial`) {
+          await expect(query.preload()).rejects.toThrow(
+            new Error(draftIndexError),
+          )
+          expect(query.size).toBe(0)
+        } else {
+          await query.preload()
+          const original = query.get(1)!
+          const index = original.children.createIndex((child) => child.id, {
+            indexType: BasicIndex,
+          })
+          rejectIndex = true
+          expect(() => parents.write(`update`, { id: 1, revision: 1 })).toThrow(
+            new Error(draftIndexError),
+          )
+          expect(query.get(1)).toBe(original)
+          expect(original.revision).toBe(0)
+          expect(index.lookup(`eq`, 10)).toEqual(new Set([10]))
+        }
       } finally {
         await query.cleanup()
         await parents.collection.cleanup()
