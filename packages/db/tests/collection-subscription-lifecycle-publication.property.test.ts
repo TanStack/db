@@ -66,6 +66,8 @@ type Replacement = {
 type PublicationModel = {
   source: Map<RowKey, Row>
   visible: Map<RowKey, Row>
+  // Public rows carried across a discarded source/replay, not yet refreshed.
+  retainedKeys: Set<RowKey>
   replacement?: Replacement
   batches: Array<Array<PublicationChange>>
   sentKeys: Set<RowKey>
@@ -111,6 +113,7 @@ function recordSourceWrite(publication: PublicationModel, row: Row): void {
     publication.visible.get(row.id) ?? publication.source.get(row.id)
   publication.source.set(row.id, cloneRow(row))
   publication.visible.set(row.id, cloneRow(row))
+  publication.retainedKeys.delete(row.id)
   publication.sentKeys.add(row.id)
   if (previous?.value === row.value) return
   publication.batches.push([
@@ -243,10 +246,12 @@ function finishReplacement(
     currentAttempts.every(({ outcome }) => outcome === `resolve`)
   ) {
     publishIfChanged(publication, new Map(replacement.rows))
+    publication.retainedKeys.clear()
     publication.replacement = undefined
   } else {
     // Retire private publication work, not the source's independently applied state.
     publication.replacement = undefined
+    publication.retainedKeys = new Set(publication.visible.keys())
   }
 }
 
@@ -263,6 +268,7 @@ function projectPublication(
     lifecycle.active &&
     !lifecycle.unsubscribed
   ) {
+    const previousSource = new Map(publication.source)
     publication.source.clear()
     if (command.replacement) {
       publication.source.set(
@@ -279,8 +285,33 @@ function projectPublication(
       }
     } else {
       publication.replacement = undefined
-      // An authoritative reset also removes rows retained across cleanup.
-      publishIfChanged(publication, new Map(publication.source))
+      if (
+        publication.retainedKeys.size === 0 &&
+        (eagerRestart || lifecycle.owners.length === 0)
+      ) {
+        // Without held publications or replay demand this is a raw source
+        // transaction: all old source rows are deleted, even if never shown.
+        // A same-key replacement keeps its delete/insert pair in one callback.
+        const changes: Array<PublicationChange> = [
+          ...[...previousSource].map(([key, value]) => ({
+            type: `delete` as const,
+            key,
+            value: cloneRow(value),
+          })),
+          ...[...publication.source].map(([key, value]) => ({
+            type: `insert` as const,
+            key,
+            value: cloneRow(value),
+          })),
+        ]
+        if (changes.length > 0) publication.batches.push(changes)
+        publication.visible = new Map(publication.source)
+        publication.sentKeys = new Set(publication.source.keys())
+      } else {
+        // Held publications need a replacement diff, not raw source deletes.
+        publishIfChanged(publication, new Map(publication.source))
+      }
+      publication.retainedKeys.clear()
     }
   } else if (
     command.type === `restart` &&
@@ -303,13 +334,17 @@ function projectPublication(
       publication.source.delete(command.key)
       publication.replacement?.rows.delete(command.key)
       if (!publication.replacement && previousValue) {
+        const deletedValue = publication.retainedKeys.has(command.key)
+          ? (publication.visible.get(command.key) ?? previousValue)
+          : previousValue
         publication.visible.delete(command.key)
+        publication.retainedKeys.delete(command.key)
         publication.sentKeys.delete(command.key)
         publication.batches.push([
           {
             type: `delete`,
             key: command.key,
-            value: cloneRow(previousValue),
+            value: cloneRow(deletedValue),
           },
         ])
       }
@@ -326,6 +361,7 @@ function projectPublication(
       }
     }
   } else if (command.type === `cleanup`) {
+    publication.retainedKeys = new Set(publication.visible.keys())
     publication.source.clear()
     publication.replacement = undefined
   } else if (command.type === `release`) {
@@ -371,6 +407,7 @@ function projectPublication(
     !mapsEqual(publication.visible, publication.source)
   ) {
     publishIfChanged(publication, new Map(publication.source))
+    publication.retainedKeys.clear()
     priorPublicationCount++
   }
 
@@ -441,6 +478,7 @@ async function runPublicationHistory(
   const publication: PublicationModel = {
     source: new Map(),
     visible: new Map(),
+    retainedKeys: new Set(),
     batches: [],
     sentKeys: new Set(),
   }
@@ -1071,9 +1109,16 @@ function expectNoPublicationMismatches(
 }
 
 describe(`CollectionSubscription lifecycle publication oracle`, () => {
-  it.each([undefined, false] as const)(
-    `distinguishes unseen-row changes with includeInitialState=%s`,
-    async (includeInitialState) => {
+  it.each(
+    ([undefined, false] as const).flatMap((includeInitialState) =>
+      ([`update`, `delete`, `truncate`] as const).map((operation) => ({
+        includeInitialState,
+        operation,
+      })),
+    ),
+  )(
+    `distinguishes unseen-row $operation with includeInitialState=$includeInitialState`,
+    async ({ includeInitialState, operation }) => {
       let operations!: SyncOperations
       const collection = createCollection<Row, RowKey>({
         getKey: ({ id }) => id,
@@ -1107,18 +1152,27 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       try {
         expect(changes).toEqual([])
         operations.begin()
-        operations.write({ type: `update`, value: { id: `d`, value: 4 } })
+        if (operation === `truncate`) operations.truncate()
+        else if (operation === `delete`)
+          operations.write({ type: `delete`, key: `d` })
+        else operations.write({ type: `update`, value: { id: `d`, value: 4 } })
         await operations.commit()
-        expect(changes).toEqual([
-          {
-            type: includeInitialState === false ? `update` : `insert`,
-            key: `d`,
-            value: { id: `d`, value: 4 },
-            ...(includeInitialState === false
-              ? { previousValue: { id: `d`, value: 0 } }
-              : {}),
-          },
-        ])
+        expect(changes).toEqual(
+          operation === `update`
+            ? [
+                {
+                  type: includeInitialState === false ? `update` : `insert`,
+                  key: `d`,
+                  value: { id: `d`, value: 4 },
+                  ...(includeInitialState === false
+                    ? { previousValue: { id: `d`, value: 0 } }
+                    : {}),
+                },
+              ]
+            : includeInitialState === false
+              ? [{ type: `delete`, key: `d`, value: { id: `d`, value: 0 } }]
+              : [],
+        )
       } finally {
         subscription.unsubscribe()
         await collection.cleanup()
@@ -1142,6 +1196,69 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       { type: `unsubscribe` },
     ])
   })
+
+  it(`keeps raw truncate deletes after retiring the final replay owner`, async () => {
+    await runPublicationHistory([
+      {
+        type: `settle`,
+        demand: `a`,
+        scope: `obsolete`,
+        age: `oldest`,
+        outcome: `reject`,
+      },
+      {
+        type: `settle`,
+        demand: `a`,
+        scope: `current`,
+        age: `oldest`,
+        outcome: `reject`,
+      },
+      { type: `request`, demand: `a` },
+      { type: `cleanup` },
+      { type: `restart` },
+      { type: `source`, key: `a`, action: `upsert`, value: 5 },
+      { type: `release`, demand: `a` },
+      { type: `restart` },
+      { type: `truncate` },
+    ])
+  })
+
+  it.each(
+    ([`none`, `retained`, `refreshed`, `new`] as const).flatMap((baseline) =>
+      ([`delete`, `empty`, `same`, `other`] as const).map((reset) => ({
+        baseline,
+        reset,
+      })),
+    ),
+  )(
+    `distinguishes raw source resets from retained replacements: $baseline/$reset`,
+    async ({ baseline, reset }) => {
+      await runPublicationHistory([
+        ...(baseline === `retained` || baseline === `refreshed`
+          ? [{ type: `source`, key: `d`, action: `upsert`, value: 0 } as const]
+          : []),
+        { type: `request`, demand: `a` },
+        { type: `cleanup` },
+        { type: `restart` },
+        { type: `source`, key: `a`, action: `upsert`, value: 5 },
+        { type: `release`, demand: `a` },
+        ...(baseline === `refreshed` || baseline === `new`
+          ? [{ type: `source`, key: `d`, action: `upsert`, value: 0 } as const]
+          : []),
+        reset === `delete`
+          ? { type: `source`, key: `a`, action: `delete`, value: 0 }
+          : {
+              type: `truncate`,
+              ...(reset === `same`
+                ? { replacement: { id: `a`, value: 5 } as const }
+                : reset === `other`
+                  ? { replacement: { id: `c`, value: 6 } as const }
+                  : {}),
+            },
+        { type: `unsubscribe` },
+      ])
+    },
+  )
 
   it(`reconciles a repeated reset after the last replay owner aborts`, async () => {
     await runPublicationHistory([

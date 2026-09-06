@@ -4457,7 +4457,8 @@ candidate repair scopes, not completed fixes or proof of root cause.
   truncate publishes delete(a5) but model expects no event after request,
   cleanup/restart, private a5, release, no-op restart. Full nine-command trace
   remains in `/tmp/tanstack-minimal-oracles-repaired-100x.json`. Classification
-  remains open; this is not a green full campaign or a pagination failure.
+  classified below as a raw-event model error; the old campaign remains red,
+  not a green full campaign or a pagination failure.
 
 #### Boundary implementation and evidence
 
@@ -4565,3 +4566,41 @@ candidate repair scopes, not completed fixes or proof of root cause.
   remained alive on timers after both records; stopped that exact probe with
   SIGTERM (exit143). This is output/assertion evidence, not a clean-exit probe.
   Both final Vitest runs exited0 independently.
+
+### Raw truncate after retiring private replay
+
+- [x] Reproduced seed1678102822's complete nine-command history, including the
+  two no-op rejected settlements and no-op second restart. At command8 runtime
+  emits delete(a5), model expected no callback. Six direct controls cross
+  default/explicit-false includeInitialState with update/delete/truncate:
+  **6 green/1 red**,46 filtered, `/tmp/tanstack-publication-raw-truncate-red.json`.
+- [x] Runtime contract check: explicit `includeInitialState:false` requests ALL
+  future source events, including deletes for unseen rows (changes.ts
+  markAllStateAsSeen; subscription.ts filterAndFlipChanges). The retained
+  snapshot path instead reconciles from held public state. No runtime change
+  is needed for the reported deletion; a raw event stream is not always a
+  reconstructable result snapshot.
+- [x] Added a16-cell product: no prior public row / retained sibling / refreshed
+  sibling / newly published sibling × single delete / empty truncate /
+  same-key same-value replacement / different-key replacement. **7 green/9 red**,
+ 53 filtered, `/tmp/tanstack-publication-reset-product-red.json`. All9 failures
+  are truncate variants with no retained row left; the four single-delete
+  controls and three retained-sibling truncate controls already pass. Each
+  failure stops at reset; its unsubscribe suffix is not established by red.
+- [x] Model now distinguishes public keys still awaiting refresh from current
+  source rows. An unbuffered truncate emits source deletes plus replacement
+  inserts in one batch, retaining same-key delete/insert pairs. A held snapshot
+  or replay demand still uses the replacement diff. Refresh, successful
+  replacement and cleanup/replay retirement update that semantic distinction.
+  This adds test-model state, not runtime state; no classifier or test removed.
+- [x] Publication100x: **69/0**, no skips, fixed1657005 and random-190819726;
+  `/tmp/tanstack-publication-raw-truncate-100x.json`. Original replay1678102822,
+  path3298:20: **1/0**,68 filtered;
+  `/tmp/tanstack-publication-raw-truncate-replay.json`. Counts overlap. Runtime
+  unchanged; tests/model frozen until both processes exited0, then formatted.
+- [x] Scoped ESLint:0 errors, two existing no-shadow warnings. Package tsc
+  exits2 with the existing callback key `string|number`→RowKey diagnostic and
+  other existing test errors. Reports `/tmp/tanstack-publication-raw-truncate-lint.txt`
+  and `/tmp/tanstack-publication-raw-truncate-types.txt`; not a green typecheck.
+- [ ] Commit and source-first Field Lab loss audit, then broader100x. The old
+  campaign stays recorded as red; only a new completed run can close that gate.
