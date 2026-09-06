@@ -1126,30 +1126,6 @@ export class CollectionSubscription
     previous.removeRequestAbortListener?.()
   }
 
-  /** Abort and release one exact adapter acquisition. */
-  private releaseSubsetAcquisition(
-    acquisition: SubsetAcquisition,
-    reportReleaseError = true,
-  ): void {
-    acquisition.abortController?.abort()
-    try {
-      if (this.isLoadSubsetSessionCurrent(acquisition.loadSubsetSession)) {
-        this.collection._sync.unloadSubset(acquisition.options)
-      }
-    } catch (error) {
-      const normalized = reportReleaseError
-        ? this.recordLoadSubsetError(
-            acquisition.options,
-            normalizeError(error),
-            true,
-          )
-        : normalizeError(error)
-      throw normalized
-    } finally {
-      acquisition.removeRequestAbortListener?.()
-    }
-  }
-
   /** Keep an exact lease visible until one release attempt succeeds. */
   private releaseOrRetainAcquisition(
     acquisition: SubsetAcquisition,
@@ -1161,11 +1137,28 @@ export class CollectionSubscription
     if (this.releasingAcquisitions.has(acquisition)) return
     this.releasingAcquisitions.add(acquisition)
     try {
-      this.releaseSubsetAcquisition(acquisition, reportReleaseError)
+      try {
+        acquisition.abortController?.abort()
+        if (this.isLoadSubsetSessionCurrent(acquisition.loadSubsetSession)) {
+          this.collection._sync.unloadSubset(acquisition.options)
+        }
+      } finally {
+        // Error listeners may dispose their consumer and retry this debt.
+        // Finish the adapter attempt before delivering that error.
+        this.releasingAcquisitions.delete(acquisition)
+        acquisition.removeRequestAbortListener?.()
+      }
       const index = this.releaseDebts.indexOf(acquisition)
       if (index !== -1) this.releaseDebts.splice(index, 1)
-    } finally {
-      this.releasingAcquisitions.delete(acquisition)
+    } catch (error) {
+      const normalized = reportReleaseError
+        ? this.recordLoadSubsetError(
+            acquisition.options,
+            normalizeError(error),
+            true,
+          )
+        : normalizeError(error)
+      throw normalized
     }
   }
 

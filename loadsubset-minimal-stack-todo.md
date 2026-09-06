@@ -1243,12 +1243,12 @@ explicitly removed.
 This is the bounded protocol census. Do not add another production patch until
 every row is either green or has a named red witness.
 
-Latest checkpoint: **597 passing / 0 failing** across 597 test functions.
-The demand suite is **195/0**, and history is **37/0**. The initial-work
+Latest checkpoint: **601 passing / 0 failing** across 601 test functions.
+The demand suite is **199/0**, and history is **37/0**. The initial-work
 notification mismatch was a model error: readiness and publication have
 different wait sets. Remaining failures: publication **0**, settled-peer replay **0**, ordered
-work **0**. The wider adjacent run has another **9 failing functions**:
-six cleanup/retry and three window-behavior assertions. Six ordered incremental
+work **0**. The wider adjacent run has another **4 failing functions**:
+one live cleanup-retry and three window-behavior assertions. Six ordered incremental
 failure cells now reach the intended post-startup phase and pass; no runtime
 change was needed for those cells. These are separately queued below. Counts describe tests,
 not unique confirmed runtime bugs; contract-alignment notes below distinguish
@@ -3014,6 +3014,8 @@ candidate repair scopes, not completed fixes or proof of root cause.
       cell. These are test failures, not fifteen confirmed distinct bugs.
       Keep the existing assertions until each has a contract-backed disposition.
       Six live ordered cells are reconciled below; nine failures remain.
+      The release-error reentry step below resolves another five assertions;
+      four remain: live cleanup retry and three window-behavior cases.
 
 ### Ordered work bounds and tie-boundary retention
 
@@ -3183,6 +3185,47 @@ candidate repair scopes, not completed fixes or proof of root cause.
   order may hide other omissions. No auditor tests or correctness endorsement;
   JSON does not prove commands, property examples, temporary restoration, or
   formatting/lint/typecheck results.
+
+### Release-error reentry and retained cleanup
+
+- A release failure was reported while its acquisition still held the
+  in-progress release guard. Effect's error callback disposes synchronously;
+  that nested unsubscribe skipped the busy acquisition, returned success,
+  and let Effect forget its retry callback. The debt itself survived inside
+  the subscription, but its owner no longer had a cleanup handle.
+- Complete the adapter attempt and remove the guard before reporting its
+  failure. Error-triggered teardown can then retry the exact debt, either
+  releasing it or observing another failure and retaining its callback. Keep
+  the guard during actual adapter reentry. Fold the one-use release helper
+  into its caller: **20 production lines added / 27 removed**, no new state.
+  The architecture records the adapter/error-delivery phase distinction.
+- Add four oracle cases: adapter vs error-listener reentry × one/two release
+  failures. Check the phase-specific attempt count, nested failure identity,
+  logical subscriber removal, exact acquisition options, retry to success,
+  and no further physical unload after success. Error-listener delivery must
+  expose the original Error. Existing unit/Cartesian cases remain intact.
+- First red report `/tmp/tanstack-release-error-reentry-red.json` is **2/2**,
+  but cleanup masked the two-failure case's first assertion. Change only final
+  teardown order to retire the fixture's source session before unsubscribing:
+  `/tmp/tanstack-release-error-reentry-clean-red.json` is **2/2**, both error
+  listener cases now fail the attempt count (one instead of two). Adapter
+  reentry controls already pass. These reds precede the final Error identity
+  assertion; final green reaches retry and exact-lease suffixes.
+- First proposed runtime across demand/Effect/error-matrix suites **310/2**:
+  `/tmp/tanstack-release-error-reentry-first-green.json`. All four added oracle
+  cases and four existing obsolete-demand cleanup failures pass. The remaining
+  Effect reentrant-disposal assertion expected a duplicate unload while the
+  first was still executing. Correct that checkpoint to one, preserve retry
+  on the next explicit disposal, add logical subscriber removal and a third
+  disposal proving no duplicate release after success. No production change
+  was needed for that assertion.
+- Eleven-suite final checkpoint, seed override 1657011 **874/4**:
+  `/tmp/tanstack-release-error-reentry-census.json`. Bounded **601/0**; adjacent
+  **273/4** (Effect 69/0, loader 31/0, pagination 130/3, error matrix 43/1).
+  Still open: live cleanup retry and three window-return/reentry cases. No
+  whole-repository or final 100× claim. Prettier/diff pass. Targeted ESLint
+  reports 13 errors and one warning, all on unchanged statements outside this
+  patch; no clean-lint or standalone typecheck claim.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar

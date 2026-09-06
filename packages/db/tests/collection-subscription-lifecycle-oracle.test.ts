@@ -3365,6 +3365,87 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     },
   )
 
+  it.each(
+    ([`adapter`, `error-listener`] as const).flatMap((reentry) =>
+      [1, 2].map((failures) => ({ reentry, failures })),
+    ),
+  )(
+    `retries the exact failed release after $reentry reentry with $failures failures`,
+    async ({ reentry, failures }) => {
+      const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
+      const failure = new Error(`physical release failed`)
+      const loads: Array<LoadSubsetOptions> = []
+      const unloads: Array<LoadSubsetOptions> = []
+      const errors: Array<Error> = []
+      const nestedFailures: Array<unknown> = []
+      let releaseOwner = () => {}
+      const collection = createCollection<{ id: string }>({
+        id: `release-reentry-${reentry}-${failures}`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options) => {
+                loads.push(options)
+                return true
+              },
+              unloadSubset: (options) => {
+                unloads.push(options)
+                if (unloads.length === 1 && reentry === `adapter`) {
+                  releaseOwner()
+                }
+                if (unloads.length <= failures) throw failure
+              },
+            }
+          },
+        },
+      })
+      const subscription = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      releaseOwner = () => {
+        try {
+          subscription.unsubscribe()
+        } catch (error) {
+          nestedFailures.push(error)
+        }
+      }
+      subscription.on(`loadSubset:error`, ({ error }) => {
+        errors.push(error)
+        if (errors.length === 1 && reentry === `error-listener`) releaseOwner()
+      })
+      try {
+        subscription.requestSnapshot({ where })
+        expect(() => subscription.releaseSnapshot(where)).toThrow(failure)
+        // Adapter reentry is still inside unload and cannot retry it. Error
+        // delivery is after unload throws: teardown must see a retryable lease.
+        const initialAttempts = reentry === `adapter` ? 1 : 2
+        expect(unloads).toHaveLength(initialAttempts)
+        expect(collection.subscriberCount).toBe(0)
+        if (reentry === `error-listener`) expect(errors[0]).toBe(failure)
+        expect(nestedFailures).toEqual(
+          reentry === `error-listener` && failures === 2 ? [failure] : [],
+        )
+        if (unloads.length <= failures) {
+          if (unloads.length < failures) {
+            expect(() => subscription.unsubscribe()).toThrow(failure)
+          }
+          subscription.unsubscribe()
+        }
+        expect(unloads).toHaveLength(failures + 1)
+        subscription.unsubscribe()
+        expect(unloads).toHaveLength(failures + 1)
+        expect(loads).toHaveLength(1)
+        for (const options of unloads) expect(options).toBe(loads[0])
+      } finally {
+        await collection.cleanup()
+        subscription.unsubscribe()
+      }
+    },
+  )
+
   it(`keeps failed physical release debt out of truncate replay`, async () => {
     const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
     const releaseFailure = new Error(`release failed`)

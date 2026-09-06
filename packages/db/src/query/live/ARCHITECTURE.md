@@ -517,6 +517,10 @@ rolls the tentative owner back without calling `unloadSubset`. Logical demand
 retires even when `unloadSubset` fails. The exact physical acquisition then
 remains as cleanup debt so teardown can retry it without letting a retired
 demand join readiness or a later replay.
+An adapter cannot release the same acquisition again while its unload is still
+on the stack. Error delivery follows the failed adapter attempt, however, so
+an error listener's disposal can retry that exact debt and observe any failure;
+it must not mistake a busy-release no-op for completed cleanup.
 
 Collection cleanup detaches surviving logical demand from the discarded sync
 session. It aborts that session's physical work and rejects its replay barrier,

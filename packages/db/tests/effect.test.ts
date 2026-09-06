@@ -804,11 +804,14 @@ describe(`createEffect`, () => {
       try {
         await flushPromises()
         await expect(effect.dispose()).rejects.toBe(failure)
-        expect(unloadCount).toBe(2)
+        // Reentrant disposal cannot repeat an unload still on the stack.
+        expect(unloadCount).toBe(1)
+        expect(source.subscriberCount).toBe(0)
 
         await effect.dispose()
-        // The nested attempt released the exact lease. The retained outer
-        // cleanup callback may run again, but must not unload that lease twice.
+        // The failed outer release remains retryable after it unwinds.
+        expect(unloadCount).toBe(2)
+        await effect.dispose()
         expect(unloadCount).toBe(2)
       } finally {
         await effect.dispose()
