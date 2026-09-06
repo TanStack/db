@@ -101,6 +101,60 @@ class Projection {
 }
 
 describe(`functional projection output compatibility`, () => {
+  it.each([false, true])(
+    `preserves projection through public-facade changes and parent restoration (reads=%s)`,
+    async (readsFacade) => {
+      const parents = createControlledCollection(`published-parent`, [
+        { id: 1 },
+      ])
+      const children = createControlledCollection(`published-child`, [
+        { id: 10, parentId: 1 },
+      ])
+      const source = createLiveQueryCollection((q) =>
+        q.from({ parent: parents.collection }).select(({ parent }) => ({
+          id: parent.id,
+          children: q
+            .from({ child: children.collection })
+            .where(({ child }) => eq(child.parentId, parent.id)),
+        })),
+      )
+      const projected = createLiveQueryCollection((q) =>
+        q
+          .from({ row: source })
+          .fn.select(({ row }) => {
+            const count = readsFacade
+              ? readChildren(row.children, `collection`).rows.length
+              : 1
+            return { id: row.id, count }
+          })
+          .distinct(),
+      )
+      const rows = () =>
+        projected.toArray.map(({ id, count }) => ({ id, count }))
+      try {
+        await source.preload()
+        await projected.preload()
+        expect(rows()).toEqual([{ id: 1, count: 1 }])
+        children.write(`insert`, { id: 11, parentId: 1 })
+        expect(
+          readChildren(source.toArray[0]?.children, `collection`).rows,
+        ).toHaveLength(2)
+        // A stable facade does not make its scalar reads child dependencies.
+        expect(rows()).toEqual([{ id: 1, count: 1 }])
+        parents.write(`delete`, { id: 1 })
+        expect(rows()).toEqual([])
+        children.write(`delete`, { id: 11, parentId: 1 })
+        parents.write(`insert`, { id: 1 })
+        expect(rows()).toEqual([{ id: 1, count: 1 }])
+      } finally {
+        await projected.cleanup()
+        await source.cleanup()
+        await parents.collection.cleanup()
+        await children.collection.cleanup()
+      }
+    },
+  )
+
   it(`covers the declared output and renamed-field products`, () => {
     expect(valueCells).toHaveLength(48)
     expect(renamedCells).toHaveLength(24)

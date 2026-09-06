@@ -1261,10 +1261,12 @@ change was needed for those cells. These are separately queued below. Counts des
 not unique confirmed runtime bugs; contract-alignment notes below distinguish
 stale oracle expectations from implementation defects.
 
-The functional-projection matrix is now **127 green / 21 red** (144 product
-cells plus four controls/census functions), up from the frozen **85/63**
-specification. The inline input boundary repairs 42 cells; all 21 remaining
-failures are Collection-valued. The latest eleven adjacent suites are **370/0**.
+The functional-projection suite is now **129 green / 21 red** (144 product
+cells plus six controls/census functions), up from the frozen **85/63**
+specification. The inline input boundary repairs 42 cells; two later controls
+pass without a runtime change. All 21 remaining failures are Collection-valued.
+The latest four adjacent suites are **147/0**; the wider eleven-suite inline
+checkpoint remains **370/0**.
 These counts do not replace the twelve-suite lifecycle scope above or count
 distinct bugs. The first projection-state repair was withdrawn after a new
 scalar-output control proved it regressed existing behavior. The current
@@ -3787,3 +3789,41 @@ candidate repair scopes, not completed fixes or proof of root cause.
   proven by this step. Keep the earlier mutable-key diagnostic unclassified.
 - [ ] Full 100× campaign, broad integration, and final coherence review remain
   queued after the boundary work; this checkpoint does not close them.
+
+### Collection-valued projection boundary investigation
+
+- [x] Add two controls with a separately created, preloaded source query that
+  exposes a real child Collection. A second query either reads its row count
+  or uses a constant, then applies distinct. Both check initial projection,
+  child insertion without scalar recomputation, parent removal, child removal,
+  and parent restoration. Both pass without any production change. These
+  controls prove that public result trace, not internal retraction identity or
+  all independently materialized query compositions.
+- The initial concern that rereading a changed facade necessarily breaks
+  retraction was not reproduced. Temporary callback logging observed counts
+  1, 0, 1 in the facade-reading trace, but public removal and restoration still
+  passed. The logging was removed. Do not add a result cache or claim a new
+  retraction bug from this concern alone. Draft report named
+  `/tmp/tanstack-public-facade-retraction-red.json` actually has **2/0**, with
+  148 skipped tests; its filename is not a red result. That draft stopped at
+  removal. The restoration suffix also passes in
+  `/tmp/tanstack-public-facade-retraction-restore.json` (**2/0**, 148 skipped).
+- Final `/tmp/tanstack-projection-public-boundary-controls.json`: **276/21**,
+  no skips, success false. Projection **129/21**; Collection oracle **28/0**,
+  context transport **96/0**, facade adapter **5/0**, functional variants
+  **18/0**. Seed override `1657011`; all previous projection assertions remain.
+  Changed-test lint and formatting pass. No production repair is claimed.
+  Full DB typecheck still exits 2 with diagnostics outside the changed test;
+  `/tmp/tanstack-projection-public-boundary-types.txt` prints none for it.
+- [ ] Design decision before widening implementation: the same-query Collection
+  callback needs usable public facades, while its output must reach downstream
+  D2 operators before publication. Current resolution occurs after those
+  operators, and merely moving prepare before resolve does not fix that order.
+  A staged facade-to-D2 boundary must preserve private ordered/replay work,
+  rollback, nested callbacks, and child-only facade updates without inventing
+  scalar dependency tracking. Its cost and correctness have not been measured
+  in an implementation. Alternatively, reject Collection-valued same-query
+  inputs to fn.select and require inline inputs or an already-published source
+  query. That narrows the API, including callbacks that ignore the include;
+  it needs explicit user approval. No staged runtime or new rejection added.
+- [ ] Post-commit Field Lab loss audit for these controls and the boundary note.
