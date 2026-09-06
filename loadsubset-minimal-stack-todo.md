@@ -328,7 +328,12 @@ explicitly removed.
 - The generated predicate-subtraction request-refinement oracle is gone. The
   exported helper still keeps its independent public semantic laws.
 
-## Current red/green results
+## Earlier red/green checkpoints
+
+These are historical results, not a current whole-branch green claim. The
+lifecycle completion dashboard below owns current counts. In particular, the
+old rollback and superseding-reset statements predate the retained-snapshot
+contract; their controller assertions are now named follow-ups below.
 
 - [x] Listener and scheduler failures attempt all callbacks and preserve the
       first exact error.
@@ -3349,19 +3354,22 @@ candidate repair scopes, not completed fixes or proof of root cause.
   Superseded waiters already rejected correctly; changed the old successful
   settlement expectation to AbortError and observe both rejections before
   cleanup. No runtime repair is claimed for that stale expectation.
-- Expanded pagination before the fix: **0/6**,
+- Expanded pagination before the fix: **0/6, 130 skipped**, success false,
   `/tmp/tanstack-window-phases-red.json`. Final focused old-runtime control:
   **3/8, 180 skipped**, `/tmp/tanstack-window-boundaries-old-runtime.json`.
   All four runtime files matched HEAD before that control. Six pagination
   witnesses stop at missing reentry rejection or missing cancellation; two
   late-waiter cells stop at undefined instead of AbortError. The cleanup-reach
   assertions pass on the old runtime. Green tests reach the later recovery
-  suffixes; the focused control is not a whole-suite success claim.
+  suffixes; the two late-waiter reds stop before resolving the transport and
+  checking its later outcome. The focused control is not a whole-suite success
+  claim. Seed-labeled properties skipped in focused runs are not campaigns.
 - Restored runtime, final eleven-suite run with seed override 1657011:
   **883/0**, no skips, success true,
   `/tmp/tanstack-window-boundaries-census.json`. Bounded **601/0**, adjacent
   **282/0**, including pagination **136/0**. The earlier focused waiter run is
-  **5/0** (`/tmp/tanstack-window-waiter-matrix-green.json`), not the full file.
+  **5/0, 50 skipped**, success true
+  (`/tmp/tanstack-window-waiter-matrix-green.json`), not the full file.
 - Full controller file: **48/7**, no skips, success false,
   `/tmp/tanstack-window-controller-adjacent.json`. Repeating with all four
   runtime files exactly at HEAD gives **46/9**, no skips, success false,
@@ -3376,8 +3384,24 @@ candidate repair scopes, not completed fixes or proof of root cause.
   - [ ] `restores the query's initial window after the last lease is released`
   - [ ] `retains the original baseline when its first restoration throws`
   - [ ] `retains the original baseline when its first restoration rejects`
-- Diff check passes. No new full lint/typecheck or final 100× claim. Post-commit
-  Field Lab loss audit follows this frozen step; no push.
+- Diff check and targeted formatting pass. No new full lint/typecheck or final
+  100× claim. No push.
+- Field Lab loss audit of `c4e8207c` recovered the two focused skip counts,
+  late-waiter red suffix limits, and stale current-status framing of historical
+  rollback/reset results. Corrected those record gaps here. Other frozen source
+  assertions, runtime delta, report counts, and seven failure-name comparisons
+  matched. Reused auditor because the thread limit prevented a fresh scanner;
+  prior framing and source-first order may conceal omissions. No auditor tests
+  or runtime endorsement; JSON does not prove commands, ablation/restoration,
+  formatting, or multipliers. This record correction follows the frozen audit.
+- Separate diagnostic after freezing that step: adding the existing `flush()`
+  wait after release to the two lease-restoration tests and the two baseline
+  failure variants yields **4/0, 51 skipped**, success true,
+  `/tmp/tanstack-controller-release-timing-probe.json`. No runtime changed.
+  Reverted the three temporary await insertions and verified a clean worktree
+  before this record edit. This suggests stale synchronous timing assumptions,
+  not a repair or proof of every intermediate snapshot. Keep the four entries
+  open until their settled-state assertions are updated with explicit reach.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
