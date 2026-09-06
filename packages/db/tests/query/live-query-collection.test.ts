@@ -2131,19 +2131,22 @@ describe(`createLiveQueryCollection`, () => {
           { label: `object`, value: { reason: `replay failed` } },
         ] as const
       ).flatMap(({ label, value }) =>
-        ([`throw`, `reject`] as const).map((delivery) => ({
-          delivery,
-          label,
-          value,
-        })),
+        ([`throw`, `reject`] as const).flatMap((delivery) =>
+          ([`retained`, `new`] as const).map((demand) => ({
+            delivery,
+            demand,
+            label,
+            value,
+          })),
+        ),
       ),
     )(
-      `uses one normalized error for a $delivery replay failure with $label`,
-      async ({ delivery, value }) => {
+      `scopes a normalized $delivery replay failure with $label to its $demand demand`,
+      async ({ delivery, demand, value }) => {
         type Row = { id: number; rank: number }
         const replayGate = createDeferred<void>()
         let recovering = false
-        let replayCalls = 0
+        let failedReplayCalls = 0
         let syncOps!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
         const source = createCollection<Row, number>({
           id: `ordered-normalized-${delivery}-${String(value)}-source`,
@@ -2159,10 +2162,18 @@ describe(`createLiveQueryCollection`, () => {
               operations.commit()
               operations.markReady()
               return {
-                loadSubset: () => {
+                loadSubset: (options) => {
                   if (!recovering) return true
-                  replayCalls++
-                  if (replayCalls > 1) return replayGate.promise
+                  // Choose by request shape, not callback order: a startup
+                  // throw rolls back new demand but retains a replayed owner.
+                  const target =
+                    demand === `retained`
+                      ? options.limit !== undefined
+                      : options.limit === undefined &&
+                        options.where === undefined
+                  if (!target || failedReplayCalls > 0)
+                    return replayGate.promise
+                  failedReplayCalls++
                   if (delivery === `throw`) throw value
                   return Promise.reject(value)
                 },
@@ -2188,15 +2199,27 @@ describe(`createLiveQueryCollection`, () => {
             expect(live.utils.lastSubsetError).toBeInstanceOf(Error),
           )
           const reportedError = live.utils.lastSubsetError
+          expect(failedReplayCalls).toBe(1)
 
           const windowMove = live.utils.setWindow({ offset: 0, limit: 2 })
           expect(windowMove).toBeInstanceOf(Promise)
           replayGate.resolve()
-          const windowError = await Promise.resolve(windowMove).catch(
-            (error: unknown) => error,
+          const settlement = await Promise.resolve(windowMove).then(
+            () => ({ status: `fulfilled` as const }),
+            (error: unknown) => ({ status: `rejected` as const, error }),
           )
-          expect(windowError).toBe(reportedError)
-          expect(windowError).toBeInstanceOf(Error)
+          if (demand === `new` && delivery === `throw`) {
+            expect(settlement.status).toBe(`fulfilled`)
+            expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
+          } else {
+            expect(settlement.status).toBe(`rejected`)
+            if (settlement.status !== `rejected`)
+              throw new Error(`Expected replay rejection`)
+            expect(settlement.error).toBe(reportedError)
+            expect(settlement.error).toBeInstanceOf(Error)
+            expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
+          }
+          expect(live.utils.lastSubsetError).toBe(reportedError)
         } finally {
           replayGate.resolve()
           await Promise.all([live.cleanup(), source.cleanup()])

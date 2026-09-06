@@ -27,9 +27,10 @@ current as review findings, oracle laws, and implementation choices change.
   file reproduces all8. U1 is now reconciled: one full-source recovery replaces
   the old extra boundary request. U2's source replay cleared a failed window's
   publication gate; repaired with one separate window-failure flag (+7 source
-  lines). Six assertions in U3–U4 remain open.
+  lines). U3 now distinguishes retained demand from rolled-back startup demand
+  in20 passing cells without production changes. Only U4 remains open.
 - Still open: whole-branch size goal (+3263 net package-source lines against
-  fixedmain68366eca; U2 adds7), unit-failure groups U3–U4, final coherence/review and
+  fixedmain68366eca; U2 adds7), unit-failure group U4, final coherence/review and
   RFC/PR/changeset reconciliation. Older unchecked entries are phase records;
   reconcile them with later evidence before treating them as current bugs.
 
@@ -4953,12 +4954,28 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   Scoped lint reports two unchanged builder diagnostics (always-truthy/falsy
   conditions), also reproduced against pre-U2 source through ESLint stdin;
   do not label that command green. `/tmp/tanstack-u2-baseline-lint.log`.
-- [ ] U3 — `uses one normalized error for a 'throw' replay failure` across
+- [x] U3 — `uses one normalized error for a 'throw' replay failure` across
   Error/undefined/NaN/false/object (5 cells): catch-derived windowError is
   undefined instead of reportedError. That observation cannot distinguish
   fulfillment with undefined from rejection with undefined; record settlement
   explicitly before diagnosing it. Compare synchronous-failure timing
   and operation enrollment with existing replay/error oracle coverage.
+  The fixture failed the first callback, now a newly added full-source demand.
+  A synchronous startup throw rolls that owner back; its error is reported but
+  cannot poison successful replay of surviving demand. An async rejection
+  retains the failed owner. Target by finite/full-source request shape instead
+  of callback order. Cross retained/new demand × throw/reject × five values:
+  all20 cells pass, with tagged settlement, exact normalized error identity,
+  historical lastSubsetError and settled-window assertions. Existing new-demand
+  cases remain; retained-demand cases restore the intended replay failure law.
+  No production edit. Lifecycle oracle start/retirement laws independently
+  cover rollback ownership (including no owner to replay after startup throw).
+  All10 retained-only exploratory cells passed before widening. Focused20-cell
+  run passed assertions but exited1 because filtering the lifecycle oracle
+  violates its afterAll coverage check; not a clean gate. Full lifecycle+unit
+  run301/1, no skips, exit1, with only U4 failing:
+  `/tmp/tanstack-u3-retained-demand.log`, `/tmp/tanstack-u3-matrix.log`,
+  `/tmp/tanstack-u3-broad.log`. Scoped unit lint and package tsc exit0.
 - [ ] U4 — `keeps partial ordered source work private when later refinement
   rejects`: window promise resolves instead of rejecting. Confirm that the
   fixture still reaches its intended failing refinement under the new loading
