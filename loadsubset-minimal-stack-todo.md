@@ -1261,26 +1261,22 @@ change was needed for those cells. These are separately queued below. Counts des
 not unique confirmed runtime bugs; contract-alignment notes below distinguish
 stale oracle expectations from implementation defects.
 
-The functional-projection suite is now **130 green / 27 red** (144 product
-cells plus thirteen controls/census functions), up from the frozen **85/63**
-specification. The inline input boundary repairs 42 cells; two later controls
-pass without a runtime change. The 21 original remaining failures are
-Collection-valued. Three new isolation probes also fail during initial preload
-on that boundary, before reaching their later assertions. A withdrawn snapshot
-candidate passed the original 150 tests but failed two isolation checks; its
-success is not a landed repair. The separate-view follow-up adds one passing
-expression control and three functional controls that fail earlier on null
-input in the restored baseline. Its candidate reaches **155/2**, with only
-class/closure handle-identity assertions failing, but remains archived rather
-than installed in production. These candidate counts are not current repairs.
-The latest four adjacent suites are **147/0**; the wider eleven-suite inline
-checkpoint remains **370/0**.
-These counts do not replace the twelve-suite lifecycle scope above or count
-distinct bugs. The first projection-state repair was withdrawn after a new
-scalar-output control proved it regressed existing behavior. The current
-repair instead materializes inline inputs before invoking the callback; the
-Collection-valued boundary is next. Historical candidate assertions are not
-current repairs.
+The functional-projection suite is now **158 green / 0 red** (144 product
+cells plus fourteen controls/census functions). The same revised tests on
+baseline production are **130/28**; those baseline reds stop on incomplete
+Collection-valued input. Only the updated-parent identity assertion for
+separate functional calls changed by user decision; expression identity,
+unchanged-parent identity, live contents, and isolation assertions remain.
+The smaller continuation replaces the old deferred-callback machinery.
+The captured-method isolation extension first failed on that candidate
+(**157/1**) and now passes. The latest eleven adjacent suites pass **370/0**;
+the twelve-suite lifecycle census also reran **940/0** with no skips.
+These are bounded test counts, not unique bugs or proof of the full draft
+Collection API. Draft index/subscription creation, virtual properties,
+async failure/cleanup, performance, and the 100x campaign remain queued.
+The current source step is **+119 net lines**, down from the archived +227
+candidate. Whole-branch executable source is still **+3,214 net lines**
+against main checkpoint `68366eca`; the below-main target is not met.
 
 | Protocol slice                                       | Executable coverage                                                                                 | Current result                                               |
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
@@ -3917,10 +3913,9 @@ candidate repair scopes, not completed fixes or proof of root cause.
   newly confirmed baseline runtime defects. Production size increase retained:
   **zero**. Candidate cost: **+227 net source lines**, old machinery still
   present. No bundle, memory, or performance improvement proved.
-- [ ] Ask for the intended class/closure handle contract before more runtime
-  work. Stable `===` identity remains normative unless explicitly changed.
-  A live-view choice would still require full draft API/lifecycle checks; it
-  would not make this prototype production-ready.
+- [x] User chose live views: identity between separate functional projection
+  calls is unnecessary. Full draft API/lifecycle checks remain required; this
+  choice does not make the prototype production-ready. Implementation below.
 - [x] Post-commit Field Lab loss audit of `05a2827f` found no supported
   omission or overclaim. It checked all six reports, the source patch and
   added tests, then the frozen reduction/dashboard. All 153 prior assertions
@@ -3936,3 +3931,28 @@ candidate repair scopes, not completed fixes or proof of root cause.
   diff, archived patch applies cleanly, final test ESLint passes. Restored
   package tsc exits 2 with no changed-oracle diagnostic in
   `/tmp/tanstack-facade-draft-view-restored-types.txt`; no full type pass.
+
+### Slim replacement after the live-view decision
+
+- [x] Implement the user's accepted cross-call identity contract. Remove the
+  view-to-public conversion and all `FN_SELECT_STATE` deferred callbacks;
+  materialize inputs before the callback in the same D2 graph. Details and
+  limits: `notes/facade-slim-replacement.md`.
+- [x] Preserve every prior test and all data/isolation assertions. Only the
+  updated-parent identity assertion for functional calls is relaxed. Add the
+  captured-method dimension to the failure-isolation product: candidate
+  **157/1** red becomes **158/0** after dropping the draft reader on promotion
+  and forwarding captured methods to the live public Collection.
+- [x] Run the same revised oracle against baseline production: **130/28**.
+  Reinstall the saved slim candidate. Rerun eleven adjacent suites **370/0**
+  and twelve lifecycle suites **940/0**, no skips. Baseline null-input reds
+  do not prove later isolation failures; the candidate red reaches that phase.
+- [x] Measure all six source files, including the new module: **+119 net**,
+  108 less than the prior +227 candidate. Whole branch **+3,214 net** against
+  `68366eca`, still above main. No bundle/memory/performance claim.
+- [ ] Commit this bounded replacement, then run the standing Field Lab loss
+  audit against the source, assertion changes, reports, and frozen reduction.
+- [ ] Complete draft API parity and async/failure/cleanup gates listed in the
+  note before claiming the Collection view complete. The green broad census
+  is not targeted coverage of every new continuation transition.
+- [ ] Then run the queued 100x campaign and size/refactoring pass.

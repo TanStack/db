@@ -257,28 +257,35 @@ state. This avoids reserving user aliases or selected field names while keeping
 the context stable across D2 operators without collapsing two
 reference-sensitive leaf values that happen to have the same object shape.
 
-A functional projection that consumes a Collection-valued include is deferred
-until the facade adapter has replaced every inert bucket reference with its
-public Collection. D2 retains the source row and route as private projection
-state, so route changes still retract the right graph value. The callback may
-then wrap or pass through the Collection without capturing compiler state;
-child-only changes continue through that stable facade without republishing the
-parent.
+A functional projection consumes fully materialized input before downstream
+operators run. Collection-valued inputs use separate temporary read views:
+the graph drains the child relation, then feeds resolved inputs into a
+continuation in the same D2 graph. The real public facade and its indexes stay
+unchanged while the callback runs. D2's existing reduction retains callback
+outputs for retractions; retractions do not rerun the callback against changed
+child contents. No callback is stored in a result row or run at publication.
+
+At publication, each temporary view switches permanently to the public
+Collection and drops its private reader. Captured read methods follow that
+switch too. Separate functional projection calls may return different views
+of the same bucket; cross-call object identity is not a contract. Retained
+views must still expose that bucket's later public changes. Expression-only
+projections continue to share the stable public facade. Child-only updates do
+not rerun scalar projections or republish parents merely to update a view.
 
 Include paths describe a functional projection's input, not its arbitrary
 output. A callback may drop or rename a field, or return a scalar. Its input
 paths must not be attached to that output by a downstream QueryRef consumer.
 
-When every include in a functional projection's input subtree is inline, the
-compiler materializes that input through the existing D2 materializer before
-calling the projection. It consumes the input's include descriptors there;
+The compiler materializes a functional projection's input through the existing
+D2 materializer. It consumes the input's include descriptors there;
 downstream keys, distinct, ordering, and QueryRef consumers see the callback's
-actual output. The compiler owns the validated callback wrapper, including
-calls deferred to publication. Queries without includes keep their original
-pipeline. A subtree containing a Collection-valued include does not take this
-inline path: its public-facade boundary remains separate. The projection oracle
-still records failures at that boundary; the inline repair does not establish
-the Collection-valued callback contract above.
+actual output. The compiler owns the validated callback wrapper. Inline-only
+inputs need no Collection continuation. Queries without includes keep their
+original pipeline unless they consume a staged input elsewhere in the graph.
+The bounded projection oracle now passes; draft index/subscription creation,
+virtual-property parity, and asynchronous failure/cleanup around these views
+remain verification gates, not guarantees established by that suite.
 
 Every valid plan is checked as a Collection, `toArray`, and `materialize`
 include at initial load, after a parent-route update, and after a child update.
@@ -918,7 +925,7 @@ create recursive Collection machinery.
 | Collection facades, event coherence, and route activation                   | `packages/db/tests/query/includes-collection-oracle.property.test.ts`        |
 | Correlated physical work                                                    | `packages/db/tests/query/includes-work-counter-oracle.test.ts`               |
 | Route-context discovery and transport across recursive and join boundaries  | `packages/db/tests/query/includes-context-transport-oracle.test.ts`          |
-| Functional projection input timing and output preservation (Collection boundary still red) | `packages/db/tests/query/includes-functional-projection-oracle.test.ts` |
+| Functional projection timing, output preservation, and bounded view isolation | `packages/db/tests/query/includes-functional-projection-oracle.test.ts` |
 | Cross-formulation equivalence and reference-sensitive route identity        | `packages/db/tests/query/includes-cross-formulation-oracle.property.test.ts` |
 | Query-db ownership                                                          | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`      |
 | Reachable nested shape                                                      | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts`    |

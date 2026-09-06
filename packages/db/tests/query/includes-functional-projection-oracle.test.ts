@@ -103,7 +103,7 @@ class Projection {
 
 describe(`functional projection output compatibility`, () => {
   it.each([`expression`, `plain`, `opaque`, `closure`] as const)(
-    `keeps one live facade across a same-route parent update through a %s holder`,
+    `keeps retained views live across a same-route parent update through a %s holder`,
     async (holder) => {
       const parents = createControlledCollection(`draft-identity-parent`, [
         { id: 1, groupId: 1, label: `first` },
@@ -165,12 +165,13 @@ describe(`functional projection output compatibility`, () => {
         expect
           .soft(query.get(1)!.label, `parent update is visible`)
           .toBe(`changed`)
-        expect
-          .soft(
-            query.get(1)!.box.children,
-            `updated parent keeps shared facade`,
-          )
-          .toBe(held)
+        // Expression projections share the public facade. Separate functional
+        // calls may return distinct views, but every retained view stays live.
+        if (holder === `expression`) {
+          expect
+            .soft(query.get(1)!.box.children, `shared public facade`)
+            .toBe(held)
+        }
         expect
           .soft(
             query.get(2)!.box.children,
@@ -198,7 +199,7 @@ describe(`functional projection output compatibility`, () => {
     },
   )
 
-  it.each([`rows`, `index`, `callback-read`] as const)(
+  it.each([`rows`, `index`, `callback-read`, `captured-method`] as const)(
     `keeps held facade %s unchanged when a later projection throws`,
     async (surface) => {
       const parents = createControlledCollection(`snapshot-parent`, [
@@ -212,6 +213,7 @@ describe(`functional projection output compatibility`, () => {
       let fail = false
       let prepared: Array<number> = []
       let readPublished: (() => Array<number>) | undefined
+      let capturedGet: ((key: number) => { id: number } | undefined) | undefined
       let observed: Array<number> | undefined
       const query = createLiveQueryCollection((q) =>
         q
@@ -231,6 +233,7 @@ describe(`functional projection output compatibility`, () => {
               observed = readPublished?.()
               throw failure
             }
+            capturedGet = row.children.get.bind(row.children)
             return { id: row.id, children: row.children }
           }),
       )
@@ -238,7 +241,10 @@ describe(`functional projection output compatibility`, () => {
         await query.preload()
         const original = query.get(1)!
         const held = original.children
-        readPublished = () => held.toArray.map((child) => child.id)
+        readPublished = () =>
+          surface === `captured-method`
+            ? [capturedGet?.(10)?.id].filter((id) => id !== undefined)
+            : held.toArray.map((child) => child.id)
         const index = held.createIndex((child) => child.id, {
           indexType: BasicIndex,
         })

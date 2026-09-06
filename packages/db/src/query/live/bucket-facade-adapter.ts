@@ -1,14 +1,10 @@
 import { output, serializeValue } from '@tanstack/db-ivm'
 import { createCollection } from '../../collection/index.js'
 import {
-  FN_SELECT_STATE,
   INCLUDES_ROUTING,
   transformPublicContainers,
 } from '../compiler/route-metadata.js'
-import {
-  BUCKET_FACADE_REF,
-  runIncludesFnSelect,
-} from './materialized-pipeline.js'
+import { BUCKET_FACADE_REF } from './materialized-pipeline.js'
 import type { Collection } from '../../collection/index.js'
 import type { SyncConfig } from '../../types.js'
 import type { PublicationDeferral } from '../../collection/changes.js'
@@ -16,13 +12,9 @@ import type {
   BucketFacadeCompilation,
   BucketFacadeRef,
   BucketRow,
-  FnSelectState,
 } from './materialized-pipeline.js'
 
-const PRIVATE_RESULT_KEYS = new Set<PropertyKey>([
-  INCLUDES_ROUTING,
-  FN_SELECT_STATE,
-])
+const PRIVATE_RESULT_KEYS = new Set<PropertyKey>([INCLUDES_ROUTING])
 
 type FacadeSync = Parameters<SyncConfig<any>[`sync`]>[0]
 
@@ -74,6 +66,8 @@ export class BucketFacadeAdapter {
   private readonly entries = new Map<string, Map<string, FacadeEntry>>()
   private readonly retiredEntries = new Map<string, Map<string, FacadeEntry>>()
   private resolvedValues = new WeakMap<object, unknown>()
+  private draftValues = new WeakMap<object, unknown>()
+  private draftViews = new Map<object, ReturnType<typeof createDraftView>>()
 
   constructor(
     private readonly parentId: string,
@@ -104,6 +98,73 @@ export class BucketFacadeAdapter {
 
   hasPendingChanges(): boolean {
     return this.pending.size > 0 || this.pendingActivity.size > 0
+  }
+
+  // A distinct input view reads copied rows. Public Collections and
+  // their indexes are not mutated while a projection is evaluated.
+  resolveDraft<T>(value: T): T {
+    if (value === null || typeof value !== `object`) return value
+    if (isBucketFacadeRef(value)) {
+      const { edgeId, bucketKey } = value[BUCKET_FACADE_REF]
+      const entry = this.getEntry(edgeId, bucketKey)
+      const existing = this.draftViews.get(entry.collection)
+      if (existing) return existing.view as T
+      const rows = () => {
+        const result = new Map<string | number, object>(
+          entry.collection.entries(),
+        )
+        if ((this.pendingActivity.get(edgeId)?.get(bucketKey) ?? 0) < 0) {
+          return new Map<string | number, object>()
+        }
+        for (const change of this.pending
+          .get(edgeId)
+          ?.get(bucketKey)
+          ?.values() ?? []) {
+          const key = change.value.publicKey as string | number
+          if (change.deletes > change.inserts) result.delete(key)
+          else result.set(key, this.resolveDraft(change.value.value))
+        }
+        const order = this.compilations.find(
+          (item) => item.edgeId === edgeId,
+        )?.hasOrderBy
+        if (!order) return result
+        const orderFor = (key: string | number) =>
+          this.pending.get(edgeId)?.get(bucketKey)?.get(serializeValue(key))
+            ?.value.order ?? entry.currentOrder.get(key)
+        return new Map(
+          [...result].sort(([left], [right]) => {
+            const a = orderFor(left)
+            const b = orderFor(right)
+            return a === b
+              ? 0
+              : a === undefined
+                ? 1
+                : b === undefined
+                  ? -1
+                  : a < b
+                    ? -1
+                    : 1
+          }),
+        )
+      }
+      const draft = createDraftView(entry.collection, rows)
+      this.draftViews.set(entry.collection, draft)
+      return draft.view as T
+    }
+    const existing = this.draftValues.get(value)
+    if (existing !== undefined) return existing as T
+    const resolved = transformPublicContainers(
+      value,
+      (leaf) => (isBucketFacadeRef(leaf) ? this.resolveDraft(leaf) : leaf),
+      PRIVATE_RESULT_KEYS,
+    )
+    this.draftValues.set(value, resolved)
+    return resolved as T
+  }
+
+  publishDrafts(): void {
+    for (const draft of this.draftViews.values()) draft.release()
+    this.draftViews.clear()
   }
 
   flush(): FacadePublication {
@@ -487,22 +548,6 @@ export class BucketFacadeAdapter {
       this.resolvedValues.set(value, facade)
       return facade
     }
-    const fnSelectState = (value as Record<PropertyKey, unknown>)[
-      FN_SELECT_STATE
-    ] as FnSelectState | undefined
-    if (fnSelectState?.deferUntilFacade) {
-      const sourceRow = this.resolveValue(fnSelectState.sourceRow) as Record<
-        PropertyKey,
-        any
-      >
-      const selected = runIncludesFnSelect(
-        fnSelectState,
-        sourceRow,
-        value as Record<PropertyKey, any>,
-      )
-      this.resolvedValues.set(value, selected)
-      return selected
-    }
     if (Array.isArray(value) || isPlainObject(value)) {
       const result = transformPublicContainers(
         value,
@@ -535,4 +580,52 @@ function isPlainObject(value: unknown): value is Record<PropertyKey, unknown> {
   if (value === null || typeof value !== `object`) return false
   const prototype = Object.getPrototypeOf(value)
   return prototype === Object.prototype || prototype === null
+}
+
+/** Captured methods follow promotion too; released views retain no draft graph. */
+function createDraftView(
+  collection: Collection,
+  readDraft: (() => Map<string | number, object>) | undefined,
+) {
+  const shell = Object.assign(
+    Object.create(Object.getPrototypeOf(collection)),
+    {
+      id: collection.id,
+      config: collection.config,
+    },
+  )
+  const member = (property: PropertyKey): unknown => {
+    if (readDraft) {
+      const rows = readDraft()
+      if (property === `toArray`) return [...rows.values()]
+      if (property === `size`) return rows.size
+      if (property === `get`) return (key: string | number) => rows.get(key)
+      if (property === `has`) return (key: string | number) => rows.has(key)
+      if (property === `keys`) return () => rows.keys()
+      if (property === `values`) return () => rows.values()
+      if (property === `entries`) return () => rows.entries()
+      if (property === `isReady`) return () => true
+      if (property === `status`) return `ready`
+    }
+    return Reflect.get(collection, property, collection)
+  }
+  const view = new Proxy(shell, {
+    get(_target, property) {
+      const value = member(property)
+      return typeof value === `function` && property !== `constructor`
+        ? (...args: Array<unknown>) =>
+            Reflect.apply(
+              member(property) as (...values: Array<unknown>) => unknown,
+              collection,
+              args,
+            )
+        : value
+    },
+  })
+  return {
+    view,
+    release: () => {
+      readDraft = undefined
+    },
+  }
 }

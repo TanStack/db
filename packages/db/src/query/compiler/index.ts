@@ -11,6 +11,10 @@ import {
 import { optimizeQuery } from '../optimizer.js'
 import { materializeCompilation } from '../live/materialized-pipeline.js'
 import {
+  facadeProjections,
+  stageFacadeProjection,
+} from '../live/facade-projection.js'
+import {
   createParentContext,
   createValueIdentity,
   getParentContextIdentity,
@@ -57,7 +61,6 @@ import { getLazyLoadTargets } from './lazy-targets.js'
 import { processOrderBy } from './order-by.js'
 import { crossJoinParentRoutes } from './parent-routes.js'
 import {
-  FN_SELECT_STATE,
   INCLUDES_PUBLIC_KEY,
   INCLUDES_ROUTING,
   attachRouteMetadata,
@@ -94,11 +97,7 @@ import type {
 import type { QueryCache, QueryMapping, WindowOptions } from './types.js'
 
 export type { WindowOptions } from './types.js'
-export {
-  FN_SELECT_STATE,
-  INCLUDES_PUBLIC_KEY,
-  INCLUDES_ROUTING,
-} from './route-metadata.js'
+export { INCLUDES_PUBLIC_KEY, INCLUDES_ROUTING } from './route-metadata.js'
 
 const SKIP_INCLUDE = Symbol(`skipInclude`)
 
@@ -621,10 +620,7 @@ export function compileQuery(
     ...directIncludes,
     ...sourceIncludes.map(({ include }) => include),
   ]
-  const materializeSelectInput =
-    !!query.fnSelect &&
-    inputIncludes.length > 0 &&
-    inputIncludes.every(isInlineInclude)
+  const materializeSelectInput = !!query.fnSelect && inputIncludes.length > 0
   let includesResults: Array<IncludesCompilationResult> = !query.select
     ? [...directIncludes]
     : []
@@ -1017,7 +1013,7 @@ export function compileQuery(
         ],
       ),
     ) as ResultStream
-    pipeline = materializeCompilation({
+    const materializedInput = materializeCompilation({
       pipeline: inputPipeline,
       includes: includesResults,
       valueIdentity,
@@ -1025,7 +1021,11 @@ export function compileQuery(
       sourceWhereClauses,
       aliasToCollectionId,
       aliasRemapping,
-    }).pipeline.pipe(
+    })
+    const projectedInput = inputIncludes.every(isInlineInclude)
+      ? materializedInput.pipeline
+      : stageFacadeProjection(mainCollectionId, materializedInput)
+    pipeline = projectedInput.pipe(
       map(([key, [value]]) => {
         const row = { ...value }
         delete row[INCLUDES_ROUTING]
@@ -1045,45 +1045,38 @@ export function compileQuery(
       return selected
     }
     // Handle functional select - apply the function to transform the row
-    pipeline = pipeline.pipe(
-      map(([key, namespacedRow]) => {
-        const callbackRow = sourceCarriesInternalRouteState
-          ? (stripInternalCallbackMetadata(namespacedRow) as NamespacedRow)
-          : namespacedRow
-        const selectResults = fnSelect(callbackRow)
-        let selected = selectResults
-        if (
-          selectResults &&
-          typeof selectResults === `object` &&
-          (Array.isArray(selectResults) || isPlainObject(selectResults))
-        ) {
-          selected = Array.isArray(selectResults)
-            ? [...selectResults]
-            : { ...selectResults }
-          const routing = (namespacedRow as any)[INCLUDES_ROUTING]
-          if (routing) {
-            selected[INCLUDES_ROUTING] = routing
-          }
-          if (includesResults.length > 0) {
-            Object.defineProperty(selected, FN_SELECT_STATE, {
-              value: {
-                sourceRow: namespacedRow,
-                fnSelect,
-              },
-              enumerable: true,
-              configurable: true,
-            })
-          }
+    const projectRow = (namespacedRow: NamespacedRow) => {
+      const callbackRow = sourceCarriesInternalRouteState
+        ? (stripInternalCallbackMetadata(namespacedRow) as NamespacedRow)
+        : namespacedRow
+      const selectResults = fnSelect(callbackRow)
+      let selected = selectResults
+      if (
+        selectResults &&
+        typeof selectResults === `object` &&
+        (Array.isArray(selectResults) || isPlainObject(selectResults))
+      ) {
+        selected = Array.isArray(selectResults)
+          ? [...selectResults]
+          : { ...selectResults }
+        const routing = (namespacedRow as any)[INCLUDES_ROUTING]
+        if (routing) {
+          selected[INCLUDES_ROUTING] = routing
         }
-        return [
-          key,
-          {
-            ...namespacedRow,
-            $selected: selected,
-          },
-        ] as [string, typeof namespacedRow & { $selected: any }]
-      }),
-    )
+      }
+      return {
+        ...namespacedRow,
+        $selected: selected,
+      }
+    }
+    pipeline =
+      facadeProjections(pipeline.graph).length > 0
+        ? pipeline.pipe(
+            reduce((rows) =>
+              rows.map(([row, weight]) => [projectRow(row), weight]),
+            ),
+          )
+        : pipeline.pipe(map(([key, row]) => [key, projectRow(row)]))
   } else if (query.select) {
     pipeline = processSelect(pipeline, query.select, allInputs)
   } else {

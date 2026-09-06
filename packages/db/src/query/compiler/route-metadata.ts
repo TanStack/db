@@ -2,7 +2,6 @@ const ROUTED_SCALAR_VALUE = Symbol(`tanstack_db_routed_scalar_value`)
 const ROUTE_METADATA = Symbol(`tanstack_db_route_metadata`)
 export const INCLUDES_PUBLIC_KEY = Symbol(`includesPublicKey`)
 export const INCLUDES_ROUTING = Symbol(`includesRouting`)
-export const FN_SELECT_STATE = Symbol(`fnSelectState`)
 const INTERNAL_ROUTE_KEYS = new Set<PropertyKey>([
   ROUTE_METADATA,
   INCLUDES_PUBLIC_KEY,
@@ -10,7 +9,6 @@ const INTERNAL_ROUTE_KEYS = new Set<PropertyKey>([
 const INTERNAL_CALLBACK_KEYS = new Set<PropertyKey>([
   ...INTERNAL_ROUTE_KEYS,
   INCLUDES_ROUTING,
-  FN_SELECT_STATE,
 ])
 
 type RoutedResult = {
