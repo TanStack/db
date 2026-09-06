@@ -3975,6 +3975,10 @@ candidate repair scopes, not completed fixes or proof of root cause.
 
 - [x] Add 13 read surfaces × unordered/descending order, each checking initial
   callback output, a route move, and a retained view after child insertion.
+  The retained-view suffix always reads toArray; it does not repeat the
+  selected API after publication. Descending expectations apply to traversal
+  surfaces; get, has, and index lookup follow explicit requested-key order,
+  and size expects a count of two.
   Surfaces: toArray, get, has, size, keys, values, entries, iterator, forEach,
   map, state, $key, and newly created index lookup. Expected keys/order come
   from the fixture, not another Collection method. This verifies $key only,
@@ -3995,7 +3999,15 @@ candidate repair scopes, not completed fixes or proof of root cause.
   tsc exits 2 with no changed-file diagnostics in
   `/tmp/tanstack-facade-api-types.txt`; no full type pass claimed. Twelve-suite
   lifecycle **940/0** remains the preceding step's result, not a fresh rerun.
-- [ ] Commit this bounded repair and run the standing Field Lab loss audit.
+- [x] Commit as `cf11720e` and run the standing Field Lab loss audit. It
+  recovered the retained-read and order-expectation distinctions above;
+  compressing the 26 cases into one product had hidden their different
+  assertion scopes. Other preservation, reach, reports, source size, and
+  open-contract traces match. Reused, sequential source-first context was
+  not fresh or sibling-blind; prior framing may hide omissions. Auditor ran
+  no tests and did not inspect optional types or post-freeze rerun. This is
+  not merge-readiness evidence. Root committed rerun is **182/2**, no skips,
+  in `/tmp/tanstack-facade-api-committed.json`.
 - [ ] Decide draft-time index creation before implementing more machinery.
   Its manager belongs to the public Collection, so immediate lookup during
   the callback sees the old snapshot (empty in these activation cases).
@@ -4008,3 +4020,5 @@ candidate repair scopes, not completed fixes or proof of root cause.
   remain queued. These API cells add no async/cleanup reach. Whole-branch
   source remains **+3,214** against `68366eca` (+119 for the slim replacement),
   with no current bundle/performance claim and no 100x campaign yet.
+- [ ] Extend post-publication checks to repeat the selected read API, not
+  only toArray, after choosing the draft index contract.
