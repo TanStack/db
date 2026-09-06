@@ -1282,7 +1282,7 @@ The captured-method isolation extension first failed on that candidate
 the twelve-suite lifecycle checkpoint remains **940/0** from the preceding
 slim-replacement step, not a rerun after this two-expression change.
 These are bounded test counts, not unique bugs or proof of the full draft
-Collection API. Draft index/subscription creation, virtual properties,
+Collection API. Draft subscription creation, remaining virtual properties,
 async failure/cleanup, performance, and the 100x campaign remain queued.
 The slim replacement plus guard is **+125 net lines** (+119 replacement,
 zero for helper receivers, +6 guard), down from the archived +227 candidate.
@@ -4036,9 +4036,10 @@ candidate repair scopes, not completed fixes or proof of root cause.
   create or maintain private index state.
 - [x] Revise the two order-mode index cells to require the exact error and
   zero created indexes during initial and moved callbacks. Keep their input
-  row and later live-view assertions using ordinary reads. A method captured
-  during the callback then creates a working index after publication, with
-  lookups for both original keys and the later inserted child.
+  row and later live-view assertions using ordinary reads. The method captured
+  during the moved callback then creates a working index after publication,
+  checking destination keys 20/21 and later inserted child 22. The initial
+  callback's capture is replaced and is not independently invoked afterward.
 - [x] Add initial/update uncaught-error cases. Preload rejects with the exact
   error and publishes no root row; a later parent update throws that error
   while preserving the original public row and its existing child index.
@@ -4054,6 +4055,17 @@ candidate repair scopes, not completed fixes or proof of root cause.
   and Prettier pass. Package tsc still exits 2, with no changed-file diagnostic
   in `/tmp/tanstack-facade-index-guard-types.txt`; no full type pass claimed.
   The 940/0 lifecycle checkpoint is historical, not rerun for this guard.
-- [ ] Commit and run standing Field Lab loss audit.
+- [x] Commit as `e70145f3` and run standing Field Lab loss audit. It recovered
+  the stale dashboard's combined index/subscription queue label and the
+  initial-versus-moved captured-method distinction; both are corrected above.
+  Dropping rules: stale shared-category text and phase compression. Source,
+  preserved assertions, all three reports, and size traces otherwise match.
+  Red cases stop on missing rejection before later suffixes; only green runs
+  reach the zero-index, preserved-row, and published-index assertions. This
+  reused, sequential source-first audit was not fresh or sibling-blind; prior
+  framing may hide omissions. No test rerun, optional types or committed
+  report inspection by the auditor. It does not establish merge readiness.
+  Root-agent committed rerun is **186/0**, no skips, in
+  `/tmp/tanstack-facade-index-guard-committed.json`.
 - [ ] Async/cleanup, non-key virtual properties, subscription creation,
   repeated read API after publication, and 100x campaign remain queued.
