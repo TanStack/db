@@ -3795,8 +3795,11 @@ candidate repair scopes, not completed fixes or proof of root cause.
 - [x] Add two controls with a separately created, preloaded source query that
   exposes a real child Collection. A second query either reads its row count
   or uses a constant, then applies distinct. Both check initial projection,
-  child insertion without scalar recomputation, parent removal, child removal,
-  and parent restoration. Both pass without any production change. These
+  child insertion without scalar recomputation, parent removal, and parent
+  restoration. Between removal and restoration they remove a child, without a
+  separate child-removal assertion. Only the facade-reading variant checks the
+  restored count; the constant variant cannot detect wrong child contents.
+  Both pass without any production change. These
   controls prove that public result trace, not internal retraction identity or
   all independently materialized query compositions.
 - The initial concern that rereading a changed facade necessarily breaks
@@ -3826,4 +3829,12 @@ candidate repair scopes, not completed fixes or proof of root cause.
   inputs to fn.select and require inline inputs or an already-published source
   query. That narrows the API, including callbacks that ignore the include;
   it needs explicit user approval. No staged runtime or new rejection added.
-- [ ] Post-commit Field Lab loss audit for these controls and the boundary note.
+- [x] Post-commit Field Lab loss audit of `15c55168` recovered one compressed
+  assertion distinction: child removal is an action between checkpoints, not
+  a separate assertion, and the constant control cannot check restored child
+  count. Corrected above. Other source/report/count/scope traces match the
+  reduction. The auditor used prior context and scanned sources sequentially
+  before the reduction, not sibling-blind; that order may hide omissions. It
+  ran no tests and did not inspect the optional type transcript. Reports alone
+  do not prove draft source suffixes, removed logging, command environment,
+  lint, or formatting. This audit is not runtime endorsement.
