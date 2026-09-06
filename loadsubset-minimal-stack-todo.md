@@ -59,8 +59,8 @@ current as review findings, oracle laws, and implementation choices change.
   after loss audits:11 more source lines removed,204 minified/13 gzip diagnostic
   bytes removed. Expanded integration1736/0 at1x, package types pass. Reentry
   matrix3/3 and retention matrix5/5 restore pre-W5 behavior. Focused lifecycle
-  100x444/0 atbaa2163f preceded the final one-line failure-pruning repair; final
-  current-session-failure-map audit/replay stress pending. Combined W1–W5
+  100x444/0 atbaa2163f preceded the final failure-map revisions. Final7b9ea648
+  source loss audit complete; replay-only100x79/0,exit0. Combined W1–W5
   savings164 lines/2566 minified/490 gzip bytes,source gap3108. No push.
   Group-by baseline142/0, code unchanged.
 
@@ -5581,8 +5581,25 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   payload. `/tmp/tanstack-weight-replay-session-failures-bundle.json`.
   Combined W1–W5 savings164 source lines/2566 minified/490 gzip bytes;source gap3108.
   Prior16/17/32-line values are intermediate rejected representations.
-- [ ] Commit current-session failures, then bounded source loss audit.
-- [ ] Final replay-oracle100x; prior broader100x gates remain version-specific.
+- [x] Commit7b9ea648, then bounded source loss audit: no further supported loss
+  against original81a1b348 and the recovered traces. Admission preserves
+  retained/retired distinction; current-only failure writes, setup accounting,
+  owner removal and shared async error normalization remain. No old attempt
+  carries an error map, so pending-backed and setup-only error retention are
+  both eliminated. Witness follows stored frames rather than captured discarded
+  maps. Reused/nonblind candidate-author scan of source/assertions; no reruns,
+  measured heap claim, run-total verification, or readiness verdict. Familiarity
+  can favor the representation and omission focus can overvalue differences.
+- [x] Final replay-oracle100x on frozen7b9ea648:79/0,1 file,exit0,189.81s,
+  no skipped tests or reported runner errors. Fixed corpora plus fresh random
+  seeds; seed/path/property overrides unset. Multiplier scales opted-in
+  fast-check properties, not each deterministic test100 times. Reports:
+  `/tmp/tanstack-weight-replay-session-failures-100.{json,log}`. This final-head
+  stress gate is replay-only; broader100x gates above remain version-specific.
+  Final expanded28-file gate is1736/0 at1x, not a full final-head100x claim.
+- Frozen7b9ea648 bundle measurement confirms345514 minified/97672 gzip for
+  DB and unchanged30220/9133 for DB-IVM; report
+  `/tmp/tanstack-weight-replay-session-failures-committed-bundle.json`.
 
 ### Next source-weight candidate (read-only during W5 gate)
 
@@ -5607,3 +5624,8 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   compiler/7 builder tests,142/0 across3 files,exit0. Reports/logs
   `/tmp/tanstack-weight-group-by-baseline` and `-group-by-contract-baseline`.
   These runs establish a baseline, not a complete cross-formulation oracle.
+- Source trace: toBooleanPredicate is `result === true`, whereas D2 multiset
+  filtering uses JavaScript truthiness. Both agree for the declared boolean/null
+  HAVING domain; they differ for unchecked nonboolean values. Preserve current
+  branch behavior during reduction unless separate tests/decision change that
+  contract. Do not call this a newly confirmed user-facing bug from source alone.
