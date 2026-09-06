@@ -35,7 +35,7 @@ current as review findings, oracle laws, and implementation choices change.
   invalidating the old window generation at teardown. Total growth this pass9
   production lines. Fresh100x integration gate passes1582/0 across26 files,
   exit0, no skipped tests or reported runner errors. Integration loss audit
-  complete; final campaign report audit follows.
+  complete; final campaign report audit complete.
 - Still open: whole-branch size goal (+3272 net package-source lines against
   fixedmain68366eca), final coherence/review and
   RFC/PR/changeset reconciliation. Older unchecked entries are phase records;
@@ -5072,3 +5072,10 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   Ordinary package tsc exits0 separately (`/tmp/tanstack-u-final-types.log`).
   No push. Next is the queued code-size/coherence review, including the
   remaining IndexInterface cursor declaration mismatch and builder lint debt.
+- [x] Commitf5ed3b28 then fresh report-only Field Lab loss audit: no material
+  loss in checkpoint/gate summary. JSON's60 suite entries differ from26 file
+  records; both report1582 passed tests. Vitest's experimental type warning and
+  runner type result do not establish ordinary package tsc. Command/source
+  evidence, not reports alone, establishes revision, environment and exits.
+  Report-level grouping can hide individual test differences; no testcase
+  completeness or readiness assessment. No edits, reruns or source inspection.
