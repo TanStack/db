@@ -4365,5 +4365,35 @@ candidate repair scopes, not completed fixes or proof of root cause.
   cannot prove frozen SHA/env or worker-reporting errors. Reused source-first
   context, no reruns, not fresh/blind or a merge endorsement. Evidence compression
   can obscure these distinctions; records above keep each run separate.
-- [ ] Pagination per-step loss audit and full repaired100x campaign pending.
+- [x] Pagination loss audit for `f2da9848`: counts supported. The two100x
+  properties repeat the same800-history corpus (seed1658, same generator),
+  not independent samples. Cursor-named helpers need request-shape checks;
+  their existence does not prove unchanged cursor reach after this repair.
+  The sixteen cells prove rows/publications, not transport volume or latency.
+  Red JSON strips the nested row-diff cause; verbose pinned evidence has the
+  wrong-row case, while under-fill detail needs a separate verbose rerun.
+  Reused source-first audit, no reruns or merge/readiness endorsement.
+- [ ] Full repaired100x campaign and explicit-prefix transfer-cost assessment.
   No size-pass completion; whole branch now +3,225 net source lines at68366eca.
+
+### Raw subscription changes after private replay retirement
+
+- [x] Pin the later seed1657005 history without deleting its no-op suffix.
+  Add direct public-API controls: a source row exists before subscription;
+  later update arrives as insert with default options and as raw update with
+  `includeInitialState:false`. Before model repair **2 green / 1 red**,
+  45 filtered in `/tmp/tanstack-publication-raw-boundary-red.txt`.
+- [x] Model correction only: raw updates may reference a row installed in
+  source state but never published during the abandoned replay. Use that prior
+  source value when no retained public value exists; retained public values
+  still govern stale-snapshot reconciliation. This is the existing explicit
+  false-option contract (`changes.ts` markAllStateAsSeen, subscription filtering
+  bypass), not a new permission for D2 incremental inputs to omit insertions.
+- [x] Focused controls/pin **3/0**,45 filtered; full publication100x **48/0**,
+  fixed1657005 and replay712591281. Reports
+  `/tmp/tanstack-publication-raw-boundary-green.json`,
+  `/tmp/tanstack-publication-raw-100x.json`. Scoped lint exits0 with two existing
+  no-shadow warnings. Package tsc still exits2; includes the preexisting
+  publication callback key `string|number`→RowKey diagnostic, not introduced
+  by these changes. `/tmp/tanstack-100x-repairs-types.txt`.
+- [ ] Commit, per-step loss audit, then record full repaired100x result.

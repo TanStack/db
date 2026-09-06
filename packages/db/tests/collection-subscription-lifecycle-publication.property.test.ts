@@ -104,18 +104,22 @@ type PublicationRunOptions = {
 }
 
 function recordSourceWrite(publication: PublicationModel, row: Row): void {
-  const previousVisible = publication.visible.get(row.id)
+  // This driver requests raw future changes (includeInitialState: false).
+  // After retiring private work, an unseen source row can still be updated.
+  // Retained public rows take precedence when reconciling a stale snapshot.
+  const previous =
+    publication.visible.get(row.id) ?? publication.source.get(row.id)
   publication.source.set(row.id, cloneRow(row))
   publication.visible.set(row.id, cloneRow(row))
   publication.sentKeys.add(row.id)
-  if (previousVisible?.value === row.value) return
+  if (previous?.value === row.value) return
   publication.batches.push([
-    previousVisible
+    previous
       ? {
           type: `update`,
           key: row.id,
           value: cloneRow(row),
-          previousValue: cloneRow(previousVisible),
+          previousValue: cloneRow(previous),
         }
       : { type: `insert`, key: row.id, value: cloneRow(row) },
   ])
@@ -1067,6 +1071,78 @@ function expectNoPublicationMismatches(
 }
 
 describe(`CollectionSubscription lifecycle publication oracle`, () => {
+  it.each([undefined, false] as const)(
+    `distinguishes unseen-row changes with includeInitialState=%s`,
+    async (includeInitialState) => {
+      let operations!: SyncOperations
+      const collection = createCollection<Row, RowKey>({
+        getKey: ({ id }) => id,
+        startSync: true,
+        sync: {
+          sync: (sync) => {
+            operations = sync
+            sync.begin()
+            sync.write({ type: `insert`, value: { id: `d`, value: 0 } })
+            sync.commit()
+            sync.markReady()
+          },
+        },
+      })
+      const changes: Array<PublicationChange> = []
+      const subscription = collection.subscribeChanges(
+        (batch) => {
+          for (const change of batch) {
+            changes.push({
+              type: change.type,
+              key: change.value.id,
+              value: cloneRow(change.value),
+              ...(change.previousValue
+                ? { previousValue: cloneRow(change.previousValue) }
+                : {}),
+            })
+          }
+        },
+        { includeInitialState },
+      )
+      try {
+        expect(changes).toEqual([])
+        operations.begin()
+        operations.write({ type: `update`, value: { id: `d`, value: 4 } })
+        await operations.commit()
+        expect(changes).toEqual([
+          {
+            type: includeInitialState === false ? `update` : `insert`,
+            key: `d`,
+            value: { id: `d`, value: 4 },
+            ...(includeInitialState === false
+              ? { previousValue: { id: `d`, value: 0 } }
+              : {}),
+          },
+        ])
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it(`keeps raw source updates after retiring the final replay owner`, async () => {
+    await runPublicationHistory([
+      { type: `cleanup` },
+      { type: `release`, demand: `b` },
+      { type: `request`, demand: `b` },
+      { type: `restart` },
+      { type: `source`, key: `d`, action: `upsert`, value: 0 },
+      { type: `abort`, demand: `b` },
+      { type: `release`, demand: `b` },
+      { type: `abort`, demand: `b` },
+      { type: `source`, key: `d`, action: `upsert`, value: 4 },
+      { type: `release`, demand: `b` },
+      { type: `restart` },
+      { type: `unsubscribe` },
+    ])
+  })
+
   it(`reconciles a repeated reset after the last replay owner aborts`, async () => {
     await runPublicationHistory([
       { type: `source`, key: `a`, action: `upsert`, value: 0 },
