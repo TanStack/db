@@ -1262,8 +1262,9 @@ not unique confirmed runtime bugs; contract-alignment notes below distinguish
 stale oracle expectations from implementation defects.
 
 The queued functional-projection matrix is now a separate red baseline:
-**21 green / 36 red** (54 product cells plus three controls). Its adjacent
-includes suites remain **124/0**. This does not replace the twelve-suite
+**85 green / 63 red** (144 product cells plus four controls/census functions).
+The latest four adjacent suites are **147/0**; the earlier wider includes
+checkpoint remains **342/0**. This does not replace the twelve-suite
 lifecycle scope above or count 36 distinct defects. No runtime changed while
 adding this matrix; its five failure families are recorded below. The first
 projection-state repair was withdrawn after a new scalar-output control proved
@@ -3637,6 +3638,70 @@ candidate repair scopes, not completed fixes or proof of root cause.
   selectors/order/distinct, multiple include fields and nested facade readiness.
   A placeholder record cannot stand in for the callback's output at those
   boundaries. Do not move invocation later solely to green the current matrix.
+
+### Projection compatibility specification
+
+- [x] Expanded the oracle before another runtime patch. All original 57 tests
+  remain; the new products add 91 functions, for **148** total:
+  - Output preservation: Collection / array / materialized × expression /
+    functional consumer × number / null / Date / dropped-record × include /
+    matched no-include control = **48/0**. Includes are deliberately not read
+    in this product. Check initial output, a child insert, parent value change
+    and parent removal. The second functional callback checks incoming shape
+    during insertion/retraction; final values are checked against the chosen
+    parent value. The matched no-include form variants repeat the same query
+    semantics, not three distinct no-include mechanisms.
+  - Renamed nested fields: three forms × expression / functional projection ×
+    expression / functional consumer × one / two correlated inputs = **6/18**.
+    Expression-only controls pass. Observe each callback stage separately for
+    reach, input form and facade readiness, with initial, primary-child update,
+    sibling-child update when present, and parent-route move checkpoints. The
+    independent child-row map checks both public inputs and derived totals.
+    As before, live Collection reads do not imply child-only scalar dependency
+    tracking; inline forms do. Per-invocation rows are captured, not compared
+    with complete authoritative state during every intermediate invocation.
+  - Consumer operators: three forms × stable custom key / selected-value
+    top-1 order / distinct × reads / ignores include = **9/9**. The nine cases
+    ignoring includes pass. A two-parent fixture changes the winning ordered
+    row for inline child updates, merges distinct values on a parent move, and
+    removes one parent. Exact public keys are checked for the custom-key form.
+    This covers operators after a QueryRef functional projection, not all
+    operators at every nested or union boundary.
+  - One declaration census checks product cardinality and unique case names.
+- Final report `/tmp/tanstack-projection-compatibility-final.json` is **232/63**,
+  no skips, success false: projection **85/63**, existing Collection oracle
+  **28/0**, context transport **96/0**, facade adapter **5/0**, and functional
+  variants **18/0**. The old projection product remains **21/36** including its
+  three controls; newly added cases account for **64/27**. These are overlapping
+  test combinations, not additional distinct-defect counts. No runtime changes.
+- Controls corrected before freezing this specification:
+  - Draft sibling query used a constant filter, which is not a correlated
+    include. Six cases stopped at compiler validation. The sibling now uses
+    `parent.siblingGroup`; those cases reach callback/publication assertions.
+    Draft `/tmp/tanstack-projection-compatibility-draft.json`: **70/48**, with
+    six validation errors. Corrected
+    `/tmp/tanstack-projection-compatibility-correlated.json`: **70/48**, with
+    assertion failures instead. Added expression controls/stage-specific reach
+    and sibling updates yield
+    `/tmp/tanstack-projection-compatibility-controls.json`: **76/54**.
+  - The first custom-key probe changed the key when the score changed. Its
+    three include-ignoring cells also failed, so it did not isolate projection
+    ordering. `/tmp/tanstack-projection-consumer-boundary.json`: **82/66**.
+    The frozen product uses `result:${row.id}`, a stable key read from actual
+    callback output. Whether mutable public keys are supported is unclassified;
+    this is not a refutation or fix of that separate behavior. Keep the draft
+    report for a later contract check rather than declaring it resolved.
+- New-suite ESLint/Prettier checks pass. Full DB typecheck still exits 2 with
+  errors outside this file (`/tmp/tanstack-projection-consumer-types.txt`);
+  no new-suite diagnostics were printed. Not a full typecheck pass. The final
+  100× campaign and broader output shapes remain open.
+- [ ] Before declaring projection complete, include opaque wrapper inputs and
+  nested facade readiness/error rollback in the final integration check. Date
+  input preservation and the existing opaque output cases do not prove those
+  whole products. First implement against the now-declared controls; expand
+  only where the changed boundary actually introduces a new interaction.
+- [ ] Check mutable public-key behavior separately before classifying the
+  discarded diagnostic. Do not grow this projection repair around it.
 - [ ] After the post-commit loss audit, repair the shared projection boundary:
   preserve source-row state through all declared source forms, run callbacks
   only once their include inputs have the promised form, and reuse the existing

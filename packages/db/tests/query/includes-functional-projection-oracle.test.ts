@@ -18,10 +18,41 @@ const cells = boundaries.flatMap((boundary) =>
     ),
   ),
 )
+const consumers = [`expression`, `functional`] as const
+const valueShapes = [`number`, `null`, `date`, `dropped-record`] as const
+const valueCells = forms.flatMap((form) =>
+  consumers.flatMap((consumer) =>
+    valueShapes.flatMap((shape) =>
+      [false, true].map((withInclude) => ({
+        form,
+        consumer,
+        shape,
+        withInclude,
+      })),
+    ),
+  ),
+)
+const renamedCells = forms.flatMap((form) =>
+  consumers.flatMap((consumer) =>
+    consumers.flatMap((projection) =>
+      [false, true].map((withSibling) => ({
+        form,
+        consumer,
+        projection,
+        withSibling,
+      })),
+    ),
+  ),
+)
+const operatorCells = forms.flatMap((form) =>
+  ([`custom-key`, `selected-order`, `distinct`] as const).flatMap((operator) =>
+    [false, true].map((readsInclude) => ({ form, operator, readsInclude })),
+  ),
+)
 
 type Child = { id: number; parentGroup: number; value: number }
 type Input = { id: number; kind: string; children?: unknown }
-type Phase = `initial` | `child-update` | `route-move`
+type Phase = `initial` | `child-update` | `sibling-update` | `route-move`
 type ChildView = {
   valid: boolean
   ready: boolean | undefined
@@ -68,6 +99,436 @@ class Projection {
     readonly total: number,
   ) {}
 }
+
+describe(`functional projection output compatibility`, () => {
+  it(`covers the declared output and renamed-field products`, () => {
+    expect(valueCells).toHaveLength(48)
+    expect(renamedCells).toHaveLength(24)
+    expect(operatorCells).toHaveLength(18)
+    expect(new Set(valueCells.map((cell) => JSON.stringify(cell))).size).toBe(
+      48,
+    )
+    expect(new Set(renamedCells.map((cell) => JSON.stringify(cell))).size).toBe(
+      24,
+    )
+    expect(
+      new Set(operatorCells.map((cell) => JSON.stringify(cell))).size,
+    ).toBe(18)
+  })
+
+  it.each(operatorCells)(
+    `$form / $operator / reads-include=$readsInclude consumes the projected value`,
+    async ({ form, operator, readsInclude }) => {
+      const parents = createControlledCollection(`operator-parent`, [
+        { id: 1, group: 1, base: 3 },
+        { id: 2, group: 2, base: 5 },
+      ])
+      const children = createControlledCollection(`operator-child`, [
+        { id: 10, parentGroup: 1, value: 3 },
+        { id: 20, parentGroup: 2, value: 5 },
+      ])
+      // This model stores the scalar computed on a parent projection. A live
+      // Collection handle does not make its scalar reads child dependencies.
+      const expectedScores = new Map([
+        [1, 3],
+        [2, 5],
+      ])
+      const observed: Array<ChildView> = []
+      const live = createLiveQueryCollection({
+        query: (q) => {
+          const source = q
+            .from({ parent: parents.collection })
+            .select(({ parent }) => {
+              const childRows = q
+                .from({ child: children.collection })
+                .where(({ child }) => eq(child.parentGroup, parent.group))
+              return {
+                id: parent.id,
+                base: parent.base,
+                children:
+                  form === `collection`
+                    ? childRows
+                    : form === `array`
+                      ? toArray(childRows)
+                      : materialize(childRows),
+              }
+            })
+          const projected = q.from({ row: source }).fn.select(({ row }) => {
+            const view = readsInclude
+              ? readChildren(row.children, form)
+              : undefined
+            if (view) observed.push({ ...view, rows: publicRows(view.rows) })
+            return {
+              id: operator === `distinct` ? 0 : row.id,
+              score: view
+                ? view.rows.reduce((sum, child) => sum + child.value, 0)
+                : row.base,
+            }
+          })
+          if (operator === `distinct`) return projected.distinct()
+          if (operator === `selected-order`)
+            return projected
+              .orderBy(({ $selected }) => $selected.score, `desc`)
+              .orderBy(({ $selected }) => $selected.id)
+              .limit(1)
+          return projected
+        },
+        getKey:
+          operator === `custom-key` ? (row) => `result:${row.id}` : undefined,
+      })
+      const check = () => {
+        let expected = [...expectedScores].map(([id, score]) => ({ id, score }))
+        if (operator === `distinct`)
+          expected = [...new Set(expected.map((row) => row.score))].map(
+            (score) => ({ id: 0, score }),
+          )
+        if (operator === `selected-order`)
+          expected = expected
+            .sort(
+              (left, right) => right.score - left.score || left.id - right.id,
+            )
+            .slice(0, 1)
+        const sort = (rows: Array<{ id: number; score: number }>) =>
+          rows.sort(
+            (left, right) => left.id - right.id || left.score - right.score,
+          )
+        expect
+          .soft(sort(live.toArray.map(({ id, score }) => ({ id, score }))))
+          .toEqual(sort(expected))
+        if (operator === `custom-key`)
+          expect
+            .soft([...live.keys()].sort())
+            .toEqual(expected.map((row) => `result:${row.id}`).sort())
+        for (const view of observed) {
+          expect.soft(view.valid, `operator callback input form`).toBe(true)
+          if (form === `collection`)
+            expect
+              .soft(view.ready, `operator callback input readiness`)
+              .toBe(true)
+        }
+        observed.length = 0
+      }
+      try {
+        await live.preload()
+        check()
+        if (readsInclude && form !== `collection`) expectedScores.set(1, 7)
+        children.write(`update`, { id: 10, parentGroup: 1, value: 7 })
+        check()
+        expectedScores.set(1, 5)
+        parents.write(`update`, { id: 1, group: 2, base: 5 })
+        check()
+        expectedScores.delete(1)
+        parents.write(`delete`, { id: 1, group: 2, base: 5 })
+        check()
+      } finally {
+        await live.cleanup()
+        await parents.collection.cleanup()
+        await children.collection.cleanup()
+      }
+    },
+  )
+
+  it.each(valueCells)(
+    `$form / $consumer / $shape / include=$withInclude preserves arbitrary output`,
+    async ({ form, consumer, shape, withInclude }) => {
+      const parents = createControlledCollection(`output-parent`, [
+        { id: 1, value: 2 },
+      ])
+      const children = createControlledCollection(`output-child`, [
+        { id: 10, parentId: 1 },
+      ])
+      let expectedValue = 2
+      const assertValue = (value: unknown, expected?: number) => {
+        switch (shape) {
+          case `number`:
+            expect.soft(typeof value).toBe(`number`)
+            if (expected !== undefined) expect.soft(value).toBe(expected)
+            break
+          case `null`:
+            expect.soft(value).toBeNull()
+            break
+          case `date`:
+            expect.soft(value instanceof Date).toBe(true)
+            if (expected !== undefined && value instanceof Date)
+              expect.soft(value.getTime()).toBe(expected * 1000)
+            break
+          case `dropped-record`:
+            expect.soft(value !== null && typeof value === `object`).toBe(true)
+            if (value !== null && typeof value === `object`) {
+              // Virtual properties are public metadata. Check the selected field
+              // and forbid input paths without imposing a new metadata contract.
+              expect.soft(`children` in value || `row` in value).toBe(false)
+              expect.soft(`code` in value).toBe(true)
+              if (expected !== undefined && `code` in value)
+                expect.soft(value.code).toBe(expected)
+            }
+        }
+      }
+      const live = createLiveQueryCollection((q) => {
+        const source = q
+          .from({ parent: parents.collection })
+          .select(({ parent }) => {
+            const childRows = q
+              .from({ child: children.collection })
+              .where(({ child }) => eq(child.parentId, parent.id))
+            return {
+              id: parent.id,
+              value: parent.value,
+              ...(withInclude
+                ? {
+                    children:
+                      form === `collection`
+                        ? childRows
+                        : form === `array`
+                          ? toArray(childRows)
+                          : materialize(childRows),
+                  }
+                : {}),
+            }
+          })
+        const projected = q.from({ row: source }).fn.select(({ row }) => {
+          switch (shape) {
+            case `number`:
+              return row.value
+            case `null`:
+              return null
+            case `date`:
+              return new Date(row.value * 1000)
+            case `dropped-record`:
+              return { code: row.value }
+          }
+        })
+        const outer = q.from({ result: projected })
+        return consumer === `expression`
+          ? outer.select(({ result }) => ({ value: result }))
+          : outer.fn.select(({ result }) => {
+              // Observe the value on entry, including retract callbacks. Those
+              // may carry an earlier value, but must still have its proper type.
+              assertValue(result)
+              return { value: result }
+            })
+      })
+      const check = () => {
+        expect.soft(live.toArray).toHaveLength(1)
+        assertValue(live.toArray[0]?.value, expectedValue)
+      }
+      try {
+        await live.preload()
+        check()
+        children.write(`insert`, { id: 11, parentId: 1 })
+        check()
+        expectedValue = 4
+        parents.write(`update`, { id: 1, value: expectedValue })
+        check()
+        parents.write(`delete`, { id: 1, value: expectedValue })
+        expect.soft(live.toArray).toEqual([])
+      } finally {
+        await live.cleanup()
+        await parents.collection.cleanup()
+        await children.collection.cleanup()
+      }
+    },
+  )
+
+  it.each(renamedCells)(
+    `$form / $projection / $consumer / sibling=$withSibling materializes inputs before renaming them`,
+    async ({ form, consumer, projection, withSibling }) => {
+      const parents = createControlledCollection(`renamed-parent`, [
+        { id: 1, group: 1, siblingGroup: 2 },
+      ])
+      const initial: Array<Child> = [
+        { id: 10, parentGroup: 1, value: 3 },
+        { id: 20, parentGroup: 2, value: 5 },
+      ]
+      const children = createControlledCollection(`renamed-child`, initial)
+      const truth = new Map(initial.map((row) => [row.id, row]))
+      let group = 1
+      let phase: Phase = `initial`
+      const calls: Array<{
+        phase: Phase
+        stage: `projection` | `consumer`
+        primary: ChildView
+        sibling?: ChildView
+      }> = []
+      const inspect = (
+        stage: `projection` | `consumer`,
+        primary: unknown,
+        sibling: unknown,
+      ) => {
+        const view = readChildren(primary, form)
+        const second = withSibling ? readChildren(sibling, form) : undefined
+        calls.push({
+          phase,
+          stage,
+          primary: { ...view, rows: publicRows(view.rows) },
+          sibling: second && { ...second, rows: publicRows(second.rows) },
+        })
+        return (
+          view.rows.reduce((sum, row) => sum + row.value, 0) +
+          (second?.rows.reduce((sum, row) => sum + row.value, 0) ?? 0)
+        )
+      }
+      const live = createLiveQueryCollection((q) => {
+        const source = q
+          .from({ parent: parents.collection })
+          .select(({ parent }) => {
+            const primary = q
+              .from({ child: children.collection })
+              .where(({ child }) => eq(child.parentGroup, parent.group))
+            const sibling = q
+              .from({ other: children.collection })
+              .where(({ other }) => eq(other.parentGroup, parent.siblingGroup))
+            return {
+              id: parent.id,
+              children:
+                form === `collection`
+                  ? primary
+                  : form === `array`
+                    ? toArray(primary)
+                    : materialize(primary),
+              ...(withSibling
+                ? {
+                    sibling:
+                      form === `collection`
+                        ? sibling
+                        : form === `array`
+                          ? toArray(sibling)
+                          : materialize(sibling),
+                  }
+                : {}),
+            }
+          })
+        const input = q.from({ row: source })
+        const projected =
+          projection === `expression`
+            ? input.select(({ row }) => ({
+                id: row.id,
+                renamed: { primary: row.children, sibling: row.sibling },
+                total: 0,
+              }))
+            : input.fn.select(({ row }) => ({
+                id: row.id,
+                renamed: { primary: row.children, sibling: row.sibling },
+                total: inspect(`projection`, row.children, row.sibling),
+              }))
+        const outer = q.from({ result: projected })
+        return consumer === `expression`
+          ? outer.select(({ result }) => ({ value: result }))
+          : outer.fn.select(({ result }) => ({
+              value: {
+                id: result.id,
+                renamed: result.renamed,
+                total: inspect(
+                  `consumer`,
+                  result.renamed.primary,
+                  result.renamed.sibling,
+                ),
+              },
+            }))
+      })
+      const check = () => {
+        const row = live.toArray[0]?.value
+        expect.soft(live.toArray, `${phase}: row count`).toHaveLength(1)
+        expect.soft(row?.id, `${phase}: public id`).toBe(1)
+        const expectedPrimary = publicRows(
+          [...truth.values()].filter((child) => child.parentGroup === group),
+        )
+        const expectedSibling = withSibling
+          ? publicRows(
+              [...truth.values()].filter((child) => child.parentGroup === 2),
+            )
+          : []
+        for (const [value, expected] of [
+          [row?.renamed.primary, expectedPrimary],
+          ...(withSibling
+            ? [[row?.renamed.sibling, expectedSibling] as const]
+            : []),
+        ] as const) {
+          const view = readChildren(value, form)
+          expect.soft(view.valid, `${phase}: renamed public form`).toBe(true)
+          expect
+            .soft(publicRows(view.rows), `${phase}: renamed public rows`)
+            .toEqual(expected)
+          if (form === `collection`)
+            expect
+              .soft(view.ready, `${phase}: renamed public readiness`)
+              .toBe(true)
+        }
+        if (row)
+          expect
+            .soft(
+              `children` in row || `row` in row,
+              `${phase}: input paths do not leak`,
+            )
+            .toBe(false)
+        if (
+          form !== `collection` ||
+          phase === `initial` ||
+          phase === `route-move`
+        ) {
+          if (projection === `functional` || consumer === `functional`)
+            expect
+              .soft(row?.total, `${phase}: derived total`)
+              .toBe(
+                [...expectedPrimary, ...expectedSibling].reduce(
+                  (sum, child) => sum + child.value,
+                  0,
+                ),
+              )
+          for (const stage of [
+            ...(projection === `functional` ? [`projection` as const] : []),
+            ...(consumer === `functional` ? [`consumer` as const] : []),
+          ]) {
+            expect
+              .soft(
+                calls.filter(
+                  (call) => call.phase === phase && call.stage === stage,
+                ).length,
+                `${phase}: ${stage} callback reach`,
+              )
+              .toBeGreaterThan(0)
+          }
+        }
+        for (const call of calls.filter((item) => item.phase === phase)) {
+          for (const view of [
+            call.primary,
+            ...(call.sibling ? [call.sibling] : []),
+          ]) {
+            expect.soft(view.valid, `${phase}: callback input form`).toBe(true)
+            if (form === `collection`)
+              expect
+                .soft(view.ready, `${phase}: callback input readiness`)
+                .toBe(true)
+          }
+        }
+      }
+      try {
+        await live.preload()
+        check()
+        phase = `child-update`
+        const changed = { id: 10, parentGroup: 1, value: 7 }
+        truth.set(10, changed)
+        children.write(`update`, changed)
+        check()
+        if (withSibling) {
+          phase = `sibling-update`
+          const sibling = { id: 20, parentGroup: 2, value: 11 }
+          truth.set(20, sibling)
+          children.write(`update`, sibling)
+          check()
+        }
+        phase = `route-move`
+        group = 2
+        parents.write(`update`, { id: 1, group, siblingGroup: 2 })
+        check()
+      } finally {
+        await live.cleanup()
+        await parents.collection.cleanup()
+        await children.collection.cleanup()
+      }
+    },
+  )
+})
 
 describe(`functional include projection boundary grammar`, () => {
   it(`preserves a scalar result when a functional projection drops its include`, async () => {
