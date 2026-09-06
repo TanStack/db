@@ -3523,6 +3523,11 @@ candidate repair scopes, not completed fixes or proof of root cause.
   4. [ ] Opaque functional root results lose rematerialization. Check selected
      fields and children, not a new guarantee about root prototypes. Existing
      nested opaque-wrapper regressions remain intact.
+  5. [ ] Inline child updates must rerun functional projections. The frozen
+     report has 20 zero-call reach failures: QueryRef / recursive QueryRef ×
+     array / materialized × record / opaque-root × empty / populated (16),
+     plus union × array / materialized × opaque-root × empty / populated (4).
+     These overlap the value failures above; they are not 20 additional bugs.
 - Controls corrected two assumptions before freezing the baseline. Explicitly
   selecting `children: undefined` produced null; an actually absent union field
   is the intended control. The intermediate report
@@ -3546,6 +3551,15 @@ candidate repair scopes, not completed fixes or proof of root cause.
 - New-file ESLint passes; formatting/diff check pass. Full DB `tsc --noEmit`
   exits 2 with diagnostics in other existing test files, none in this new file
   (`/tmp/tanstack-projection-types.txt`). This is not a full typecheck pass.
+- [x] Post-commit Field Lab loss audit of `8e3592ff` recovered family 5 above:
+  compressing callback non-execution into wrong values had dropped an explicit
+  reach law. It verified the report counts, exclusions, unchanged adjacent
+  suites and absence of runtime edits. The auditor was reused, with prior
+  framing and source-order contamination; it ran no tests and did not inspect
+  the optional typecheck transcript. This is not fresh runtime endorsement.
+- Scope limit: opaque roots here are callback outputs. Opaque callback input
+  roots and chained functional selectors are not a declared product dimension.
+  Do not claim those covered or infer a defect without a bounded witness.
 - [ ] After the post-commit loss audit, repair the shared projection boundary:
   preserve source-row state through all declared source forms, run callbacks
   only once their include inputs have the promised form, and reuse the existing
