@@ -3838,3 +3838,36 @@ candidate repair scopes, not completed fixes or proof of root cause.
   ran no tests and did not inspect the optional type transcript. Reports alone
   do not prove draft source suffixes, removed logging, command environment,
   lint, or formatting. This audit is not runtime endorsement.
+
+### Cheap facade snapshot spike: isolation gate failed
+
+- [x] Try the user-approved shallow row-copy approach. Full record and
+  replayable candidate: `notes/facade-snapshot-spike.md` and `.patch`.
+  Staging Collection inputs in the same D2 graph plus retaining callback
+  outputs with D2 reduce makes all **150 original projection tests pass**.
+  The eleven adjacent suites also pass **370/0**.
+- [x] Add the missing publication observation product before accepting the
+  green projection result. Three probes check held row reads, held index
+  reads, and reading a held public handle inside a failing callback. On the
+  candidate they are **1 green / 2 red**: rows stay frozen, but the held index
+  and callback-time public read expose private state. This is one route-change
+  history, not proof of every failure/async publication path.
+- [x] Withdraw the unsafe production wiring without deleting its evidence or
+  the new tests. Production is byte-identical to `fd06c647`; the patch is
+  archived. The expanded executable projection oracle is **129/24**, no skips.
+  Its three added baseline reds fail at initial preload (null input), before
+  reaching the candidate's isolation checkpoints. Do not report the 150/0
+  candidate result as a landed repair or these cells as three new bugs.
+- [x] Measure the complete candidate: **+179 net production lines**, including
+  two new modules. No old deferred path removed, no bundle/memory benchmark.
+  The pre-spike branch remains **+3,095 net executable source lines** against
+  origin/main `68366eca`, not below main. Final test lint/format passes; the
+  candidate package type check and source lint are not claimed green.
+- [ ] Before implementing another candidate, define a separate draft input
+  view that leaves public facade state and indexes untouched. Pin retained
+  handle identity and opaque callback-output behavior first. No new API ban
+  or global coordination layer is approved by this experiment.
+- [ ] Only after this isolation gate passes, run async/cleanup/nested boundary
+  probes, the lifecycle census, and the queued 100x campaign; then measure
+  whether old machinery can be deleted rather than layered over.
+- [ ] Post-commit Field Lab loss audit of this frozen checkpoint.

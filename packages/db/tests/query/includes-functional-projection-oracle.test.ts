@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { BasicIndex } from '../../src/indexes/basic-index.js'
 import {
   createLiveQueryCollection,
   eq,
@@ -101,6 +102,73 @@ class Projection {
 }
 
 describe(`functional projection output compatibility`, () => {
+  it.each([`rows`, `index`, `callback-read`] as const)(
+    `keeps held facade %s unchanged when a later projection throws`,
+    async (surface) => {
+      const parents = createControlledCollection(`snapshot-parent`, [
+        { id: 1, groupId: 1 },
+      ])
+      const children = createControlledCollection(`snapshot-child`, [
+        { id: 10, groupId: 1 },
+        { id: 20, groupId: 2 },
+      ])
+      const failure = new Error(`projection failed after draft preparation`)
+      let fail = false
+      let prepared: Array<number> = []
+      let readPublished: (() => Array<number>) | undefined
+      let observed: Array<number> | undefined
+      const query = createLiveQueryCollection((q) =>
+        q
+          .from({
+            row: q
+              .from({ parent: parents.collection })
+              .select(({ parent }) => ({
+                id: parent.id,
+                children: q
+                  .from({ child: children.collection })
+                  .where(({ child }) => eq(child.groupId, parent.groupId)),
+              })),
+          })
+          .fn.select(({ row }) => {
+            prepared = row.children.toArray.map((child) => child.id)
+            if (fail) {
+              observed = readPublished?.()
+              throw failure
+            }
+            return { id: row.id, children: row.children }
+          }),
+      )
+      try {
+        await query.preload()
+        const original = query.get(1)!
+        const held = original.children
+        readPublished = () => held.toArray.map((child) => child.id)
+        const index = held.createIndex((child) => child.id, {
+          indexType: BasicIndex,
+        })
+        expect(held.toArray.map((child) => child.id)).toEqual([10])
+        expect(index.lookup(`eq`, 10)).toEqual(new Set([10]))
+        fail = true
+        expect(() => parents.write(`update`, { id: 1, groupId: 2 })).toThrow(
+          failure,
+        )
+        expect(prepared).toEqual([20])
+        expect(query.get(1)).toBe(original)
+        if (surface === `rows`) {
+          expect(held.toArray.map((child) => child.id)).toEqual([10])
+        } else if (surface === `index`) {
+          expect(index.lookup(`eq`, 10)).toEqual(new Set([10]))
+        } else {
+          expect(observed).toEqual([10])
+        }
+      } finally {
+        await query.cleanup()
+        await parents.collection.cleanup()
+        await children.collection.cleanup()
+      }
+    },
+  )
+
   it.each([false, true])(
     `preserves projection through public-facade changes and parent restoration (reads=%s)`,
     async (readsFacade) => {
