@@ -36,7 +36,7 @@ current as review findings, oracle laws, and implementation choices change.
   production lines. Fresh100x integration gate passes1582/0 across26 files,
   exit0, no skipped tests or reported runner errors. Integration loss audit
   complete; final campaign report audit complete.
-- Still open: whole-branch size goal (+3087 net package-source lines against
+- Still open: whole-branch size goal (+3102 net package-source lines against
   fixedmain68366eca), final coherence/review and
   RFC/PR/changeset reconciliation. Older unchecked entries are phase records;
   reconcile them with later evidence before treating them as current bugs.
@@ -55,11 +55,12 @@ current as review findings, oracle laws, and implementation choices change.
   oracle-confirmed extra-fetch defect repaired (4 red→16 green matrix cells).
   Expanded28-file1x and full100x gates1729/0; W4 loss audit complete. Total W1–W4
   savings153 source lines/2362 minified/477 gzip bytes; source gap3119.
-- W5 flattens replay pending state:32 more source lines removed,383 minified/
-  93 gzip diagnostic bytes removed. Expanded integration1730/0 at1x, ordinary
-  package types pass. New reentry test catches an initial refactor regression;
-  baseline and corrected implementation pass. Post-commit loss audit and100x
-  still pending. Combined W1–W5 savings185 lines/2745 minified/570 gzip bytes.
+- W5 flattens replay pending state, with retained-attempt eligibility restored
+  after the loss audit:17 more source lines removed,145 minified/34 gzip
+  diagnostic bytes removed. Expanded integration1731/0 at1x, package types pass.
+  Expanded reentry matrix catches both refactor regressions; baseline and final
+  implementation pass3/3. Final post-commit audit and focused100x pending.
+  Combined W1–W5 savings170 lines/2507 minified/511 gzip bytes,source gap3102.
 
 
 ## Chosen design
@@ -5463,5 +5464,70 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   esbuild measurement, not a CI/application payload or heap benchmark.
   Combined W1–W5:185 source lines/2745 minified/570 gzip bytes removed.
   Fixed-main package-source gap3087 (5289 added/2202 removed), excludingMarkdown.
-- [ ] Commit, then source-to-implementation Field Lab loss audit.
-- [ ] Expanded frozen full100x integration campaign.
+- [x] Commitcdb9ecdb, then source-to-implementation Field Lab loss audit.
+  Recovered one supported distinction: parent81a1b348 retains old attempts
+  while setup or pending work remains (subscription419–425); returning ordinary
+  work can enroll while that attempt remains (689–700). Candidate current-only
+  guard (668–680) erased that category. Counterexample: A owns pending P; extra
+  demand starts in A and synchronously starts B before returning pending Q;
+  B settles, then P settles, Q still pending. Candidate can publish without Q.
+  This is source-traced, not yet executed. Existing new case used a settled
+  failed A, so it never covered the retained-old-attempt category. Dropping rule:
+  current versus noncurrent collapsed retained versus retired. No other
+  supported loss found in setup, owner release, shared promises, failure scope.
+  Reused/nonblind candidate-author scan; familiarity can favor the representation,
+  and omission focus can overvalue harmless differences. No readiness verdict.
+  Do not accept W5 until pending-old-attempt and settlement-order cases pass.
+- [x] Full100x on frozencdb9ecdb:1730/0,28 files,exit0,no skips/reported runner
+  errors,502.44s. `/tmp/tanstack-weight-w1-w5-100.{json,log}`. This run omitted
+  the audit's new pending-predecessor case and does NOT clear that finding.
+
+#### W5 audit repair — retained versus retired is not current versus old
+
+- Add the pending-predecessor state to the same reentry matrix (3 total cells).
+  Let new replay B settle first, then old enrolled P, then returning extra Q.
+  Assert retained rows until Q settles. On cdb9ecdb,2pass/1fail: value2 publishes
+  at P settlement instead of retained0. On pre-W5 source81a1b348,3/3 pass.
+  Logs `/tmp/tanstack-weight-replay-pending-{red,baseline,green}.log`.
+  This is the second refactor-introduced error exposed by strengthening the test,
+  not an additional bug in the pre-refactor branch. The loss audit recovered
+  the missing replay-state dimension that random repetitions could not supply.
+- Keep the flat session pending set and setup count; each attempt also retains
+  pendingCount/setupComplete for startup eligibility. Current attempts may
+  enroll; older ones may enroll only while setup or other work retains them.
+  Drained old attempts cannot reopen. Participants point back to their attempt;
+  settlement decrements only if its participant was still present, and logical
+  release removes/decrements every owned participant exactly once. This removes
+  the registry and three pruning loops without equating old with retired.
+- Final W5 delta against81a1b348:41added/58removed,net17 production lines.
+  DB diagnostic bundle345718→345573 (-145),gzip97685→97651 (-34);DB-IVM unchanged.
+  `/tmp/tanstack-weight-replay-retention-bundle.json`. Initial32-line/383-byte
+  claims above describe the rejected version, not final savings. Combined
+  W1–W5 savings170 lines/2507 minified/511 gzip bytes; source gap3102.
+- Expanded integration1731/0,28 files,exit0,no skips or reported runner errors,
+  multiplier1,fixed corpora/fresh seeds. `/tmp/tanstack-weight-replay-retention-full`
+  JSON/log. Ordinary package tsc passes (`-retention-types.log`). Changed-file
+  lint retains the same five source errors/seven test shadow warnings; no new
+  suppression. No test removed or expected-failure classifier introduced.
+- [ ] Follow-up commit, then source-to-implementation loss audit of the repair.
+- [ ] Focused replay/lifecycle100x on the corrected frozen implementation.
+
+### Next source-weight candidate (read-only during W5 gate)
+
+- group-by.ts: processGroupBy still has separate single-group and multi-group
+  pipelines, each with aggregate extraction, wrapped evaluation, public virtual
+  metadata/route attachment, expression HAVING and functional HAVING. This
+  duplication also exists in fixed main, not just this stack's additions.
+  Candidate: one pipeline with distinct key/selected-value construction; avoid
+  a new general abstraction or weakening equality/raw-representative semantics.
+- Preserve zero-group validation/selection differences and public single_group
+  key; grouped primitive/opaque keys, stable positive representatives, wrapped
+  aggregate refs, collision-safe fields, parent route transport, virtual origin,
+  and callback metadata stripping. The expression HAVING paths currently differ
+  in explicit toBooleanPredicate coercion; determine executable behavior before
+  unifying them. Existing includes context/collection/cross-formulation tests
+  cover grouped routing, not proof of every grouped/ungrouped equivalence.
+- No runtime change, size estimate, or completed coverage claim for this
+  candidate yet. Hashing/equality inspection found different structural versus
+  runtime identity contracts; shared-looking type checks alone do not justify
+  combining them or deleting bounded cyclic traversal guarantees.

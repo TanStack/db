@@ -108,6 +108,8 @@ type SubsetDemand = {
 }
 
 type TruncateReplayAttempt = {
+  pendingCount: number
+  setupComplete: boolean
   failures: Map<SubsetDemand, Error>
 }
 
@@ -115,7 +117,7 @@ type TruncateReplaySession = {
   loadSubsetSession: number
   publicationState: TruncatePublicationState
   privateRows: Map<string | number, object>
-  pending: Set<{ demand: SubsetDemand }>
+  pending: Set<{ demand: SubsetDemand; attempt: TruncateReplayAttempt }>
   pendingSetups: number
   currentAttempt: TruncateReplayAttempt
   completion: Deferred<void>
@@ -329,6 +331,8 @@ export class CollectionSubscription
     }
 
     const attempt: TruncateReplayAttempt = {
+      pendingCount: 0,
+      setupComplete: false,
       failures: new Map(),
     }
     const currentRows = this.collection.currentStateAsChanges({
@@ -362,6 +366,7 @@ export class CollectionSubscription
       this.startTruncateReplayDemand(session, attempt, demand)
       if (this.truncateReplaySession !== session) break
     }
+    attempt.setupComplete = true
     session.pendingSetups--
     this.checkTruncateReplayComplete(session)
   }
@@ -390,6 +395,8 @@ export class CollectionSubscription
     }
 
     const attempt: TruncateReplayAttempt = {
+      pendingCount: 0,
+      setupComplete: false,
       failures: new Map(),
     }
     let session = this.truncateReplaySession
@@ -455,6 +462,7 @@ export class CollectionSubscription
         // A newer truncate arrived before this attempt began source work. It
         // already captured the active demands, so starting this obsolete
         // acquisition now would place it outside the newer abort sweep.
+        attempt.setupComplete = true
         session.pendingSetups--
         this.checkTruncateReplayComplete(session)
         return
@@ -471,6 +479,7 @@ export class CollectionSubscription
         }
       }
 
+      attempt.setupComplete = true
       session.pendingSetups--
       this.checkTruncateReplayComplete(session)
     })
@@ -638,7 +647,7 @@ export class CollectionSubscription
 
   private settleTruncateReplay(
     session: TruncateReplaySession,
-    pending: { demand: SubsetDemand },
+    pending: { demand: SubsetDemand; attempt: TruncateReplayAttempt },
   ): void {
     try {
       if (this.truncateReplaySession !== session) return
@@ -646,7 +655,7 @@ export class CollectionSubscription
         this.retireStaleTruncateReplay(session)
         return
       }
-      session.pending.delete(pending)
+      if (session.pending.delete(pending)) pending.attempt.pendingCount--
       this.checkTruncateReplayComplete(session)
     } catch (error) {
       // Replay settlement runs from a Promise callback, so throwing here would
@@ -667,16 +676,19 @@ export class CollectionSubscription
   ): void {
     if (
       this.truncateReplaySession !== session ||
-      session.currentAttempt !== attempt ||
+      (session.currentAttempt !== attempt &&
+        attempt.setupComplete &&
+        attempt.pendingCount === 0) ||
       !(result instanceof Promise)
     ) {
       return
     }
 
-    // Keep already-registered work from older attempts in the barrier, but do
-    // not enroll a startup superseded before adapter return. Each acquisition
-    // gets its own participant, even when its promise is shared.
-    const pending = { demand }
+    // An older attempt can still accept returning startup work while setup or
+    // another participant retains it. Once drained, it cannot reopen. Shared
+    // promises still get one participant per logical acquisition.
+    const pending = { demand, attempt }
+    attempt.pendingCount++
     session.pending.add(pending)
     void result.then(
       () => this.settleTruncateReplay(session, pending),
@@ -702,7 +714,10 @@ export class CollectionSubscription
     if (!session) return
     session.currentAttempt.failures.delete(demand)
     for (const pending of session.pending) {
-      if (pending.demand === demand) session.pending.delete(pending)
+      if (pending.demand === demand) {
+        session.pending.delete(pending)
+        pending.attempt.pendingCount--
+      }
     }
   }
 

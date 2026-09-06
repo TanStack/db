@@ -2283,7 +2283,11 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
-  it.each([`replay`, `additional demand`] as const)(
+  it.each([
+    `replay`,
+    `additional demand`,
+    `additional pending demand`,
+  ] as const)(
     `aborts a %s acquisition before a reentrant newer truncate starts`,
     async (start) => {
       let begin!: () => void
@@ -2294,6 +2298,7 @@ describe(`CollectionSubscription replay oracle`, () => {
       let truncate!: () => void
       const olderReplay = createDeferred<void>()
       const newerReplay = createDeferred<void>()
+      const predecessor = createDeferred<void>()
       const replaySignals: Array<AbortSignal | undefined> = []
       let loadCount = 0
       const collection = createCollection<ReplayRow>({
@@ -2317,7 +2322,10 @@ describe(`CollectionSubscription replay oracle`, () => {
                   return true
                 }
 
-                if (loadCount === 2 && start === `additional demand`) {
+                if (loadCount === 2 && start !== `replay`) {
+                  if (start === `additional pending demand`) {
+                    return predecessor.promise
+                  }
                   // A failed replay retains its public baseline after setup and
                   // all participants finish. Start the extra demand in that gap.
                   throw new Error(`retain the failed replay`)
@@ -2359,10 +2367,12 @@ describe(`CollectionSubscription replay oracle`, () => {
         commit()
         await flushPromises()
 
-        if (start === `additional demand`) {
-          expect(subscription.lastError).toEqual(
-            new Error(`retain the failed replay`),
-          )
+        if (start !== `replay`) {
+          if (start === `additional demand`) {
+            expect(subscription.lastError).toEqual(
+              new Error(`retain the failed replay`),
+            )
+          }
           expect(sortedRows(visible)).toEqual([{ id: `one`, value: 0 }])
           subscription.requestSnapshot({
             where: new Func(`eq`, [new PropRef([`id`]), new Value(`two`)]),
@@ -2378,12 +2388,22 @@ describe(`CollectionSubscription replay oracle`, () => {
         install(2)
         newerReplay.resolve()
         await flushPromises()
-        // A startup superseded before return does not hold publication. An
-        // ordinary demand still owns its separate readiness participant.
-        expect(sortedRows(visible)).toEqual([{ id: `one`, value: 2 }])
-        expect(subscription.status).toBe(
-          start === `replay` ? `ready` : `loadingSubset`,
-        )
+        if (start === `additional pending demand`) {
+          expect(sortedRows(visible)).toEqual([{ id: `one`, value: 0 }])
+          predecessor.resolve()
+          await flushPromises()
+          // The returning extra demand joined the retained old attempt. Its
+          // transport still holds publication after that attempt's prior work.
+          expect(sortedRows(visible)).toEqual([{ id: `one`, value: 0 }])
+          expect(subscription.status).toBe(`loadingSubset`)
+        } else {
+          // A startup superseded before return does not hold publication. An
+          // ordinary demand still owns its separate readiness participant.
+          expect(sortedRows(visible)).toEqual([{ id: `one`, value: 2 }])
+          expect(subscription.status).toBe(
+            start === `replay` ? `ready` : `loadingSubset`,
+          )
+        }
         if (!replaySignals[0]?.aborted) install(1)
         olderReplay.resolve()
         await flushPromises()
@@ -2391,6 +2411,7 @@ describe(`CollectionSubscription replay oracle`, () => {
         expect(sortedRows(visible)).toEqual([{ id: `one`, value: 2 }])
         expect(subscription.status).toBe(`ready`)
       } finally {
+        predecessor.resolve()
         olderReplay.resolve()
         newerReplay.resolve()
         await flushPromises()
