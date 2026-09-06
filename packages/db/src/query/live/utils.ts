@@ -461,6 +461,8 @@ export class OrderedSourceLoader {
   resetCursor(): void {
     this.generation++
     this.pending = undefined
+    this.hasLastBoundary = false
+    this.lastBoundary = undefined
     this.invalidateCursor()
   }
 
@@ -471,8 +473,6 @@ export class OrderedSourceLoader {
   invalidateCursor(): void {
     this.lastPage = undefined
     this.lastPrefixCount = undefined
-    this.hasLastBoundary = false
-    this.lastBoundary = undefined
   }
 
   invalidateSourceOrdering(): void {

@@ -1434,38 +1434,54 @@ describe(`ordered source work oracle`, () => {
     }
   })
 
-  it(`settles an underfilled source without repeating one continuation forever`, async () => {
-    const scenario: Scenario = {
-      middleCount: 3,
-      middleEligible: false,
-      lastEligible: false,
-      tied: false,
-      direction: `asc`,
-    }
-    const [collection, effect] = await Promise.all([
-      observeConsumer(`collection`, scenario),
-      observeConsumer(`effect`, scenario),
-    ])
+  it.each(
+    [0, 1, 2, 3, 4].flatMap((middleCount) =>
+      ([`asc`, `desc`] as const).flatMap((direction) =>
+        [false, true].map((tied) => ({ middleCount, direction, tied })),
+      ),
+    ),
+  )(
+    `settles an underfilled source without repeating a continuation: %j`,
+    async ({ middleCount, direction, tied }) => {
+      const scenario: Scenario = {
+        middleCount,
+        middleEligible: false,
+        lastEligible: false,
+        tied,
+        direction,
+      }
+      const [collection, effect] = await Promise.all([
+        observeConsumer(`collection`, scenario),
+        observeConsumer(`effect`, scenario),
+      ])
 
-    expect(collection.rows.map(({ id }) => id)).toEqual([1])
-    expect(effect.rows).toEqual(collection.rows)
-    expect(effect.errors).toEqual(collection.errors)
-    expect(effect.live).toBe(collection.live)
-    for (const observation of [collection, effect]) {
-      expect(observation.errors).toEqual([])
-      expect(observation.live).toBe(true)
-      expect(
-        observation.requests.length,
-        JSON.stringify(observation.requests),
-      ).toBeLessThanOrEqual(8)
-      expect(
-        observation.requests.filter(({ kind }) => kind === `page`).length,
-      ).toBeLessThanOrEqual(rowsForScenario(scenario).length)
-      expect(new Set(observation.requests.map(({ key }) => key)).size).toBe(
-        observation.requests.length,
-      )
-    }
-  })
+      expect(collection.rows.map(({ id }) => id)).toEqual([1])
+      expect(effect.rows).toEqual(collection.rows)
+      expect(effect.errors).toEqual(collection.errors)
+      expect(effect.live).toBe(collection.live)
+      for (const observation of [collection, effect]) {
+        expect(observation.errors).toEqual([])
+        expect(observation.live).toBe(true)
+        // At most one page and one tie-boundary load per source row, including
+        // the final empty page. A fixed cap mistakes longer finite walks for loops.
+        const sourceSize = rowsForScenario(scenario).length
+        expect(
+          observation.requests.length,
+          JSON.stringify(observation.requests),
+        ).toBeLessThanOrEqual(2 * sourceSize)
+        expect(
+          observation.requests.filter(({ kind }) => kind === `page`).length,
+        ).toBeLessThanOrEqual(sourceSize)
+        expect(
+          observation.requests.filter(({ kind }) => kind === `boundary`).length,
+        ).toBeLessThanOrEqual(sourceSize)
+        expect(
+          new Set(observation.requests.map(({ key }) => key)).size,
+          JSON.stringify(observation.requests),
+        ).toBe(observation.requests.length)
+      }
+    },
+  )
 
   it(`replaces an ordered snapshot after truncate without repeating void loads`, async () => {
     const initial: ReadonlyArray<Row> = [

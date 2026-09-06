@@ -1243,11 +1243,11 @@ explicitly removed.
 This is the bounded protocol census. Do not add another production patch until
 every row is either green or has a named red witness.
 
-Latest checkpoint: **573 passing / 2 failing** across 575 test functions.
+Latest checkpoint: **593 passing / 1 failing** across 594 test functions.
 The demand suite is **195/0**, and history is **37/0**. The initial-work
 notification mismatch was a model error: readiness and publication have
 different wait sets. Remaining failures: publication **0**, settled-peer replay **0**, ordered
-work **2**. The wider adjacent run has another **15 failing functions** (also
+work **1**. The wider adjacent run has another **15 failing functions** (also
 red on the pre-step runtime); these are separately queued below. Counts describe tests,
 not unique confirmed runtime bugs; contract-alignment notes below distinguish
 stale oracle expectations from implementation defects.
@@ -1263,7 +1263,7 @@ stale oracle expectations from implementation defects.
 | Row-bearing lifecycle histories                      | independent public-row model; exact batches modulo independent-key order; fixed and random histories | 43 green / 0 red; duplicate snapshots and retained-row reset repaired; live source truth checked independently; no visible-row request omission remains |
 | Replay phase transitions                             | setup/pending/settling/publishing crossed with release, reacquisition, supersession, abort, cleanup | 72 green; direct settled-peer recovery and consecutive failure/retry witnesses green |
 | Ordered route mechanics                              | page/prefix/boundary/full-source × return/throw/resolve/reject/abort/cleanup                        | green                                                        |
-| Ordered consumer integration                         | Collection/Effect parity, source-local recovery, public-window reentry, sync-session settlement     | 2 ordered-work reds: repeated continuation and synchronous recovery publication; adjacent failures separately queued |
+| Ordered consumer integration                         | Collection/Effect parity, source-local recovery, public-window reentry, sync-session settlement     | 1 ordered-work red: synchronous recovery publication; adjacent failures separately queued |
 | Ordered generated histories                          | 192 checked route/delivery/window/outcome/session/barrier histories; finite/full request shapes     | 192 green cells; no known-red classifier remains |
 
 The earlier 44-test red catalog grouped into these protocol faults. Later
@@ -3001,14 +3001,58 @@ candidate repair scopes, not completed fixes or proof of root cause.
   chosen categories at the expense of other omissions. No auditor test execution,
   correctness endorsement, or independent proof of commands, successful example
   counts, temporary patch restoration, or lint results.
-- [ ] Resolve repeated continuation and synchronous full-source recovery
-      publication (two bounded ordered-work reds).
+- [x] Distinguish valid finite walks from duplicate tie-boundary acquisition;
+      correct the work bound and repair boundary retention (next section).
+- [ ] Resolve synchronous full-source recovery publication (one bounded red).
 - [ ] Reconcile/fix the fifteen pre-existing adjacent failures before claiming
       broad green: two Effect release-retry assertions; three pagination
       reentry/session-return assertions; six live ordered incremental failure
       cells; three Effect obsolete-demand cleanup cells; one live cleanup retry
       cell. These are test failures, not fifteen confirmed distinct bugs.
       Keep the existing assertions until each has a contract-backed disposition.
+
+### Ordered work bounds and tie-boundary retention
+
+- The original underfilled witness did not repeat a request. Its five-row trace
+  contained nine distinct exact keys: five pages (including the terminal empty
+  page) and four tie-boundary loads. It failed the constant cap of eight before
+  reaching the no-duplicate assertion. This is an oracle bound error, not proof
+  of a runtime loop. Preserve that original scenario in the expanded matrix.
+- Replaced the constant with two source-size bounds: at most one page and one
+  boundary load per source row; total at most twice source size. Kept exact-key
+  uniqueness, expected output, error/liveness parity, empty errors, and live
+  consumer assertions. Added an explicit boundary-count bound and trace
+  diagnostics. Fixture remains the same finite immutable source protocol.
+- Expanded 1 case to 20: middle row count 0–4 × ascending/descending × tied/
+  distinct ranks, through both consumers. The matrix before production changes
+  was **16/4**, `/tmp/tanstack-ordered-progress-bound-matrix.json`. Four new
+  descending/tied cases (middle count 1–4) reach the uniqueness assertion and
+  report three unique keys in four requests. Those are actual duplicate loads,
+  not the old incorrect work cap. Seven-suite pre-fix census **589/5**, 594
+  functions, `/tmp/tanstack-ordered-progress-matrix-final-census.json` (seed
+  override 1657011); ordered-work 39/5, others unchanged.
+- A row emitted by a tie-boundary acquisition cleared the loader's existing
+  last-boundary record through ordinary cursor invalidation. Its next finite
+  continuation then acquired the same boundary again. Move the two existing
+  boundary resets from `invalidateCursor` to `resetCursor`: new row arrivals
+  retain that record, while replay/reset and disposal still clear it. A different
+  boundary value continues to compare unequal in `loadBoundary`. No new state,
+  helper, or production lines (**2 added / 2 removed**).
+- Eight-suite restored run **624/1**,
+  `/tmp/tanstack-ordered-boundary-retention-green.json`, override 1657011:
+  seven-suite lifecycle census **593/1**, plus source-loader **31/0**. Ordered
+  work is **43/1**; its only red is synchronous full-source recovery publication.
+  New matrix 20/0. The pre-fix matrix/census are red controls for these same
+  tests against the preceding committed runtime; no expected-failure filter or
+  runtime ablation remains.
+- Targeted 10× with override -1475725790 and `--testTimeout=60000`, including
+  Effect, pagination and error-matrix neighbors:
+  `/tmp/tanstack-ordered-boundary-retention-10x-adjacent.json`, **470/16**:
+  ordered lifecycle 196/0, ordered work 43/1, Effect 67/2, pagination 130/3,
+  subset-error 34/10. The fifteen adjacent failure names are unchanged; no new
+  failure names versus the preceding final census. This is not the final 100×
+  or the entire repository suite. Prettier and diff checks pass; no new lint or
+  standalone typecheck result claimed for this step.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
