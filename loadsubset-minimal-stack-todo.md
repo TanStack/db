@@ -3053,6 +3053,18 @@ candidate repair scopes, not completed fixes or proof of root cause.
   failure names versus the preceding final census. This is not the final 100×
   or the entire repository suite. Prettier and diff checks pass; no new lint or
   standalone typecheck result claimed for this step.
+- Fresh Field Lab loss audit of `681ed762` found no supported omission in this
+  step or the dashboard. It checked frozen source/tests before the five reports:
+  original scenario and assertions survive; matrix-only run has 24 unrelated
+  skipped tests; the four new red traces repeat the rank-zero boundary; all
+  totals and executed seed labels match. Failure paths also still clear the
+  boundary record; reset/replay/disposal above are not an exhaustive list.
+  One sequential source-first scanner, not sibling-blind: requested categories
+  and source order may hide other omissions. No auditor tests or correctness
+  endorsement. JSON does not independently establish command environments,
+  successful example counts, timeout settings, runtime restoration, lint, or
+  typecheck. The matrix-only report's random property was skipped, so its seed
+  label is not an executed campaign.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
