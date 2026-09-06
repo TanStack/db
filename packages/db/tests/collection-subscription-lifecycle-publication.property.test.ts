@@ -112,10 +112,10 @@ function recordSourceWrite(publication: PublicationModel, row: Row): void {
   const previous =
     publication.visible.get(row.id) ?? publication.source.get(row.id)
   publication.source.set(row.id, cloneRow(row))
-  publication.visible.set(row.id, cloneRow(row))
   publication.retainedKeys.delete(row.id)
-  publication.sentKeys.add(row.id)
   if (previous?.value === row.value) return
+  publication.visible.set(row.id, cloneRow(row))
+  publication.sentKeys.add(row.id)
   publication.batches.push([
     previous
       ? {
@@ -435,7 +435,11 @@ function projectPublication(
           ]
         : [],
     )
-    if (row) publication.sentKeys.add(row.id)
+    if (row) {
+      publication.visible.set(row.id, cloneRow(row))
+      publication.retainedKeys.delete(row.id)
+      publication.sentKeys.add(row.id)
+    }
   }
 }
 
@@ -827,6 +831,16 @@ async function runPublicationHistory(
         index,
         expectedPublicationCount,
         observedPublicationCount,
+      )
+      check(
+        [...visible.values()].sort((left, right) =>
+          left.id.localeCompare(right.id),
+        ),
+        `consumer state after command ${index}: ${JSON.stringify(command)}`,
+      ).toEqual(
+        [...publication.visible.values()].sort((left, right) =>
+          left.id.localeCompare(right.id),
+        ),
       )
       observations.push({
         index,
@@ -1220,6 +1234,36 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
       { type: `release`, demand: `a` },
       { type: `restart` },
       { type: `truncate` },
+    ])
+  })
+
+  it(`records requested snapshot rows before a canceled reset`, async () => {
+    await runPublicationHistory([
+      { type: `request`, demand: `b` },
+      { type: `truncate` },
+      { type: `source`, key: `b`, action: `upsert`, value: 0 },
+      { type: `release`, demand: `b` },
+      { type: `request`, demand: `b` },
+      { type: `restart` },
+      { type: `abort`, demand: `a` },
+      { type: `abort`, demand: `b` },
+      { type: `restart` },
+      { type: `truncate` },
+      { type: `restart` },
+      { type: `unsubscribe` },
+      { type: `release`, demand: `b` },
+    ])
+  })
+
+  it(`does not invent a publication for an unchanged private row`, async () => {
+    await runPublicationHistory([
+      { type: `request`, demand: `a` },
+      { type: `cleanup` },
+      { type: `restart` },
+      { type: `source`, key: `a`, action: `upsert`, value: 5 },
+      { type: `release`, demand: `a` },
+      { type: `source`, key: `a`, action: `upsert`, value: 5 },
+      { type: `unsubscribe` },
     ])
   })
 

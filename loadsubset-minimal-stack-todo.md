@@ -3,6 +3,25 @@
 This is the durable execution log for simplifying the RFC #1657 stack. Keep it
 current as review findings, oracle laws, and implementation choices change.
 
+## Current checkpoint — 2026-09-06
+
+- Pagination transfer repair committed at88fad51b:110 selected rows instead
+  of560 in the bounded traversal probe, +38 net production lines. Its focused
+ 100x and broader1x gates pass; assumptions and local-read costs are below.
+- Remaining publication witness corrected in the test model at667ec972:
+  raw future source events differ from held-snapshot replacements. Production
+  unchanged. Publication100x69/0 and the original failing seed replay pass.
+- Full100x oracle/loader run at667ec972 has1469 passing assertions and none
+  failed, but exited1 despite JSON success:true. A diagnostic rerun is pending
+  with normal error reporting and test console logging suppressed. Do not call
+  the full campaign green. Post-commit loss audits are complete; runtime/tests
+  remain frozen during verification.
+- Still open: whole-branch size goal (+3263 net package-source lines against
+  fixedmain68366eca), package test type diagnostics, final coherence/review and
+  RFC/PR/changeset reconciliation. Older unchecked entries are phase records;
+  reconcile them with later evidence before treating them as current bugs.
+
+
 ## Chosen design
 
 - Keep exact request deduplication and per-subscription ownership.
@@ -4602,5 +4621,76 @@ candidate repair scopes, not completed fixes or proof of root cause.
   exits2 with the existing callback key `string|number`→RowKey diagnostic and
   other existing test errors. Reports `/tmp/tanstack-publication-raw-truncate-lint.txt`
   and `/tmp/tanstack-publication-raw-truncate-types.txt`; not a green typecheck.
-- [ ] Commit and source-first Field Lab loss audit, then broader100x. The old
-  campaign stays recorded as red; only a new completed run can close that gate.
+- [x] Commit667ec972 and run source-first Field Lab loss audit. The formatted
+  suite also passes69/0, fixed1657005 and random847440060;
+  `/tmp/tanstack-publication-raw-truncate-formatted.json`. This repeats the
+  suite, not another69 independent tests. The report audit recovered this
+  omitted checkpoint, lost by compressing the record to “then formatted.”
+- [ ] Broader100x clean-exit gate at667ec972, all24 files from test:oracles plus the
+  loader unit suite, coverage off, timeout600000, overrides unset. Outputs:
+  `/tmp/tanstack-minimal-full-100x-raw-truncate.json` and matching `.log`.
+  Completed1469/0, no skips, JSON success:true, **process exit1**. JSON-only
+  reporting contains no reason for the process failure. This closes the
+  assertion mismatch, not the clean-process gate. A normal+JSON reporter rerun
+  (`/tmp/tanstack-minimal-full-100x-reported.log`) was stopped with SIGTERM143
+  after50MB of expected test warnings, without a final report. Replacement run
+  uses `--silent` to suppress test console logs but keeps default+JSON error
+  reporting: `/tmp/tanstack-minimal-full-100x-silent.json` and `.log`. No test
+  changes or ignored errors; fresh random seeds, same100x scope. Runtime/tests
+  remain frozen until exit. Do not infer the unexplained exit's cause yet.
+- Report loss audit confirms the red failing sets/counts and overlapping green
+  reports. JSON does not independently prove multiplier, shrink-path override,
+  frozen SHA, formatting order or command exits. Type log has30 diagnostics;
+  comparison with earlier logs, not this log alone, supports “preexisting.”
+  Reused report-first scanner, no sibling code inspection/edits/reruns or
+  inference about the running full campaign. Prior framing and checkpoint
+  compression can hide distinctions between repeated and independent evidence.
+- Source loss audit recovered that retainedKeys tracks stale public keys, not
+  source membership: even a same-value refresh consumes a key without a
+  callback; any remaining key selects replacement reconciliation for the
+  truncate. Explicit false skips unseen-key filtering, but stale-publication
+  reconciliation still runs first and may rewrite/suppress individual events.
+  “ALL future events” alone would obscure that ordering.
+- The16 cases fix on-demand/explicit-false, one demand, cleanup→restart→private
+  write→release, no settlement, and same-value sibling refresh. Unsubscribe
+  ends each history with no post-unsubscribe stimulus. The6 direct controls
+  use one preinstalled row and undefined/false (not true), and flatten batches.
+  The history driver separately checks exact per-command batch boundaries,
+  types/keys/values/previousValue and source state; only cross-key ordering is
+  normalized. Its callback consumer map is updated but not directly asserted.
+  Raw-event equivalence is not snapshot reconstruction. Dimension/assertion
+  compression dropped these limits; no new bug follows from the audit alone.
+- Source scanner used reused source-first context, not fresh/blind, and did no
+  edits/reruns/report certification. An omission-focused scan may overstate
+  intentional fixture limits. No whole-PR or full100x correctness endorsement.
+
+### Publication model state consistency follow-up
+
+- [x] Normal-reporter100x run exposed random87900852, path3937: request b,
+  truncate, private source b0, release b, request b, no-op restart/abort a,
+  abort b, no-op restart, truncate, restart, unsubscribe, release b. Failure at
+  command9: delete(b0) observed, no callback expected. Completed1468/1, no skips,
+  plus **two Vitest worker Timeout calling onTaskUpdate errors**, exit1.
+  Runtime/tests stayed frozen. Log `/tmp/tanstack-minimal-full-100x-silent.log`.
+  The timeouts identify a runner-reporting failure in this run; they do not
+  independently prove the cause of the earlier JSON-only exit1.
+- [x] Source inspection: expected request-snapshot callbacks add the row to
+  expected batches/sentKeys but omit publication.visible. The runtime callback
+  consumer map is maintained but never compared to model.visible, as the audit
+  noted. This can defer a model inconsistency until a later reset. Also inspect
+  unchanged private-row writes: no callback must not invent a consumer row.
+- [x] After the frozen run exits, pin the full history and add a per-command
+  model/consumer-state assertion, plus unchanged-private-write control. Red the
+  invariant where state first diverges: **0 green/2 red**,69 filtered, at
+  request command4 (actual b0, model empty) and unchanged-write command5 (actual
+  empty, model a5). `/tmp/tanstack-publication-consumer-state-red.json`.
+  Snapshot callbacks now add their row to model.visible; unchanged writes
+  return before adding an unpublished row. No runtime edits. Raw/reset laws
+  and all prior batch assertions remain; new invariant checks state too.
+- [x] Formatted publication suite **71/0**, no skips, exit0;
+  `/tmp/tanstack-publication-consumer-state-green.json`. This is normal scale,
+  not the100x follow-up. These changes close the audit's unasserted consumer-
+  map gap for this driver; they do not turn raw events into D2 input deltas.
+- [ ] Commit then loss audit and publication100x. Full-suite clean-process gate
+  remains open separately from model repair: do not suppress unhandled errors
+  or loosen assertions to work around the worker-reporting timeouts.
