@@ -184,6 +184,8 @@ export class CollectionConfigBuilder<
   private readonly demandGenerations = new Map<string, number>()
   private readonly pendingOrderedLoads = new Set<Promise<unknown>>()
   private orderedLoadFailed = false
+  // Source replay cannot settle a failed imperative window operation.
+  private windowFailed = false
   private syncSession = 0
   private windowOperationGeneration = 0
   // Map of lexical source IDs to optimizable ORDER BY state
@@ -343,6 +345,7 @@ export class CollectionConfigBuilder<
       error?: unknown
     } = { generation: windowOperationGeneration, failed: false }
     this.activeWindowOperation = operation
+    this.windowFailed = false
     if (this.pendingOrderedLoads.size === 0) this.orderedLoadFailed = false
     try {
       // The window and all source work it causes form one synchronous
@@ -356,6 +359,7 @@ export class CollectionConfigBuilder<
       if (operation.failed) throw operation.error
     } catch (error) {
       if (windowOperationGeneration === this.windowOperationGeneration) {
+        this.windowFailed = true
         this.currentWindow = this.settledWindow
       }
       loadOperation?.cancel()
@@ -377,6 +381,7 @@ export class CollectionConfigBuilder<
       },
       (error) => {
         if (windowOperationGeneration === this.windowOperationGeneration) {
+          this.windowFailed = true
           this.currentWindow = this.settledWindow
         }
         throw error
@@ -919,6 +924,7 @@ export class CollectionConfigBuilder<
       this.activeDemands.clear()
       this.pendingOrderedLoads.clear()
       this.orderedLoadFailed = false
+      this.windowFailed = false
       this.optimizableOrderByCollections = {}
       this.lazySourcesCallbacks = {}
 
@@ -1101,6 +1107,7 @@ export class CollectionConfigBuilder<
       }
 
       if (
+        this.windowFailed ||
         this.orderedLoadFailed ||
         this.hasPendingSourceRecovery() ||
         this.pendingOrderedLoads.size > 0

@@ -15,7 +15,11 @@ import { evaluateReferenceExpression } from '../reference-expression.js'
 import { TraceAssertionError } from '../trace-runner.js'
 import { flushPromises, mockSyncCollectionOptions } from '../utils.js'
 import type { Deferred } from '../../src/deferred.js'
-import type { ChangeMessage, LoadSubsetOptions } from '../../src/types.js'
+import type {
+  ChangeMessage,
+  LoadSubsetOptions,
+  SyncConfig,
+} from '../../src/types.js'
 
 type PageRow = {
   id: number
@@ -2331,6 +2335,103 @@ describe(`pagination recomputation oracle`, () => {
       },
     )
   })
+
+  it.each(
+    ([`asc`, `desc`] as const).flatMap((direction) =>
+      ([`sync`, `async`] as const).map((replayDelivery) => ({
+        direction,
+        replayDelivery,
+      })),
+    ),
+  )(
+    `keeps a failed $direction window private after $replayDelivery source replay until explicit retry`,
+    async ({ direction, replayDelivery }) => {
+      const rows: Array<PageRow> = [
+        { id: 1, rank: 1 },
+        { id: 2, rank: 2 },
+      ]
+      const failure = new Error(`window acquisition failed`)
+      const replayGate = createDeferred<void>()
+      let operations!: Parameters<SyncConfig<PageRow, number>[`sync`]>[0]
+      let loads = 0
+      const source = createCollection<PageRow, number>({
+        id: `pagination-failed-window-replay-${collectionSequence++}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: (sync) => {
+            operations = sync
+            sync.markReady()
+            return {
+              loadSubset: (options) => {
+                loads++
+                sync.begin()
+                for (const row of loads === 1 ? rows.slice(0, 1) : rows) {
+                  sync.write({ type: `insert`, value: { ...row } })
+                }
+                const receipt = sync.commit(options.signal)
+                if (loads === 1) return Promise.reject(failure)
+                if (replayDelivery === `sync`) return receipt
+                return replayGate.promise.then(async () => {
+                  if (receipt !== true) await receipt
+                })
+              },
+            }
+          },
+        },
+      })
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank, direction)
+          .limit(0)
+          .select(({ row }) => ({ id: row.id, rank: row.rank }))
+          .distinct(),
+      )
+      const publications: Array<Array<number>> = []
+      const subscriber = live.subscribeChanges(() => {
+        publications.push(Array.from(live.values(), ({ id }) => id))
+      })
+      const assertHeld = () => {
+        expect(Array.from(live.values())).toEqual([])
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 0 })
+        expect(publications).toEqual([])
+      }
+      try {
+        await live.preload()
+        await expect(
+          live.utils.setWindow({ offset: 0, limit: 2 }),
+        ).rejects.toBe(failure)
+        assertHeld()
+        operations.begin()
+        operations.truncate()
+        const receipt = operations.commit()
+        if (receipt !== true) await receipt
+        await flushPromises()
+        assertHeld()
+        replayGate.resolve()
+        await flushPromises()
+        await flushPromises()
+        expect(loads).toBe(2)
+        assertHeld()
+
+        await live.utils.setWindow({ offset: 0, limit: 2 })
+        const expected = referenceWindow(rows, direction, {
+          offset: 0,
+          limit: 2,
+        })
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual(expected)
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
+        expect(publications).toEqual([expected])
+      } finally {
+        replayGate.resolve()
+        subscriber.unsubscribe()
+        await cleanupAll(live, source)
+      }
+    },
+  )
 
   it.each([
     { offset: 0, limit: 1, failureKind: `error` as const },

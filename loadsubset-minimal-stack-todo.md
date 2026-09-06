@@ -25,9 +25,11 @@ current as review findings, oracle laws, and implementation choices change.
   The expanded affected-file run found8 existing live-query unit failures in
   four named groups outside the earlier oracle-only gate. The unmodified test
   file reproduces all8. U1 is now reconciled: one full-source recovery replaces
-  the old extra boundary request. Seven assertions in U2–U4 remain open.
+  the old extra boundary request. U2's source replay cleared a failed window's
+  publication gate; repaired with one separate window-failure flag (+7 source
+  lines). Six assertions in U3–U4 remain open.
 - Still open: whole-branch size goal (+3263 net package-source lines against
-  fixedmain68366eca), unit-failure groups U2–U4, final coherence/review and
+  fixedmain68366eca; U2 adds7), unit-failure groups U3–U4, final coherence/review and
   RFC/PR/changeset reconciliation. Older unchecked entries are phase records;
   reconcile them with later evidence before treating them as current bugs.
 
@@ -4924,10 +4926,33 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   incorrectly required absent cursor/offset properties to exist as undefined;
   replaced it with value assertions, preserving the semantic request check.
   This is stale work-count maintenance, not a newly repaired runtime bug.
-- [ ] U2 — `publishes a window after its failed full-source demand replays
+  Committed7d250b11, then fresh Field Lab loss audit. It recovered retained
+  exact error-identity assertions and mixed settlement timing (initial true,
+  rejected page Promise, recovery delivery in a microtask). Red stopped before
+  the old final-row assertion; it never proved wrong rows. Green ran one unit
+  and six oracle cells across two files. Sources read separately before the
+  frozen reduction; no edits/reruns/readiness judgment. Omission focus can
+  overstate deliberate compression.
+- [x] U2 — `publishes a window after its failed full-source demand replays
   successfully`: rows become visible after successful truncate replay where
   the unit expects[] until explicit window retry. Reconcile the failed-window
   publication barrier with the replay oracle and architecture law.
+  Confirmed: starting ordered replay work reset orderedLoadFailed even though
+  the imperative window had failed. Keep a separate windowFailed publication
+  guard, cleared only by explicit window start or session cleanup; failed
+  current operations set it. Source recovery still uses its existing guard.
+  No architectural contract change; +7 production lines, one boolean.
+  Oracle gap: replay recovery and failed window recovery were tested separately,
+  not a successful source replay after an already-failed window. Added the
+  direction × sync/async replay matrix with rows, settled window and event
+  assertions before/after replay and explicit retry. All4 oracle cells plus
+  original U2 unit red before repair (exit1), green after (5/0,284 filtered,
+  exit0): `/tmp/tanstack-u2-red.log`, `/tmp/tanstack-u2-green.log`.
+  Three-file broad run330 pass/6 fail, no skips, exit1; only U3's five cells
+  and U4 remain (`/tmp/tanstack-u2-broad.json` and `.log`). Package tsc exits0.
+  Scoped lint reports two unchanged builder diagnostics (always-truthy/falsy
+  conditions), also reproduced against pre-U2 source through ESLint stdin;
+  do not label that command green. `/tmp/tanstack-u2-baseline-lint.log`.
 - [ ] U3 — `uses one normalized error for a 'throw' replay failure` across
   Error/undefined/NaN/false/object (5 cells): catch-derived windowError is
   undefined instead of reportedError. That observation cannot distinguish
