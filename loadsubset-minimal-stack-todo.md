@@ -24,9 +24,10 @@ current as review findings, oracle laws, and implementation choices change.
 - Package test typecheck now passes (30 errors→0), with no runtime code growth.
   The expanded affected-file run found8 existing live-query unit failures in
   four named groups outside the earlier oracle-only gate. The unmodified test
-  file reproduces all8. Reconcile those next; details and reports below.
+  file reproduces all8. U1 is now reconciled: one full-source recovery replaces
+  the old extra boundary request. Seven assertions in U2–U4 remain open.
 - Still open: whole-branch size goal (+3263 net package-source lines against
-  fixedmain68366eca), the four unit-failure groups, final coherence/review and
+  fixedmain68366eca), unit-failure groups U2–U4, final coherence/review and
   RFC/PR/changeset reconciliation. Older unchecked entries are phase records;
   reconcile them with later evidence before treating them as current bugs.
 
@@ -4907,10 +4908,22 @@ Classify each against the chosen contract and corresponding oracle before
 changing runtime or an expectation. These are8 failing assertions, not8 newly
 confirmed runtime bugs. Keep the list bounded before returning to code-size work.
 
-- [ ] U1 — `retries the same ordered refill after a transient rejection`:
+- [x] U1 — `retries the same ordered refill after a transient rejection`:
   cumulative loadCount after retry is4; old assertion expects5. This is not
   four loads made by the retry. Check whether reduced transfer
   legitimately removed one acquisition, using exact request/row evidence.
+  Reconciled with the architecture's authoritative retry rule: the fourth
+  acquisition has no predicate, order, limit, offset or cursor. It publishes
+  rows1/2 and window0:2; failure previously retained row1/window0:1. Expect4
+  total loads, not5. No production edit. Existing pagination oracle cells
+  `recovers the first ... rejected ordered request ... from the full source`
+  and `does not derive a retry cursor ...` cover the same recovery law with
+  independent authoritative rows. Fresh original-test red exits1 at4-versus5
+  (`/tmp/tanstack-u1-red.log`); updated unit plus six oracle controls pass7/0,
+  278 filtered, exit0 (`/tmp/tanstack-u1-green.log`). Initial request assertion
+  incorrectly required absent cursor/offset properties to exist as undefined;
+  replaced it with value assertions, preserving the semantic request check.
+  This is stale work-count maintenance, not a newly repaired runtime bug.
 - [ ] U2 — `publishes a window after its failed full-source demand replays
   successfully`: rows become visible after successful truncate replay where
   the unit expects[] until explicit window retry. Reconcile the failed-window

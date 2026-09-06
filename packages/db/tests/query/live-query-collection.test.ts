@@ -1682,6 +1682,7 @@ describe(`createLiveQueryCollection`, () => {
       type Row = { id: number; rank: number }
       const failure = new Error(`ordered refill failed`)
       let loadCount = 0
+      const acquisitions: Array<LoadSubsetOptions> = []
       const source = createCollection<Row>({
         id: `ordered-refill-retry-source`,
         getKey: (row) => row.id,
@@ -1693,6 +1694,7 @@ describe(`createLiveQueryCollection`, () => {
             markReady()
             return {
               loadSubset: (options) => {
+                acquisitions.push(options)
                 loadCount++
                 if (loadCount === 3) return Promise.reject(failure)
                 const deliver = (row: Row) => {
@@ -1726,11 +1728,21 @@ describe(`createLiveQueryCollection`, () => {
         expect(failedWindow).toBeInstanceOf(Promise)
         await expect(failedWindow).rejects.toBe(failure)
         expect(live.utils.lastSubsetError).toBe(failure)
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
 
         const retry = live.utils.setWindow({ offset: 0, limit: 2 })
         if (retry !== true) await retry
-        expect(loadCount).toBe(5)
+        // Recovery loads the full source once; it needs no tie-boundary probe.
+        expect(loadCount).toBe(4)
+        const recovery = acquisitions[3]!
+        expect(recovery.where).toBeUndefined()
+        expect(recovery.orderBy).toBeUndefined()
+        expect(recovery.limit).toBeUndefined()
+        expect(recovery.offset).toBeUndefined()
+        expect(recovery.cursor).toBeUndefined()
         expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2])
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
       } finally {
         await Promise.all([live.cleanup(), source.cleanup()])
       }
