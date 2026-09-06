@@ -63,6 +63,12 @@ current as review findings, oracle laws, and implementation choices change.
   source loss audit complete; replay-only100x79/0,exit0. Combined W1–W5
   savings164 lines/2566 minified/490 gzip bytes,source gap3108. No push.
   Group-by baseline142/0, code unchanged.
+- W6 shared group-by pipeline implemented:141 net production lines removed,
+  880 minified/246 gzip diagnostic bytes removed. New direct-production matrix
+  30/30 on original and reduced pipelines; removing grouped wrapper ref rewriting
+  fails3 cells (restored). Integration1705/0,28 files at1x. Post-commit source
+  audits and focused stress pending. Combined savings305 lines/3446 minified/
+  736 gzip bytes; current fixed-main source gap2967.
 
 
 ## Chosen design
@@ -5629,3 +5635,45 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   HAVING domain; they differ for unchecked nonboolean values. Preserve current
   branch behavior during reduction unless separate tests/decision change that
   contract. Do not call this a newly confirmed user-facing bug from source alone.
+
+### W6 — share the group-by pipeline — 2026-09-06
+
+- Freeze original atd69d8461. Share aggregate extraction, D2 grouping, selected
+  output assembly, virtual metadata, route attachment, and both HAVING loops.
+  Keep explicit single-group branches for validation, constant internal/public
+  keys, selected-value initialization, wrapped group refs and expression HAVING
+  coercion. Keep the zero-group path free of an extra per-row clone. No new state,
+  framework or public contract; no tests removed. This duplication predates the
+  stack and is also present on fixed main.
+- Test law: recompute public groups from source rows after each of five states:
+  empty, initial, group-move/update/delete, empty, restored. Matrix crosses
+  grouped/global × absent/plain/wrapped SELECT × absent/expression/function/
+  false/null HAVING (30 cells). It checks exact result cardinality, multiplicity,
+  public keys, selected output, synced/origin metadata and collection identity.
+  Wrapped expressions also use grouping refs; selected aliases challenge the
+  generated namespace. Source membership and summation use plain arrays/Maps,
+  not the compiler or D2 aggregate implementation.
+- Existing compiler unit file copies validation rather than calling production;
+  its9 tests remain but are not evidence of production validation. New
+  `tests/query/compiler/group-by-pipeline.test.ts` calls processGroupBy directly
+  on a real graph. Existing142 group-by integration/compiler/builder tests and
+  includes routing/equality/callback oracles remain.
+- Initial test observer accumulated private intermediate reducer fields and
+  failed18/18 on unmodified production. Corrected to accumulate only the public
+  projection; this is a fixture correction, not a runtime bug. Final30 cells
+  pass on the original function. Controlled ablation skips grouped wrapper ref
+  rewriting:27pass/3fail; restored candidate30pass. Logs:
+  `/tmp/tanstack-weight-group-pipeline-{baseline-final,ablation,green}.log`.
+- Expanded integration1705/0,28 files,exit0,no skipped tests or reported runner
+  errors,1x,fixed corpora/fresh seeds,10.55s; report
+  `/tmp/tanstack-weight-group-shared-full.{json,log}`. Final types/lint checked
+  separately. Import-order cleanup fixes the file's two existing lint errors.
+- W6 source42added/183removed,net141. Diagnostic DB bundle345514→344634
+  minified(-880),97672→97426 gzip(-246);DB-IVM unchanged30220/9133. Synthetic
+  all-entry-export esbuild measurement, not a consumer app or throughput result.
+  `/tmp/tanstack-weight-group-shared-bundle.json`. Combined W1–W6 savings305
+  source lines/3446 minified/736 gzip bytes;fixed-main gap2967. Goal remains open.
+- [ ] Commit then separately audit original single-group and grouped branches
+  against the frozen reduction with Field Lab Hidden-signal recovery assay.
+- [ ] Focused includes context/equality stress with100x property multiplier;
+  deterministic group-by matrix is not itself multiplied100 times.
