@@ -5267,3 +5267,36 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   usage. Scanner read diff/source/test assertions, not run reports or tests.
   Reused/non-blind candidate author can favor the intended representation;
   static trace does not establish every reentrant combination or readiness.
+
+### W3 — reuse teardown callback handling — 2026-09-06
+
+- [x] unsubscribe uses existing runAllCallbacks rather than its own first-error
+  accumulator and catch/continue loops. A small private retryReleaseDebts
+  method serves initial and repeated teardown, snapshots the debt list, and
+  checks membership when each callback runs so reentrant cleanup cannot unload
+  already retired debt. Logical demand and release-debt registration finish
+  before adapter unload begins. Source listeners detach before logical cleanup;
+  unsubscribed notification and listener clearing remain later steps even when
+  an earlier callback fails. Repeated unsubscribe retries only physical debt.
+- Source-listener cleanup functions are captured and their fields cleared
+  before invoking them, instead of clearing each field after invocation.
+  The functions only remove their captured event registrations. Capturing
+  them avoids retaining the callbacks after teardown; no source API changed.
+  The callback helper retains the first exact failure, including nullish
+  throws, instead of a nullable accumulator. Adapter release errors remain
+  normalized by releaseOrRetainAcquisition. Event-listener errors still use
+  EventEmitter's existing host-microtask path, not this accumulator.
+- Delta57 added/84 removed, net27 source lines removed. Diagnostic DB bundle
+  346671→346493 minified (-178),98008→97974 gzip (-34); DB-IVM unchanged.
+  No new retained state; callback arrays/closures are teardown-local. No heap
+  or throughput claim. `/tmp/tanstack-weight-teardown-bundle.json`.
+  Combined W1–W3:68 source lines/1587 minified/188 gzip bytes removed;
+  fixed-main package-source gap3204. These are modest reductions.
+- Expanded1x gate adds original subscription units to the existing26-file
+  oracle/loader+live-query set:1645/0,27 files,exit0,no skips/reported runner
+  errors. Fixed corpus and fresh random seeds; multiplier1. No tests changed.
+  `/tmp/tanstack-weight-teardown.json` and `.log`. Ordinary package tsc exits0
+  (`-types.log`). W3 has not yet had a new100x run or all-adapter verification.
+- [ ] Commit W3 then Field Lab source-to-implementation loss audit; verify
+  release order, first-error delivery, all-owner retirement, reentrant debt
+  membership checks, one-shot notification and callback clearing.

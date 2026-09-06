@@ -1984,100 +1984,73 @@ export class CollectionSubscription
     this.skipFiltering = true
   }
 
-  unsubscribe() {
-    if (this.unsubscribed) {
-      let firstCleanupError: unknown
-      for (const acquisition of [...this.releaseDebts]) {
-        if (!this.releaseDebts.includes(acquisition)) continue
-        try {
+  private retryReleaseDebts(): void {
+    runAllCallbacks(
+      this.releaseDebts.map((acquisition) => () => {
+        // An earlier release may reenter teardown and retire this debt.
+        if (this.releaseDebts.includes(acquisition)) {
           this.releaseOrRetainAcquisition(acquisition)
-        } catch (error) {
-          firstCleanupError ??= error
         }
-      }
-      if (firstCleanupError !== undefined) throw firstCleanupError
-      return
-    }
+      }),
+    )
+  }
+
+  unsubscribe() {
+    if (this.unsubscribed) return this.retryReleaseDebts()
     this.unsubscribed = true
     // Stop any status listener set already being iterated. Clearing the
     // emitter's map cannot invalidate that captured Set by itself.
     this.statusRevision++
-    let firstCleanupError: unknown
-
-    // Clean up truncate event listener
-    try {
-      this.truncateCleanup?.()
-    } catch (error) {
-      firstCleanupError = error
-    }
+    const sourceListenerCleanups = [
+      this.truncateCleanup,
+      this.collectionCleanup,
+      this.collectionRestartCleanup,
+    ]
     this.truncateCleanup = undefined
-    try {
-      this.collectionCleanup?.()
-    } catch (error) {
-      firstCleanupError ??= error
-    }
     this.collectionCleanup = undefined
-    try {
-      this.collectionRestartCleanup?.()
-    } catch (error) {
-      firstCleanupError ??= error
-    }
     this.collectionRestartCleanup = undefined
 
-    // Stop any buffered replay from publishing after unsubscription.
-    if (this.truncateReplaySession?.completion.isPending()) {
-      this.truncateReplaySession.completion.reject(
-        new LoadSubsetOperationAbortedError(),
-      )
-    }
-    this.truncateReplaySession = undefined
-    this.truncateReplacementPending = false
-    this.stalePublishedRows.clear()
+    runAllCallbacks([
+      ...sourceListenerCleanups.map((cleanup) => () => cleanup?.()),
+      () => {
+        // Stop any buffered replay from publishing after unsubscription.
+        if (this.truncateReplaySession?.completion.isPending()) {
+          this.truncateReplaySession.completion.reject(
+            new LoadSubsetOperationAbortedError(),
+          )
+        }
+        this.truncateReplaySession = undefined
+        this.truncateReplacementPending = false
+        this.stalePublishedRows.clear()
 
-    // Logical demand ends now even if a physical adapter release must be
-    // retried. Keeping those states separate prevents retired demand from
-    // joining a later truncate replay.
-    const acquisitions: Array<SubsetAcquisition> = [
-      ...this.releaseDebts,
-      ...this.subsetDemands
-        .filter((demand) => demand.acquisitionState === `active`)
-        .map((demand) => demand.acquisition),
-    ]
-    for (const demand of this.subsetDemands) {
-      demand.initialResult?.reject(new LoadSubsetOperationAbortedError())
-      this.stopDemandStatusParticipants(demand)
-      if (demand.acquisitionState === `starting`) {
-        demand.acquisition.abortController?.abort()
-        demand.acquisition.removeRequestAbortListener?.()
-      }
-    }
-    this.subsetDemands = []
-    for (const acquisition of acquisitions) {
-      if (!this.releaseDebts.includes(acquisition)) {
-        this.releaseDebts.push(acquisition)
-      }
-    }
-    for (const acquisition of acquisitions) {
-      if (!this.releaseDebts.includes(acquisition)) continue
-      try {
-        this.releaseOrRetainAcquisition(acquisition)
-      } catch (error) {
-        firstCleanupError ??= error
-      }
-    }
-
-    try {
-      this.emitInner(`unsubscribed`, {
-        type: `unsubscribed`,
-        subscription: this,
-      })
-    } catch (error) {
-      firstCleanupError ??= error
-    } finally {
+        // Logical demand ends now even if a physical adapter release must be
+        // retried. Retire every owner before an unload can reenter teardown.
+        const acquisitions = this.subsetDemands
+          .filter((demand) => demand.acquisitionState === `active`)
+          .map((demand) => demand.acquisition)
+        for (const demand of this.subsetDemands) {
+          demand.initialResult?.reject(new LoadSubsetOperationAbortedError())
+          this.stopDemandStatusParticipants(demand)
+          if (demand.acquisitionState === `starting`) {
+            demand.acquisition.abortController?.abort()
+            demand.acquisition.removeRequestAbortListener?.()
+          }
+        }
+        this.subsetDemands = []
+        for (const acquisition of acquisitions) {
+          if (!this.releaseDebts.includes(acquisition)) {
+            this.releaseDebts.push(acquisition)
+          }
+        }
+        this.retryReleaseDebts()
+      },
+      () =>
+        this.emitInner(`unsubscribed`, {
+          type: `unsubscribed`,
+          subscription: this,
+        }),
       // Clear all event listeners to prevent memory leaks
-      this.clearListeners()
-    }
-
-    if (firstCleanupError !== undefined) throw firstCleanupError
+      () => this.clearListeners(),
+    ])
   }
 }
