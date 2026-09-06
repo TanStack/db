@@ -1261,6 +1261,12 @@ change was needed for those cells. These are separately queued below. Counts des
 not unique confirmed runtime bugs; contract-alignment notes below distinguish
 stale oracle expectations from implementation defects.
 
+The queued functional-projection matrix is now a separate red baseline:
+**20 green / 36 red** (54 product cells plus two controls). Its adjacent
+includes suites remain **124/0**. This does not replace the twelve-suite
+lifecycle scope above or count 36 distinct defects. No runtime changed while
+adding this matrix; its four failure families are recorded below.
+
 | Protocol slice                                       | Executable coverage                                                                                 | Current result                                               |
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
 | Logical demand start/release and synchronous reentry | 28 start cells, 14 failure-delivery cells, 8 release cells                                          | green; queued replay status and failed-start rollback expectations reconciled |
@@ -3479,9 +3485,78 @@ candidate repair scopes, not completed fixes or proof of root cause.
   distinguish a valid branch without an include from a premature placeholder,
   and observe callback-time values directly rather than discard those samples.
 
-- [ ] Finish the functional-projection boundary matrix: initial placeholders,
-      recursive and union sources, ready facades in callbacks, derived scalar
-      behavior, and opaque callback roots.
+### Functional-projection boundary baseline
+
+- [x] Added `includes-functional-projection-oracle.test.ts` to `test:oracles`,
+  leaving all existing includes tests intact. The deterministic product crosses
+  QueryRef / recursive QueryRef / union × Collection / array / materialized ×
+  expression / functional-record / functional-opaque-root × empty / populated.
+  Each of its 54 named cells runs initial, child-update, and parent-route-move
+  checkpoints. A declaration census checks cardinality and unique cell names;
+  a separate no-include control checks opaque-root selected fields.
+- The independent model owns authoritative parent group and child rows. Public
+  rows must equal that group's contents at each checkpoint. Collection handles
+  remain identical on child-only changes and change on a route move. Inline
+  derived scalars must update with their contents. For Collection-valued
+  includes, scalar reads are checked when the parent projection runs (initial
+  and route move), not treated as dependency-tracked child-only computations.
+  This does not add implicit dependency tracking to live Collection handles.
+- Callback observations retain their phase and branch identity. Capture value
+  shape, readiness, and selected child fields inside the callback, rather than
+  dereference a retained facade after preload. Never filter away nullish
+  callbacks for a branch that declares an include. A union branch without an
+  include is a separate valid-absence control. Soft assertions retain later
+  checkpoints; these runs had assertion mismatches rather than thrown query
+  errors. Callback rows are captured, but are not independently asserted equal
+  to full source truth on every internal invocation. Final public rows and
+  derived values have that independent comparison.
+- All **18 expression-projection controls pass** through all three phases.
+  All **36 functional cells fail**, with overlapping families, not 36 bugs:
+  1. [ ] Premature callbacks see placeholders instead of the declared include
+     form. Even the union/record cases whose public rows pass expose this.
+  2. [ ] Concrete Collection facades can still be unready when the callback
+     reads them. The union/Collection/record trace distinguishes an actual
+     facade with `ready: false` from a non-facade placeholder.
+  3. [ ] Functional projection over QueryRef and recursive QueryRef sources
+     loses materialized children and derived scalars; equivalent expression
+     projections retain them. Do not repair only the already-covered union.
+  4. [ ] Opaque functional root results lose rematerialization. Check selected
+     fields and children, not a new guarantee about root prototypes. Existing
+     nested opaque-wrapper regressions remain intact.
+- Controls corrected two assumptions before freezing the baseline. Explicitly
+  selecting `children: undefined` produced null; an actually absent union field
+  is the intended control. The intermediate report
+  `/tmp/tanstack-functional-projection-with-controls.json` was **13/42**; removing
+  that explicit field yields **19/36** in
+  `/tmp/tanstack-functional-projection-baseline.json`. A separate no-include
+  prototype probe was **0/1, 55 skipped**, success false,
+  `/tmp/tanstack-functional-projection-opaque-control.json`: public root records
+  already flatten class prototypes without includes. Removed the prototype
+  preservation hypothesis from the product. The final field-only control does
+  not require either preserving or flattening prototypes as a new contract.
+- Frozen three-suite baseline:
+  `/tmp/tanstack-functional-projection-frozen-baseline.json` **144/36**, no skips,
+  success false: new matrix **20/36**, existing Collection oracle **28/0**, route
+  context oracle **96/0**. The preceding
+  `/tmp/tanstack-functional-projection-final-baseline.json` has the same counts,
+  before removing a prototype-flattening assertion from the no-include control.
+  Original matrix without expression controls was **1/36**,
+  `/tmp/tanstack-functional-projection-matrix-red.json`. No expected-failure
+  classifier, skipped red cell, runtime patch, or production-line growth.
+- New-file ESLint passes; formatting/diff check pass. Full DB `tsc --noEmit`
+  exits 2 with diagnostics in other existing test files, none in this new file
+  (`/tmp/tanstack-projection-types.txt`). This is not a full typecheck pass.
+- [ ] After the post-commit loss audit, repair the shared projection boundary:
+  preserve source-row state through all declared source forms, run callbacks
+  only once their include inputs have the promised form, and reuse the existing
+  projection-state/publication machinery. Check all cells after each coherent
+  change rather than adding a separate workaround per source/form. Preserve
+  callback failure handling and nested opaque values in the adjacent suites.
+  Keep production growth bounded; do not introduce another result registry or
+  a new reactive dependency tracker for scalar reads of a live facade.
+- [ ] Rerun the projection matrix plus the completed lifecycle checkpoint and
+  then the wider includes oracles before calling this boundary complete.
+- [ ] Clear the full DB test typecheck diagnostics before PR handoff.
 - [ ] Ask multiple fresh reviewers for final coherence, hostile-assay, and
       loss-audit passes.
 - [ ] Update RFC/PR text and changeset to match the final design.
