@@ -3173,6 +3173,17 @@ candidate repair scopes, not completed fixes or proof of root cause.
   130/3, error matrix 40/4. This is not whole-repository green or final 100×.
   Prettier and diff checks pass; no new lint or standalone typecheck claim.
 
+- Fresh Field Lab loss audit of `2d7f28cb` recovered two compressed limits:
+  each focused report skips 20 other functions (12 startup, six obsolete-demand
+  cleanup, live cleanup retry, reentrant ordered error). The no-failure control
+  stops at the error assertions, before ordered request/key and subscriber-count
+  checks; finally cleanup runs, and restored green reaches the later checks.
+  Counts, retained assertions, and nine remaining failure names match. One fresh
+  sequential source-first scanner, not sibling-blind; phase framing and source
+  order may hide other omissions. No auditor tests or correctness endorsement;
+  JSON does not prove commands, property examples, temporary restoration, or
+  formatting/lint/typecheck results.
+
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
       behavior, and opaque callback roots.
