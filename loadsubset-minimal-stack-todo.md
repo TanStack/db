@@ -4428,3 +4428,32 @@ candidate repair scopes, not completed fixes or proof of root cause.
   coverage, or silently add another state machine. User was asked whether to
   spend a little more code on the narrower policy rather than accept repeated
   prefixes. Hold this gate separately from oracle green and source-size goals.
+
+### Confirmed loading boundary: approved cheaper continuation
+
+- [x] User approved retaining small acquisition-boundary information and using
+  recovery when invalidated, without restoring subset algebra. Source survey:
+  `frontend-pagination-research-survey.md`; seven systems, bounded sources,
+  no external framework benchmark or transferable correctness proof.
+- [x] Added asc/desc × pages/widen × page size3/10 transfer controls to the
+  pagination oracle. Each visits ten windows and checks rows before counting
+  all provider-returned rows, including duplicates and boundary probes. All
+  **8 red** on unchanged runtime:175>50 or560>120 permitted returned rows.
+  `/tmp/tanstack-pagination-transfer-red.json`. The fixture receives source
+  rows already in requested order; projection removes virtual metadata from
+  comparisons. Earlier fixture-only failures were corrected before this red.
+- [ ] Keep a settled acquisition boundary, not the live high-water row. Check
+  the exact requested range after settlement; scope continuation to that range.
+  Reuse the existing failure/replay invalidation and publication barrier.
+  Preserve the16 intervening-insert cases and the broader lifecycle matrices.
+- [ ] Verify ordinary transfer stays linear; include outlier arrivals during
+  acquisition, backward/shrink moves, filters, ties and source-order changes.
+  Measure source lines and indexed read work separately from transfer volume.
+- [ ] Commit each step and run the standing Field Lab loss audit against its
+  frozen evidence and todo reduction. No push or merge-readiness claim yet.
+- [x] Prior full100x run finished: **1,375 passed / 1 failed**, at runtime
+  `d7f4b9d6`. Publication random seed1678102822, path3298:20; last command
+  truncate publishes delete(a5) but model expects no event after request,
+  cleanup/restart, private a5, release, no-op restart. Full nine-command trace
+  remains in `/tmp/tanstack-minimal-oracles-repaired-100x.json`. Classification
+  remains open; this is not a green full campaign or a pagination failure.

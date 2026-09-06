@@ -3902,6 +3902,56 @@ describe(`pagination recomputation oracle`, () => {
 
   it.each(
     ([`asc`, `desc`] as const).flatMap((direction) =>
+      ([`pages`, `widen`] as const).flatMap((mode) =>
+        [3, 10].map((pageSize) => ({ direction, mode, pageSize })),
+      ),
+    ),
+  )(
+    `fetches linear row volume while traversing settled pages: %j`,
+    async ({ direction, mode, pageSize }) => {
+      const pageCount = 10
+      const rows = Array.from({ length: pageCount * pageSize }, (_, rank) => ({
+        id: rank + 1,
+        rank,
+      }))
+      const ordered = direction === `asc` ? rows : [...rows].reverse()
+      const { source, requests } = createConformingOrderedSource(
+        `pagination-transfer-${collectionSequence++}`,
+        ordered,
+      )
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank, direction)
+          .limit(pageSize),
+      )
+      try {
+        await live.preload()
+        for (let page = 0; page < pageCount; page++) {
+          const offset = mode === `pages` ? page * pageSize : 0
+          const limit = mode === `pages` ? pageSize : (page + 1) * pageSize
+          if (page > 0) await live.utils.setWindow({ offset, limit })
+          expect([...live.values()].map(projectPageRow)).toEqual(
+            ordered.slice(offset, offset + limit),
+          )
+        }
+        // Count every provider-returned row, including duplicates and tie
+        // probes. Request counts alone cannot detect repeated growing prefixes.
+        const returnedRows = requests.reduce(
+          (total, request) => total + rowsForLoadSubset(ordered, request).length,
+          0,
+        )
+        expect(returnedRows).toBeLessThanOrEqual(rows.length + 2 * pageCount)
+        expect(requests.some((request) => request.cursor !== undefined)).toBe(true)
+      } finally {
+        await live.cleanup()
+        await source.cleanup()
+      }
+    },
+  )
+
+  it.each(
+    ([`asc`, `desc`] as const).flatMap((direction) =>
       [false, true].flatMap((explicitPublicKeyOrder) =>
         [false, true].flatMap((tied) =>
           [1, 2].map((limit) => ({
