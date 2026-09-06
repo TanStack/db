@@ -3128,6 +3128,18 @@ candidate repair scopes, not completed fixes or proof of root cause.
   clean-lint claim. A lint process overlapped the old-runtime control, so its
   source-file snapshot is not independently established by that first output;
   the final lint rerun used the restored runtime.
+- Fresh Field Lab loss audit of `397f9625` found no supported omission in this
+  step or dashboard. Frozen source/test scan preceded all eight report scans;
+  counts, executed seeds, and the fifteen unchanged adjacent failure names
+  match. Focused reports have 40 unrelated skipped functions, including both
+  seeded properties: their printed seeds are not executed campaigns. Old-runtime
+  sync failures stop at the first retained-rank check; those reds do not execute
+  payload/retry suffixes or post-finally release assertions. Final green reports
+  cover those later checks. One fresh sequential source-first scanner, not
+  sibling-blind; framing and reading order may hide other omissions. No auditor
+  tests, correctness endorsement, or adjacent-failure diagnosis. JSON does not
+  independently prove environment commands, multipliers/example counts, timeout
+  settings, temporary restoration, or lint/typecheck runs.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
