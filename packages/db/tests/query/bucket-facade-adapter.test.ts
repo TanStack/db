@@ -34,6 +34,103 @@ class ThrowingBuildIndex extends BasicIndex<number> {
 }
 
 describe(`BucketFacadeAdapter`, () => {
+  it.each(
+    [10, 100].flatMap((size) =>
+      [false, true].map((ordered) => ({ size, ordered })),
+    ),
+  )(
+    `copies a $size-row draft once for repeated reads (ordered=$ordered)`,
+    ({ size, ordered }) => {
+      const graph = new D2()
+      const rows = graph.newInput<[string, BucketRow]>()
+      const activeBuckets = graph.newInput<[string, true]>()
+      const adapter = new BucketFacadeAdapter(
+        `draft-read-work`,
+        [{ edgeId: `children`, rows, activeBuckets, hasOrderBy: ordered }],
+        () => {},
+      )
+      graph.finalize()
+      const bucketKey = `group`
+      const values = Array.from({ length: size }, (_, id) => ({ id }))
+      activeBuckets.sendData(new MultiSet([[[bucketKey, true], 1]]))
+      rows.sendData(
+        new MultiSet(
+          values.map((value) => [
+            [
+              bucketKey,
+              {
+                publicKey: value.id,
+                value,
+                order: ordered
+                  ? String(size - value.id).padStart(3, `0`)
+                  : undefined,
+              },
+            ],
+            1,
+          ]),
+        ),
+      )
+      graph.run()
+      adapter.flush().publish()
+      const ref: BucketFacadeRef = {
+        [BUCKET_FACADE_REF]: { edgeId: `children`, bucketKey },
+      }
+      const publicView = adapter.resolve(ref) as unknown as Collection<
+        { id: number },
+        number
+      >
+      const entries = publicView.entries.bind(publicView)
+      let visited = 0
+      const scan = vi
+        .spyOn(publicView, `entries`)
+        .mockImplementation(function* () {
+          for (const entry of entries()) {
+            visited++
+            yield entry
+          }
+        })
+      try {
+        const draft = adapter.resolveDraft(ref) as unknown as typeof publicView
+        for (const { id } of values) {
+          expect(draft.get(id)?.id).toBe(id)
+          expect(draft.has(id)).toBe(true)
+          expect(draft.size).toBe(size)
+        }
+        expect([...draft.keys()]).toEqual(
+          ordered
+            ? values.map(({ id }) => id).reverse()
+            : values.map(({ id }) => id),
+        )
+        // These counters see the real facade scan, not a modeled operation.
+        expect
+          .soft(scan.mock.calls.length, `full bucket scans`)
+          .toBeLessThanOrEqual(1)
+        expect.soft(visited, `source rows visited`).toBeLessThanOrEqual(size)
+        adapter.publishDrafts()
+        const inserted = { id: size }
+        rows.sendData(
+          new MultiSet([
+            [
+              [
+                bucketKey,
+                { publicKey: inserted.id, value: inserted, order: `999` },
+              ],
+              1,
+            ],
+          ]),
+        )
+        graph.run()
+        adapter.flush().publish()
+        expect(draft.get(size)?.id).toBe(size)
+        expect(draft.size).toBe(size + 1)
+      } finally {
+        scan.mockRestore()
+        adapter.publishDrafts()
+        adapter.cleanup()
+      }
+    },
+  )
+
   it(`moves a row when the graph reuses its object for a new order`, async () => {
     const graph = new D2()
     const rows = graph.newInput<[string, BucketRow]>()

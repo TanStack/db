@@ -147,7 +147,7 @@ export class BucketFacadeAdapter {
           }),
         )
       }
-      const draft = createDraftView(entry.collection, rows)
+      const draft = createDraftView(entry.collection, rows())
       this.draftViews.set(entry.collection, draft)
       return draft.view as T
     }
@@ -582,10 +582,10 @@ function isPlainObject(value: unknown): value is Record<PropertyKey, unknown> {
   return prototype === Object.prototype || prototype === null
 }
 
-/** Captured methods follow promotion too; released views retain no draft graph. */
+/** One input snapshot; promotion drops it and captured methods follow live state. */
 function createDraftView(
   collection: Collection,
-  readDraft: (() => Map<string | number, object>) | undefined,
+  snapshot: Map<string | number, object> | undefined,
 ) {
   const shell = Object.assign(
     Object.create(Object.getPrototypeOf(collection)),
@@ -595,8 +595,8 @@ function createDraftView(
     },
   )
   const member = (property: PropertyKey): unknown => {
-    if (readDraft) {
-      const rows = readDraft()
+    if (snapshot) {
+      const rows = snapshot
       if (property === `toArray`) return [...rows.values()]
       if (property === `size`) return rows.size
       if (property === `get`) return (key: string | number) => rows.get(key)
@@ -614,7 +614,7 @@ function createDraftView(
       const value = member(property)
       return typeof value === `function` && property !== `constructor`
         ? (...args: Array<unknown>) => {
-            if (readDraft && property === `createIndex`) {
+            if (snapshot && property === `createIndex`) {
               throw new Error(
                 `createIndex() cannot run on a temporary Collection inside fn.select(). Create the index on the published child Collection instead.`,
               )
@@ -631,7 +631,7 @@ function createDraftView(
   return {
     view,
     release: () => {
-      readDraft = undefined
+      snapshot = undefined
     },
   }
 }

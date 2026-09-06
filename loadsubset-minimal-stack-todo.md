@@ -1288,7 +1288,10 @@ eight pending-load cells cover resolve/reject and obsolete completion after
 restart with expression controls. Two-stage success/callback/prepare failure
 and remote virtual metadata now pass. Their products are bounded, not an
 exhaustive cross of async/optimistic/nested/subscription histories. Copying and
-retention bounds, broader campaign, and the 100x run remain queued.
+retention now have the bounded checks below. The broader 1x oracle command
+reports **1,349 green / 6 red**, all six in collection-state-retention; they
+reproduce before the snapshot change. Classify/repair that separate gate before
+the 100x run. Do not combine this command's count with the projection count.
 The slim replacement plus guard is **+125 net lines** (+119 replacement,
 zero for helper receivers, +6 guard), down from the archived +227 candidate.
 Whole-branch executable source is still **+3,220 net lines**
@@ -4205,3 +4208,44 @@ candidate repair scopes, not completed fixes or proof of root cause.
 - [ ] Measure copying/retention bounds before the queued 100x campaign and
   size/refactoring pass. Whole branch remains above main; tests passing does
   not waive the size target or establish full API/performance parity.
+
+### Draft snapshot work and retained state
+
+- [x] Add four real-adapter counter cells: 10/100 rows × unordered/ordered.
+  Repeated get/has/size and key traversal must copy at most one bucket, then a
+  promoted view must expose a later inserted row. Baseline visits **520/50,200
+  rows** (52/502 scans), not 10/100. All four work assertions red in
+  `/tmp/tanstack-facade-read-work-red-final.json` (five earlier tests green).
+  Initial `...-red.json` had bad unordered fixture order values, so those two
+  cells stopped early; only the corrected report establishes all four reds.
+- [x] Pass the already-resolved input snapshot into createDraftView instead
+  of retaining a function that copies and sorts it on every property read.
+  Promotion clears that snapshot; captured methods still follow live state.
+  **7 source lines added / 7 removed**, net zero; whole branch remains +3,220
+  against `68366eca`. No new cache registry, revision, or adapter closure.
+  Four cells now scan once and visit 10/100 rows. Facade plus projection suites
+  **214/0**, no skips, in `/tmp/tanstack-facade-read-work-green.json`.
+- [x] Add manual `tests/facade-draft-retention.probe.ts` (not an automatic
+  Vitest suite). Run with `node --expose-gc --import tsx` from packages/db.
+  Eight cells: released/unreleased × held view/method × publish/rollback,
+  ten samples each, after adapter cleanup. Released payloads: 0/40 retained;
+  unreleased positive controls: 40/40 retained; adapters: 0/80 retained.
+  `/tmp/tanstack-facade-retention-final.json`, Node24.5.0. This measures forced-GC
+  reachability of the direct adapter fixture, not live-query heap/GC latency,
+  temporary peak allocation, wall time, or every closure in the application.
+- [x] Earlier read tests checked data but not repeated-read work; each lookup
+  silently recopied the bucket, giving quadratic traversal. These counter
+  bounds cover that class rather than only one reported fixture.
+- [x] Targeted ESLint/Prettier pass. Package tsc exits2 with no changed-source,
+  test or probe diagnostic in `/tmp/tanstack-facade-work-types.txt`; no full
+  type pass claimed. Manual probe reran after its final reachable-handle check.
+- [ ] Commit and Field Lab loss audit.
+- [ ] Full oracle command at multiplier1, fixed seed1657011: **1,349/6**, no
+  skips, `/tmp/tanstack-facade-work-oracles.json`. Six retention failures also
+  reproduce with the sole changed runtime file restored exactly to `cbeda0b6`
+  (verified empty git diff): `/tmp/tanstack-retention-baseline.txt`.
+  Candidate then restored. Five reports concern restart delete-event
+  expectations; the optimistic case also sees an extra early metadata update.
+  These are not six diagnosed runtime bugs. Next classify both differences.
+- [ ] Then run the queued100x campaign and size/refactoring pass. No full-suite
+  green, 100x completion, universal correctness or below-main size claim.

@@ -265,8 +265,10 @@ unchanged while the callback runs. D2's existing reduction retains callback
 outputs for retractions; retractions do not rerun the callback against changed
 child contents. No callback is stored in a result row or run at publication.
 
-At publication, each temporary view switches permanently to the public
-Collection and drops its private reader. Captured read methods follow that
+Each temporary view copies its bucket rows once when the input is resolved;
+repeated keyed reads do not rescan or sort the bucket. At publication, the view
+switches permanently to the public Collection and drops its private snapshot.
+Captured read methods follow that
 switch too. Separate functional projection calls may return different views
 of the same bucket; cross-call object identity is not a contract. Retained
 views must still expose that bucket's later public changes. Expression-only
@@ -297,8 +299,10 @@ failure, flush failure, and cleanup/restart. Pending child loads cover success,
 rejection, and obsolete settlement after restart, with expression controls.
 Two chained continuations cover synchronous success, second-callback failure,
 and second-prepare failure. Retained readers check remote virtual metadata.
-These bounded cases do not establish every async/optimistic/nested API cross;
-copying/retention bounds also remain a verification gate.
+These bounded cases do not establish every async/optimistic/nested API cross.
+Work counters bound one view's snapshot scan to its bucket size. A manual
+forced-GC probe checks released views and captured methods after adapter
+cleanup; it is not a whole-application heap or throughput measurement.
 
 Every valid plan is checked as a Collection, `toArray`, and `materialize`
 include at initial load, after a parent-route update, and after a child update.
