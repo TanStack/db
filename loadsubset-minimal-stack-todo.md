@@ -3606,6 +3606,14 @@ candidate repair scopes, not completed fixes or proof of root cause.
   changes left are two import moves, **2 added / 2 removed** lines. No semantic
   runtime change or production growth remains. Compiler/new-suite ESLint and
   Prettier checks pass; full DB typecheck and final multiplier remain open.
+- [x] Post-commit Field Lab loss audit of `ca26b6a2` found no supported omission
+  in the withdrawal record. It verified candidate/restored report counts,
+  focused skips versus full-suite results, reopened assertion families and the
+  import-only net compiler diff. The scalar control proves initial numeric
+  output only; updates, atomic outputs and further compositions remain queued.
+  This was a reused source-first auditor, with framing/order contamination;
+  it ran no tests and did not independently verify commands or broader runtime
+  compatibility. No runtime endorsement is inferred from the audit.
 - Next implementation plan, replacing the withdrawn shortcut:
   1. Define the projection boundary as materialized input → callback → arbitrary
      output. Keep source include paths on the input side; never infer output
