@@ -1261,10 +1261,14 @@ change was needed for those cells. These are separately queued below. Counts des
 not unique confirmed runtime bugs; contract-alignment notes below distinguish
 stale oracle expectations from implementation defects.
 
-The functional-projection suite is now **129 green / 21 red** (144 product
-cells plus six controls/census functions), up from the frozen **85/63**
+The functional-projection suite is now **129 green / 24 red** (144 product
+cells plus nine controls/census functions), up from the frozen **85/63**
 specification. The inline input boundary repairs 42 cells; two later controls
-pass without a runtime change. All 21 remaining failures are Collection-valued.
+pass without a runtime change. The 21 original remaining failures are
+Collection-valued. Three new isolation probes also fail during initial preload
+on that boundary, before reaching their later assertions. A withdrawn snapshot
+candidate passed the original 150 tests but failed two isolation checks; its
+success is not a landed repair.
 The latest four adjacent suites are **147/0**; the wider eleven-suite inline
 checkpoint remains **370/0**.
 These counts do not replace the twelve-suite lifecycle scope above or count
@@ -3870,4 +3874,20 @@ candidate repair scopes, not completed fixes or proof of root cause.
 - [ ] Only after this isolation gate passes, run async/cleanup/nested boundary
   probes, the lifecycle census, and the queued 100x campaign; then measure
   whether old machinery can be deleted rather than layered over.
-- [ ] Post-commit Field Lab loss audit of this frozen checkpoint.
+- [x] Post-commit Field Lab loss audit of `9a215be4` recovered a stale current
+  dashboard: it still said 129/21 while the appended checkpoint correctly said
+  129/24. Updated the dashboard and its control count. Dropping rule:
+  append-only recording left an earlier current summary stale. Source and
+  report traces otherwise match: all 150 prior names/assertions remain,
+  the two candidate isolation failures reach their surface assertions, and
+  the three new baseline failures stop earlier at preload. Production diff
+  from `fd06c647` is empty; the candidate patch is +179 lines.
+  This was a reused, sequential source-first auditor with prior framing, not
+  sibling-blind. It reran no tests and did not inspect optional type/lint or
+  historical size evidence. Omission-focused reading can overemphasize details;
+  its count reconciliation is not runtime endorsement.
+- Root-agent post-freeze checks: archived patch applies cleanly; worktree was
+  clean at the checkpoint; source count against `68366eca` is still
+  5,119 added / 2,024 removed across 48 executable source files. Final restored
+  TypeScript exits 2, with no diagnostic for the expanded projection oracle
+  (`/tmp/tanstack-facade-snapshot-restored-types.txt`). No full type pass claimed.
