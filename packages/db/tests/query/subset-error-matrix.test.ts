@@ -265,6 +265,7 @@ describe(`loadSubset failure matrix`, () => {
       let loadCount = 0
       const orderedLoadKeys: Array<string | undefined> = []
       let loadsBeforeFailure = 0
+      let failureArmed = false
 
       if (path === `ordered`) {
         let begin!: () => void
@@ -286,7 +287,10 @@ describe(`loadSubset failure matrix`, () => {
                 loadSubset: (options) => {
                   loadCount++
                   orderedLoadKeys.push(getLoadSubsetDemandKey(options))
-                  if (loadCount > 1) return fail(delivery, error)
+                  if (failureArmed) return fail(delivery, error)
+                  // Initial coverage includes tie-boundary refinement, not
+                  // just the first page. Inject failure only after it settles.
+                  if (loadCount > 1) return true
                   begin()
                   write({ type: `insert`, value: row })
                   commit()
@@ -299,6 +303,7 @@ describe(`loadSubset failure matrix`, () => {
         child = primary
         triggerFailure = () => {
           loadsBeforeFailure = orderedLoadKeys.length
+          failureArmed = true
           begin()
           write({ type: `delete`, value: row })
           commit()
@@ -326,7 +331,10 @@ describe(`loadSubset failure matrix`, () => {
           const sourceErrors: Array<Error> = []
           const effect = startEffect(path, primary, child, sourceErrors)
           try {
-            triggerFailure()
+            await flushFailures()
+            expect(sourceErrors).toEqual([])
+            expect(effect.disposed).toBe(false)
+            expect(() => triggerFailure()).not.toThrow()
             await flushFailures()
 
             expect(sourceErrors).toHaveLength(1)
@@ -343,7 +351,9 @@ describe(`loadSubset failure matrix`, () => {
           const live = startLive(path, primary, child)
           try {
             await live.preload()
-            triggerFailure()
+            expect(live.status).toBe(`ready`)
+            expect(live.utils.lastSubsetError).toBeUndefined()
+            expect(() => triggerFailure()).not.toThrow()
             await flushFailures()
 
             expect(live.status).toBe(path === `lazy` ? `error` : `ready`)
@@ -359,6 +369,8 @@ describe(`loadSubset failure matrix`, () => {
 
         if (path === `ordered`) {
           const incrementalKeys = orderedLoadKeys.slice(loadsBeforeFailure)
+          expect(loadsBeforeFailure).toBeGreaterThan(1)
+          expect(incrementalKeys.length).toBeGreaterThan(0)
           expect(new Set(incrementalKeys).size).toBe(incrementalKeys.length)
         } else {
           expect(loadCount).toBe(1)

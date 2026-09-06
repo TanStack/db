@@ -1247,8 +1247,10 @@ Latest checkpoint: **597 passing / 0 failing** across 597 test functions.
 The demand suite is **195/0**, and history is **37/0**. The initial-work
 notification mismatch was a model error: readiness and publication have
 different wait sets. Remaining failures: publication **0**, settled-peer replay **0**, ordered
-work **0**. The wider adjacent run has another **15 failing functions** (also
-red on the pre-step runtime); these are separately queued below. Counts describe tests,
+work **0**. The wider adjacent run has another **9 failing functions**:
+six cleanup/retry and three window-behavior assertions. Six ordered incremental
+failure cells now reach the intended post-startup phase and pass; no runtime
+change was needed for those cells. These are separately queued below. Counts describe tests,
 not unique confirmed runtime bugs; contract-alignment notes below distinguish
 stale oracle expectations from implementation defects.
 
@@ -3011,6 +3013,7 @@ candidate repair scopes, not completed fixes or proof of root cause.
       cells; three Effect obsolete-demand cleanup cells; one live cleanup retry
       cell. These are test failures, not fifteen confirmed distinct bugs.
       Keep the existing assertions until each has a contract-backed disposition.
+      Six live ordered cells are reconciled below; nine failures remain.
 
 ### Ordered work bounds and tie-boundary retention
 
@@ -3140,6 +3143,35 @@ candidate repair scopes, not completed fixes or proof of root cause.
   tests, correctness endorsement, or adjacent-failure diagnosis. JSON does not
   independently prove environment commands, multipliers/example counts, timeout
   settings, temporary restoration, or lint/typecheck runs.
+
+### Adjacent incremental-error phase boundary
+
+- The ordered failure fixture threw on load number two, but initial preload
+  now includes tie-boundary refinement. All six live ordered cells therefore
+  rejected during preload, before the intended incremental delete. The six
+  Effect ordered cells also lacked an explicit settled-startup checkpoint.
+- Arm failure only after startup settles. Prove no prior error and a live
+  consumer before deleting the visible row; then require a new ordered request,
+  exact error identity (or normalized Error for non-Error throws), the existing
+  consumer-specific status/disposal behavior, unique incremental demand keys,
+  and final subscriber cleanup. Initial refinement must have made more than
+  one request. The twelve lazy variants remain in the same matrix. No tests or
+  prior post-failure assertions removed, no production changes.
+- Original focused run **18/6**:
+  `/tmp/tanstack-adjacent-incremental-original-red.json`. Corrected fixture
+  **24/0**: `/tmp/tanstack-adjacent-incremental-armed.json`.
+- No-failure control: replace only the armed ordered adapter's failure with
+  success, keeping all assertions. **12/12**:
+  `/tmp/tanstack-adjacent-incremental-no-failure-control.json`. Every ordered
+  case fails its error assertion; all lazy cases pass. This tests sensitivity
+  to the missing injected error, not a production error-reporting mutation.
+  Restore the fixture and rerun **24/0**:
+  `/tmp/tanstack-adjacent-incremental-restored.json`. No control remains.
+- Eleven-suite checkpoint with seed override 1657011 **865/9**:
+  `/tmp/tanstack-adjacent-incremental-census.json`. Seven bounded suites remain
+  **597/0**; adjacent suites **268/9**: loader 31/0, Effect 67/2, pagination
+  130/3, error matrix 40/4. This is not whole-repository green or final 100×.
+  Prettier and diff checks pass; no new lint or standalone typecheck claim.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar
