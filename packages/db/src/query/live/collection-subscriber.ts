@@ -239,11 +239,7 @@ export class CollectionSubscriber<
     // Do not provide the callback that loads more data
     // if there's no more data to load
     // otherwise we end up in an infinite loop trying to load more data
-    const dataLoader =
-      sentChanges > 0 &&
-      !this.collectionConfigBuilder.hasPendingSourceRecovery()
-        ? callback
-        : undefined
+    const dataLoader = sentChanges > 0 ? callback : undefined
 
     // We need to schedule a graph run even if there's no data to load
     // because we need to mark the collection as ready if it's not already
@@ -359,8 +355,7 @@ export class CollectionSubscriber<
         if (result instanceof Promise) {
           this.collectionConfigBuilder.trackOrderedLoadPromise(
             result,
-            holdPublication &&
-              !this.collectionConfigBuilder.hasPendingSourceRecovery(),
+            holdPublication && !subscription.hasPendingTruncateReplacement,
           )
         }
         onLoadSubsetResult(result)
@@ -394,7 +389,7 @@ export class CollectionSubscriber<
   // to ensure that the orderBy operator has enough data to work with
   loadMoreIfNeeded(subscription: CollectionSubscription) {
     if (
-      this.collectionConfigBuilder.hasPendingSourceRecovery() &&
+      subscription.hasPendingTruncateReplacement &&
       !this.collectionConfigBuilder.hasActiveWindowOperation()
     ) {
       return true
@@ -471,13 +466,6 @@ export class CollectionSubscriber<
     changes: Array<ChangeMessage<any, string | number>>,
     comparator: (a: any, b: any) => number,
   ): void {
-    const invalidatesSourceOrdering = changes.some((change) => {
-      const previous = this.sentToD2Rows.get(change.key)
-      if (change.type === `insert` || previous === undefined) return false
-      return (
-        change.type === `delete` || comparator(previous, change.value) !== 0
-      )
-    })
     const result = trackBiggestSentValue(
       changes,
       this.biggest,
@@ -485,7 +473,7 @@ export class CollectionSubscriber<
       comparator,
     )
     this.biggest = result.biggest
-    if (invalidatesSourceOrdering) {
+    if (result.invalidatesSourceOrdering) {
       this.orderedLoader?.invalidateSourceOrdering()
     } else if (result.shouldResetLoadKey) {
       this.orderedLoader?.invalidateCursor()

@@ -185,22 +185,25 @@ export function reconcileChangesForD2<
 
 /**
  * Track the biggest value seen in a stream of changes, used for cursor-based
- * pagination in ordered subscriptions. Returns whether the load request key
- * should be reset (allowing another load).
- *
- * @param changes   - changes to process (deletes are skipped)
- * @param current   - the current biggest value (or undefined if none)
- * @param sentRows  - keys already sent to D2 (for new-key detection)
- * @param comparator - orderBy comparator
- * @returns `{ biggest, shouldResetLoadKey }` — the new biggest value and
- *          whether the caller should clear its last-load-request-key
+ * pagination in ordered subscriptions. Moving or deleting an emitted row
+ * invalidates finite source coverage, even if the local window remains full.
+ * Other boundary changes only reset the cursor.
  */
 export function trackBiggestSentValue(
   changes: Array<ChangeMessage<any, string | number>>,
   current: unknown | undefined,
-  sentRows: { has: (key: string | number) => boolean },
+  sentRows: ReadonlyMap<string | number, unknown>,
   comparator: (a: any, b: any) => number,
-): { biggest: unknown; shouldResetLoadKey: boolean } {
+): {
+  biggest: unknown
+  shouldResetLoadKey: boolean
+  invalidatesSourceOrdering: boolean
+} {
+  const invalidatesSourceOrdering = changes.some((change) => {
+    const previous = sentRows.get(change.key)
+    if (change.type === `insert` || previous === undefined) return false
+    return change.type === `delete` || comparator(previous, change.value) !== 0
+  })
   if (
     current !== undefined &&
     changes.some((change) => {
@@ -213,7 +216,11 @@ export function trackBiggestSentValue(
     // request must start from the beginning. This also covers equal-order
     // ties, where the tracked row itself is not distinguishable by the source
     // comparator.
-    return { biggest: undefined, shouldResetLoadKey: true }
+    return {
+      biggest: undefined,
+      shouldResetLoadKey: true,
+      invalidatesSourceOrdering,
+    }
   }
 
   let biggest = current
@@ -236,7 +243,7 @@ export function trackBiggestSentValue(
     }
   }
 
-  return { biggest, shouldResetLoadKey }
+  return { biggest, shouldResetLoadKey, invalidatesSourceOrdering }
 }
 
 /**

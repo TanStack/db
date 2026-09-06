@@ -979,7 +979,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       comparator,
     )
     this.biggestSentValue.set(sourceId, result.biggest)
-    if (result.shouldResetLoadKey) {
+    if (result.invalidatesSourceOrdering) {
+      this.orderedLoaders.get(sourceId)?.invalidateSourceOrdering()
+    } else if (result.shouldResetLoadKey) {
       this.orderedLoaders.get(sourceId)?.invalidateCursor()
     }
   }

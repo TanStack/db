@@ -1243,11 +1243,12 @@ explicitly removed.
 This is the bounded protocol census. Do not add another production patch until
 every row is either green or has a named red witness.
 
-Latest checkpoint: **570 passing / 4 failing** across 574 test functions.
+Latest checkpoint: **573 passing / 2 failing** across 575 test functions.
 The demand suite is **195/0**, and history is **37/0**. The initial-work
 notification mismatch was a model error: readiness and publication have
 different wait sets. Remaining failures: publication **0**, settled-peer replay **0**, ordered
-work **4**. Counts describe tests,
+work **2**. The wider adjacent run has another **15 failing functions** (also
+red on the pre-step runtime); these are separately queued below. Counts describe tests,
 not unique confirmed runtime bugs; contract-alignment notes below distinguish
 stale oracle expectations from implementation defects.
 
@@ -1262,7 +1263,7 @@ stale oracle expectations from implementation defects.
 | Row-bearing lifecycle histories                      | independent public-row model; exact batches modulo independent-key order; fixed and random histories | 43 green / 0 red; duplicate snapshots and retained-row reset repaired; live source truth checked independently; no visible-row request omission remains |
 | Replay phase transitions                             | setup/pending/settling/publishing crossed with release, reacquisition, supersession, abort, cleanup | 72 green; direct settled-peer recovery and consecutive failure/retry witnesses green |
 | Ordered route mechanics                              | page/prefix/boundary/full-source × return/throw/resolve/reject/abort/cleanup                        | green                                                        |
-| Ordered consumer integration                         | Collection/Effect parity, source-local recovery, public-window reentry, sync-session settlement     | 4 named ordered-work reds; settled-peer replay is counted separately |
+| Ordered consumer integration                         | Collection/Effect parity, source-local recovery, public-window reentry, sync-session settlement     | 2 ordered-work reds: repeated continuation and synchronous recovery publication; adjacent failures separately queued |
 | Ordered generated histories                          | 192 checked route/delivery/window/outcome/session/barrier histories; finite/full request shapes     | 192 green cells; no known-red classifier remains |
 
 The earlier 44-test red catalog grouped into these protocol faults. Later
@@ -2931,6 +2932,70 @@ candidate repair scopes, not completed fixes or proof of root cause.
   clean lint claim. JSON supports counts/failures/seeds, not successful run counts,
   environment overrides, temporary patch identity/restoration, or lint results;
   those rely on the recorded execution commands.
+
+### Ordered consumer coverage and independent-source recovery
+
+- Shared the existing emitted-row ordering invalidation rule between Collection
+  and Effect via `trackBiggestSentValue`. An order-changing update invalidates
+  finite source coverage even when the local top-K remains full. Effect used to
+  clear only its cursor, leaving the newly eligible remote row unrequested.
+  Reuses each consumer's existing D2 row map; no new stored state.
+- Loader suppression now checks the affected subscription's replay, not every
+  source in the graph. Unrelated sources may acquire their replacements while
+  the graph's existing publication barrier still retains the public snapshot.
+  The callback scheduler no longer drops a source's data-loader callback merely
+  because another source is replaying. The loader performs its source-local
+  check at execution time. Ordered promise tracking uses the same local scope.
+- Expanded the finite-prefix parity witness to move/delete × Collection/Effect.
+  Each mutation runs both consumers concurrently, checks the independently
+  expected row, additional acquisition, and final publication parity. Delete
+  already passed before this patch: it is a control, not another defect.
+  Strengthened independent-source recovery to require new primary work while
+  secondary replay is still pending, while public rows remain unchanged.
+  No old witness was removed or made expected-failure.
+- Before runtime changes, focused expanded cases were **1/2**,
+  `/tmp/tanstack-ordered-isolation-expanded-red.json`: move and source isolation
+  fail; delete passes. Initial full ordered-work run after runtime changes was
+  **23/2**, `/tmp/tanstack-ordered-isolation-first-green.json`.
+- Temporarily restored all three edited runtime files exactly to `d702e7fe`
+  (empty git diff verified), retaining final expanded tests. Five-suite control
+  **277/25**, `/tmp/tanstack-ordered-isolation-old-runtime-control.json`:
+  ordered-work **21/4**, Effect **67/2**, loader **31/0**, pagination **130/3**,
+  subset-error matrix **28/16**. Restored the runtime patch afterward. A first
+  reverse-patch attempt had an invalid filename and applied nothing; corrected
+  its path before the verified control. No temporary control remains.
+- Final restored eleven-suite run, seed override 1657011:
+  `/tmp/tanstack-ordered-isolation-final-census.json`, **835/17**. Bounded seven
+  lifecycle suites **573/2** (575 functions): history 37/0, demand 195/0,
+  publication 43/0, replay 72/0, refinement 7/0, ordered lifecycle 196/0,
+  ordered work 23/2. Adjacent **262/15**: Effect 67/2, loader 31/0,
+  pagination 130/3, subset-error matrix 34/10. Six Effect ordered incremental
+  failure cells (throw/reject × Error/NaN/undefined) also turn green: ordering
+  invalidation now reaches the failing acquisition and reports its error.
+  No new adjacent failure relative to the old-runtime control.
+- Production diff **27 added / 30 removed (-3 lines)**, including shorter
+  helper documentation. Prettier passes. Targeted eslint still reports five
+  errors outside edited lines: Effect import ordering and `attempt` const;
+  ordered-work import ordering, an existing type assertion, and an optional
+  chain. No clean-lint or standalone typecheck claim. No final 100× claim.
+- Targeted 10× initially hit the default five-second timeout in both consumer
+  properties: **217/4**, `/tmp/tanstack-ordered-isolation-fresh-10x.json`.
+  The extra failures report `STACK_TRACE_ERROR` at about 5001 ms, with fixed
+  seed 17801 and fresh seed -1475725790; they are not shrunk counterexamples.
+  Replayed with seed -1475725790, multiplier 10 and `--testTimeout=60000`:
+  **219/2**, `/tmp/tanstack-ordered-isolation-replay-10x.json`. Both properties
+  pass in roughly six seconds; only the same two named ordered-work failures
+  remain. Ordered lifecycle's fixed seed is 93471. This changes test budget,
+  not runtime behavior, generated inputs, or expectations. Successful example
+  counts rely on the recorded command/config, not JSON test totals.
+- [ ] Resolve repeated continuation and synchronous full-source recovery
+      publication (two bounded ordered-work reds).
+- [ ] Reconcile/fix the fifteen pre-existing adjacent failures before claiming
+      broad green: two Effect release-retry assertions; three pagination
+      reentry/session-return assertions; six live ordered incremental failure
+      cells; three Effect obsolete-demand cleanup cells; one live cleanup retry
+      cell. These are test failures, not fifteen confirmed distinct bugs.
+      Keep the existing assertions until each has a contract-backed disposition.
 
 - [ ] Finish the functional-projection boundary matrix: initial placeholders,
       recursive and union sources, ready facades in callbacks, derived scalar

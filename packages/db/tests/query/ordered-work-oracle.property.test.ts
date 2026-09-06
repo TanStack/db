@@ -472,6 +472,7 @@ async function observeLaterOrderTermMutation(
 
 async function observeFinitePrefixMutation(
   kind: `collection` | `effect`,
+  mutation: `move` | `delete`,
 ): Promise<{
   rows: Array<number>
   requests: number
@@ -577,12 +578,21 @@ async function observeFinitePrefixMutation(
     }
     const requestsBeforeMutation = requests
     const moved = { ...truth.get(1)!, rank: 10 }
-    truth.set(1, moved)
+    if (mutation === `delete`) truth.delete(1)
+    else truth.set(1, moved)
     sync.begin({ immediate: true })
-    sync.write({ type: `update`, value: { ...moved } })
+    sync.write({
+      type: mutation === `delete` ? `delete` : `update`,
+      value: { ...moved },
+    })
     const receipt = sync.commit()
     if (receipt !== true) await receipt
-    await vi.waitFor(() => expect(visibleIds()).toEqual([2]))
+    await vi.waitFor(() =>
+      expect(
+        visibleIds(),
+        JSON.stringify({ kind, requests, source: source.toArray }),
+      ).toEqual([2]),
+    )
 
     expect(requests).toBeGreaterThan(requestsBeforeMutation)
     return { rows: visibleIds(), requests, publications }
@@ -605,13 +615,18 @@ describe(`ordered source work oracle`, () => {
     expect(new Set(effect.requests)).toEqual(new Set(collection.requests))
   })
 
-  it(`recovers a finite source prefix equally across consumers`, async () => {
-    const collection = await observeFinitePrefixMutation(`collection`)
-    const effect = await observeFinitePrefixMutation(`effect`)
+  it.each([`move`, `delete`] as const)(
+    `recovers a finite source prefix equally across consumers after %s`,
+    async (mutation) => {
+      const [collection, effect] = await Promise.all([
+        observeFinitePrefixMutation(`collection`, mutation),
+        observeFinitePrefixMutation(`effect`, mutation),
+      ])
 
-    expect(effect.rows).toEqual(collection.rows)
-    expect(effect.publications.at(-1)).toEqual(collection.publications.at(-1))
-  })
+      expect(effect.rows).toEqual(collection.rows)
+      expect(effect.publications.at(-1)).toEqual(collection.publications.at(-1))
+    },
+  )
 
   it(`loads each source of a filtered join once`, async () => {
     type Order = {
@@ -1316,7 +1331,9 @@ describe(`ordered source work oracle`, () => {
       primarySync.write({ type: `update`, value: moved })
       const mutationReceipt = primarySync.commit()
       if (mutationReceipt !== true) await mutationReceipt
-      await flushPromises()
+      await vi.waitFor(() =>
+        expect(primaryRequests).toBeGreaterThan(requestsBeforeMutation),
+      )
       expect(live.toArray.map(({ id }) => id)).toEqual([1])
 
       secondaryReplay.resolve()
