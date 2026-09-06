@@ -36,7 +36,7 @@ current as review findings, oracle laws, and implementation choices change.
   production lines. Fresh100x integration gate passes1582/0 across26 files,
   exit0, no skipped tests or reported runner errors. Integration loss audit
   complete; final campaign report audit complete.
-- Still open: whole-branch size goal (+3254 net package-source lines against
+- Still open: whole-branch size goal (+3231 net package-source lines against
   fixedmain68366eca), final coherence/review and
   RFC/PR/changeset reconciliation. Older unchecked entries are phase records;
   reconcile them with later evidence before treating them as current bugs.
@@ -46,7 +46,10 @@ current as review findings, oracle laws, and implementation choices change.
   committed at b9fa9698:18 net source lines removed,915 minified/119 gzip
   diagnostic bytes removed; focused442/0 and broader1582/0 at1x, package types
   pass. Post-commit ownership loss audit complete; focused lifecycle100x379/0
-  across4 files,exit0. Whole-source gap is3254.
+  across4 files,exit0. W2 synchronous ordered-request failure consolidation is
+  committed at704a402f:23 more lines and494 minified/35 gzip bytes removed;
+  focused544/0 and broader1582/0 at1x, ordered/pagination100x443/0. Types and
+  changed-file lint pass. Whole-source gap is3231; W2 loss audit complete.
 
 
 ## Chosen design
@@ -5247,7 +5250,20 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   changed-file eslint both exit0 (`-types.log`, `-lint.log` same prefix).
 - Full26-file integration1x:1582/0,exit0,no skips/reported runner errors;
   `/tmp/tanstack-weight-request-full.json` and `.log`.
-- [ ] Focused ordered/pagination100x is running with code frozen.
-  Commit the reduction then source-to-implementation Field
-  Lab loss audit against the request-wrapper candidate and its restored proof
-  obligations. Do not infer all-adapter or full-branch100x results from these.
+- [x] Commit704a402f, then focused ordered-lifecycle/ordered-work/pagination100x:
+  443/0,3 files,exit0 in105.61s,no skips/no reported runner errors. Runtime/tests
+  frozen during runs; seed/path/property overrides unset, fixed corpus and fresh
+  random seeds, multiplier100,threads3,testTimeout600000,coverage disabled.
+  `/tmp/tanstack-weight-request-100.json` and `.log`. Multiplier scales opted-in
+  property runs, not every test100 times. This is not full26-file100x or all
+  adapters. No assertions/classifiers/tests were changed in W2.
+- [x] Post-commit Field Lab source-to-implementation loss audit found no concrete
+  lost constraint. It traced sync/full-source clearing before provisional
+  release separately from unchanged async retained ownership/generation checks;
+  callback-before-throw, publication/cleanup failure, observer failure, route
+  rejection/abort/disposal and retry guards retain their assertions. Broader
+  synchronous marker reset is an explicit change, not hidden as byte-identical
+  bookkeeping. The20-step promise test bounds unsettled participants, not heap
+  usage. Scanner read diff/source/test assertions, not run reports or tests.
+  Reused/non-blind candidate author can favor the intended representation;
+  static trace does not establish every reentrant combination or readiness.
