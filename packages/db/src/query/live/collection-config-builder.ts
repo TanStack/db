@@ -896,6 +896,8 @@ export class CollectionConfigBuilder<
         }
       }
 
+      // Late window settlement belongs to the discarded graph, not its restart.
+      this.windowOperationGeneration++
       // Clear current sync session state
       this.currentSyncConfig = undefined
       this.currentSyncState = undefined

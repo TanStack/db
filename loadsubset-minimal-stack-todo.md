@@ -28,9 +28,14 @@ current as review findings, oracle laws, and implementation choices change.
   the old extra boundary request. U2's source replay cleared a failed window's
   publication gate; repaired with one separate window-failure flag (+7 source
   lines). U3 now distinguishes retained demand from rolled-back startup demand
-  in20 passing cells without production changes. Only U4 remains open.
-- Still open: whole-branch size goal (+3263 net package-source lines against
-  fixedmain68366eca; U2 adds7), unit-failure group U4, final coherence/review and
+  in20 passing cells without production changes. U4 now fulfills its page
+  before failing refinement, preserving the original privacy assertions.
+  All four groups closed; expanded26-file normal-scale gate1582/0, exit0.
+  The broader lifecycle oracle caught a U2 cleanup regression, repaired by
+  invalidating the old window generation at teardown. Total growth this pass9
+  production lines. Fresh100x integration gate and final loss audit follow.
+- Still open: whole-branch size goal (+3272 net package-source lines against
+  fixedmain68366eca), final coherence/review and
   RFC/PR/changeset reconciliation. Older unchecked entries are phase records;
   reconcile them with later evidence before treating them as current bugs.
 
@@ -4954,6 +4959,21 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   Scoped lint reports two unchanged builder diagnostics (always-truthy/falsy
   conditions), also reproduced against pre-U2 source through ESLint stdin;
   do not label that command green. `/tmp/tanstack-u2-baseline-lint.log`.
+  Commit92b6c536 audited with Field Lab loss-audit: matrix varies settlement,
+  not write timing; all initial failures are async after one row, with an empty
+  settled window, untied numeric rows and distinct projection. It asserts two
+  loads before retry and one final publication, not retry request count.
+  Sync reds stop earlier than async reds, inside the row assertion before that
+  checkpoint's window/events. Baseline stdin lint additionally reports134
+  comment-format diagnostics, not just the two typed conditions. Source-first
+  sequential scan in one fresh context; omission bias and no readiness claim.
+  Broader integration exposed a regression from the new flag: old window
+  rejection after teardown set windowFailed again, hiding restarted rows.
+  Existing ordered-lifecycle oracle caught24 restart histories plus coverage
+  check and two generated properties (27 failures), so this is not27 new bugs.
+  Increment the existing windowOperationGeneration on teardown; old settlement
+  cannot mutate replacement state. +2 lines, no new state. Original failures
+  retained in `/tmp/tanstack-u-final-green.json` and `.log` (1555/27,exit1).
 - [x] U3 — `uses one normalized error for a 'throw' replay failure` across
   Error/undefined/NaN/false/object (5 cells): catch-derived windowError is
   undefined instead of reportedError. That observation cannot distinguish
@@ -4976,7 +4996,35 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   run301/1, no skips, exit1, with only U4 failing:
   `/tmp/tanstack-u3-retained-demand.log`, `/tmp/tanstack-u3-matrix.log`,
   `/tmp/tanstack-u3-broad.log`. Scoped unit lint and package tsc exit0.
-- [ ] U4 — `keeps partial ordered source work private when later refinement
+  Committeda353d56d, then fresh loss audit: original input cases remain, not
+  literally unchanged expectations. Five new-demand/throw cells now fulfill;
+  the other15 reject with exact normalized identity. Historical lastSubsetError
+  is checked in all20. The filtered attempt had21 passes (one extra coverage
+  enumeration test) and281 filtered, with a failed suite hook. Full run splits
+  into199 lifecycle and102 unit passes plus U4 failure. Source-first sequential
+  scan, no edits/reruns/readiness judgment; omission focus can overstate brevity.
+- [x] U4 — `keeps partial ordered source work private when later refinement
   rejects`: window promise resolves instead of rejecting. Confirm that the
   fixture still reaches its intended failing refinement under the new loading
   boundary; preserve publication/row assertions either way.
+  Fixture supplied only rank0 to a continuation after rank1. With no new
+  continuation boundary, the intended fourth request no longer happened.
+  Supply rank2 for the page and keep rank0 as a concurrent live insert that
+  would replace the old top-one result if leaked. Original assertions now pass
+  without production repair (`/tmp/tanstack-u4-unit.log`,1/0,102 filtered,exit0).
+  Added direction × throw/reject oracle matrix using rowsForLoadSubset and
+  independent final-window recomputation. It proves newly supplied row2,
+  failure in the later row2 boundary, old snapshot/window/no events on failure,
+  then one coherent retry publication. Initial matrix asserted selected rows
+  were only row2, overlooking the already-delivered tie row1; record newly
+  delivered rows separately. Four fixture assertion failures are retained in
+  `/tmp/tanstack-u4-oracle.log`, not classified as runtime bugs.
+  Expanded full1x run includes all original oracle/loader files plus live-query
+  units:1582/0,26 files,no skips,no reported runner errors,exit0,threads4,
+  seed/path/property overrides unset. `/tmp/tanstack-u-final-verified.json`
+  and `.log`. Earlier combined attempt1551/31 included27 lifecycle failures
+  and4 new fixture assertions (`/tmp/tanstack-u-final-oracles.json`/`.log`).
+  Final changed-test lint and ordinary package tsc exit0. Production delta
+  across U1–U4 is9 lines in builder (one boolean plus existing generation
+  invalidation); no tests removed or skipped in the full run. Commit/audit and
+  fresh100x integration run follow before returning to size/coherence work.

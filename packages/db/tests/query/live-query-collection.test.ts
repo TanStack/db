@@ -2695,8 +2695,10 @@ describe(`createLiveQueryCollection`, () => {
                 if (loadCount === 2) return true
                 if (loadCount === 3) {
                   begin()
-                  // This valid row from the wider page would also replace the
-                  // row in the previously settled top-one window.
+                  // Fulfill the requested continuation so its new boundary
+                  // needs refinement. Also deliver a live insert before the
+                  // cursor: it would replace the old top-one result if leaked.
+                  write({ type: `insert`, value: { id: 2, rank: 2 } })
                   write({ type: `insert`, value: { id: 0, rank: 0 } })
                   commit(options.signal)
                   return Promise.resolve()

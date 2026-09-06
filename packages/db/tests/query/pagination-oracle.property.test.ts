@@ -2668,6 +2668,112 @@ describe(`pagination recomputation oracle`, () => {
     },
   )
 
+  it.each(
+    ([`asc`, `desc`] as const).flatMap((direction) =>
+      ([`throw`, `reject`] as const).map((delivery) => ({
+        direction,
+        delivery,
+      })),
+    ),
+  )(
+    `holds a $direction page and concurrent live insert when its boundary refinement fails by $delivery`,
+    async ({ direction, delivery }) => {
+      const sign = direction === `asc` ? 1 : -1
+      const rows: Array<PageRow> = [
+        { id: 1, rank: sign },
+        { id: 2, rank: 2 * sign },
+      ]
+      const liveInsert: PageRow = { id: 0, rank: 0 }
+      const delivered = new Set<number>()
+      const failure = new Error(`later boundary failed`)
+      let widening = false
+      let failedBoundary: LoadSubsetOptions | undefined
+      let suppliedPage: Array<PageRow> | undefined
+      const source = createCollection<PageRow>({
+        id: `pagination-boundary-publication-${collectionSequence++}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options) => {
+                const selected = rowsForLoadSubset(rows, options)
+                if (
+                  widening &&
+                  options.where &&
+                  !options.orderBy &&
+                  selected.some(({ id }) => id === 2) &&
+                  !failedBoundary
+                ) {
+                  failedBoundary = options
+                  if (delivery === `throw`) throw failure
+                  return Promise.reject(failure)
+                }
+                const newRows = selected.filter(({ id }) => !delivered.has(id))
+                begin()
+                for (const row of newRows) {
+                  delivered.add(row.id)
+                  write({ type: `insert`, value: { ...row } })
+                }
+                if (widening && options.orderBy && !suppliedPage) {
+                  suppliedPage = newRows
+                  rows.push(liveInsert)
+                  delivered.add(liveInsert.id)
+                  write({ type: `insert`, value: { ...liveInsert } })
+                }
+                const receipt = commit(options.signal)
+                // Make the page asynchronous so the failure is in its later
+                // refinement, not the synchronous setWindow call stack.
+                return Promise.resolve(receipt).then(() => undefined)
+              },
+            }
+          },
+        },
+      })
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank, direction)
+          .limit(1),
+      )
+      const publications: Array<Array<number>> = []
+      const subscription = live.subscribeChanges(() => {
+        publications.push(Array.from(live.values(), ({ id }) => id))
+      })
+      try {
+        await live.preload()
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
+        publications.length = 0
+        widening = true
+        await expect(
+          live.utils.setWindow({ offset: 0, limit: 2 }),
+        ).rejects.toBe(failure)
+        expect(suppliedPage?.map(({ id }) => id)).toEqual([2])
+        expect(failedBoundary).toBeDefined()
+        expect(
+          rowsForLoadSubset(rows, failedBoundary!).map(({ id }) => id),
+        ).toEqual([2])
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
+        expect(publications).toEqual([])
+        await live.utils.setWindow({ offset: 0, limit: 2 })
+        const expected = referenceWindow(rows, direction, {
+          offset: 0,
+          limit: 2,
+        })
+        expect(Array.from(live.values(), ({ id }) => id)).toEqual(expected)
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
+        expect(publications).toEqual([expected])
+      } finally {
+        subscription.unsubscribe()
+        await cleanupAll(live, source)
+      }
+    },
+  )
+
   it(`recovers a failed tie boundary from the authoritative full source`, async () => {
     const authoritativeRows: Array<PageRow> = [
       { id: 1, rank: -1 },
