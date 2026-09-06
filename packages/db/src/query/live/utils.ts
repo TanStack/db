@@ -382,7 +382,9 @@ export class OrderedSourceLoader {
     if (!this.info.dataNeeded) return this.pending
     const count = Math.max(
       this.info.dataNeeded(),
-      this.failed || !this.hasEstablishedSourceCoverage
+      this.failed ||
+        !this.hasEstablishedSourceCoverage ||
+        windowOperationGeneration !== undefined
         ? this.info.offset + this.info.limit
         : 0,
     )
@@ -496,7 +498,10 @@ export class OrderedSourceLoader {
     // Rows observed before the first provider request do not prove ordered
     // source coverage. In particular, a row inserted while limit is zero must
     // not become the cursor when that window first opens.
-    const startsFromSourcePrefix = !this.hasEstablishedSourceCoverage
+    // Live inserts can fill a window without filling the source prefix.
+    const startsFromSourcePrefix =
+      !this.hasEstablishedSourceCoverage ||
+      windowOperationGeneration !== undefined
     const biggest = !startsFromSourcePrefix ? this.getBiggest() : undefined
     let minValues: Array<unknown> | undefined
     if (biggest !== undefined) {

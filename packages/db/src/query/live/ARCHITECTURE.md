@@ -688,6 +688,12 @@ acquisition instead of letting its queued success erase the failure.
 A later explicit window operation has a new generation and may retry from the
 safe source boundary.
 
+An explicit window move establishes the requested source prefix from zero.
+Live inserts may fill the local top-K without delivering earlier source rows,
+so local row count alone cannot prove the new window. This uses the existing
+indexed prefix path, not a full-source recovery or another retained frontier.
+Ordinary forward refill within an operation can still use a cursor.
+
 An initial ordered load or imperative window move includes every page,
 tie-boundary request, and forward refill needed to reach its fixed point. Its
 preload or window promise cannot settle before that chain, and a failure in any

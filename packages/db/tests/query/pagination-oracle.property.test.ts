@@ -2498,10 +2498,14 @@ describe(`pagination recomputation oracle`, () => {
         commit()
         await flushPromises()
         const failedReplayRequests = requests.slice(beforeFailedReplay)
+        // Explicit window moves now acquire a prefix from zero. Find the
+        // replayed four-row acquisition, not a cursor-shaped request.
         const replayedFailedRequest = failedReplayRequests.find(
-          ({ cursor }) => cursor !== undefined,
+          ({ limit }) => limit === 4,
         )
         expect(replayedFailedRequest).toBeDefined()
+        expect(replayedFailedRequest).toMatchObject({ offset: 0, limit: 4 })
+        expect(replayedFailedRequest?.cursor).toBeUndefined()
 
         const releasesBeforeRetry = unloaded.length
         const requestsBeforeRetry = requests.length
@@ -2742,7 +2746,6 @@ describe(`pagination recomputation oracle`, () => {
             .limit(1),
         )
       }
-      let live!: ReturnType<typeof createWindowedQuery>
       const source = createCollection<PageRow>({
         id: `pagination-initial-request-reentrancy-${collectionSequence++}`,
         getKey: (row) => row.id,
@@ -2787,7 +2790,7 @@ describe(`pagination recomputation oracle`, () => {
           },
         },
       })
-      live = createWindowedQuery()
+      const live = createWindowedQuery()
 
       try {
         await live.preload()
@@ -2900,7 +2903,6 @@ describe(`pagination recomputation oracle`, () => {
           .limit(1),
       )
     }
-    let live!: ReturnType<typeof createWindowedQuery>
     const source = createCollection<PageRow>({
       id: `pagination-window-cleanup-${collectionSequence++}`,
       getKey: (row) => row.id,
@@ -2934,7 +2936,7 @@ describe(`pagination recomputation oracle`, () => {
         },
       },
     })
-    live = createWindowedQuery()
+    const live = createWindowedQuery()
 
     try {
       await live.preload()
@@ -3896,6 +3898,40 @@ describe(`pagination recomputation oracle`, () => {
   )(
     `matches full recomputation across source and window transitions for a random or replayed seed`,
     runPaginationStateScenario,
+  )
+
+  it.each(
+    ([`asc`, `desc`] as const).flatMap((direction) =>
+      [false, true].flatMap((explicitPublicKeyOrder) =>
+        [false, true].flatMap((tied) =>
+          [1, 2].map((limit) => ({
+            direction,
+            explicitPublicKeyOrder,
+            tied,
+            limit,
+          })),
+        ),
+      ),
+    ),
+  )(
+    `loads the source prefix when moving past an intervening insert: %j`,
+    async ({ direction, explicitPublicKeyOrder, tied, limit }) => {
+      const sign = direction === `asc` ? 1 : -1
+      await runPaginationStateScenario({
+        direction,
+        initialWindow: { offset: 0, limit: 1 },
+        actions: [
+          { type: `put`, id: 3, rank: sign * (tied ? 1 : 2), keep: false },
+          { type: `window`, offset: 1, limit },
+          { type: `put`, id: 1, rank: 0, keep: false },
+        ],
+        ranks: [0, sign],
+        keeps: [false, false],
+        explicitPublicKeyOrder,
+        includeFilter: false,
+        reverseInsertion: false,
+      })
+    },
   )
 
   it(`discovered trace: a rank update must refill a top-1 window`, async () => {

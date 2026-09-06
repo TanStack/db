@@ -4332,12 +4332,38 @@ candidate repair scopes, not completed fixes or proof of root cause.
   abort/release b, then source d4. Runtime emits update(d0→d4), model insert(d4):
   the subscriber never received d0. Full shrink includes no-op commands and is
   preserved in the JSON. Classification/repair queued; do not call100x green.
-- [ ] Pagination seed1658 shrank to rows1(rank0),2(rank1); insert3(rank1), move
+- [x] Pagination seed1658 shrank to rows1(rank0),2(rank1); insert3(rank1), move
   to offset1/limit1, no-op update1. Checkpoint2 shows row3 instead of row2.
   The generalized asc/desc × implicit/explicit key order × tied/distinct insert
   matrix is **4 red / 4 green** on baseline: implicit order fails even without
   ties. Preserve all eight cases, not just the original shrink.
-- [ ] Repair the ordered loader's false prefix proof. A filled graph window
+- [x] Widen that product to limit1/2: **6 red / 10 green** on unchanged runtime,
+  `/tmp/tanstack-pagination-prefix-16-red.json` (136 filtered tests). Distinct
+  inserted ranks also leave an under-filled wider window, not only wrong ties.
+- [x] Repair the ordered loader's false prefix proof. A filled graph window
   after a live insert does not establish a complete source prefix. An explicit
   window move must reacquire that prefix; do not add more retained cursor state.
-  Candidate verification and per-step loss audit pending. No size-pass completion.
+  Reuse indexed page acquisition from zero on explicit moves, with count at
+  least offset+limit. Ordinary refill can still continue by cursor. This adds
+  **5 net source lines**, no state. Tradeoff: explicit moves may request a
+  prefix again rather than only its tail; no blanket full-source recovery.
+- [x] Pagination **152/0**; full1x oracle command **1,373/0**, fixed random seed
+  1657011; fixed transition corpus at100x and replay1658 **2/0** (150 filtered).
+  `/tmp/tanstack-pagination-prefix-152-green.json`,
+  `/tmp/tanstack-prefix-repair-oracles-green.json`,
+  `/tmp/tanstack-pagination-prefix-100x.json`. Not a fresh full100x campaign.
+  The two failed-acquisition replay tests retain release identity, rejection,
+  row and no-extra-request assertions, but now assert the actual prefix request
+  (offset0/limit4) instead of identifying it by a cursor. They no longer claim
+  that an explicit move enters the cursor path. Existing ordered lifecycle and
+  pending-cursor suites remain. Two preexisting prefer-const findings in these
+  fixtures were corrected; scoped ESLint and Prettier pass.
+- [x] Loss audit for `ec2ec796` recovered the later failure's exact stopping
+  point (source d4; suffix not reached), no-op settlements of absent b are not
+  rejected acquisitions, and the normal-scale random seed1970373042 differs
+  from replay712591281. Matrix claims require separate reports; JSON alone
+  cannot prove frozen SHA/env or worker-reporting errors. Reused source-first
+  context, no reruns, not fresh/blind or a merge endorsement. Evidence compression
+  can obscure these distinctions; records above keep each run separate.
+- [ ] Pagination per-step loss audit and full repaired100x campaign pending.
+  No size-pass completion; whole branch now +3,225 net source lines at68366eca.
