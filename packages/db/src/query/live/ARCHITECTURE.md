@@ -291,9 +291,11 @@ downstream keys, distinct, ordering, and QueryRef consumers see the callback's
 actual output. The compiler owns the validated callback wrapper. Inline-only
 inputs need no Collection continuation. Queries without includes keep their
 original pipeline unless they consume a staged input elsewhere in the graph.
-The projection oracle checks the draft index guard; subscription creation,
-virtual-property parity, and asynchronous failure/cleanup around these views
-remain verification gates, not guarantees established by that suite.
+The projection oracle checks the draft index guard and subscriptions created
+during a callback or after publication across synchronous success, callback
+failure, flush failure, and cleanup/restart. Remaining virtual-property parity
+and asynchronous publication/failure around these views remain verification
+gates, not guarantees established by that suite.
 
 Every valid plan is checked as a Collection, `toArray`, and `materialize`
 include at initial load, after a parent-route update, and after a child update.

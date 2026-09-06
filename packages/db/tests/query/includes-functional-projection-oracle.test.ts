@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
+import { BucketFacadeAdapter } from '../../src/query/live/bucket-facade-adapter.js'
 import {
   createLiveQueryCollection,
   eq,
@@ -102,6 +103,162 @@ class Projection {
 }
 
 describe(`functional projection output compatibility`, () => {
+  it.each(
+    ([`draft`, `published`] as const).flatMap((subscribeAt) =>
+      ([`none`, `callback`, `flush`] as const).map((failureAt) => ({
+        subscribeAt,
+        failureAt,
+      })),
+    ),
+  )(
+    `keeps $subscribeAt subscriptions isolated through $failureAt failure and restart`,
+    async ({ subscribeAt, failureAt }) => {
+      const parents = createControlledCollection(`subscription-parent`, [
+        { id: 1, groupId: 1 },
+      ])
+      const children = createControlledCollection(`subscription-child`, [
+        { id: 10, groupId: 1 },
+        { id: 20, groupId: 2 },
+      ])
+      const observers: Array<{
+        rows: Set<number>
+        batches: Array<Array<string>>
+        view: Pick<typeof children.collection, `toArray` | `subscribeChanges`>
+      }> = []
+      const releases: Array<() => void> = []
+      const observe = (view: (typeof observers)[number][`view`]) => {
+        const rows = new Set<number>()
+        const batches: Array<Array<string>> = []
+        const subscription = view.subscribeChanges(
+          (changes) => {
+            batches.push(
+              changes.map((change) => `${change.type}:${change.value.id}`),
+            )
+            for (const change of changes) {
+              if (change.type === `delete`) rows.delete(change.value.id)
+              else rows.add(change.value.id)
+            }
+          },
+          { includeInitialState: true },
+        )
+        releases.push(() => subscription.unsubscribe())
+        observers.push({ rows, batches, view })
+      }
+      const failure = new Error(`projection subscription ${failureAt} failure`)
+      let failing = false
+      let flushReached = false
+      const originalFlush = BucketFacadeAdapter.prototype.flush
+      // Fail after actual facade writes, before any deferred public events.
+      // An event-listener throw is asynchronous and would not test rollback.
+      const flush =
+        failureAt === `flush`
+          ? vi
+              .spyOn(BucketFacadeAdapter.prototype, `flush`)
+              .mockImplementation(function (this: BucketFacadeAdapter) {
+                const publication = originalFlush.call(this)
+                return {
+                  ...publication,
+                  prepare: () => {
+                    publication.prepare()
+                    if (failing) {
+                      flushReached = true
+                      throw failure
+                    }
+                  },
+                }
+              })
+          : undefined
+      const query = createLiveQueryCollection((q) =>
+        q
+          .from({
+            row: q
+              .from({ parent: parents.collection })
+              .select(({ parent }) => ({
+                id: parent.id,
+                groupId: parent.groupId,
+                children: q
+                  .from({ child: children.collection })
+                  .where(({ child }) => eq(child.groupId, parent.groupId)),
+              })),
+          })
+          .fn.select(({ row }) => {
+            if (subscribeAt === `draft`) observe(row.children)
+            if (failing && failureAt === `callback`) throw failure
+            return { id: row.id, groupId: row.groupId, children: row.children }
+          }),
+      )
+      const ids = (observer: (typeof observers)[number]) =>
+        [...observer.rows].sort((a, b) => a - b)
+      try {
+        await query.preload()
+        if (subscribeAt === `published`) observe(query.get(1)!.children)
+        const first = observers[0]!
+        expect(ids(first), `initial subscription snapshot`).toEqual([10])
+        children.write(`insert`, { id: 11, groupId: 1 })
+        expect(ids(first), `initial live insert`).toEqual([10, 11])
+        const originalRow = query.get(1)
+        const beforeFailure = first.batches.length
+        failing = failureAt !== `none`
+        const move = () => parents.write(`update`, { id: 1, groupId: 2 })
+        if (failing) {
+          expect(move).toThrow(failure)
+          expect(query.get(1), `root rollback`).toBe(originalRow)
+          expect(ids(first), `old subscriber rollback`).toEqual([10, 11])
+          expect(first.batches.length, `no partial public events`).toBe(
+            beforeFailure,
+          )
+          if (subscribeAt === `draft`) {
+            expect(observers).toHaveLength(2)
+            expect(
+              ids(observers[1]!),
+              `failed subscriber sees no private rows`,
+            ).toEqual([])
+          }
+          if (failureAt === `flush`) expect(flushReached).toBe(true)
+        } else {
+          move()
+          if (subscribeAt === `published`) observe(query.get(1)!.children)
+          expect(ids(first), `retired route`).toEqual([])
+          expect(ids(observers[1]!), `destination subscription`).toEqual([20])
+        }
+
+        // Keep the external subscriptions alive across cleanup. They belong to
+        // the old graph, not the next graph created by preload on this query.
+        await query.cleanup()
+        const oldObservers = [...observers]
+        const oldBatches = oldObservers.map(
+          (observer) => observer.batches.length,
+        )
+        failing = false
+        await query.preload()
+        if (subscribeAt === `published`) observe(query.get(1)!.children)
+        expect(observers).toHaveLength(oldObservers.length + 1)
+        expect(query.get(1)!.groupId, `restart uses current source`).toBe(2)
+        const restarted = observers.at(-1)!
+        expect(ids(restarted), `restart subscription snapshot`).toEqual([20])
+        children.write(`insert`, { id: 22, groupId: 2 })
+        expect(ids(restarted), `restart live insert`).toEqual([20, 22])
+        expect(
+          oldObservers.map((observer) => observer.batches.length),
+          `old graph receives no fresh events`,
+        ).toEqual(oldBatches)
+        for (const observer of oldObservers) {
+          expect(
+            observer.view.toArray,
+            `old graph exposes no fresh rows`,
+          ).toEqual([])
+        }
+      } finally {
+        failing = false
+        flush?.mockRestore()
+        for (const release of releases) release()
+        await query.cleanup()
+        await parents.collection.cleanup()
+        await children.collection.cleanup()
+      }
+    },
+  )
+
   const draftIndexError = `createIndex() cannot run on a temporary Collection inside fn.select(). Create the index on the published child Collection instead.`
   const readSurfaces = [
     `toArray`,

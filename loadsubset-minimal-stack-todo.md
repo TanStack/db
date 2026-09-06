@@ -1261,9 +1261,9 @@ change was needed for those cells. These are separately queued below. Counts des
 not unique confirmed runtime bugs; contract-alignment notes below distinguish
 stale oracle expectations from implementation defects.
 
-The functional-projection suite is now **186 green / 0 red** (144 product
+The functional-projection suite is now **192 green / 0 red** (144 product
 cells, fourteen controls/census functions, 26 read-API cells, and two uncaught
-index-guard cases). The API
+index-guard cases, plus six subscription/failure/restart cells). The API
 extension started at **174/10**; correcting two receiver expressions fixes
 iteration, forEach, map, and state in both order modes with zero net source
 growth. The user then approved a clear error for draft-time index creation.
@@ -1282,8 +1282,9 @@ The captured-method isolation extension first failed on that candidate
 the twelve-suite lifecycle checkpoint remains **940/0** from the preceding
 slim-replacement step, not a rerun after this two-expression change.
 These are bounded test counts, not unique bugs or proof of the full draft
-Collection API. Draft subscription creation, remaining virtual properties,
-async failure/cleanup, performance, and the 100x campaign remain queued.
+Collection API. Six synchronous subscription/failure/restart cells now pass;
+remaining virtual properties, async failure/cleanup, performance, and the
+100x campaign remain queued.
 The slim replacement plus guard is **+125 net lines** (+119 replacement,
 zero for helper receivers, +6 guard), down from the archived +227 candidate.
 Whole-branch executable source is still **+3,220 net lines**
@@ -4099,3 +4100,32 @@ candidate repair scopes, not completed fixes or proof of root cause.
   optional types not inspected. Reports do not prove commands/environment or
   intermediate source provenance. Subscription/failure/cleanup and async
   gates remain open; this audit is not merge-readiness evidence.
+
+### Subscriptions: synchronous failure and graph restart
+
+- [x] Add six cells: subscribe inside the functional callback versus after
+  publication, crossed with success, callback throw, and facade prepare throw.
+  Each includes initial snapshot/live insertion, a parent route move, explicit
+  query cleanup, preload on the same query, and a fresh-graph child insertion.
+  Compare subscriber-fed key sets to fixture truth, not the facade's own rows.
+- [x] Inject flush failure after the real adapter flush and prepare. Assert
+  the seam was reached, the exact error propagates, the prior root keeps its
+  identity, and old subscribers receive no partial events. A subscription
+  created during failed work receives no private rows. This is not a listener
+  failure test: those errors use a different asynchronous delivery path.
+- [x] Keep external subscriptions alive through cleanup/restart and release
+  them explicitly in finally. Old views expose no new graph rows/events;
+  restarted subscribers see the current source and later insert. Do not require
+  automatic undo of user subscriptions or cleanup delete events.
+- [x] Full suite **192/0**, no skips, without runtime changes. Initial report
+  `...-red.json` was **190/2** because the two success cells omitted the move
+  action. The targeted `...-probe.json` confirmed that setup mistake (four
+  passed, two failed, other tests filtered). Corrected report:
+  `/tmp/tanstack-facade-subscription-boundary-green.json`. These are stronger
+  green checks, not a red/green production repair. ESLint passes. Initial tsc
+  found an untyped spy receiver; after annotation, tsc still exits 2 but has
+  no changed-test diagnostic in `...-types-final.txt`. No full type pass.
+- [ ] Commit this step, then run the standing Field Lab loss audit.
+- [ ] Async demand settlement, nested continuations, remaining virtual props,
+  copying/retention bounds, and 100x campaign remain open. No new production
+  size, bundle/performance, adjacent, or broad lifecycle result is claimed.
