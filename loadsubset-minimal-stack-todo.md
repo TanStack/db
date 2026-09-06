@@ -4862,10 +4862,44 @@ candidate repair scopes, not completed fixes or proof of root cause.
   `.log`. Temporary copy removed afterward; original test retained. This proves
   those failures predate the type repairs, not whether fixtures or runtime are
   wrong. No expectations/classifiers were loosened to hide them.
-- [ ] Commit type step, then fresh source/report Field Lab loss audit before
-  moving to the unit-failure groups. Earlier1471-pass100x gate covers its stated
+- [x] Commit type step f9aa0530; fresh source/report Field Lab loss audits
+  completed against its frozen record before moving to unit-failure groups.
+  Earlier1471-pass100x gate covers its stated
   oracle/loader files at31ec4d15; it is not a whole-unit-suite green claim or a
   fresh100x run of this type-cleanup commit.
+- [x] Post-commit full25-file oracle/loader suite at1x:1471/0, no skips, exit0,
+  no reported unhandled errors; threads4, seed/path/property overrides unset.
+  `/tmp/tanstack-minimal-types-full-oracles.json` and `.log`. This is a fresh
+  normal-scale check of f9aa0530, not another100x campaign or an assertion that
+  the separate live-query unit failures are fixed.
+- Audit recovery — declaration scope: the changed abstract BaseIndex methods
+  accept unknown indexed values; the separate IndexInterface declarations still
+  use TKey. The retained undefined-cursor tests exercise BaseIndex, not both
+  declaration surfaces. Consumer impact of that remaining mismatch is untested;
+  include it in the type/API coherence pass, not the runtime bug count.
+- Audit recovery — coverage scope: middleCount4 remains in the deterministic
+  underfilled-source matrix (two directions × two tie states); random and
+  exhaustive parity domains remain0–3. The __proto__ fixture retains its data
+  descriptor flags; output assertions check own-property presence, prototype,
+  marker and nested identity, not all descriptor flags directly.
+- Audit recovery — assertion boundaries: U1 stops before its row assertion.
+  U2 passes loadCount===2, then stops at the row mismatch before window and
+  publication assertions. U3 stops at error identity before instanceof Error;
+  all five corresponding async reject cells pass in both runs. U4 stops at
+  promise settlement before flushPromises and later privacy assertions. Do not
+  infer the unexecuted suffix from a test title. Other passing controls include
+  failed-full-source-window retry, active-replay waiting and replay-blocked
+  cleanup; none alone explains the failing cells.
+- Audit recovery — report units: baseline93 entries/1 file; affected run773
+  entries/8 files, including the same93 unit cases. The latter has772 distinct
+  file/fullName pairs because two pagination cases share a title. Log/JSON are
+  two views of one run, not independent evidence. Command records establish
+  SHAs, exits, environment and temporary-source provenance; reports alone do
+  not. Lint reports identify three warnings but do not prove their age.
+- Audit limits: all nine changed TypeScript files received a source-first scan;
+  the separate report scanner read its reports before the frozen reduction.
+  Neither changed files, reran tests, diagnosed U1–U4 or assessed readiness.
+  Omission-focused scanning can overstate deliberate summary compression.
 
 #### Next: four existing live-query unit-failure groups
 
@@ -4874,15 +4908,18 @@ changing runtime or an expectation. These are8 failing assertions, not8 newly
 confirmed runtime bugs. Keep the list bounded before returning to code-size work.
 
 - [ ] U1 — `retries the same ordered refill after a transient rejection`:
-  retry performs4 loads; old assertion expects5. Check whether reduced transfer
+  cumulative loadCount after retry is4; old assertion expects5. This is not
+  four loads made by the retry. Check whether reduced transfer
   legitimately removed one acquisition, using exact request/row evidence.
 - [ ] U2 — `publishes a window after its failed full-source demand replays
   successfully`: rows become visible after successful truncate replay where
   the unit expects[] until explicit window retry. Reconcile the failed-window
   publication barrier with the replay oracle and architecture law.
 - [ ] U3 — `uses one normalized error for a 'throw' replay failure` across
-  Error/undefined/NaN/false/object (5 cells): waiting window resolvesundefined
-  instead of rejecting with reportedError. Compare synchronous-failure timing
+  Error/undefined/NaN/false/object (5 cells): catch-derived windowError is
+  undefined instead of reportedError. That observation cannot distinguish
+  fulfillment with undefined from rejection with undefined; record settlement
+  explicitly before diagnosing it. Compare synchronous-failure timing
   and operation enrollment with existing replay/error oracle coverage.
 - [ ] U4 — `keeps partial ordered source work private when later refinement
   rejects`: window promise resolves instead of rejecting. Confirm that the
