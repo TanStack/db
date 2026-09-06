@@ -3921,4 +3921,18 @@ candidate repair scopes, not completed fixes or proof of root cause.
   work. Stable `===` identity remains normative unless explicitly changed.
   A live-view choice would still require full draft API/lifecycle checks; it
   would not make this prototype production-ready.
-- [ ] Post-commit Field Lab loss audit of this frozen checkpoint.
+- [x] Post-commit Field Lab loss audit of `05a2827f` found no supported
+  omission or overclaim. It checked all six reports, the source patch and
+  added tests, then the frozen reduction/dashboard. All 153 prior assertions
+  remain; the identity failures reach their intended assertions and still run
+  the later live-row checks. The three new baseline functional failures stop
+  earlier. Production diff is empty and candidate cost is +227 lines.
+  This reused, source-first auditor was not sibling-blind and carried prior
+  framing, which may hide omissions. It ran no tests and did not check the
+  optional type transcript; reports do not establish intermediate source
+  versions, command environment, lint or formatting. This is not runtime
+  endorsement or approval to weaken handle identity.
+- Root-agent post-freeze checks: clean checkpoint worktree, empty production
+  diff, archived patch applies cleanly, final test ESLint passes. Restored
+  package tsc exits 2 with no changed-oracle diagnostic in
+  `/tmp/tanstack-facade-draft-view-restored-types.txt`; no full type pass.
