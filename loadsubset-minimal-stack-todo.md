@@ -3695,6 +3695,12 @@ candidate repair scopes, not completed fixes or proof of root cause.
   errors outside this file (`/tmp/tanstack-projection-consumer-types.txt`);
   no new-suite diagnostics were printed. Not a full typecheck pass. The final
   100× campaign and broader output shapes remain open.
+- [x] Post-commit Field Lab loss audit of `5d3f1c0e` found no supported omission
+  or overclaim in this specification. It checked all five report distributions,
+  the changed controls, retained original functions and absence of runtime
+  edits. The auditor was reused and source-first; prior framing and reading
+  order can hide omissions. It ran no tests and did not read the optional
+  typecheck transcript. This is not fresh runtime endorsement.
 - [ ] Before declaring projection complete, include opaque wrapper inputs and
   nested facade readiness/error rollback in the final integration check. Date
   input preservation and the existing opaque output cases do not prove those
