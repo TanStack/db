@@ -134,6 +134,10 @@ describe(`functional projection output compatibility`, () => {
         { id: 20, groupId: 2 },
         { id: 21, groupId: 2 },
       ])
+      const readers = new Map<
+        number,
+        (keys: Array<number>, draft?: boolean) => Array<number | string>
+      >()
       let checkPublishedIndex: (() => void) | undefined
       const query = createLiveQueryCollection((q) =>
         q
@@ -154,66 +158,77 @@ describe(`functional projection output compatibility`, () => {
           .fn.select(({ row }) => {
             const view = row.children
             const expectedKeys = [row.groupId * 10, row.groupId * 10 + 1]
-            let ids: Array<number | string>
-            switch (surface) {
-              case `toArray`:
-                ids = view.toArray.map((child) => child.id)
-                break
-              case `get`:
-                ids = expectedKeys.flatMap((key) => view.get(key)?.id ?? [])
-                break
-              case `has`:
-                ids = expectedKeys.filter((key) => view.has(key))
-                break
-              case `size`:
-                ids = [view.size]
-                break
-              case `keys`:
-                ids = [...view.keys()]
-                break
-              case `values`:
-                ids = [...view.values()].map((child) => child.id)
-                break
-              case `entries`:
-                ids = [...view.entries()].map(([key]) => key)
-                break
-              case `iterator`:
-                ids = [...view].map(([key]) => key)
-                break
-              case `forEach`:
-                ids = []
-                view.forEach((child) => ids.push(child.id))
-                break
-              case `map`:
-                ids = view.map((child) => child.id)
-                break
-              case `state`:
-                ids = [...view.state.keys()]
-                break
-              case `virtual-key`:
-                ids = view.toArray.map((child) => child.$key)
-                break
-              case `index`: {
-                // Capturing the method is safe. Calling it on private input is not.
-                const createIndex = view.createIndex.bind(view)
-                expect(() =>
-                  createIndex((child) => child.id, {
-                    indexType: BasicIndex,
-                  }),
-                ).toThrow(new Error(draftIndexError))
-                expect(view.indexes.size).toBe(0)
-                checkPublishedIndex = () => {
-                  const index = createIndex((child) => child.id, {
-                    indexType: BasicIndex,
-                  })
-                  for (const key of expectedKeys)
-                    expect(index.lookup(`eq`, key)).toEqual(new Set([key]))
-                  expect(index.lookup(`eq`, 22)).toEqual(new Set([22]))
+            const createIndex = view.createIndex.bind(view)
+            const read = (keys: Array<number>, draft = false) => {
+              let ids: Array<number | string>
+              switch (surface) {
+                case `toArray`:
+                  ids = view.toArray.map((child) => child.id)
+                  break
+                case `get`:
+                  ids = keys.flatMap((key) => view.get(key)?.id ?? [])
+                  break
+                case `has`:
+                  ids = keys.filter((key) => view.has(key))
+                  break
+                case `size`:
+                  ids = [view.size]
+                  break
+                case `keys`:
+                  ids = [...view.keys()]
+                  break
+                case `values`:
+                  ids = [...view.values()].map((child) => child.id)
+                  break
+                case `entries`:
+                  ids = [...view.entries()].map(([key]) => key)
+                  break
+                case `iterator`:
+                  ids = [...view].map(([key]) => key)
+                  break
+                case `forEach`:
+                  ids = []
+                  view.forEach((child) => ids.push(child.id))
+                  break
+                case `map`:
+                  ids = view.map((child) => child.id)
+                  break
+                case `state`:
+                  ids = [...view.state.keys()]
+                  break
+                case `virtual-key`:
+                  ids = view.toArray.map((child) => child.$key)
+                  break
+                case `index`: {
+                  // Capturing the method is safe. Calling it on private input is not.
+                  if (!draft) {
+                    const index = createIndex((child) => child.id, {
+                      indexType: BasicIndex,
+                    })
+                    return keys.flatMap((key) => [...index.lookup(`eq`, key)])
+                  }
+                  expect(() =>
+                    createIndex((child) => child.id, {
+                      indexType: BasicIndex,
+                    }),
+                  ).toThrow(new Error(draftIndexError))
+                  expect(view.indexes.size).toBe(0)
+                  checkPublishedIndex = () => {
+                    const index = createIndex((child) => child.id, {
+                      indexType: BasicIndex,
+                    })
+                    for (const key of expectedKeys)
+                      expect(index.lookup(`eq`, key)).toEqual(new Set([key]))
+                    expect(index.lookup(`eq`, 22)).toEqual(new Set([22]))
+                  }
+                  ids = keys.flatMap((key) => view.get(key)?.id ?? [])
+                  break
                 }
-                ids = expectedKeys.flatMap((key) => view.get(key)?.id ?? [])
-                break
               }
+              return ids
             }
+            readers.set(row.groupId, read)
+            const ids = read(expectedKeys, true)
             return { id: row.id, ids, children: view }
           }),
       )
@@ -224,8 +239,27 @@ describe(`functional projection output compatibility`, () => {
           ? ids.reverse()
           : ids
       }
+      const checkPublished = (
+        group: number,
+        ids: Array<number>,
+        phase: string,
+      ) => {
+        const actual = readers.get(group)!([
+          group * 10,
+          group * 10 + 1,
+          group * 10 + 2,
+        ])
+        const result =
+          surface === `size`
+            ? [ids.length]
+            : ordered && ![`get`, `has`, `index`].includes(surface)
+              ? [...ids].reverse()
+              : ids
+        expect.soft(actual, phase).toEqual(result)
+      }
       try {
         await query.preload()
+        checkPublished(1, [10, 11], `initial published read`)
         expect
           .soft(query.get(1)!.ids, `initial callback input`)
           .toEqual(expected(1))
@@ -233,12 +267,18 @@ describe(`functional projection output compatibility`, () => {
         expect
           .soft(query.get(1)!.ids, `moved callback input`)
           .toEqual(expected(2))
+        checkPublished(1, [], `retired route read`)
+        checkPublished(2, [20, 21], `moved published read`)
         const held = query.get(1)!.children
         children.write(`insert`, { id: 22, groupId: 2 })
         expect(held.toArray.map((child) => child.id)).toEqual(
           ordered ? [22, 21, 20] : [20, 21, 22],
         )
         checkPublishedIndex?.()
+        checkPublished(1, [], `retired route ignores later insert`)
+        checkPublished(2, [20, 21, 22], `published insertion read`)
+        children.write(`delete`, { id: 21, groupId: 2 })
+        checkPublished(2, [20, 22], `published deletion read`)
       } finally {
         await query.cleanup()
         await parents.collection.cleanup()

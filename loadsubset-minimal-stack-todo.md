@@ -4025,9 +4025,8 @@ candidate repair scopes, not completed fixes or proof of root cause.
   remain queued. These API cells add no async/cleanup reach. Whole-branch
   source remains **+3,214** against `68366eca` (+119 for the slim replacement),
   with no current bundle/performance claim and no 100x campaign yet.
-- [ ] Extend post-publication checks to repeat the selected read API, not
-  only toArray. The index surface now has its explicit published lookup control;
-  the other read surfaces still need this extension.
+- [x] Extend post-publication checks to repeat the selected read API, not
+  only toArray. All 26 cells pass the retained-read checkpoints below.
 
 ### Approved narrow index guard
 
@@ -4068,4 +4067,29 @@ candidate repair scopes, not completed fixes or proof of root cause.
   Root-agent committed rerun is **186/0**, no skips, in
   `/tmp/tanstack-facade-index-guard-committed.json`.
 - [ ] Async/cleanup, non-key virtual properties, subscription creation,
-  repeated read API after publication, and 100x campaign remain queued.
+  and 100x campaign remain queued. Repeated API reads are checked below.
+
+### Retained read API: publication, retirement, insert, delete
+
+- [x] Reuse each selected reader in the 26 API cells after initial publication,
+  old-route retirement, destination publication, child insertion, and child
+  deletion. The retired view is also checked after the destination insert.
+  Expected rows remain fixture-derived; traversal APIs check descending order,
+  explicit-key APIs preserve probe order, and size checks cardinality.
+- [x] Preserve both route readers rather than replacing the initial capture.
+  The index method is bound once inside each callback, then used after its
+  publication and retirement. Other methods are fetched through their retained
+  view at read time; this is not a captured-method product for every API.
+  Index cells create/look up an index at each read; they do not prove one
+  specific index instance survives every checkpoint. Existing held-index tests
+  remain separate controls. Old callback/input/isolation assertions stay.
+- [x] All **186 tests pass**, no skips, without production changes. Reports:
+  `/tmp/tanstack-facade-retained-api.json` (before moving the index-method
+  binding outside the reader), and `...-final.json` (both captures checked).
+  This strengthens green coverage; it found no new defect and is not a
+  new red/green runtime repair. ESLint passes; package tsc exits 2 without
+  changed-test diagnostics in `/tmp/tanstack-facade-retained-api-types.txt`.
+  Source size stays +3,220 against `68366eca`; no adjacent/lifecycle rerun
+  claimed for this test-only step, no new performance evidence.
+- [ ] Commit, then run standing Field Lab loss audit before the lifecycle
+  boundary step. Subscription/failure/cleanup and async gates remain open.
