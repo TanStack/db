@@ -36,13 +36,17 @@ current as review findings, oracle laws, and implementation choices change.
   production lines. Fresh100x integration gate passes1582/0 across26 files,
   exit0, no skipped tests or reported runner errors. Integration loss audit
   complete; final campaign report audit complete.
-- Still open: whole-branch size goal (+3272 net package-source lines against
+- Still open: whole-branch size goal (+3254 net package-source lines against
   fixedmain68366eca), final coherence/review and
   RFC/PR/changeset reconciliation. Older unchecked entries are phase records;
   reconcile them with later evidence before treating them as current bugs.
 - Size identification plan committed at efd299e2: five deletion candidates,
   controlled bundle baseline and per-candidate laws recorded below. Two
-  post-commit source-to-plan audits complete; no runtime reductions applied yet.
+  post-commit source-to-plan audits complete. W1 acquisition composition now
+  committed at b9fa9698:18 net source lines removed,915 minified/119 gzip
+  diagnostic bytes removed; focused442/0 and broader1582/0 at1x, package types
+  pass. Post-commit ownership loss audit complete; focused lifecycle100x379/0
+  across4 files,exit0. Whole-source gap is3254.
 
 
 ## Chosen design
@@ -5192,5 +5196,21 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   Baseline stdin lint reports the same five diagnostics; typed stdin checks
   can consult the current program, so this is not an isolated baseline proof.
   No lint suppression or unrelated cleanup added. Diff whitespace check passes.
-- [ ] Commit W1 then source-to-implementation Field Lab loss audit; preserve
-  ownership, startup/reentrant release, replacement-failure and session laws.
+- [x] Commit b9fa9698 then bounded source-to-implementation Field Lab loss audit.
+  No supported lost behavior/proof obligation found. Scanner traced tentative
+  ownership/startup throw, reentrant replay release, failed replacement and
+  cleanup/session isolation to unchanged test assertions. New detached metadata
+  does not mutate the physical object captured by release/replay; guarded
+  restore cannot overwrite it. No test execution or independent verification
+  of run counts by the scanner. Reused/non-blind candidate author: familiarity
+  can favor this representation and miss counterexamples outside its constraints.
+  Not a readiness verdict.
+- [x] Focused100x on frozen b9fa9698 runtime/tests:379 passed/0 failed,
+  4 files,no skips/no reported runner errors,exit0 in388.08s. Suites: subscription
+  lifecycle-oracle, lifecycle-history, lifecycle-publication, replay-oracle.
+  Fixed corpora and fresh random seeds; seed/path/property overrides unset,
+  TANSTACK_DB_ORACLE_RUNS_MULTIPLIER=100; threads4,testTimeout600000,
+  coverage disabled. `/tmp/tanstack-weight-acquisition-100.json` and `.log`.
+  This scales opted-in property runs, not every deterministic cell100 times.
+  This is the focused W1 stress gate, not a rerun of all26 files at100x.
+  No tests, classifiers or production code changed during verification.
