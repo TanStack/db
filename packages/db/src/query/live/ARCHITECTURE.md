@@ -10,9 +10,11 @@ The central rule is simple:
 > one D2 graph. Use custom state only at asynchronous source and public
 > Collection boundaries.
 
-The correlated-materialization oracle suites listed below are green behavioral
-contracts for this design. Suites for adjacent planner and query-db ownership
-boundaries may also contain exact classifiers for defects outside this graph.
+The correlated-materialization oracle suites listed below are behavioral
+contracts for this design. The functional-projection suite still exposes known
+Collection-valued boundary failures; it must not be reported as green. Suites
+for adjacent planner and query-db ownership boundaries may also contain exact
+classifiers for defects outside this graph.
 
 ## Scope
 
@@ -266,6 +268,17 @@ parent.
 Include paths describe a functional projection's input, not its arbitrary
 output. A callback may drop or rename a field, or return a scalar. Its input
 paths must not be attached to that output by a downstream QueryRef consumer.
+
+When every include in a functional projection's input subtree is inline, the
+compiler materializes that input through the existing D2 materializer before
+calling the projection. It consumes the input's include descriptors there;
+downstream keys, distinct, ordering, and QueryRef consumers see the callback's
+actual output. The compiler owns the validated callback wrapper, including
+calls deferred to publication. Queries without includes keep their original
+pipeline. A subtree containing a Collection-valued include does not take this
+inline path: its public-facade boundary remains separate. The projection oracle
+still records failures at that boundary; the inline repair does not establish
+the Collection-valued callback contract above.
 
 Every valid plan is checked as a Collection, `toArray`, and `materialize`
 include at initial load, after a parent-route update, and after a child update.
@@ -905,6 +918,7 @@ create recursive Collection machinery.
 | Collection facades, event coherence, and route activation                   | `packages/db/tests/query/includes-collection-oracle.property.test.ts`        |
 | Correlated physical work                                                    | `packages/db/tests/query/includes-work-counter-oracle.test.ts`               |
 | Route-context discovery and transport across recursive and join boundaries  | `packages/db/tests/query/includes-context-transport-oracle.test.ts`          |
+| Functional projection input timing and output preservation (Collection boundary still red) | `packages/db/tests/query/includes-functional-projection-oracle.test.ts` |
 | Cross-formulation equivalence and reference-sensitive route identity        | `packages/db/tests/query/includes-cross-formulation-oracle.property.test.ts` |
 | Query-db ownership                                                          | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`      |
 | Reachable nested shape                                                      | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts`    |

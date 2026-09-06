@@ -9,6 +9,7 @@ import {
   tap,
 } from '@tanstack/db-ivm'
 import { optimizeQuery } from '../optimizer.js'
+import { materializeCompilation } from '../live/materialized-pipeline.js'
 import {
   createParentContext,
   createValueIdentity,
@@ -616,10 +617,18 @@ export function compileQuery(
   // Extract includes from SELECT, compile child pipelines, and replace with placeholders.
   // This must happen AFTER WHERE (so parent pipeline is filtered) but BEFORE processSelect
   // (so IncludesSubquery nodes are stripped before select compilation).
-  const includesResults: Array<IncludesCompilationResult> = !query.select
+  const inputIncludes = [
+    ...directIncludes,
+    ...sourceIncludes.map(({ include }) => include),
+  ]
+  const materializeSelectInput =
+    !!query.fnSelect &&
+    inputIncludes.length > 0 &&
+    inputIncludes.every(isInlineInclude)
+  let includesResults: Array<IncludesCompilationResult> = !query.select
     ? [...directIncludes]
     : []
-  const includesRoutingFns: Array<{
+  let includesRoutingFns: Array<{
     fieldName: string
     getRouting: (nsRow: any) => {
       active: boolean
@@ -635,7 +644,7 @@ export function compileQuery(
             sourceAlias,
             include.resultPath,
           )
-        : query.fnSelect
+        : query.fnSelect && !materializeSelectInput
           ? []
           : [
               {
@@ -977,17 +986,71 @@ export function compileQuery(
     throw new FnSelectWithGroupByError()
   }
 
+  const routingFns = includesRoutingFns
+  const getRowIncludesRouting = (row: NamespacedRow) =>
+    Object.fromEntries(
+      routingFns.map(({ fieldName, getRouting }) => [
+        fieldName,
+        getRouting(row),
+      ]),
+    )
+  if (materializeSelectInput) {
+    // Input paths belong before the callback: its arbitrary output may rename
+    // or discard them. Inline values need no public Collection boundary.
+    const inputPipeline = pipeline.pipe(
+      map(
+        ([key, row]: [
+          unknown,
+          NamespacedRow & { [INCLUDES_ROUTING]?: object },
+        ]) => [
+          key,
+          [
+            {
+              ...row,
+              [INCLUDES_ROUTING]: {
+                ...row[INCLUDES_ROUTING],
+                ...getRowIncludesRouting(row),
+              },
+            },
+            undefined,
+          ],
+        ],
+      ),
+    ) as ResultStream
+    pipeline = materializeCompilation({
+      pipeline: inputPipeline,
+      includes: includesResults,
+      valueIdentity,
+      collectionId: mainCollectionId,
+      sourceWhereClauses,
+      aliasToCollectionId,
+      aliasRemapping,
+    }).pipeline.pipe(
+      map(([key, [value]]) => {
+        const row = { ...value }
+        delete row[INCLUDES_ROUTING]
+        return [key, row]
+      }),
+    ) as NamespacedAndKeyedStream
+    includesResults = []
+    includesRoutingFns = []
+  }
+
   // Process the SELECT clause early - always create $selected
   // This eliminates duplication and allows for DISTINCT implementation
   if (query.fnSelect) {
+    const fnSelect = (row: NamespacedRow) => {
+      const selected = query.fnSelect!(row)
+      validateFnSelectResult(selected)
+      return selected
+    }
     // Handle functional select - apply the function to transform the row
     pipeline = pipeline.pipe(
       map(([key, namespacedRow]) => {
         const callbackRow = sourceCarriesInternalRouteState
           ? (stripInternalCallbackMetadata(namespacedRow) as NamespacedRow)
           : namespacedRow
-        const selectResults = query.fnSelect!(callbackRow)
-        validateFnSelectResult(selectResults)
+        const selectResults = fnSelect(callbackRow)
         let selected = selectResults
         if (
           selectResults &&
@@ -1001,11 +1064,11 @@ export function compileQuery(
           if (routing) {
             selected[INCLUDES_ROUTING] = routing
           }
-          if (directIncludes.length > 0) {
+          if (includesResults.length > 0) {
             Object.defineProperty(selected, FN_SELECT_STATE, {
               value: {
                 sourceRow: namespacedRow,
-                fnSelect: query.fnSelect!,
+                fnSelect,
               },
               enumerable: true,
               configurable: true,
@@ -1051,21 +1114,10 @@ export function compileQuery(
   if (includesRoutingFns.length > 0) {
     pipeline = pipeline.pipe(
       map(([key, namespacedRow]: any) => {
-        const routing: Record<
-          string,
-          {
-            active: boolean
-            correlationKey: unknown
-            parentContext: Record<string, any> | null
-          }
-        > = {}
-        for (const { fieldName, getRouting } of includesRoutingFns) {
-          routing[fieldName] = getRouting(namespacedRow)
-        }
         const selected = Array.isArray(namespacedRow.$selected)
           ? [...namespacedRow.$selected]
           : { ...namespacedRow.$selected }
-        selected[INCLUDES_ROUTING] = routing
+        selected[INCLUDES_ROUTING] = getRowIncludesRouting(namespacedRow)
         return [key, { ...namespacedRow, $selected: selected }]
       }),
     )
@@ -1292,6 +1344,13 @@ export function compileQuery(
   if (parentKeyStream === undefined) cache.set(rawQuery, compilationResult)
 
   return compilationResult
+}
+
+function isInlineInclude(include: IncludesCompilationResult): boolean {
+  return (
+    include.materialization !== `collection` &&
+    (include.childCompilationResult.includes ?? []).every(isInlineInclude)
+  )
 }
 
 function keyWhereClausesBySource(

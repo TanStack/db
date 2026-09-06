@@ -9,6 +9,7 @@ import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import {
   createLiveQueryCollection,
   eq,
+  materialize,
   toArray,
 } from '../../src/query/index.js'
 import { runTrace } from '../trace-runner.js'
@@ -163,6 +164,114 @@ function createColdComments(): {
   })
   return { collection, loads }
 }
+
+it.each(
+  ([`array`, `materialized`] as const).flatMap((form) =>
+    ([`expression`, `functional`] as const).map((projection) => ({
+      form,
+      projection,
+    })),
+  ),
+)(
+  `$form / $projection preserves child demand and applied settlement across projection`,
+  async ({ form, projection }) => {
+    const posts = createColdPosts([{ id: 1, authorId: `one`, title: `post` }])
+    const started = createDeferred<void>()
+    const release = createDeferred<void>()
+    const loads: Array<LoadSubsetOptions> = []
+    const comments = createCollection<Comment>({
+      id: nextCollectionId(`projection-pending-comments`),
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => ({
+          loadSubset: (options) => {
+            loads.push(options)
+            const keys = correlationKeys([options], `postId`)
+            started.resolve()
+            return release.promise.then(async () => {
+              if (options.signal?.aborted) return
+              begin()
+              if (keys.includes(1))
+                write({
+                  type: `insert`,
+                  value: { id: 100, postId: 1, body: `one` },
+                })
+              await commit()
+              markReady()
+            })
+          },
+        }),
+      },
+    })
+    const live = createLiveQueryCollection((q) => {
+      const included = q.from({ post: posts.collection }).select(({ post }) => {
+        const childRows = q
+          .from({ comment: comments })
+          .where(({ comment }) => eq(comment.postId, post.id))
+        return {
+          id: post.id,
+          comments:
+            form === `array` ? toArray(childRows) : materialize(childRows),
+          count: 0,
+        }
+      })
+      const outer = q.from({ row: included })
+      return projection === `expression`
+        ? outer.select(({ row }) => row)
+        : outer.fn.select(({ row }) => {
+            expect
+              .soft(
+                Array.isArray(row.comments),
+                `callback receives an inline value`,
+              )
+              .toBe(true)
+            return {
+              id: row.id,
+              comments: row.comments,
+              count: Array.isArray(row.comments) ? row.comments.length : -1,
+            }
+          })
+    })
+    let settled = false
+    const preload = live.preload()
+    const observed = preload.then(
+      () => {
+        settled = true
+      },
+      () => {
+        settled = true
+      },
+    )
+    try {
+      await Promise.race([started.promise, preload])
+      expect(loads).toHaveLength(1)
+      expect(correlationKeys(loads, `postId`)).toEqual([1])
+      expect(settled).toBe(false)
+      release.resolve()
+      await preload
+      expect(live.toArray).toHaveLength(1)
+      // Observe the runtime boundary: a broken projection can omit this value.
+      const publishedComments = live.toArray[0]?.comments as unknown as
+        | Array<Comment>
+        | undefined
+      expect(
+        publishedComments?.map(({ id, postId, body }) => ({
+          id,
+          postId,
+          body,
+        })),
+      ).toEqual([{ id: 100, postId: 1, body: `one` }])
+      if (projection === `functional`) expect(live.toArray[0]?.count).toBe(1)
+    } finally {
+      release.resolve()
+      await live.cleanup()
+      await observed
+      await posts.collection.cleanup()
+      await comments.cleanup()
+    }
+  },
+)
 
 type ReadinessObservation = {
   ready: boolean

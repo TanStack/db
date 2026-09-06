@@ -1261,15 +1261,16 @@ change was needed for those cells. These are separately queued below. Counts des
 not unique confirmed runtime bugs; contract-alignment notes below distinguish
 stale oracle expectations from implementation defects.
 
-The queued functional-projection matrix is now a separate red baseline:
-**85 green / 63 red** (144 product cells plus four controls/census functions).
-The latest four adjacent suites are **147/0**; the earlier wider includes
-checkpoint remains **342/0**. This does not replace the twelve-suite
-lifecycle scope above or count 36 distinct defects. No runtime changed while
-adding this matrix; its five failure families are recorded below. The first
-projection-state repair was withdrawn after a new scalar-output control proved
-it regressed existing behavior. The shared input/output boundary is next;
-do not read the earlier candidate's passing assertions as current repairs.
+The functional-projection matrix is now **127 green / 21 red** (144 product
+cells plus four controls/census functions), up from the frozen **85/63**
+specification. The inline input boundary repairs 42 cells; all 21 remaining
+failures are Collection-valued. The latest eleven adjacent suites are **370/0**.
+These counts do not replace the twelve-suite lifecycle scope above or count
+distinct bugs. The first projection-state repair was withdrawn after a new
+scalar-output control proved it regressed existing behavior. The current
+repair instead materializes inline inputs before invoking the callback; the
+Collection-valued boundary is next. Historical candidate assertions are not
+current repairs.
 
 | Protocol slice                                       | Executable coverage                                                                                 | Current result                                               |
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
@@ -3708,7 +3709,7 @@ candidate repair scopes, not completed fixes or proof of root cause.
   only where the changed boundary actually introduces a new interaction.
 - [ ] Check mutable public-key behavior separately before classifying the
   discarded diagnostic. Do not grow this projection repair around it.
-- [ ] After the post-commit loss audit, repair the shared projection boundary:
+- [ ] Finish the shared projection boundary (inline step completed below):
   preserve source-row state through all declared source forms, run callbacks
   only once their include inputs have the promised form, and reuse the existing
   projection-state/publication machinery. Check all cells after each coherent
@@ -3722,3 +3723,57 @@ candidate repair scopes, not completed fixes or proof of root cause.
 - [ ] Ask multiple fresh reviewers for final coherence, hostile-assay, and
       loss-audit passes.
 - [ ] Update RFC/PR text and changeset to match the final design.
+
+### Inline projection input repair
+
+- [x] Materialize purely inline input subtrees before the functional callback
+  using the existing D2 materializer. Consume their include paths at that input
+  boundary, not on the callback's arbitrary output. Actual output then reaches
+  custom public keys, distinct, selected ordering, and downstream QueryRefs.
+  The recursive guard excludes any subtree containing a Collection-valued
+  include. No custom result registry or facade scalar-dependency tracker added.
+- [x] Keep callback validation in one compiler-owned wrapper, reused by initial
+  and deferred invocation. This removes the materializer's runtime import of
+  the compiler, avoiding a cycle when the compiler invokes the materializer.
+  The existing deferred-return validation regression remains green.
+- [x] Preserve every projection assertion from `178dc461`. Final report
+  `/tmp/tanstack-projection-inline-typed.json`: **497/21**, no skips, success
+  false. Projection is **127/21**, versus the specification's **85/63**:
+  all 42 inline red cells are repaired; all remaining 21 reds are
+  Collection-valued. The other eleven includes/facade/functional suites are
+  **370/0**. Seed override: `1657011`. This is a bounded matrix result, not
+  proof for all callback shapes or 42 distinct bugs.
+- [x] Add on-demand expression/functional × array/materialized controls. They
+  observe the actual correlated child request, hold its completion, check that
+  preload remains pending, and compare published rows after applied commit.
+  Disabling only the new inline guard gives **2/2**, with both functional forms
+  red and expression controls green; restoring it gives **4/0**. Reports:
+  `/tmp/tanstack-projection-inline-demand-red.json` and
+  `/tmp/tanstack-projection-inline-demand-green.json` (17 nonselected tests in
+  each focused run). The red sees wrong callback input and missing published
+  contents; the hard contents assertion stops before the final count assertion.
+  These focused reports precede the final type-only observation annotation;
+  the final twelve-suite run includes all four controls. The fixture decodes
+  request keys using the existing helper, but expected rows are independent
+  literals, not the decoded request or engine output.
+- [x] Rerun the twelve lifecycle suites after the final source/type edits:
+  `/tmp/tanstack-projection-inline-lifecycle-final.json` is **940/0**, no skips,
+  success true, seed `1657011`. Lint and formatting pass for changed TypeScript;
+  DB build passes (`/tmp/tanstack-projection-inline-build.txt`). Full DB
+  typecheck exits 2 with other test diagnostics, none in the three changed
+  TypeScript files (`/tmp/tanstack-projection-inline-final-types-v2.txt`).
+  This is not a full typecheck pass. Earlier candidate typing errors were
+  corrected before freezing this step.
+- Production delta versus `178dc461`: compiler **78 added / 19 removed**;
+  materializer **1 added / 2 removed** = **+58 net lines**. The intermediate
+  +53 count preceded explicit symbol-routing typing. No bundle-size delta is
+  claimed. Inline input materialization still does D2 work if the callback
+  later drops the value; no-includes queries keep their existing pipeline.
+- [ ] Post-commit Field Lab loss audit for this inline step.
+- [ ] Repair the remaining Collection-valued boundary separately. Do not
+  infer scalar dependency tracking from a live facade or claim the inline
+  guard fixes mixed subtrees. Functional WHERE consuming includes, opaque
+  wrapper inputs, and nested facade readiness/error rollback are not newly
+  proven by this step. Keep the earlier mutable-key diagnostic unclassified.
+- [ ] Full 100× campaign, broad integration, and final coherence review remain
+  queued after the boundary work; this checkpoint does not close them.

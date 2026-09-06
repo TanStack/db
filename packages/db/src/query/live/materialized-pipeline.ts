@@ -7,7 +7,6 @@ import {
   reduce,
   serializeValue,
 } from '@tanstack/db-ivm'
-import { validateFnSelectResult } from '../compiler/index.js'
 import { VIRTUAL_PROP_NAMES } from '../../virtual-props.js'
 import { deepEquals } from '../../utils.js'
 import { getParentContextIdentity } from '../equality-value-identity.js'
@@ -44,6 +43,7 @@ type IncludeRoute = {
 
 export type FnSelectState = {
   sourceRow: Record<PropertyKey, any>
+  /** Compiler-owned projection wrapper validates each returned value. */
   fnSelect: (row: any) => unknown
   deferUntilFacade?: boolean
 }
@@ -566,7 +566,6 @@ export function runIncludesFnSelect(
   previousValue: Record<PropertyKey, any>,
 ): Record<PropertyKey, any> {
   const selectedValue = state.fnSelect(stripInternalCallbackMetadata(sourceRow))
-  validateFnSelectResult(selectedValue)
   if (!selectedValue || typeof selectedValue !== `object`) {
     throw new Error(`fn.select must return an object when it projects includes`)
   }
