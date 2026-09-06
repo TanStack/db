@@ -36,7 +36,7 @@ current as review findings, oracle laws, and implementation choices change.
   production lines. Fresh100x integration gate passes1582/0 across26 files,
   exit0, no skipped tests or reported runner errors. Integration loss audit
   complete; final campaign report audit complete.
-- Still open: whole-branch size goal (+3119 net package-source lines against
+- Still open: whole-branch size goal (+3087 net package-source lines against
   fixedmain68366eca), final coherence/review and
   RFC/PR/changeset reconciliation. Older unchecked entries are phase records;
   reconcile them with later evidence before treating them as current bugs.
@@ -55,6 +55,11 @@ current as review findings, oracle laws, and implementation choices change.
   oracle-confirmed extra-fetch defect repaired (4 red→16 green matrix cells).
   Expanded28-file1x and full100x gates1729/0; W4 loss audit complete. Total W1–W4
   savings153 source lines/2362 minified/477 gzip bytes; source gap3119.
+- W5 flattens replay pending state:32 more source lines removed,383 minified/
+  93 gzip diagnostic bytes removed. Expanded integration1730/0 at1x, ordinary
+  package types pass. New reentry test catches an initial refactor regression;
+  baseline and corrected implementation pass. Post-commit loss audit and100x
+  still pending. Combined W1–W5 savings185 lines/2745 minified/570 gzip bytes.
 
 
 ## Chosen design
@@ -5414,3 +5419,49 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   bucket-facade+133, equality-value identity+113. These are net lines against
   fixed main68366eca, not removable-line estimates. The first five candidates
   are not a complete plan to meet the whole-branch size goal; retain that gap.
+
+### W5 — one replay pending set — 2026-09-06
+
+- Replace per-attempt pending sets/setup flags and the historical attempt
+  registry with one session pending-acquisition set and a pending-setup count.
+  Keep currentAttempt as an error-attribution token; only its failure map gates
+  publication. Distinct participant objects preserve shared-promise owners;
+  release removes every participant owned by that demand. Already-registered
+  older work remains in the shared barrier. Session/generation fencing stays.
+  Each queued/inline setup adds one barrier, and each normal/obsolete setup
+  completion removes one. No new retained row state or test deletion.
+- Registration is still guarded: adapter startup superseded before return is
+  not enrolled in the new attempt's publication. This matches the existing
+  replay-start path and replaces the removed registry-membership guard with a
+  direct current-attempt check. Ordinary readiness remains independently tracked.
+- Expand the reentrant-acquisition test from1 to2 cases: replay startup versus
+  an additional demand started after a failed replay finishes. Assert retained
+  rows before replacement, replacement rows BEFORE obsolete adapter settlement,
+  the separate ready/loadingSubset states, and final ready/unchanged rows.
+  Initial fixture incorrectly used the graph-only hasFailedTruncateReplacement
+  flag on a plain subscription, then wrongly expected ordinary readiness to
+  finish with publication. Correct to lastError/rows and independent readiness.
+  Those assertion errors were not production bugs.
+- Controlled comparison with identical final behavioral assertions:
+  pre-W5 runtime81a1b348 passes2/0; first draft without a registration guard
+  fails1/2 (retained value0 instead of replacement2); corrected guard passes2/0.
+  Logs `/tmp/tanstack-weight-replay-boundary-{baseline-final,red-final,green-final}.log`.
+  Thus the added test caught a refactor-introduced regression, not a new
+  pre-existing defect. Existing tests covered supersession during replay startup,
+  not extra-demand startup in an already-settled failed session. The final test
+  uses Error equality rather than reading unknown lastError.message for types.
+- Focused original gate442/0 in5 files. Expanded integration1730/0 in28 files,
+  exit0,no skips or reported runner errors,multiplier1,fixed corpora plus fresh
+  random seeds; `/tmp/tanstack-weight-replay-full.{json,log}`. Same command/scope
+  as W1–W4 stress above with multiplier1 and this output path. Final ordinary
+  package tsc passes; `/tmp/tanstack-weight-replay-types-final.log`. Changed-file
+  lint retains the five subscription errors already recorded at W1 and seven
+  existing replay-test shadow warnings, with no suppression added.
+- Source30 added/62 removed, net32 lines. Controlled diagnostic DB bundle
+  345718→345335 minified (-383),97685→97592 gzip (-93),DB-IVM unchanged.
+  `/tmp/tanstack-weight-replay-bundle-final.json`; same synthetic all-export
+  esbuild measurement, not a CI/application payload or heap benchmark.
+  Combined W1–W5:185 source lines/2745 minified/570 gzip bytes removed.
+  Fixed-main package-source gap3087 (5289 added/2202 removed), excludingMarkdown.
+- [ ] Commit, then source-to-implementation Field Lab loss audit.
+- [ ] Expanded frozen full100x integration campaign.

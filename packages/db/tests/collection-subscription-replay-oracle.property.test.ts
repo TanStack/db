@@ -2283,94 +2283,122 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
-  it(`aborts a replay acquisition before a reentrant newer truncate starts`, async () => {
-    let begin!: () => void
-    let write!: (
-      message: ChangeMessageOrDeleteKeyMessage<ReplayRow, string>,
-    ) => void
-    let commit!: () => void
-    let truncate!: () => void
-    const olderReplay = createDeferred<void>()
-    const newerReplay = createDeferred<void>()
-    const replaySignals: Array<AbortSignal | undefined> = []
-    let loadCount = 0
-    const collection = createCollection<ReplayRow>({
-      id: `reentrant-newer-replay`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      sync: {
-        sync: (operations) => {
-          begin = operations.begin
-          write = operations.write
-          commit = operations.commit
-          truncate = operations.truncate
-          operations.markReady()
-          return {
-            loadSubset: ({ signal }) => {
-              loadCount++
-              if (loadCount === 1) {
-                begin()
-                write({ type: `insert`, value: { id: `one`, value: 0 } })
-                commit()
-                return true
-              }
+  it.each([`replay`, `additional demand`] as const)(
+    `aborts a %s acquisition before a reentrant newer truncate starts`,
+    async (start) => {
+      let begin!: () => void
+      let write!: (
+        message: ChangeMessageOrDeleteKeyMessage<ReplayRow, string>,
+      ) => void
+      let commit!: () => void
+      let truncate!: () => void
+      const olderReplay = createDeferred<void>()
+      const newerReplay = createDeferred<void>()
+      const replaySignals: Array<AbortSignal | undefined> = []
+      let loadCount = 0
+      const collection = createCollection<ReplayRow>({
+        id: `reentrant-newer-replay`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (operations) => {
+            begin = operations.begin
+            write = operations.write
+            commit = operations.commit
+            truncate = operations.truncate
+            operations.markReady()
+            return {
+              loadSubset: ({ signal }) => {
+                loadCount++
+                if (loadCount === 1) {
+                  begin()
+                  write({ type: `insert`, value: { id: `one`, value: 0 } })
+                  commit()
+                  return true
+                }
 
-              replaySignals.push(signal)
-              if (loadCount === 2) {
-                begin()
-                truncate()
-                commit()
-                return olderReplay.promise
-              }
-              return newerReplay.promise
-            },
-            unloadSubset: () => {},
-          }
+                if (loadCount === 2 && start === `additional demand`) {
+                  // A failed replay retains its public baseline after setup and
+                  // all participants finish. Start the extra demand in that gap.
+                  throw new Error(`retain the failed replay`)
+                }
+                replaySignals.push(signal)
+                if (loadCount === (start === `replay` ? 2 : 3)) {
+                  begin()
+                  truncate()
+                  commit()
+                  return olderReplay.promise
+                }
+                return newerReplay.promise
+              },
+              unloadSubset: () => {},
+            }
+          },
         },
-      },
-    })
-    const visible = new Map<string | number, ReplayRow>()
-    const subscription = collection.subscribeChanges((changes) => {
-      recordPublishedChanges(visible, changes as Array<ReplayChange>)
-    })
-
-    const install = (value: number) => {
-      begin()
-      write({
-        type: collection.has(`one`) ? `update` : `insert`,
-        value: { id: `one`, value },
       })
-      commit()
-    }
+      const visible = new Map<string | number, ReplayRow>()
+      const subscription = collection.subscribeChanges((changes) => {
+        recordPublishedChanges(visible, changes as Array<ReplayChange>)
+      })
 
-    try {
-      subscription.requestSnapshot({ optimizedOnly: false })
-      expect(sortedRows(visible)).toEqual([{ id: `one`, value: 0 }])
+      const install = (value: number) => {
+        begin()
+        write({
+          type: collection.has(`one`) ? `update` : `insert`,
+          value: { id: `one`, value },
+        })
+        commit()
+      }
 
-      begin()
-      truncate()
-      commit()
-      await flushPromises()
+      try {
+        subscription.requestSnapshot({ optimizedOnly: false })
+        expect(sortedRows(visible)).toEqual([{ id: `one`, value: 0 }])
 
-      expect(replaySignals).toHaveLength(2)
-      expect(replaySignals[0]?.aborted).toBe(true)
+        begin()
+        truncate()
+        commit()
+        await flushPromises()
 
-      install(2)
-      newerReplay.resolve()
-      await flushPromises()
-      if (!replaySignals[0]?.aborted) install(1)
-      olderReplay.resolve()
-      await flushPromises()
+        if (start === `additional demand`) {
+          expect(subscription.lastError).toEqual(
+            new Error(`retain the failed replay`),
+          )
+          expect(sortedRows(visible)).toEqual([{ id: `one`, value: 0 }])
+          subscription.requestSnapshot({
+            where: new Func(`eq`, [new PropRef([`id`]), new Value(`two`)]),
+            optimizedOnly: false,
+          })
+          await flushPromises()
+        }
 
-      expect(sortedRows(visible)).toEqual([{ id: `one`, value: 2 }])
-    } finally {
-      olderReplay.resolve()
-      newerReplay.resolve()
-      await flushPromises()
-      subscription.unsubscribe()
-      await collection.cleanup()
-    }
-  })
+        expect(replaySignals).toHaveLength(start === `replay` ? 2 : 3)
+        expect(replaySignals[0]?.aborted).toBe(true)
+        expect(sortedRows(visible)).toEqual([{ id: `one`, value: 0 }])
+
+        install(2)
+        newerReplay.resolve()
+        await flushPromises()
+        // A startup superseded before return does not hold publication. An
+        // ordinary demand still owns its separate readiness participant.
+        expect(sortedRows(visible)).toEqual([{ id: `one`, value: 2 }])
+        expect(subscription.status).toBe(
+          start === `replay` ? `ready` : `loadingSubset`,
+        )
+        if (!replaySignals[0]?.aborted) install(1)
+        olderReplay.resolve()
+        await flushPromises()
+
+        expect(sortedRows(visible)).toEqual([{ id: `one`, value: 2 }])
+        expect(subscription.status).toBe(`ready`)
+      } finally {
+        olderReplay.resolve()
+        newerReplay.resolve()
+        await flushPromises()
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
 
   it(`does not retain replay work registered after its demand is released`, async () => {
     let begin!: () => void
