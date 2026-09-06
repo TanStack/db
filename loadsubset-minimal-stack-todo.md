@@ -4228,8 +4228,10 @@ candidate repair scopes, not completed fixes or proof of root cause.
 - [x] Add manual `tests/facade-draft-retention.probe.ts` (not an automatic
   Vitest suite). Run with `node --expose-gc --import tsx` from packages/db.
   Eight cells: released/unreleased × held view/method × publish/rollback,
-  ten samples each, after adapter cleanup. Released payloads: 0/40 retained;
+  ten samples each, after adapter cleanup. Released row wrappers: 0/40 retained;
   unreleased positive controls: 40/40 retained; adapters: 0/80 retained.
+  WeakRefs target the row wrapper containing a1MiB buffer, not the buffer
+  itself; this is not a retained-byte measurement.
   `/tmp/tanstack-facade-retention-final.json`, Node24.5.0. This measures forced-GC
   reachability of the direct adapter fixture, not live-query heap/GC latency,
   temporary peak allocation, wall time, or every closure in the application.
@@ -4239,14 +4241,21 @@ candidate repair scopes, not completed fixes or proof of root cause.
 - [x] Targeted ESLint/Prettier pass. Package tsc exits2 with no changed-source,
   test or probe diagnostic in `/tmp/tanstack-facade-work-types.txt`; no full
   type pass claimed. Manual probe reran after its final reachable-handle check.
-- [ ] Commit and Field Lab loss audit.
+- [x] Commit `6be078b8`, then standing Field Lab loss audit. It recovered the
+  wrapper-versus-payload measurement distinction above; the compressed label
+  did not establish buffer reachability or retained bytes. Counter reaches,
+  report totals, preserved tests, runtime net-zero diff and declared remaining
+  gates match. Reused sequential source-first context was not fresh/blind;
+  no reruns, environment/restoration/provenance/lint verification or full
+  implementation endorsement. This is not merge-readiness evidence.
 - [ ] Full oracle command at multiplier1, fixed seed1657011: **1,349/6**, no
   skips, `/tmp/tanstack-facade-work-oracles.json`. Six retention failures also
   reproduce with the sole changed runtime file restored exactly to `cbeda0b6`
   (verified empty git diff): `/tmp/tanstack-retention-baseline.txt`.
   Candidate then restored. Five reports concern restart delete-event
-  expectations; the optimistic case also sees an extra early metadata update.
-  These are not six diagnosed runtime bugs. Next classify both differences.
+  expectations; the optimistic failure display also contains an extra metadata
+  update. That display is not independent timing evidence; classification and
+  the superseding green expectation-alignment step are below.
 - [ ] Then run the queued100x campaign and size/refactoring pass. No full-suite
   green, 100x completion, universal correctness or below-main size claim.
 
@@ -4264,11 +4273,41 @@ candidate repair scopes, not completed fixes or proof of root cause.
   trace, the parked receipt, its timeline and no-early-confirmation checks.
   The apparent extra metadata update in the failure display did not require a
   fix: the test's mutable publication array also changes in finally when a
-  failed assertion releases the mutation. This is diagnostic output, not an
-  independently reproduced early publication. `/tmp/tanstack-retention-aligned.txt`.
+  failed assertion releases the mutation. That timing explanation is an
+  inference from the source, not a controlled reproduction of when the failure
+  object acquired the batch. `/tmp/tanstack-retention-aligned.txt`.
 - [x] Full oracle command now **1,355/0**, no skips, fixed seed1657011 at1x:
   `/tmp/tanstack-facade-work-oracles-green.json`. All prior assertions remain
   except the two explicit obsolete empty-batch expectations. No runtime edit.
   ESLint/Prettier pass; tsc exits2, no changed-test/source/probe diagnostics in
   `/tmp/tanstack-retention-aligned-types.txt`; no whole-package type pass.
-- [ ] Commit and Field Lab loss audit, then100x campaign.
+- [x] Commit `93c3c2d0`, then standing Field Lab loss audit. It confirms only
+  two empty-batch expectations changed, with generators, runtime, model and
+  all other assertions preserved. Recovered limits: subscriber-known rows
+  differ from all visible rows; baseline failures stopped before later state,
+  receipt and rollback checks, now reached by green; metadata timing remains
+  inferred; stale historical wording needed qualification. These are assertion
+  scope/timing/history compression, not new bugs. Reused sequential source-first
+  context was not fresh/blind; no reruns, environment/SHA/lint/type or100x
+  verification and no merge-readiness endorsement.
+
+### 100x campaign and next size target
+
+- [ ] Running against runtime/test commit `93c3c2d0` with multiplier100,
+  seed/path/property overrides unset: fixed structural corpora plus fresh
+  random seeds. Full `pnpm test:oracles`, coverage off, per-test/hook timeout
+  600000ms. Logs `/tmp/tanstack-minimal-oracles-100x.log`; final JSON
+  `/tmp/tanstack-minimal-oracles-100x.json`. Do not call this complete until
+  process exit and report counts are checked. Production/test files frozen.
+  Interim failures name pagination's fixed-seed transitions and subscription
+  publication's fixed/random histories. Preserve the full run and shrinking
+  output before classifying; these are not yet diagnosed runtime bugs.
+- [x] Remeasure the fixed main checkpoint `68366eca`:49 source files,
+  5,301 added/2,081 removed = **+3,220 net**. Same baseline/scope as earlier;
+  excludes Markdown and includes root-level source files, not only nested TS.
+  The snapshot work fix adds zero net source lines. No bundle measurement yet.
+- [ ] Main remaining size concentrations: subscription lifecycle/replay
+  **+897**, ordered loader/utils **+486** (together1,383/3,220≈43% of net growth).
+  Inspect those lifecycle responsibilities and duplication first during the
+  queued coherence/refactoring pass. This inventory identifies where growth
+  lives, not proof that the lines are removable or any contract can be dropped.
