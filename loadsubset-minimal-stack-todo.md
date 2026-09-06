@@ -3517,13 +3517,13 @@ candidate repair scopes, not completed fixes or proof of root cause.
   2. [ ] Concrete Collection facades can still be unready when the callback
      reads them. The union/Collection/record trace distinguishes an actual
      facade with `ready: false` from a non-facade placeholder.
-  3. [ ] Functional projection over QueryRef and recursive QueryRef sources
+  3. [x] Functional projection over QueryRef and recursive QueryRef sources
      loses materialized children and derived scalars; equivalent expression
      projections retain them. Do not repair only the already-covered union.
-  4. [ ] Opaque functional root results lose rematerialization. Check selected
+  4. [x] Opaque functional root results lose rematerialization. Check selected
      fields and children, not a new guarantee about root prototypes. Existing
      nested opaque-wrapper regressions remain intact.
-  5. [ ] Inline child updates must rerun functional projections. The frozen
+  5. [x] Inline child updates must rerun functional projections. The frozen
      report has 20 zero-call reach failures: QueryRef / recursive QueryRef ×
      array / materialized × record / opaque-root × empty / populated (16),
      plus union × array / materialized × opaque-root × empty / populated (4).
@@ -3560,6 +3560,31 @@ candidate repair scopes, not completed fixes or proof of root cause.
 - Scope limit: opaque roots here are callback outputs. Opaque callback input
   roots and chained functional selectors are not a declared product dimension.
   Do not claim those covered or infer a defect without a bounded witness.
+- [x] First shared-path repair retains QueryRef include input paths when the
+  projection is functional, and attaches the existing projection state for all
+  compiled includes, including opaque root results. No new state or registry;
+  compiler diff is 12 added / 12 removed lines including two import-order lint
+  corrections. Earlier commentary's minus-two estimate omitted the wider root
+  condition; the measured net production change is zero.
+  `/tmp/tanstack-projection-source-state.json` remains **144/36**, success false,
+  but every public-form, content, scalar, identity and callback-reach assertion
+  now passes. The remaining failures are the early placeholder and unready
+  facade observations (families 1–2). Checkmarks on families 3–5 mean those
+  assertions passed in this bounded product, not that functional cells are green.
+  No test assertions were removed or weakened.
+- Wider adjacent validation: `/tmp/tanstack-projection-source-adjacent.json`
+  **342/0**, no skips, success true, across nine includes/facade suites. This
+  includes existing callback-result rejection and facade rollback tests, but
+  does not prove all possible functional consumers. Compiler ESLint and
+  Prettier check pass after correcting the existing import order.
+- Lifecycle checkpoint rerun: `/tmp/tanstack-projection-source-lifecycle.json`
+  **940/0**, no skips, success true, the same twelve-suite census with
+  `TANSTACK_DB_ORACLE_SEED=1657011`. This is not the final 100× campaign or a
+  full DB typecheck pass.
+- [ ] Callback timing repair must account for custom public keys, downstream
+  selectors/order/distinct, multiple include fields and nested facade readiness.
+  A placeholder record cannot stand in for the callback's output at those
+  boundaries. Do not move invocation later solely to green the current matrix.
 - [ ] After the post-commit loss audit, repair the shared projection boundary:
   preserve source-row state through all declared source forms, run callbacks
   only once their include inputs have the promised form, and reuse the existing

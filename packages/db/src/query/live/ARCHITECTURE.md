@@ -263,6 +263,10 @@ then wrap or pass through the Collection without capturing compiler state;
 child-only changes continue through that stable facade without republishing the
 parent.
 
+Functional projections retain include input paths from QueryRef sources as well
+as union branches. This private source-row state is independent of whether the
+callback returns a plain record or an opaque root object.
+
 Every valid plan is checked as a Collection, `toArray`, and `materialize`
 include at initial load, after a parent-route update, and after a child update.
 The grammar declarations generate the cases; individual reported defects do

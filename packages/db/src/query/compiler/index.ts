@@ -10,12 +10,11 @@ import {
 } from '@tanstack/db-ivm'
 import { optimizeQuery } from '../optimizer.js'
 import {
-  createValueIdentity,
   createParentContext,
+  createValueIdentity,
   getParentContextIdentity,
   getParentContextValue,
 } from '../equality-value-identity.js'
-import type { ValueIdentity } from '../equality-value-identity.js'
 import {
   CollectionInputNotFoundError,
   DistinctRequiresSelectError,
@@ -71,6 +70,7 @@ import {
   stripRouteMetadata,
 } from './route-metadata.js'
 import { processSelect } from './select.js'
+import type { ValueIdentity } from '../equality-value-identity.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
 import type { OrderByOptimizationInfo } from './order-by.js'
 import type {
@@ -635,14 +635,12 @@ export function compileQuery(
             sourceAlias,
             include.resultPath,
           )
-        : query.fnSelect
-          ? []
-          : [
-              {
-                path: [sourceAlias, ...include.resultPath],
-                guards: [],
-              },
-            ]
+        : [
+            {
+              path: [sourceAlias, ...include.resultPath],
+              guards: [],
+            },
+          ]
 
     if (projectedPaths.length === 0) {
       continue
@@ -992,7 +990,9 @@ export function compileQuery(
         if (
           selectResults &&
           typeof selectResults === `object` &&
-          (Array.isArray(selectResults) || isPlainObject(selectResults))
+          (includesResults.length > 0 ||
+            Array.isArray(selectResults) ||
+            isPlainObject(selectResults))
         ) {
           selected = Array.isArray(selectResults)
             ? [...selectResults]
@@ -1001,7 +1001,7 @@ export function compileQuery(
           if (routing) {
             selected[INCLUDES_ROUTING] = routing
           }
-          if (directIncludes.length > 0) {
+          if (includesResults.length > 0) {
             Object.defineProperty(selected, FN_SELECT_STATE, {
               value: {
                 sourceRow: namespacedRow,
