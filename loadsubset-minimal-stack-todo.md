@@ -56,7 +56,9 @@ current as review findings, oracle laws, and implementation choices change.
   not a newly reproduced end-to-end adapter bug. Full DB4776/0, zero skips,
   147files, exit0; types/formatting pass. One unchanged builder lint error remains.
   Slice source+2, diagnostic gzip+6 bytes; no retained state. Cumulative+23 vs
-  planning baseline (+2828 vs fixed main). Fresh post-commit audit pending.
+  planning baseline (+2828 vs fixed main). Fresh post-commit audit returned a
+  bounded null: all old test bodies and13 normative laws retained; static and
+  builder-boundary injection limits recorded with the full report. Step3 complete.
   Optional D2 demand-presence experiment remains queued, not started.
 - All three wider analyses complete at frozen1cec4d7f, including inherited
   loading code, not just the PR diff. Separate unranked readouts are below.

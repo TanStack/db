@@ -108,8 +108,8 @@ The detailed loading and publication laws below still apply.
 | Owner | Accepts / retires | Does not establish |
 | --- | --- | --- |
 | Subscription acquisition | Tentatively installs the candidate before adapter callbacks; `acceptAcquisitionTransfer` hands off the old lease; failed cleanup retains exact release debt | Replay completion or permission to publish |
-| OrderedSourceLoader | Tracks request settlement, safe continuation and repair debt; reset discards the cursor, disposal rejects later state changes | Provider exhaustion or acceptance of an imperative window |
-| Subscription replay | Counts setup and logical acquisition participants; checks completion after reentrant release callbacks; success closes the source replacement gate | Success of a previously failed window operation |
+| OrderedSourceLoader | Tracks request settlement, safe continuation and repair debt; reset discards the cursor, disposal ignores late settlement | Provider exhaustion or acceptance of an imperative window |
+| Subscription replay | Counts setup and logical acquisition participants; checks completion after reentrant release callbacks; success releases the source replacement hold | Success of a previously failed window operation |
 | Query builder | Tracks ordered publication participants in one sync session and accepts a window only for its operation generation | Physical adapter ownership or cancellation |
 | D2 and public Collection boundary | D2 accumulates private result changes; the builder flushes root and child changes when the existing gates allow it | Source completeness merely because graph work drained |
 

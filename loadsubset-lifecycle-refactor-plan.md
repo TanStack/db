@@ -1,7 +1,7 @@
 # Loading lifecycle refactor plan
 
 Status: ordered-loader and replay-handoff changes complete and audited.
-Integration walk implemented and validated; fresh loss audit pending.
+Integration walk implemented, validated and independently loss-audited.
 Optional D2 work remains queued.
 Planning baseline: 15987067 on codex/loadsubset-minimal-stack.
 
@@ -447,7 +447,15 @@ same esbuild0.20.2 recipe, Node24.5.0/zlib1.2.12: 368581 -> 368584 minified byte
 103810 -> 103816 gzip (+6). Both artifacts were compressed in one invocation;
 earlier Node22 gzip totals are not the comparator. Source cumulative+23 versus
 planning baseline, +2828 versus fixed main. Not a heap/performance measurement.
-Post-commit loss audit is pending.
+Fresh post-commit loss audit at1e69e838 returned a bounded null. All old test
+bodies and all13 normative laws remain; current-session failure/publication
+behavior is retained. Full report:
+[loadsubset-integration-handoffs-loss-audit.md](loadsubset-integration-handoffs-loss-audit.md).
+The audit is static and compresses histories into branch classes. It confirms
+the new test's boundary scope, not adapter, window, nested-publication or shared-
+promise coverage. Two table phrases were clarified after audit: disposal ignores
+late settlement (not every method call), and replay success releases the source
+replacement hold. Step3 is complete; the optional D2 experiment remains next.
 
 ## Step 4 — Separate, optional D2 demand-presence experiment
 
