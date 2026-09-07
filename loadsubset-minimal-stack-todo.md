@@ -36,7 +36,7 @@ current as review findings, oracle laws, and implementation choices change.
   production lines. Fresh100x integration gate passes1582/0 across26 files,
   exit0, no skipped tests or reported runner errors. Integration loss audit
   complete; final campaign report audit complete.
-- Still open: whole-branch size goal (+2891 net package-source lines against
+- Still open: whole-branch size goal (+2849 net package-source lines against
   fixedmain68366eca), final coherence/review and
   RFC/PR/changeset reconciliation. Older unchecked entries are phase records;
   reconcile them with later evidence before treating them as current bugs.
@@ -6014,8 +6014,32 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
 - [x] Diagnostic DB bundle344161/97322 ->343643/97210 minified/gzip (-518/-112);
   DB-IVM30220/9133 unchanged. Production -42 lines; removes per-source arrays/maps,
   not the dependency set or per-run snapshot. No heap-byte/throughput measurement.
-- [ ] Focused pagination/layered-publication/scheduler/Effect100x gate running.
-- [ ] Fresh post-commit Hidden-signal recovery assay against3feb359b.
+- [x] Focused pagination/layered-publication/scheduler/Effect100x:378/0,4 files,
+  exit0,116.61s,no skips/reported runner errors. Fixed corpora/fresh seeds with
+  replay overrides unset. Opted-in properties scale, not deterministic cases.
+  Frozen832bf765 bundle reconfirms343643/97210 DB and30220/9133 DB-IVM.
+- [x] Freeze the new matrix's outer publication array at assertion time so finally
+  rollback cannot append batches to the failure report. Ablation's real first
+  mismatch was old-left/new-right before the settled pair; later rollback entries
+  were diagnostic contamination, not extra pre-assertion publications. Final
+  scheduler+Effect142/0,exit0 after this test-only follow-up; runtime unchanged.
+- [x] Two fresh post-commit Hidden-signal recovery assays at832bf765 against3feb359b:
+  both explicit null, source units isolated (builder/subscriber versus Effect).
+  Builder audit traces baseline1351–1356 registration to1329–1332 and default
+  scheduling706–724 to699–702: every map entry already belongs to the Set, self
+  excluded at insertion, snapshot finished before parent calls. Explicit arrays,
+  including empty overrides, remain untouched; default insertion order/dedup intact.
+  SourceId remains in D2/subscription routing; only redundant scheduling hint goes.
+  Builder teardown retained dependency state before and after; no source-only edge
+  can survive outside the Set. Pending-job/session/clear/coalescing rules unchanged.
+  Effect audit traces523–531 registration to522–527, scheduling761–770 to757–758:
+  same complete unique dependency sequence, frozen before parent reentry. Unchanged
+  scheduler copies either iterable into its own Set. Disposal clears sole retained
+  store and still gates late execution. Sibling implementation remained hidden.
+  Dropping rule: compress redundant storage, not source identity or DAG edges.
+  Static only, no auditor test execution/performance/readiness verdict. Artifact
+  risk: mistaking removed private representation or malformed argument behavior
+  for a supported contract; those are excluded from the null claims.
 - Evidence prefix: /tmp/tanstack-weight-dependency-maps-; baseline,green,ablation,
   expanded-green,expanded-ablation,full,100,types,lint logs; full/100 JSON; bundle.json.
   W1–W11 totals423 source lines/4437 minified/952 gzip diagnostic bytes removed.

@@ -1067,7 +1067,7 @@ describe(`live query scheduler`, () => {
           for (const write of reverseWrites ? [...writes].reverse() : writes)
             write()
         })
-        expect(publications).toEqual([
+        expect([...publications]).toEqual([
           [{ left: `next-left`, right: `next-right` }],
         ])
       } finally {
