@@ -149,3 +149,43 @@ not proven by hunks. The bulk import obscures ancestry. The detailed reading is
 deepest in subscription/ordered-loading/scheduling paths, lighter in collection
 state/lifecycle and adapter behavior. These limits remain open; the two separate
 Design grammar readings have not been used to fill them in.
+
+## Post-commit loss audit qualifications
+
+A fresh source-bounded audit of the original report at dce182aa is preserved in
+[loadsubset-wide-formation-loss-audit.md](loadsubset-wide-formation-loss-audit.md).
+The following qualifications supplement, rather than replace, the unit register.
+They do not establish a new bug or select a simplification.
+
+- F02: the added options module relocated inherited request cloning as well as
+  adding demand snapshots. Cloning survives its deletion in subset-dedupe.
+  The same outcome cut also replaced a deferred-options translation registry
+  with shared acquisition-object identity; that is separate from F04.
+- F04: logical demand versus physical acquisition already existed at baseline.
+  The named commits add lifecycle states and then nest an acquisition object;
+  they did not invent the ownership distinction.
+- F03: completed exact reuse can serve a signaled caller. Only pending sharing
+  excludes signals; generation and abort fences govern completion caching.
+- F01/F10: completion covers registrations belonging to the applicable active
+  operation. Older operations retain existing work but do not absorb new
+  registrations belonging to a superseding window.
+- F05–F07: replay counts logical acquisitions separately even when promises
+  are shared; flattening storage did not turn membership into promise dedupe.
+- F09: stale-row reconciliation runs outside truncate buffering. An ordinary
+  snapshot cannot reopen a failed private replay.
+- F11: ordered evidence comes from a local range read after fulfillment of the
+  exact request, relying on the adapter contract. Empty ranges preserve a prior
+  safe boundary and do not prove exhaustion. Local prefix counting still costs
+  work even when transport is reduced.
+- F14: scheduler blocking also queries a dependency's pending-graph state,
+  not just its own job map. Builder dependency snapshots precede reentrant setup.
+- F13: a lease gets a pending result only after lease/minimum-limit checks and
+  only when that promise matches the current desired limit.
+- F17: nonfailed segments survive any overlap; partial shrink does not split
+  their ownership. Unchanged nonfailed demand is not a fresh aggregate wait.
+  Failed intersecting segments defeat that fast path and are reacquired.
+
+All eleven audit entries remain available, including source anchors, mechanisms,
+preserved material and scope limits. These additions correct possible overbroad
+readings of compact arrows; they do not convert the Formation section into a full
+runtime specification.

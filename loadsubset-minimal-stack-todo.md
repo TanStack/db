@@ -5,12 +5,42 @@ current as review findings, oracle laws, and implementation choices change.
 
 ## Current checkpoint — 2026-09-07
 
-- Wider analysis selected in parallel at frozen1cec4d7f: independent complete
-  state-machine and D2 Design grammar readings, plus a Formation section over
-  baseline68366eca and local history. Formation report is
-  loadsubset-wide-formation-section.md; grammar reports are still running.
+- All three wider analyses complete at frozen1cec4d7f, including inherited
+  loading code, not just the PR diff. Separate unranked readouts are below.
   Analysis only: no runtime/test edits, test runs or implementation selection.
-  Source history identifies prior cuts and surviving constraints, not a ranking.
+  Production source gap remains +2805 lines against fixed main68366eca.
+  Formation's fresh loss audit recovered qualifications, now recorded with its
+  report. The grammar checkpoint's post-commit loss audit is pending.
+
+### Wider analysis readouts — 2026-09-07
+
+- State-machine Design grammar: [full report](loadsubset-wide-state-machine-grammar.md).
+  Two local forms: acquisition-transfer reducer; evidence-bearing ordered
+  continuation. Logical ownership, physical release debt, replay participation,
+  applied settlement and window acceptance remain distinct. A global lifecycle
+  enum would conflate states that can coexist. Estimated replacement surfaces
+  are 120–230 and 70–140 lines, but new machinery is estimated at 150–280 and
+  90–180 lines respectively: neither establishes net savings. Reentrant callback
+  order and trace equivalence remain untested for the generated forms.
+- D2 Design grammar: [full report](loadsubset-wide-d2-grammar.md).
+  Two local forms: weighted demand-key presence in the existing graph; relational
+  segment reachability/coverage. They could replace hand-maintained weights or
+  intersection scans, but need external ownership/effect handling. Consolidating
+  graph turns can change acquisition/abort timing; segment relations add indexed
+  state and reservation/rollback glue. Gross deletion estimates are not net
+  savings. Neither form removes published/private snapshots or exact previous
+  D2 contributions. No generated implementation or performance test was run.
+- Formation section: [history report](loadsubset-wide-formation-section.md),
+  [fresh loss audit](loadsubset-wide-formation-loss-audit.md).
+  Named transformations already cut several duplicate baselines, cursor mirrors,
+  dependency/completion maps and callback loops. Surviving scopes are not proved
+  redundant. The audit recovered inherited cloning/ownership provenance and
+  conditions on exact reuse, replay admission, ordered evidence, operation
+  completion and segment retention. This is a bounded lineage, not a complete
+  history or a ranking of the four generated forms.
+
+### Earlier checkpoints
+
 - Snapshot/acquisition split: source assessment complete at7be7a585. A plain
   returned handle cannot replace the early ownership callback: local snapshot
   work may throw after acquisition and before return. Full separation needs
