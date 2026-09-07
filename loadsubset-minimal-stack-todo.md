@@ -6067,8 +6067,26 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
 - [x] Diagnostic bundle343643/97210 ->343526/97174 DB minified/gzip (-117/-36);
   DB-IVM30220/9133 unchanged. Same esbuild all-export/external-dependency method;
   not actual application bundle, heap or runtime-performance measurement.
-- [ ] Focused100x pagination/includes-publication/scheduler/Effect gate.
-- [ ] Commit and fresh post-commit Hidden-signal recovery assay.
+- [x] Focused100x pagination/includes-publication/scheduler/Effect:386/0,4 files,
+  exit0,112.14s. Fixed corpora/fresh seeds, replay overrides unset. No skipped tests
+  or reported runner errors; multiplier scales opted-in properties, not unit cells.
+  Final package tsc exit0; frozen84d788c5 diagnostic bundle confirms the above.
+- [x] Commit production/tests/log as84d788c5; no push.
+- [x] Fresh post-commit Hidden-signal recovery assay at84d788c5 against5122fc8f:
+  explicit null for scheduler.ts. Auditor scanned baseline before candidate.
+  With J=jobs.has(dep), C=completed.has(dep), P=pending-aware signal, old condition
+  (J&&!C)||(!J&&P) differs from J||P only when J&&C: new work queued during an older
+  callback is marked complete afterward. That bypass is the intentional bug fix,
+  not a supported contract to preserve. Unregistered pending-aware dependencies,
+  lazy sources, replacement ordering, dependency retention, errors, no-progress,
+  clear/listeners and publication error precedence retain their source paths.
+  Auditor also ran scheduler tests (exit0). This bounded single-source audit does
+  not prove all caller reentry or end-to-end publication behavior; test gates are
+  separate. Dropping rule: remove historical completion state from current pending
+  decisions. Artifact risk: rescuing incidental wrong ordering as a contract, or
+  allowing the supplied repair description to bias that classification. Baseline
+  was read first, but this was not blind to the stated repair.
+  Final changed-file lint exit0.
 - Evidence prefix: /tmp/tanstack-weight-scheduler-completed-; red/baseline/green,
   types/lint,db-all/prior-failures/full/100 logs and JSON reports, bundle.json.
   W1–W12 totals433 source lines/4554 minified/988 gzip diagnostic bytes removed.
