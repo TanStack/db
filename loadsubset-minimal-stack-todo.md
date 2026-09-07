@@ -6134,4 +6134,20 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   (default subscription emits insert), f1-contract.log and f1-consumer.log (all
   added checks pass before reference identity fails), f2-green.log under the same
   tanstack-full-suite- prefix. F2 source weight unchanged; all5 old failure
-  assertions still accounted for. Fresh post-commit F2 loss audit pending.
+  assertions still accounted for. F2 committed atdc41313e. Package tsc and changed
+  join-subquery test lint exit0. Full146-file run with the uncommitted F1 probe:
+  4722 passed/1 failed/6 existing skips,exit1,27.58s; only F1's original reference
+  assertion fails. JSON/log: /tmp/tanstack-full-suite-contract-final.*.
+  The F1 probe stays local pending the identity decision; original identity
+  assertion remains.
+- [x] Fresh F2 Hidden-signal recovery assay (5f24bbfa ->dc41313e): supported
+  omissions null. Baseline immediate reads at501/542 become preload+readiness at
+  502–503/545–546. Explicitly drops same-stack publication timing, not result
+  semantics: baseline architecture713–718 already requires the full initial
+  ordered refinement barrier, and747 exempts it from ordinary synchronous updates.
+  Builder499–533 and1069–1075 track loads/hold publication. Every fixture, query,
+  matrix cell and exact result assertion preserved. Static audit, root-reported
+  test runs; neither version proves single-publication timing in those4 cases.
+  Candidate no longer observes pre-ready state or same-stack latency. Distortion
+  risk: treating every old observation as a contract, or treating a documented
+  barrier as proof that every runtime delay is necessary. No readiness verdict.
