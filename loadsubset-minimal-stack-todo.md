@@ -10,7 +10,8 @@ current as review findings, oracle laws, and implementation choices change.
   Analysis only: no runtime/test edits, test runs or implementation selection.
   Production source gap remains +2805 lines against fixed main68366eca.
   Formation's fresh loss audit recovered qualifications, now recorded with its
-  report. The grammar checkpoint's post-commit loss audit is pending.
+  report. The grammar checkpoint's fresh post-commit loss audit is complete;
+  its recovered D2 boundary is recorded below.
 
 ### Wider analysis readouts — 2026-09-07
 
@@ -28,7 +29,9 @@ current as review findings, oracle laws, and implementation choices change.
   intersection scans, but need external ownership/effect handling. Consolidating
   graph turns can change acquisition/abort timing; segment relations add indexed
   state and reservation/rollback glue. Gross deletion estimates are not net
-  savings. Neither form removes published/private snapshots or exact previous
+  savings. The segment form's preservation claim assumes a stabilized-demand
+  boundary and covers live-query/effect demand, not plain collection subscribers
+  or replacement of CollectionSubscription. Neither form removes published/private snapshots or exact previous
   D2 contributions. No generated implementation or performance test was run.
 - Formation section: [history report](loadsubset-wide-formation-section.md),
   [fresh loss audit](loadsubset-wide-formation-loss-audit.md).
@@ -38,6 +41,13 @@ current as review findings, oracle laws, and implementation choices change.
   conditions on exact reuse, replay admission, ordered evidence, operation
   completion and segment retention. This is a bounded lineage, not a complete
   history or a ranking of the four generated forms.
+- [Fresh readout loss audit](loadsubset-wide-readouts-loss-audit.md): one missing
+  D2 scope/preservation qualification restored above; no false ranking, savings
+  or execution-proof claims found. Report copies verified byte-identical;
+  Formation's original remains an exact prefix with qualifications appended.
+  Isolation caveat: the scanner accidentally saw earlier TODO checkpoints,
+  excluded them from findings, but cannot claim they were unseen. This was a
+  report comparison, not independent runtime verification.
 
 ### Earlier checkpoints
 
