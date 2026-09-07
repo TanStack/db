@@ -6099,10 +6099,39 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   whether this is an obsolete identity contract or excess publication; preserve
   the notification assertion. Do not replace it with deep equality without tracing
   the intended contract and the rest of the test.
-- [ ] F2: join-subquery.test.ts:505/546, ordered limited child subquery with LEFT
+- [x] F2: join-subquery.test.ts:505/546, ordered limited child subquery with LEFT
   and RIGHT joins, autoIndex off/eager (4 cells). Actual [] vs expected issue5.
   Trace query semantics, input demand and applied rows before deciding runtime
   defect versus outdated fixture. Fold any confirmed gap into the relevant oracle.
 - The selected30-file gate did not include either unit file. Full-package runs,
   not only the oracle selection, must stay in the final acceptance gate. These
   failures reproduce before W12; their earlier origin has not been bisected.
+
+### Full-suite contract reconciliation — F2 complete, F1 decision open
+
+- [x] F2's4 cells read toArray immediately after startSync. OrderedSourceLoader
+  wraps even a synchronous snapshot in request.then(complete, fail), then registers
+  its continuation with trackOrderedLoadPromise. Initial publication waits for the
+  whole refinement chain. These cases must await preload, not assume startSync
+  promises a settled ordered window. Preserve every existing exact result assertion
+  and add isReady after preload. Same runtime:4 red ->4 green; whole join-subquery
+  file27/0,exit0. No production change or previously passing test removed.
+- [ ] F1 currently fails only the retained nested array's reference equality.
+  Temporary probe adds actual event, value, old-snapshot and downstream checks:
+  one coherent timeline update; unchanged sibling value; prior changed sibling
+  still empty; a derived query selecting the unchanged sibling emits no update.
+  All pass before the original toBe fails. This does not establish reference
+  identity or React selector/render behavior. The old updateEvents list was
+  never asserted, and default subscribeChanges treats a not-yet-seen row as an
+  insert. Set includeInitialState:false to observe actual later update semantics.
+- F1's identity boundary is not the earlier fn.select temporary Collection view
+  decision. Asked whether unchanged inline arrays must remain === across updates
+  to the containing root row. Do not remove the identity assertion before that
+  choice. Copy-on-write private-metadata stripping and per-root facade resolution
+  are relevant source paths; exact allocation origin has not been instrumented.
+- Evidence: /tmp/tanstack-full-suite-contract-probe.log (176/1 after awaiting
+  joins; first F1 probe stopped at the missing update event), f1-events.log
+  (default subscription emits insert), f1-contract.log and f1-consumer.log (all
+  added checks pass before reference identity fails), f2-green.log under the same
+  tanstack-full-suite- prefix. F2 source weight unchanged; all5 old failure
+  assertions still accounted for. Fresh post-commit F2 loss audit pending.
