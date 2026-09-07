@@ -73,7 +73,8 @@ current as review findings, oracle laws, and implementation choices change.
 - W7 removes unused group mapping output/prefix and shares evaluation-row
   assembly:21 more production lines removed,194 minified/28 gzip diagnostic
   bytes removed. Integration1707/0,types/lint pass; direct graph matrix32/32
-  on baseline. Post-commit audit pending. Combined savings326 source lines/
+  on baseline. Committedf929e44f; source loss audit complete. Focused100x265/0,
+  four files,exit0. Combined savings326 source lines/
   3640 minified/764 gzip bytes;fixed-main gap2946.
 
 
@@ -5711,7 +5712,7 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   confirms344634/97426 for DB,30220/9133 for DB-IVM:
   `/tmp/tanstack-weight-group-shared-committed-bundle.json`.
 
-### Next bounded weight candidates (not implemented)
+### W7 candidate notes (implemented below)
 
 - Group mapping returns a cloned group-expression array which no caller reads;
   only its selected-alias Map is consumed. Check that validation need not retain
@@ -5751,5 +5752,43 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   `/tmp/tanstack-weight-group-helpers-bundle.json`. These are synthetic
   all-entry-export measurements, not consumer payload or throughput benchmarks.
   Combined W1–W7 savings326 lines/3640 minified/764 gzip bytes; gap2946.
-- [ ] Commit, then source-first Field Lab Hidden-signal recovery assay.
-- [ ] Focused includes/group-by100x on frozen candidate.
+- [x] Commitf929e44f, then fresh source-first Field Lab Hidden-signal recovery
+  assay. Three separate source scans (mapping wrapper, prefix result, evaluation
+  helpers) return no supported behavior or work-protection omission. Original
+  mapping269–309→candidate258–288/451; evaluation212–233/566/580/769→211–220/
+  545/559/748. Namespace selection and every consumed derived field remain.
+  Static scope differences: accessor-driven IR mutation could distinguish a
+  copied validation array; getters could distinguish selected-read order; an
+  explicit undefined wrapped result would activate the new default. Current
+  callers use compiler-built rows and a defined finalResults object, so no
+  reachable supported regression was established. Do not claim universal
+  equivalence for arbitrary accessor-driven internal IR.
+  Limits: no reruns/benchmarks by auditor; source units scanned separately but
+  in one context. Framing can hide indirect contracts, and searching for losses
+  can overvalue incidental JavaScript differences. New tests do not themselves
+  cover correlated parent context, callback sanitation or work counters; retained
+  includes suites provide separate bounded coverage. No readiness verdict.
+- [x] Focused includes/group-by100x on frozenf929e44f:265/0,4 files,exit0,
+  20.73s,no skips/reported runner errors. Same context-transport, cross-formulation,
+  direct group pipeline and query group-by suites as W6, with fixed corpora/fresh
+  seeds and seed/path/property overrides unset. Deterministic cases are not
+  multiplied100 times. `/tmp/tanstack-weight-group-helpers-100.{json,log}`.
+  Frozen bundle reconfirms344440/97398 DB and30220/9133 DB-IVM:
+  `/tmp/tanstack-weight-group-helpers-committed-bundle.json`.
+
+### Next bounded candidate — ordered request kinds (read-only)
+
+- OrderedSourceLoader carries refine/isFullSource/establishesSourceCoverage
+  booleans through requestAndObserve and observe. All current callers use only
+  three combinations: ordered page/prefix(true,false,true), full source(false,
+  true,true), tie boundary(false,false,false). loadPage/loadPrefix callers always
+  pass refine=true. Candidate: name those request kinds and derive their effects
+  once, removing repeated positional booleans and impossible combinations.
+- This would simplify parameters, not merge lifecycle states or remove source
+  coverage/error guards. Preserve generation invalidation, provisional success,
+  failure/release ownership, full-source replay recovery, tie/forward refinement
+  and callback reentry. Keep sourceBoundary separate from observed graph rows.
+- Before changing it, test each request kind through sync success/throw and
+  async resolve/reject with public results/work/settlement assertions. Existing
+  ordered-source-loader tests, pagination/replay/publication oracles are retained
+  gates. No implementation, measured saving, or defect claim yet.
