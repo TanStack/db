@@ -1,7 +1,7 @@
 # Loading lifecycle refactor plan
 
-Status: first ordered-loader pass complete, tested and audited. Acquisition
-handoff is next; integration and optional D2 work remain queued.
+Status: ordered-loader pass audited. First acquisition-handoff slice implemented
+and tested; fresh audit is next. Integration and optional D2 work remain queued.
 Planning baseline: 15987067 on codex/loadsubset-minimal-stack.
 
 ## Aim
@@ -250,6 +250,50 @@ Exit: one place to read each loader transition, unchanged caller API and
 observable traces, no additional retained page or row index.
 
 ## Step 2 — Make acquisition transfer explicit
+
+### Step 2a — captured lease handoff
+
+Baseline89d3ba2b. Add a readonly, stack-local SubsetAcquisitionTransfer holding
+the demand, previous lease, previous acquisition state, and candidate lease.
+It replaces the restorePrevious closure; restoreAcquisitionTransfer restores
+only when this candidate still occupies the demand. acceptAcquisitionTransfer
+owns the existing restore/accept/unload sequence and its existing rollback.
+It still captures the currently held lease after conditional restoration,
+rather than unconditionally treating the captured previous lease as current.
+
+Keep replay session/attempt identity in the replay caller's captured context.
+The plan proposed including it in the transfer record, but no lease transition
+uses it: copying it would duplicate replay admission state. Likewise, initial
+startup stays in startSubsetDemand with its own existing session/attempt guard.
+This record is not stored on the subscription or captured by Promise observers;
+it exists only across synchronous handoff work, in place of a closure.
+No new module, registry, callback configuration or general state machine.
+
+| Boundary | Preserved ownership rule |
+| --- | --- |
+| Before source invocation | Candidate occupies the demand; active previous ownership remains distinguishable from detached/starting |
+| Throw or superseded attempt | Restore only this candidate, never overwrite a newer acquisition |
+| Successful startup | Accept candidate before unloading the current previous lease |
+| Old unload throws, demand lives | Restore previous lease; caller retires candidate |
+| Old unload throws after demand retires | Keep exact old lease as cleanup debt; do not restore logical ownership |
+
+The old reentrant-release regression is retained as one cell of a four-cell
+product: release logical demand during unload or keep it; old unload succeeds
+or throws. All four pass baseline. Delaying candidate ownership until after
+unload produces2 red/2 green cells; both reentrant cases detect the broken
+ordering. Mutation restored; no new production defect is claimed. Artifacts:
+/tmp/tanstack-acquisition-transfer-controls.json and
+/tmp/tanstack-acquisition-transfer-red.json.
+
+Candidate targeted716/0, zero skips, nine files; package types pass. Artifact:
+/tmp/tanstack-acquisition-transfer-targeted.json. Lint finds the same five
+errors on unchanged subscription statements (one import cycle, four redundant
+conditions); linting the actual baseline source reproduced all five, then the
+candidate was restored. Existing replay-test shadow warnings also remain.
+No clean lint claim. This slice adds15 production lines. Paired diagnostic
+bundle368306 ->368581 (+275) and gzip103768 ->103838 (+70), same esbuild recipe
+and Node22.13.1/zlib1.3.0.1-motley-82a5fec. No heap/throughput claim. Artifact:
+/tmp/tanstack-acquisition-transfer.mjs. Full suite and fresh audit follow.
 
 Read-only preparation after Step1c: releaseDebts and releasingAcquisitions have
 different lifetimes. handleCollectionCleanup discards debts while an adapter

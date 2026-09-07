@@ -3246,64 +3246,76 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
-  it(`retries an old replay lease when its reentrant release fails`, async () => {
-    let begin!: () => void
-    let commit!: () => void
-    let truncate!: () => void
-    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
-    const loads: Array<LoadSubsetOptions> = []
-    const unloads: Array<LoadSubsetOptions> = []
-    let reentered = false
-    const releaseFailure = new Error(`old replay lease release failed`)
-    const collection = createCollection<ReplayRow>({
-      id: `reentrant-replay-lease-replacement`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
-      sync: {
-        sync: (operations) => {
-          begin = operations.begin
-          commit = operations.commit
-          truncate = operations.truncate
-          operations.markReady()
-          return {
-            loadSubset: (options) => {
-              loads.push(options)
-              return true
-            },
-            unloadSubset: (options) => {
-              unloads.push(options)
-              if (options === loads[0] && !reentered) {
-                reentered = true
-                subscription.releaseSnapshot(where)
-                throw releaseFailure
-              }
-            },
-          }
+  it.each(
+    [false, true].flatMap((releaseDemand) =>
+      [false, true].map((failRelease) => ({ releaseDemand, failRelease })),
+    ),
+  )(
+    `preserves exact replay handoff with releaseDemand=$releaseDemand and failRelease=$failRelease`,
+    async ({ releaseDemand, failRelease }) => {
+      let begin!: () => void
+      let commit!: () => void
+      let truncate!: () => void
+      const where = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
+      const loads: Array<LoadSubsetOptions> = []
+      const unloads: Array<LoadSubsetOptions> = []
+      let reentered = false
+      const releaseFailure = new Error(`old replay lease release failed`)
+      const collection = createCollection<ReplayRow>({
+        id: `reentrant-replay-lease-replacement`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (operations) => {
+            begin = operations.begin
+            commit = operations.commit
+            truncate = operations.truncate
+            operations.markReady()
+            return {
+              loadSubset: (options) => {
+                loads.push(options)
+                return true
+              },
+              unloadSubset: (options) => {
+                unloads.push(options)
+                if (options === loads[0] && !reentered) {
+                  reentered = true
+                  if (releaseDemand) subscription.releaseSnapshot(where)
+                  if (failRelease) throw releaseFailure
+                }
+              },
+            }
+          },
         },
-      },
-    })
-    const subscription = collection.subscribeChanges(() => {}, {
-      includeInitialState: false,
-    })
+      })
+      const subscription = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
 
-    try {
-      subscription.requestSnapshot({ where, optimizedOnly: false })
-      begin()
-      truncate()
-      commit()
-      await flushPromises()
+      try {
+        subscription.requestSnapshot({ where, optimizedOnly: false })
+        begin()
+        truncate()
+        commit()
+        await flushPromises()
 
-      expect(loads).toHaveLength(2)
-      expect(unloads).toHaveLength(2)
-      expect(unloads[0]).toBe(loads[0])
-      expect(unloads[1]).toBe(loads[1])
-      subscription.unsubscribe()
-      expect(unloads).toEqual([loads[0], loads[1], loads[0]])
-    } finally {
-      subscription.unsubscribe()
-      await collection.cleanup()
-    }
-  })
+        expect(loads).toHaveLength(2)
+        expect(unloads).toEqual(
+          releaseDemand || failRelease ? [loads[0], loads[1]] : [loads[0]],
+        )
+        expect(loads[1]!.signal?.aborted).toBe(releaseDemand || failRelease)
+        subscription.unsubscribe()
+        // Failed old release keeps that exact lease as debt (retired demand)
+        // or as its prior owner (live demand). Success never retries it.
+        expect(unloads).toEqual(
+          failRelease ? [loads[0], loads[1], loads[0]] : [loads[0], loads[1]],
+        )
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
 
   it(`rejects replay completion with the exact reported adapter error`, async () => {
     let begin!: () => void

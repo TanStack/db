@@ -36,6 +36,13 @@ current as review findings, oracle laws, and implementation choices change.
   debt/busy lifetimes and replacement-vs-retirement transitions in the plan.
   First ordered-loader pass complete; acquisition handoff is next. Do not force
   the retained independent source facts into one exclusive lifecycle enum.
+- Step2a lease handoff: captured previous/candidate record and named restore/
+  accept transitions; replay/session admission stays with caller. Four-cell
+  release/throw matrix preserves the old regression and passes baseline;
+  delayed ownership mutation produces2 red/2 green. Candidate716/0, types pass;
+  five baseline lint errors reproduced. Source+15, diagnostic gzip+70 bytes for
+  this slice. Full suite/fresh audit pending; initial/replay policies remain
+  distinct. See the plan for exact traces and scope.
 - All three wider analyses complete at frozen1cec4d7f, including inherited
   loading code, not just the PR diff. Separate unranked readouts are below.
   Analysis only: no runtime/test edits, test runs or implementation selection.
