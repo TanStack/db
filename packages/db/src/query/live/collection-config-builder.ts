@@ -515,13 +515,15 @@ export class CollectionConfigBuilder<
     if (this.pendingOrderedLoads.size === 0) this.orderedLoadFailed = false
     this.pendingOrderedLoads.add(promise)
     const finish = (succeeded: boolean) => {
-      if (!succeeded) this.orderedLoadFailed = true
-      if (!this.pendingOrderedLoads.delete(promise)) return
+      // Admission precedes mutation: cleanup retires this session's participants.
       if (
-        !this.orderedLoadFailed &&
-        this.pendingOrderedLoads.size === 0 &&
-        syncSession === this.syncSession
+        syncSession !== this.syncSession ||
+        !this.pendingOrderedLoads.delete(promise)
       ) {
+        return
+      }
+      if (!succeeded) this.orderedLoadFailed = true
+      if (!this.orderedLoadFailed && this.pendingOrderedLoads.size === 0) {
         // The ordered chain already drove its source graph to quiescence.
         // Flush the retained result without invoking the source loaders again.
         this.scheduleGraphRun()

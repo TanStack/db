@@ -100,6 +100,29 @@ for facade state. The one exception is a joined query with a custom public-key
 function: its possible duplicate contributors still pass through the keyed
 reduction that enforces public-key congruence and multiplicity.
 
+### Loading handoffs
+
+These owners cooperate; they are not phases of one exclusive state machine.
+The detailed loading and publication laws below still apply.
+
+| Owner | Accepts / retires | Does not establish |
+| --- | --- | --- |
+| Subscription acquisition | Tentatively installs the candidate before adapter callbacks; `acceptAcquisitionTransfer` hands off the old lease; failed cleanup retains exact release debt | Replay completion or permission to publish |
+| OrderedSourceLoader | Tracks request settlement, safe continuation and repair debt; reset discards the cursor, disposal rejects later state changes | Provider exhaustion or acceptance of an imperative window |
+| Subscription replay | Counts setup and logical acquisition participants; checks completion after reentrant release callbacks; success closes the source replacement gate | Success of a previously failed window operation |
+| Query builder | Tracks ordered publication participants in one sync session and accepts a window only for its operation generation | Physical adapter ownership or cancellation |
+| D2 and public Collection boundary | D2 accumulates private result changes; the builder flushes root and child changes when the existing gates allow it | Source completeness merely because graph work drained |
+
+Session and participant checks precede changes to the builder's ordered failure
+state, not just scheduling. An obsolete rejection cannot close a replacement
+session's publication gate. Loader-local stale-result guards are separate.
+
+`hasPendingTruncateReplacement` means publication is still withheld, including
+after replay failure. `pendingTruncateReplacement` exposes only an unsettled
+completion promise. Neither is a general readiness flag. A direct subscriber
+buffers and diffs its own replacement rows; a query subscription delegates
+publication to the builder while the graph keeps its private contributions.
+
 ## Identity
 
 Aliases are lexical query-language names rather than source runtime identities.

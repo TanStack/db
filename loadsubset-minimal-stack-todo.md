@@ -46,9 +46,18 @@ current as review findings, oracle laws, and implementation choices change.
   loss. Restored identity across all four cells; copied-options mutation4 red,
   restored fixture4 green. Corrected full suite4772/0, types pass again; fresh
   assertion audit returned null. Both full reports and campaign seeds are
-  preserved in the plan. Next: integration walk across the named owners.
+  preserved in the plan. Integration walk follows below.
   Initial/replay policies remain distinct. Cumulative production source+21 vs
   planning baseline (+2826 vs fixed main). See the plan for traces and scope.
+- Step3 integration walk: six traces mapped to owners and existing controls;
+  compact ARCHITECTURE handoff table added without removing normative laws.
+  Builder participant admission now precedes failure-state mutation. Four
+  boundary cells red/green2/2 ->4/0; this deliberately bypasses loader filtering,
+  not a newly reproduced end-to-end adapter bug. Full DB4776/0, zero skips,
+  147files, exit0; types/formatting pass. One unchanged builder lint error remains.
+  Slice source+2, diagnostic gzip+6 bytes; no retained state. Cumulative+23 vs
+  planning baseline (+2828 vs fixed main). Fresh post-commit audit pending.
+  Optional D2 demand-presence experiment remains queued, not started.
 - All three wider analyses complete at frozen1cec4d7f, including inherited
   loading code, not just the PR diff. Separate unranked readouts are below.
   Analysis only: no runtime/test edits, test runs or implementation selection.

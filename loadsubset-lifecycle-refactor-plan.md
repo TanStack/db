@@ -1,8 +1,8 @@
 # Loading lifecycle refactor plan
 
-Status: ordered-loader and replay-handoff changes complete and audited. The
-audit-recovered test assertion is restored and verified. Integration walk is
-next; optional D2 work remains queued.
+Status: ordered-loader and replay-handoff changes complete and audited.
+Integration walk implemented and validated; fresh loss audit pending.
+Optional D2 work remains queued.
 Planning baseline: 15987067 on codex/loadsubset-minimal-stack.
 
 ## Aim
@@ -404,6 +404,50 @@ Walk these traces end to end:
 Exit: each trace can be explained through the named owners without reconstructing
 scattered boolean assignments. Existing snapshot, error and notification laws
 still hold.
+
+### Step 3 integration walk
+
+The resulting owner map is in ARCHITECTURE.md under Loading handoffs. Existing
+normative laws remain intact; no second readiness/barrier manager was added.
+
+| Trace | Owner handoff and preserved distinction | Executable coverage (packages/db/tests) |
+| --- | --- | --- |
+| Provisional result, then local throw | OrderedSourceLoader observes only after synchronous request return; provisional failure retires the exact acquisition through Subscription while preserving the primary error | query/ordered-source-loader.test.ts: callback-before-throw route matrix and provisional-cleanup failure controls |
+| Unload releases its consumer, then throws | Subscription installs candidate before unload; reentrant release retires it, while failed old release remains exact cleanup debt | collection-subscription-replay-oracle.property.test.ts: exact replay handoff releaseDemand × failRelease matrix |
+| Order-changing write during a finite request | Loader derives invalidation from sent contributions; finite settlement cannot discharge full-source repair debt; builder retains the complete public result | query/pagination-oracle.property.test.ts: pending-mutation fixed/random properties; query/ordered-source-loader.test.ts: reset/stale-result controls |
+| Failed window, then successful replay | Subscription completes source replacement; loader clears applicable source failure; builder windowFailed still requires explicit window retry | query/pagination-oracle.property.test.ts: failed asc/desc window × sync/async replay matrix |
+| Cleanup/restart, then old result | Subscription load session, loader activity/generation and builder sync session each reject stale state changes at their own boundary | query/ordered-lifecycle-oracle.property.test.ts: restart histories; query/scheduler.test.ts: new builder participant product below |
+| New demand during replay completion | Subscription keeps setup on-stack and rechecks participants after unload/publication callbacks; new work joins replay before ready/publication | collection-subscription-replay-oracle.property.test.ts: new async demand during unload and last-demand reacquisition timing product |
+
+The walk found a builder-local admission defect: trackOrderedLoadPromise set
+orderedLoadFailed before checking whether the participant/session was retired.
+Move both admission checks before mutation. This retains current-session failure
+behavior and does not add state. Four new builder-boundary tests cross obsolete
+resolve/reject with replacement pending/settled, checking withheld rows, exact
+publication counts and later reactivity. Baseline2 red/2 green; candidate4 green.
+Artifacts: /tmp/tanstack-integration-session-{red,green}.json.
+
+Scope: these tests inject a promise through the builder's actual tracking method,
+then use real cleanup/restart and Collection publication. They bypass the ordered
+loader's stale-result filtering, which explains why the existing end-to-end
+restart product did not expose the builder-local defect. This is not evidence
+of a newly reproduced application/adapter path. Independent owner-boundary
+contracts supplement, not replace, those integration histories.
+
+Final full DB gate: 4776/0, zero skips,147 files, exit0; package types pass.
+Artifact: /tmp/tanstack-integration-final-full.json. The earlier full run passed
+all4776 runtime assertions but exited1 while the new fixture still had type
+errors; those are fixed, not waived. Its artifact remains
+/tmp/tanstack-integration-full.json. Formatting passes. Changed-test lint is
+clean; builder lint flags the unchanged callback optional-chain condition at
+line634 (baseline632). No clean builder-lint claim.
+
+Production slice net+2 lines and no retained state. Paired diagnostic with the
+same esbuild0.20.2 recipe, Node24.5.0/zlib1.2.12: 368581 -> 368584 minified bytes;
+103810 -> 103816 gzip (+6). Both artifacts were compressed in one invocation;
+earlier Node22 gzip totals are not the comparator. Source cumulative+23 versus
+planning baseline, +2828 versus fixed main. Not a heap/performance measurement.
+Post-commit loss audit is pending.
 
 ## Step 4 — Separate, optional D2 demand-presence experiment
 

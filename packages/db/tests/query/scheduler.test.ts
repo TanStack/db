@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
+import { createDeferred } from '../../src/deferred.js'
 import { createLiveQueryCollection, eq, isNull } from '../../src/query/index.js'
 import { createTransaction } from '../../src/transactions.js'
 import { createOptimisticAction } from '../../src/optimistic-action.js'
@@ -12,7 +13,11 @@ import {
 import { CollectionConfigBuilder } from '../../src/query/live/collection-config-builder.js'
 import { CollectionSubscriber } from '../../src/query/live/collection-subscriber.js'
 import { Query, createEffect } from '../../src/index.js'
-import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
+import {
+  flushPromises,
+  mockSyncCollectionOptions,
+  stripVirtualProps,
+} from '../utils.js'
 import type { OutputWithVirtual } from '../utils.js'
 import type { FullSyncState } from '../../src/query/live/types.js'
 import type { SyncConfig } from '../../src/types.js'
@@ -1389,6 +1394,86 @@ describe(`live query scheduler`, () => {
     expect(join.utils.getRunCount()).toBe(baseRunCount + 1)
     tx.rollback()
   })
+
+  it.each(
+    [`resolve`, `reject`].flatMap((outcome) =>
+      [false, true].map((replacementSettled) => ({
+        outcome,
+        replacementSettled,
+      })),
+    ),
+  )(
+    `isolates ordered publication participants across restart: $outcome replacementSettled=$replacementSettled`,
+    async ({ outcome, replacementSettled }) => {
+      let sync!: Parameters<SyncConfig<User>[`sync`]>[0]
+      const source = createCollection<User>({
+        getKey: ({ id }) => id,
+        sync: {
+          sync: (operations) => {
+            sync = operations
+            operations.begin()
+            operations.write({ type: `insert`, value: { id: 1, name: `old` } })
+            operations.commit()
+            operations.markReady()
+          },
+        },
+      })
+      const builder = new CollectionConfigBuilder({
+        query: (q) => q.from({ user: source }),
+      })
+      const config = builder.getConfig()
+      const live = createCollection({ ...config, singleResult: undefined })
+      const obsolete = createDeferred<void>()
+      const replacement = createDeferred<void>()
+      try {
+        await live.preload()
+        // Inject participants at the builder boundary: the ordered loader has
+        // its own stale-result guards, which must not mask this owner's law.
+        builder.trackOrderedLoadPromise(obsolete.promise, true)
+        await live.cleanup()
+        await live.preload()
+        builder.trackOrderedLoadPromise(replacement.promise, true)
+        const publications: Array<Array<string>> = []
+        live.subscribeChanges(() => {
+          publications.push(live.toArray.map(({ name }) => name))
+        })
+        const update = (name: string) => {
+          sync.begin()
+          sync.write({ type: `update`, value: { id: 1, name } })
+          sync.commit()
+        }
+        update(`replacement`)
+        expect(live.toArray.map(({ name }) => name)).toEqual([`old`])
+        expect(publications).toEqual([])
+        if (replacementSettled) {
+          replacement.resolve()
+          await flushPromises()
+        }
+        const beforeObsolete = [...publications]
+        if (outcome === `resolve`) obsolete.resolve()
+        else obsolete.reject(new Error(`discarded session failed`))
+        await flushPromises()
+        expect(publications).toEqual(beforeObsolete)
+        if (!replacementSettled) {
+          expect(live.toArray.map(({ name }) => name)).toEqual([`old`])
+          replacement.resolve()
+          await flushPromises()
+        }
+        expect(live.toArray.map(({ name }) => name)).toEqual([`replacement`])
+        expect(publications).toEqual([[`replacement`]])
+        update(`later`)
+        expect(live.toArray.map(({ name }) => name)).toEqual([`later`])
+        expect(publications).toEqual([[`replacement`], [`later`]])
+        expect(live.status).toBe(`ready`)
+        expect(config.utils.lastSubsetError).toBeUndefined()
+      } finally {
+        obsolete.resolve()
+        replacement.resolve()
+        await live.cleanup()
+        await source.cleanup()
+      }
+    },
+  )
 
   it(`coalesces load-more callbacks scheduled within the same context`, () => {
     const baseCollection = createCollection<User>({
