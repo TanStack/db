@@ -3098,7 +3098,7 @@ describe(`QueryCollection`, () => {
         ).toBe(0)
       })
 
-      it(`cleans listeners immediately and resolves the unloaded preload before its request settles`, async () => {
+      it(`cleans listeners immediately and rejects the abandoned preload before its request settles`, async () => {
         const deferred = createDeferred<Array<TestItem>>()
         const collection = createCollection(
           queryCollectionOptions<TestItem>({
@@ -3111,10 +3111,14 @@ describe(`QueryCollection`, () => {
           }),
         )
         const liveQuery = createSubset(collection)
-        let preloadResolved = false
-        void liveQuery.preload().then(() => {
-          preloadResolved = true
-        })
+        let preloadError: unknown
+        const preloadOutcome = liveQuery.preload().then(
+          () => undefined,
+          (error: unknown) => {
+            preloadError = error
+            return error
+          },
+        )
 
         await vi.waitFor(() => expect(queryClient.isFetching()).toBe(1))
         await liveQuery.cleanup()
@@ -3125,19 +3129,19 @@ describe(`QueryCollection`, () => {
         // This assertion runs while the request is unresolved and directly guards the
         // ready-listener bookkeeping bug: unload must synchronously detach its observer.
         expect(subsetQuery?.getObserversCount() ?? 0).toBe(0)
-        // Live-query cleanup resolves its preload even though Query Core is still fetching.
-        expect(preloadResolved).toBe(true)
+        // Cleanup cancels the caller's wait even while Query Core keeps fetching.
+        expect(preloadError).toMatchObject({ name: `AbortError` })
 
         deferred.resolve([{ id: `1`, name: `Late item` }])
         await vi.waitFor(() => expect(queryClient.isFetching()).toBe(0))
 
         expect(collection.size).toBe(0)
-        expect(preloadResolved).toBe(true)
+        expect(await preloadOutcome).toBe(preloadError)
         expect(subsetQuery?.getObserversCount() ?? 0).toBe(0)
         await collection.cleanup()
       })
 
-      it(`keeps an unloaded preload resolved when its pending request later rejects`, async () => {
+      it(`keeps the cleanup error when an abandoned preload's request later rejects`, async () => {
         const deferred = createDeferred<Array<TestItem>>()
         const collection = createCollection(
           queryCollectionOptions<TestItem>({
@@ -3150,7 +3154,10 @@ describe(`QueryCollection`, () => {
           }),
         )
         const liveQuery = createSubset(collection)
-        const preloadPromise = liveQuery.preload()
+        const preloadOutcome = liveQuery.preload().then(
+          () => undefined,
+          (error: unknown) => error,
+        )
 
         await vi.waitFor(() => expect(queryClient.isFetching()).toBe(1))
         await liveQuery.cleanup()
@@ -3159,12 +3166,14 @@ describe(`QueryCollection`, () => {
           queryKey: [`late-subset-rejection-test`],
         })[0]
         expect(subsetQuery?.getObserversCount() ?? 0).toBe(0)
-        await expect(preloadPromise).resolves.toBeUndefined()
+        const preloadError = await preloadOutcome
+        expect(preloadError).toMatchObject({ name: `AbortError` })
 
         deferred.reject(new Error(`Late query failure`))
         await vi.waitFor(() => expect(queryClient.isFetching()).toBe(0))
 
         expect(collection.size).toBe(0)
+        expect(await preloadOutcome).toBe(preloadError)
         expect(subsetQuery?.getObserversCount() ?? 0).toBe(0)
         await collection.cleanup()
       })
