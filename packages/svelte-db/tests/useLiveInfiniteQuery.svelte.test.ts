@@ -86,6 +86,7 @@ describe(`useLiveInfiniteQuery`, () => {
     expect(query.state.get(`1`)?.title).toBe(`Post 1`)
     expect(query.hasNextPage).toBe(true)
     expect(warning).toHaveBeenCalledOnce()
+    expect(livePosts.utils.getWindow()).toEqual({ offset: 0, limit: 4 })
   })
 
   it(`resets to the first page when a collection getter changes`, async () => {
