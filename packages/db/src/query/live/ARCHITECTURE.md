@@ -519,6 +519,13 @@ compose(
 ): MaterializedRow
 ```
 
+When a parent result changes, unchanged inline include arrays may receive new
+object identities. Cross-publication `===` equality for those arrays is not a
+contract. Their values and prior snapshots must remain correct; a downstream
+query whose selected result is unchanged must not emit a spurious update. This
+does not guarantee that a UI component using shallow prop comparison skips a
+render, nor does it relax the stable public Collection facade contract above.
+
 ## Demand plane
 
 Demand is derived from data, but it performs asynchronous side effects outside

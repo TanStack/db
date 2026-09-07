@@ -5,6 +5,11 @@ current as review findings, oracle laws, and implementation choices change.
 
 ## Current checkpoint — 2026-09-06
 
+- All five full-suite follow-ups are reconciled: ordered joins await initial
+  readiness; unchanged inline arrays need not retain reference identity when
+  the containing parent changes (user-approved). Full DB gate4724/0,6 existing
+  skips,146 files. Values, snapshot immutability and notification assertions
+  remain enforced. No runtime growth; fixed-main source gap remains2839.
 - Pagination transfer repair committed at88fad51b:110 selected rows instead
   of560 in the bounded traversal probe, +38 net production lines. Its focused
  100x and broader1x gates pass; assumptions and local-read costs are below.
@@ -6094,7 +6099,7 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
 
 ### Next full-suite investigation queue — five assertions, causes not yet proved
 
-- [ ] F1: includes.test.ts:5926, deep buffer change under one parent. The sibling's
+- [x] F1: includes.test.ts:5926, deep buffer change under one parent. The sibling's
   nested result array is value-equal but fails reference identity (toBe). Determine
   whether this is an obsolete identity contract or excess publication; preserve
   the notification assertion. Do not replace it with deep equality without tracing
@@ -6107,7 +6112,7 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   not only the oracle selection, must stay in the final acceptance gate. These
   failures reproduce before W12; their earlier origin has not been bisected.
 
-### Full-suite contract reconciliation — F2 complete, F1 decision open
+### Full-suite contract reconciliation — F2 complete, F1 decision record
 
 - [x] F2's4 cells read toArray immediately after startSync. OrderedSourceLoader
   wraps even a synchronous snapshot in request.then(complete, fail), then registers
@@ -6116,7 +6121,7 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   promises a settled ordered window. Preserve every existing exact result assertion
   and add isReady after preload. Same runtime:4 red ->4 green; whole join-subquery
   file27/0,exit0. No production change or previously passing test removed.
-- [ ] F1 currently fails only the retained nested array's reference equality.
+- [x] F1 initially failed only the retained nested array's reference equality.
   Temporary probe adds actual event, value, old-snapshot and downstream checks:
   one coherent timeline update; unchanged sibling value; prior changed sibling
   still empty; a derived query selecting the unchanged sibling emits no update.
@@ -6151,3 +6156,29 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   Candidate no longer observes pre-ready state or same-stack latency. Distortion
   risk: treating every old observation as a contract, or treating a documented
   barrier as proof that every runtime delay is necessary. No readiness verdict.
+
+### F1 — accepted inline-array identity boundary
+
+- User approved not preserving inline-array === across updates to a containing
+  parent: "we don't want to bend over backwards to preserve identity". This is
+  a deliberate contract relaxation, not a runtime bug fix or proof of fewer UI
+  renders. Shallow prop comparison may rerender a child receiving a new array.
+- [x] Document that limit beside pure composition in ARCHITECTURE.md. Keep
+  immutable previous results, correct values and no unchanged downstream result
+  notifications mandatory. Stable public Collection facades remain a separate,
+  unchanged contract. No runtime cache, reconciliation or production code added.
+- [x] Expand the existing deep buffer fixture across changed sibling0/1. Both
+  cases fail only the old reference assertion after the new value/notification
+  checks pass. Then remove only that identity assertion under the approved
+  contract. Retain unchanged values, changed text, prior snapshot immutability,
+  one coherent root update, and no unchanged downstream-query update. Explicit
+  includeInitialState:false makes the listener observe subsequent update types.
+  New downstream subscriptions/collection have finally cleanup. Other test
+  assertions remain. Most displayed fixture diff is formatting indentation.
+- [x] Whole DB gate4724 passed/0 failed/6 existing skips,146 files,exit0,28.79s.
+  All five full-suite follow-ups closed. Package tsc and changed-test lint exit0.
+  Evidence: /tmp/tanstack-inline-identity-red.log (2 reference-only failures,
+  root runner with149 tests filtered); -full.json/log (package runner, all tests),
+  -types.log and -lint.log under the same prefix. No runtime red/green claim:
+  runtime stayed unchanged while the explicitly accepted test contract changed.
+- [ ] Commit and fresh post-commit Hidden-signal recovery assay.
