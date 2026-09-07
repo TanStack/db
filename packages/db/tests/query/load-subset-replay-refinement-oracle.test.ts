@@ -19,6 +19,113 @@ type Row = { id: string; version: number }
 type ObservedRow = { sourceId: string; rowKey: string; version: number }
 
 describe(`loadSubset replay refinement`, () => {
+  // A direct subscriber survives source cleanup. A dependent live query enters
+  // a terminal error instead; restarting only its source must not revive it.
+  it.each(
+    ([`direct`, `live`] as const).flatMap((consumer) =>
+      ([`resolve`, `reject`] as const).map((outcome) => ({
+        consumer,
+        outcome,
+      })),
+    ),
+  )(
+    `separates direct restart from fatal live source cleanup: %j`,
+    async ({ consumer, outcome }) => {
+      let operations!: Parameters<SyncConfig<Row, string>[`sync`]>[0]
+      let loads = 0
+      const pending = createDeferred<void>()
+      void pending.promise.catch(() => undefined)
+      const initial = [{ id: `row`, version: 1 }]
+      const replacement = [{ id: `row`, version: 2 }]
+      const source = createCollection<Row, string>({
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (next) => {
+            operations = next
+            next.markReady()
+            return {
+              loadSubset: () => {
+                if (++loads > 1) return pending.promise
+                next.begin()
+                next.write({ type: `insert`, value: initial[0]! })
+                next.commit()
+                return true
+              },
+              unloadSubset: () => {},
+            }
+          },
+        },
+      })
+      const live =
+        consumer === `live`
+          ? createLiveQueryCollection((q) => q.from({ row: source }))
+          : undefined
+      const visible = new Map<string, Row>()
+      const rows = (values: ReadonlyArray<Row>) =>
+        values.map(({ id, version }) => ({ id, version }))
+      const readEvents = () => rows([...visible.values()])
+      const read = () => (live ? rows(live.toArray) : readEvents())
+      const publications: Array<Array<Row>> = []
+      const subscription = (live ?? source).subscribeChanges(
+        (changes) => {
+          for (const change of changes) {
+            if (change.type === `delete`) visible.delete(String(change.key))
+            else visible.set(String(change.key), { ...change.value })
+          }
+          publications.push(readEvents())
+        },
+        { includeInitialState: consumer === `live` },
+      )
+
+      try {
+        if (live) await live.preload()
+        else subscription.requestSnapshot({})
+        await flushPromises()
+        expect(loads).toBe(1)
+        expect(read()).toEqual(initial)
+        expect(readEvents()).toEqual(initial)
+        publications.length = 0
+
+        await source.cleanup()
+        if (live) expect(live.status).toBe(`error`)
+        source.startSyncImmediate()
+        await flushPromises()
+        expect(loads).toBe(2)
+        expect(read()).toEqual(initial)
+        // Cleanup may change row metadata without changing the public data.
+        for (const publication of publications)
+          expect(publication).toEqual(initial)
+
+        operations.begin()
+        operations.write({ type: `insert`, value: replacement[0]! })
+        await operations.commit()
+        await flushPromises()
+        expect(rows(source.toArray)).toEqual(replacement)
+        expect(read()).toEqual(initial)
+        expect(readEvents()).toEqual(initial)
+        for (const publication of publications)
+          expect(publication).toEqual(initial)
+        publications.length = 0
+
+        if (outcome === `resolve`) pending.resolve()
+        else pending.reject(new Error(`restart failed`))
+        await flushPromises()
+        const publishes = consumer === `direct` && outcome === `resolve`
+        const expected = publishes ? replacement : initial
+        expect(read()).toEqual(expected)
+        expect(readEvents()).toEqual(expected)
+        expect(publications).toEqual(publishes ? [replacement] : [])
+        if (live) expect(live.status).toBe(`error`)
+      } finally {
+        pending.resolve()
+        subscription.unsubscribe()
+        await live?.cleanup()
+        await source.cleanup()
+      }
+    },
+  )
+
   it(`publishes a successful sibling after a settled failed include route retires`, async () => {
     type Parent = { id: string; left: number | null; right: number }
     type Child = { id: number; version: number }

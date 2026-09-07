@@ -24,11 +24,21 @@ work, not a claim that each is still open; use this queue for current execution.
   Targeted tests: 238 passed, zero failed/skipped. Changed-file lint and package
   typecheck pass. Full DB validation: 4789 passed, zero failed/skipped, 148 files,
   process exit 0 (`/tmp/tanstack-readiness-full.json`).
-- [ ] Commit this readiness slice and obtain its fresh post-commit loss audit.
-- [ ] Verify the prep-pr review's detached-demand restart publication finding.
-  Static review identifies a missing live-query publication-start handoff;
-  add the missing direct/live subscriber boundary before changing runtime code.
-  Record red/green evidence, commit the fix if confirmed, and audit that step.
+- [x] Readiness slice committed as `f902b213`. Fresh post-commit loss audit:
+  [bounded null](loadsubset-readiness-cleanup-loss-audit.md), with static,
+  third-party interface and module-loading limits retained.
+- [x] Verify the prep-pr detached-demand restart publication finding: refuted.
+  The real direct/live × success/failure test does not leak partial rows.
+  Its initial live/success expectation failed because manual source cleanup
+  deliberately marks dependent live queries terminally errored (already pinned
+  in db-client and live-query-observer tests). The reviewer withdrew the leak
+  claim and its 95/100 confidence. Adding the proposed publication-start handoff
+  did not change the result and was removed. No runtime change retained.
+  Keep the four-cell contract test with explicit terminal-error assertions and
+  clarify direct subscription restart versus live-query recovery in ARCHITECTURE.
+  Targeted gate: 161 passed, zero failures/skips, four files; package types and
+  changed-test lint pass. No earlier test body or assertion was removed.
+- [ ] Validate, commit and audit this test/documentation clarification.
 - [ ] Resolve two optional P3 simplifier suggestions with the user: local
   descriptor-safe array snapshot sharing; a private route-property record type.
   Neither is a confirmed bug or a reason to reopen broader architecture work.

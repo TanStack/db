@@ -620,6 +620,13 @@ before it queues reacquisition, then reacquires all detached demand through a
 fresh private publication barrier. Settlements from the old session cannot
 publish rows, report errors, or change readiness in the new session.
 
+This is the direct subscription's restart contract, not automatic recovery of
+a dependent live query. Manually cleaning up a source puts its live queries in
+a terminal error state. Restarting that source alone does not revive their
+graphs or publish replacement results; callers must restart or recreate the
+live query itself. This differs from a source truncate, which keeps the live
+query active behind its replay publication barrier.
+
 An initial sync error also leaves newly requested demand detached, even when
 the adapter has installed a loader. Same-session `markReady()` resumes that
 demand; releasing it before recovery creates no physical acquisition or unload.
