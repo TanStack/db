@@ -6692,8 +6692,29 @@ or runtime policy is selected here.
   evidence of full semantic equivalence. No new bug or red/green fix claimed.
 - Removed only the candidate through apply_patch; production/test source then
   matched a66c84d6. Re-ran the same three files:325/0,exit0 at
-  /tmp/tanstack-snapshot-handoff-restored.json/log. Property runs are separate
-  randomized executions, not a fixed-seed paired comparison. No full-suite run
-  this step. Source gap remains+2805 against fixed main68366eca.
-- Next standing step: fresh Field Lab loss audit of this frozen experiment
-  record against baseline source, candidate diff and saved test/type evidence.
+  /tmp/tanstack-snapshot-handoff-restored.json/log. The campaign includes six
+  common fixed-seed properties and seven properties with different recorded
+  random/replay seeds; the entire campaign is not a paired comparison. No
+  full-suite run this step. Source gap remains+2805 against fixed main68366eca.
+- Fresh Field Lab loss audit complete against frozen record565ff438, baseline
+  source, candidate patch and saved evidence. Report:
+  /Users/kylemathews/Documents/Codex/2026-09-06/run-a-fresh-field-lab-hostile/outputs/loss-audit-handoff-experiment.md.
+  It confirms the line count, preserved operation order and restored admitted
+  source/test paths; it did not rerun tests or survey outside this bundle.
+- Recovered qualification: a receiver-sensitive callback could mutate the new
+  wrapper's tracking field before the helper reads it. That could change pending
+  status participation for a started Promise load, while error observation
+  remains attached. This is a static inference, not an executed repro. The
+  baseline limited method uses its captured value instead. Some loader gates
+  stub subscriptions; real synchronous-result checks use arrow callbacks. Their
+  passes therefore do not establish receiver-sensitive equivalence.
+- Snapshot uses the helper's final active check to stop before its local read;
+  limited ends immediately after the helper, so it need not consume the boolean.
+  No effect-order reversal or loader-unwind edit was found in this candidate.
+- Gate success is saved in JSON/logs; shell exit0 and the separate tsc success
+  come from execution-tool receipts. The empty tsc log is not independent proof
+  of its command or outcome. Main independently rechecked the fixed-main source
+  count (+5263/-2458), outside the scanner's admitted bundle.
+- The audit can overemphasize a compressed detail or static possibility. Main
+  restored these evidence qualifications, not the rejected implementation; no
+  new callback guarantee or broader repair was selected.
