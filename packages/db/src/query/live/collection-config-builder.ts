@@ -74,7 +74,7 @@ export type LiveQueryCollectionUtils = UtilsRecord & {
 
 type PendingGraphRun = {
   syncSession: number
-  loadCallbacks: Set<() => boolean>
+  loadCallbacks: Set<() => void>
 }
 
 // Global counter for auto-generated collection IDs
@@ -576,8 +576,8 @@ export class CollectionConfigBuilder<
   // That can happen because even though we load N rows, the pipeline might filter some of these rows out
   // causing the orderBy operator to receive less than N rows or even no rows at all.
   // So this callback would notice that it doesn't have enough rows and load some more.
-  // The callback returns a boolean, when it's true it's done loading data and we can mark the collection as ready.
-  maybeRunGraph(callback?: () => boolean) {
+  // Readiness follows source/demand state, not the callback's return value.
+  maybeRunGraph(callback?: () => void) {
     if (this.isGraphRunning) {
       // no nested runs of the graph
       // which is possible if the `callback`
@@ -680,7 +680,7 @@ export class CollectionConfigBuilder<
    *
    * Uses the current sync session's config and syncState from instance properties.
    *
-   * @param callback - Optional callback to load more data if needed (returns true when done)
+   * @param callback - Optional callback to load more data if needed
    * @param options - Optional scheduling configuration
    * @param options.contextId - Transaction ID to group work; defaults to active transaction
    * @param options.jobId - Unique identifier for this job; defaults to this builder instance
@@ -688,7 +688,7 @@ export class CollectionConfigBuilder<
    * @param options.dependencies - Explicit dependency list; overrides auto-discovered dependencies
    */
   scheduleGraphRun(
-    callback?: () => boolean,
+    callback?: () => void,
     options?: {
       contextId?: SchedulerContextId
       jobId?: unknown
@@ -825,27 +825,7 @@ export class CollectionConfigBuilder<
 
     this.incrementRunCount()
 
-    const combinedLoader = () => {
-      let allDone = true
-      let failed = false
-      let firstError: unknown
-      pending.loadCallbacks.forEach((loader) => {
-        try {
-          allDone = loader() && allDone
-        } catch (error) {
-          allDone = false
-          if (!failed) {
-            failed = true
-            firstError = error
-          }
-        }
-      })
-      if (failed) throw firstError
-      // Returning false signals that callers should schedule another pass.
-      return allDone
-    }
-
-    this.maybeRunGraph(combinedLoader)
+    this.maybeRunGraph(() => runAllCallbacks(pending.loadCallbacks))
   }
 
   private getSyncConfig(): SyncConfig<TResult> {
@@ -1426,14 +1406,6 @@ export class CollectionConfigBuilder<
       return loadMore
     })
 
-    // Combine all loaders into a single callback that initiates loading more data
-    // from any source that needs it. Returns true once all loaders have been called,
-    // but the actual async loading may still be in progress.
-    const loadSubsetDataCallbacks = () => {
-      runAllCallbacks(loaders)
-      return true
-    }
-
     // Mark as subscribed so the graph can start running
     // (graph only runs when all collections are subscribed)
     syncState.subscribedToAllCollections = true
@@ -1443,7 +1415,7 @@ export class CollectionConfigBuilder<
     // The canonical place to mark ready is after the graph processes data
     // in maybeRunGraph(), which ensures data has been processed first.
 
-    return loadSubsetDataCallbacks
+    return () => runAllCallbacks(loaders)
   }
 }
 

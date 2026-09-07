@@ -1275,76 +1275,151 @@ describe(`live query scheduler`, () => {
     maybeRunGraphSpy.mockRestore()
   })
 
-  it.each([
-    { name: `undefined`, failure: undefined },
-    { name: `null`, failure: null },
-    { name: `false`, failure: false },
-    { name: `zero`, failure: 0 },
-    { name: `empty string`, failure: `` },
-    { name: `NaN`, failure: Number.NaN },
-  ])(`preserves the first falsy graph-loader failure: $name`, ({ failure }) => {
-    const baseCollection = createCollection<User>({
-      id: `falsy-loader-users-${String(failure)}`,
-      getKey: (user) => user.id,
-      sync: {
-        sync: () => () => {},
-      },
-    })
-    const builder = new CollectionConfigBuilder({
-      id: `falsy-loader-builder-${String(failure)}`,
-      query: (q) => q.from({ user: baseCollection }),
-    })
-    const contextId = Symbol(`falsy-loader-context`)
-    const laterLoader = vi.fn(() => true)
-    const config = {
-      begin: vi.fn(),
-      write: vi.fn(),
-      commit: vi.fn(),
-      markReady: vi.fn(),
-      truncate: vi.fn(),
-    } as unknown as Parameters<SyncConfig<UserWithVirtual>[`sync`]>[0]
-    const syncState = {
-      messagesCount: 0,
-      subscribedToAllCollections: true,
-      unsubscribeCallbacks: new Set<() => void>(),
-      graph: {
-        pendingWork: () => false,
-        run: vi.fn(),
-      },
-      inputs: {},
-      pipeline: {},
-    } as unknown as FullSyncState
-    const maybeRunGraphSpy = vi
-      .spyOn(builder, `maybeRunGraph`)
-      .mockImplementation((combinedLoader) => {
-        combinedLoader?.()
+  it.each(
+    [false, true].flatMap((initialWork) =>
+      [false, true].map((loaderResult) => ({ initialWork, loaderResult })),
+    ),
+  )(
+    `drains loader writes before publication: initial=$initialWork return=$loaderResult`,
+    ({ initialWork, loaderResult }) => {
+      const source = createCollection<User>({
+        getKey: (user) => user.id,
+        sync: { sync: () => () => {} },
       })
-
-    builder.currentSyncConfig = config
-    builder.currentSyncState = syncState
-    builder.scheduleGraphRun(
-      () => {
-        throw failure
-      },
-      { contextId },
-    )
-    builder.scheduleGraphRun(laterLoader, { contextId })
-
-    let didThrow = false
-    let thrown: unknown
-    try {
+      const builder = new CollectionConfigBuilder({
+        query: (q) => q.from({ user: source }),
+      })
+      const events: Array<string> = []
+      let pendingWork = initialWork
+      let wrote = false
+      builder.currentSyncConfig = {
+        markReady: vi.fn(),
+      } as unknown as Parameters<SyncConfig<UserWithVirtual>[`sync`]>[0]
+      builder.currentSyncState = {
+        messagesCount: 1,
+        subscribedToAllCollections: true,
+        graph: {
+          pendingWork: () => pendingWork,
+          run: () => {
+            events.push(`graph`)
+            pendingWork = false
+          },
+        },
+        flushPendingChanges: () => events.push(`publish`),
+      } as unknown as FullSyncState
+      const contextId = Symbol(`loader-write-context`)
+      builder.scheduleGraphRun(
+        () => {
+          events.push(`first`)
+          if (!wrote) {
+            wrote = true
+            pendingWork = true
+          }
+          return loaderResult
+        },
+        { contextId },
+      )
+      builder.scheduleGraphRun(
+        () => {
+          events.push(`second`)
+          return true
+        },
+        { contextId },
+      )
       transactionScopedScheduler.flush(contextId)
-    } catch (error) {
-      didThrow = true
-      thrown = error
-    } finally {
-      maybeRunGraphSpy.mockRestore()
-    }
+      expect(events).toEqual([
+        ...(initialWork ? [`graph`] : []),
+        `first`,
+        `second`,
+        `graph`,
+        `first`,
+        `second`,
+        `publish`,
+      ])
+      expect(builder.hasPendingGraphRun(contextId)).toBe(false)
+    },
+  )
 
-    expect(didThrow).toBe(true)
-    expect(Object.is(thrown, failure)).toBe(true)
-    expect(laterLoader).toHaveBeenCalledOnce()
-  })
+  it.each(
+    [
+      { name: `undefined`, failure: undefined },
+      { name: `null`, failure: null },
+      { name: `false`, failure: false },
+      { name: `zero`, failure: 0 },
+      { name: `empty string`, failure: `` },
+      { name: `NaN`, failure: Number.NaN },
+    ].flatMap((entry) =>
+      [false, true].map((laterFails) => ({ ...entry, laterFails })),
+    ),
+  )(
+    `preserves the first falsy graph-loader failure: $name laterFails=$laterFails`,
+    ({ failure, laterFails }) => {
+      const baseCollection = createCollection<User>({
+        id: `falsy-loader-users-${String(failure)}`,
+        getKey: (user) => user.id,
+        sync: {
+          sync: () => () => {},
+        },
+      })
+      const builder = new CollectionConfigBuilder({
+        id: `falsy-loader-builder-${String(failure)}`,
+        query: (q) => q.from({ user: baseCollection }),
+      })
+      const contextId = Symbol(`falsy-loader-context`)
+      const laterLoader = vi.fn(() => {
+        if (laterFails) throw new Error(`later loader failed`)
+        return false
+      })
+      const config = {
+        begin: vi.fn(),
+        write: vi.fn(),
+        commit: vi.fn(),
+        markReady: vi.fn(),
+        truncate: vi.fn(),
+      } as unknown as Parameters<SyncConfig<UserWithVirtual>[`sync`]>[0]
+      const syncState = {
+        messagesCount: 0,
+        subscribedToAllCollections: true,
+        unsubscribeCallbacks: new Set<() => void>(),
+        graph: {
+          pendingWork: () => false,
+          run: vi.fn(),
+        },
+        inputs: {},
+        pipeline: {},
+      } as unknown as FullSyncState
+      const maybeRunGraphSpy = vi
+        .spyOn(builder, `maybeRunGraph`)
+        .mockImplementation((combinedLoader) => {
+          combinedLoader?.()
+        })
+
+      builder.currentSyncConfig = config
+      builder.currentSyncState = syncState
+      builder.scheduleGraphRun(
+        () => {
+          throw failure
+        },
+        { contextId },
+      )
+      builder.scheduleGraphRun(laterLoader, { contextId })
+
+      let didThrow = false
+      let thrown: unknown
+      try {
+        transactionScopedScheduler.flush(contextId)
+      } catch (error) {
+        didThrow = true
+        thrown = error
+      } finally {
+        maybeRunGraphSpy.mockRestore()
+      }
+
+      expect(didThrow).toBe(true)
+      expect(Object.is(thrown, failure)).toBe(true)
+      expect(laterLoader).toHaveBeenCalledOnce()
+    },
+  )
 
   it(`attempts every repeated-alias source loader and preserves the first failure`, async () => {
     const createSource = (name: string) =>
@@ -1397,7 +1472,7 @@ describe(`live query scheduler`, () => {
       subscribeToAllCollections: (
         syncConfig: typeof config,
         state: FullSyncState,
-      ) => () => boolean
+      ) => () => void
     }
     const syncState = {
       messagesCount: 0,

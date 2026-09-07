@@ -216,7 +216,7 @@ export class CollectionSubscriber<
 
   private sendChangesToPipeline(
     changes: Iterable<ChangeMessage<any, string | number>>,
-    callback?: () => boolean,
+    callback?: () => void,
   ) {
     const changesArray = Array.isArray(changes) ? changes : [...changes]
     const reconciledChanges = reconcileChangesForD2(
@@ -378,12 +378,12 @@ export class CollectionSubscriber<
   // This function is called by maybeRunGraph
   // after each iteration of the query pipeline
   // to ensure that the orderBy operator has enough data to work with
-  loadMoreIfNeeded(subscription: CollectionSubscription) {
+  loadMoreIfNeeded(subscription: CollectionSubscription): void {
     if (
       subscription.hasPendingTruncateReplacement &&
       !this.collectionConfigBuilder.hasActiveWindowOperation()
     ) {
-      return true
+      return
     }
 
     const orderByInfo = this.getOrderByInfo()
@@ -391,7 +391,7 @@ export class CollectionSubscriber<
     if (!orderByInfo) {
       // This query has no orderBy operator
       // so there's no data to load
-      return true
+      return
     }
 
     try {
@@ -404,7 +404,6 @@ export class CollectionSubscriber<
     } catch (error) {
       if (!Object.is(subscription.lastError, error)) throw error
     }
-    return true
   }
 
   private sendChangesToPipelineWithTracking(
@@ -421,7 +420,7 @@ export class CollectionSubscriber<
     // This ensures we pass the same function instance to the scheduler each time,
     // allowing it to deduplicate callbacks when multiple changes arrive during a transaction.
     type SubscriptionWithLoader = CollectionSubscription & {
-      [loadMoreCallbackSymbol]?: () => boolean
+      [loadMoreCallbackSymbol]?: () => void
     }
 
     const subscriptionWithLoader = subscription as SubscriptionWithLoader

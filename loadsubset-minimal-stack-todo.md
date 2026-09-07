@@ -5929,3 +5929,29 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   live-query graph scheduling/publication paths for duplicate work; do not merge
   requested/settled window state or readiness/publication gates merely to save
   fields. Preserve the current lifecycle matrix as the acceptance boundary.
+
+### W10 — make graph loader callbacks side-effect-only
+
+- [x] Trace callback results through subscriber, source-loader fanout, scheduler
+  fanout and graph drain. maybeRunGraph never consumes the callback return value;
+  updateLiveQueryStatus reads source/demand/loading state. Remove the misleading
+  allDone computation and duplicate first-error loop; reuse runAllCallbacks.
+  Callback types are void; remove always-true subscriber/source-fanout returns.
+  Keep request/session/publication guards and pending callback ownership intact.
+- [x] Before changing runtime, extend scheduler tests:4 cells cross initial graph
+  work with true/false loader return, assert both loaders run and synchronous writes
+  drain before publication. Expand6 existing falsy-first-error cells across later
+  success/failure, retaining exact error and attempt-all assertions (12 cells).
+  Baseline57/0 and refactor57/0. Scheduler/graph-entry harness has a controlled
+  graph stub, not real-D2 relation/publication proof; integration gates supply that.
+- [x] Controlled ablation short-circuits on false and skips error collection:
+  14 red/43 green,exit1. Restored helper before final tests. This is test sensitivity
+  evidence, not14 newly found production bugs. No prior tests deleted.
+- [x] Package typecheck exit0. Diagnostic bundle DB344290/97378 ->344161/97322
+  minified/gzip (-129/-56), DB-IVM30220/9133 unchanged. Production source -29 lines.
+  Changed-file lint flags one unchanged second-drain conditional; baseline check
+  recorded separately. No clean whole-file lint claim.
+- [ ] Expanded30-file1x and focused pagination/publication/scheduler100x gates.
+- [ ] Fresh post-commit Hidden-signal recovery assay against bd2be04d.
+- Evidence prefix: /tmp/tanstack-weight-loader-callbacks-; baseline/green/ablation
+  logs, full/100 JSON+logs, types/lint logs, bundle.json. Normal commit, no push.
