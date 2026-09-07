@@ -7,7 +7,8 @@ current as review findings, oracle laws, and implementation choices change.
 
 - Formation section + fresh hostile assay complete: rejected deleting the
   established-source flag. Settled-empty then live-fill would fetch three times
-  instead of once;306 existing targeted tests missed it. Retained the new work
+  instead of once; the fresh assay reported306 old targeted tests missed it
+  (its console output was not retained). Retained the new work
   law, no production change. Targeted307/0; full DB4756/0,zero skips,147 files.
   Source weight unchanged (+2805 against fixed main). Detailed trace below.
 - All six skipped order-by cases now run with autoIndex off as well as eager:
@@ -6369,13 +6370,17 @@ R4 --4c382d75 removes predicate pruning ----------------> source-owned retention
   historical trace alone.
 - Result: C1 rejected. A real indexed on-demand source settles ORDER BY rank
   LIMIT1 with no rows. A later live insert fills the window. Baseline requests
-  once; C1 requests three times (initial prefix, repeated prefix, then unbounded
-  boundary equality). Rows and absence of subset error pass on both versions.
+  once; C1 requests three times. The fresh auditor identifies those as initial
+  prefix, repeated prefix, then unbounded boundary equality; the saved main red
+  assertion preserves the count, not those detailed shapes. Rows and absence
+  of subset error pass on both versions.
   This is an executed overfetch regression in the proposed deletion, not a new
   production defect, readiness failure, or ownership leak.
 - The fresh auditor ran all306 existing loader/work/pagination cases green on
   both versions, then the discriminator green/red/green. Its temporary edits
-  were restored. Main retained the law beside the pagination empty-source test
+  were restored. Those306-case console runs are agent-reported: their output
+  was not retained, so the saved main reports cannot independently certify them.
+  Main retained the law beside the pagination empty-source test
   and independently repeated the comparison:307/0 targeted baseline; the exact
   candidate fails the new request-trace assertion (1 failed,200 name-filtered).
   Source restored byte-for-byte to HEAD; changed-test eslint/diff-check pass.
@@ -6398,3 +6403,12 @@ R4 --4c382d75 removes predicate pruning ----------------> source-owned retention
   field is neither justified nor redundant merely because several rewrites
   retained it. Historical test fixes are evidence to investigate, not a proof
   of correctness or a reason to preserve every present guard.
+- Post-commit loss audit of5b860cd6: no production diff, removed/weakened test,
+  or mismatch between the new fixture and its work assertion. Recovered an
+  evidence caveats lost in compression: the prior306-case candidate run has no
+  saved console artifact, and the red assertion omits detailed request shapes.
+  Marked those agent-reported above; saved main evidence
+  independently supports307/0 baseline, the deletion's targeted failure, and
+  full4756/0. Full log also emits TimeoutNegativeWarning (lines3–5); the process
+  still completes successfully. One scanner checked test diff and execution
+  sources sequentially; no fresh runtime verification or whole-branch audit.
