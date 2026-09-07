@@ -15,6 +15,7 @@ import type { OrderBy } from '../src/query/ir.js'
 import type {
   ChangeMessageOrDeleteKeyMessage,
   LoadSubsetOptions,
+  SyncConfig,
 } from '../src/types.js'
 import type { Scheduler } from 'fast-check'
 
@@ -1444,6 +1445,120 @@ const { multiplier, ...replay } = readOracleRunConfig()
 const generatedRuns = 30 * multiplier
 
 describe(`CollectionSubscription replay oracle`, () => {
+  it.each([`resolve`, `reject`] as const)(
+    `starts a replacement that lets canceled replay %s`,
+    async (outcome) => {
+      const oldReplay = createDeferred<void>()
+      const newReplay = createDeferred<void>()
+      const aborted = new DOMException(`superseded`, `AbortError`)
+      const loads: Array<LoadSubsetOptions> = []
+      const unloads: Array<LoadSubsetOptions> = []
+      const events: Array<string> = []
+      let operations!: Parameters<SyncConfig<ReplayRow>[`sync`]>[0]
+      const collection = createCollection<ReplayRow>({
+        id: `replacement-start-dependency-${outcome}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (sync) => {
+            operations = sync
+            sync.markReady()
+            return {
+              loadSubset: (options) => {
+                loads.push(options)
+                events.push(`load:${loads.length}`)
+                if (loads.length === 1) {
+                  sync.begin()
+                  sync.write({ type: `insert`, value: { id: `one`, value: 0 } })
+                  sync.commit()
+                  return true
+                }
+                if (loads.length === 2) return oldReplay.promise
+                // This provider has stopped old request-scoped writes on abort.
+                // Its shared refresh protocol completes the old waiter only
+                // when a replacement acquisition registers. Completion does
+                // not require new result publication or a callback from core.
+                expect(loads[1]?.signal?.aborted).toBe(true)
+                if (outcome === `resolve`) oldReplay.resolve()
+                else oldReplay.reject(aborted)
+                events.push(`old:settled`)
+                return newReplay.promise
+              },
+              unloadSubset: (options) => {
+                unloads.push(options)
+              },
+            }
+          },
+        },
+      })
+      const visible = new Map<string | number, ReplayRow>()
+      const subscription = collection.subscribeChanges((changes) => {
+        for (const change of changes) {
+          if (change.type === `delete`) visible.delete(change.key)
+          else {
+            const { id, value } = change.value
+            visible.set(change.key, { id, value })
+          }
+        }
+      })
+      const truncate = () => {
+        operations.begin()
+        operations.truncate()
+        operations.commit()
+      }
+      try {
+        subscription.requestSnapshot({ optimizedOnly: false })
+        expect([...visible.values()]).toEqual([{ id: `one`, value: 0 }])
+        truncate()
+        const completion = subscription.pendingTruncateReplacement
+        expect(completion).toBeDefined()
+        let completed = false
+        const completionErrors: Array<unknown> = []
+        void completion?.then(
+          () => {
+            completed = true
+          },
+          (error: unknown) => completionErrors.push(error),
+        )
+        await flushPromises()
+        expect(loads).toHaveLength(2)
+        expect(oldReplay.isPending()).toBe(true)
+        expect([...visible.values()]).toEqual([{ id: `one`, value: 0 }])
+
+        truncate()
+        await flushPromises()
+        expect(events).toEqual([`load:1`, `load:2`, `load:3`, `old:settled`])
+        expect(oldReplay.isPending()).toBe(false)
+        expect([...visible.values()]).toEqual([{ id: `one`, value: 0 }])
+        expect(subscription.status).toBe(`loadingSubset`)
+        expect(subscription.lastError).toBeUndefined()
+        expect(completed).toBe(false)
+        expect(completionErrors).toEqual([])
+
+        operations.begin()
+        operations.write({ type: `insert`, value: { id: `one`, value: 2 } })
+        await operations.commit()
+        newReplay.resolve()
+        await flushPromises()
+        expect([...visible.values()]).toEqual([{ id: `one`, value: 2 }])
+        expect(subscription.status).toBe(`ready`)
+        expect(subscription.lastError).toBeUndefined()
+        expect(completed).toBe(true)
+        expect(completionErrors).toEqual([])
+      } finally {
+        oldReplay.resolve()
+        newReplay.resolve()
+        await flushPromises()
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+      expect(unloads).toHaveLength(loads.length)
+      for (const load of loads) {
+        expect(unloads.filter((unload) => unload === load)).toHaveLength(1)
+      }
+    },
+  )
+
   it(`generates shared, failed, stale, released, and post-replay histories`, () => {
     const scenarios = fc.sample(replayScenarioArbitrary, {
       seed: 1755,

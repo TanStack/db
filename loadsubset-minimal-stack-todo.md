@@ -3,8 +3,16 @@
 This is the durable execution log for simplifying the RFC #1657 stack. Keep it
 current as review findings, oracle laws, and implementation choices change.
 
-## Current checkpoint — 2026-09-06
+## Current checkpoint — 2026-09-07
 
+- Serialized rare recovery rejected before a production spike. Fresh Hostile
+  failure assay identifies a dependency cycle: old canceled work can require
+  replacement startup to settle, while drain-before-start waits for that old
+  settlement. Main's two-case real-subscription probe confirms baseline progress
+  with old resolve/reject; retained in the replay oracle. No new production bug
+  or runtime change. Full DB4758/0,zero skips,147 files; package types pass.
+  Design, deletion map and all seven attack dispositions are in
+  loadsubset-serialized-recovery-design.md. Detailed evidence below.
 - Formation section + fresh hostile assay complete: rejected deleting the
   established-source flag. Settled-empty then live-fill would fetch three times
   instead of once; the fresh assay reported306 old targeted tests missed it
@@ -6412,3 +6420,100 @@ R4 --4c382d75 removes predicate pruning ----------------> source-owned retention
   full4756/0. Full log also emits TimeoutNegativeWarning (lines3–5); the process
   still completes successfully. One scanner checked test diff and execution
   sources sequentially; no fresh runtime verification or whole-branch audit.
+
+### Design grammar — independent source and interview runs
+
+- User selected two fresh Design grammar runs, then added a code-blind
+  first-principles interview. Root could launch one fresh subagent; a second
+  launch and one child-launch attempt both hit the agent-thread limit. User
+  explicitly approved a separate fresh Codex task for the interview-based run.
+  These are two fresh accounts with different inputs, not two code-reading
+  agents or independent validations of implementation correctness.
+- Source baseline stays08f5fbed. No production/test changes or new test runs.
+- [x] Code-grounded run A: /tmp/tanstack-loadsubset-design-grammar-a.md.
+  Independent source extraction without prior TODO/instrument reports; eight
+  rules around demand, physical acquisition, evidence, images and scope
+  membership. Three unranked generated forms: shared acquisition facts with
+  distinct membership views; serialize rare recovery without changing ordinary
+  pagination; split local delivery from acquisition behind existing wrappers.
+  None establishes removable lines or executable equivalence. Parent checked
+  source/reconstruction and recovered a compressed distinction: no-op/queued
+  dispatch versus physical adapter acquisition, and true adapter-start throw
+  versus a later snapshot throw after acquisition. Run A amended its report.
+- [x] Code-blind run B, fresh task01a07a18-f017-7af0-8d19-5a3ff83a5497.
+  Its source is five interview answers, not repository code or run A. Questions
+  cover partial page failure; disposal/shared work; cheap forward traversal;
+  superseding recovery/window intent; synchronous reentry. Answers distinguish
+  hard requirements, negotiable choices, and unknown adapter extent/fairness.
+  Clarified that whole-session cleanup may retire acquisitions collectively;
+  no requirement to unload obsolete acquisitions into a new source session.
+  Report: /Users/kylemathews/Documents/Codex/2026-09-06/run-a-fresh-code-blind-field/outputs/design-grammar.md.
+  Eight rules and six candidate units: intent, caller obligation, acquisition,
+  validity context, sufficiency evidence, publication. It reconstructs the five
+  elicited scenarios on paper; no code/execution evidence. Three unranked forms:
+  consumer-local reconstruction; shared acquisition with separate consumer
+  publication; serialized rare recovery with session replacement. Central rule:
+  valid data can outlive obsolete intent; publication authority cannot transfer
+  blindly to a newer request. Unknowns include exhaustion/multi-page consistency
+  and the terminal success/cancel point during listener-triggered disposal.
+  Parent checked and the report incorporated two wording qualifications:
+  publication-before-success is
+  for result/window operations, not every physical acquisition/cleanup; callout
+  requires committed ownership changes, not ending every still-valid owner.
+- Interview control: parent supplies affordances, not classes or fields. Its
+  existing implementation knowledge can still bias which scenarios/constraints
+  it supplies. The code-blind run cannot find an omitted affordance by inspecting
+  code; its reconstruction is only against the supplied contract. Do not merge
+  the two reports into a preferred design or claim savings without later work.
+
+### Serialized rare recovery — design gate stopped the spike
+
+- User approved a design/deletion map, fresh Hostile failure assay, then a
+  bounded spike only if the design survives. Candidate and disposition:
+  loadsubset-serialized-recovery-design.md. Scope was one subscription's rare
+  replacement startup; ordinary pagination and acquisition ownership unchanged.
+- [x] Wrote the concrete scheduling rule and deletion map against08f5fbed.
+  Actual potential cut was limited: exact acquisition replacement, failed unload
+  debt, logical membership, source-session fences and public/private images
+  remain necessary. The ordered full-source hook requires explicit integration;
+  its void return is not the acquisition's completion promise.
+- [x] Fresh hostile task01a07a32-175c-7592-8ca6-638e368ca53b, separately opened
+  with explicit user permission after the local subagent limit. Report:
+  /Users/kylemathews/Documents/Codex/2026-09-06/run-a-fresh-field-lab-hostile/outputs/serialized-recovery-hostile-assay.md.
+  It saw only this candidate and traced source/tests, not sibling candidates,
+  TODO or main's new probe. It reports586 baseline tests passing in five suites.
+  Seven unranked attacks are individually disposed in the design document.
+  A1–A3 overlap around liveness; A4–A6 are preservation/integration hazards,
+  not additional proven runtime bugs. A7 records unproved savings and existing
+  queued-reset coalescing. The warning list can anchor the hostile reader.
+- [x] Main independently ran a real-subscription provider with a canceled old
+  waiter settled only when a replacement registers. Both old resolve/reject
+  variants pass, preserving public rows, replacement completion, scoped errors,
+  and exact unload ownership. The provider stops canceled request-scoped writes.
+  Event trace proves baseline can start-new then settle-old. Candidate instead
+  requires settle-old before start-new: a cycle under the preserved contract.
+  No deployed adapter prevalence claim; no candidate runtime or timeout-based
+  red run. The initial probe's virtual-metadata/plain-row assertion was a fixture
+  error, corrected before the recorded passing evidence.
+- [x] Retained both cases in collection-subscription-replay-oracle.property.test.ts
+  as `starts a replacement that lets canceled replay %s`. Removed only the
+  temporary probe file after transferring its test body (type renamed to the
+  existing ReplayRow). No existing test removed, skipped or weakened.
+  Missing oracle dimension: what enables settlement, not merely settlement order.
+  Independently resolved deferred fixtures exclude this provider dependency.
+- [x] Verification: isolated2/0 at
+  /tmp/tanstack-serialized-recovery-baseline.json/log; broader588/0,6 files at
+  /tmp/tanstack-serialized-recovery-gates.json/log. Final retained-file full DB
+  4758/0,zero skips,147 files,exit0 at
+  /tmp/tanstack-serialized-recovery-retained-full.json/log. Full log has one
+  TimeoutNegativeWarning plus index-fallback diagnostics; not warning-free.
+  Final package tsc exit0 at -retained-types.log; changed-file eslint exit0
+  with7 existing no-shadow warnings outside new code at -retained-lint.log.
+  These share the /tmp/tanstack-serialized-recovery prefix. No100x claim.
+- [x] Decision: do not spike drain-before-start or add a provider requirement,
+  timeout, generic scheduler, release-first swap, or broad restart to rescue it.
+  This is a rejected design, not a new production bug. Production remains byte
+  unchanged from08f5fbed; source gap remains+2805 against fixed main. No measured
+  bundle change, no savings forecast, no automatically selected alternate design.
+- [ ] Commit the retained law and design evidence; then run a fresh loss audit
+  against the test/evidence, hostile report dispositions, and grammar summaries.
