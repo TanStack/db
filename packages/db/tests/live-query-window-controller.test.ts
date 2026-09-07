@@ -50,6 +50,42 @@ const flush = () => new Promise((r) => setTimeout(r, 0))
 const ids = (snap: { data: ReadonlyArray<any> }) => snap.data.map((r) => r.id)
 
 describe(`createLiveQueryWindowController`, () => {
+  it.each(
+    [0, 2, 5].flatMap((rowCount) =>
+      [`fetch`, `reset`, `dispose`].map((action) => ({ rowCount, action })),
+    ),
+  )(
+    `handles $action during initial loading with $rowCount rows`,
+    async ({ rowCount, action }) => {
+      const source = makeSource(ROWS.slice(0, rowCount))
+      const lq = makeOrderedLiveQuery(source, 2)
+      const controller = createLiveQueryWindowController(lq, {
+        pageSize: 2,
+      })
+      const unsubscribe = controller.subscribe(() => {})
+      try {
+        expect(controller.getSnapshot().isLoading).toBe(true)
+        const fetch = controller.fetchNextPage()
+        expect(controller.fetchNextPage()).toBe(fetch)
+        if (action === `reset`) await controller.reset()
+        if (action === `dispose`) controller.dispose()
+        await fetch
+        const visibleCount = action === `fetch` ? 4 : 2
+        expect(ids(controller.getSnapshot())).toEqual(
+          ROWS.slice(0, Math.min(rowCount, visibleCount)).map((row) => row.id),
+        )
+        expect(controller.getSnapshot().pages).toHaveLength(
+          action === `fetch` && rowCount > 2 ? 2 : 1,
+        )
+      } finally {
+        unsubscribe()
+        controller.dispose()
+        await lq.cleanup()
+        await source.cleanup()
+      }
+    },
+  )
+
   it.each([
     { pageSize: undefined, normalized: 20 },
     { pageSize: 0, normalized: 20 },

@@ -728,10 +728,12 @@ class LiveQueryWindowControllerImpl<
 
   fetchNextPage(): Promise<void> {
     if (this.disposed) return Promise.resolve()
-    if (this.isFetchingNextPage && this.activeFetchPromise) {
+    if (this.activeFetchPromise) {
       return this.activeFetchPromise
     }
-    if (!this.getSnapshot().hasNextPage) return Promise.resolve()
+    const snapshot = this.getSnapshot()
+    const awaitingInitialLoad = snapshot.isLoading || snapshot.isIdle
+    if (!snapshot.hasNextPage && !awaitingInitialLoad) return Promise.resolve()
 
     let resolveFetch!: () => void
     let rejectFetch!: (error: unknown) => void
@@ -743,7 +745,21 @@ class LiveQueryWindowControllerImpl<
 
     let request: Promise<void>
     try {
-      request = this.requestPageCount(this.committedPageCount + 1, true)
+      const generation = this.windowGeneration
+      // An unpublished initial snapshot cannot establish that there is no next
+      // page. Keep one fetch pending, then decide from the settled first page.
+      request = awaitingInitialLoad
+        ? this.preload().then(() => {
+            if (
+              this.disposed ||
+              generation !== this.windowGeneration ||
+              !this.getSnapshot().hasNextPage
+            ) {
+              return
+            }
+            return this.requestPageCount(this.committedPageCount + 1, true)
+          })
+        : this.requestPageCount(this.committedPageCount + 1, true)
     } catch (error) {
       this.activeFetchPromise = null
       rejectFetch(error)
@@ -772,10 +788,12 @@ class LiveQueryWindowControllerImpl<
       this.committedPageCount === 1 &&
       !this.hasPaginationError &&
       !this.isFetchingNextPage &&
+      !this.activeFetchPromise &&
       this.pendingWindowGeneration === undefined
     ) {
       return Promise.resolve()
     }
+    this.activeFetchPromise = null
     return this.requestPageCount(1, false)
   }
 
