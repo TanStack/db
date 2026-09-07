@@ -5,6 +5,9 @@ current as review findings, oracle laws, and implementation choices change.
 
 ## Current checkpoint — 2026-09-06
 
+- All six skipped order-by cases now run with autoIndex off as well as eager:
+  unchanged assertions pass. Removed obsolete guards/comments, no production
+  change. Order-by116/0; full DB4755/0 with zero skips,147 files,exit0.
 - W13 source-owned retention: removed predicate-based replay pruning; request
   release changes loading/readiness, not row ownership (user-approved).
   Corrected both oracle models, retained the four-cell fracture witness in a
@@ -6274,3 +6277,20 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   full-final,100}.json/log; -types-final.log, -test-lint.log,
   -baseline-lint-semantic.log, -bundle.json; matrix old-runtime result at
   /tmp/tanstack-retention-matrix-red.log. No push.
+
+### Remove obsolete order-by skip guards
+
+- [x] Ran the six autoIndex-off cases unchanged by temporarily replacing both
+  conditional test aliases with it. All116 order-by cases pass, zero skips.
+  The blanket claim that these cases require eager indexes is obsolete for
+  these fixtures; no claim that every no-index query has indexed performance.
+- [x] Removed both aliases and their stale index-requirement comment, using it
+  directly at the six call sites. Test names, inputs and assertions unchanged;
+  no production code changed. Full DB4755/0,zero skips,147 files,exit0,28.46s.
+  Changed-file eslint and git diff --check pass. Evidence:
+  /tmp/tanstack-orderby-unskip-{probe,full}.json/log and -lint.log.
+- [ ] Fresh post-commit source loss audit of the six unskipped test cases.
+- Instrument recommendations only (not selected/running): Formation section
+  for the origin and surviving premises of accumulated state/guards, then
+  Hostile failure assay for concrete deletion candidates and their oracle gaps.
+  No new broad investigation started by this recommendation.

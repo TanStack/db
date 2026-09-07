@@ -255,10 +255,6 @@ function createEmployeesWithNullableCollection(
 
 function createOrderByTests(autoIndex: `off` | `eager`): void {
   describe(`with autoIndex ${autoIndex}`, () => {
-    // Some tests require an index for incremental updates (loadMoreIfNeeded).
-    // These only work with autoIndex: 'eager' which auto-creates the needed indexes.
-    const itWhenAutoIndexEager = autoIndex === `eager` ? it : it.skip
-
     let employeesCollection: ReturnType<typeof createEmployeesCollection>
     let departmentsCollection: ReturnType<typeof createDepartmentsCollection>
 
@@ -620,7 +616,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         ])
       })
 
-      itWhenAutoIndexEager(
+      it(
         `applies incremental insert of a new row inside the topK but after max sent value correctly`,
         async () => {
           const collection = createLiveQueryCollection((q) =>
@@ -800,7 +796,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         ])
       })
 
-      itWhenAutoIndexEager(
+      it(
         `handles deletion from partial page with limit larger than data`,
         async () => {
           const collection = createLiveQueryCollection((q) =>
@@ -1851,9 +1847,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
     })
 
     describe(`OrderBy Optimization Tests`, () => {
-      const itWhenAutoIndex = autoIndex === `eager` ? it : it.skip
-
-      itWhenAutoIndex(
+      it(
         `optimizes single-column orderBy when passed as single value`,
         async () => {
           // Patch getConfig to expose the builder on the returned config for test access
@@ -1898,7 +1892,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         },
       )
 
-      itWhenAutoIndex(
+      it(
         `optimizes orderBy with alias paths in joins`,
         async () => {
           // Patch getConfig to expose the builder on the returned config for test access
@@ -1954,7 +1948,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         },
       )
 
-      itWhenAutoIndex(
+      it(
         `loads an ordered self-join through the ordered alias`,
         async () => {
           const collection = createLiveQueryCollection((q) =>
@@ -1987,7 +1981,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         },
       )
 
-      itWhenAutoIndex(
+      it(
         `optimizes single-column orderBy when passed as array with single element`,
         async () => {
           // Patch getConfig to expose the builder on the returned config for test access
