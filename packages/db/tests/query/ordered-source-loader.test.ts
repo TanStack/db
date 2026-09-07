@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
-import { OrderedSourceLoader } from '../../src/query/live/utils.js'
+import { OrderedSourceLoader } from '../../src/query/live/ordered-source-loader.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
 import type {
   CollectionSubscription,

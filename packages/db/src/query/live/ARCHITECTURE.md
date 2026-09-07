@@ -93,6 +93,7 @@ operators and a few boundary adapters:
 | Run the graph and publish root rows   | `packages/db/src/query/live/collection-config-builder.ts`                                              |
 | Publish Collection-valued buckets     | `packages/db/src/query/live/bucket-facade-adapter.ts`                                                  |
 | Start and release asynchronous demand | `packages/db/src/query/live/subset-demand-controller.ts`, `packages/db/src/collection/subscription.ts` |
+| Ordered provider loading and continuation | `packages/db/src/query/live/ordered-source-loader.ts` |
 
 Queries without includes keep the original compiled pipeline and do not pay
 for facade state. The one exception is a joined query with a custom public-key

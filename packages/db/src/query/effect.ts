@@ -9,8 +9,8 @@ import { compileQuery } from './compiler/index.js'
 import { normalizeExpressionPaths } from './compiler/expressions.js'
 import { getCollectionBuilder } from './live/collection-registry.js'
 import { SubsetDemandController } from './live/subset-demand-controller.js'
+import { OrderedSourceLoader } from './live/ordered-source-loader.js'
 import {
-  OrderedSourceLoader,
   buildQueryFromConfig,
   computeSubscriptionOrderByHints,
   extractCollectionSources,

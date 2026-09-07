@@ -12,6 +12,10 @@ current as review findings, oracle laws, and implementation choices change.
   presence. Step 0 fresh baseline4758/0, zero skips,147 files; package types pass.
   Field/transition map and paired bundle baseline are recorded in the plan.
   Clarity and ownership count alongside size; no generic lifecycle framework.
+  Baseline fresh audit complete with reset/replay/promise-identity qualifications.
+  Step1a mechanical ordered-loader move: class body unchanged,629/0 targeted,
+  types pass; baseline Effect lint error retained. Minified bytes unchanged,
+  diagnostic gzip +15. Post-commit move audit is next.
 - All three wider analyses complete at frozen1cec4d7f, including inherited
   loading code, not just the PR diff. Separate unranked readouts are below.
   Analysis only: no runtime/test edits, test runs or implementation selection.

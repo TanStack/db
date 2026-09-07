@@ -1,6 +1,6 @@
 # Loading lifecycle refactor plan
 
-Status: approved for execution; baseline step complete, runtime work pending.
+Status: approved for execution; baseline and mechanical move complete.
 Planning baseline: 15987067 on codex/loadsubset-minimal-stack.
 
 ## Aim
@@ -82,6 +82,38 @@ The state design must preserve these products. In particular, source evidence
 and a recovery obligation can coexist; pending work and a synchronous call guard
 can coexist. The generated grammar's one request-phase sketch is not yet a
 proven replacement for all of these fields.
+
+Fresh post-commit baseline loss audit (97b5d872) verified counts and found no
+missing mutable field. Three lifetime qualifications are retained:
+
+- resetCursor retains failure, recovery obligation, full-source flags and the
+  failed release handle while discarding pending identity and cursor guards.
+- settleFullSourceReplay only conditionally clears fullSourceFailed; it does
+  not perform ordinary request-success cleanup.
+- Promise identity decides whether a callback may clear pending, independently
+  of activity/generation checks. Reset does not cancel the underlying promise.
+
+This was one source-bundle static audit, not another runtime test. A field list
+can hide callback sequencing. Compression also needs its tool recipe: the
+recorded gzip size is reproducible with gzip -n -c; comparisons use the same
+runtime/tool for both artifacts.
+
+### Step 1a — mechanical move
+
+OrderedSourceLoader and OrderedRequestKind moved verbatim to
+query/live/ordered-source-loader.ts; two production consumers and its focused
+test import that module directly. No compatibility re-export or behavior change.
+The architecture's concrete map points to the new owner.
+
+Targeted gate: 629/0, zero skips, six files; package types pass. Artifact:
+/tmp/tanstack-ordered-move-targeted.json. Exact moved-body comparison passes.
+Touched-file lint reports the pre-existing prefer-const diagnostic in Effect;
+the baseline stdin check is recorded separately. No clean lint claim.
+Baseline stdin lint reproduced the same prefer-const error (exit 1).
+Paired diagnostic bundle remains 368361 minified bytes; gzip changes
+103734 -> 103749 (+15), using Node v24.5.0 / zlib 1.2.12 on both artifacts.
+Module ordering/identifier changes can affect compression without semantic
+changes. This is not an application-size or performance result.
 
 Current surface: OrderedSourceLoader in query/live/utils.ts, consumed by the
 collection subscriber and Effect. Move it to ordered-source-loader.ts in one

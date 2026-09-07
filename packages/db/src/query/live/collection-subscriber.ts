@@ -1,6 +1,6 @@
 import { normalizeExpressionPaths } from '../compiler/expressions.js'
+import { OrderedSourceLoader } from './ordered-source-loader.js'
 import {
-  OrderedSourceLoader,
   computeSubscriptionOrderByHints,
   reconcileChangesForD2,
   sendChangesToInput,
