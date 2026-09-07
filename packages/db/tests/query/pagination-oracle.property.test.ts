@@ -2193,6 +2193,65 @@ describe(`pagination recomputation oracle`, () => {
     })
   })
 
+  it(`does not refetch when live insertion fills a settled empty window`, async () => {
+    let sync!: Parameters<SyncConfig<PageRow, number>[`sync`]>[0]
+    const requests: Array<LoadSubsetOptions> = []
+    const source = createCollection<PageRow, number>({
+      id: `settled-empty-window`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (operations) => {
+          sync = operations
+          operations.markReady()
+          return {
+            loadSubset: (options) => {
+              requests.push(options)
+              return true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const live = createLiveQueryCollection((q) =>
+      q.from({ row: source }).orderBy(({ row }) => row.rank).limit(1),
+    )
+    try {
+      await live.preload()
+      expect(live.toArray).toEqual([])
+      expect(requests).toHaveLength(1)
+
+      sync.begin()
+      sync.write({ type: `insert`, value: { id: 1, rank: 1 } })
+      const receipt = sync.commit()
+      if (receipt !== true) await receipt
+      await flushPromises()
+
+      expect(live.toArray.map(({ id, rank }) => ({ id, rank }))).toEqual([
+        { id: 1, rank: 1 },
+      ])
+      expect(live.utils.lastSubsetError).toBeUndefined()
+      // Correct rows alone would miss a repeated prefix and boundary fetch.
+      expect(
+        requests.map(({ limit, offset, orderBy, where, cursor }) => ({
+          limit,
+          offset,
+          ordered: Boolean(orderBy),
+          filtered: Boolean(where),
+          cursor: Boolean(cursor),
+        })),
+      ).toEqual([
+        { limit: 1, offset: 0, ordered: true, filtered: false, cursor: false },
+      ])
+    } finally {
+      await cleanupAll(live, source)
+    }
+  })
+
   it(`materializes an offset past the final row`, async () => {
     await runPaginationScenario({
       ranks: [0, 1],

@@ -5,6 +5,11 @@ current as review findings, oracle laws, and implementation choices change.
 
 ## Current checkpoint — 2026-09-06
 
+- Formation section + fresh hostile assay complete: rejected deleting the
+  established-source flag. Settled-empty then live-fill would fetch three times
+  instead of once;306 existing targeted tests missed it. Retained the new work
+  law, no production change. Targeted307/0; full DB4756/0,zero skips,147 files.
+  Source weight unchanged (+2805 against fixed main). Detailed trace below.
 - All six skipped order-by cases now run with autoIndex off as well as eager:
   unchanged assertions pass. Removed obsolete guards/comments, no production
   change. Order-by116/0; full DB4755/0 with zero skips,147 files,exit0.
@@ -6299,3 +6304,97 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   for the origin and surviving premises of accumulated state/guards, then
   Hostile failure assay for concrete deletion candidates and their oracle gaps.
   No new broad investigation started by this recommendation.
+
+### Formation section — surviving loading/replay state
+
+- [x] User selected Formation section followed by a fresh Hostile failure
+  assay. Frozen source head9e47cdd1; fixed-main comparison68366eca. This is a
+  bounded investigation, not a new implementation or a whole-branch audit.
+- Corpus: current subscription.ts and query/live/utils.ts, their file history,
+  and the exact introducing/removing diffs named below. Architecture and linked
+  replay/ordered tests constrain the readout. Excluded: other production growth,
+  adapter implementations and a complete review of every intervening commit.
+  Commit references identify source versions, not original invention dates.
+  Blame alone is not used to infer origin: moved declarations retain old blame.
+  At the frozen head these files have net growth of825 and429 lines against
+  fixed main respectively (git diff --numstat). These counts select the scope;
+  they do not measure removable code. C1 itself is only a small field deletion.
+
+Unit register (paths are relative to packages/db/src):
+
+| Unit | Source trace | Current survival |
+| --- | --- | --- |
+| O1: source request issued flag | query/live/utils.ts, parent of cf5c4ffb | Overwritten by success-only O2 |
+| O2: established-source flag | cf5c4ffb; current loadMore/observe/invalidateSourceCoverage | Present |
+| O3: finite recovery-prefix counters | parent of 4a5d469c | Removed; full-source recovery flag replaces their recovery role |
+| O4: settled source boundary | 88fad51b; current loadPage/loadBoundary | Present; replaces live high-water cursor use, not all O2 uses |
+| R1: replay event buffer | subscription.ts, parent of 53a9292c | Overwritten by bounded privateRows in 53a9292c |
+| R2: copied public replay baseline | parent of d65f07c5 | Removed; existing publishedRows reused |
+| R3: replay startup eligibility | baa2163f | Present: attempt tags, setupComplete and pendingCount restored after flattening |
+| L1: copied physical lease fields | parent of b9fa9698 | Overwritten by composed acquisition object; old/new leases still distinct |
+| R4: predicate-based release pruning | parent of 4c382d75 | Removed; source owns row retention, not request predicates |
+
+Direct relation register and readable cross-section:
+
+```text
+O1 --cf5c4ffb overwrites--> O2 --------------------------> retained
+O3 --4a5d469c replaces--> full-source recovery ----------> retained
+live high-water cursor --88fad51b replaces--> O4 --------> retained beside O2
+
+R1 --53a9292c overwrites--> bounded privateRows ---------> retained
+R2 --d65f07c5 removes copy/reuses publishedRows ---------> retained baseline
+flattened attempt eligibility --baa2163f restores R3 ---> retained
+L1 --b9fa9698 combines fields into acquisition object --> reused by both starts
+R4 --4c382d75 removes predicate pruning ----------------> source-owned retention
+```
+
+- Each arrow records an inspected diff, not resemblance or a presumed need.
+  No dependency/order is claimed between separate rows of the diagram.
+  No cycles or contradictory direct relations found. No phase story or optional
+  technology-lineage pass is needed for this bounded code question.
+- Reconstruction: these local overwrites, removals and reuses reproduce the
+  listed surviving units. This is not a reconstruction of the entire two files;
+  their other guards and intervening changes remain outside the unit register.
+  In particular, bounded private state and a retained public baseline are not
+  two copies serving the same purpose. First acquisition and replacement also
+  differ: startup throw removes a tentative owner; replacement failure retains
+  the previous lease. Their shared acquisition representation is already reused.
+- Candidate C1: remove O2 and use sourceBoundary === undefined for loadMore's
+  initial-prefix lower bound. This is a hypothesis, not a safe deletion finding.
+  An empty successful request can set O2 without O4; resetCursor clears O4 but
+  not O2. Those distinctions require an executed challenge before any change.
+- [x] Fresh Hostile failure assay of C1: preserve rows, readiness/errors, exact
+  ownership and ordinary pagination request count/shape. Temporary candidate
+  and probes must be restored; no production implementation authorized by the
+  historical trace alone.
+- Result: C1 rejected. A real indexed on-demand source settles ORDER BY rank
+  LIMIT1 with no rows. A later live insert fills the window. Baseline requests
+  once; C1 requests three times (initial prefix, repeated prefix, then unbounded
+  boundary equality). Rows and absence of subset error pass on both versions.
+  This is an executed overfetch regression in the proposed deletion, not a new
+  production defect, readiness failure, or ownership leak.
+- The fresh auditor ran all306 existing loader/work/pagination cases green on
+  both versions, then the discriminator green/red/green. Its temporary edits
+  were restored. Main retained the law beside the pagination empty-source test
+  and independently repeated the comparison:307/0 targeted baseline; the exact
+  candidate fails the new request-trace assertion (1 failed,200 name-filtered).
+  Source restored byte-for-byte to HEAD; changed-test eslint/diff-check pass.
+  Main evidence: /tmp/tanstack-formation-ordered-{green,red}.json/log and
+  /tmp/tanstack-formation-ordered-lint.log. Full restored-source gate4756/0,
+  zero skips,147 files,exit0: /tmp/tanstack-formation-full-green.json/log.
+- Oracle gap: initial-row generators exclude empty sources; the pinned empty
+  source test was static. The work oracle's two consumers share the loader, so
+  an identical request regression can also survive their agreement. New law:
+  settled-empty acquisition -> live row fills window -> unchanged request trace.
+  It constrains work independently of row equality and consumer equivalence.
+- Required distinction for any future replacement: settled-empty versus never
+  established. Do not use row-boundary absence as their common state. The fresh
+  assay saw only C1, not sibling candidates; its synchronous-success probe does
+  not cover async timing, cleanup, ownership or the separate reset distinction.
+  Random-suite executions used fresh seeds, not paired replay seeds; the
+  actual baseline/candidate discriminator is deterministic. No100x claim.
+- Distortion controls: selection favors high-growth files and plausible cuts;
+  it can miss duplication elsewhere. Later does not imply better. A surviving
+  field is neither justified nor redundant merely because several rewrites
+  retained it. Historical test fixes are evidence to investigate, not a proof
+  of correctness or a reason to preserve every present guard.
