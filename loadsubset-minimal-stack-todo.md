@@ -67,7 +67,10 @@ current as review findings, oracle laws, and implementation choices change.
   [loadsubset-demand-presence-experiment.md](loadsubset-demand-presence-experiment.md).
   Timing-policy gate reached; keep current counter unless that policy is revised.
   Restored targeted223/0, zero skips,10files; types/new-test lint/format pass.
-  Production unchanged from the preceding full4776/0 gate. Fresh audit pending.
+  Production unchanged from the preceding full4776/0 gate. Fresh audit complete;
+  report now preserves the two short-circuited row-count checks, singleton-value
+  assertion limit, and removed inline graph dependency. No new measured defects.
+  Spike rejected under the current timing contract; policy gate remains explicit.
 - All three wider analyses complete at frozen1cec4d7f, including inherited
   loading code, not just the PR diff. Separate unranked readouts are below.
   Analysis only: no runtime/test edits, test runs or implementation selection.

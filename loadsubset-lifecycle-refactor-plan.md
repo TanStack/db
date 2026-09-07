@@ -3,7 +3,7 @@
 Status: ordered-loader and replay-handoff changes complete and audited.
 Integration walk implemented, validated and independently loss-audited.
 Optional D2 spike failed the timing-preservation gate; production restored.
-Its characterization tests and report await the post-commit loss audit.
+Its characterization tests and report are committed and independently audited.
 Planning baseline: 15987067 on codex/loadsubset-minimal-stack.
 
 ## Aim
@@ -488,7 +488,13 @@ throughput are not measured. No timing policy was silently changed.
 Restored targeted gate223/0, zero skips,10files, exit0; package types and new-test
 lint/formatting pass. Artifact: /tmp/tanstack-demand-presence-final-targeted.json.
 No full-suite rerun: production is byte-identical to the previous full4776/0
-checkpoint. Fresh audit pending. The recommendation is to
+checkpoint. Fresh audit recovered three report limits: failing candidate cases
+stop before their row-count check; equal-contributor assertions do not identify
+the exact singleton value; the spike also removes the inline tap dependency.
+These qualifications are restored in the report. Complete static reading:
+[loadsubset-demand-presence-loss-audit.md](loadsubset-demand-presence-loss-audit.md).
+They are evidence limits, not additional measured production defects. The
+spike/audit step is complete; the policy gate remains. The recommendation is to
 retain the existing local counter under the current timing contract. A different
 turn-batched policy needs a user decision before further implementation.
 

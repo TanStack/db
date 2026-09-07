@@ -14,8 +14,11 @@ in one graph run, and separate graph runs. Each starts with one active key,
 then retracts and re-adds its contributor. Four further cells retain one demand
 until both equal-valued contributors leave: numbers, signed zero, Date values,
 and Buffer/Uint8Array bytes. The last control checks nullish exclusion and the
-full-join no-lazy-demand path. Output multiplicity is checked in the timing and
-equal-contributor cases; these are not full result-shape or adapter tests.
+full-join no-lazy-demand path. The tests contain output-multiplicity checks, but
+the two failing candidate timing cells stop at their earlier demand assertion
+and never reach that check. The equal-contributor cells check singleton demand
+size and retention, not its member's exact normalized value; a wrong singleton
+could pass. These are not full result-shape, key-identity or adapter tests.
 
 | Delivery of retract/re-add | Baseline demand transitions | D2 candidate |
 | --- | --- | --- |
@@ -72,7 +75,10 @@ zlib1.2.12 compression invocation:
 | Difference | -87 | -25 |
 
 The candidate replaces one tap with filter/map/distinct/tap: three additional
-operators on an eligible lazy join, none on the unchanged full-join path.
+operators on an eligible lazy join, none on the unchanged full-join path. It also
+changes topology: the old tap output feeds the join; the new demand chain is a
+side branch and the join consumes the active stream directly. Operator insertion
+order is not proof that removing that dependency preserves reentrant behavior.
 Baseline keeps one weight/value map. Candidate keeps distinct's multiplicity
 map plus the boundary's current-value map, with a temporary updated-values map
 inside distinct.run. Both are bounded by keys, not event history. These are
@@ -86,3 +92,5 @@ contract; any turn-batched design requires a separate user decision and the
 unrun boundary controls above. New compiler controls remain as characterization
 tests, not a claim that this policy can never be changed. Targeted validation
 and fresh post-commit loss audit are recorded in the refactor plan.
+The fresh audit recovered the assertion and topology limits now stated above;
+its complete static reading is in loadsubset-demand-presence-loss-audit.md.
