@@ -9,8 +9,10 @@ current as review findings, oracle laws, and implementation choices change.
   returned handle cannot replace the early ownership callback: local snapshot
   work may throw after acquisition and before return. Full separation needs
   method-specific composition plus compatibility wrappers; no large deletion
-  is established. A smaller duplicate-handoff extraction is identified below,
-  not approved or implemented. Production/test source unchanged.
+  is established. The approved smaller duplicate-handoff experiment was tried
+  and removed: only8 net source lines saved, with extra call glue and a changed
+  limited-result callback receiver. Candidate and restored gates325/0; candidate
+  package types pass. No production/test changes retained. Details below.
 - Serialized rare recovery rejected before a production spike. Fresh Hostile
   failure assay identifies a dependency cycle: old canceled work can require
   replacement startup to settle, while drain-before-start waits for that old
@@ -6659,3 +6661,39 @@ or runtime policy is selected here.
   exit0 comes from the execution tool receipt. No savings have been measured.
   A loss audit can overvalue details omitted from a short assessment; these
   qualifications do not authorize new implementation work.
+
+### Shared snapshot handoff — bounded experiment rejected
+
+- User approved the small extraction after the source assessment. Baseline
+  a66c84d6. The candidate shared SnapshotLoadOptions and observeSnapshotDemand
+  between requestSnapshot and requestLimitedSnapshot. It left the first active
+  check at each caller, kept requestedSubsetWhere registration before reporting,
+  and retained both surrounding effect orders and all loader unwind code.
+- Candidate diff: +31/-39, net -8 source lines in subscription.ts. No new
+  persistent state, public argument/return type change, or removed tests.
+  Patch saved at /tmp/tanstack-snapshot-handoff-candidate.patch before removal.
+  No bundle, throughput, allocation profile or heap measurement was made.
+- The limited method's destructured callback used to be invoked as a plain
+  function. The candidate put it in a fresh options object and invoked it as
+  that object's method, changing its JavaScript receiver. This is a source-level
+  semantic difference, not a reproduced app failure or a newly adopted public
+  `this` guarantee. Restoring the old invocation would require additional glue.
+  The snapshot method also reads its tracking option after notification, while
+  the limited method captures it at entry; do not flatten those reads casually.
+- Main rejected this candidate on the user's code-weight/simplicity criterion:
+  an8-line deletion does not justify the extra helper/options wrapper and call
+  semantics risk. This does not prove every shared-handoff form unhelpful. No
+  new design, generalized operation layer or callback contract was selected.
+- Candidate tests325/0,3 files,exit0; separate package tsc --noEmit exit0:
+  /tmp/tanstack-snapshot-handoff-candidate.json/log and
+  /tmp/tanstack-snapshot-handoff-tsc.log. Gates: ordered-source-loader44,
+  collection-subscription-lifecycle-oracle199, subscription-replay-oracle82.
+  Existing gates did not distinguish the receiver change; passing them is not
+  evidence of full semantic equivalence. No new bug or red/green fix claimed.
+- Removed only the candidate through apply_patch; production/test source then
+  matched a66c84d6. Re-ran the same three files:325/0,exit0 at
+  /tmp/tanstack-snapshot-handoff-restored.json/log. Property runs are separate
+  randomized executions, not a fixed-seed paired comparison. No full-suite run
+  this step. Source gap remains+2805 against fixed main68366eca.
+- Next standing step: fresh Field Lab loss audit of this frozen experiment
+  record against baseline source, candidate diff and saved test/type evidence.
