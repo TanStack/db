@@ -59,7 +59,15 @@ current as review findings, oracle laws, and implementation choices change.
   planning baseline (+2828 vs fixed main). Fresh post-commit audit returned a
   bounded null: all old test bodies and13 normative laws retained; static and
   builder-boundary injection limits recorded with the full report. Step3 complete.
-  Optional D2 demand-presence experiment remains queued, not started.
+  Optional D2 demand-presence experiment is recorded below.
+- Step4 spike: existing distinct changes queued-message drop/readd timing.
+  Baseline11/0, candidate9/2, restored11/0; no production change retained. Candidate
+  saves12 lines/25 gzip bytes but adds three operators and a second retained map.
+  Patch, controls, costs and unrun adapter/Effects gates preserved in
+  [loadsubset-demand-presence-experiment.md](loadsubset-demand-presence-experiment.md).
+  Timing-policy gate reached; keep current counter unless that policy is revised.
+  Restored targeted223/0, zero skips,10files; types/new-test lint/format pass.
+  Production unchanged from the preceding full4776/0 gate. Fresh audit pending.
 - All three wider analyses complete at frozen1cec4d7f, including inherited
   loading code, not just the PR diff. Separate unranked readouts are below.
   Analysis only: no runtime/test edits, test runs or implementation selection.

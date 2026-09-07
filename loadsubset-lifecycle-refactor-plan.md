@@ -2,7 +2,8 @@
 
 Status: ordered-loader and replay-handoff changes complete and audited.
 Integration walk implemented, validated and independently loss-audited.
-Optional D2 work remains queued.
+Optional D2 spike failed the timing-preservation gate; production restored.
+Its characterization tests and report await the post-commit loss audit.
 Planning baseline: 15987067 on codex/loadsubset-minimal-stack.
 
 ## Aim
@@ -472,6 +473,24 @@ fast path and count retained graph state and adapter work.
 Retain the experiment only if it gives a clearer boundary with acceptable
 measured overhead and preserves the selected timing contract. If it needs a
 new timing policy, stop for that decision rather than calling it a refactor.
+
+### Step 4 spike checkpoint
+
+The bounded existing-distinct candidate is not retained. Eleven compiler
+controls pass baseline; candidate9/2 reveals that queued-message drop/readd no
+longer emits intermediate empty demand. Source code is restored exactly. Full
+trace, fixture corrections, source-state counts, diagnostic cost and unrun gates
+are in [loadsubset-demand-presence-experiment.md](loadsubset-demand-presence-experiment.md);
+the candidate patch is saved beside it. The spike saves12 source lines/25 gzip
+bytes but adds three graph operators and a second retained map. Heap and
+throughput are not measured. No timing policy was silently changed.
+
+Restored targeted gate223/0, zero skips,10files, exit0; package types and new-test
+lint/formatting pass. Artifact: /tmp/tanstack-demand-presence-final-targeted.json.
+No full-suite rerun: production is byte-identical to the previous full4776/0
+checkpoint. Fresh audit pending. The recommendation is to
+retain the existing local counter under the current timing contract. A different
+turn-batched policy needs a user decision before further implementation.
 
 The larger segment-reachability D2 form is not part of the initial implementation.
 It assumes a stabilized-demand boundary and applies only to live-query/Effect
