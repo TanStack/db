@@ -6181,4 +6181,17 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   root runner with149 tests filtered); -full.json/log (package runner, all tests),
   -types.log and -lint.log under the same prefix. No runtime red/green claim:
   runtime stayed unchanged while the explicitly accepted test contract changed.
-- [ ] Commit and fresh post-commit Hidden-signal recovery assay.
+- [x] Commit at4a5c09a6 and fresh post-commit Hidden-signal recovery assay:
+  no supported omission beyond the accepted identity loss. Source trace:
+  baseline7367954d test5901–5926 ->candidate5904–5906/5938–5947 preserves the
+  original value checks and adds actual event, prior snapshot and downstream
+  no-event assertions. Baseline updateEvents had no assertion. Architecture522–527
+  limits the relaxation and excludes public Collection facade identity. Auditor
+  read baseline test first and ignored indentation, but required architecture
+  reading exposed the new paragraph before that scan; supplied briefing may
+  also anchor it. No independent test run or all-consumer/UI-render proof.
+- [x] Focused100x includes/publication:187 passed/0 failed,2 files,exit0,113.19s,
+  no skips or reported runner errors. Fixed corpora/fresh seeds with replay
+  overrides unset; only opted-in properties scale, not unit cases. Evidence:
+  /tmp/tanstack-inline-identity-100.json/log. Runtime source gap remains2839;
+  W1–W12 weight savings unchanged. No push.
