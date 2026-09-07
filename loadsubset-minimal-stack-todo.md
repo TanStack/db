@@ -5984,3 +5984,39 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   both on teardown. Before changing either, trace scheduling/cleanup/reentry
   and preserve dependency order/coalescing/explicit override tests. This is a
   candidate to remove duplicate state, not permission to change DAG ordering.
+
+### W11 — remove redundant per-source scheduling dependency maps
+
+- [x] Trace all map/set writers in CollectionConfigBuilder and Effect. Each map
+  value was either empty or a builder inserted immediately into builderDependencies;
+  no external callback separates those writes. Builder insertion excludes self.
+  Effect cleanup cleared both. Therefore unioning one source's map value into a
+  snapshot of the full set adds nothing and preserves the same insertion order.
+- [x] Remove both maps, their writes/Effect cleanup, sourceId scheduling plumbing,
+  and redundant unions. Preserve a per-schedule array snapshot before recursively
+  scheduling parents, explicit dependency overrides, scheduler edge registration,
+  job/context identity, and session/disposal guards. Do not use the live Set during
+  recursive scheduling. No DAG-ordering contract change.
+- [x] Initial8-cell matrix crosses Collection/Effect, shared/separate sources and
+  write order; baseline65/0 and refactor scheduler+Effect134/0. Test fixture types
+  corrected (required source IDs, explicit inner join/effect row type, ES2022 array
+  reversal) without runtime changes. All earlier tests retained.
+- [x] Negative control removes all discovered dependency edges: initial matrix
+  stayed green; one older asymmetric join test failed. That exposed a test-shape
+  gap, not a refactor defect. Expand with raw/derived right input:16 cells now test
+  asymmetric paths too. Expanded refactor142/0; repeated ablation3 red/139 green,
+  including new Collection and Effect cells for separate sources/raw-right-first.
+  Restore real dependency snapshots before final gates. No new production bug
+  claim; initial baseline covered8 cells, remaining8 added after this control.
+- [x] Final expanded30-file1x gate1853/0,exit0,13.98s,no skips/reported errors.
+  Package typecheck exit0. Changed-file lint retains two unchanged diagnostics:
+  Effect259 prefer-const and builder632 second-drain condition. New tests lint clean.
+- [x] Diagnostic DB bundle344161/97322 ->343643/97210 minified/gzip (-518/-112);
+  DB-IVM30220/9133 unchanged. Production -42 lines; removes per-source arrays/maps,
+  not the dependency set or per-run snapshot. No heap-byte/throughput measurement.
+- [ ] Focused pagination/layered-publication/scheduler/Effect100x gate running.
+- [ ] Fresh post-commit Hidden-signal recovery assay against3feb359b.
+- Evidence prefix: /tmp/tanstack-weight-dependency-maps-; baseline,green,ablation,
+  expanded-green,expanded-ablation,full,100,types,lint logs; full/100 JSON; bundle.json.
+  W1–W11 totals423 source lines/4437 minified/952 gzip diagnostic bytes removed.
+  Fixed-main source gap2849 remains open. No push.

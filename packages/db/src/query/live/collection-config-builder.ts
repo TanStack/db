@@ -136,11 +136,6 @@ export class CollectionConfigBuilder<
     | undefined
 
   private maybeRunGraphFn: (() => void) | undefined
-  private readonly sourceDependencies: Record<
-    string,
-    Array<CollectionConfigBuilder<any, any>>
-  > = {}
-
   private readonly builderDependencies = new Set<
     CollectionConfigBuilder<any, any>
   >()
@@ -684,7 +679,6 @@ export class CollectionConfigBuilder<
    * @param options - Optional scheduling configuration
    * @param options.contextId - Transaction ID to group work; defaults to active transaction
    * @param options.jobId - Unique identifier for this job; defaults to this builder instance
-   * @param options.sourceId - Source that triggered this schedule; adds its dependencies
    * @param options.dependencies - Explicit dependency list; overrides auto-discovered dependencies
    */
   scheduleGraphRun(
@@ -692,7 +686,6 @@ export class CollectionConfigBuilder<
     options?: {
       contextId?: SchedulerContextId
       jobId?: unknown
-      sourceId?: string
       dependencies?: Array<CollectionConfigBuilder<any, any>>
     },
   ) {
@@ -703,25 +696,10 @@ export class CollectionConfigBuilder<
     // Use the builder instance as the job ID for deduplication. This is memory-safe
     // because the scheduler's context Map is deleted after flushing (no long-term retention).
     const jobId = options?.jobId ?? this
-    const dependentBuilders = (() => {
-      if (options?.dependencies) {
-        return options.dependencies
-      }
-
-      const deps = new Set(this.builderDependencies)
-      if (options?.sourceId) {
-        const sourceDeps = this.sourceDependencies[options.sourceId]
-        if (sourceDeps) {
-          for (const dep of sourceDeps) {
-            deps.add(dep)
-          }
-        }
-      }
-
-      deps.delete(this)
-
-      return Array.from(deps)
-    })()
+    // Snapshot before scheduling parents, which can reenter source setup.
+    const dependentBuilders = options?.dependencies ?? [
+      ...this.builderDependencies,
+    ]
 
     // Ensure dependent builders are actually scheduled in this context so that
     // dependency edges always point to a real job (or a deduped no-op if already scheduled).
@@ -1350,10 +1328,7 @@ export class CollectionConfigBuilder<
 
       const dependencyBuilder = getCollectionBuilder(collection)
       if (dependencyBuilder && dependencyBuilder !== this) {
-        this.sourceDependencies[sourceId] = [dependencyBuilder]
         this.builderDependencies.add(dependencyBuilder)
-      } else {
-        this.sourceDependencies[sourceId] = []
       }
 
       // CollectionSubscriber handles the actual subscription to the source collection

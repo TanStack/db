@@ -409,7 +409,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   // Scheduler integration
   private subscribedToAllCollections = false
   private readonly builderDependencies = new Set<unknown>()
-  private readonly sourceDependencies: Record<string, Array<unknown>> = {}
 
   // Reentrance guard
   private isGraphRunning = false
@@ -524,10 +523,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       // collection, its builder must run first during transaction flushes.
       const dependencyBuilder = getCollectionBuilder(collection)
       if (dependencyBuilder) {
-        this.sourceDependencies[sourceId] = [dependencyBuilder]
         this.builderDependencies.add(dependencyBuilder)
-      } else {
-        this.sourceDependencies[sourceId] = []
       }
 
       // Get where clause for this alias (for predicate push-down)
@@ -717,7 +713,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     changes: Array<ChangeMessage<any, string | number>>,
   ): void {
     this.sendChangesToD2(sourceId, changes)
-    this.scheduleGraphRun(sourceId)
+    this.scheduleGraphRun()
   }
 
   private setDemand(
@@ -754,20 +750,12 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
    * Dependencies are discovered from source collections that are themselves
    * live query collections, ensuring parent queries run before effects.
    */
-  private scheduleGraphRun(sourceId?: string): void {
+  private scheduleGraphRun(): void {
     const contextId =
       getActiveTransaction()?.id ?? getActivePublicationContext()
 
-    // Collect dependencies for this schedule call
-    const deps = new Set(this.builderDependencies)
-    if (sourceId) {
-      const sourceDeps = this.sourceDependencies[sourceId]
-      if (sourceDeps) {
-        for (const dep of sourceDeps) {
-          deps.add(dep)
-        }
-      }
-    }
+    // Snapshot before scheduling parents, which can reenter source setup.
+    const deps = [...this.builderDependencies]
 
     // Ensure dependent builders are scheduled in this context so that
     // dependency edges always point to a real job.
@@ -999,9 +987,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     // Clear mutable objects
     for (const key of Object.keys(this.lazySourcesCallbacks)) {
       delete this.lazySourcesCallbacks[key]
-    }
-    for (const key of Object.keys(this.sourceDependencies)) {
-      delete this.sourceDependencies[key]
     }
     for (const key of Object.keys(this.optimizableOrderByCollections)) {
       delete this.optimizableOrderByCollections[key]

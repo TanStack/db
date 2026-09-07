@@ -237,9 +237,7 @@ export class CollectionSubscriber<
     // We need to schedule a graph run even if there's no data to load
     // because we need to mark the collection as ready if it's not already
     // and that's only done in `scheduleGraphRun`
-    this.collectionConfigBuilder.scheduleGraphRun(dataLoader, {
-      sourceId: this.sourceId,
-    })
+    this.collectionConfigBuilder.scheduleGraphRun(dataLoader)
   }
 
   private subscribeToMatchingChanges(

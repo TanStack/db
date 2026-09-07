@@ -11,6 +11,7 @@ import {
 } from '../../src/scheduler.js'
 import { CollectionConfigBuilder } from '../../src/query/live/collection-config-builder.js'
 import { CollectionSubscriber } from '../../src/query/live/collection-subscriber.js'
+import { Query, createEffect } from '../../src/index.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 import type { OutputWithVirtual } from '../utils.js'
 import type { FullSyncState } from '../../src/query/live/types.js'
@@ -957,6 +958,127 @@ describe(`live query scheduler`, () => {
     second.unsubscribe()
     tx.rollback()
   })
+
+  it.each(
+    [`collection`, `effect`].flatMap((consumer) =>
+      [false, true].flatMap((sharedSource) =>
+        [false, true].flatMap((derivedRight) =>
+          [false, true].map((reverseWrites) => ({
+            consumer,
+            sharedSource,
+            derivedRight,
+            reverseWrites,
+          })),
+        ),
+      ),
+    ),
+  )(
+    `publishes settled dependencies once: $consumer shared=$sharedSource derivedRight=$derivedRight reverse=$reverseWrites`,
+    async ({ consumer, sharedSource, derivedRight, reverseWrites }) => {
+      type Row = { id: number; left: string; right: string }
+      const makeSource = (id: string) =>
+        createCollection(
+          mockSyncCollectionOptions<Row>({
+            id,
+            getKey: (row) => row.id,
+            initialData: [{ id: 1, left: `old-left`, right: `old-right` }],
+          }),
+        )
+      const leftSource = makeSource(`dependency-left`)
+      const rightSource = sharedSource
+        ? leftSource
+        : makeSource(`dependency-right`)
+      const leftQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ row: leftSource })
+            .select(({ row }) => ({ id: row.id, value: row.left })),
+      })
+      const rightQuery = derivedRight
+        ? createLiveQueryCollection({
+            query: (q) =>
+              q
+                .from({ row: rightSource })
+                .select(({ row }) => ({ id: row.id, right: row.right })),
+          })
+        : undefined
+      await Promise.all([
+        leftQuery.preload(),
+        (rightQuery ?? rightSource).preload(),
+      ])
+      const query = new Query()
+        .from({ left: leftQuery })
+        .join(
+          { right: rightQuery ?? rightSource },
+          ({ left, right }) => eq(left.id, right.id),
+          `inner`,
+        )
+        .select(({ left, right }) => ({
+          id: left.id,
+          left: left.value,
+          right: right.right,
+        }))
+      const publications: Array<Array<{ left: string; right: string }>> = []
+      let cleanupConsumer: () => Promise<void>
+      if (consumer === `collection`) {
+        const joined = createLiveQueryCollection({ query })
+        await joined.preload()
+        const subscription = joined.subscribeChanges(() => {
+          publications.push(
+            joined.toArray.map(({ left, right }) => ({ left, right })),
+          )
+        })
+        cleanupConsumer = async () => {
+          subscription.unsubscribe()
+          await joined.cleanup()
+        }
+      } else {
+        const effect = createEffect<{
+          id: number
+          left: string
+          right: string
+        }>({
+          query,
+          onBatch: (events) => {
+            publications.push(
+              events.map(({ value: { left, right } }) => ({ left, right })),
+            )
+          },
+        })
+        cleanupConsumer = () => effect.dispose()
+      }
+      const tx = createTransaction({
+        mutationFn: async () => {},
+        autoCommit: false,
+      })
+      try {
+        publications.length = 0
+        const writes = [
+          () =>
+            leftSource.update(1, (row) => {
+              row.left = `next-left`
+            }),
+          () =>
+            rightSource.update(1, (row) => {
+              row.right = `next-right`
+            }),
+        ]
+        tx.mutate(() => {
+          for (const write of reverseWrites ? [...writes].reverse() : writes)
+            write()
+        })
+        expect(publications).toEqual([
+          [{ left: `next-left`, right: `next-right` }],
+        ])
+      } finally {
+        tx.rollback()
+        await cleanupConsumer()
+        await Promise.all([leftQuery.cleanup(), rightQuery?.cleanup()])
+        await leftSource.cleanup()
+        if (!sharedSource) await rightSource.cleanup()
+      }
+    },
+  )
 
   it(`runs join live queries once after their parent queries settle`, async () => {
     const collectionA = createCollection<{ id: number; value: string }>({
