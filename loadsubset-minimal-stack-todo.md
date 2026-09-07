@@ -5,6 +5,12 @@ current as review findings, oracle laws, and implementation choices change.
 
 ## Current checkpoint — 2026-09-07
 
+- Wider analysis selected in parallel at frozen1cec4d7f: independent complete
+  state-machine and D2 Design grammar readings, plus a Formation section over
+  baseline68366eca and local history. Formation report is
+  loadsubset-wide-formation-section.md; grammar reports are still running.
+  Analysis only: no runtime/test edits, test runs or implementation selection.
+  Source history identifies prior cuts and surviving constraints, not a ranking.
 - Snapshot/acquisition split: source assessment complete at7be7a585. A plain
   returned handle cannot replace the early ownership callback: local snapshot
   work may throw after acquisition and before return. Full separation needs
