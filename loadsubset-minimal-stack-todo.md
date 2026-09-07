@@ -36,7 +36,7 @@ current as review findings, oracle laws, and implementation choices change.
   production lines. Fresh100x integration gate passes1582/0 across26 files,
   exit0, no skipped tests or reported runner errors. Integration loss audit
   complete; final campaign report audit complete.
-- Still open: whole-branch size goal (+2922 net package-source lines against
+- Still open: whole-branch size goal (+2920 net package-source lines against
   fixedmain68366eca), final coherence/review and
   RFC/PR/changeset reconciliation. Older unchecked entries are phase records;
   reconcile them with later evidence before treating them as current bugs.
@@ -5892,8 +5892,40 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
 - [x] Package typecheck exit0. Controlled all-export diagnostic bundle:
   DB344431/97398 ->344290/97378 minified/gzip (-141/-20); DB-IVM unchanged
   30220/9133. Net source reduction2 lines; retained-state saving is the point.
-- [ ] Focused lifecycle100x and expanded29-file1x gates running; results pending.
-- [ ] Fresh post-commit Hidden-signal recovery assay against f8a9afc6.
+- [x] Expanded29-file1x gate1780/0,exit0,13.24s,no skipped tests or reported
+  runner errors. Fixed corpora/fresh seeds; replay overrides unset.
+- [x] Focused lifecycle100x:171/0,3 files,exit0,396.78s,no skips or reported
+  runner errors. Publication71/0 includes6000 fixed-seed and6000 fresh-seed
+  generated histories; history37/0 includes four8000-run properties (fixed/random
+  async/sync histories); subscription unit63/0. Total44000 generated histories
+  plus deterministic cases. Multiplier does not repeat each unit test100 times.
+- [x] Fresh post-commit Hidden-signal recovery assay atd65f07c5 againstf8a9afc6:
+  explicit null. Separate source passes trace creation copies, private direct
+  publication, graph early-return, and release/reentry/error boundaries. Public
+  tracking precedes subscriber callbacks, including throws; direct diff is built
+  before subscriber delivery. Removed baseline was not read in graph branch.
+  Dropping rule: deduplicate retained public state, not publication/ownership facts.
+  Static scan only; one scanner shared context across source passes. Parent test
+  counts arrived after writer tracing and were not used as preservation proof.
+  Artifact risk: treating every removed incidental behavior as a contract.
+  Qualified boundary: deepEquals can invoke getters/overridden methods, and
+  release filtering can throw before public tracking. The old copied map was
+  already pruned there; the candidate may retry an undelivered delete. No supported
+  loss established; side-effectful predicate/getter reentry is not proven by this
+  null. Do not claim every arbitrary JavaScript callback is covered.
 - Evidence: /tmp/tanstack-weight-replay-baseline-map-{baseline,100,full,types,lint}.log;
-  100/full JSON reports and bundle.json share that prefix. Lint reports five
-  existing errors; baseline comparison pending. Whole-branch size goal stays open.
+  100/full JSON reports and bundle.json share that prefix. Lint reports the same
+  five non-stylistic baseline diagnostics (cycle and unnecessary conditions).
+  Baseline stdin lint also emits157 spaced-comment diagnostics absent from the
+  on-disk candidate invocation; those routes are not an exact lint comparison.
+  No new flagged changed expression; do not claim whole-file lint is green.
+- W1–W9 totals:352 net source lines,3790 minified and784 gzip diagnostic bytes
+  removed. Fixed-main source gap2920. All prior tests retained, no push.
+
+### Next weight pass
+
+- W9 removes a redundant O(n) retained map, not a large source-code block.
+  Keep the substantial below-main source goal open. Next inspect the existing
+  live-query graph scheduling/publication paths for duplicate work; do not merge
+  requested/settled window state or readiness/publication gates merely to save
+  fields. Preserve the current lifecycle matrix as the acceptance boundary.
