@@ -36,7 +36,7 @@ current as review findings, oracle laws, and implementation choices change.
   production lines. Fresh100x integration gate passes1582/0 across26 files,
   exit0, no skipped tests or reported runner errors. Integration loss audit
   complete; final campaign report audit complete.
-- Still open: whole-branch size goal (+2920 net package-source lines against
+- Still open: whole-branch size goal (+2891 net package-source lines against
   fixedmain68366eca), final coherence/review and
   RFC/PR/changeset reconciliation. Older unchecked entries are phase records;
   reconcile them with later evidence before treating them as current bugs.
@@ -5951,7 +5951,36 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   minified/gzip (-129/-56), DB-IVM30220/9133 unchanged. Production source -29 lines.
   Changed-file lint flags one unchanged second-drain conditional; baseline check
   recorded separately. No clean whole-file lint claim.
-- [ ] Expanded30-file1x and focused pagination/publication/scheduler100x gates.
-- [ ] Fresh post-commit Hidden-signal recovery assay against bd2be04d.
+- [x] Expanded30-file1x:1837/0,exit0,13.56s. Focused100x:337/0,4 files,exit0,
+  114.10s (pagination, includes-publication, ordered-source-loader, scheduler).
+  No skips/reported runner errors. Fixed corpora/fresh seeds, replay overrides
+  unset. Multiplier scales opted-in properties, not deterministic cases.
+  Counts differ from W9 because scheduler57 tests are added to this gate;
+  W10 adds10 matrix cases, not57 entirely new tests.
+- [x] Fresh post-commit Hidden-signal recovery assay atb455df37 againstbd2be04d:
+  explicit null. Prior maybeRunGraph calls at625/638 ignore callback returns;
+  runAllCallbacks preserves attempt-all/first-exact-error behavior. Pending-state
+  removal, session checks, graph drain, publication checks and closure timing
+  unchanged. Subscriber guards, loader calls, promise/error handling and cached
+  identity unchanged; no repository result consumer found. Existing tests retained.
+  Dropping rule: remove unused return plumbing, not readiness state. Static only,
+  source units sequential in one scanner context; supplied test counts kept
+  separate. Risk: overvaluing incidental return-value differences as contracts.
 - Evidence prefix: /tmp/tanstack-weight-loader-callbacks-; baseline/green/ablation
   logs, full/100 JSON+logs, types/lint logs, bundle.json. Normal commit, no push.
+- Baseline stdin lint confirms the same second-drain conditional diagnostic at637;
+  changed-file disk lint reports no other diagnostics. Keep that session guard.
+- Frozen-source bundle reconfirmed in committed-bundle.json under the evidence
+  prefix: DB344161/97322 and DB-IVM30220/9133 minified/gzip diagnostic bytes.
+- W1–W10 totals:381 net source lines,3919 minified and840 gzip diagnostic bytes
+  removed. Fixed-main source gap2891; this remains an open goal, not completion.
+
+### Next candidate — scheduler dependency maps
+
+- Both CollectionConfigBuilder and Effect add every discovered dependency to
+  builderDependencies and also store it under sourceDependencies. Scheduling
+  copies the builder set and unions in that per-source subset. All discovered
+  writes in each class keep that subset relation; Effect additionally clears
+  both on teardown. Before changing either, trace scheduling/cleanup/reentry
+  and preserve dependency order/coalescing/explicit override tests. This is a
+  candidate to remove duplicate state, not permission to change DAG ordering.
