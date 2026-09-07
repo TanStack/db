@@ -59,6 +59,110 @@ function createOrderByInfo(
 }
 
 describe(`OrderedSourceLoader`, () => {
+  const syncRouteCells = (
+    [`page`, `prefix`, `boundary`, `full-source`] as const
+  ).flatMap((route) =>
+    ([`success`, `throw`, `callback-then-throw`] as const).map((outcome) => ({
+      route,
+      outcome,
+    })),
+  )
+
+  it.each(syncRouteCells)(
+    `preserves $route request semantics with synchronous $outcome`,
+    async ({ route, outcome }) => {
+      const requests: Array<{ method: string; options: RequestOptions }> = []
+      const released: Array<RequestOptions> = []
+      const failure = new Error(`target request failed`)
+      const waiting = createDeferred()
+      let boundaryReads = 0
+      const targetIndex = route === `boundary` ? 1 : 0
+      const request = (method: string, options: RequestOptions) => {
+        const index = requests.length
+        requests.push({ method, options })
+        if (index !== targetIndex) {
+          // Bootstrap the boundary case; leave later refinement/retry in flight.
+          options.onLoadSubsetResult?.(
+            index < targetIndex ? true : waiting.promise,
+            options,
+          )
+          return
+        }
+        if (outcome !== `throw`) {
+          options.onLoadSubsetResult?.(true, options, () =>
+            released.push(options),
+          )
+        }
+        if (outcome !== `success`) throw failure
+      }
+      const subscription = {
+        setOrderByIndex: () => {},
+        readOrderedSnapshot: () => {
+          boundaryReads++
+          return [{ value: { rank: 1 } }]
+        },
+        requestLimitedSnapshot: (options: RequestOptions) =>
+          request(`limited`, options),
+        requestSnapshot: (options: RequestOptions) =>
+          request(`snapshot`, options),
+      } as unknown as CollectionSubscription
+      const loader = new OrderedSourceLoader(
+        createOrderByInfo({
+          dataNeeded: () => 0,
+          ...(route === `prefix` ? { index: undefined } : {}),
+          requiresFullSource: route === `full-source`,
+        }),
+        subscription,
+        `row`,
+      )
+      try {
+        if (outcome !== `success` && route !== `boundary`) {
+          expect(() => loader.start()).toThrow(failure)
+        } else {
+          loader.start()
+          if (outcome === `success`) await loader.pendingPromise
+          else await expect(loader.pendingPromise).rejects.toBe(failure)
+        }
+        // Drain the synchronous boundary's own settlement as well as its parent.
+        await Promise.resolve()
+        const target = requests[targetIndex]!
+        expect(target.method).toBe(route === `page` ? `limited` : `snapshot`)
+        expect(target.options.limit).toBe(
+          route === `page` || route === `prefix` ? 1 : undefined,
+        )
+        expect(Boolean(target.options.where)).toBe(route === `boundary`)
+        expect(released).toEqual(
+          outcome === `callback-then-throw` ? [target.options] : [],
+        )
+        if (outcome === `success`) {
+          // Ordered loads establish a cursor and refine ties; neither a tie
+          // load nor a full-source load may restart that refinement step.
+          expect(boundaryReads).toBe(route === `full-source` ? 0 : 1)
+          expect(requests).toHaveLength(route === `full-source` ? 1 : 2)
+          if (route === `page` || route === `prefix`) {
+            expect(requests[1]!.options.where).toBeDefined()
+            expect(requests[1]!.options.orderBy).toBeUndefined()
+          }
+        } else {
+          const count = requests.length
+          loader.loadMore()
+          expect(requests).toHaveLength(count)
+          loader.loadMore(1)
+          expect(requests).toHaveLength(count + 1)
+          const retry = requests.at(-1)!
+          expect(retry.method).toBe(`snapshot`)
+          expect(retry.options.orderBy).toBeUndefined()
+          expect(retry.options.where).toBeUndefined()
+          expect(retry.options.limit).toBeUndefined()
+        }
+      } finally {
+        loader.dispose()
+        waiting.resolve()
+        await Promise.resolve()
+      }
+    },
+  )
+
   it(`recovers authoritatively when reading a settled boundary fails`, async () => {
     const failure = new Error(`boundary read failed`)
     const requests: Array<{ method: string; options: RequestOptions }> = []

@@ -36,7 +36,7 @@ current as review findings, oracle laws, and implementation choices change.
   production lines. Fresh100x integration gate passes1582/0 across26 files,
   exit0, no skipped tests or reported runner errors. Integration loss audit
   complete; final campaign report audit complete.
-- Still open: whole-branch size goal (+2946 net package-source lines against
+- Still open: whole-branch size goal (+2922 net package-source lines against
   fixedmain68366eca), final coherence/review and
   RFC/PR/changeset reconciliation. Older unchecked entries are phase records;
   reconcile them with later evidence before treating them as current bugs.
@@ -76,6 +76,11 @@ current as review findings, oracle laws, and implementation choices change.
   on baseline. Committedf929e44f; source loss audit complete. Focused100x265/0,
   four files,exit0. Combined savings326 source lines/
   3640 minified/764 gzip bytes;fixed-main gap2946.
+- W8 names ordered/page-prefix, boundary, and full-source request kinds instead
+  of forwarding three booleans. No lifecycle state removed.24 more production
+  lines removed; diagnostic minified9 bytes smaller,gzip unchanged. Integration
+  1780/0 across29 selected files; loader matrix44/44. Audit/stress pending.
+  Combined savings350 source lines/3649 minified/764 gzip bytes;gap2922.
 
 
 ## Chosen design
@@ -5776,7 +5781,7 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   Frozen bundle reconfirms344440/97398 DB and30220/9133 DB-IVM:
   `/tmp/tanstack-weight-group-helpers-committed-bundle.json`.
 
-### Next bounded candidate — ordered request kinds (read-only)
+### W8 candidate notes (implemented below)
 
 - OrderedSourceLoader carries refine/isFullSource/establishesSourceCoverage
   booleans through requestAndObserve and observe. All current callers use only
@@ -5792,3 +5797,40 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   async resolve/reject with public results/work/settlement assertions. Existing
   ordered-source-loader tests, pagination/replay/publication oracles are retained
   gates. No implementation, measured saving, or defect claim yet.
+
+### W8 — named ordered request kinds — 2026-09-06
+
+- Baseline9bfa0ea1. Replace refine/isFullSource/establishesSourceCoverage
+  positional booleans with a private OrderedRequestKind union at the four
+  request call sites and two forwarding methods. Page and prefix are ordered,
+  tie requests are boundary, and full acquisitions are full-source. Remove the
+  always-true refine parameter from loadPage/loadPrefix. Derive the same effects
+  in observe/requestAndObserve; keep all generation/error/release state and
+  synchronous provisional-settlement guards. Merge adjacent identical full-source
+  dispatch blocks with a short-circuit OR, preserving their evaluation order.
+- Add12 synchronous loader-policy cells: page/prefix/boundary/full-source ×
+  success/throw/callback-before-throw. Check request method/window/predicate,
+  ordered boundary reads/tie refinement, exact release, no implicit retry and
+  explicit full-source retry. They use controlled subscription doubles: this
+  is a loader policy test, not proof of Collection publication or adapter writes.
+  Retained real-source/integration/replay/publication suites test those boundaries.
+  Existing20 async cells and all other tests remain; no classifier/test deletion.
+- Expanded44-test loader file passes on baseline before production changes.
+  Controlled ablation mislabels full-source as ordered:39pass/5fail, including
+  missed explicit retries. Restore correct kind:44pass. This is sensitivity
+  evidence, not discovery of a pre-existing product bug. Logs:
+  `/tmp/tanstack-weight-request-kinds-{baseline,ablation,green}.log`.
+- Integration1780/0,29 files,exit0,13.40s,no skips/reported runner errors at1x,
+  fixed corpora plus fresh seeds; selected oracle/subscription lifecycle/ordered
+  loader/live-query/effect/group pipeline files. This differs from W7's selected
+  file set; do not infer73 added tests (only12 were added).
+  `/tmp/tanstack-weight-request-kinds-full.{json,log}`. Package tsc and changed-file
+  eslint pass; `-request-kinds-types.log`, `-request-kinds-lint.log`.
+- Source19added/43removed,net24. Diagnostic DB bundle344440→344431 minified
+  (-9),gzip97398→97398 (unchanged);DB-IVM unchanged30220/9133. Naming kinds alone
+  initially increased gzip4 bytes; final dispatch consolidation removes that.
+  This is primarily a source-clarity reduction, not a meaningful payload win.
+  `/tmp/tanstack-weight-request-kinds-bundle.json`. Combined W1–W8 savings350
+  source lines/3649 minified/764 gzip bytes;fixed-main gap2922. No throughput claim.
+- [ ] Commit, then source-first Field Lab Hidden-signal recovery assay.
+- [ ] Focused pagination/ordered-publication100x at frozen candidate.
