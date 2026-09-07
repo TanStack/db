@@ -1,7 +1,8 @@
 # Loading lifecycle refactor plan
 
-Status: ordered-loader pass audited. First acquisition-handoff slice implemented
-and tested; fresh audit is next. Integration and optional D2 work remain queued.
+Status: ordered-loader pass audited. Handoff audit found one test-assertion loss;
+reference checks restored and red/green verified. Campaign and follow-up audit
+remain open. Integration and optional D2 work remain queued.
 Planning baseline: 15987067 on codex/loadsubset-minimal-stack.
 
 ## Aim
@@ -293,7 +294,34 @@ candidate was restored. Existing replay-test shadow warnings also remain.
 No clean lint claim. This slice adds15 production lines. Paired diagnostic
 bundle368306 ->368581 (+275) and gzip103768 ->103838 (+70), same esbuild recipe
 and Node22.13.1/zlib1.3.0.1-motley-82a5fec. No heap/throughput claim. Artifact:
-/tmp/tanstack-acquisition-transfer.mjs. Full suite and fresh audit follow.
+/tmp/tanstack-acquisition-transfer.mjs. Full DB4772/0, zero skips,147 files,
+exit0; artifact: /tmp/tanstack-acquisition-transfer-full.json. A 100x replay/
+history campaign started at2a489848 is running. Across the approved
+refactor, production source is net+21 versus planning15987067 and +2826 versus
+fixed main68366eca.
+
+Fresh post-commit audit found no production behavior/callback-order loss, but
+recovered a genuine assertion loss: replacing the old toBe checks with array
+toEqual dropped exact unload-options identity. Full audit is preserved in
+[loadsubset-acquisition-transfer-loss-audit.md](loadsubset-acquisition-transfer-loss-audit.md).
+Restore that distinction for every cell by comparing load indexes found with
+reference-based indexOf; an options copy produces -1. A temporary fixture
+mutation recording shallow options copies makes all four cells red; restored
+fixture passes4/0. Artifacts:
+/tmp/tanstack-acquisition-transfer-identity-red.json and
+/tmp/tanstack-acquisition-transfer-identity-green.json. No production change
+was needed. This corrects a loss introduced while broadening the old test.
+The campaign started before this assertion correction; final tests and a
+fresh bounded assertion audit must validate the corrected test separately.
+
+The initial path is unchanged: startSubsetDemand already installs a starting
+owner before source invocation, then checks captured load session, membership,
+and replay participation after return. requestSnapshot publishes its result
+callback synchronously and checks membership again before observing status or
+reading local rows. It has no previous lease to restore. Giving initial startup
+a dummy previous/candidate transfer would obscure that distinction, so only
+replay uses the new transfer record. Cleanup debt and in-progress unload remain
+with their existing owner; no release-state consolidation is part of this slice.
 
 Read-only preparation after Step1c: releaseDebts and releasingAcquisitions have
 different lifetimes. handleCollectionCleanup discards debts while an adapter

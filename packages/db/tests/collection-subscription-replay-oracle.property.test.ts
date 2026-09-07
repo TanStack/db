@@ -3300,15 +3300,16 @@ describe(`CollectionSubscription replay oracle`, () => {
         await flushPromises()
 
         expect(loads).toHaveLength(2)
-        expect(unloads).toEqual(
-          releaseDemand || failRelease ? [loads[0], loads[1]] : [loads[0]],
+        // indexOf checks the exact options object, not a structurally equal copy.
+        expect(unloads.map((options) => loads.indexOf(options))).toEqual(
+          releaseDemand || failRelease ? [0, 1] : [0],
         )
         expect(loads[1]!.signal?.aborted).toBe(releaseDemand || failRelease)
         subscription.unsubscribe()
         // Failed old release keeps that exact lease as debt (retired demand)
         // or as its prior owner (live demand). Success never retries it.
-        expect(unloads).toEqual(
-          failRelease ? [loads[0], loads[1], loads[0]] : [loads[0], loads[1]],
+        expect(unloads.map((options) => loads.indexOf(options))).toEqual(
+          failRelease ? [0, 1, 0] : [0, 1],
         )
       } finally {
         subscription.unsubscribe()

@@ -34,19 +34,23 @@ current as review findings, oracle laws, and implementation choices change.
   Production net+6 vs planning baseline (+2811 vs fixed main), all added lines
   in this substep are comments. Step2 preparation retained separate release
   debt/busy lifetimes and replacement-vs-retirement transitions in the plan.
-  First ordered-loader pass complete; acquisition handoff is next. Do not force
+  First ordered-loader pass complete; acquisition handoff is Step2 below. Do not force
   the retained independent source facts into one exclusive lifecycle enum.
 - Step2a lease handoff: captured previous/candidate record and named restore/
   accept transitions; replay/session admission stays with caller. Four-cell
   release/throw matrix preserves the old regression and passes baseline;
   delayed ownership mutation produces2 red/2 green. Candidate716/0, types pass;
   five baseline lint errors reproduced. Source+15, diagnostic gzip+70 bytes for
-  this slice. Full suite/fresh audit pending; initial/replay policies remain
-  distinct. See the plan for exact traces and scope.
+  this slice. Full DB4772/0, zero skips; 100x campaign pending. Fresh audit found
+  one test loss (deep equality weakened old options-identity checks), no runtime
+  loss. Restored identity across all four cells; copied-options mutation4 red,
+  restored fixture4 green. Final suite/assertion audit pending.
+  Initial/replay policies remain distinct. Cumulative production source+21 vs
+  planning baseline (+2826 vs fixed main). See the plan for traces and scope.
 - All three wider analyses complete at frozen1cec4d7f, including inherited
   loading code, not just the PR diff. Separate unranked readouts are below.
   Analysis only: no runtime/test edits, test runs or implementation selection.
-  Production source gap remains +2805 lines against fixed main68366eca.
+  At that frozen analysis, production source gap was +2805 lines against main68366eca.
   Formation's fresh loss audit recovered qualifications, now recorded with its
   report. The grammar checkpoint's fresh post-commit loss audit is complete;
   its recovered D2 boundary is recorded below.
