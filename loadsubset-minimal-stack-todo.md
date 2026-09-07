@@ -5,6 +5,13 @@ current as review findings, oracle laws, and implementation choices change.
 
 ## Current checkpoint — 2026-09-07
 
+- Approved architecture-first refactor is in
+  [loadsubset-lifecycle-refactor-plan.md](loadsubset-lifecycle-refactor-plan.md).
+  Sequence: freeze contracts; isolate and type ordered loading; make acquisition
+  transfer explicit; review publication integration; optionally test D2 demand
+  presence. Step 0 fresh baseline4758/0, zero skips,147 files; package types pass.
+  Field/transition map and paired bundle baseline are recorded in the plan.
+  Clarity and ownership count alongside size; no generic lifecycle framework.
 - All three wider analyses complete at frozen1cec4d7f, including inherited
   loading code, not just the PR diff. Separate unranked readouts are below.
   Analysis only: no runtime/test edits, test runs or implementation selection.
