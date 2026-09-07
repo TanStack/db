@@ -66,6 +66,10 @@ describe(`useLiveInfiniteQuery`, () => {
     )
     cleanup = () => scope.stop()
     if (!query) throw new Error(`Failed to mount infinite query`)
+    // A framework tick does not settle asynchronous window normalization.
+    await vi.waitFor(() =>
+      expect(livePosts.utils.getWindow()).toEqual({ offset: 0, limit: 4 }),
+    )
     await flushVue()
 
     expect(query.collection.value).toBe(livePosts)
@@ -73,7 +77,6 @@ describe(`useLiveInfiniteQuery`, () => {
     expect(query.state.value.get(`1`)?.title).toBe(`Post 1`)
     expect(query.hasNextPage.value).toBe(true)
     expect(warning).toHaveBeenCalledOnce()
-    expect(livePosts.utils.getWindow()).toEqual({ offset: 0, limit: 4 })
   })
 
   it(`resets to the first page when a collection ref changes`, async () => {

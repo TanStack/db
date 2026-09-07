@@ -67,20 +67,25 @@ describe(`useLiveInfiniteQuery`, () => {
     await livePosts.preload()
     const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
 
+    let query!: ReturnType<typeof usePostsCollectionInfiniteQuery>
     cleanup = $effect.root(() => {
-      const query = useLiveInfiniteQuery(() => livePosts, {
+      query = useLiveInfiniteQuery(() => livePosts, {
         pageSize: 3,
         getNextPageParam: (lastPage) => lastPage[0]?.createdAt,
       })
-      flushSync()
-
-      expect(query.collection).toBe(livePosts)
-      expect(query.data.map((post) => post.id)).toEqual([`1`, `2`, `3`])
-      expect(query.state.get(`1`)?.title).toBe(`Post 1`)
-      expect(query.hasNextPage).toBe(true)
-      expect(warning).toHaveBeenCalledOnce()
-      expect(livePosts.utils.getWindow()).toEqual({ offset: 0, limit: 4 })
     })
+    flushSync()
+    // flushSync starts the subscription but does not settle its window load.
+    await vi.waitFor(() =>
+      expect(livePosts.utils.getWindow()).toEqual({ offset: 0, limit: 4 }),
+    )
+    flushSync()
+
+    expect(query.collection).toBe(livePosts)
+    expect(query.data.map((post) => post.id)).toEqual([`1`, `2`, `3`])
+    expect(query.state.get(`1`)?.title).toBe(`Post 1`)
+    expect(query.hasNextPage).toBe(true)
+    expect(warning).toHaveBeenCalledOnce()
   })
 
   it(`resets to the first page when a collection getter changes`, async () => {
