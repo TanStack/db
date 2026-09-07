@@ -44,9 +44,15 @@ work, not a claim that each is still open; use this queue for current execution.
   runtime/test loss. Limits retained: one-row matrix, direct reads derived from
   the event map, metadata/event-count flattening, and no explicit live restart
   execution check. Do not claim a new runtime bug or full lifecycle proof.
-- [ ] Resolve two optional P3 simplifier suggestions with the user: local
-  descriptor-safe array snapshot sharing; a private route-property record type.
-  Neither is a confirmed bug or a reason to reopen broader architecture work.
+- [x] User accepted the descriptor-safe array snapshot sharing suggestion.
+  One private loop now owns holes/accessor rejection; membership remains shallow
+  and ordering recursive. Expression-context dispatch is unchanged. Baseline
+  with new controls24/0; candidate subset/identity/oracle gate103/0, zero skips;
+  package types and changed-file lint pass. Production net-1 line. No new bug
+  claimed; prior assertions retained, membership accessor test widened to both
+  modes, plus sparse/inherited-getter and nested-depth controls.
+- [ ] Commit/audit the array-loop extraction, then ask about the second optional
+  P3: a private route-property record type. No broader refactor selected.
 - [x] Current-head DB gate at `fcee4971`: 4793 passed, zero failures/skips,
   148 files, process exit 0 (`/tmp/tanstack-readiness-final-full.json`). Package
   types, changed-test lint and Vite build pass; built ESM and CJS import smoke

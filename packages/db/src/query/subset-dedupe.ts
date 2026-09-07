@@ -163,30 +163,29 @@ function snapshotComparable<T>(value: T): T {
 
 function snapshotMembership<T>(value: T): T {
   if (!Array.isArray(value)) return value
-  const result = new Array(value.length)
-  for (let index = 0; index < value.length; index++) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, index)
-    if (!descriptor) continue
-    if (!(`value` in descriptor)) {
-      throw new TypeError(`Cannot snapshot membership candidate accessor`)
-    }
-    result[index] = snapshotComparable(descriptor.value)
-  }
-  return result as T
+  return snapshotArray(value, snapshotComparable, `membership candidate`) as T
 }
 
 function snapshotOrdering<T>(value: T): T {
   if (!Array.isArray(value)) return snapshotComparable(value)
-  const result = new Array(value.length)
+  return snapshotArray(value, snapshotOrdering, `ordering operand`) as T
+}
+
+function snapshotArray(
+  value: ReadonlyArray<unknown>,
+  snapshotElement: (value: unknown) => unknown,
+  context: string,
+): Array<unknown> {
+  const result = new Array<unknown>(value.length)
   for (let index = 0; index < value.length; index++) {
     const descriptor = Object.getOwnPropertyDescriptor(value, index)
     if (!descriptor) continue
     if (!(`value` in descriptor)) {
-      throw new TypeError(`Cannot snapshot ordering operand accessor`)
+      throw new TypeError(`Cannot snapshot ${context} accessor`)
     }
-    result[index] = snapshotOrdering(descriptor.value)
+    result[index] = snapshotElement(descriptor.value)
   }
-  return result as T
+  return result
 }
 
 const typedArrayTag = Object.getOwnPropertyDescriptor(

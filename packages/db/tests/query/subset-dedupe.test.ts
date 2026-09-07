@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest'
 import { runInNewContext } from 'node:vm'
+import { describe, expect, it, vi } from 'vitest'
 import {
   DeduplicatedLoadSubset,
   cloneOptions,
@@ -378,21 +378,78 @@ describe(`DeduplicatedLoadSubset`, () => {
     const boundary: [number, Array<number>] = [1, [2]]
     const cloned = cloneOptions({ where: gt(ref(`tuple`), val(boundary)) })
     boundary[0] = 9
-    boundary[1]![0] = 9
+    boundary[1][0] = 9
 
     expect(((cloned.where as Func).args[1] as Value).value).toEqual([1, [2]])
   })
 
-  it(`rejects observable membership accessors`, () => {
-    const candidates: Array<number> = []
-    Object.defineProperty(candidates, 0, {
-      enumerable: true,
-      get: () => 1,
-    })
-    candidates.length = 1
+  it.each([
+    { name: `in`, context: `membership candidate` },
+    { name: `gt`, context: `ordering operand` },
+  ])(
+    `rejects observable $context accessors without calling them`,
+    ({ name, context }) => {
+      const candidates: Array<number> = []
+      const get = vi.fn(() => 1)
+      Object.defineProperty(candidates, 0, {
+        enumerable: true,
+        get,
+      })
+      candidates.length = 1
 
-    expect(() =>
-      cloneOptions({ where: new Func(`in`, [ref(`id`), val(candidates)]) }),
-    ).toThrow(`Cannot snapshot membership candidate accessor`)
-  })
+      expect(() =>
+        cloneOptions({ where: new Func(name, [ref(`id`), val(candidates)]) }),
+      ).toThrow(`Cannot snapshot ${context} accessor`)
+      expect(get).not.toHaveBeenCalled()
+    },
+  )
+
+  it.each([`in`, `gt`])(
+    `preserves sparse %s arrays without reading inherited entries`,
+    (name) => {
+      const date = new Date(7)
+      const values = new Array<Date>(3)
+      values[1] = date
+      const get = vi.fn(() => new Date(99))
+      Object.setPrototypeOf(
+        values,
+        Object.create(Array.prototype, { 0: { get } }),
+      )
+      const cloned = cloneOptions({
+        where: new Func(name, [ref(`value`), val(values)]),
+      })
+      const snapshot = ((cloned.where as Func).args[1] as Value<Array<Date>>)
+        .value
+
+      expect(snapshot).not.toBe(values)
+      expect(snapshot.length).toBe(3)
+      expect(Object.hasOwn(snapshot, 0)).toBe(false)
+      expect(Object.hasOwn(snapshot, 2)).toBe(false)
+      expect(get).not.toHaveBeenCalled()
+      expect(snapshot[1]).not.toBe(date)
+      date.setTime(9)
+      expect(snapshot[1]!.getTime()).toBe(7)
+    },
+  )
+
+  it.each([`in`, `gt`])(
+    `preserves the nested-array snapshot depth for %s`,
+    (name) => {
+      const nested = [new Date(7)]
+      const cloned = cloneOptions({
+        where: new Func(name, [ref(`value`), val([nested])]),
+      })
+      const snapshot = (
+        (cloned.where as Func).args[1] as Value<Array<Array<Date>>>
+      ).value
+
+      if (name === `in`) expect(snapshot[0]).toBe(nested)
+      else {
+        expect(snapshot[0]).not.toBe(nested)
+        expect(snapshot[0]![0]).not.toBe(nested[0])
+      }
+      nested[0]!.setTime(9)
+      expect(snapshot[0]![0]!.getTime()).toBe(name === `in` ? 9 : 7)
+    },
+  )
 })
