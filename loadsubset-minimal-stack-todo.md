@@ -51,8 +51,14 @@ work, not a claim that each is still open; use this queue for current execution.
   package types and changed-file lint pass. Production net-1 line. No new bug
   claimed; prior assertions retained, membership accessor test widened to both
   modes, plus sparse/inherited-getter and nested-depth controls.
-- [ ] Commit/audit the array-loop extraction, then ask about the second optional
-  P3: a private route-property record type. No broader refactor selected.
+  Commit `3623df29`; full DB gate also passes4798/0, zero skips,148 files,
+  exit0 (`/tmp/tanstack-array-snapshot-full.json`). Changed-file formatting passes.
+- [x] Array-loop extraction committed and freshly audited:
+  [bounded null](loadsubset-array-snapshot-loss-audit.md). No source-supported
+  behavior/assertion loss found. Static/selected-fixture limits retained;
+  recursion depth and stack use of the extra helper call were not measured.
+- [ ] Ask about the second optional P3: a private route-property record type.
+  No broader refactor selected.
 - [x] Current-head DB gate at `fcee4971`: 4793 passed, zero failures/skips,
   148 files, process exit 0 (`/tmp/tanstack-readiness-final-full.json`). Package
   types, changed-test lint and Vite build pass; built ESM and CJS import smoke
