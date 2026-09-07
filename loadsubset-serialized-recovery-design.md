@@ -248,7 +248,7 @@ suites. Those are baseline controls, not candidate verification.
 | Attack | Main disposition |
 | --- | --- |
 | A1: old settlement depends on replacement startup | Reject drain-before-start under the preserved provider contract. A main-task real-subscription probe passes both old resolve/reject variants and records load-new before settle-old, retained public rows, new publication/completion, no stale error, and exact unload ownership. The proposed wait adds the opposite edge and creates a cycle. No candidate runtime was implemented or executed. |
-| A2: superseded-before-return timing | Existing tests prove an earlier publication escape. Do not rewrite them as obsolete; this candidate cannot justify removing that escape. Infinite nonsettling-provider behavior was not executed. |
+| A2: superseded-before-return timing | Existing tests prove an earlier publication escape. Independent eventual settlement can make the change merely permitted latency; replacement-dependent settlement creates A1's cycle. Do not silently rewrite the tests. Forever-unsettled canceled work raises a separate contract question and was not executed. |
 | A3: shared consumers and additional demand | Shares A1's mechanism; not a second confirmed bug. Preserve per-owner membership. The combined shared-transport/reset/reacquisition matrix remains unexecuted and is not needed to establish A1. |
 | A4: ordered recovery hook | Integration unresolved: loadFullSource returns void and forwards actual results through observers. Moving the hook requires preserving both subscription and graph holds. No unsafe hook change was made. |
 | A5: tentative ownership and cleanup debt | Valid preservation constraint, not an observed production bug. Serial startup does not eliminate acquire-before-unload or reentrant teardown distinctions. |
@@ -280,3 +280,31 @@ design, and no production spike. The author-selected provider dependency and
 the hostile stance can emphasize contract exposure over common adapter behavior;
 neither establishes prevalence. A1 nonetheless defeats this candidate's own
 promise to preserve existing liveness without a stronger provider requirement.
+
+### Post-commit evidence qualifications
+
+Fresh source-isolated loss scans of b372383c preserved all seven dispositions
+and the central startup dependency. Their full traces are in the sibling
+loss-audit reports beside the hostile report, collated in loss-audit-collation.md.
+The loss scans describe omissions from short summaries, not deleted source
+material, independent runtime bugs, or a requirement to repeat every example.
+
+The two new tests use resolve and specifically AbortError rejection. They observe
+one completion captured before the second reset and check it remains pending
+after old settlement. They check id/value snapshots at checkpoints and exact
+option-object unload matching after teardown. They do not trace every callback
+batch, unload ordering, virtual metadata, arbitrary rejection types, or the
+precise publication point between the final write and new waiter resolution.
+The saved JSON proves the recorded pass counts. Shell exit0 and package tsc
+success were observed in main's tool results; empty types output and the log
+files alone are not independent exit-status receipts.
+
+Keep these conditions when revisiting the source report, rather than reducing
+them to labels: shared tests distinguish two transports/two consumers from one
+promise/two demands; ordered recovery must preserve startup/async failure and
+cleanup fencing as well as both holds; tentative versus established acquisition
+and release-callback reacquisition need phase-specific ownership checks. The
+existing first queued-reset burst is the coalescing control; later reentry is
+the cost probe. Whole-change measurements could still show benefits from fewer
+overlapping recoveries. A hostile stance may undercount those benefits even
+though this particular scheduling rule fails its preserved liveness contract.

@@ -6515,5 +6515,61 @@ R4 --4c382d75 removes predicate pruning ----------------> source-owned retention
   This is a rejected design, not a new production bug. Production remains byte
   unchanged from08f5fbed; source gap remains+2805 against fixed main. No measured
   bundle change, no savings forecast, no automatically selected alternate design.
-- [ ] Commit the retained law and design evidence; then run a fresh loss audit
-  against the test/evidence, hostile report dispositions, and grammar summaries.
+- [x] Committed retained law and design evidence atb372383c; four fresh,
+  source-isolated post-commit loss scans completed through the separate audit
+  task. Reports under its outputs directory: loss-audit-evidence.md,
+  loss-audit-hostile-dispositions.md, loss-audit-grammar-a.md,
+  loss-audit-grammar-b.md and loss-audit-collation.md. Three scans ran together;
+  the fourth began when one finished. No new execution by these scanners.
+  They preserve all attacks, central dependency, pass counts, additive test diff
+  and explicit absence of candidate execution/savings. Recovered qualifications
+  are recorded in the design's post-commit section: abort-specific rejection,
+  captured-completion timing, checkpoint-only rows, after-teardown unload
+  identity, logs versus tool exit receipts, permitted delay versus a new cycle,
+  and shared/ordered/reentrant conditions hidden by short labels.
+  The scans can overvalue normal summary omissions; full originals stay linked.
+
+### Grammar preservation notes recovered by the loss audit
+
+The earlier grammar summaries are indexes, not substitute specifications. Before
+implementing any generated form, read its full source report and the architecture.
+The audit recovered these constraints from the compressed labels; no new design
+or runtime policy is selected here.
+
+- A's five and B's six units overlap; they are not proposed classes, separable
+  modules, a universal state object, or a generic scheduler. Promise identity
+  alone cannot own participation. Physical transport sharing is optional and
+  source-dependent; distinct completion scopes remain even when work is shared.
+- A keeps logical retirement, exact physical debt, retained source rows, caller
+  waits and primary errors separate. B also keeps failed/canceled caller outcomes
+  terminal even when valid data survives them. Collective session cleanup does
+  not authorize erasing another consumer's valid interests.
+- A binds replay admission to provenance, not all pending work; ordinary
+  pre-replay work differs from admitted replacement work. B's completeness
+  requires applied relevant data and finished local processing; a held old image
+  is not new sufficiency evidence. Ordinary live updates need not freeze.
+- Both preserve cheap ordinary traversal and explicit evidence boundaries:
+  confirmed range -> page/ties/deficit, not limits, arbitrary cached rows or short
+  pages as coverage. Invalid order evidence permits rare authoritative recovery;
+  source success cannot repair an independent failed window operation.
+- Install ownership/state before callouts, recheck afterward, fence ended
+  sessions and stale/ABA status delivery. Post-install observer failure is not
+  rollback. Cleanup errors cannot replace primary errors or strand callers.
+  Permitted explicit recursion errors do not remove supported disposal/reentry.
+- A Form A needs bounded active memberships and separate source/query completion;
+  fewer observers may change microtask order or add coupling/glue. A Form C must
+  keep requestSnapshot's acquire-before-local-read order distinct from
+  requestLimitedSnapshot's local-publication-before-acquire order; retain public
+  synchronous callbacks and provisional enclosing-call success. Neither is
+  approved for implementation. The concrete drain-first Form B failed above.
+- B's consumer-local form may duplicate work; its shared form adds fanout and
+  loses transport isolation. B's serialized form may delay freshness, broaden
+  reacquisition and change callbacks; source-wide restart still needs to protect
+  other consumers. Generated combinations are not verified modular substitutions.
+- A's reconstruction used bounded code/test controls, not full equivalence.
+  B's interview leaves retry budgets, source extent, fairness, sharing/eviction,
+  tie guarantees, some terminal-callback timing and cleanup policy unanswered;
+  those are limits of that interview, not newly discovered missing code features.
+  Neither measures concrete performance/memory or proves oracle completeness.
+  The grammar vocabulary can favor membership-based designs and hide simplicity
+  already present in direct methods; keep that bias distinct from source facts.
