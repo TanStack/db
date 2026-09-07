@@ -23,6 +23,7 @@ import {
   QueryMustHaveFromClauseError,
   SubQueryMustHaveFromClauseError,
 } from '../../errors.js'
+import { getQueryIR } from './query-ir.js'
 import {
   createRefProxy,
   createRefProxyWithSelected,
@@ -1614,12 +1615,7 @@ export function buildQuery<TContext extends Context>(
   return getQueryIR(result)
 }
 
-// Internal function to get the QueryIR from a builder
-export function getQueryIR(
-  builder: BaseQueryBuilder | QueryBuilder<any> | InitialQueryBuilder,
-): QueryIR {
-  return (builder as unknown as BaseQueryBuilder)._getQuery()
-}
+export { getQueryIR }
 
 // Type-only exports for the query builder
 export type InitialQueryBuilder = Pick<

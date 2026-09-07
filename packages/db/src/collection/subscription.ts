@@ -353,6 +353,8 @@ export class CollectionSubscription
         lastSentKey: this.lastSentKey,
       },
       privateRows: new Map(
+        // The API returns void for unavailable snapshots, not just undefined.
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
         (currentRows ?? [])
           .filter((change) => change.type !== `delete`)
           .map((change) => [change.key, change.value]),
@@ -1077,7 +1079,9 @@ export class CollectionSubscription
   }
 
   /** Restore only our tentative lease, never a newer reentrant acquisition. */
-  private restoreAcquisitionTransfer(transfer: SubsetAcquisitionTransfer): void {
+  private restoreAcquisitionTransfer(
+    transfer: SubsetAcquisitionTransfer,
+  ): void {
     const { demand, previous, previousState, candidate } = transfer
     if (demand.acquisition !== candidate) return
     demand.acquisition = previous
@@ -1406,6 +1410,8 @@ export class CollectionSubscription
       })
       if (snapshot === undefined) {
         opts.onUnoptimized()
+        // The callback can unsubscribe; TypeScript retains the pre-call narrowing.
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
         if (this.unsubscribed) return false
         snapshot = this.collection.currentStateAsChanges({
           ...stateOpts,
@@ -1415,6 +1421,8 @@ export class CollectionSubscription
     } else {
       snapshot = this.collection.currentStateAsChanges(stateOpts)
     }
+    // Snapshot evaluation may call user code that tears down the subscription.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (this.unsubscribed) return false
 
     if (snapshot === undefined) {
@@ -1718,6 +1726,8 @@ export class CollectionSubscription
     }
 
     this.publishSnapshot(changes)
+    // A subscriber callback can synchronously tear down this subscription.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (this.unsubscribed) return
 
     // Update the row count and last key after sending (for next call's offset/cursor)

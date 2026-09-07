@@ -3,6 +3,44 @@
 This is the durable execution log for simplifying the RFC #1657 stack. Keep it
 current as review findings, oracle laws, and implementation choices change.
 
+## Active readiness queue — one PR to main
+
+The user selected one consolidated PR against `main`, not another stack. Keep
+the checkpoint commits; do not rewrite published history. No PR exists for
+`codex/loadsubset-minimal-stack` at this checkpoint. Origin/main was fetched and
+remains `68366eca`. Historical unchecked boxes below are records of earlier
+work, not a claim that each is still open; use this queue for current execution.
+
+- [x] Finish the approved architecture refactor: Steps 0–3 complete and audited;
+  the optional D2 presence spike is rejected under the current timing contract.
+- [x] Correct `IndexInterface.take/takeReversed` to accept indexed values, not
+  row keys. New BasicIndex/BTreeIndex tests expose the public-interface mismatch:
+  TypeScript rejected numeric/undefined cursors with string row keys before the
+  fix; package typecheck passes after it. Runtime cursor controls are green.
+- [x] Clear the seven measured lint errors. Keep the reentrant teardown guards
+  and the void-return snapshot fallback, with targeted lint explanations.
+  Move the existing `getQueryIR` body/signature unchanged into a helper with
+  type-only builder imports; preserve its old export and break the runtime cycle.
+  Targeted tests: 238 passed, zero failed/skipped. Changed-file lint and package
+  typecheck pass. Full DB validation: 4789 passed, zero failed/skipped, 148 files,
+  process exit 0 (`/tmp/tanstack-readiness-full.json`).
+- [ ] Commit this readiness slice and obtain its fresh post-commit loss audit.
+- [ ] Verify the prep-pr review's detached-demand restart publication finding.
+  Static review identifies a missing live-query publication-start handoff;
+  add the missing direct/live subscriber boundary before changing runtime code.
+  Record red/green evidence, commit the fix if confirmed, and audit that step.
+- [ ] Resolve two optional P3 simplifier suggestions with the user: local
+  descriptor-safe array snapshot sharing; a private route-property record type.
+  Neither is a confirmed bug or a reason to reopen broader architecture work.
+- [ ] Finish current-head validation and record source/bundle size against the
+  fixed main baseline. Earlier full suite and 100x campaigns remain evidence
+  for their recorded revisions, not an assertion about later edits.
+- [ ] Decide PR packaging for the committed investigation notes and spike
+  patches. Preserve useful tests and durable contracts; do not silently discard
+  the historical evidence or close the old stack PRs.
+- [ ] After the review gate, prepare the changeset, concise consolidated PR
+  body and RFC bookkeeping; push normally and start CI monitoring.
+
 ## Current checkpoint — 2026-09-07
 
 - Approved architecture-first refactor is in

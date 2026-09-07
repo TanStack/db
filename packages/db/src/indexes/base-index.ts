@@ -68,13 +68,13 @@ export interface IndexInterface<
 
   take: (
     n: number,
-    from: TKey,
+    from: unknown,
     filterFn?: (key: TKey) => boolean,
   ) => Array<TKey>
   takeFromStart: (n: number, filterFn?: (key: TKey) => boolean) => Array<TKey>
   takeReversed: (
     n: number,
-    from: TKey,
+    from: unknown,
     filterFn?: (key: TKey) => boolean,
   ) => Array<TKey>
   takeReversedFromEnd: (

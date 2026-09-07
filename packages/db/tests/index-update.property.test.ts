@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest'
+import { describe, expect, expectTypeOf, test } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { compareKeys } from '@tanstack/db-ivm'
 import { BasicIndex } from '../src/indexes/basic-index.js'
@@ -6,7 +6,7 @@ import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { PropRef } from '../src/query/ir.js'
 import { DEFAULT_COMPARE_OPTIONS } from '../src/utils.js'
 import { makeComparator } from '../src/utils/comparison.js'
-import type { BaseIndex } from '../src/indexes/base-index.js'
+import type { BaseIndex, IndexInterface } from '../src/indexes/base-index.js'
 
 type IndexValue = number
 
@@ -161,6 +161,33 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
       [`other`, { value: [20] }],
     ])
     expect(index.canOptimizeRangeFor(100)).toBe(false)
+  })
+
+  test(`accepts indexed values rather than row keys through the index interface`, () => {
+    const index: IndexInterface<string> = new IndexType(
+      1,
+      new PropRef([`value`]),
+    )
+    expectTypeOf<
+      Parameters<IndexInterface<string>[`take`]>[1]
+    >().toEqualTypeOf<unknown>()
+    expectTypeOf<
+      Parameters<IndexInterface<string>[`takeReversed`]>[1]
+    >().toEqualTypeOf<unknown>()
+    expectTypeOf<
+      Parameters<BaseIndex<string>[`take`]>[1]
+    >().toEqualTypeOf<unknown>()
+    expectTypeOf<
+      Parameters<BaseIndex<string>[`takeReversed`]>[1]
+    >().toEqualTypeOf<unknown>()
+    index.add(`undefined`, { value: undefined })
+    index.add(`zero`, { value: 0 })
+    index.add(`one`, { value: 1 })
+
+    expect(index.take(3, 0)).toEqual([`one`])
+    expect(index.takeReversed(3, 1)).toEqual([`zero`, `undefined`])
+    expect(index.take(3, undefined)).toEqual([`zero`, `one`])
+    expect(index.takeReversed(3, undefined)).toEqual([])
   })
 
   test(`distinguishes explicit undefined range and cursor bounds`, () => {

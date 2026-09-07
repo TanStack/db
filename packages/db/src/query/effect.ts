@@ -255,8 +255,7 @@ export function createEffect<
     // Abort signal for in-flight handlers
     abortController.abort()
 
-    let attempt!: Promise<void>
-    attempt = (async () => {
+    const attempt = (async () => {
       // Tear down the pipeline (unsubscribe from sources, etc.)
       let cleanupFailed = false
       let cleanupError: unknown

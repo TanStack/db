@@ -631,6 +631,8 @@ export class CollectionConfigBuilder<
         // Ensure the callback runs at least once even when the graph has no pending work.
         // This handles lazy loading scenarios where setWindow() increases the limit or
         // an async loadSubset completes and we need to re-check if more data is needed.
+        // drainGraph changes this flag inside its closure.
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
         if (!callbackCalled) {
           callback?.()
           if (!isCurrentSession()) return
