@@ -1419,7 +1419,9 @@ export class CollectionStateManager<
         const visibleLayoutChanged =
           previousLayout !== undefined &&
           (previousLayout.length !== this.size ||
-            [...this.keys()].some((key, index) => key !== previousLayout[index]))
+            [...this.keys()].some(
+              (key, index) => key !== previousLayout[index],
+            ))
         this.changes.emitEvents(events, true, visibleLayoutChanged)
       } catch (error) {
         failure = { error }

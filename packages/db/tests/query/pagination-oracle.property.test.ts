@@ -2218,7 +2218,10 @@ describe(`pagination recomputation oracle`, () => {
       },
     })
     const live = createLiveQueryCollection((q) =>
-      q.from({ row: source }).orderBy(({ row }) => row.rank).limit(1),
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(1),
     )
     try {
       await live.preload()

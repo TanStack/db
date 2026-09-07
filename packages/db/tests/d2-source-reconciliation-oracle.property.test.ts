@@ -793,9 +793,10 @@ fcTest.prop(
   },
 )
 
-const assertDisjointHistoriesCommute = (
-  [left, right]: [Array<SourceOperation>, Array<SourceOperation>],
-) => {
+const assertDisjointHistoriesCommute = ([left, right]: [
+  Array<SourceOperation>,
+  Array<SourceOperation>,
+]) => {
   const leftThenRight = createReconciliationModel()
   applyReconciliationStep(leftThenRight, { type: `batch`, operations: left })
   applyReconciliationStep(leftThenRight, { type: `batch`, operations: right })

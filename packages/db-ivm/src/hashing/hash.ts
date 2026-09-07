@@ -400,7 +400,8 @@ function consumeGraphContextWork(context: HashContext): void {
 function isReferenceHashedObject(input: object): boolean {
   return (
     input instanceof File ||
-    (isBinaryValue(input) && input.byteLength > UINT8ARRAY_CONTENT_HASH_THRESHOLD)
+    (isBinaryValue(input) &&
+      input.byteLength > UINT8ARRAY_CONTENT_HASH_THRESHOLD)
   )
 }
 

@@ -2527,10 +2527,7 @@ describe(`On-Demand Sync Mode`, () => {
       const started = startOnDemandSync(db, { onLoadSubset })
       unloadSubset = started.unloadSubset
 
-      await Promise.all([
-        started.loadSubset(first),
-        started.loadSubset(second),
-      ])
+      await Promise.all([started.loadSubset(first), started.loadSubset(second)])
       started.sync.cleanup?.()
 
       expect(firstCleanup).toHaveBeenCalledOnce()
@@ -2565,9 +2562,7 @@ describe(`On-Demand Sync Mode`, () => {
         )
 
         expect(
-          getAll.mock.calls.filter(([sql]) =>
-            String(sql).includes(`clothing`),
-          ),
+          getAll.mock.calls.filter(([sql]) => String(sql).includes(`clothing`)),
         ).toHaveLength(1)
       } finally {
         started.sync.cleanup?.()

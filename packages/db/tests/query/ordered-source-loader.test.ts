@@ -420,45 +420,48 @@ describe(`OrderedSourceLoader`, () => {
     { label: `zero`, value: 0, continuation: `tie` },
     { label: `false`, value: false, continuation: `tie` },
     { label: `empty string`, value: ``, continuation: `tie` },
-  ])(`uses $continuation for a $label boundary`, async ({ value, continuation }) => {
-    const methods: Array<string> = []
-    let needed = 0
-    const request = (method: string, options: RequestOptions) => {
-      methods.push(method)
-      options.onLoadSubsetResult?.(true, options)
-    }
-    const subscription = {
-      setOrderByIndex: () => {},
-      readOrderedSnapshot: () => [{ value: { rank: value } }],
-      requestLimitedSnapshot: (options: RequestOptions) =>
-        request(`page`, options),
-      requestSnapshot: (options: RequestOptions) => {
-        const kind = options.where ? `tie` : `full-source`
-        expect(kind).toBe(continuation)
-        request(kind, options)
-      },
-    } as unknown as CollectionSubscription
-    const loader = new OrderedSourceLoader(
-      createOrderByInfo({ dataNeeded: () => needed, comparator: () => 0 }),
-      subscription,
-      `row`,
-    )
+  ])(
+    `uses $continuation for a $label boundary`,
+    async ({ value, continuation }) => {
+      const methods: Array<string> = []
+      let needed = 0
+      const request = (method: string, options: RequestOptions) => {
+        methods.push(method)
+        options.onLoadSubsetResult?.(true, options)
+      }
+      const subscription = {
+        setOrderByIndex: () => {},
+        readOrderedSnapshot: () => [{ value: { rank: value } }],
+        requestLimitedSnapshot: (options: RequestOptions) =>
+          request(`page`, options),
+        requestSnapshot: (options: RequestOptions) => {
+          const kind = options.where ? `tie` : `full-source`
+          expect(kind).toBe(continuation)
+          request(kind, options)
+        },
+      } as unknown as CollectionSubscription
+      const loader = new OrderedSourceLoader(
+        createOrderByInfo({ dataNeeded: () => needed, comparator: () => 0 }),
+        subscription,
+        `row`,
+      )
 
-    loader.start()
-    await loader.pendingPromise
-    await loader.pendingPromise
-    expect(methods).toEqual([`page`, continuation])
+      loader.start()
+      await loader.pendingPromise
+      await loader.pendingPromise
+      expect(methods).toEqual([`page`, continuation])
 
-    needed = 2
-    loader.loadMore(1)
-    await loader.pendingPromise
-    expect(methods).toEqual(
-      continuation === `tie`
-        ? [`page`, `tie`, `page`]
-        : [`page`, `full-source`],
-    )
-    loader.dispose()
-  })
+      needed = 2
+      loader.loadMore(1)
+      await loader.pendingPromise
+      expect(methods).toEqual(
+        continuation === `tie`
+          ? [`page`, `tie`, `page`]
+          : [`page`, `full-source`],
+      )
+      loader.dispose()
+    },
+  )
 
   it(`retains only bounded promise state during a long refinement chain`, async () => {
     let biggest: { rank: number } | undefined

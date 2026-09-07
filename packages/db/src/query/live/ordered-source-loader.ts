@@ -1,4 +1,7 @@
-import { buildCursorCurrent, canExpressCursorOrder } from '../../utils/cursor.js'
+import {
+  buildCursorCurrent,
+  canExpressCursorOrder,
+} from '../../utils/cursor.js'
 import { normalizeError } from '../../utils/error.js'
 import { normalizeOrderByPaths } from '../compiler/expressions.js'
 import type {
@@ -240,7 +243,8 @@ export class OrderedSourceLoader {
         limit: this.info.offset + this.info.limit,
       })
       .filter(
-        ({ value }) => this.info.comparator(value, this.settledSourceBoundary) <= 0,
+        ({ value }) =>
+          this.info.comparator(value, this.settledSourceBoundary) <= 0,
       ).length
   }
 

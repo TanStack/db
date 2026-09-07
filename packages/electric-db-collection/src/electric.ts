@@ -565,7 +565,8 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   const logPrefix = collectionId ? `[${collectionId}] ` : ``
 
   const abortReason = (abortedSignal: AbortSignal): unknown =>
-    abortedSignal.reason ?? new DOMException(`The operation was aborted`, `AbortError`)
+    abortedSignal.reason ??
+    new DOMException(`The operation was aborted`, `AbortError`)
 
   /**
    * Handles errors from snapshot operations. Returns true if the error was

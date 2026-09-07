@@ -640,10 +640,7 @@ function createPowerSyncCollectionConfig<
         // One reconciliation owns every queued revision so callers cannot
         // settle against a stale trigger configuration.
         const reconcileTracking = async (): Promise<void> => {
-          while (
-            !stopped &&
-            reconciledTrackingRevision !== trackingRevision
-          ) {
+          while (!stopped && reconciledTrackingRevision !== trackingRevision) {
             const revision = trackingRevision
             const isCurrent = () => !stopped && trackingRevision === revision
             const appliedReceipts: Array<SyncAppliedReceipt> = []

@@ -86,14 +86,14 @@ model. They are not a second set of runtime objects, nor does every name need a
 matching TypeScript type. The implementation maps this model onto existing D2
 operators and a few boundary adapters:
 
-| Architectural role                    | Concrete implementation                                                                                |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| Compile relation IDs and demand plans | `packages/db/src/query/compiler/index.ts`, `packages/db/src/query/compiler/joins.ts`                   |
-| Reduce public keys and build routes   | `packages/db/src/query/live/materialized-pipeline.ts`                                                  |
-| Run the graph and publish root rows   | `packages/db/src/query/live/collection-config-builder.ts`                                              |
-| Publish Collection-valued buckets     | `packages/db/src/query/live/bucket-facade-adapter.ts`                                                  |
-| Start and release asynchronous demand | `packages/db/src/query/live/subset-demand-controller.ts`, `packages/db/src/collection/subscription.ts` |
-| Ordered provider loading and continuation | `packages/db/src/query/live/ordered-source-loader.ts` |
+| Architectural role                        | Concrete implementation                                                                                |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Compile relation IDs and demand plans     | `packages/db/src/query/compiler/index.ts`, `packages/db/src/query/compiler/joins.ts`                   |
+| Reduce public keys and build routes       | `packages/db/src/query/live/materialized-pipeline.ts`                                                  |
+| Run the graph and publish root rows       | `packages/db/src/query/live/collection-config-builder.ts`                                              |
+| Publish Collection-valued buckets         | `packages/db/src/query/live/bucket-facade-adapter.ts`                                                  |
+| Start and release asynchronous demand     | `packages/db/src/query/live/subset-demand-controller.ts`, `packages/db/src/collection/subscription.ts` |
+| Ordered provider loading and continuation | `packages/db/src/query/live/ordered-source-loader.ts`                                                  |
 
 Queries without includes keep the original compiled pipeline and do not pay
 for facade state. The one exception is a joined query with a custom public-key
@@ -105,13 +105,13 @@ reduction that enforces public-key congruence and multiplicity.
 These owners cooperate; they are not phases of one exclusive state machine.
 The detailed loading and publication laws below still apply.
 
-| Owner | Accepts / retires | Does not establish |
-| --- | --- | --- |
-| Subscription acquisition | Tentatively installs the candidate before adapter callbacks; `acceptAcquisitionTransfer` hands off the old lease; failed cleanup retains exact release debt | Replay completion or permission to publish |
-| OrderedSourceLoader | Tracks request settlement, safe continuation and repair debt; reset discards the cursor, disposal ignores late settlement | Provider exhaustion or acceptance of an imperative window |
-| Subscription replay | Counts setup and logical acquisition participants; checks completion after reentrant release callbacks; success releases the source replacement hold | Success of a previously failed window operation |
-| Query builder | Tracks ordered publication participants in one sync session and accepts a window only for its operation generation | Physical adapter ownership or cancellation |
-| D2 and public Collection boundary | D2 accumulates private result changes; the builder flushes root and child changes when the existing gates allow it | Source completeness merely because graph work drained |
+| Owner                             | Accepts / retires                                                                                                                                           | Does not establish                                        |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| Subscription acquisition          | Tentatively installs the candidate before adapter callbacks; `acceptAcquisitionTransfer` hands off the old lease; failed cleanup retains exact release debt | Replay completion or permission to publish                |
+| OrderedSourceLoader               | Tracks request settlement, safe continuation and repair debt; reset discards the cursor, disposal ignores late settlement                                   | Provider exhaustion or acceptance of an imperative window |
+| Subscription replay               | Counts setup and logical acquisition participants; checks completion after reentrant release callbacks; success releases the source replacement hold        | Success of a previously failed window operation           |
+| Query builder                     | Tracks ordered publication participants in one sync session and accepts a window only for its operation generation                                          | Physical adapter ownership or cancellation                |
+| D2 and public Collection boundary | D2 accumulates private result changes; the builder flushes root and child changes when the existing gates allow it                                          | Source completeness merely because graph work drained     |
 
 Session and participant checks precede changes to the builder's ordered failure
 state, not just scheduling. An obsolete rejection cannot close a replacement

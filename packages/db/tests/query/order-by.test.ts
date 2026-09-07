@@ -616,59 +616,56 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         ])
       })
 
-      it(
-        `applies incremental insert of a new row inside the topK but after max sent value correctly`,
-        async () => {
-          const collection = createLiveQueryCollection((q) =>
-            q
-              .from({ employees: employeesCollection })
-              .orderBy(({ employees }) => employees.salary, `asc`)
-              .offset(1)
-              .limit(10)
-              .select(({ employees }) => ({
-                id: employees.id,
-                name: employees.name,
-                salary: employees.salary,
-              })),
-          )
-          await collection.preload()
+      it(`applies incremental insert of a new row inside the topK but after max sent value correctly`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ employees: employeesCollection })
+            .orderBy(({ employees }) => employees.salary, `asc`)
+            .offset(1)
+            .limit(10)
+            .select(({ employees }) => ({
+              id: employees.id,
+              name: employees.name,
+              salary: employees.salary,
+            })),
+        )
+        await collection.preload()
 
-          const results = Array.from(collection.values())
+        const results = Array.from(collection.values())
 
-          expect(results.map((r) => r.salary)).toEqual([
-            52_000, 55_000, 60_000, 65_000,
-          ])
+        expect(results.map((r) => r.salary)).toEqual([
+          52_000, 55_000, 60_000, 65_000,
+        ])
 
-          // Now insert a new employee with highest salary
-          // this should now become part of the topK because
-          // the topK isn't full yet, so even though it's after the max sent value
-          // it should still be part of the topK
-          const newEmployee = {
-            id: 6,
-            name: `George`,
-            department_id: 1,
-            salary: 72_000,
-            hire_date: `2023-01-01`,
-          }
+        // Now insert a new employee with highest salary
+        // this should now become part of the topK because
+        // the topK isn't full yet, so even though it's after the max sent value
+        // it should still be part of the topK
+        const newEmployee = {
+          id: 6,
+          name: `George`,
+          department_id: 1,
+          salary: 72_000,
+          hire_date: `2023-01-01`,
+        }
 
-          employeesCollection.utils.begin()
-          employeesCollection.utils.write({
-            type: `insert`,
-            value: newEmployee,
-          })
-          employeesCollection.utils.commit()
+        employeesCollection.utils.begin()
+        employeesCollection.utils.write({
+          type: `insert`,
+          value: newEmployee,
+        })
+        employeesCollection.utils.commit()
 
-          const newResults = Array.from(collection.values())
+        const newResults = Array.from(collection.values())
 
-          expect(newResults.map((r) => [r.id, r.salary])).toEqual([
-            [5, 52_000],
-            [3, 55_000],
-            [2, 60_000],
-            [4, 65_000],
-            [6, 72_000],
-          ])
-        },
-      )
+        expect(newResults.map((r) => [r.id, r.salary])).toEqual([
+          [5, 52_000],
+          [3, 55_000],
+          [2, 60_000],
+          [4, 65_000],
+          [6, 72_000],
+        ])
+      })
 
       it(`applies incremental insert of a new row after the topK correctly`, async () => {
         const collection = createLiveQueryCollection((q) =>
@@ -796,40 +793,37 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         ])
       })
 
-      it(
-        `handles deletion from partial page with limit larger than data`,
-        async () => {
-          const collection = createLiveQueryCollection((q) =>
-            q
-              .from({ employees: employeesCollection })
-              .orderBy(({ employees }) => employees.salary, `desc`)
-              .limit(20) // Limit larger than number of employees (5)
-              .select(({ employees }) => ({
-                id: employees.id,
-                name: employees.name,
-                salary: employees.salary,
-              })),
-          )
-          await collection.preload()
+      it(`handles deletion from partial page with limit larger than data`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ employees: employeesCollection })
+            .orderBy(({ employees }) => employees.salary, `desc`)
+            .limit(20) // Limit larger than number of employees (5)
+            .select(({ employees }) => ({
+              id: employees.id,
+              name: employees.name,
+              salary: employees.salary,
+            })),
+        )
+        await collection.preload()
 
-          const results = Array.from(collection.values())
-          expect(results).toHaveLength(5)
-          expect(results[0]!.name).toBe(`Diana`)
+        const results = Array.from(collection.values())
+        expect(results).toHaveLength(5)
+        expect(results[0]!.name).toBe(`Diana`)
 
-          // Delete Diana (the highest paid employee, first in DESC order)
-          const dianaData = employeeData.find((e) => e.id === 4)!
-          employeesCollection.utils.begin()
-          employeesCollection.utils.write({
-            type: `delete`,
-            value: dianaData,
-          })
-          employeesCollection.utils.commit()
+        // Delete Diana (the highest paid employee, first in DESC order)
+        const dianaData = employeeData.find((e) => e.id === 4)!
+        employeesCollection.utils.begin()
+        employeesCollection.utils.write({
+          type: `delete`,
+          value: dianaData,
+        })
+        employeesCollection.utils.commit()
 
-          const newResults = Array.from(collection.values())
-          expect(newResults).toHaveLength(4)
-          expect(newResults[0]!.name).toBe(`Bob`)
-        },
-      )
+        const newResults = Array.from(collection.values())
+        expect(newResults).toHaveLength(4)
+        expect(newResults[0]!.name).toBe(`Bob`)
+      })
     })
 
     describe(`OrderBy with Joins`, () => {
@@ -1847,184 +1841,172 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
     })
 
     describe(`OrderBy Optimization Tests`, () => {
-      it(
-        `optimizes single-column orderBy when passed as single value`,
-        async () => {
-          // Patch getConfig to expose the builder on the returned config for test access
-          const { CollectionConfigBuilder } = await import(
-            `../../src/query/live/collection-config-builder.js`
-          )
-          const originalGetConfig = CollectionConfigBuilder.prototype.getConfig
+      it(`optimizes single-column orderBy when passed as single value`, async () => {
+        // Patch getConfig to expose the builder on the returned config for test access
+        const { CollectionConfigBuilder } = await import(
+          `../../src/query/live/collection-config-builder.js`
+        )
+        const originalGetConfig = CollectionConfigBuilder.prototype.getConfig
 
-          CollectionConfigBuilder.prototype.getConfig = function (this: any) {
-            const cfg = originalGetConfig.call(this)
-            ;(cfg as any).__builder = this
-            return cfg
-          }
+        CollectionConfigBuilder.prototype.getConfig = function (this: any) {
+          const cfg = originalGetConfig.call(this)
+          ;(cfg as any).__builder = this
+          return cfg
+        }
 
-          try {
-            const collection = createLiveQueryCollection((q) =>
-              q
-                .from({ employees: employeesCollection })
-                .orderBy(({ employees }) => employees.salary, `desc`)
-                .limit(3)
-                .select(({ employees }) => ({
-                  id: employees.id,
-                  name: employees.name,
-                  salary: employees.salary,
-                })),
-            )
-
-            await collection.preload()
-
-            const builder = (collection as any).config.__builder
-            expect(builder).toBeTruthy()
-            const orderByInfo = Object.values(
-              builder.optimizableOrderByCollections,
-            )[0] as any
-            const orderedSource = builder.collectionSources.find(
-              (source: { alias: string }) => source.alias === `employees`,
-            )
-            expect(orderByInfo.sourceId).toBe(orderedSource.sourceId)
-          } finally {
-            CollectionConfigBuilder.prototype.getConfig = originalGetConfig
-          }
-        },
-      )
-
-      it(
-        `optimizes orderBy with alias paths in joins`,
-        async () => {
-          // Patch getConfig to expose the builder on the returned config for test access
-          const { CollectionConfigBuilder } = await import(
-            `../../src/query/live/collection-config-builder.js`
-          )
-          const originalGetConfig = CollectionConfigBuilder.prototype.getConfig
-
-          CollectionConfigBuilder.prototype.getConfig = function (this: any) {
-            const cfg = originalGetConfig.call(this)
-            ;(cfg as any).__builder = this
-            return cfg
-          }
-
-          try {
-            const collection = createLiveQueryCollection((q) =>
-              q
-                .from({ employees: employeesCollection })
-                .join(
-                  { departments: departmentsCollection },
-                  ({ employees, departments }) =>
-                    eq(employees.department_id, departments.id),
-                )
-                .orderBy(({ departments }) => departments.name, `asc`)
-                .limit(5)
-                .select(({ employees, departments }) => ({
-                  employeeId: employees.id,
-                  employeeName: employees.name,
-                  departmentName: departments.name,
-                })),
-            )
-
-            await collection.preload()
-
-            const builder = (collection as any).config.__builder
-            expect(builder).toBeTruthy()
-
-            // Verify that the order-by optimization is scoped to the departments alias
-            const orderByInfo = Object.values(
-              builder.optimizableOrderByCollections,
-            )[0] as any
-            const orderedSource = builder.collectionSources.find(
-              (source: { alias: string }) => source.alias === `departments`,
-            )
-            expect(orderByInfo).toBeDefined()
-            expect(orderByInfo.alias).toBe(`departments`)
-            expect(orderByInfo.sourceId).toBe(orderedSource.sourceId)
-            expect(orderByInfo.offset).toBe(0)
-            expect(orderByInfo.limit).toBe(5)
-          } finally {
-            CollectionConfigBuilder.prototype.getConfig = originalGetConfig
-          }
-        },
-      )
-
-      it(
-        `loads an ordered self-join through the ordered alias`,
-        async () => {
+        try {
           const collection = createLiveQueryCollection((q) =>
             q
-              .from({ employee: employeesCollection })
-              .join({ manager: employeesCollection }, ({ employee, manager }) =>
-                eq(employee.id, manager.id),
-              )
-              .orderBy(({ manager }) => manager.name, `asc`)
+              .from({ employees: employeesCollection })
+              .orderBy(({ employees }) => employees.salary, `desc`)
               .limit(3)
-              .select(({ employee, manager }) => ({
-                id: employee.id,
-                employeeName: employee.name,
-                managerName: manager.name,
+              .select(({ employees }) => ({
+                id: employees.id,
+                name: employees.name,
+                salary: employees.salary,
               })),
           )
 
           await collection.preload()
 
-          expect(
-            Array.from(collection.values()).map((row) => [
-              row.employeeName,
-              row.managerName,
-            ]),
-          ).toEqual([
-            [`Alice`, `Alice`],
-            [`Bob`, `Bob`],
-            [`Charlie`, `Charlie`],
-          ])
-        },
-      )
-
-      it(
-        `optimizes single-column orderBy when passed as array with single element`,
-        async () => {
-          // Patch getConfig to expose the builder on the returned config for test access
-          const { CollectionConfigBuilder } = await import(
-            `../../src/query/live/collection-config-builder.js`
+          const builder = (collection as any).config.__builder
+          expect(builder).toBeTruthy()
+          const orderByInfo = Object.values(
+            builder.optimizableOrderByCollections,
+          )[0] as any
+          const orderedSource = builder.collectionSources.find(
+            (source: { alias: string }) => source.alias === `employees`,
           )
-          const originalGetConfig = CollectionConfigBuilder.prototype.getConfig
+          expect(orderByInfo.sourceId).toBe(orderedSource.sourceId)
+        } finally {
+          CollectionConfigBuilder.prototype.getConfig = originalGetConfig
+        }
+      })
 
-          CollectionConfigBuilder.prototype.getConfig = function (this: any) {
-            const cfg = originalGetConfig.call(this)
-            ;(cfg as any).__builder = this
-            return cfg
-          }
+      it(`optimizes orderBy with alias paths in joins`, async () => {
+        // Patch getConfig to expose the builder on the returned config for test access
+        const { CollectionConfigBuilder } = await import(
+          `../../src/query/live/collection-config-builder.js`
+        )
+        const originalGetConfig = CollectionConfigBuilder.prototype.getConfig
 
-          try {
-            const collection = createLiveQueryCollection((q) =>
-              q
-                .from({ employees: employeesCollection })
-                .orderBy(({ employees }) => [employees.salary], `desc`)
-                .limit(3)
-                .select(({ employees }) => ({
-                  id: employees.id,
-                  name: employees.name,
-                  salary: employees.salary,
-                })),
+        CollectionConfigBuilder.prototype.getConfig = function (this: any) {
+          const cfg = originalGetConfig.call(this)
+          ;(cfg as any).__builder = this
+          return cfg
+        }
+
+        try {
+          const collection = createLiveQueryCollection((q) =>
+            q
+              .from({ employees: employeesCollection })
+              .join(
+                { departments: departmentsCollection },
+                ({ employees, departments }) =>
+                  eq(employees.department_id, departments.id),
+              )
+              .orderBy(({ departments }) => departments.name, `asc`)
+              .limit(5)
+              .select(({ employees, departments }) => ({
+                employeeId: employees.id,
+                employeeName: employees.name,
+                departmentName: departments.name,
+              })),
+          )
+
+          await collection.preload()
+
+          const builder = (collection as any).config.__builder
+          expect(builder).toBeTruthy()
+
+          // Verify that the order-by optimization is scoped to the departments alias
+          const orderByInfo = Object.values(
+            builder.optimizableOrderByCollections,
+          )[0] as any
+          const orderedSource = builder.collectionSources.find(
+            (source: { alias: string }) => source.alias === `departments`,
+          )
+          expect(orderByInfo).toBeDefined()
+          expect(orderByInfo.alias).toBe(`departments`)
+          expect(orderByInfo.sourceId).toBe(orderedSource.sourceId)
+          expect(orderByInfo.offset).toBe(0)
+          expect(orderByInfo.limit).toBe(5)
+        } finally {
+          CollectionConfigBuilder.prototype.getConfig = originalGetConfig
+        }
+      })
+
+      it(`loads an ordered self-join through the ordered alias`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ employee: employeesCollection })
+            .join({ manager: employeesCollection }, ({ employee, manager }) =>
+              eq(employee.id, manager.id),
             )
+            .orderBy(({ manager }) => manager.name, `asc`)
+            .limit(3)
+            .select(({ employee, manager }) => ({
+              id: employee.id,
+              employeeName: employee.name,
+              managerName: manager.name,
+            })),
+        )
 
-            await collection.preload()
+        await collection.preload()
 
-            const builder = (collection as any).config.__builder
-            expect(builder).toBeTruthy()
-            const orderByInfo = Object.values(
-              builder.optimizableOrderByCollections,
-            )[0] as any
-            const orderedSource = builder.collectionSources.find(
-              (source: { alias: string }) => source.alias === `employees`,
-            )
-            expect(orderByInfo.sourceId).toBe(orderedSource.sourceId)
-          } finally {
-            CollectionConfigBuilder.prototype.getConfig = originalGetConfig
-          }
-        },
-      )
+        expect(
+          Array.from(collection.values()).map((row) => [
+            row.employeeName,
+            row.managerName,
+          ]),
+        ).toEqual([
+          [`Alice`, `Alice`],
+          [`Bob`, `Bob`],
+          [`Charlie`, `Charlie`],
+        ])
+      })
+
+      it(`optimizes single-column orderBy when passed as array with single element`, async () => {
+        // Patch getConfig to expose the builder on the returned config for test access
+        const { CollectionConfigBuilder } = await import(
+          `../../src/query/live/collection-config-builder.js`
+        )
+        const originalGetConfig = CollectionConfigBuilder.prototype.getConfig
+
+        CollectionConfigBuilder.prototype.getConfig = function (this: any) {
+          const cfg = originalGetConfig.call(this)
+          ;(cfg as any).__builder = this
+          return cfg
+        }
+
+        try {
+          const collection = createLiveQueryCollection((q) =>
+            q
+              .from({ employees: employeesCollection })
+              .orderBy(({ employees }) => [employees.salary], `desc`)
+              .limit(3)
+              .select(({ employees }) => ({
+                id: employees.id,
+                name: employees.name,
+                salary: employees.salary,
+              })),
+          )
+
+          await collection.preload()
+
+          const builder = (collection as any).config.__builder
+          expect(builder).toBeTruthy()
+          const orderByInfo = Object.values(
+            builder.optimizableOrderByCollections,
+          )[0] as any
+          const orderedSource = builder.collectionSources.find(
+            (source: { alias: string }) => source.alias === `employees`,
+          )
+          expect(orderByInfo.sourceId).toBe(orderedSource.sourceId)
+        } finally {
+          CollectionConfigBuilder.prototype.getConfig = originalGetConfig
+        }
+      })
     })
 
     describe(`String Comparison Tests`, () => {

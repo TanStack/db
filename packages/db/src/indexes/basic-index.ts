@@ -436,12 +436,7 @@ export class BasicIndex<
     n: number,
     filterFn?: (key: TKey) => boolean,
   ): Array<TKey> {
-    return this.takeFromIndex(
-      n,
-      this.sortedValues.length - 1,
-      -1,
-      filterFn,
-    )
+    return this.takeFromIndex(n, this.sortedValues.length - 1, -1, filterFn)
   }
 
   private takeFromIndex(

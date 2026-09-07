@@ -500,12 +500,9 @@ describe(`layered-query publication oracle`, () => {
   fcTest.prop(
     [fc.constantFrom(20, 30)],
     oraclePropertyOptions(100, `includes-publication.parent-route`),
-  )(
-    `compares route transitions at both query layers`,
-    async (group) => {
-      await expectPublicationMatches({ type: `parentRoute`, group })
-    },
-  )
+  )(`compares route transitions at both query layers`, async (group) => {
+    await expectPublicationMatches({ type: `parentRoute`, group })
+  })
 
   fcTest.prop(
     [
@@ -525,13 +522,10 @@ describe(`layered-query publication oracle`, () => {
   fcTest.prop(
     [changedValueArbitrary],
     oraclePropertyOptions(100, `includes-publication.optimistic-rollback`),
-  )(
-    `publishes restored state after optimistic rollback`,
-    async (value) => {
-      await expectPublicationMatches({
-        type: `optimisticRollback`,
-        value,
-      })
-    },
-  )
+  )(`publishes restored state after optimistic rollback`, async (value) => {
+    await expectPublicationMatches({
+      type: `optimisticRollback`,
+      value,
+    })
+  })
 })
