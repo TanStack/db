@@ -63,8 +63,12 @@ work, not a claim that each is still open; use this queue for current execution.
   after (comments retained). Package types, changed-file lint and formatting pass.
   Production net-10 lines. The preceding4798/0 full-suite result remains the last
   runtime test run; this type-only step did not rerun it.
-- [ ] Commit and audit the private-type extraction, then proceed to the PR
-  documentation confirmation gate. Both optional review items are implemented.
+- [x] Private-type extraction committed as `ccf4a9cc`. Fresh
+  [loss audit](loadsubset-route-property-type-loss-audit.md) found no dropped
+  field, optionality, runtime-order or export constraint in the selected file;
+  static/single-file limits retained. Both optional review items are complete.
+- [ ] Confirm proceeding to changeset and consolidated PR body, with packaging
+  of investigation notes still to resolve below.
 - [x] Current-head DB gate at `fcee4971`: 4793 passed, zero failures/skips,
   148 files, process exit 0 (`/tmp/tanstack-readiness-final-full.json`). Package
   types, changed-test lint and Vite build pass; built ESM and CJS import smoke
