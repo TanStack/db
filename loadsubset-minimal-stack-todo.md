@@ -41,10 +41,12 @@ current as review findings, oracle laws, and implementation choices change.
   release/throw matrix preserves the old regression and passes baseline;
   delayed ownership mutation produces2 red/2 green. Candidate716/0, types pass;
   five baseline lint errors reproduced. Source+15, diagnostic gzip+70 bytes for
-  this slice. Full DB4772/0, zero skips; 100x campaign pending. Fresh audit found
+  this slice. Full DB4772/0, zero skips; 100x campaign122/0, zero skips. Fresh audit found
   one test loss (deep equality weakened old options-identity checks), no runtime
   loss. Restored identity across all four cells; copied-options mutation4 red,
-  restored fixture4 green. Final suite/assertion audit pending.
+  restored fixture4 green. Corrected full suite4772/0, types pass again; fresh
+  assertion audit returned null. Both full reports and campaign seeds are
+  preserved in the plan. Next: integration walk across the named owners.
   Initial/replay policies remain distinct. Cumulative production source+21 vs
   planning baseline (+2826 vs fixed main). See the plan for traces and scope.
 - All three wider analyses complete at frozen1cec4d7f, including inherited

@@ -1,8 +1,8 @@
 # Loading lifecycle refactor plan
 
-Status: ordered-loader pass audited. Handoff audit found one test-assertion loss;
-reference checks restored and red/green verified. Campaign and follow-up audit
-remain open. Integration and optional D2 work remain queued.
+Status: ordered-loader and replay-handoff changes complete and audited. The
+audit-recovered test assertion is restored and verified. Integration walk is
+next; optional D2 work remains queued.
 Planning baseline: 15987067 on codex/loadsubset-minimal-stack.
 
 ## Aim
@@ -296,7 +296,7 @@ bundle368306 ->368581 (+275) and gzip103768 ->103838 (+70), same esbuild recipe
 and Node22.13.1/zlib1.3.0.1-motley-82a5fec. No heap/throughput claim. Artifact:
 /tmp/tanstack-acquisition-transfer.mjs. Full DB4772/0, zero skips,147 files,
 exit0; artifact: /tmp/tanstack-acquisition-transfer-full.json. A 100x replay/
-history campaign started at2a489848 is running. Across the approved
+history campaign started at2a489848 passed122/0, zero skips, exit0. Across the approved
 refactor, production source is net+21 versus planning15987067 and +2826 versus
 fixed main68366eca.
 
@@ -311,8 +311,22 @@ fixture passes4/0. Artifacts:
 /tmp/tanstack-acquisition-transfer-identity-red.json and
 /tmp/tanstack-acquisition-transfer-identity-green.json. No production change
 was needed. This corrects a loss introduced while broadening the old test.
-The campaign started before this assertion correction; final tests and a
-fresh bounded assertion audit must validate the corrected test separately.
+The campaign started before this assertion correction. The final corrected
+full DB suite passed4772/0, zero skips,147 files, exit0; types pass again.
+Artifact: /tmp/tanstack-acquisition-transfer-final-full.json.
+Fresh bounded assertion audit returned null: identity, length, order, and
+cleanup checks preserve the original case. It also notes the new final retry
+identity check is stricter than the original deep equality. Full report:
+[loadsubset-acquisition-transfer-identity-loss-audit.md](loadsubset-acquisition-transfer-identity-loss-audit.md).
+The audit is static, limited to assertion preservation; internal ownership
+explanations and broader callback timing are not proved by this four-cell fixture.
+
+100x artifact: /tmp/tanstack-acquisition-transfer-100x.json, with campaign-only
+--testTimeout=120000. Each history property ran8000 cases and each replay
+property3000. Random seeds: history async254995751, sync-399209978; replay
+completion727401577, sequential1319136034, restart1961738447,
+scheduled1461825591, shared1953159746, optimistic1721776742. Fixed seeds remain
+in the suites. No timeout failure or assertion mismatch was reported.
 
 The initial path is unchanged: startSubsetDemand already installs a starting
 owner before source invocation, then checks captured load session, membership,
