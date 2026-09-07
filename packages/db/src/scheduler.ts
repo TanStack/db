@@ -18,13 +18,13 @@ interface ScheduleOptions {
 
 /**
  * State per context. Queue preserves order, jobs hold run functions, dependencies track
- * prerequisites, and completed records which jobs have run during the current flush.
+ * prerequisites. A job leaves the pending map before its callback runs, so work
+ * queued by that callback is a new pending dependency.
  */
 interface SchedulerContextState {
   queue: Array<unknown>
   jobs: Map<unknown, () => void>
   dependencies: Map<unknown, Set<unknown>>
-  completed: Set<unknown>
 }
 
 interface PendingAwareJob {
@@ -64,7 +64,6 @@ export class Scheduler {
         queue: [],
         jobs: new Map(),
         dependencies: new Map(),
-        completed: new Set(),
       }
       this.contexts.set(contextId, context)
     }
@@ -100,9 +99,6 @@ export class Scheduler {
     } else if (!context.dependencies.has(jobId)) {
       context.dependencies.set(jobId, new Set())
     }
-
-    // Clear completion status since we're rescheduling
-    context.completed.delete(jobId)
   }
 
   /**
@@ -113,7 +109,7 @@ export class Scheduler {
     const context = this.contexts.get(contextId)
     if (!context) return
 
-    const { queue, jobs, dependencies, completed } = context
+    const { queue, jobs, dependencies } = context
 
     while (queue.length > 0) {
       let ranThisPass = false
@@ -124,7 +120,6 @@ export class Scheduler {
         const run = jobs.get(jobId)
         if (!run) {
           dependencies.delete(jobId)
-          completed.delete(jobId)
           continue
         }
 
@@ -139,13 +134,10 @@ export class Scheduler {
               isPendingAwareJob(dep) && dep.hasPendingGraphRun(contextId)
 
             // Treat dependencies as blocking if the dep has a pending run in this
-            // context or if it's enqueued and not yet complete. If the dep is
+            // context or if it's enqueued. If the dep is
             // neither pending nor enqueued, consider it satisfied to avoid deadlocks
             // on lazy sources that never schedule work.
-            if (
-              (jobs.has(dep) && !completed.has(dep)) ||
-              (!jobs.has(dep) && depHasPending)
-            ) {
+            if (jobs.has(dep) || depHasPending) {
               ready = false
               break
             }
@@ -155,10 +147,9 @@ export class Scheduler {
         if (ready) {
           jobs.delete(jobId)
           dependencies.delete(jobId)
-          // Run the job. If it throws, we don't mark it complete, allowing the
-          // error to propagate while maintaining scheduler state consistency.
+          // A reentrant schedule now owns a fresh pending job; finishing this
+          // callback must not mark that replacement as complete.
           run()
-          completed.add(jobId)
           ranThisPass = true
         } else {
           queue.push(jobId)
@@ -213,7 +204,6 @@ export class Scheduler {
 
     context.jobs.delete(jobId)
     context.dependencies.delete(jobId)
-    context.completed.delete(jobId)
     context.queue = context.queue.filter((id) => id !== jobId)
 
     if (context.jobs.size === 0) {

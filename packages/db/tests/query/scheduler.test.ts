@@ -105,6 +105,56 @@ afterEach(() => {
   transactionScopedScheduler.flushAll()
 })
 
+describe(`Scheduler dependency reentry`, () => {
+  it.each(
+    [false, true].flatMap((sourceFirst) =>
+      [false, true].flatMap((pendingAware) =>
+        [false, true].map((requeue) => ({
+          sourceFirst,
+          pendingAware,
+          requeue,
+        })),
+      ),
+    ),
+  )(
+    `waits for current source work: sourceFirst=$sourceFirst pendingAware=$pendingAware requeue=$requeue`,
+    ({ sourceFirst, pendingAware, requeue }) => {
+      const scheduler = new Scheduler()
+      const contextId = Symbol(`source-reentry`)
+      let sourceRuns = 0
+      let pending = true
+      const source = pendingAware
+        ? { hasPendingGraphRun: () => pending }
+        : Symbol(`source`)
+      const observedRuns: Array<number> = []
+      const runSource = () => {
+        sourceRuns++
+        pending = false
+        if (requeue && sourceRuns === 1) {
+          pending = true
+          scheduler.schedule({ contextId, jobId: source, run: runSource })
+        }
+      }
+      const jobs = [
+        { contextId, jobId: source, run: runSource },
+        {
+          contextId,
+          jobId: Symbol(`dependent`),
+          dependencies: [source],
+          run: () => observedRuns.push(sourceRuns),
+        },
+      ]
+      for (const job of sourceFirst ? jobs : [...jobs].reverse()) {
+        scheduler.schedule(job)
+      }
+      scheduler.flush(contextId)
+      expect(sourceRuns).toBe(requeue ? 2 : 1)
+      expect(observedRuns).toEqual([sourceRuns])
+      expect(scheduler.hasPendingJobs(contextId)).toBe(false)
+    },
+  )
+})
+
 describe(`Collection publication scheduler context`, () => {
   it(`shares one context and flushes after the outer publication`, () => {
     const calls: Array<string> = []

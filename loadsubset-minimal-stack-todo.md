@@ -36,7 +36,7 @@ current as review findings, oracle laws, and implementation choices change.
   production lines. Fresh100x integration gate passes1582/0 across26 files,
   exit0, no skipped tests or reported runner errors. Integration loss audit
   complete; final campaign report audit complete.
-- Still open: whole-branch size goal (+2849 net package-source lines against
+- Still open: whole-branch size goal (+2839 net package-source lines against
   fixedmain68366eca), final coherence/review and
   RFC/PR/changeset reconciliation. Older unchecked entries are phase records;
   reconcile them with later evidence before treating them as current bugs.
@@ -6044,3 +6044,47 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   expanded-green,expanded-ablation,full,100,types,lint logs; full/100 JSON; bundle.json.
   W1–W11 totals423 source lines/4437 minified/952 gzip diagnostic bytes removed.
   Fixed-main source gap2849 remains open. No push.
+
+### W12 — pending jobs are the scheduler's dependency truth
+
+- [x] Remove the completed Set and its writes. A job leaves jobs before run();
+  reentrant scheduling creates a new pending job. Adding the same ID to completed
+  after run() incorrectly let dependents bypass that replacement. Block on jobs
+  or the dependency's pending-run signal, retaining lazy-source, context, clear,
+  error propagation and no-progress checks. Production -10 lines, one less Set.
+- [x] Add8 direct Scheduler cells: source/dependent enqueue order, plain versus
+  pending-aware IDs, and requeue/no-requeue. Old source:4 red/77 green; fixed
+  scheduler+Effect150/0. All4 requeue cells observe source pass1 instead of2 on
+  the old source. Existing tests lacked same-ID requeue during its own callback.
+  This is a real red/green bug, not an artificial ablation. Tests exercise the
+  scheduler directly, not a full D2 query; integration gates remain separate.
+- [x] Expanded30-file1x gate1861/0,exit0,14.15s. Package tsc and changed-file
+  scheduler source/test eslint exit0. No tests deleted or weakened.
+- [x] All DB tests:4718 passed,5 failed,6 skipped,146 files. Temporarily restore
+  scheduler.ts byte-for-byte to5122fc8f and rerun the two failing files:172 passed,
+  same5 failures at the same assertions. Restore the fix afterward. These are
+  pre-W12 failures, not evidence of a green whole-package gate or known causes.
+- [x] Diagnostic bundle343643/97210 ->343526/97174 DB minified/gzip (-117/-36);
+  DB-IVM30220/9133 unchanged. Same esbuild all-export/external-dependency method;
+  not actual application bundle, heap or runtime-performance measurement.
+- [ ] Focused100x pagination/includes-publication/scheduler/Effect gate.
+- [ ] Commit and fresh post-commit Hidden-signal recovery assay.
+- Evidence prefix: /tmp/tanstack-weight-scheduler-completed-; red/baseline/green,
+  types/lint,db-all/prior-failures/full/100 logs and JSON reports, bundle.json.
+  W1–W12 totals433 source lines/4554 minified/988 gzip diagnostic bytes removed.
+  Fixed-main source gap2839 remains open. No push.
+
+### Next full-suite investigation queue — five assertions, causes not yet proved
+
+- [ ] F1: includes.test.ts:5926, deep buffer change under one parent. The sibling's
+  nested result array is value-equal but fails reference identity (toBe). Determine
+  whether this is an obsolete identity contract or excess publication; preserve
+  the notification assertion. Do not replace it with deep equality without tracing
+  the intended contract and the rest of the test.
+- [ ] F2: join-subquery.test.ts:505/546, ordered limited child subquery with LEFT
+  and RIGHT joins, autoIndex off/eager (4 cells). Actual [] vs expected issue5.
+  Trace query semantics, input demand and applied rows before deciding runtime
+  defect versus outdated fixture. Fold any confirmed gap into the relevant oracle.
+- The selected30-file gate did not include either unit file. Full-package runs,
+  not only the oracle selection, must stay in the final acceptance gate. These
+  failures reproduce before W12; their earlier origin has not been bisected.
