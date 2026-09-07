@@ -5,6 +5,13 @@ current as review findings, oracle laws, and implementation choices change.
 
 ## Current checkpoint — 2026-09-06
 
+- W13 source-owned retention: removed predicate-based replay pruning; request
+  release changes loading/readiness, not row ownership (user-approved).
+  Corrected both oracle models, retained the four-cell fracture witness in a
+  24-cell matrix, and pinned stale-row reacquisition. Full DB4749/0,6 existing
+  skips,147 files; package types pass. Production -34 lines, diagnostic bundle
+  -412 minified/-126 gzip bytes; fixed-main source gap now2805. Focused100x and
+  post-commit loss audit pending; detailed evidence and contract changes below.
 - All five full-suite follow-ups are reconciled: ordered joins await initial
   readiness; unchanged inline arrays need not retain reference identity when
   the containing parent changes (user-approved). Full DB gate4724/0,6 existing
@@ -41,7 +48,7 @@ current as review findings, oracle laws, and implementation choices change.
   production lines. Fresh100x integration gate passes1582/0 across26 files,
   exit0, no skipped tests or reported runner errors. Integration loss audit
   complete; final campaign report audit complete.
-- Still open: whole-branch size goal (+2839 net package-source lines against
+- Still open: whole-branch size goal (+2805 net package-source lines against
   fixedmain68366eca), final coherence/review and
   RFC/PR/changeset reconciliation. Older unchecked entries are phase records;
   reconcile them with later evidence before treating them as current bugs.
@@ -6195,3 +6202,55 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   overrides unset; only opted-in properties scale, not unit cases. Evidence:
   /tmp/tanstack-inline-identity-100.json/log. Runtime source gap remains2839;
   W1–W12 weight savings unchanged. No push.
+
+### W13 — source-owned retention after fracture scan
+
+- [x] Accepted rule: demand owns an acquisition, not matching source rows.
+  Release ends work/readiness and invokes unload; actual source deletions and
+  successful authoritative replacement own row removal. Removed the historical
+  special promise of immediate predicate-based pruning during replay. This
+  supersedes the release-pruning statement in "Retained-row replay scope and
+  failure recovery"; its independent-source and coherent-publication laws stay.
+- [x] Oracle-first red: lifecycle publication's release reducer no longer
+  deletes demand-named rows. Replay expectations use independently tracked
+  applied source rows, not only surviving requests, and retain the failed
+  baseline on release. Unchanged runtime d53fb749:8 failures/146 passes in
+  three files (including original four-cell diagnostic), exit1. Fixed replay
+  seed1756 and fresh seed-778275775 both expose the changed law.
+- [x] Four-cell fracture witness expanded to24 source-retention cells:
+  normal/successful/failed replay × matching/nonmatching independent row ×
+  overlapping/disjoint surviving request × source retain/evict on unload.
+  Old runtime4 red/20 green; pruning removal24/0. These check exact source and
+  subscriber rows, publication counts/privacy, cancellation, physical unload
+  exactly once, and failure identity. No source ownership map added to core.
+- [x] Delete pruneReleasedReplayRows and its call. Deletion exposed a retained
+  same-key snapshot refresh previously masked by synthetic removal: fixed
+  replay seed1756 path2:1:1:3 shrank to final release followed by reacquisition.
+  Existing stalePublishedRows and reconciliation now let a direct snapshot
+  refresh that row; no new state. Added a deterministic trace and kept exact
+  coherent update/previousValue and two nonempty publication checks.
+- [x] Preserve cleanup and reentrancy tests under the new contract: final
+  release no longer invokes a synthetic delete callback. Its throwing completion
+  callback test now uses the existing graph publication hook; reentry formerly
+  induced by synthetic deletion now uses the actual ready notification.
+  After-release and during-unload cases remain; old replay rejects AbortError
+  once retired, while demand acquired during unload still gates replacement.
+  Successful peer checks retain source-cached rows until actual source deletes.
+  No tests removed; original standalone probe became the24-cell suite.
+- [x] Full package gate4749/0,6 existing skips,147 files,exit0,30.24s; package
+  tsc exit0. First full run4748/0 had two new-fixture type errors (Map key
+  number versus string|number); corrected before this clean gate. Test-file
+  eslint exit0 with9 pre-existing shadow warnings. Source eslint has5 existing
+  errors, reproduced on d53fb749 via stdin (spaced-comment rule disabled only
+  for the stdin baseline diagnostic); no clean source-lint claim.
+- [x] Weight: -34 net executable lines against d53fb749; cumulative W1–W13
+  savings467 lines,4966 minified/1114 gzip bytes. Fixed-main68366eca source gap
+  +2805. Diagnostic esbuild0.20.2, es2022, all exports/dependencies external:
+  DB343526→343114 minified and97174→97048 gzip; db-ivm30220/9133 unchanged.
+  Not an application bundle, runtime-throughput or heap measurement.
+- [ ] Focused100x replay/lifecycle/publication gate (five files).
+- [ ] Fresh post-commit Field Lab Hidden-signal recovery assay.
+- Evidence: /tmp/tanstack-release-retention-{red,first-green,green,full,
+  full-final,100}.json/log; -types-final.log, -test-lint.log,
+  -baseline-lint-semantic.log, -bundle.json; matrix old-runtime result at
+  /tmp/tanstack-retention-matrix-red.log. No push.

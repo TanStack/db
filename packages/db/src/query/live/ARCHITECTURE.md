@@ -570,6 +570,16 @@ on the stack. Error delivery follows the failed adapter attempt, however, so
 an error listener's disposal can retry that exact debt and observe any failure;
 it must not mistake a busy-release no-op for completed cleanup.
 
+Request predicates describe acquisition, not row ownership. Releasing a demand
+does not delete matching rows from either the public snapshot or an unfinished
+replacement. The source controls retention through actual row writes; a
+successful authoritative replacement reconciles the retained public snapshot.
+This rule also applies when another demand overlaps the released predicate or
+an independent source write happens to match it. Source deletions during replay
+stay private until successful publication; failure preserves the last complete
+snapshot. Query filters and routes, not request release, decide which retained
+source rows belong in a query result.
+
 Collection cleanup detaches surviving logical demand from the discarded sync
 session. It aborts that session's physical work and rejects its replay barrier,
 and rejects an unfinished initial preload with `AbortError`. Cleanup never

@@ -365,16 +365,8 @@ function projectPublication(
     publication.source.clear()
     publication.replacement = undefined
   } else if (command.type === `release`) {
-    if (
-      effect.ownerId !== undefined &&
-      publication.replacement &&
-      !lifecycle.owners.some(({ demand }) => demand === command.demand)
-    ) {
-      const next = new Map(publication.visible)
-      next.delete(command.demand)
-      publication.replacement.rows.delete(command.demand)
-      publishIfChanged(publication, next)
-    }
+    // Release changes demand, not source retention. Only source writes or a
+    // successful replacement can change the subscriber's rows.
     finishReplacement(publication, lifecycle)
   } else if (command.type === `settle` && effect.attemptId !== undefined) {
     const attempt = lifecycle.attempts[effect.attemptId]!

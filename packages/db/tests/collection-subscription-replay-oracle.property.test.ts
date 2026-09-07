@@ -654,13 +654,7 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
         )
         const previousPublication = new Map(expectedPublished)
         expectedPublished.clear()
-        const nextRows = currentAttemptSucceeds
-          ? rowsById(
-              currentAttempt.loads.flatMap(({ demandId, rows }) =>
-                activeDemandIds.has(demandId) ? rows : [],
-              ),
-            )
-          : session.baseline
+        const nextRows = currentAttemptSucceeds ? sourceRows : session.baseline
         for (const [id, row] of nextRows) {
           expectedPublished.set(id, { ...row })
         }
@@ -726,7 +720,6 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
         scenario.releaseOnLastAttempt !== undefined
       ) {
         const releasedDemand = scenario.releaseOnLastAttempt
-        const previous = expectedPublished.get(releasedDemand)
         subscription.releaseSnapshot(demandWheres.get(releasedDemand)!)
         activeDemandIds.delete(releasedDemand)
         for (const replayIndex of modelSession.pending) {
@@ -734,19 +727,8 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
             modelSession.pending.delete(replayIndex)
           }
         }
-        expectedPublished.delete(releasedDemand)
-        modelSession.baseline.delete(releasedDemand)
-        if (previous) {
-          modelSession.publicationCount++
-          expectedPublicationCount++
-          expect(sortedChanges(publicationBatches.at(-1)!)).toEqual([
-            {
-              type: `delete`,
-              key: releasedDemand,
-              value: previous,
-            },
-          ])
-        }
+        // A released request does not retract rows already applied by the
+        // source, nor change the retained baseline of an unfinished replay.
         if (modelSession.pending.size === 0 && activeDemandIds.size === 0) {
           expectedPublicationCount = publicationCount
           modelSession = undefined
@@ -2185,7 +2167,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     })
   })
 
-  it(`excludes rows written before their replay demand is released`, async () => {
+  it(`retains applied rows after their replay demand is released`, async () => {
     await runReplayScenario({
       initialRows: [{ id: `two`, value: 0 }],
       demandIds: [`one`, `two`],
@@ -2208,6 +2190,30 @@ describe(`CollectionSubscription replay oracle`, () => {
       ],
       settlementOrder: [0, 1],
       settlementPhases: [0, 0],
+      releaseOnLastAttempt: `one`,
+      afterSettlement: [{ type: `request`, demandId: `one` }],
+    })
+  })
+
+  it(`refreshes a retained row when its final released demand is reacquired`, async () => {
+    // Reduced from the fixed replay corpus after removing release-time pruning.
+    await runReplayScenario({
+      initialRows: [{ id: `one`, value: 0 }],
+      demandIds: [`one`],
+      attempts: [
+        {
+          loads: [
+            {
+              demandId: `one`,
+              rows: [{ id: `one`, value: 1 }],
+              outcome: `resolve`,
+              writeBeforeSettlement: true,
+            },
+          ],
+        },
+      ],
+      settlementOrder: [0],
+      settlementPhases: [0],
       releaseOnLastAttempt: `one`,
       afterSettlement: [{ type: `request`, demandId: `one` }],
     })
@@ -2878,8 +2884,13 @@ describe(`CollectionSubscription replay oracle`, () => {
         },
       },
     })
-    const subscription = collection.subscribeChanges(() => {
-      if (rejectReplacement) throw listenerFailure
+    const subscription = collection.subscribeChanges(() => {}, {
+      truncateReplayPublication: {
+        start: () => {},
+        succeed: () => {
+          if (rejectReplacement) throw listenerFailure
+        },
+      },
     })
 
     try {
@@ -3692,11 +3703,14 @@ describe(`CollectionSubscription replay oracle`, () => {
       // Outside replay, release ends acquisition ownership; this adapter does
       // not evict its cached rows. The still-live subscriber observes deletion
       // when the source actually removes the row.
-      expect(sortedRows(visible)).toEqual([{ id: `two`, value: 2 }])
+      expect(sortedRows(visible)).toEqual([
+        { id: `one`, value: 2 },
+        { id: `two`, value: 2 },
+      ])
       begin()
       write({ type: `delete`, key: `two` })
       commit()
-      expect(sortedRows(visible)).toEqual([])
+      expect(sortedRows(visible)).toEqual([{ id: `one`, value: 2 }])
     } finally {
       failed.resolve()
       successful.resolve()
@@ -3707,7 +3721,10 @@ describe(`CollectionSubscription replay oracle`, () => {
     for (const load of loads) {
       expect(unloads.filter((options) => options === load)).toHaveLength(1)
     }
-    expect(survivingRows).toEqual([{ id: `two`, value: 2 }])
+    expect(survivingRows).toEqual([
+      { id: `one`, value: 2 },
+      { id: `two`, value: 2 },
+    ])
   })
 
   it(`keeps replay completion failure separate from a peer release failure`, async () => {
@@ -3922,7 +3939,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
-  it.each([`after-release`, `during-delete`, `during-unload`] as const)(
+  it.each([`after-release`, `during-ready`, `during-unload`] as const)(
     `reacquires a final released replay demand %s without waiting for obsolete work`,
     async (reacquireTiming) => {
       let begin!: () => void
@@ -3936,7 +3953,7 @@ describe(`CollectionSubscription replay oracle`, () => {
       const where = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
       const loads: Array<LoadSubsetOptions> = []
       const unloads: Array<LoadSubsetOptions> = []
-      let reacquireInCallback = false
+      let reacquireOnReady = false
       let reacquireInUnload = false
       const collection = createCollection<ReplayRow>({
         id: `final-replay-reacquire-${reacquireTiming}`,
@@ -3984,18 +4001,15 @@ describe(`CollectionSubscription replay oracle`, () => {
       const subscription: CollectionSubscription = collection.subscribeChanges(
         (changes) => {
           batches.push(recordPublishedChanges(visible, changes))
-          if (
-            reacquireInCallback &&
-            changes.some(({ type }) => type === `delete`)
-          ) {
-            reacquireInCallback = false
-            subscription.requestSnapshot({ where })
-          }
         },
       )
       const readyRows: Array<Array<ReplayRow>> = []
       subscription.on(`status:ready`, () => {
         readyRows.push(sortedRows(visible))
+        if (reacquireOnReady) {
+          reacquireOnReady = false
+          subscription.requestSnapshot({ where })
+        }
       })
 
       try {
@@ -4011,7 +4025,9 @@ describe(`CollectionSubscription replay oracle`, () => {
           (error: unknown) => ({ status: `rejected` as const, error }),
         )
 
-        reacquireInCallback = reacquireTiming === `during-delete`
+        // Release has no synthetic delete callback. Reenter from its actual
+        // ready notification instead; the old replay is already retired then.
+        reacquireOnReady = reacquireTiming === `during-ready`
         reacquireInUnload = reacquireTiming === `during-unload`
         subscription.releaseSnapshot(where)
         if (reacquireTiming === `after-release`) {
@@ -4042,7 +4058,10 @@ describe(`CollectionSubscription replay oracle`, () => {
           await expect(settlement).resolves.toEqual({ status: `resolved` })
         } else {
           expect(subscription.pendingTruncateReplacement).toBeUndefined()
-          await expect(settlement).resolves.toEqual({ status: `resolved` })
+          await expect(settlement).resolves.toMatchObject({
+            status: `rejected`,
+            error: { name: `AbortError` },
+          })
         }
 
         expect(subscription.pendingTruncateReplacement).toBeUndefined()
@@ -4050,19 +4069,22 @@ describe(`CollectionSubscription replay oracle`, () => {
         expect(sortedChanges(batches[0]!)).toEqual([
           { type: `insert`, key: `one`, value: { id: `one`, value: 1 } },
         ])
-        expect(sortedChanges(batches.at(-2)!)).toEqual([
-          { type: `delete`, key: `one`, value: { id: `one`, value: 1 } },
-        ])
         expect(sortedChanges(batches.at(-1)!)).toEqual([
-          { type: `insert`, key: `one`, value: { id: `one`, value: 2 } },
+          {
+            type: `update`,
+            key: `one`,
+            value: { id: `one`, value: 2 },
+            previousValue: { id: `one`, value: 1 },
+          },
         ])
+        expect(batches.filter((batch) => batch.length > 0)).toHaveLength(2)
         expect(loads).toHaveLength(3)
         expect(loads.map(({ where: requestWhere }) => requestWhere)).toEqual([
           where,
           where,
           where,
         ])
-        if (reacquireTiming !== `after-release`) {
+        if (reacquireTiming === `during-unload`) {
           expect(readyRows).toEqual([[{ id: `one`, value: 2 }]])
         }
       } finally {

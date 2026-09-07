@@ -787,8 +787,7 @@ export class CollectionSubscription
     this.stalePublishedRows.clear()
 
     this.applyPrivateChanges(session, retainedDeletes)
-    // Direct subscribers retain their public rows throughout replay. Released
-    // rows are already removed there, so no second baseline needs reconciling.
+    // Diff the retained public snapshot against the applied source replacement.
     const replacement = this.createStateDiff(
       this.publishedRows,
       session.privateRows,
@@ -1408,11 +1407,15 @@ export class CollectionSubscription
       return false
     }
 
-    // Only send changes that have not been sent yet
+    // Skip known rows, except retained rows from an abandoned replay: a new
+    // snapshot must reconcile those with the source, not suppress their update.
     const knownRows =
       this.truncateReplaySession?.privateRows ?? this.publishedRows
     const filteredSnapshot = snapshot.filter(
-      (change) => !this.sentKeys.has(change.key) && !knownRows.has(change.key),
+      (change) =>
+        (!this.isBufferingForTruncate &&
+          this.stalePublishedRows.has(change.key)) ||
+        (!this.sentKeys.has(change.key) && !knownRows.has(change.key)),
     )
 
     // Add keys to sentKeys BEFORE calling callback to prevent race condition.
@@ -1423,7 +1426,11 @@ export class CollectionSubscription
     }
 
     this.snapshotSent = true
-    this.publishSnapshot(filteredSnapshot)
+    this.publishSnapshot(
+      this.isBufferingForTruncate
+        ? filteredSnapshot
+        : this.reconcileStalePublishedChanges(filteredSnapshot),
+    )
     return true
   }
 
@@ -1499,7 +1506,6 @@ export class CollectionSubscription
     demand.initialResult?.reject(new LoadSubsetOperationAbortedError())
     const releaseCallbacks = [
       () => this.removeTruncateReplayParticipant(demand),
-      () => this.pruneReleasedReplayRows(demand),
       ...(demand.acquisitionState === `active`
         ? [
             // Adapter release is a supported reentrancy boundary. A demand
@@ -1533,46 +1539,6 @@ export class CollectionSubscription
     this.stalePublishedRows = new Map(this.publishedRows)
     this.restorePublishedSnapshotTracking()
     this.options.truncateReplayPublication?.succeed()
-  }
-
-  /** Remove rows owned only by a demand released during private replay. */
-  private pruneReleasedReplayRows(released: SubsetDemand): void {
-    const session = this.truncateReplaySession
-    if (!session) return
-    const releasedFilter = released.requestOptions.where
-      ? createFilterFunctionFromExpression(released.requestOptions.where)
-      : undefined
-    const filters = this.subsetDemands.map((demand) =>
-      demand.requestOptions.where
-        ? createFilterFunctionFromExpression(demand.requestOptions.where)
-        : undefined,
-    )
-    const isReleasedRow = (value: object) =>
-      (releasedFilter?.(value) ?? true) &&
-      filters.every((filter) => !(filter?.(value) ?? true))
-    // Request ownership does not constrain independent source deltas. Retire
-    // only this demand's rows, from both public and unfinished replacement state.
-    for (const [key, value] of session.privateRows) {
-      if (isReleasedRow(value)) session.privateRows.delete(key)
-    }
-    const deletes = [...this.publishedRows]
-      .filter(([, value]) => isReleasedRow(value))
-      .map(
-        ([key, value]): ChangeMessage<any, any> => ({
-          type: `delete`,
-          key,
-          value,
-        }),
-      )
-    if (deletes.length === 0) return
-
-    for (const { key } of deletes) {
-      // A fully loaded snapshot normally stops per-change sent-key tracking.
-      // Release still retires these keys, so a later demand must be able to
-      // publish them again from the retained source state.
-      this.sentKeys.delete(key)
-    }
-    this.filteredCallback(deletes)
   }
 
   /** Read the applied rows in an ordered acquisition without starting demand. */
