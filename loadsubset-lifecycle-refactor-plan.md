@@ -115,6 +115,42 @@ Paired diagnostic bundle remains 368361 minified bytes; gzip changes
 Module ordering/identifier changes can affect compression without semantic
 changes. This is not an application-size or performance result.
 
+Fresh mechanical-move loss audit at 200f96fc returned null: the moved body,
+remaining utility bodies, all consumer uses and test assertions were preserved;
+no public export or new dependency-cycle path was introduced. Static comparison
+only; its mechanical lens does not establish correctness of existing behavior.
+
+### Step 1b — first explicit state transitions
+
+Replace failed + failedWindowOperationGeneration with a failedRequest record.
+Presence represents failure even without an explicit operation generation.
+Completion clears the record; retry claims its generation before releasing old
+work. A retained release handle without a current failure remains independent.
+Synchronous and asynchronous failures share recordRequestFailure, which clears
+request/tie dedupe guards. Existing activity/generation and call-stack guards,
+source evidence, recovery obligation and full-source lifecycle remain separate.
+This is a bounded substep, not completion of the whole source-evidence refactor.
+
+Remove hasLastBoundary: canExpressCursorOrder rejects null and undefined before
+the equality guard, and reset always clears lastBoundary. The initial field map
+listed presence/value as separate facts but did not account for that operand
+domain. A proposed undefined-tie test was wrong: the supported path deliberately
+loads the full source. The corrected five-cell control crosses nullish full-source
+fallback with valid falsy ties (zero, false, empty string), including subsequent
+refinement and no repeated tie acquisition.
+
+Those controls pass the old runtime. Removing the order-safety guard as a
+temporary sensitivity mutation yields 2 failed / 3 passed (44 tests filtered).
+The mutation is restored; no defect is being claimed in the baseline.
+Artifacts: /tmp/tanstack-ordered-state-controls.json and
+/tmp/tanstack-ordered-state-red-control.json.
+
+Candidate targeted634/0, no skips, six files; types and changed loader/test lint
+pass. Full gate is running. Paired diagnostic vs original baseline:
+368361 -> 368196 minified (-165), 103734 -> 103737 gzip (+3), same Node/zlib.
+Only one failure record is retained at a time; no event history/row mirror added.
+No heap or throughput claim. Fresh post-commit state audit is next.
+
 Current surface: OrderedSourceLoader in query/live/utils.ts, consumed by the
 collection subscriber and Effect. Move it to ordered-source-loader.ts in one
 mechanical commit, preserving its interface. Do not mix the move with semantics.

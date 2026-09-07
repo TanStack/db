@@ -23,14 +23,16 @@ export class OrderedSourceLoader {
   private requesting = false
   private fullSource = false
   private fullSourceFailed = false
-  private failed = false
-  private failedWindowOperationGeneration: number | undefined
+  // The record's presence blocks automatic retry, including initial requests
+  // that have no explicit window-operation generation.
+  private failedRequest:
+    | { windowOperationGeneration: number | undefined }
+    | undefined
   private releaseFailedAcquisition: ReleaseLoadSubset | undefined
   private active = true
   private generation = 0
   private lastPage: { count: number; boundary: unknown } | undefined
   private lastPrefixCount: number | undefined
-  private hasLastBoundary = false
   private lastBoundary: unknown
 
   constructor(
@@ -91,17 +93,20 @@ export class OrderedSourceLoader {
   loadMore(windowOperationGeneration?: number): Promise<unknown> | undefined {
     if (!this.active || this.info.limit === 0 || this.requesting) return
     const mayRetryFailure =
-      !this.failed ||
+      this.failedRequest === undefined ||
       (windowOperationGeneration !== undefined &&
-        windowOperationGeneration !== this.failedWindowOperationGeneration)
+        windowOperationGeneration !==
+          this.failedRequest.windowOperationGeneration)
     if (!mayRetryFailure) return this.pending
     if (
-      (this.failed || this.releaseFailedAcquisition) &&
+      (this.failedRequest || this.releaseFailedAcquisition) &&
       windowOperationGeneration !== undefined
     ) {
       // Move ownership to the explicit replacement before releasing the old
       // lease. Adapter cleanup may reenter the loader.
-      this.failedWindowOperationGeneration = windowOperationGeneration
+      if (this.failedRequest) {
+        this.failedRequest.windowOperationGeneration = windowOperationGeneration
+      }
       const releaseFailedAcquisition = this.releaseFailedAcquisition
       this.releaseFailedAcquisition = undefined
       if (releaseFailedAcquisition) {
@@ -135,7 +140,7 @@ export class OrderedSourceLoader {
     if (!this.info.dataNeeded) return this.pending
     let count = Math.max(
       this.info.dataNeeded(),
-      this.failed || !this.hasEstablishedSourceCoverage
+      this.failedRequest !== undefined || !this.hasEstablishedSourceCoverage
         ? this.info.offset + this.info.limit
         : 0,
     )
@@ -199,7 +204,6 @@ export class OrderedSourceLoader {
   resetCursor(): void {
     this.generation++
     this.pending = undefined
-    this.hasLastBoundary = false
     this.lastBoundary = undefined
     this.sourceBoundary = undefined
     this.invalidateCursor()
@@ -292,8 +296,7 @@ export class OrderedSourceLoader {
     const complete = (): void => {
       if (this.pending === tracked) this.pending = undefined
       if (!this.active || generation !== this.generation) return
-      this.failed = false
-      this.failedWindowOperationGeneration = undefined
+      this.failedRequest = undefined
       if (kind !== `boundary`) {
         this.hasEstablishedSourceCoverage = true
         // Source delivery can invalidate the in-flight prefix marker.
@@ -337,13 +340,8 @@ export class OrderedSourceLoader {
         // pass must not start an eager retry loop.
         this.fullSourceFailed = true
       }
-      this.failed = true
-      this.failedWindowOperationGeneration = windowOperationGeneration
+      this.recordRequestFailure(windowOperationGeneration)
       this.releaseFailedAcquisition = releaseAcquisition
-      this.lastPage = undefined
-      this.lastPrefixCount = undefined
-      this.hasLastBoundary = false
-      this.lastBoundary = undefined
       throw error
     }
     const tracked = request.then(complete, fail)
@@ -370,7 +368,9 @@ export class OrderedSourceLoader {
       this.loadFullSource(false, windowOperationGeneration)
       return this.pending
     }
-    if (this.hasLastBoundary && Object.is(this.lastBoundary, value)) {
+    // Undefined is not an expressible cursor boundary, so it denotes that no
+    // tie request has been attempted. Other falsy values remain valid keys.
+    if (Object.is(this.lastBoundary, value)) {
       return this.loadMore()
     }
     const where = buildCursorCurrent(orderBy, [value])
@@ -378,7 +378,6 @@ export class OrderedSourceLoader {
       this.loadFullSource(false, windowOperationGeneration)
       return this.pending
     }
-    this.hasLastBoundary = true
     this.lastBoundary = value
     return this.requestAndObserve(
       (onLoadSubsetResult) => {
@@ -427,15 +426,18 @@ export class OrderedSourceLoader {
     windowOperationGeneration?: number,
   ): void {
     this.invalidateSourceCoverage()
-    this.invalidateCursor()
-    this.hasLastBoundary = false
-    this.lastBoundary = undefined
-    this.failed = true
-    this.failedWindowOperationGeneration = windowOperationGeneration
+    this.recordRequestFailure(windowOperationGeneration)
     if (isFullSource) {
       this.fullSource = false
       this.fullSourceFailed = true
     }
+  }
+
+  /** A failed request blocks ordinary refinement until a new operation. */
+  private recordRequestFailure(windowOperationGeneration?: number): void {
+    this.failedRequest = { windowOperationGeneration }
+    this.invalidateCursor()
+    this.lastBoundary = undefined
   }
 
   /** Observe settlement only after all synchronous request work succeeds. */

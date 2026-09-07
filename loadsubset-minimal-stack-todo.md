@@ -15,7 +15,12 @@ current as review findings, oracle laws, and implementation choices change.
   Baseline fresh audit complete with reset/replay/promise-identity qualifications.
   Step1a mechanical ordered-loader move: class body unchanged,629/0 targeted,
   types pass; baseline Effect lint error retained. Minified bytes unchanged,
-  diagnostic gzip +15. Post-commit move audit is next.
+  diagnostic gzip +15. Fresh move audit returned null.
+  Step1b: explicit retry-failure record/shared failure transition; redundant tie
+  flag removed after checking cursor admissibility. Five control cells pass old
+  runtime and detect an ablated safety guard (2 red/3 green). Candidate634/0,
+  types/changed-file lint pass; full gate and state audit pending. This is the
+  first state substep, not completion of all ordered-source evidence work.
 - All three wider analyses complete at frozen1cec4d7f, including inherited
   loading code, not just the PR diff. Separate unranked readouts are below.
   Analysis only: no runtime/test edits, test runs or implementation selection.
