@@ -30,21 +30,36 @@ work, not a claim that each is still open; use this queue for current execution.
 - [x] Verify the prep-pr detached-demand restart publication finding: refuted.
   The real direct/live × success/failure test does not leak partial rows.
   Its initial live/success expectation failed because manual source cleanup
-  deliberately marks dependent live queries terminally errored (already pinned
-  in db-client and live-query-observer tests). The reviewer withdrew the leak
+  deliberately marks dependent live queries terminally errored. Existing
+  db-client/observer tests cover safe teardown order, not this exact fatal-state
+  matrix; the new cells now assert that boundary directly. The reviewer withdrew the leak
   claim and its 95/100 confidence. Adding the proposed publication-start handoff
   did not change the result and was removed. No runtime change retained.
   Keep the four-cell contract test with explicit terminal-error assertions and
   clarify direct subscription restart versus live-query recovery in ARCHITECTURE.
   Targeted gate: 161 passed, zero failures/skips, four files; package types and
   changed-test lint pass. No earlier test body or assertion was removed.
-- [ ] Validate, commit and audit this test/documentation clarification.
+- [x] Test/document clarification committed as `fcee4971`; its fresh
+  [loss audit](loadsubset-restart-contract-loss-audit.md) found no selected
+  runtime/test loss. Limits retained: one-row matrix, direct reads derived from
+  the event map, metadata/event-count flattening, and no explicit live restart
+  execution check. Do not claim a new runtime bug or full lifecycle proof.
 - [ ] Resolve two optional P3 simplifier suggestions with the user: local
   descriptor-safe array snapshot sharing; a private route-property record type.
   Neither is a confirmed bug or a reason to reopen broader architecture work.
-- [ ] Finish current-head validation and record source/bundle size against the
-  fixed main baseline. Earlier full suite and 100x campaigns remain evidence
-  for their recorded revisions, not an assertion about later edits.
+- [x] Current-head DB gate at `fcee4971`: 4793 passed, zero failures/skips,
+  148 files, process exit 0 (`/tmp/tanstack-readiness-final-full.json`). Package
+  types, changed-test lint and Vite build pass; built ESM and CJS import smoke
+  checks both expose createCollection and getStableQueryBuilderHash.
+  Earlier 100x campaigns remain evidence for their recorded revisions.
+  Source delta across packages/**/src TS/TSX is +2848 lines against fixed main
+  `68366eca` (+43 vs refactor baseline `15987067`). Same-invocation frozen-source
+  esbuild 0.20.2 diagnostic: DB 310374/88767 ->343334/97036 minified/gzip bytes
+  (+32960/+8269); DB-IVM 27574/8262 ->30220/9133 (+2646/+871).
+  All exports, browser ES2022, external package dependencies, no source maps;
+  these are separate package diagnostics, not a consumer application payload.
+  Do not compare this virtual-source recipe with the earlier direct-entry
+  refactor microbenchmarks or attribute their difference to this cleanup.
 - [ ] Decide PR packaging for the committed investigation notes and spike
   patches. Preserve useful tests and durable contracts; do not silently discard
   the historical evidence or close the old stack PRs.
