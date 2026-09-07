@@ -6289,7 +6289,12 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   no production code changed. Full DB4755/0,zero skips,147 files,exit0,28.46s.
   Changed-file eslint and git diff --check pass. Evidence:
   /tmp/tanstack-orderby-unskip-{probe,full}.json/log and -lint.log.
-- [ ] Fresh post-commit source loss audit of the six unskipped test cases.
+- [x] Committed ata9f2423c; fresh post-commit source loss audit returned null.
+  Candidate exactly equals baseline8e175214 after removing two aliases/the
+  stale comment and replacing six call sites with it. Test bodies, inputs and
+  assertions are byte-for-byte unchanged; no skip remains or was added.
+  Static one-file comparison only, no independent runtime or production review;
+  existing test gaps are outside this intended-edit control.
 - Instrument recommendations only (not selected/running): Formation section
   for the origin and surviving premises of accumulated state/guards, then
   Hostile failure assay for concrete deletion candidates and their oracle gaps.
