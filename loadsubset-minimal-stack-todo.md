@@ -6586,11 +6586,11 @@ or runtime policy is selected here.
   public API change. Frozen head7be7a585. Scope: snapshot methods, ordered loader
   handoff/catch paths, source-result forwarding and existing loader regressions.
 - Exact order today:
-  - requestSnapshot: prepare predicate/options -> acquire -> early ownership
+  - requestSnapshot: prepare predicate/options -> start logical demand -> early ownership
     callback -> subscription observation -> local read/filter/publication ->
     boolean return. Active-demand checks follow each callback boundary.
   - requestLimitedSnapshot: local indexed read/publication -> update local
-    pagination position/build request -> acquire -> early ownership callback ->
+    pagination position/build request -> start logical demand -> early ownership callback ->
     subscription observation -> return. Disposal during publication can prevent
     acquisition entirely. Do not impose one universal order on both methods.
 - Existing callback is a provisional ownership handoff, not redundant success
@@ -6630,3 +6630,32 @@ or runtime policy is selected here.
   /tmp/tanstack-snapshot-split-baseline.json/log. No runtime/test edits, full-suite
   rerun, separate package typecheck, hostile assay, or savings measurement in
   this assessment. Vitest reports no type errors; that is not a separate tsc run.
+
+#### Fresh loss audit of the snapshot assessment
+
+- Assessment commit38aaaec5 audited against frozen source7be7a585 by a fresh,
+  source-isolated scanner. Report:
+  /Users/kylemathews/Documents/Codex/2026-09-06/run-a-fresh-field-lab-hostile/outputs/loss-audit-snapshot-split.md.
+  No tests rerun or source edits by the scanner. Main checked the recovered
+  distinctions against the methods before recording these qualifications.
+- Logical demand is not proof of physical acquisition. Detached requests deliver
+  a deferred result synchronously with started:false; recovery publication can
+  settle that result later. The order bullets above now name logical demand.
+  Any extraction must preserve this branch and synchronous notification.
+- Loader failure handling has two boundaries: a throw inside the snapshot call,
+  and an observer throw after that call returns. The latter also invalidates the
+  observed settlement generation and clears pending work before marking failure
+  and releasing ownership. Preserve both catches and the reentry guard.
+- trackLoadSubsetPromise:false removes pending-status participation, not Promise
+  rejection reporting. Caller observation and subscription error observation
+  have different jobs; merging them is not justified by apparent duplication.
+- The unchanged44-test gate also covers four routes by five async outcomes,
+  bounded unsettled participants through a20-step refinement chain, cleanup
+  reentry, non-Error normalization, cleanup retry and repeated-unsubscribe
+  idempotence. These constrain a future extraction; none tests a new split.
+- The audit found no contradiction in method order, the candidate duplication
+  boundary, the narrow return-only objection or the saved44-pass count. Saved
+  files alone do not bind the run to a Git revision or record its shell exit;
+  exit0 comes from the execution tool receipt. No savings have been measured.
+  A loss audit can overvalue details omitted from a short assessment; these
+  qualifications do not authorize new implementation work.
