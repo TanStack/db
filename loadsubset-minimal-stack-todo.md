@@ -5,6 +5,12 @@ current as review findings, oracle laws, and implementation choices change.
 
 ## Current checkpoint — 2026-09-07
 
+- Snapshot/acquisition split: source assessment complete at7be7a585. A plain
+  returned handle cannot replace the early ownership callback: local snapshot
+  work may throw after acquisition and before return. Full separation needs
+  method-specific composition plus compatibility wrappers; no large deletion
+  is established. A smaller duplicate-handoff extraction is identified below,
+  not approved or implemented. Production/test source unchanged.
 - Serialized rare recovery rejected before a production spike. Fresh Hostile
   failure assay identifies a dependency cycle: old canceled work can require
   replacement startup to settle, while drain-before-start waits for that old
@@ -6573,3 +6579,54 @@ or runtime policy is selected here.
   Neither measures concrete performance/memory or proves oracle completeness.
   The grammar vocabulary can favor membership-based designs and hide simplicity
   already present in direct methods; keep that bias distinct from source facts.
+
+### Snapshot/acquisition split — source assessment
+
+- User selected examining the narrower split next, not an implementation or
+  public API change. Frozen head7be7a585. Scope: snapshot methods, ordered loader
+  handoff/catch paths, source-result forwarding and existing loader regressions.
+- Exact order today:
+  - requestSnapshot: prepare predicate/options -> acquire -> early ownership
+    callback -> subscription observation -> local read/filter/publication ->
+    boolean return. Active-demand checks follow each callback boundary.
+  - requestLimitedSnapshot: local indexed read/publication -> update local
+    pagination position/build request -> acquire -> early ownership callback ->
+    subscription observation -> return. Disposal during publication can prevent
+    acquisition entirely. Do not impose one universal order on both methods.
+- Existing callback is a provisional ownership handoff, not redundant success
+  notification. OrderedSourceLoader.requestAndObserve captures the exact result,
+  options and release before the snapshot call returns. A later local/publication
+  throw marks loader failure before cleanup, releases that exact acquisition,
+  and preserves the primary error even when unload throws. A return-only handle
+  would be unavailable on this throw path. This rules out a mechanical callback
+  replacement, not every possible split design.
+- A full split would need explicit preparation, local delivery and owned
+  acquisition steps, plus wrappers preserving the public boolean/void returns
+  and result callbacks. Additional callers in collection/changes.ts and
+  subset-demand-controller.ts also rely on synchronous result forwarding.
+  Splitting methods alone moves the unwind/ownership work rather than removes it.
+  No class, generic operation engine, new lifetime state or added guarantee is
+  justified by this assessment; no line/bundle savings measured.
+- Smaller candidate: share the repeated post-start handoff inside subscription.ts
+  (active check -> notify exact result/release -> recheck -> observe if started ->
+  recheck), with each snapshot method retaining its own surrounding effect order.
+  An internal named handle type could remove repeated type declarations, but is
+  not a reason to change the callback's public arguments. Keep requestSnapshot's
+  requestedSubsetWhere registration before notification. Do not remove the
+  loader's provisional catch or fallback-release behavior without separate
+  evidence. Actual net savings need a bounded diff; this is not yet selected.
+- Source anchors at7be7a585: subscription.ts:1314–1432,1577–1784;
+  query/live/utils.ts:608–735; collection/changes.ts:287–292;
+  query/live/subset-demand-controller.ts:157–187. Architecture:693–707 explicitly
+  requires provisional callback success to wait for the enclosing request.
+  ordered-source-loader.test.ts:64–142 crosses page/prefix/boundary/full-source
+  with success/throw/callback-then-throw; real-subscription case near470–539
+  checks exact cleanup and primary-error preservation after publication throws.
+- Limits: source reasoning plus unchanged-test control, not a candidate runtime
+  experiment or a proof that the complete split cannot reduce code. Selection
+  focuses on provisional capture and may undercount other benefits of clearer
+  effect boundaries. No alternate implementation has been silently selected.
+- Unchanged loader gate44/0,one file,exit0:
+  /tmp/tanstack-snapshot-split-baseline.json/log. No runtime/test edits, full-suite
+  rerun, separate package typecheck, hostile assay, or savings measurement in
+  this assessment. Vitest reports no type errors; that is not a separate tsc run.
