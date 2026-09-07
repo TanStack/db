@@ -19,7 +19,11 @@ current as review findings, oracle laws, and implementation choices change.
   Step1b: explicit retry-failure record/shared failure transition; redundant tie
   flag removed after checking cursor admissibility. Five control cells pass old
   runtime and detect an ablated safety guard (2 red/3 green). Candidate634/0,
-  types/changed-file lint pass; full gate and state audit pending. This is the
+  types/changed-file lint pass; full DB4763/0, zero skips,147 files. Fresh state
+  audit returned null. First100x run hit two ~5s runner failures; replay of the
+  failed work seed with a campaign-only timeout passed258/0, zero skips.
+  Production net+1 vs planning
+  baseline (+2806 vs fixed main). This is the
   first state substep, not completion of all ordered-source evidence work.
 - All three wider analyses complete at frozen1cec4d7f, including inherited
   loading code, not just the PR diff. Separate unranked readouts are below.

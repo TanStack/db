@@ -1,6 +1,6 @@
 # Loading lifecycle refactor plan
 
-Status: approved for execution; baseline and mechanical move complete.
+Status: baseline, mechanical move and first failure-state substep complete and audited.
 Planning baseline: 15987067 on codex/loadsubset-minimal-stack.
 
 ## Aim
@@ -146,16 +146,36 @@ Artifacts: /tmp/tanstack-ordered-state-controls.json and
 /tmp/tanstack-ordered-state-red-control.json.
 
 Candidate targeted634/0, no skips, six files; types and changed loader/test lint
-pass. Full gate is running. Paired diagnostic vs original baseline:
+pass. Full DB gate4763/0, zero skips,147 files, exit0; artifact
+/tmp/tanstack-ordered-state-full.json. Paired diagnostic vs original baseline:
 368361 -> 368196 minified (-165), 103734 -> 103737 gzip (+3), same Node/zlib.
 Only one failure record is retained at a time; no event history/row mirror added.
-No heap or throughput claim. Fresh post-commit state audit is next.
+No heap or throughput claim. Production source net +1 versus planning baseline,
++2806 versus fixed main68366eca (documentation excluded).
 
-Current surface: OrderedSourceLoader in query/live/utils.ts, consumed by the
-collection subscriber and Effect. Move it to ordered-source-loader.ts in one
-mechanical commit, preserving its interface. Do not mix the move with semantics.
+Fresh post-commit state audit returned null; complete source trace is in
+[loadsubset-ordered-failure-state-loss-audit.md](loadsubset-ordered-failure-state-loss-audit.md).
+It verified the dormant operation ID was unread while failure was absent, the
+release handle still has independent lifetime, and the cursor domain justifies
+removing the presence bit. It did not execute tests. The five new controls are
+synchronous method-sequence tests, not substitutes for integration lifecycle
+and failure/reentry coverage.
 
-Then replace correlated flags with explicit local state in a separate commit:
+The first 100x ordered lifecycle/work campaign reported256/2; both failed work
+properties ended near the default five-second limit with STACK_TRACE_ERROR, not
+an assertion mismatch. The replay uses the reported random seed1560018276 and
+unchanged fixed seeds, with --testTimeout=120000 for this invocation only.
+No assertion or runtime policy was relaxed. Preserve the first artifact:
+/tmp/tanstack-ordered-state-100x.json. Replay passed all 258 tests with zero
+failures or skips; runner JSON success is true. Artifact:
+/tmp/tanstack-ordered-state-100x-retry.json. The work suite replayed the failed
+random seed; the lifecycle random campaign also used that seed on this run.
+
+Original surface: OrderedSourceLoader in query/live/utils.ts, consumed by the
+collection subscriber and Effect. The separate mechanical move above is done.
+
+Remaining state work must preserve the following distinctions; the completed
+failure-record substep does not establish that the other flags can be merged:
 
 - Source evidence: no established request; a fulfilled finite range (possibly
   empty, with no new boundary); invalid evidence requiring full-source repair;
