@@ -56,7 +56,6 @@ function createInternalGroupFields(groupCount: number, selectClause?: Select) {
   while (aliases.some((alias) => alias.startsWith(prefix))) prefix += `_`
 
   return {
-    prefix,
     synced: `${prefix}synced`,
     hasLocal: `${prefix}has_local`,
     correlationKey: `${prefix}correlation_key`,
@@ -209,21 +208,10 @@ function getCorrelationRouteIdentity(
       ]
 }
 
-function getHavingEvaluationRow(
+function getGroupEvaluationRow(
   row: Record<string, unknown>,
   fields: InternalGroupFields,
-): NamespacedRow {
-  const parentContext = row[fields.parentContext]
-  return {
-    ...getParentContextValue(parentContext),
-    $selected: row.$selected as Record<string, unknown>,
-  }
-}
-
-function getWrappedAggregateEvaluationRow(
-  row: Record<string, unknown>,
-  selected: Record<string, unknown>,
-  fields: InternalGroupFields,
+  selected = row.$selected as Record<string, unknown>,
 ): NamespacedRow {
   const parentContext = row[fields.parentContext]
   return {
@@ -264,26 +252,17 @@ function getRowVirtualMetadata(row: NamespacedRow): RowVirtualMetadata {
 const { sum, count, avg, min, max } = groupByOperators
 
 /**
- * Interface for caching the mapping between GROUP BY expressions and SELECT expressions
- */
-interface GroupBySelectMapping {
-  selectToGroupByIndex: Map<string, number> // Maps SELECT alias to GROUP BY expression index
-  groupByExpressions: Array<any> // The GROUP BY expressions for reference
-}
-
-/**
  * Validates that all non-aggregate expressions in SELECT are present in GROUP BY
  * and creates a cached mapping for efficient lookup during processing
  */
 function validateAndCreateMapping(
   groupByClause: GroupBy,
   selectClause?: Select,
-): GroupBySelectMapping {
+): Map<string, number> {
   const selectToGroupByIndex = new Map<string, number>()
-  const groupByExpressions = [...groupByClause]
 
   if (!selectClause) {
-    return { selectToGroupByIndex, groupByExpressions }
+    return selectToGroupByIndex
   }
 
   // Validate each SELECT expression
@@ -294,7 +273,7 @@ function validateAndCreateMapping(
     }
 
     // Non-aggregate expression must be in GROUP BY
-    const groupIndex = groupByExpressions.findIndex((groupExpr) =>
+    const groupIndex = groupByClause.findIndex((groupExpr) =>
       expressionsEqual(expr, groupExpr),
     )
 
@@ -306,7 +285,7 @@ function validateAndCreateMapping(
     selectToGroupByIndex.set(alias, groupIndex)
   }
 
-  return { selectToGroupByIndex, groupByExpressions }
+  return selectToGroupByIndex
 }
 
 /**
@@ -469,7 +448,7 @@ export function processGroupBy(
             finalResults[alias] = aggregatedRow[alias]
           } else if (!singleGroup && !wrappedAggExprs[alias]) {
             // Use cached mapping to get the corresponding __key_X for non-aggregates
-            const groupIndex = mapping?.selectToGroupByIndex.get(alias)
+            const groupIndex = mapping?.get(alias)
             if (groupIndex !== undefined) {
               finalResults[alias] =
                 aggregatedRow[fields.groupValues[groupIndex]!]
@@ -563,7 +542,7 @@ export function processGroupBy(
 
       pipeline = pipeline.pipe(
         filter(([, row]) => {
-          const namespacedRow = getHavingEvaluationRow(row, fields)
+          const namespacedRow = getGroupEvaluationRow(row, fields)
           const result = compiledHaving(namespacedRow)
           // Preserve each path's coercion for unchecked nonboolean IR values.
           return singleGroup ? toBooleanPredicate(result) : result
@@ -577,7 +556,7 @@ export function processGroupBy(
     for (const fnHaving of fnHavingClauses) {
       pipeline = pipeline.pipe(
         filter(([, row]) => {
-          const namespacedRow = getHavingEvaluationRow(row, fields)
+          const namespacedRow = getGroupEvaluationRow(row, fields)
           const callbackRow = sanitizeCallbackRows
             ? stripInternalCallbackMetadata(namespacedRow)
             : namespacedRow
@@ -766,7 +745,7 @@ function evaluateWrappedAggregates(
   }
   for (const [alias, evaluator] of Object.entries(wrappedAggExprs)) {
     finalResults[alias] = evaluator(
-      getWrappedAggregateEvaluationRow(aggregatedRow, finalResults, fields),
+      getGroupEvaluationRow(aggregatedRow, fields, finalResults),
     )
   }
   for (const key of Object.keys(finalResults)) {

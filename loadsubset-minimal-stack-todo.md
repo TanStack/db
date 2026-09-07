@@ -36,7 +36,7 @@ current as review findings, oracle laws, and implementation choices change.
   production lines. Fresh100x integration gate passes1582/0 across26 files,
   exit0, no skipped tests or reported runner errors. Integration loss audit
   complete; final campaign report audit complete.
-- Still open: whole-branch size goal (+2967 net package-source lines against
+- Still open: whole-branch size goal (+2946 net package-source lines against
   fixedmain68366eca), final coherence/review and
   RFC/PR/changeset reconciliation. Older unchecked entries are phase records;
   reconcile them with later evidence before treating them as current bugs.
@@ -70,6 +70,11 @@ current as review findings, oracle laws, and implementation choices change.
   focused100x263/0,4 files; types/lint pass. Both source audits complete.
   Combined savings305 lines/3446 minified/
   736 gzip bytes; current fixed-main source gap2967.
+- W7 removes unused group mapping output/prefix and shares evaluation-row
+  assembly:21 more production lines removed,194 minified/28 gzip diagnostic
+  bytes removed. Integration1707/0,types/lint pass; direct graph matrix32/32
+  on baseline. Post-commit audit pending. Combined savings326 source lines/
+  3640 minified/764 gzip bytes;fixed-main gap2946.
 
 
 ## Chosen design
@@ -5719,3 +5724,32 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
 - These are small source-read candidates, not yet test-backed reductions or
   measured savings. Larger remaining growth is still subscription lifecycle
   and live-query loading, whose separate contracts must not be erased for size.
+
+### W7 — remove group helper scaffolding — 2026-09-06
+
+- Baselinea55b6d02. Return the SELECT-alias map directly; no caller consumes
+  the copied groupByExpressions return field. Validate against groupByClause
+  without the redundant array copy. Remove unused fields.prefix output while
+  preserving the local collision-avoidance prefix and every derived field.
+- Replace getHavingEvaluationRow/getWrappedAggregateEvaluationRow with one
+  concrete getGroupEvaluationRow helper for their three call sites. HAVING
+  uses the row's selected output; aggregate wrappers explicitly pass the
+  in-progress selected output. Parent context decoding and functional callback
+  sanitation remain unchanged. No new state or public contract.
+- Add two real-compiler validation cells: a non-grouped selected reference is
+  rejected with NonAggregateExpressionNotInGroupByError for nonzero grouping,
+  while the existing zero-key validation bypass remains. Full direct graph
+  file32/32 passes on original source before implementation. Existing copied
+  validation unit tests and all other tests remain; no weakening/classifier.
+  `/tmp/tanstack-weight-group-helpers-baseline.log`.
+- Candidate integration1707/0,28 files,exit0,10.48s,no skips/reported runner
+  errors,1x,fixed corpora and fresh random seeds. Same selected files/worker
+  configuration as W6. `/tmp/tanstack-weight-group-helpers-full.{json,log}`.
+  Package tsc passes (`-helpers-types.log`), changed-file eslint passes.
+- Source10added/31removed,net21. Diagnostic DB bundle344634→344440
+  minified(-194),97426→97398 gzip(-28);DB-IVM unchanged30220/9133.
+  `/tmp/tanstack-weight-group-helpers-bundle.json`. These are synthetic
+  all-entry-export measurements, not consumer payload or throughput benchmarks.
+  Combined W1–W7 savings326 lines/3640 minified/764 gzip bytes; gap2946.
+- [ ] Commit, then source-first Field Lab Hidden-signal recovery assay.
+- [ ] Focused includes/group-by100x on frozen candidate.

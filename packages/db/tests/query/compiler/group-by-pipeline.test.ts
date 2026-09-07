@@ -1,5 +1,6 @@
 import { D2, MultiSet, output } from '@tanstack/db-ivm'
 import { describe, expect, test } from 'vitest'
+import { NonAggregateExpressionNotInGroupByError } from '../../../src/errors.js'
 import { coalesce } from '../../../src/query/builder/functions.js'
 import { processGroupBy } from '../../../src/query/compiler/group-by.js'
 import { createValueIdentity } from '../../../src/query/equality-value-identity.js'
@@ -35,6 +36,26 @@ const cases = [false, true].flatMap((grouped) =>
 )
 
 describe(`group-by production pipeline`, () => {
+  test.each([false, true])(
+    `validates ungrouped SELECT references only with grouping keys: %s`,
+    (grouped) => {
+      const graph = new D2()
+      const compile = () =>
+        processGroupBy(
+          graph.newInput<KeyedNamespacedRow>(),
+          grouped ? [new PropRef([`row`, `group`])] : [],
+          createValueIdentity(),
+          undefined,
+          { amount: new PropRef([`row`, `amount`]) },
+        )
+      if (grouped) {
+        expect(compile).toThrow(NonAggregateExpressionNotInGroupByError)
+      } else {
+        expect(compile).not.toThrow()
+      }
+    },
+  )
+
   test.each(cases)(
     `recomputes rows and metadata: grouped=$grouped, select=$selection, having=$having`,
     ({ grouped, selection, having }) => {
