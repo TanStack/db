@@ -5872,3 +5872,28 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   largest growth areas. Trace their existing owners and executable laws before
   selecting another bounded cut. Keep the below-main goal open; current gap2922
   is measured, not a forecast that this remainder can all be removed.
+
+### W9 — remove replay's duplicate public-row baseline
+
+- [x] Trace retained state before editing. Direct subscribers keep publishedRows
+  unchanged while replay writes privateRows; demand release publishes its deletes
+  and updates publishedRows. Graph-controlled subscribers publish through their
+  graph and never use the copied baseline for replacement diffing. Keep snapshot
+  flags/offset/last-key rollback, private rows, stale-row reconciliation, and all
+  acquisition/attempt/session guards separate and unchanged.
+- [x] Remove publicationState.publishedRows and both creation-time Map copies.
+  Direct replacement diffs against existing publishedRows before callback delivery;
+  release no longer updates a second baseline. This removes one shallow O(n) map
+  allocation/retention per new replay session, not n cloned row objects. No heap
+  byte or throughput claim. No tests removed or rewritten; no new bug claim.
+- [x] Baseline f8a9afc6:171/0 across subscription, lifecycle-history and
+  lifecycle-publication files at1x,exit0. Existing checkpoint/event histories
+  cover replay failure/retry, overlapping work, ownership release and restart.
+- [x] Package typecheck exit0. Controlled all-export diagnostic bundle:
+  DB344431/97398 ->344290/97378 minified/gzip (-141/-20); DB-IVM unchanged
+  30220/9133. Net source reduction2 lines; retained-state saving is the point.
+- [ ] Focused lifecycle100x and expanded29-file1x gates running; results pending.
+- [ ] Fresh post-commit Hidden-signal recovery assay against f8a9afc6.
+- Evidence: /tmp/tanstack-weight-replay-baseline-map-{baseline,100,full,types,lint}.log;
+  100/full JSON reports and bundle.json share that prefix. Lint reports five
+  existing errors; baseline comparison pending. Whole-branch size goal stays open.

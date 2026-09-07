@@ -88,7 +88,6 @@ type TruncateReplayPublicationControl = Readonly<{
 type TruncatePublicationState = {
   loadedInitialState: boolean
   snapshotSent: boolean
-  publishedRows: Map<string | number, object>
   limitedSnapshotRowCount: number
   lastSentKey: string | number | undefined
 }
@@ -342,7 +341,6 @@ export class CollectionSubscription
       publicationState: {
         loadedInitialState: this.loadedInitialState,
         snapshotSent: this.snapshotSent,
-        publishedRows: new Map(this.publishedRows),
         limitedSnapshotRowCount: this.limitedSnapshotRowCount,
         lastSentKey: this.lastSentKey,
       },
@@ -405,7 +403,6 @@ export class CollectionSubscription
         publicationState: {
           loadedInitialState: this.loadedInitialState,
           snapshotSent: this.snapshotSent,
-          publishedRows: new Map(this.publishedRows),
           limitedSnapshotRowCount: this.limitedSnapshotRowCount,
           lastSentKey: this.lastSentKey,
         },
@@ -790,8 +787,10 @@ export class CollectionSubscription
     this.stalePublishedRows.clear()
 
     this.applyPrivateChanges(session, retainedDeletes)
+    // Direct subscribers retain their public rows throughout replay. Released
+    // rows are already removed there, so no second baseline needs reconciling.
     const replacement = this.createStateDiff(
-      session.publicationState.publishedRows,
+      this.publishedRows,
       session.privateRows,
     )
     try {
@@ -1568,7 +1567,6 @@ export class CollectionSubscription
     if (deletes.length === 0) return
 
     for (const { key } of deletes) {
-      session.publicationState.publishedRows.delete(key)
       // A fully loaded snapshot normally stops per-change sent-key tracking.
       // Release still retires these keys, so a later demand must be able to
       // publish them again from the retained source state.
