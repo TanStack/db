@@ -1,7 +1,7 @@
 # Loading lifecycle refactor plan
 
-Status: baseline, move and failure-state substep audited; source-state clarification
-implemented and tested, awaiting its fresh audit.
+Status: first ordered-loader pass complete, tested and audited. Acquisition
+handoff is next; integration and optional D2 work remain queued.
 Planning baseline: 15987067 on codex/loadsubset-minimal-stack.
 
 ## Aim
@@ -199,10 +199,30 @@ not a newly found production bug. Artifacts:
 
 Candidate targeted640/0, zero skips, six files; package types and changed-file
 lint pass. Artifact: /tmp/tanstack-ordered-source-state-targeted.json.
-Fresh post-commit loss audit is next. This substep adds five comment lines,
-no runtime fields, retained history or state object.
+Full DB4769/0, zero skips,147 files, exit0; artifact:
+/tmp/tanstack-ordered-source-state-full.json. After reversing the four private
+renames and excluding trivia, TypeScript scanner tokens match baseline exactly
+(2343 each). This checks the mechanical change, not the original policy.
+Fresh post-commit loss audit returned null; full source trace is preserved in
+[loadsubset-ordered-source-state-loss-audit.md](loadsubset-ordered-source-state-loss-audit.md).
+It found no lost behavior or changed callback order. One control limit matters:
+the final no-extra-request assertion cannot by itself prove recovery cleared,
+because retained full-source demand also blocks fetching. The clearing
+assignment is verified statically, not independently by that assertion.
+Empty snapshots and the chosen settlement order also leave nonempty/reentrant
+crosses to the existing integration oracles. This substep adds five comment lines,
+no runtime fields, retained history or state object. Production net+6 versus
+planning baseline, +2811 versus fixed main68366eca.
+Paired diagnostic bundle: baseline368361 -> candidate368306 bytes (-55),
+gzip103765 ->103768 (+3). Same esbuild recipe, both gzip inputs measured with
+Node v22.13.1 / zlib1.3.0.1-motley-82a5fec; do not compare these gzip values
+with the earlier Node24/zlib1.2 run. Artifact:
+/tmp/tanstack-ordered-source-state.mjs. No runtime/heap claim.
 
-The remaining source facts stay separate for these reasons:
+Decision for this first pass: keep the remaining source facts separate rather
+than force them into the proposed exclusive phases. No further flag compression
+is required before Step2. The integration walk in Step3 remains outstanding.
+These are the distinctions the implementation retains:
 
 - Source evidence: no established request; a fulfilled finite range (possibly
   empty, with no new boundary); invalid evidence requiring full-source repair;
@@ -230,6 +250,15 @@ Exit: one place to read each loader transition, unchanged caller API and
 observable traces, no additional retained page or row index.
 
 ## Step 2 — Make acquisition transfer explicit
+
+Read-only preparation after Step1c: releaseDebts and releasingAcquisitions have
+different lifetimes. handleCollectionCleanup discards debts while an adapter
+unload can remain on the stack until releaseOrRetainAcquisition's finally block.
+Do not combine those structures by clearing a single shared map at cleanup.
+Also preserve the two release paths: replaceSubsetAcquisition temporarily
+publishes next ownership and can restore the previous acquisition on failure;
+releaseOrRetainAcquisition retires logical ownership and retains exact cleanup
+debt. Their common unload call is not evidence of equivalent transitions.
 
 Current surface: subscription.ts's startSubsetDemand,
 startTruncateReplayDemand, replaceSubsetAcquisition,

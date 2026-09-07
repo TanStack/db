@@ -28,7 +28,14 @@ current as review findings, oracle laws, and implementation choices change.
 - Step1c source-state clarification: exact settlement, safe boundary, repair
   obligation and retained full-source demand remain separate. Six new reset/
   obsolete-settlement cells pass baseline; moving the stale failure guard
-  produces2 red/4 green. Candidate640/0, types/lint pass; fresh audit pending.
+  produces2 red/4 green. Candidate640/0; full DB4769/0, zero skips; types/lint
+  pass. Executable tokens match after four private renames; fresh audit returned
+  null. Its test-scope qualification is preserved in the plan and full readout.
+  Production net+6 vs planning baseline (+2811 vs fixed main), all added lines
+  in this substep are comments. Step2 preparation retained separate release
+  debt/busy lifetimes and replacement-vs-retirement transitions in the plan.
+  First ordered-loader pass complete; acquisition handoff is next. Do not force
+  the retained independent source facts into one exclusive lifecycle enum.
 - All three wider analyses complete at frozen1cec4d7f, including inherited
   loading code, not just the PR diff. Separate unranked readouts are below.
   Analysis only: no runtime/test edits, test runs or implementation selection.
