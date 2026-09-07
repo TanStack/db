@@ -3184,72 +3184,76 @@ describe(`pagination recomputation oracle`, () => {
     }
   })
 
-  it(`does not settle a window move after its sync session is cleaned up`, async () => {
-    const authoritativeRows: Array<PageRow> = [
-      { id: 1, rank: 0 },
-      { id: 2, rank: 1 },
-    ]
-    const delivered = new Set<number>()
-    let cleanUpDuringNextRequest = false
-    let cleanupPromise: Promise<void> | undefined
-    function createWindowedQuery() {
-      return createLiveQueryCollection((query) =>
-        query
-          .from({ row: source })
-          .orderBy(({ row }) => row.rank)
-          .limit(1),
-      )
-    }
-    const source = createCollection<PageRow>({
-      id: `pagination-window-cleanup-${collectionSequence++}`,
-      getKey: (row) => row.id,
-      syncMode: `on-demand`,
-      startSync: true,
-      autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
-      sync: {
-        sync: ({ begin, write, commit, markReady }) => {
-          markReady()
-          return {
-            loadSubset: (options) => {
-              if (cleanUpDuringNextRequest) {
-                cleanUpDuringNextRequest = false
-                cleanupPromise = live.cleanup()
-              }
-              const fresh = rowsForLoadSubset(
-                authoritativeRows,
-                options,
-              ).filter(({ id }) => !delivered.has(id))
-              if (fresh.length === 0) return true
-              begin()
-              for (const row of fresh) {
-                delivered.add(row.id)
-                write({ type: `insert`, value: { ...row } })
-              }
-              commit()
-              return true
-            },
-          }
+  it.each([`return-only`, `write-after-cleanup`])(
+    `does not settle a window move after its sync session is cleaned up: %s`,
+    async (delivery) => {
+      const authoritativeRows: Array<PageRow> = [
+        { id: 1, rank: 0 },
+        { id: 2, rank: 1 },
+      ]
+      const delivered = new Set<number>()
+      let cleanUpDuringNextRequest = false
+      let cleanupPromise: Promise<void> | undefined
+      function createWindowedQuery() {
+        return createLiveQueryCollection((query) =>
+          query
+            .from({ row: source })
+            .orderBy(({ row }) => row.rank)
+            .limit(1),
+        )
+      }
+      const source = createCollection<PageRow>({
+        id: `pagination-window-cleanup-${collectionSequence++}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options) => {
+                if (cleanUpDuringNextRequest) {
+                  cleanUpDuringNextRequest = false
+                  cleanupPromise = live.cleanup()
+                  if (delivery === `return-only`) return true
+                }
+                const fresh = rowsForLoadSubset(
+                  authoritativeRows,
+                  options,
+                ).filter(({ id }) => !delivered.has(id))
+                if (fresh.length === 0) return true
+                begin()
+                for (const row of fresh) {
+                  delivered.add(row.id)
+                  write({ type: `insert`, value: { ...row } })
+                }
+                commit()
+                return true
+              },
+            }
+          },
         },
-      },
-    })
-    const live = createWindowedQuery()
+      })
+      const live = createWindowedQuery()
 
-    try {
-      await live.preload()
-      cleanUpDuringNextRequest = true
-      const move = live.utils.setWindow({ offset: 0, limit: 2 })
-      expect(cleanUpDuringNextRequest).toBe(false)
-      expect(cleanupPromise).toBeInstanceOf(Promise)
-      await cleanupPromise
+      try {
+        await live.preload()
+        cleanUpDuringNextRequest = true
+        const move = live.utils.setWindow({ offset: 0, limit: 2 })
+        expect(cleanUpDuringNextRequest).toBe(false)
+        expect(cleanupPromise).toBeInstanceOf(Promise)
+        await cleanupPromise
 
-      expect(move).toBeInstanceOf(Promise)
-      await expect(move).rejects.toMatchObject({ name: `AbortError` })
-      expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
-    } finally {
-      await cleanupAll(live, source)
-    }
-  })
+        expect(move).toBeInstanceOf(Promise)
+        await expect(move).rejects.toMatchObject({ name: `AbortError` })
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
+      } finally {
+        await cleanupAll(live, source)
+      }
+    },
+  )
 
   it(`tracks an asynchronous prefix refresh after synchronous satisfaction`, async () => {
     const rows: Array<PageRow> = [

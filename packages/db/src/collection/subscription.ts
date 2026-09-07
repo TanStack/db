@@ -7,7 +7,6 @@ import { buildCursor, buildCursorCurrent } from '../utils/cursor.js'
 import { deepEquals } from '../utils.js'
 import { normalizeError } from '../utils/error.js'
 import { runAllCallbacks } from '../utils/callbacks.js'
-import { getLoadSubsetDemandKey } from '../query/ir-stable-identity.js'
 import { createDeferred } from '../deferred.js'
 import { LoadSubsetOperationAbortedError } from '../errors.js'
 import {
@@ -46,8 +45,6 @@ type RequestSnapshotOptions = {
   ) => void
   /** Called when the local snapshot must fall back from an index to a scan. */
   onUnoptimized?: () => void
-  /** Replace an earlier exact acquisition before retrying it. */
-  replaceExistingDemand?: boolean
 }
 
 type RequestLimitedSnapshotOptions = {
@@ -1331,7 +1328,7 @@ export class CollectionSubscription
    * or, the entire state was already loaded or the request was cancelled.
    */
   requestSnapshot(opts?: RequestSnapshotOptions): boolean {
-    // Cancel before replacing ownership or publishing a local snapshot.
+    // Cancel before acquiring ownership or publishing a local snapshot.
     if (this.unsubscribed || opts?.signal?.aborted) return false
     if (this.loadedInitialState) {
       // Subscription was deoptimized so we already sent the entire initial state
@@ -1369,10 +1366,6 @@ export class CollectionSubscription
       // Include orderBy and limit if provided so sync layer can optimize the query
       orderBy: opts?.orderBy,
       limit: opts?.limit,
-    }
-
-    if (opts?.replaceExistingDemand) {
-      if (!this.releaseMatchingDemand(loadOptions)) return false
     }
 
     const {
@@ -1506,15 +1499,6 @@ export class CollectionSubscription
       const index = this.subsetDemands.indexOf(demand)
       if (index !== -1) this.releaseDemandAt(index, false)
     }
-  }
-
-  private releaseMatchingDemand(options: LoadSubsetOptions): boolean {
-    const key = getLoadSubsetDemandKey(options)
-    const index = this.subsetDemands.findIndex(
-      (demand) => getLoadSubsetDemandKey(demand.requestOptions) === key,
-    )
-    if (index !== -1) this.releaseDemandAt(index)
-    return !this.unsubscribed
   }
 
   private releaseDemandAt(

@@ -2269,7 +2269,6 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
           subscription.requestSnapshot({
             where,
             signal: controller.signal,
-            replaceExistingDemand: true,
             onLoadSubsetResult: () => results++,
           }),
         ).toBe(false)

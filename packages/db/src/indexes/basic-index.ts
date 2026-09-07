@@ -152,10 +152,27 @@ export class BasicIndex<
       if (keySet.size === 0) {
         // No more keys for this value, remove from map and sorted array
         this.valueMap.delete(normalizedValue)
-        const sortedIndex = this.sortedValues.findIndex((value) =>
-          areSameValueZeroEqual(value, normalizedValue),
+        let sortedIndex = findInsertPositionInArray(
+          this.sortedValues,
+          normalizedValue,
+          this.compareFn,
         )
-        if (sortedIndex !== -1) this.sortedValues.splice(sortedIndex, 1)
+        // Distinct equality keys may share one comparator position.
+        while (
+          sortedIndex < this.sortedValues.length &&
+          this.compareFn(this.sortedValues[sortedIndex], normalizedValue) === 0
+        ) {
+          if (
+            areSameValueZeroEqual(
+              this.sortedValues[sortedIndex],
+              normalizedValue,
+            )
+          ) {
+            this.sortedValues.splice(sortedIndex, 1)
+            break
+          }
+          sortedIndex++
+        }
       }
     }
   }

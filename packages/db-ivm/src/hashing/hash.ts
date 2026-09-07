@@ -88,20 +88,7 @@ type TraversalHash = Pick<
 
 export function hash(input: any): number {
   const hasher = new MurmurHashStream()
-  const context: HashContext = {
-    activeObjects: new Map(),
-    activeOrder: [],
-    cyclicObjects: new Set(),
-    frames: [],
-    traversalHashes: new WeakMap(),
-    cyclicCacheWork: 0,
-    graphContextWork: 0,
-    pendingHashes: new Map(),
-  }
-  updateHasher(hasher, input, context)
-  for (const [object, valueHash] of context.pendingHashes) {
-    hashCache.set(object, valueHash)
-  }
+  updateHasher(hasher, input)
   return hasher.digest()
 }
 
@@ -228,7 +215,7 @@ function hashPlainObject(
 function updateHasher(
   hasher: Hasher,
   input: unknown,
-  context: HashContext,
+  context?: HashContext,
 ): void {
   if (input === null) {
     hasher.update(NULL)
@@ -265,7 +252,31 @@ function updateHasher(
   }
 }
 
-function getCachedHash(input: object, context: HashContext): number {
+function getCachedHash(input: object, context?: HashContext): number {
+  if (!context) {
+    const cached = hashCache.get(input)
+    if (cached !== undefined) return cached
+    if (isReferenceHashedObject(input)) return cachedReferenceHash(input)
+
+    // Only an uncached structural root needs graph traversal state. Commit its
+    // cache entries after success so a failed traversal cannot poison retries.
+    context = {
+      activeObjects: new Map(),
+      activeOrder: [],
+      cyclicObjects: new Set(),
+      frames: [],
+      traversalHashes: new WeakMap(),
+      cyclicCacheWork: 0,
+      graphContextWork: 0,
+      pendingHashes: new Map(),
+    }
+    const result = hashObject(input, context)
+    for (const [object, valueHash] of context.pendingHashes) {
+      hashCache.set(object, valueHash)
+    }
+    return result
+  }
+
   const activeIndex = context.activeObjects.get(input)
   if (activeIndex !== undefined) {
     for (let index = activeIndex; index < context.activeOrder.length; index++) {

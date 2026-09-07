@@ -4257,12 +4257,20 @@ describe(`CollectionSubscription replay oracle`, () => {
       includeInitialState: false,
     })
 
-    subscription.requestSnapshot({ where, optimizedOnly: false })
+    let release: (() => void) | undefined
+    subscription.requestSnapshot({
+      where,
+      optimizedOnly: false,
+      onLoadSubsetResult: (_result, _options, releaseDemand) => {
+        release = releaseDemand
+      },
+    })
+    expect(release).toBeTypeOf(`function`)
+    release!()
     expect(
       subscription.requestSnapshot({
         where,
         optimizedOnly: false,
-        replaceExistingDemand: true,
       }),
     ).toBe(false)
 

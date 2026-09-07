@@ -142,14 +142,12 @@ function isOrdering(name: string): boolean {
 }
 
 function snapshotComparable<T>(value: T): T {
-  if (typeof value === `object` && value !== null) {
-    try {
-      return new Date(Reflect.apply(Date.prototype.getTime, value, [])) as T
-    } catch {
-      // Not a Date; continue with the other comparison domains.
-    }
+  // Match the evaluator and demand identity: foreign-realm objects are opaque
+  // references, not local comparison values. Localizing them changes matches.
+  if (value instanceof Date) {
+    return new Date(Reflect.apply(Date.prototype.getTime, value, [])) as T
   }
-  if (isUint8Array(value)) {
+  if (value instanceof Uint8Array) {
     const bytes = new Uint8Array(value)
     return (
       typeof Buffer !== `undefined` && value instanceof Buffer
@@ -186,17 +184,4 @@ function snapshotArray(
     result[index] = snapshotElement(descriptor.value)
   }
   return result
-}
-
-const typedArrayTag = Object.getOwnPropertyDescriptor(
-  Object.getPrototypeOf(Uint8Array.prototype),
-  Symbol.toStringTag,
-)?.get
-
-function isUint8Array(value: unknown): value is Uint8Array {
-  return (
-    ArrayBuffer.isView(value) &&
-    typedArrayTag !== undefined &&
-    Reflect.apply(typedArrayTag, value, []) === `Uint8Array`
-  )
 }

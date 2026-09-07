@@ -5,8 +5,8 @@ import { createCollection } from '../../src/collection/index.js'
 import { createFilterFunctionFromExpression } from '../../src/collection/change-events.js'
 import {
   and,
-  createLiveQueryCollection,
   count,
+  createLiveQueryCollection,
   eq,
   isNull,
   lt,

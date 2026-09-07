@@ -2871,6 +2871,7 @@ describe(`OrderBy with duplicate values`, () => {
           { id: 4, a: 4, keep: true },
           { id: 5, a: 5, keep: true },
         ])
+        expect(loadSubsetCallCount).toBeGreaterThanOrEqual(1)
         expect(loadSubsetCallCount).toBeLessThanOrEqual(2)
         // First loadSubset call (initial page at offset 0) has no cursor
         expect(loadSubsetCursors[0]).toBeUndefined()
@@ -2894,9 +2895,8 @@ describe(`OrderBy with duplicate values`, () => {
           { id: 9, a: 5, keep: true },
           { id: 10, a: 5, keep: true },
         ])
-        expect(loadSubsetCallCount).toBeLessThanOrEqual(
-          initialLoadSubsetCallCount + 2,
-        )
+        // Initial tie expansion already loaded this page; reuse it without a fetch.
+        expect(loadSubsetCallCount).toBe(initialLoadSubsetCallCount)
         const secondPageLoadSubsetCallCount = loadSubsetCallCount
 
         // Now move to third page (offset 10, limit 5)
@@ -2920,6 +2920,9 @@ describe(`OrderBy with duplicate values`, () => {
           { id: 14, a: 14, keep: true },
           { id: 15, a: 15, keep: true },
         ])
+        expect(loadSubsetCallCount).toBeGreaterThan(
+          secondPageLoadSubsetCallCount,
+        )
         expect(loadSubsetCallCount).toBeLessThanOrEqual(
           secondPageLoadSubsetCallCount + 2,
         )
@@ -3100,6 +3103,7 @@ describe(`OrderBy with duplicate values`, () => {
           { id: 4, a: 4, keep: true },
           { id: 5, a: 5, keep: true },
         ])
+        expect(loadSubsetCallCount).toBeGreaterThanOrEqual(1)
         expect(loadSubsetCallCount).toBeLessThanOrEqual(2)
         // First loadSubset call (initial page at offset 0) has no cursor
         expect(loadSubsetCursors[0]).toBeUndefined()
@@ -3123,9 +3127,8 @@ describe(`OrderBy with duplicate values`, () => {
           { id: 9, a: 5, keep: true },
           { id: 10, a: 5, keep: true },
         ])
-        expect(loadSubsetCallCount).toBeLessThanOrEqual(
-          initialLoadSubsetCallCount + 2,
-        )
+        // Initial tie expansion already loaded this page; reuse it without a fetch.
+        expect(loadSubsetCallCount).toBe(initialLoadSubsetCallCount)
         const secondPageLoadSubsetCallCount = loadSubsetCallCount
 
         // Now move to third page (offset 10, limit 5)
@@ -3149,6 +3152,9 @@ describe(`OrderBy with duplicate values`, () => {
           { id: 14, a: 14, keep: true },
           { id: 15, a: 15, keep: true },
         ])
+        expect(loadSubsetCallCount).toBeGreaterThan(
+          secondPageLoadSubsetCallCount,
+        )
         expect(loadSubsetCallCount).toBeLessThanOrEqual(
           secondPageLoadSubsetCallCount + 2,
         )

@@ -23,7 +23,7 @@ type DemandState = {
 export type DemandUpdate = {
   changed: boolean
   empty: boolean
-  ready: Promise<unknown[]> | true
+  ready: Promise<Array<unknown>> | true
 }
 
 /**

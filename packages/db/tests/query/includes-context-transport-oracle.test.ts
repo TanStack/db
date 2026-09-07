@@ -1906,6 +1906,8 @@ async function runPublicSurfaceCell({
         expectNoPrivateSymbolsDeep(row, new Set([userSymbol]))
       }
     }
+    // Retain earlier callback values: later graph work must not contaminate
+    // objects already handed to user code with private route metadata.
     for (const row of callbackRows) {
       expectNoPrivateSymbolsDeep(row, new Set([userSymbol]))
     }

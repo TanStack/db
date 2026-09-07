@@ -407,7 +407,12 @@ function createOrderedSourceHarness(id: string) {
       if (replayResolvers.length === 0) {
         throw new Error(`No truncate replay is pending`)
       }
-      while (replayResolvers.length > 0) {
+      for (let pass = 0; replayResolvers.length > 0; pass++) {
+        if (pass === 20) {
+          throw new Error(
+            `Truncate replay did not reach a fixed point after 20 passes`,
+          )
+        }
         for (const resolve of replayResolvers.splice(0)) resolve()
         await flushPromises()
       }

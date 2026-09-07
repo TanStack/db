@@ -135,7 +135,7 @@ export class OrderedSourceLoader {
     }
     if (this.hasFullSourceDemand) return this.pending
     if (this.needsFullSourceRecovery || this.info.requiresFullSource) {
-      this.loadFullSource(false, windowOperationGeneration)
+      this.loadFullSource(windowOperationGeneration)
       return this.pending
     }
     if (!this.info.index || this.info.orderBy.length !== 1) {
@@ -166,10 +166,7 @@ export class OrderedSourceLoader {
     return this.pending
   }
 
-  loadFullSource(
-    replaceExistingDemand = false,
-    windowOperationGeneration?: number,
-  ): void {
+  loadFullSource(windowOperationGeneration?: number): void {
     if (!this.active || this.hasFullSourceDemand) return
     this.fullSourceFailed = false
     this.hasFullSourceDemand = true
@@ -177,7 +174,6 @@ export class OrderedSourceLoader {
       (onLoadSubsetResult) => {
         this.subscription.requestSnapshot({
           trackLoadSubsetPromise: false,
-          replaceExistingDemand,
           onLoadSubsetResult,
         })
       },
@@ -190,7 +186,7 @@ export class OrderedSourceLoader {
     if (!this.active || this.pending) return
     if (this.lastPrefixCount === count) {
       if ((this.info.dataNeeded?.() ?? 0) > 0) {
-        this.loadFullSource(false, windowOperationGeneration)
+        this.loadFullSource(windowOperationGeneration)
       }
       return
     }
@@ -374,7 +370,7 @@ export class OrderedSourceLoader {
     const value = this.info.valueExtractorForRawRow(biggest)
     const orderBy = normalizeOrderByPaths(this.info.orderBy, this.alias)
     if (!canExpressCursorOrder(orderBy.slice(0, 1), [value])) {
-      this.loadFullSource(false, windowOperationGeneration)
+      this.loadFullSource(windowOperationGeneration)
       return this.pending
     }
     // Undefined is not an expressible cursor boundary, so it denotes that no
@@ -384,7 +380,7 @@ export class OrderedSourceLoader {
     }
     const where = buildCursorCurrent(orderBy, [value])
     if (!where) {
-      this.loadFullSource(false, windowOperationGeneration)
+      this.loadFullSource(windowOperationGeneration)
       return this.pending
     }
     this.lastBoundary = value

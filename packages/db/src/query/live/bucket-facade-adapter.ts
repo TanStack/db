@@ -121,8 +121,14 @@ export class BucketFacadeAdapter {
           ?.get(bucketKey)
           ?.values() ?? []) {
           const key = change.value.publicKey as string | number
-          if (change.deletes > change.inserts) result.delete(key)
-          else result.set(key, this.resolveDraft(change.value.value))
+          if (
+            change.inserts > change.deletes ||
+            (change.inserts === change.deletes && entry.collection.has(key))
+          ) {
+            result.set(key, this.resolveDraft(change.value.value))
+          } else {
+            result.delete(key)
+          }
         }
         const order = this.compilations.find(
           (item) => item.edgeId === edgeId,

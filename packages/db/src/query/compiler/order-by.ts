@@ -154,79 +154,70 @@ export function processOrderBy(
     const firstClause = orderByClause[0]!
     const firstOrderByExpression = firstClause.expression
 
-    if (firstOrderByExpression.type === `ref`) {
-      const followRefResult = followRef(
-        rawQuery,
-        firstOrderByExpression,
-        collection,
+    const followRefResult =
+      firstOrderByExpression.type === `ref`
+        ? followRef(rawQuery, firstOrderByExpression, collection)
+        : undefined
+    if (firstOrderByExpression.type === `ref` && followRefResult) {
+      followRefCollection = followRefResult.collection
+      orderBySourceId = followRefResult.sourceId
+      const fieldName = followRefResult.path[0]
+      // The query's first source defines implicit string collation for the
+      // whole order. Build the source index with that same resolved term so
+      // provider admission cannot disagree with emitted query order.
+      const compareOpts = buildCompareOptions(firstClause, collection)
+
+      if (fieldName) {
+        // Use a single-column comparator for the index, not the
+        // multi-column `compare` function. The multi-column comparator
+        // expects array values [col1, col2, ...] but the index stores
+        // individual field values. Passing `compare` here causes the
+        // BTree to treat all single values as equal (since number[0]
+        // === undefined for both sides of the comparison).
+        const firstColumnCompareFn = makeComparator(compareOpts)
+        ensureIndexForField(
+          fieldName,
+          followRefResult.path,
+          followRefCollection,
+          compareOpts,
+          firstColumnCompareFn,
+        )
+      }
+
+      index = findIndexForField(
+        followRefCollection,
+        followRefResult.path,
+        compareOpts,
       )
 
-      if (followRefResult) {
-        followRefCollection = followRefResult.collection
-        orderBySourceId = followRefResult.sourceId
-        const fieldName = followRefResult.path[0]
-        // The query's first source defines implicit string collation for the
-        // whole order. Build the source index with that same resolved term so
-        // provider admission cannot disagree with emitted query order.
-        const compareOpts = buildCompareOptions(firstClause, collection)
-
-        if (fieldName) {
-          // Use a single-column comparator for the index, not the
-          // multi-column `compare` function. The multi-column comparator
-          // expects array values [col1, col2, ...] but the index stores
-          // individual field values. Passing `compare` here causes the
-          // BTree to treat all single values as equal (since number[0]
-          // === undefined for both sides of the comparison).
-          const firstColumnCompareFn = makeComparator(compareOpts)
-          ensureIndexForField(
-            fieldName,
-            followRefResult.path,
-            followRefCollection,
-            compareOpts,
-            firstColumnCompareFn,
-          )
-        }
-
-        index = findIndexForField(
-          followRefCollection,
-          followRefResult.path,
-          compareOpts,
-        )
-
-        // Only use the index if it supports range queries
-        if (!index?.supports(`gt`)) {
-          index = undefined
-        }
-
-        if (!index) {
-          const collectionId = followRefCollection.id
-          const fieldPath = followRefResult.path.join(`.`)
-          console.warn(
-            `[TanStack DB]${collectionId ? ` [${collectionId}]` : ``} orderBy with limit requires an index on "${fieldPath}" for efficient lazy loading. ` +
-              `Falling back to loading all data. ` +
-              `Consider creating an index on the collection with collection.createIndex((row) => row.${fieldPath}) ` +
-              `or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.`,
-          )
-        }
-
-        orderByAlias =
-          firstOrderByExpression.path.length > 1
-            ? String(firstOrderByExpression.path[0])
-            : rawQuery.from.alias
-        orderBySourceId ??= collectCollectionSources(rawQuery).find(
-          (source) =>
-            source.alias === orderByAlias &&
-            source.collection === followRefCollection,
-        )?.sourceId
+      // Only use the index if it supports range queries
+      if (!index?.supports(`gt`)) {
+        index = undefined
       }
+
+      if (!index) {
+        const collectionId = followRefCollection.id
+        const fieldPath = followRefResult.path.join(`.`)
+        console.warn(
+          `[TanStack DB]${collectionId ? ` [${collectionId}]` : ``} orderBy with limit requires an index on "${fieldPath}" for efficient lazy loading. ` +
+            `Falling back to loading all data. ` +
+            `Consider creating an index on the collection with collection.createIndex((row) => row.${fieldPath}) ` +
+            `or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.`,
+        )
+      }
+
+      orderByAlias =
+        firstOrderByExpression.path.length > 1
+          ? String(firstOrderByExpression.path[0])
+          : rawQuery.from.alias
+      orderBySourceId ??= collectCollectionSources(rawQuery).find(
+        (source) =>
+          source.alias === orderByAlias &&
+          source.collection === followRefCollection,
+      )?.sourceId
     }
 
-    if (orderBySourceId) {
-      const followed = followRef(
-        rawQuery,
-        firstClause.expression as PropRef,
-        collection,
-      )!
+    if (orderBySourceId && followRefResult) {
       const sourceOrderBy = resolveOrderBy(
         orderByClause,
         collection.compareOptions,
@@ -239,7 +230,7 @@ export function processOrderBy(
         )
       })
       const extract = compileExpression(
-        new PropRef(followed.path),
+        new PropRef(followRefResult.path),
         true,
       ) as CompiledSingleRowExpression
       const compareTerm = makeComparator(sourceOrderBy[0]!.compareOptions)

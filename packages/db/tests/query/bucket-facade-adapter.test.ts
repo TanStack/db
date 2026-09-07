@@ -35,6 +35,69 @@ class ThrowingBuildIndex extends BasicIndex<number> {
 
 describe(`BucketFacadeAdapter`, () => {
   it.each(
+    [false, true].flatMap((present) =>
+      [`insert`, `replace`, `cancel`].map((change) => ({ present, change })),
+    ),
+  )(
+    `keeps draft and published membership equal: $present / $change`,
+    async ({ present, change }) => {
+      const graph = new D2()
+      const rows = graph.newInput<[string, BucketRow]>()
+      const activeBuckets = graph.newInput<[string, true]>()
+      const adapter = new BucketFacadeAdapter(
+        `draft-membership`,
+        [{ edgeId: `children`, rows, activeBuckets, hasOrderBy: false }],
+        () => {},
+      )
+      graph.finalize()
+      const ref: BucketFacadeRef = {
+        [BUCKET_FACADE_REF]: { edgeId: `children`, bucketKey: `group` },
+      }
+      const oldRow: BucketRow = {
+        publicKey: 1,
+        value: { id: 1, name: `old` },
+        order: undefined,
+      }
+      const newRow: BucketRow = {
+        publicKey: 1,
+        value: { id: 1, name: `new` },
+        order: undefined,
+      }
+      const send = (row: BucketRow, weight: number) =>
+        rows.sendData(new MultiSet([[[`group`, row], weight]]))
+      try {
+        activeBuckets.sendData(new MultiSet([[[`group`, true], 1]]))
+        if (present) send(oldRow, 1)
+        graph.run()
+        adapter.flush().publish()
+        if (change === `cancel`) {
+          send(present ? oldRow : newRow, 1)
+          send(present ? oldRow : newRow, -1)
+        } else {
+          if (change === `replace`) send(oldRow, -1)
+          send(newRow, 1)
+        }
+        graph.run()
+        const draft = adapter.resolveDraft(ref) as unknown as Collection<
+          { id: number; name: string },
+          number
+        >
+        const expected =
+          change !== `insert` && !present
+            ? []
+            : [{ id: 1, name: change === `cancel` ? `old` : `new` }]
+        expect(draft.toArray.map(stripVirtualProps)).toEqual(expected)
+        adapter.flush().publish()
+        const published = adapter.resolve(ref) as unknown as typeof draft
+        expect(published.toArray.map(stripVirtualProps)).toEqual(expected)
+      } finally {
+        adapter.publishDrafts()
+        await adapter.cleanup()
+      }
+    },
+  )
+
+  it.each(
     [10, 100].flatMap((size) =>
       [false, true].map((ordered) => ({ size, ordered })),
     ),

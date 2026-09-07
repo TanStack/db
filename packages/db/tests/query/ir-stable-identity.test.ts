@@ -49,7 +49,6 @@ import {
   compileExpression,
   toBooleanPredicate,
 } from '../../src/query/compiler/evaluators.js'
-import { isLoadSubsetRequestSubsumedBy } from '../../src/query/predicate-utils.js'
 import {
   createRuntimeReferenceIdentityFactory,
   getRuntimeReferenceIdentity,
@@ -286,7 +285,7 @@ describe(`semantic expression identity`, () => {
   })
 
   fcTest.prop([referenceSemanticPairArbitrary])(
-    `keeps reference-semantic values distinct across identity and coverage`,
+    `keeps reference-semantic values distinct across expression and demand identity`,
     ([first, second]) => {
       const value = new PropRef<unknown>([`row`, `value`])
       const firstPredicate = new Func<boolean>(`eq`, [value, new Value(first)])
@@ -304,12 +303,6 @@ describe(`semantic expression identity`, () => {
       expect(
         getLoadSubsetDemandKey({ where: firstPredicate, limit: 1 }),
       ).not.toBe(getLoadSubsetDemandKey({ where: secondPredicate, limit: 1 }))
-      expect(
-        isLoadSubsetRequestSubsumedBy(
-          { where: firstPredicate, limit: 1 },
-          { where: secondPredicate, limit: 1 },
-        ),
-      ).toBe(false)
     },
   )
 

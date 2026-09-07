@@ -211,7 +211,9 @@ function deepEqualsInternal(
 
     // Check if all keys exist in both objects and their values are equal
     const result = keysA.every(
-      (key) => key in b && deepEqualsInternal(a[key], b[key], visited),
+      (key) =>
+        Object.prototype.propertyIsEnumerable.call(b, key) &&
+        deepEqualsInternal(a[key], b[key], visited),
     )
 
     visited.delete(a)

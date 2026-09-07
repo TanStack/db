@@ -6,6 +6,7 @@ import {
 } from '../../src/query/subset-dedupe'
 import { eq, gt } from '../../src/query/builder/functions'
 import { Func, PropRef, Value } from '../../src/query/ir'
+import { compileSingleRowExpression } from '../../src/query/compiler/evaluators'
 import type { LoadSubsetFn, LoadSubsetOptions } from '../../src/types'
 
 const ref = (name: string) => new PropRef([name])
@@ -335,16 +336,41 @@ describe(`DeduplicatedLoadSubset`, () => {
     expect(clonedBytes).toEqual(new Uint8Array([1, 2, 3]))
   })
 
-  it(`snapshots cross-realm binary comparison values`, () => {
+  it(`preserves opaque cross-realm binary comparison identity`, () => {
     const bytes = runInNewContext(`new Uint8Array([1, 2, 3])`) as Uint8Array
     const cloned = cloneOptions({ where: eq(ref(`bytes`), val(bytes)) })
     const clonedBytes = ((cloned.where as Func).args[1] as Value<Uint8Array>)
       .value
 
     bytes[0] = 9
-    expect(clonedBytes).not.toBe(bytes)
-    expect(clonedBytes).toEqual(new Uint8Array([1, 2, 3]))
+    expect(clonedBytes).toBe(bytes)
   })
+
+  describe.each([`Date`, `Uint8Array`] as const)(
+    `request cloning preserves %s predicate matches`,
+    (type) => {
+      it.each([`local`, `foreign`] as const)(`in the %s realm`, (realm) => {
+        const local = type === `Date` ? new Date(2) : new Uint8Array([1, 2])
+        const foreign: unknown = runInNewContext(
+          type === `Date` ? `new Date(2)` : `new Uint8Array([1, 2])`,
+        )
+        const value = realm === `local` ? local : foreign
+        for (const predicate of [
+          eq(ref(`value`), val(value)),
+          new Func<boolean>(`in`, [ref(`value`), val([value])]),
+        ]) {
+          const original = compileSingleRowExpression(predicate)
+          const cloned = compileSingleRowExpression(
+            cloneOptions({ where: predicate }).where!,
+          )
+          const rows = [foreign, local].map((item) => ({ value: item }))
+          const expected = realm === `foreign` ? [true, false] : [false, true]
+          expect(rows.map(original)).toEqual(expected)
+          expect(rows.map(cloned)).toEqual(expected)
+        }
+      })
+    },
+  )
 
   it.each([`coalesce`, `caseWhen`] as const)(
     `snapshots membership candidates returned by %s`,

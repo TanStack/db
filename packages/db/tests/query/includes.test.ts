@@ -1665,8 +1665,8 @@ describe(`includes subqueries`, () => {
 
       try {
         await collection.preload()
-        // One final bounded probe may be needed to close an ordered tie class.
-        expect(loadCount).toBeLessThanOrEqual(sourceRows.length + 1)
+        // Bounded tie probes carry `where` and are not counted as page loads.
+        expect(loadCount).toBe(sourceRows.length)
         for (const observation of observations) {
           for (const parent of observation) {
             expect(parent.childIds).toEqual([parent.id * 10])

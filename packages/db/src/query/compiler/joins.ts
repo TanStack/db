@@ -21,7 +21,6 @@ import {
   getParentContextIdentity,
   getParentContextValue,
 } from '../equality-value-identity.js'
-import type { ValueIdentity } from '../equality-value-identity.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
 import { compileExpression } from './evaluators.js'
 import { getLazyLoadTargets } from './lazy-targets.js'
@@ -35,6 +34,7 @@ import {
   getRoutedScalarMetadata,
   stripRouteMetadata,
 } from './route-metadata.js'
+import type { ValueIdentity } from '../equality-value-identity.js'
 import type { CompileQueryFn } from './index.js'
 import type { OrderByOptimizationInfo } from './order-by.js'
 import type {

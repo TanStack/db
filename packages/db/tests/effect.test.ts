@@ -8,7 +8,6 @@ import {
 } from './utils.js'
 import type {
   DeltaEvent,
-  Effect,
   SubscriptionLoadSubsetErrorEvent,
 } from '../src/index.js'
 
@@ -775,7 +774,6 @@ describe(`createEffect`, () => {
     it(`retains a failed source release across reentrant disposal`, async () => {
       const failure = new Error(`outer source release failed`)
       let unloadCount = 0
-      let effect!: Effect
       const source = createCollection<{ id: number }>({
         id: `effect-reentrant-cleanup-error`,
         getKey: (row) => row.id,
@@ -796,7 +794,7 @@ describe(`createEffect`, () => {
           },
         },
       })
-      effect = createEffect({
+      const effect = createEffect({
         query: (q) => q.from({ source }),
         onBatch: () => {},
       })

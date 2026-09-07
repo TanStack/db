@@ -154,6 +154,23 @@ describe(`oracle run configuration`, () => {
 })
 
 describe(`deepEquals`, () => {
+  it.each(
+    [`field`, Symbol(`field`)].flatMap((key) =>
+      [false, true].map((inherited) => ({ key, inherited })),
+    ),
+  )(
+    `requires matching enumerable own keys: $key / inherited=$inherited`,
+    ({ key, inherited }) => {
+      const own = { [key]: 1 }
+      const other = { other: 1 }
+      if (inherited) Object.setPrototypeOf(other, { [key]: 1 })
+      else Object.defineProperty(other, key, { value: 1, enumerable: false })
+      expect(deepEquals(own, other)).toBe(false)
+      expect(deepEquals(other, own)).toBe(false)
+      expect(deepEquals(own, { [key]: 1 })).toBe(true)
+    },
+  )
+
   describe(`primitives`, () => {
     it(`should handle identical primitives`, () => {
       expect(deepEquals(1, 1)).toBe(true)
