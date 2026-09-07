@@ -10,8 +10,9 @@ current as review findings, oracle laws, and implementation choices change.
   Corrected both oracle models, retained the four-cell fracture witness in a
   24-cell matrix, and pinned stale-row reacquisition. Full DB4749/0,6 existing
   skips,147 files; package types pass. Production -34 lines, diagnostic bundle
-  -412 minified/-126 gzip bytes; fixed-main source gap now2805. Focused100x and
-  post-commit loss audit pending; detailed evidence and contract changes below.
+  -412 minified/-126 gzip bytes; fixed-main source gap now2805. Focused100x410/0
+  and source-resolved Query DB ownership6/0; post-commit loss audit complete.
+  Implementation committed at4c382d75; evidence and contract changes below.
 - All five full-suite follow-ups are reconciled: ordered joins await initial
   readiness; unchanged inline arrays need not retain reference identity when
   the containing parent changes (user-approved). Full DB gate4724/0,6 existing
@@ -6248,8 +6249,27 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   +2805. Diagnostic esbuild0.20.2, es2022, all exports/dependencies external:
   DB343526→343114 minified and97174→97048 gzip; db-ivm30220/9133 unchanged.
   Not an application bundle, runtime-throughput or heap measurement.
-- [ ] Focused100x replay/lifecycle/publication gate (five files).
-- [ ] Fresh post-commit Field Lab Hidden-signal recovery assay.
+- [x] Focused100x replay/lifecycle/publication gate:410/0,5 files,exit0,
+  178.95s. Fixed corpora and fresh seeds; replay environment overrides unset.
+  Only opted-in properties scale, not unit/matrix case counts. The new24-cell
+  matrix and deterministic stale-reacquisition witness are included.
+- [x] Source-resolved Query DB ownership oracle6/0,exit0. Default package run
+  was12/0 including6 typecheck entries, but uses built DB exports; it alone
+  cannot validate this source change. Reran6 runtime cases with temporary
+  aliases to this worktree's db/src and db-ivm/src; temporary config removed.
+  Evidence: /tmp/tanstack-release-retention-querydb-source.json/log.
+- [x] Commit4c382d75 followed by fresh Field Lab Hidden-signal recovery assay:
+  no unsupported loss found. Baseline subscription1538 and model release
+  rules367/726 lose predicate eviction by explicit decision. Baseline replay
+  tests2841/3925 lose synthetic-delete throw/reentry; candidate2887/3942 uses
+  actual graph-completion/ready callbacks, which are different boundaries,
+  not equivalent preservation. Original during-unload gate, physical cleanup,
+  failure/cancellation and coherent same-key update assertions remain.
+  Auditor scanned the three baseline sources separately before W13 narrative,
+  then candidate; no reports inspected or tests independently run. This is one
+  fresh sequential scanner, not three isolated audits. Knowing the accepted
+  rule may bias classification toward deliberate losses; original source
+  pointers and changed callback outcomes are preserved above.
 - Evidence: /tmp/tanstack-release-retention-{red,first-green,green,full,
   full-final,100}.json/log; -types-final.log, -test-lint.log,
   -baseline-lint-semantic.log, -bundle.json; matrix old-runtime result at
