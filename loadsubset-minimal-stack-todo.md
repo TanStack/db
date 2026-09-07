@@ -79,7 +79,8 @@ current as review findings, oracle laws, and implementation choices change.
 - W8 names ordered/page-prefix, boundary, and full-source request kinds instead
   of forwarding three booleans. No lifecycle state removed.24 more production
   lines removed; diagnostic minified9 bytes smaller,gzip unchanged. Integration
-  1780/0 across29 selected files; loader matrix44/44. Audit/stress pending.
+  1780/0 across29 selected files; loader matrix44/44. Committedc5e060f9;
+  source loss audit complete,focused100x244/0 across2 files.
   Combined savings350 source lines/3649 minified/764 gzip bytes;gap2922.
 
 
@@ -5832,5 +5833,42 @@ confirmed runtime bugs. Keep the list bounded before returning to code-size work
   This is primarily a source-clarity reduction, not a meaningful payload win.
   `/tmp/tanstack-weight-request-kinds-bundle.json`. Combined W1–W8 savings350
   source lines/3649 minified/764 gzip bytes;fixed-main gap2922. No throughput claim.
-- [ ] Commit, then source-first Field Lab Hidden-signal recovery assay.
-- [ ] Focused pagination/ordered-publication100x at frozen candidate.
+- [x] Commitc5e060f9 then fresh source-first Field Lab Hidden-signal recovery
+  assay. Explicit null: no supported behavior omission across the four original
+  routes. Page454–503→443–485 and prefix386–412→381–401 preserve ordered
+  behavior; boundary586–619→567–598 keeps its no-coverage/no-tie-refinement
+  behavior; full-source364–383→361–378 preserves replacement/recovery/failure
+  effects. All window-generation arguments remain in the corresponding calls.
+  Shared observe506–584→488–565 keeps exact boundary reads, obsolete-generation
+  behavior, failure invalidation/release capture and per-request tracking.
+  Publication holding remains settlesAsync && isFullSource && needsFullSourceRecovery.
+  Synchronous failure/observer paths628–747→607–723 retain normalized error
+  identity, cleanup reentrancy guards and provisional cancellation. OR dispatch
+  preserves short-circuit order. No dropping rule/counterexample recovered.
+  Limits: static source/assertion scan, no auditor execution or proof of baseline
+  correctness. One scanner saw all routes, so independence is limited; mapping
+  each source route separately controls the risk that the new kind hides a
+  distinction. Mocked route matrices are not real-publication/generation proof.
+- [x] Focused pagination/ordered-loader100x atc5e060f9:244/0,2 files,exit0,
+  36.69s,no skipped tests/reported runner errors. Pagination includes public
+  window/event assertions; the loader test uses controlled subscriptions.
+  Fixed corpora/fresh seeds, seed/path/property overrides unset. Multiplier
+  applies to opted-in properties, not every deterministic test100 times.
+  `/tmp/tanstack-weight-request-kinds-100.{json,log}`. The invocation also
+  contained a nonexistent load-subset-publication filename filter, which Vitest
+  ignored; only the two reported files count. No separate publication-suite100x
+  claim. Broader selected1x gate above supplies separate integration evidence.
+- Frozen-source bundle reconfirms344431/97398 DB and30220/9133 DB-IVM:
+  `/tmp/tanstack-weight-request-kinds-committed-bundle.json`.
+
+### Next pass — larger remaining structural duplication
+
+- Small helper/parameter cuts now yield little payload change (W8 gzip0).
+  Re-inventory complete source responsibilities before more edits: prioritize
+  repeated work or state with a demonstrated shared contract, including code
+  already on main. Do not mistake large files for removable code or combine
+  distinct lifecycle facts just because their guards look alike.
+- Subscription setup/replay/cleanup and live-query publication remain the
+  largest growth areas. Trace their existing owners and executable laws before
+  selecting another bounded cut. Keep the below-main goal open; current gap2922
+  is measured, not a forecast that this remainder can all be removed.
