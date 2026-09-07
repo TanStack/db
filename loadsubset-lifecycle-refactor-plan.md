@@ -1,6 +1,7 @@
 # Loading lifecycle refactor plan
 
-Status: baseline, mechanical move and first failure-state substep complete and audited.
+Status: baseline, move and failure-state substep audited; source-state clarification
+implemented and tested, awaiting its fresh audit.
 Planning baseline: 15987067 on codex/loadsubset-minimal-stack.
 
 ## Aim
@@ -174,8 +175,34 @@ random seed; the lifecycle random campaign also used that seed on this run.
 Original surface: OrderedSourceLoader in query/live/utils.ts, consumed by the
 collection subscriber and Effect. The separate mechanical move above is done.
 
-Remaining state work must preserve the following distinctions; the completed
-failure-record substep does not establish that the other flags can be merged:
+### Step 1c — keep independent source facts explicit
+
+At baseline 7a17c3f0, the remaining source fields do not form one exclusive
+phase. Keep the product instead of encoding it in a large enum. Rename private
+hasEstablishedSourceCoverage to hasSettledSourceRequest, sourceBoundary to
+settledSourceBoundary, and fullSource to hasFullSourceDemand. Rename the private
+invalidation transition requireFullSourceRecovery to state the obligation it
+creates. The exact request's settlement is not proof of provider extent, and
+retaining full-source demand is not proof that the acquisition succeeded.
+No conditions, assignments, callback ordering or public methods change.
+
+Six control cells cross reset/dispose with obsolete resolve/reject/AbortError.
+They check the replacement promise's identity, no stale release, prefix offset
+zero after reset, and authoritative recovery even after a finite replacement
+succeeds. This makes the distinction between finite success and repair debt
+executable without reading private fields. On the baseline all55 focused tests
+pass. A temporary mutation that ignores stale failures before invalidation
+produces2 red/4 green cells; it is restored. This is test sensitivity evidence,
+not a newly found production bug. Artifacts:
+/tmp/tanstack-ordered-source-state-controls.json and
+/tmp/tanstack-ordered-source-state-red.json.
+
+Candidate targeted640/0, zero skips, six files; package types and changed-file
+lint pass. Artifact: /tmp/tanstack-ordered-source-state-targeted.json.
+Fresh post-commit loss audit is next. This substep adds five comment lines,
+no runtime fields, retained history or state object.
+
+The remaining source facts stay separate for these reasons:
 
 - Source evidence: no established request; a fulfilled finite range (possibly
   empty, with no new boundary); invalid evidence requiring full-source repair;

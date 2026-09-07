@@ -25,6 +25,10 @@ current as review findings, oracle laws, and implementation choices change.
   Production net+1 vs planning
   baseline (+2806 vs fixed main). This is the
   first state substep, not completion of all ordered-source evidence work.
+- Step1c source-state clarification: exact settlement, safe boundary, repair
+  obligation and retained full-source demand remain separate. Six new reset/
+  obsolete-settlement cells pass baseline; moving the stale failure guard
+  produces2 red/4 green. Candidate640/0, types/lint pass; fresh audit pending.
 - All three wider analyses complete at frozen1cec4d7f, including inherited
   loading code, not just the PR diff. Separate unranked readouts are below.
   Analysis only: no runtime/test edits, test runs or implementation selection.

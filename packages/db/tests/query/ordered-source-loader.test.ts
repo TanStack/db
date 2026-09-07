@@ -13,6 +13,7 @@ import type {
 } from '../../src/types.js'
 
 type RequestOptions = LoadSubsetOptions & {
+  minValues?: Array<unknown>
   onLoadSubsetResult?: (
     result: LoadSubsetRequestResult,
     acquisition: LoadSubsetOptions,
@@ -316,6 +317,100 @@ describe(`OrderedSourceLoader`, () => {
       }
 
       loader.dispose()
+    },
+  )
+
+  it.each(
+    ([`reset`, `dispose`] as const).flatMap((lifecycle) =>
+      ([`resolve`, `reject`, `abort`] as const).map((outcome) => ({
+        lifecycle,
+        outcome,
+      })),
+    ),
+  )(
+    `preserves replacement ownership after $lifecycle and obsolete $outcome`,
+    async ({ lifecycle, outcome }) => {
+      const requests: Array<{
+        method: string
+        options: RequestOptions
+        deferred: ReturnType<typeof createDeferred>
+      }> = []
+      const releases: Array<RequestOptions> = []
+      const request = (method: string, options: RequestOptions) => {
+        const deferred = createDeferred()
+        requests.push({ method, options, deferred })
+        options.onLoadSubsetResult?.(deferred.promise, options, () =>
+          releases.push(options),
+        )
+      }
+      const subscription = {
+        setOrderByIndex: () => {},
+        readOrderedSnapshot: () => [],
+        requestLimitedSnapshot: (options: RequestOptions) =>
+          request(`page`, options),
+        requestSnapshot: (options: RequestOptions) =>
+          request(`full-source`, options),
+      } as unknown as CollectionSubscription
+      const loader = new OrderedSourceLoader(
+        createOrderByInfo({ dataNeeded: () => 0 }),
+        subscription,
+        `row`,
+      )
+      try {
+        loader.start()
+        const obsolete = loader.pendingPromise!
+        if (lifecycle === `reset`) loader.resetCursor()
+        else loader.dispose()
+        const replacement = loader.loadMore(1)
+        expect(requests.map(({ method }) => method)).toEqual(
+          lifecycle === `reset` ? [`page`, `page`] : [`page`],
+        )
+        if (lifecycle === `reset`) {
+          expect(replacement).toBeInstanceOf(Promise)
+          expect(requests[1]!.options.offset).toBe(0)
+          expect(requests[1]!.options.minValues).toBeUndefined()
+        }
+
+        if (outcome === `resolve`) requests[0]!.deferred.resolve()
+        else {
+          requests[0]!.deferred.reject(
+            outcome === `abort`
+              ? new DOMException(`obsolete request canceled`, `AbortError`)
+              : new Error(`obsolete request failed`),
+          )
+        }
+        await obsolete
+        expect(loader.pendingPromise).toBe(replacement)
+        expect(releases).toEqual([])
+
+        if (lifecycle === `reset`) {
+          requests[1]!.deferred.resolve()
+          await replacement
+          // A successful finite replacement cannot prove that partial writes
+          // from the obsolete failure were repaired. Success and repair debt
+          // coexist; only an authoritative full-source request clears it.
+          loader.loadMore(2)
+          expect(requests.map(({ method }) => method)).toEqual(
+            outcome === `resolve`
+              ? [`page`, `page`]
+              : [`page`, `page`, `full-source`],
+          )
+          if (outcome !== `resolve`) {
+            expect(requests[2]!.options.orderBy).toBeUndefined()
+            expect(requests[2]!.options.limit).toBeUndefined()
+            requests[2]!.deferred.resolve()
+            await loader.pendingPromise
+            loader.loadMore(3)
+            expect(requests).toHaveLength(3)
+          }
+        } else {
+          expect(loader.loadMore(2)).toBeUndefined()
+          expect(requests).toHaveLength(1)
+        }
+      } finally {
+        loader.dispose()
+        requests.forEach(({ deferred }) => deferred.resolve())
+      }
     },
   )
 

@@ -17,11 +17,16 @@ type OrderedRequestKind = `ordered` | `boundary` | `full-source`
 /** Owns the conservative provider-loading policy for one ordered source. */
 export class OrderedSourceLoader {
   private pending: Promise<unknown> | undefined
-  private hasEstablishedSourceCoverage = false
-  private sourceBoundary: Record<string, unknown> | undefined
+  // Exact request settlement is not provider extent. Reset may discard its
+  // boundary without undoing settlement; an empty page retains the boundary.
+  private hasSettledSourceRequest = false
+  private settledSourceBoundary: Record<string, unknown> | undefined
+  // Independent of finite success: only full-source success repairs ordering.
   private needsFullSourceRecovery = false
   private requesting = false
-  private fullSource = false
+  // Retaining a demand does not prove it succeeded. Async failure retains it
+  // for replay; a synchronous startup failure does not.
+  private hasFullSourceDemand = false
   private fullSourceFailed = false
   // The record's presence blocks automatic retry, including initial requests
   // that have no explicit window-operation generation.
@@ -122,10 +127,10 @@ export class OrderedSourceLoader {
       }
     }
     if (this.fullSourceFailed) {
-      this.fullSource = false
+      this.hasFullSourceDemand = false
       this.fullSourceFailed = false
     }
-    if (this.fullSource) return this.pending
+    if (this.hasFullSourceDemand) return this.pending
     if (this.needsFullSourceRecovery || this.info.requiresFullSource) {
       this.loadFullSource(false, windowOperationGeneration)
       return this.pending
@@ -140,14 +145,14 @@ export class OrderedSourceLoader {
     if (!this.info.dataNeeded) return this.pending
     let count = Math.max(
       this.info.dataNeeded(),
-      this.failedRequest !== undefined || !this.hasEstablishedSourceCoverage
+      this.failedRequest !== undefined || !this.hasSettledSourceRequest
         ? this.info.offset + this.info.limit
         : 0,
     )
     if (this.pending) return this.pending
     if (
       windowOperationGeneration !== undefined &&
-      this.sourceBoundary !== undefined
+      this.settledSourceBoundary !== undefined
     ) {
       const needed = this.info.offset + this.info.limit
       count = Math.max(count, needed - this.countAcquiredRows())
@@ -162,9 +167,9 @@ export class OrderedSourceLoader {
     replaceExistingDemand = false,
     windowOperationGeneration?: number,
   ): void {
-    if (!this.active || this.fullSource) return
+    if (!this.active || this.hasFullSourceDemand) return
     this.fullSourceFailed = false
-    this.fullSource = true
+    this.hasFullSourceDemand = true
     this.requestAndObserve(
       (onLoadSubsetResult) => {
         this.subscription.requestSnapshot({
@@ -205,12 +210,12 @@ export class OrderedSourceLoader {
     this.generation++
     this.pending = undefined
     this.lastBoundary = undefined
-    this.sourceBoundary = undefined
+    this.settledSourceBoundary = undefined
     this.invalidateCursor()
   }
 
   settleFullSourceReplay(): void {
-    if (this.fullSource) this.fullSourceFailed = false
+    if (this.hasFullSourceDemand) this.fullSourceFailed = false
   }
 
   invalidateCursor(): void {
@@ -220,7 +225,7 @@ export class OrderedSourceLoader {
 
   invalidateSourceOrdering(): void {
     this.invalidateCursor()
-    this.invalidateSourceCoverage()
+    this.requireFullSourceRecovery()
   }
 
   dispose(): void {
@@ -235,7 +240,7 @@ export class OrderedSourceLoader {
         limit: this.info.offset + this.info.limit,
       })
       .filter(
-        ({ value }) => this.info.comparator(value, this.sourceBoundary) <= 0,
+        ({ value }) => this.info.comparator(value, this.settledSourceBoundary) <= 0,
       ).length
   }
 
@@ -244,8 +249,8 @@ export class OrderedSourceLoader {
     // Rows observed before the first provider request do not prove ordered
     // source coverage. In particular, a row inserted while limit is zero must
     // not become the cursor when that window first opens.
-    const startsFromSourcePrefix = this.sourceBoundary === undefined
-    const biggest = this.sourceBoundary
+    const startsFromSourcePrefix = this.settledSourceBoundary === undefined
+    const biggest = this.settledSourceBoundary
     let minValues: Array<unknown> | undefined
     if (biggest !== undefined) {
       const value = this.info.valueExtractorForRawRow(biggest)
@@ -298,16 +303,16 @@ export class OrderedSourceLoader {
       if (!this.active || generation !== this.generation) return
       this.failedRequest = undefined
       if (kind !== `boundary`) {
-        this.hasEstablishedSourceCoverage = true
+        this.hasSettledSourceRequest = true
         // Source delivery can invalidate the in-flight prefix marker.
         if (options?.orderBy && !options.cursor) {
           this.lastPrefixCount = options.limit
         }
         if (!isFullSource && options?.orderBy) {
           try {
-            this.sourceBoundary =
+            this.settledSourceBoundary =
               this.subscription.readOrderedSnapshot(options).at(-1)?.value ??
-              this.sourceBoundary
+              this.settledSourceBoundary
           } catch (error) {
             fail(error)
           }
@@ -332,7 +337,7 @@ export class OrderedSourceLoader {
       if (!this.active) return
       // A failed request may already have written only part of its result.
       // None of those rows is a safe continuation boundary.
-      this.invalidateSourceCoverage()
+      this.requireFullSourceRecovery()
       if (generation !== this.generation) return
       if (isFullSource) {
         // A failed request proves no full-source coverage. An explicit
@@ -360,7 +365,7 @@ export class OrderedSourceLoader {
   private loadBoundary(
     windowOperationGeneration?: number,
   ): Promise<unknown> | undefined {
-    const biggest = this.sourceBoundary
+    const biggest = this.settledSourceBoundary
     if (biggest === undefined) return
     const value = this.info.valueExtractorForRawRow(biggest)
     const orderBy = normalizeOrderByPaths(this.info.orderBy, this.alias)
@@ -392,9 +397,9 @@ export class OrderedSourceLoader {
     )
   }
 
-  private invalidateSourceCoverage(): void {
-    this.hasEstablishedSourceCoverage = false
-    this.sourceBoundary = undefined
+  private requireFullSourceRecovery(): void {
+    this.hasSettledSourceRequest = false
+    this.settledSourceBoundary = undefined
     this.needsFullSourceRecovery = true
   }
 
@@ -425,10 +430,10 @@ export class OrderedSourceLoader {
     isFullSource: boolean,
     windowOperationGeneration?: number,
   ): void {
-    this.invalidateSourceCoverage()
+    this.requireFullSourceRecovery()
     this.recordRequestFailure(windowOperationGeneration)
     if (isFullSource) {
-      this.fullSource = false
+      this.hasFullSourceDemand = false
       this.fullSourceFailed = true
     }
   }
