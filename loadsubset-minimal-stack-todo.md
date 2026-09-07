@@ -57,8 +57,14 @@ work, not a claim that each is still open; use this queue for current execution.
   [bounded null](loadsubset-array-snapshot-loss-audit.md). No source-supported
   behavior/assertion loss found. Static/selected-fixture limits retained;
   recursion depth and stack use of the extra helper call were not measured.
-- [ ] Ask about the second optional P3: a private route-property record type.
-  No broader refactor selected.
+- [x] User accepted the private route-property record type. Replaced three
+  identical inline shapes with `PublicContainerProperty`; no runtime expressions
+  or tests changed. TypeScript ES2022/ESNext output is byte-identical before and
+  after (comments retained). Package types, changed-file lint and formatting pass.
+  Production net-10 lines. The preceding4798/0 full-suite result remains the last
+  runtime test run; this type-only step did not rerun it.
+- [ ] Commit and audit the private-type extraction, then proceed to the PR
+  documentation confirmation gate. Both optional review items are implemented.
 - [x] Current-head DB gate at `fcee4971`: 4793 passed, zero failures/skips,
   148 files, process exit 0 (`/tmp/tanstack-readiness-final-full.json`). Package
   types, changed-test lint and Vite build pass; built ESM and CJS import smoke

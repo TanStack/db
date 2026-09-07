@@ -17,6 +17,11 @@ type RoutedResult = {
   [INCLUDES_PUBLIC_KEY]: unknown
 }
 
+type PublicContainerProperty = {
+  descriptor: PropertyDescriptor
+  value?: { original: unknown; replacement: unknown }
+}
+
 export type RouteMetadata = {
   correlationKey: unknown
   parentContext: unknown
@@ -145,26 +150,14 @@ export function transformPublicContainers(
   const parents = new WeakMap<object, Set<object>>()
   const properties = new WeakMap<
     object,
-    Map<
-      PropertyKey,
-      {
-        descriptor: PropertyDescriptor
-        value?: { original: unknown; replacement: unknown }
-      }
-    >
+    Map<PropertyKey, PublicContainerProperty>
   >()
   const visited = new WeakSet<object>()
   const dirty = new Set<object>()
   const visit = (current: object): void => {
     if (visited.has(current)) return
     visited.add(current)
-    const currentProperties = new Map<
-      PropertyKey,
-      {
-        descriptor: PropertyDescriptor
-        value?: { original: unknown; replacement: unknown }
-      }
-    >()
+    const currentProperties = new Map<PropertyKey, PublicContainerProperty>()
     properties.set(current, currentProperties)
     for (const key of Reflect.ownKeys(current)) {
       if (omittedKeys.has(key)) {
@@ -173,10 +166,7 @@ export function transformPublicContainers(
       }
       const descriptor = Object.getOwnPropertyDescriptor(current, key)
       if (!descriptor) continue
-      const property: {
-        descriptor: PropertyDescriptor
-        value?: { original: unknown; replacement: unknown }
-      } = { descriptor }
+      const property: PublicContainerProperty = { descriptor }
       currentProperties.set(key, property)
       if (!descriptor.enumerable || !(`value` in descriptor)) continue
       const child = descriptor.value
