@@ -2548,7 +2548,7 @@ describe(`On-Demand Sync Mode`, () => {
           started.loadSubset(first),
           started.loadSubset(second),
         ])
-        unloadSubset(first)
+        started.unloadSubset(first)
         await vi.waitFor(() =>
           expect(
             getAll.mock.calls.some(([sql]) =>
