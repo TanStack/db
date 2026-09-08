@@ -56,7 +56,10 @@ export class BTreeIndex<
   // The `orderedEntries` B+ tree groups values that occupy the same comparator
   // position. The `valueMap` keeps exact values separate for equality lookups.
   private orderedEntries: BTree<any, OrderedBucket<TKey>>
-  private valueMap = new Map<any, Set<TKey>>()
+  private valueMap = new Map<
+    unknown,
+    { keys: Set<TKey>; ordered: OrderedBucket<TKey> }
+  >()
   private indexedKeys = new Set<TKey>()
   private compareFn: (a: any, b: any) => number = defaultComparator
 
@@ -112,25 +115,29 @@ export class BTreeIndex<
   }
 
   private addToBucket(key: TKey, normalizedValue: unknown): void {
-    const keySet = this.valueMap.get(normalizedValue)
-    const isNewExactValue = keySet === undefined
-    if (keySet) {
-      keySet.add(key)
-    } else {
-      this.valueMap.set(normalizedValue, new Set([key]))
+    const exact = this.valueMap.get(normalizedValue)
+    if (exact) {
+      exact.keys.add(key)
+      exact.ordered.keys.add(key)
+      return
     }
 
-    const orderedBucket = this.orderedEntries.get(normalizedValue)
+    let orderedBucket = this.orderedEntries.get(normalizedValue)
     if (orderedBucket) {
       orderedBucket.keys.add(key)
-      if (isNewExactValue) orderedBucket.exactValues.add(normalizedValue)
+      orderedBucket.exactValues.add(normalizedValue)
     } else {
-      this.orderedEntries.set(normalizedValue, {
+      orderedBucket = {
         representative: normalizedValue,
         exactValues: new Set([normalizedValue]),
         keys: new Set([key]),
-      })
+      }
+      this.orderedEntries.set(normalizedValue, orderedBucket)
     }
+    this.valueMap.set(normalizedValue, {
+      keys: new Set([key]),
+      ordered: orderedBucket,
+    })
   }
 
   /**
@@ -159,19 +166,11 @@ export class BTreeIndex<
   }
 
   private removeFromBucket(key: TKey, normalizedValue: unknown): void {
-    const keySet = this.valueMap.get(normalizedValue)
-    let removedExactValue = false
-    if (keySet) {
-      keySet.delete(key)
-
-      if (keySet.size === 0) {
-        this.valueMap.delete(normalizedValue)
-        removedExactValue = true
-      }
-    }
-
-    const orderedBucket = this.orderedEntries.get(normalizedValue)
-    if (!orderedBucket) return
+    const exact = this.valueMap.get(normalizedValue)
+    if (!exact || !exact.keys.delete(key)) return
+    const removedExactValue = exact.keys.size === 0
+    if (removedExactValue) this.valueMap.delete(normalizedValue)
+    const orderedBucket = exact.ordered
     orderedBucket.keys.delete(key)
     if (removedExactValue) orderedBucket.exactValues.delete(normalizedValue)
 
@@ -207,7 +206,7 @@ export class BTreeIndex<
     const newValue = normalizeForBTree(newIndexedValue)
     if (
       areSameValueZeroEqual(oldValue, newValue) &&
-      this.valueMap.get(newValue)?.has(key)
+      this.valueMap.get(newValue)?.keys.has(key)
     ) {
       this.removeRangeValue(oldIndexedValue)
       this.addRangeValue(newIndexedValue)
@@ -293,7 +292,7 @@ export class BTreeIndex<
    */
   equalityLookup(value: any): Set<TKey> {
     const normalizedValue = normalizeForBTree(value)
-    return new Set(this.valueMap.get(normalizedValue) ?? [])
+    return new Set(this.valueMap.get(normalizedValue)?.keys ?? [])
   }
 
   /**
@@ -444,7 +443,7 @@ export class BTreeIndex<
 
     for (const value of values) {
       const normalizedValue = normalizeForBTree(value)
-      const keys = this.valueMap.get(normalizedValue)
+      const keys = this.valueMap.get(normalizedValue)?.keys
       if (keys) {
         keys.forEach((key) => result.add(key))
       }
@@ -481,7 +480,7 @@ export class BTreeIndex<
     // Return a new Map with denormalized keys
     const result = new Map<any, Set<TKey>>()
     for (const [key, value] of this.valueMap) {
-      result.set(denormalizeUndefined(key), value)
+      result.set(denormalizeUndefined(key), value.keys)
     }
     return result
   }
