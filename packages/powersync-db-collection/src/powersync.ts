@@ -703,9 +703,16 @@ function createPowerSyncCollectionConfig<
         }
 
         const rebuildTracking = (): Promise<void> => {
-          rebuildPromise ??= reconcileTracking().finally(() => {
-            rebuildPromise = null
-          })
+          rebuildPromise ??= reconcileTracking()
+            .catch((error) => {
+              // A rebuild may already have removed every active diff trigger.
+              // Do not leave healthy consumers ready against a stale source.
+              if (!stopped) markError(error)
+              throw error
+            })
+            .finally(() => {
+              rebuildPromise = null
+            })
           return rebuildPromise
         }
 
@@ -716,6 +723,8 @@ function createPowerSyncCollectionConfig<
           // Never create a trigger that has no observer to drain its diff table.
           await startup
           if (
+            // Cleanup can run while startup is pending.
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
             stopped ||
             releasedSubsets.has(options) ||
             options.signal?.aborted
@@ -734,6 +743,8 @@ function createPowerSyncCollectionConfig<
           }
 
           if (
+            // The user hook can reenter cleanup.
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
             stopped ||
             releasedSubsets.has(options) ||
             options.signal?.aborted ||
@@ -799,6 +810,7 @@ function createPowerSyncCollectionConfig<
             }
 
             rowsToEvict = await database.getAll<{ id: string }>(evictionSQL)
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- cleanup can run during the query
             if (stopped) return
             if (trackingRevision === revision) break
           }
@@ -830,6 +842,7 @@ function createPowerSyncCollectionConfig<
           let retryDelay = 0
           try {
             const attempts = pendingReleases.length
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- each release can reenter cleanup
             for (let index = 0; !stopped && index < attempts; index++) {
               const pending = pendingReleases.shift()!
               try {
@@ -866,6 +879,9 @@ function createPowerSyncCollectionConfig<
 
           if (wasActive) {
             pendingReleases.push({ options, failures: 0 })
+            // New work must not wait for another release's backoff.
+            clearTimeout(releaseRetryTimer)
+            releaseRetryTimer = undefined
             scheduleReleaseDrain()
           }
         }

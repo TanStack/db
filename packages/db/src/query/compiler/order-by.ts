@@ -7,11 +7,13 @@ import {
   PropRef,
   collectCollectionSources,
   followRef,
+  getWhereExpression,
   isResidualWhere,
 } from '../ir.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
 import { findIndexForField } from '../../utils/index-optimization.js'
 import { compileExpression } from './evaluators.js'
+import { getSourceAliasesFromExpression } from './expressions.js'
 import { replaceAggregatesByRefs } from './group-by.js'
 import type { CompareOptions } from '../builder/types.js'
 import type { WindowOptions } from './types.js'
@@ -256,7 +258,14 @@ export function processOrderBy(
             ({ type }) => type === `inner` || type === `right`,
           ) ??
             false) ||
-          (rawQuery.where?.some(isResidualWhere) ?? false) ||
+          (rawQuery.where?.some(
+            (where) =>
+              isResidualWhere(where) ||
+              [
+                ...getSourceAliasesFromExpression(getWhereExpression(where)),
+              ].some((alias) => alias !== orderByAlias),
+          ) ??
+            false) ||
           (rawQuery.fnWhere?.length ?? 0) > 0 ||
           rawQuery.groupBy !== undefined ||
           rawQuery.having !== undefined ||

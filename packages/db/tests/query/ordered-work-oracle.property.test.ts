@@ -107,6 +107,7 @@ let harnessId = 0
 async function observeConsumer(
   kind: `collection` | `effect`,
   scenario: Scenario,
+  joinedOnlyPredicate = false,
 ): Promise<ConsumerObservation> {
   type Sync = Parameters<SyncConfig<Row, number>[`sync`]>[0]
   const truth = rowsForScenario(scenario).sort(compareRows(scenario.direction))
@@ -179,10 +180,7 @@ async function observeConsumer(
                 : matching.findIndex(
                     ({ id }) => id === options.cursor?.lastKey,
                   ) + 1
-            const page = matching
-              .slice(start)
-              .filter((candidate) => !delivered.has(candidate.id))
-              .slice(0, options.limit)
+            const page = matching.slice(start).slice(0, options.limit)
             if (page.length > 0) {
               await apply(page)
             }
@@ -223,7 +221,9 @@ async function observeConsumer(
       .leftJoin({ marker: markerSource }, ({ row, marker }) =>
         eq(row.id, marker.rowId),
       )
-      .where(({ row, marker }) => eq(row.id, marker.rowId))
+      .where(({ row, marker }) =>
+        joinedOnlyPredicate ? gte(marker.rowId, 0) : eq(row.id, marker.rowId),
+      )
       .orderBy(({ row }) => row.rank, scenario.direction)
     return (rowToDelete ? ordered.orderBy(({ row }) => row.id, `asc`) : ordered)
       .limit(2)
@@ -285,6 +285,7 @@ async function observeConsumer(
     // Multi-term loading may schedule a different bounded number of prefix
     // and tie refinements, so compare that path by rows and work bounds.
     let finalRows = rows
+    const publicationsBeforeMutation = publications.length
     if (rowToDelete) {
       truth.splice(truth.indexOf(rowToDelete), 1)
       delivered.delete(rowToDelete.id)
@@ -299,9 +300,15 @@ async function observeConsumer(
       expect(finalRows, JSON.stringify({ kind, scenario, requests })).toEqual(
         truth.filter(({ eligible }) => eligible).slice(0, 2),
       )
+      expect(
+        publications.length - publicationsBeforeMutation,
+      ).toBeLessThanOrEqual(1)
     }
     expect(publications.at(-1) ?? []).toEqual(finalRows)
-    expect(publications.length).toBeLessThanOrEqual(requests.length + 1)
+    // The explicit source deletion can publish without another provider call.
+    expect(publications.length).toBeLessThanOrEqual(
+      requests.length + 1 + Number(rowToDelete !== undefined),
+    )
     expect(requests.length).toBeLessThanOrEqual(sourceSize * 3 + 2)
     expect(
       requests.every(
@@ -1477,6 +1484,18 @@ describe(`ordered source work oracle`, () => {
   it(`keeps live collections and Effects equal across the exhaustive small domain`, async () => {
     for (const scenario of exhaustiveScenarios) {
       await assertConsumerParity(scenario)
+    }
+  })
+
+  it(`fills ordered windows filtered only through a left-joined alias`, async () => {
+    for (const scenario of exhaustiveScenarios) {
+      const [collection, effect] = await Promise.all([
+        observeConsumer(`collection`, scenario, true),
+        observeConsumer(`effect`, scenario, true),
+      ])
+      expect(collection.rows).toEqual(effect.rows)
+      expect(collection.errors).toEqual([])
+      expect(effect.errors).toEqual([])
     }
   })
 

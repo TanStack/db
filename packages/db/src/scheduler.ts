@@ -259,6 +259,7 @@ export function withPublicationContext<T>(publish: () => T): T {
     } catch {
       // Keep the earlier publication or graph failure.
     }
+    // Keep the first reported failure, including one from an earlier listener.
     const publicationFailure = getActivePublicationFailure()
     if (publicationFailure) {
       throw publicationFailure.error

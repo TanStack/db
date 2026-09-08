@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   BasicIndex,
   DbClient,
@@ -1809,6 +1809,71 @@ describe(`persistedCollectionOptions`, () => {
       await collection.cleanup()
     }
   })
+
+  it.each([`abort`, `release`, `offline`] as const)(
+    `handles remote ensure after %s without resurrecting cancelled demand`,
+    async (action) => {
+      vi.useFakeTimers()
+      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const failure = Object.assign(new Error(action), {
+        name: action === `abort` ? `AbortError` : `Error`,
+      })
+      const ensure = vi.fn(async () => {
+        throw new Error(`offline`)
+      })
+      const coordinator: PersistedCollectionCoordinator = {
+        getNodeId: () => `cancel-ensure`,
+        subscribe: () => () => {},
+        publish: () => {},
+        isLeader: () => true,
+        ensureLeadership: async () => {},
+        requestEnsurePersistedIndex: async () => {},
+        requestEnsureRemoteSubset: ensure,
+      }
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `cancel-ensure-${action}`,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return {
+                loadSubset: async () => {
+                  throw failure
+                },
+              }
+            },
+          },
+          persistence: { adapter: createRecordingAdapter(), coordinator },
+        }),
+      )
+      const options = { limit: 1 }
+      try {
+        collection.startSyncImmediate()
+        const result = await Promise.resolve(
+          collection._sync.loadSubset(options),
+        ).then(
+          () => `ready`,
+          (error: unknown) => error,
+        )
+        if (action === `release`) collection._sync.unloadSubset(options)
+        const callsBeforeRetry = ensure.mock.calls.length
+        await vi.advanceTimersByTimeAsync(200)
+        if (action === `offline`) {
+          expect(result).toBe(`ready`)
+          expect(ensure.mock.calls.length).toBeGreaterThan(callsBeforeRetry)
+        } else {
+          if (action === `abort`) expect(result).toBe(failure)
+          expect(ensure).toHaveBeenCalledTimes(callsBeforeRetry)
+        }
+      } finally {
+        await collection.cleanup()
+        warning.mockRestore()
+        vi.useRealTimers()
+      }
+    },
+  )
 
   it(`retries queued remote subset ensure after transient failures`, async () => {
     const adapter = createRecordingAdapter()

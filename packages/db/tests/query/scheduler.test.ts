@@ -7,6 +7,7 @@ import { createOptimisticAction } from '../../src/optimistic-action.js'
 import {
   Scheduler,
   getActivePublicationContext,
+  recordPublicationError,
   transactionScopedScheduler,
   withPublicationContext,
 } from '../../src/scheduler.js'
@@ -161,6 +162,29 @@ describe(`Scheduler dependency reentry`, () => {
 })
 
 describe(`Collection publication scheduler context`, () => {
+  it(`preserves the first listener error when a later graph job fails`, () => {
+    const listenerFailure = new Error(`listener failed first`)
+    const graphFailure = new Error(`graph failed later`)
+    const graphJob = vi.fn(() => {
+      throw graphFailure
+    })
+    let contextId: ReturnType<typeof getActivePublicationContext>
+    expect(() =>
+      withPublicationContext(() => {
+        contextId = getActivePublicationContext()
+        recordPublicationError(listenerFailure)
+        transactionScopedScheduler.schedule({
+          contextId,
+          jobId: graphJob,
+          run: graphJob,
+        })
+      }),
+    ).toThrow(listenerFailure)
+    expect(graphJob).toHaveBeenCalledOnce()
+    expect(transactionScopedScheduler.hasPendingJobs(contextId!)).toBe(false)
+    expect(getActivePublicationContext()).toBeUndefined()
+  })
+
   it(`shares one context and flushes after the outer publication`, () => {
     const calls: Array<string> = []
     let contextId: ReturnType<typeof getActivePublicationContext>

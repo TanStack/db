@@ -748,7 +748,7 @@ export class CollectionPreloadAbortedError extends Error {
 /** A subset operation was canceled before its result became visible. */
 export class LoadSubsetOperationAbortedError extends Error {
   constructor() {
-    super(`Load subset operation was abandoned during collection cleanup`)
+    super(`Load subset operation was aborted before its result became visible`)
     this.name = `AbortError`
   }
 }

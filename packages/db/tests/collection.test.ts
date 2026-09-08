@@ -7,6 +7,7 @@ import {
   DuplicateKeySyncError,
   InvalidKeyError,
   KeyUpdateNotAllowedError,
+  LoadSubsetOperationAbortedError,
   MissingDeleteHandlerError,
   MissingInsertHandlerError,
   MissingUpdateHandlerError,
@@ -2349,7 +2350,7 @@ describe(`Collection isLoadingSubset property`, () => {
 
     await expect(
       collection._sync.loadSubset({ signal: request.signal }),
-    ).rejects.toMatchObject({ name: `AbortError` })
+    ).rejects.toBeInstanceOf(LoadSubsetOperationAbortedError)
 
     expect(loadSubset).not.toHaveBeenCalled()
     expect(collection.isLoadingSubset).toBe(false)

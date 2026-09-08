@@ -23,6 +23,7 @@ import {
 } from '../equality-value-identity.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
 import { compileExpression } from './evaluators.js'
+import { getSourceAliasesFromExpression } from './expressions.js'
 import { getLazyLoadTargets } from './lazy-targets.js'
 import { crossJoinParentRoutes } from './parent-routes.js'
 import {
@@ -549,30 +550,6 @@ function analyzeJoinExpressions(
 
   // This should not be reachable given the logic above, but just in case
   throw new InvalidJoinCondition()
-}
-
-/**
- * Extracts the source alias from a join expression
- */
-function getSourceAliasesFromExpression(expr: BasicExpression): Set<string> {
-  switch (expr.type) {
-    case `ref`:
-      // PropRef path has the source alias as the first element
-      return new Set(expr.path[0] ? [expr.path[0]] : [])
-    case `func`: {
-      // For function expressions, we need to check if all arguments refer to the same source
-      const sourceAliases = new Set<string>()
-      for (const arg of expr.args) {
-        for (const alias of getSourceAliasesFromExpression(arg)) {
-          sourceAliases.add(alias)
-        }
-      }
-      return sourceAliases
-    }
-    default:
-      // Values (type='val') don't reference any source
-      return new Set()
-  }
 }
 
 /**

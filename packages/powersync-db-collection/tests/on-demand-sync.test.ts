@@ -2519,13 +2519,11 @@ describe(`On-Demand Sync Mode`, () => {
       const first = { where: eq(`category`, `electronics`) }
       const second = { where: eq(`category`, `clothing`) }
       const firstCleanup = vi.fn()
-      let unloadSubset!: (options: LoadSubsetOptions) => void
-      const secondCleanup = vi.fn(() => unloadSubset(first))
+      const secondCleanup = vi.fn(() => started.unloadSubset(first))
       const onLoadSubset = vi.fn((options: LoadSubsetOptions) =>
         options === first ? firstCleanup : secondCleanup,
       )
       const started = startOnDemandSync(db, { onLoadSubset })
-      unloadSubset = started.unloadSubset
 
       await Promise.all([started.loadSubset(first), started.loadSubset(second)])
       started.sync.cleanup?.()
@@ -2540,12 +2538,10 @@ describe(`On-Demand Sync Mode`, () => {
       const getAll = vi.spyOn(db, `getAll`).mockResolvedValue([])
       const first = { where: eq(`category`, `electronics`) }
       const second = { where: eq(`category`, `clothing`) }
-      let unloadSubset!: (options: LoadSubsetOptions) => void
       const onLoadSubset = vi.fn((options: LoadSubsetOptions) =>
-        options === first ? () => unloadSubset(second) : undefined,
+        options === first ? () => started.unloadSubset(second) : undefined,
       )
       const started = startOnDemandSync(db, { onLoadSubset })
-      unloadSubset = started.unloadSubset
 
       try {
         await Promise.all([
@@ -2659,6 +2655,35 @@ describe(`On-Demand Sync Mode`, () => {
       await vi.waitFor(() => expect(dispose).toHaveBeenCalledOnce())
     })
 
+    it(`reports a source error when a rebuild removes tracking and cannot replace it`, async () => {
+      const db = await createDatabase()
+      const collection = createCollection(
+        powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.products,
+          syncMode: `on-demand`,
+        }),
+      )
+      const failure = new Error(`trigger installation failed`)
+      try {
+        await collection._sync.loadSubset({
+          where: eq(`category`, `electronics`),
+        })
+        expect(collection.status).toBe(`ready`)
+        vi.spyOn(db.triggers, `createDiffTrigger`).mockRejectedValueOnce(
+          failure,
+        )
+        await expect(
+          Promise.resolve(
+            collection._sync.loadSubset({ where: eq(`category`, `clothing`) }),
+          ),
+        ).rejects.toBe(failure)
+        expect(collection.status).toBe(`error`)
+      } finally {
+        await collection.cleanup()
+      }
+    })
+
     it(`retries a failed physical release`, async () => {
       vi.useFakeTimers()
       const db = await createDatabase()
@@ -2712,6 +2737,41 @@ describe(`On-Demand Sync Mode`, () => {
             const query = String(sql)
             return query.includes(`clothing`) && !query.includes(`electronics`)
           }),
+        ).toBe(true)
+      } finally {
+        sync.cleanup?.()
+        await vi.runOnlyPendingTimersAsync()
+        vi.useRealTimers()
+      }
+    })
+
+    it(`evicts a newly released demand without waiting for another demand's retry timer`, async () => {
+      vi.useFakeTimers()
+      const db = await createDatabase()
+      vi.spyOn(db.logger, `error`).mockImplementation(() => {})
+      vi.spyOn(db.triggers, `createDiffTrigger`).mockResolvedValue(vi.fn())
+      const getAll = vi
+        .spyOn(db, `getAll`)
+        .mockImplementation((sql) =>
+          String(sql).includes(`electronics`)
+            ? Promise.reject(new Error(`eviction failed`))
+            : Promise.resolve([]),
+        )
+      const { sync, loadSubset, unloadSubset } = startOnDemandSync(db)
+      const first = { where: eq(`category`, `electronics`) }
+      const second = { where: eq(`category`, `clothing`) }
+      try {
+        await Promise.all([loadSubset(first), loadSubset(second)])
+        unloadSubset(first)
+        for (let turn = 0; turn < 30; turn++) await Promise.resolve()
+        const callsAfterFailure = getAll.mock.calls.length
+        expect(callsAfterFailure).toBe(1)
+        unloadSubset(second)
+        for (let turn = 0; turn < 30; turn++) await Promise.resolve()
+        expect(
+          getAll.mock.calls
+            .slice(callsAfterFailure)
+            .some(([sql]) => String(sql).includes(`clothing`)),
         ).toBe(true)
       } finally {
         sync.cleanup?.()

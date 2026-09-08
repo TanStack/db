@@ -1030,18 +1030,18 @@ class PersistedCollectionRuntime<
 
     if (upstreamLoadSubset) {
       try {
-        const maybePromise = upstreamLoadSubset(options)
-        if (maybePromise instanceof Promise) {
-          await maybePromise.catch((error) => {
-            console.warn(
-              `Failed to load remote subset in persisted wrapper:`,
-              error,
-            )
-            this.queueRemoteSubsetEnsure(options)
-            return undefined
-          })
-        }
+        await upstreamLoadSubset(options)
       } catch (error) {
+        if (
+          options.signal?.aborted ||
+          (typeof error === `object` &&
+            error !== null &&
+            `name` in error &&
+            error.name === `AbortError`)
+        ) {
+          this.pendingRemoteSubsetEnsures.delete(this.getSubsetKey(options))
+          throw error
+        }
         console.warn(`Failed to trigger remote subset load:`, error)
         this.queueRemoteSubsetEnsure(options)
       }
@@ -1053,6 +1053,7 @@ class PersistedCollectionRuntime<
     upstreamUnloadSubset?: (options: LoadSubsetOptions) => void,
   ): void {
     this.activeSubsets.delete(this.getSubsetKey(options))
+    this.pendingRemoteSubsetEnsures.delete(this.getSubsetKey(options))
     upstreamUnloadSubset?.(options)
   }
 
@@ -1826,7 +1827,8 @@ class PersistedCollectionRuntime<
   private queueRemoteSubsetEnsure(options: LoadSubsetOptions): void {
     if (
       this.mode !== `sync-present` ||
-      !this.persistence.coordinator.requestEnsureRemoteSubset
+      !this.persistence.coordinator.requestEnsureRemoteSubset ||
+      this.activeSubsets.get(this.getSubsetKey(options)) !== options
     ) {
       return
     }
