@@ -3251,7 +3251,7 @@ describe(`CollectionSubscription replay oracle`, () => {
       [false, true].map((failRelease) => ({ releaseDemand, failRelease })),
     ),
   )(
-    `preserves exact replay handoff with releaseDemand=$releaseDemand and failRelease=$failRelease`,
+    `releases before reacquisition with releaseDemand=$releaseDemand and failRelease=$failRelease`,
     async ({ releaseDemand, failRelease }) => {
       let begin!: () => void
       let commit!: () => void
@@ -3299,16 +3299,17 @@ describe(`CollectionSubscription replay oracle`, () => {
         commit()
         await flushPromises()
 
-        expect(loads).toHaveLength(2)
+        const reacquires = !releaseDemand && !failRelease
+        expect(loads).toHaveLength(reacquires ? 2 : 1)
         // indexOf checks the exact options object, not a structurally equal copy.
-        expect(unloads.map((options) => loads.indexOf(options))).toEqual(
-          releaseDemand ? [0, 1] : [0],
-        )
-        expect(loads[1]!.signal?.aborted).toBe(releaseDemand || failRelease)
+        expect(unloads.map((options) => loads.indexOf(options))).toEqual([0])
+        if (reacquires) expect(loads[1]!.signal?.aborted).toBe(false)
+        if (failRelease) expect(subscription.lastError).toBe(releaseFailure)
         subscription.unsubscribe()
-        // A failed old release is final; the replacement is still owned until
-        // demand retirement, even when failure has aborted its work.
-        expect(unloads.map((options) => loads.indexOf(options))).toEqual([0, 1])
+        // A failed release or retired logical demand never starts a replacement.
+        expect(unloads.map((options) => loads.indexOf(options))).toEqual(
+          reacquires ? [0, 1] : [0],
+        )
       } finally {
         subscription.unsubscribe()
         await collection.cleanup()
@@ -4024,8 +4025,8 @@ describe(`CollectionSubscription replay oracle`, () => {
       await flushPromises()
       expect(loads.map(({ where }) => where)).toEqual([
         firstWhere,
-        firstWhere,
         nestedWhere,
+        firstWhere,
       ])
       expect(unloads).toEqual([loads[0]])
       const completion = subscription.pendingTruncateReplacement

@@ -105,13 +105,13 @@ reduction that enforces public-key congruence and multiplicity.
 These owners cooperate; they are not phases of one exclusive state machine.
 The detailed loading and publication laws below still apply.
 
-| Owner                             | Accepts / retires                                                                                                                                     | Does not establish                                        |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| Subscription acquisition          | Tentatively installs the candidate before adapter callbacks; `acceptAcquisitionTransfer` hands off the old lease; each lease gets one cleanup attempt | Replay completion or permission to publish                |
-| OrderedSourceLoader               | Tracks request settlement, safe continuation and repair debt; reset discards the cursor, disposal ignores late settlement                             | Provider exhaustion or acceptance of an imperative window |
-| Subscription replay               | Counts setup and logical acquisition participants; checks completion after reentrant release callbacks; success releases the source replacement hold  | Success of a previously failed window operation           |
-| Query builder                     | Tracks ordered publication participants in one sync session and accepts a window only for its operation generation                                    | Physical adapter ownership or cancellation                |
-| D2 and public Collection boundary | D2 accumulates private result changes; the builder flushes root and child changes when the existing gates allow it                                    | Source completeness merely because graph work drained     |
+| Owner                             | Accepts / retires                                                                                                                                    | Does not establish                                        |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| Subscription acquisition          | Retires the old physical lease before replay acquisition; installs tentative ownership before adapter callbacks; each lease gets one cleanup attempt | Replay completion or permission to publish                |
+| OrderedSourceLoader               | Tracks request settlement, safe continuation and repair debt; reset discards the cursor, disposal ignores late settlement                            | Provider exhaustion or acceptance of an imperative window |
+| Subscription replay               | Counts setup and logical acquisition participants; checks completion after reentrant release callbacks; success releases the source replacement hold | Success of a previously failed window operation           |
+| Query builder                     | Tracks ordered publication participants in one sync session and accepts a window only for its operation generation                                   | Physical adapter ownership or cancellation                |
+| D2 and public Collection boundary | D2 accumulates private result changes; the builder flushes root and child changes when the existing gates allow it                                   | Source completeness merely because graph work drained     |
 
 Session and participant checks precede changes to the builder's ordered failure
 state, not just scheduling. An obsolete rejection cannot close a replacement
@@ -606,9 +606,17 @@ repeated teardown cannot repeat it. Other acquisitions still receive cleanup,
 and a cleanup failure cannot replace an earlier request failure. Core reports
 the error but retains no retry debt: a broken adapter can leak external resources
 if it throws before freeing them. Adapters must make their own cleanup reliable.
-If releasing the old lease fails after replacement startup, the replacement
-remains owned, its work is aborted, and replay fails. Ownership cannot roll back
-to an old lease whose cleanup may already have taken effect.
+Replay replaces physical leases sequentially: detach and release the old lease,
+then acquire a fresh one only if the logical demand and replay are still current.
+A release failure fails that replay without starting a replacement. A load
+throw leaves the logical demand detached; a later authoritative replay can
+reacquire it. Neither path restores an already released lease. A sole adapter
+resource may stop and restart in this gap; adapters must not tear down resources
+held by another owner. The public replacement barrier remains closed throughout
+the gap and through failed startup, so visible results do not flicker. Once a
+new load returns successfully, its lease is active before status callbacks run.
+Reentrant callbacks therefore see either detached demand, tentative startup,
+or one active lease, not an old and new lease being transferred together.
 
 Request predicates describe acquisition, not row ownership. Releasing a demand
 does not delete matching rows from either the public snapshot or an unfinished
@@ -1037,23 +1045,24 @@ create recursive Collection machinery.
 
 ## Executable contracts
 
-| Contract                                                                    | Test suite                                                                   |
-| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| State equivalence, route lifecycle, transition history, and batch partition | `packages/db/tests/query/includes-oracle.property.test.ts`                   |
-| Joined multiplicity, alias identity, and null-key normalization             | `packages/db/tests/query/includes-query-shape-oracle.test.ts`                |
-| Demand, cancellation, and progressive timing                                | `packages/db/tests/query/includes-temporal-oracle.test.ts`                   |
-| Optimistic confirmation, rollback, and later reactivity                     | `packages/db/tests/query/includes-optimistic-oracle.property.test.ts`        |
-| Coherent layered publication                                                | `packages/db/tests/query/includes-publication-oracle.test.ts`                |
-| Collection facades, event coherence, and route activation                   | `packages/db/tests/query/includes-collection-oracle.property.test.ts`        |
-| Correlated physical work                                                    | `packages/db/tests/query/includes-work-counter-oracle.test.ts`               |
-| Route-context discovery and transport across recursive and join boundaries  | `packages/db/tests/query/includes-context-transport-oracle.test.ts`          |
-| Functional projection input boundaries, timing, and output preservation     | `packages/db/tests/query/includes-functional-projection-oracle.test.ts`      |
-| Functional input rejection and inline alternatives                          | `packages/db/tests/query/includes-functional-input-boundary.test.ts`         |
-| Public-container descriptors and reference-key matches across internal query stages | `packages/db/tests/query/public-container-copy.test.ts` |
-| Cross-formulation equivalence and reference-sensitive route identity        | `packages/db/tests/query/includes-cross-formulation-oracle.property.test.ts` |
-| Query-db ownership                                                          | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`      |
-| Failed replay retention, peer isolation, and explicit consumer-only recovery | `packages/db/tests/query/replay-failure-boundary.test.ts`                    |
-| Reachable nested shape                                                      | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts`    |
+| Contract                                                                            | Test suite                                                                   |
+| ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| State equivalence, route lifecycle, transition history, and batch partition         | `packages/db/tests/query/includes-oracle.property.test.ts`                   |
+| Joined multiplicity, alias identity, and null-key normalization                     | `packages/db/tests/query/includes-query-shape-oracle.test.ts`                |
+| Demand, cancellation, and progressive timing                                        | `packages/db/tests/query/includes-temporal-oracle.test.ts`                   |
+| Optimistic confirmation, rollback, and later reactivity                             | `packages/db/tests/query/includes-optimistic-oracle.property.test.ts`        |
+| Coherent layered publication                                                        | `packages/db/tests/query/includes-publication-oracle.test.ts`                |
+| Collection facades, event coherence, and route activation                           | `packages/db/tests/query/includes-collection-oracle.property.test.ts`        |
+| Correlated physical work                                                            | `packages/db/tests/query/includes-work-counter-oracle.test.ts`               |
+| Route-context discovery and transport across recursive and join boundaries          | `packages/db/tests/query/includes-context-transport-oracle.test.ts`          |
+| Functional projection input boundaries, timing, and output preservation             | `packages/db/tests/query/includes-functional-projection-oracle.test.ts`      |
+| Functional input rejection and inline alternatives                                  | `packages/db/tests/query/includes-functional-input-boundary.test.ts`         |
+| Public-container descriptors and reference-key matches across internal query stages | `packages/db/tests/query/public-container-copy.test.ts`                      |
+| Cross-formulation equivalence and reference-sensitive route identity                | `packages/db/tests/query/includes-cross-formulation-oracle.property.test.ts` |
+| Query-db ownership                                                                  | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`      |
+| Failed replay retention, peer isolation, and explicit consumer-only recovery        | `packages/db/tests/query/replay-failure-boundary.test.ts`                    |
+| Replay lease balance, reference-counted peers, and failed-start recovery            | `packages/db/tests/replay-adapter-ownership.test.ts`                         |
+| Reachable nested shape                                                              | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts`    |
 
 Each oracle identifies the first divergent checkpoint and compares either the
 whole result or one exact structural difference. Correlated-materialization

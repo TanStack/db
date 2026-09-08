@@ -1956,7 +1956,7 @@ describe(`CollectionSubscription status tracking`, () => {
     }
   })
 
-  it(`keeps replacement ownership when retiring the old lease fails`, async () => {
+  it(`retries detached demand after retiring the old lease fails`, async () => {
     const replay = createDeferred<void>()
     const loads: Array<LoadSubsetOptions> = []
     const unloads: Array<LoadSubsetOptions> = []
@@ -2000,17 +2000,24 @@ describe(`CollectionSubscription status tracking`, () => {
       commit()
       await flushPromises()
 
-      expect(loads).toHaveLength(2)
-      expect(subscription.status).toBe(`loadingSubset`)
-      expect(loads[1]?.signal?.aborted).toBe(true)
+      expect(loads).toHaveLength(1)
       expect(unloads).toEqual([loads[0]])
-
-      replay.reject(new DOMException(`replacement abandoned`, `AbortError`))
-      await flushPromises()
       expect(subscription.status).toBe(`ready`)
       expect(subscription.lastError).toEqual(
         new Error(`old lease release failed`),
       )
+
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+      expect(loads).toHaveLength(2)
+      expect(subscription.status).toBe(`loadingSubset`)
+      expect(loads[1]?.signal?.aborted).toBe(false)
+      expect(unloads).toEqual([loads[0]])
+      replay.resolve()
+      await flushPromises()
+      expect(subscription.status).toBe(`ready`)
 
       subscription.unsubscribe()
       unsubscribed = true

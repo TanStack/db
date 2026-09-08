@@ -446,38 +446,20 @@ export function reduceLifecycle(
       model.attempts.some(
         ({ gating, inReplacement }) => gating && inReplacement,
       )
-    const replayTrace: Array<LifecycleTraceEvent> = []
     for (const owner of model.owners) {
-      const retiredAttemptId = owner.attemptId
       // Replacing an acquisition is not releasing its logical owner. Delayed
       // cancellation still holds readiness; replay work also holds publication.
       retireAttempt(model, owner, {
         unload: true,
-        trace: false,
         keepPending: true,
       })
       if (!owner.aborted) {
-        const attempt = startAttempt(model, owner, false)
-        replayTrace.push({
-          type: `load`,
-          id: attempt.id,
-          demand: attempt.demand,
-          session: attempt.session,
-          replay: attempt.replay,
-        })
-      }
-      if (retiredAttemptId !== undefined) {
-        replayTrace.push({
-          type: `unload`,
-          attemptId: retiredAttemptId,
-          handlerSession: model.session,
-        })
+        startAttempt(model, owner)
       }
     }
     if (model.publicationBarrierOpen && replacementSucceeded(model)) {
       model.publicationBarrierOpen = false
     }
-    model.trace.push(...replayTrace)
     setStatus(model)
     return {}
   }
@@ -526,10 +508,8 @@ export function reduceLifecycle(
     if (model.publicationBarrierOpen && replacementSucceeded(model)) {
       model.publicationBarrierOpen = false
     }
-    if (!model.unsubscribed) {
-      model.publications++
-      model.trace.push({ type: `publication` })
-    }
+    model.publications++
+    model.trace.push({ type: `publication` })
     for (const load of replayLoads) {
       model.trace.push({
         type: `load`,

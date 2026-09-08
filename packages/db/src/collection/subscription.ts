@@ -102,14 +102,6 @@ type SubsetDemand = {
   initialResult?: Deferred<void>
 }
 
-/** Stack-local lease handoff; replay/session admission stays with the caller. */
-type SubsetAcquisitionTransfer = Readonly<{
-  demand: SubsetDemand
-  previous: SubsetAcquisition
-  previousState: SubsetDemand[`acquisitionState`]
-  candidate: SubsetAcquisition & { abortController: AbortController }
-}>
-
 type TruncateReplayAttempt = {
   pendingCount: number
   setupComplete: boolean
@@ -492,124 +484,53 @@ export class CollectionSubscription
     attempt: TruncateReplayAttempt,
     demand: SubsetDemand,
   ): void {
-    const initialResult = demand.initialResult
     const isCurrentAttempt = () =>
       this.truncateReplaySession === session &&
       session.currentAttempt === attempt
+    const isCurrent = () =>
+      isCurrentAttempt() &&
+      this.isLoadSubsetSessionCurrent(session.loadSubsetSession) &&
+      this.isDemandActive(demand)
     const fail = (error: unknown) => {
-      if (isCurrentAttempt() && this.isDemandActive(demand)) {
-        session.failures.set(demand, normalizeError(error))
-      }
+      if (isCurrent()) session.failures.set(demand, normalizeError(error))
     }
-    if (initialResult) {
-      // External callers wait for publication, not merely transport return.
+    if (demand.initialResult) {
       void session.completion.promise.then(
-        initialResult.resolve,
-        initialResult.reject,
+        demand.initialResult.resolve,
+        demand.initialResult.reject,
       )
     }
-    const previousState = demand.acquisitionState
-    const hadPreviousAcquisition = previousState === `active`
+
+    // Sequential handoff: retire the old physical lease while retaining its
+    // logical demand. Callback reentry cannot release that lease twice.
     const previous = demand.acquisition
-    if (demand.requestOptions.signal?.aborted) {
-      // Cancellation retains the logical owner, but acquires no replacement.
-      // Detach before unload can reenter and release that owner.
-      demand.acquisitionState = `detached`
-      try {
-        if (hadPreviousAcquisition) this.releaseAcquisition(previous)
-      } catch (error) {
-        fail(error)
-      }
-      return
-    }
-    const next = this.createSubsetAcquisition(demand)
-    const transfer: SubsetAcquisitionTransfer = {
-      demand,
-      previous,
-      previousState,
-      candidate: next,
-    }
-    demand.acquisition = next
-    if (!hadPreviousAcquisition) demand.acquisitionState = `starting`
-
-    let result: LoadSubsetRequestResult
-    try {
-      result = this.loadSubset(
-        next.options,
-        () => isCurrentAttempt() && this.subsetDemands.includes(demand),
-      )
-    } catch (error) {
-      const demandRemains = this.subsetDemands.includes(demand)
-      this.restoreAcquisitionTransfer(transfer)
-      if (demandRemains) {
-        cancelAcquisition(next)
-      } else if (hadPreviousAcquisition) {
-        try {
-          this.releaseAcquisition(previous)
-        } catch {
-          // The failed replay already owns the first error; cleanup must not
-          // replace it, and this release attempt is final.
-        }
-      }
-      if (demandRemains && isCurrentAttempt()) {
-        fail(error)
-      }
-      return
-    }
-
-    if (!this.subsetDemands.includes(demand)) {
-      // A detached demand could not release its tentative acquisition before
-      // adapter return. An ordinary replay already released `next`, so retire
-      // the old acquisition held on this stack instead.
-      try {
-        this.releaseAcquisition(hadPreviousAcquisition ? previous : next)
-      } catch (error) {
-        fail(error)
-      }
-      return
-    }
-    if (!this.isLoadSubsetSessionCurrent(session.loadSubsetSession)) {
-      cancelAcquisition(next)
-      return
-    }
-    if (!isCurrentAttempt()) {
-      this.restoreAcquisitionTransfer(transfer)
-      next.abortController.abort()
-      try {
-        this.releaseAcquisition(next)
-      } catch (error) {
-        fail(error)
-      }
-      return
-    }
-
-    this.trackTruncateReplayParticipant(session, attempt, demand, result)
-    const statusParticipant = this.observeLoadSubsetResult(
-      result,
-      demand,
-      next.options,
-      true,
-      () =>
-        isCurrentAttempt() &&
-        this.subsetDemands.includes(demand) &&
-        !next.options.signal?.aborted,
-    )
-    if (!this.subsetDemands.includes(demand)) {
-      // A status listener retired the tentative acquisition. It could not see
-      // the old lease held on this stack, so retire that lease exactly once.
+    const hadPreviousAcquisition = demand.acquisitionState === `active`
+    demand.acquisitionState = `detached`
+    if (hadPreviousAcquisition) {
       try {
         this.releaseAcquisition(previous)
       } catch (error) {
         fail(error)
+        return
       }
+    }
+    if (!isCurrent() || demand.requestOptions.signal?.aborted) return
+
+    const next = this.createSubsetAcquisition(demand)
+    demand.acquisition = next
+    demand.acquisitionState = `starting`
+    let result: LoadSubsetRequestResult
+    try {
+      result = this.loadSubset(next.options, isCurrent)
+    } catch (error) {
+      if (demand.acquisition === next) demand.acquisitionState = `detached`
+      cancelAcquisition(next)
+      fail(error)
       return
     }
-    if (!isCurrentAttempt()) {
-      // A reentrant truncate aborted this tentative acquisition before it was
-      // returned. Keep its async work in the captured attempt's barrier, but
-      // restore the demand's prior lease for the newer replay to replace.
-      this.restoreAcquisitionTransfer(transfer)
-      next.abortController.abort()
+
+    if (!isCurrent()) {
+      if (demand.acquisition === next) demand.acquisitionState = `detached`
       try {
         this.releaseAcquisition(next)
       } catch (error) {
@@ -618,23 +539,15 @@ export class CollectionSubscription
       return
     }
 
-    if (!hadPreviousAcquisition) {
-      demand.acquisitionState = `active`
-      return
-    }
-
-    // Adapter startup succeeded; accept the candidate before releasing the
-    // old lease so reentrant release sees the new owner.
-    try {
-      this.acceptAcquisitionTransfer(transfer)
-    } catch (error) {
-      // The replacement remains owned. Failure to release the old acquisition
-      // fails this replay, but cannot roll ownership back to a retired lease.
-      next.abortController.abort()
-      this.recordLoadSubsetError(demand.acquisition.options, error, true)
-      this.stopStatusParticipant(statusParticipant)
-      fail(error)
-    }
+    demand.acquisitionState = `active`
+    this.trackTruncateReplayParticipant(session, attempt, demand, result)
+    this.observeLoadSubsetResult(
+      result,
+      demand,
+      next.options,
+      true,
+      () => isCurrent() && !next.options.signal?.aborted,
+    )
   }
 
   private settleTruncateReplay(
@@ -944,7 +857,7 @@ export class CollectionSubscription
     options: LoadSubsetOptions,
     trackStatus: boolean,
     shouldReportError: () => boolean = () => true,
-  ): { demand: SubsetDemand; promise: Promise<unknown> } | undefined {
+  ): void {
     if (!(syncResult instanceof Promise)) return
 
     const loadSubsetSession = this.collection._sync.getLoadSubsetSession()
@@ -976,7 +889,6 @@ export class CollectionSubscription
       }
       finish()
     })
-    return trackStatus ? participant : undefined
   }
 
   /** Give every logical observer of one transport rejection the same Error. */
@@ -989,16 +901,6 @@ export class CollectionSubscription
     const normalized = normalizeError(error)
     this.loadSubsetPromiseErrors.set(promise, normalized)
     return normalized
-  }
-
-  private stopStatusParticipant(
-    participant:
-      | { demand: SubsetDemand; promise: Promise<unknown> }
-      | undefined,
-  ): void {
-    if (!participant) return
-    this.pendingLoadSubsetParticipants.delete(participant)
-    this.setReadyIfIdle()
   }
 
   private stopDemandStatusParticipants(demand: SubsetDemand): void {
@@ -1049,29 +951,6 @@ export class CollectionSubscription
       abortController,
       removeRequestAbortListener,
     }
-  }
-
-  /** Restore only our tentative lease, never a newer reentrant acquisition. */
-  private restoreAcquisitionTransfer(
-    transfer: SubsetAcquisitionTransfer,
-  ): void {
-    const { demand, previous, previousState, candidate } = transfer
-    if (demand.acquisition !== candidate) return
-    demand.acquisition = previous
-    demand.acquisitionState = previousState
-  }
-
-  /** Accept startup before attempting to release the prior lease. */
-  private acceptAcquisitionTransfer(transfer: SubsetAcquisitionTransfer): void {
-    this.restoreAcquisitionTransfer(transfer)
-    const { demand, candidate: next } = transfer
-    const previous = demand.acquisition
-
-    // Publish the replacement ownership before releasing the old lease. An
-    // adapter may synchronously release the logical demand from unloadSubset;
-    // that reentrant release must then see and release the new acquisition.
-    demand.acquisition = next
-    this.releaseAcquisition(previous, false)
   }
 
   /** Retire an acquisition before user code; failed cleanup is not retryable. */
