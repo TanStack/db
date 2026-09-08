@@ -413,8 +413,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   private isGraphRunning = false
   private starting = false
   private disposed = false
-  // When dispose() is called mid-graph-run, defer heavy cleanup until the run completes
-  private deferredCleanup = false
 
   private readonly onBatchProcessed: (
     events: Array<DeltaEvent<TRow, TKey>>,
@@ -819,7 +817,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
     this.isGraphRunning = true
     try {
-      while (this.graph.pendingWork()) {
+      // Ordered refill can also dispose the runner between graph steps.
+      while (!this.isDisposed() && this.graph.pendingWork()) {
         this.graph.run()
         // A handler (via onBatchProcessed) or source error callback may have
         // called dispose() during graph.run(). Stop early to avoid operating
@@ -836,13 +835,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       this.flushPendingChanges()
     } finally {
       this.isGraphRunning = false
-      // If dispose() was called during this graph run, it deferred the heavy
-      // cleanup (clearing graph/inputs/pipeline) to avoid nulling references
-      // mid-loop. Complete that cleanup now.
-      if (this.deferredCleanup) {
-        this.deferredCleanup = false
-        this.finalCleanup()
-      }
     }
   }
 
@@ -991,23 +983,14 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       delete this.optimizableOrderByCollections[key]
     }
 
-    // If the graph is currently running, defer clearing graph/inputs/pipeline
-    // until runGraph() completes — otherwise we'd null references mid-loop.
-    if (this.isGraphRunning) {
-      this.deferredCleanup = true
-    } else {
-      this.finalCleanup()
-    }
-
-    if (firstCleanupFailure) throw firstCleanupFailure.error
-  }
-
-  /** Clear graph references — called after graph run completes or immediately from dispose */
-  private finalCleanup(): void {
+    // graph.run() keeps its own stack reference. The disposed guard prevents
+    // another step or new input; clearing our references does not destroy it.
     this.graph = undefined
     this.inputs = undefined
     this.pipeline = undefined
     this.sourceWhereClauses = undefined
+
+    if (firstCleanupFailure) throw firstCleanupFailure.error
   }
 }
 
