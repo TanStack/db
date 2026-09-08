@@ -585,11 +585,13 @@ type DemandSet = readonly [
 ]
 ```
 
-One request may serve many buckets, and the adapter may coalesce or reuse
-requests according to the compiled demand plan. A coalesced request has one
-shared abort lease. If one owner releases its lease, the source request remains
-active while another owner still needs that acquisition. The source signal
-aborts only after every attached owner has released it.
+One request may serve many buckets according to the compiled demand plan.
+This does not imply transport sharing between independent subscriptions.
+The exact-request deduper reuses completed requests and shares in-flight work
+only when callers supply no abort signal. Independently cancelable requests
+use separate transports, trading duplicate concurrent fetches for simpler
+ownership. An adapter may share its own resources, but releasing one owner
+must not cancel work or remove rows still owned by another.
 
 A Collection subscription installs each logical subset owner before it calls
 the source adapter. Reentrant release during `loadSubset` therefore retires the
