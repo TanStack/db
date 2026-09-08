@@ -658,12 +658,6 @@ export class CollectionSyncManager<
     return this.pendingLoadSubsetPromises.size > 0
   }
 
-  /** Wait for the subset loads that are active during the current operation. */
-  public waitForCurrentLoadSubset(): true | Promise<void> {
-    if (this.pendingLoadSubsetPromises.size === 0) return true
-    return this.waitForPendingLoadSubset()
-  }
-
   /** @internal Observe subset requests caused by one imperative operation. */
   public beginLoadSubsetOperation(): {
     wait: () => true | Promise<void>
@@ -756,12 +750,6 @@ export class CollectionSyncManager<
           error,
         }),
     )
-  }
-
-  private async waitForPendingLoadSubset(): Promise<void> {
-    do {
-      await Promise.all([...this.pendingLoadSubsetPromises])
-    } while (this.pendingLoadSubsetPromises.size > 0)
   }
 
   /**

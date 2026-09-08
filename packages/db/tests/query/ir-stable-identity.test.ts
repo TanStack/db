@@ -32,7 +32,6 @@ import {
   UnhashableQueryIRError,
   getLoadSubsetDemandKey,
   getQueryIdentity,
-  getStableExpressionHash,
   getStableQueryIRHash,
   getStableValueHash,
 } from '../../src/query/ir-stable-identity.js'
@@ -76,6 +75,13 @@ interface User {
   }
   blob?: Uint8Array
   largeViewCount?: bigint
+}
+
+function getProjectedExpressionIdentity(expression: BasicExpression): string {
+  return getQueryIdentity({
+    ...getQueryIR(new Query().from({ user: usersCollection })),
+    select: { value: expression },
+  })
 }
 
 const referenceSemanticPairArbitrary = fc.oneof(
@@ -235,9 +241,11 @@ describe(`semantic expression identity`, () => {
     ])
     const flat = new Func<boolean>(`and`, [adult, enabled])
 
-    expect(getStableExpressionHash(nested)).toBe(getStableExpressionHash(flat))
-    expect(getStableExpressionHash(new Func(`or`, [adult, adult]))).toBe(
-      getStableExpressionHash(new Func(`or`, [adult])),
+    expect(getProjectedExpressionIdentity(nested)).toBe(
+      getProjectedExpressionIdentity(flat),
+    )
+    expect(getProjectedExpressionIdentity(new Func(`or`, [adult, adult]))).toBe(
+      getProjectedExpressionIdentity(new Func(`or`, [adult])),
     )
   })
 
@@ -248,25 +256,25 @@ describe(`semantic expression identity`, () => {
 
     expect(toBooleanPredicate(compileExpression(bareAge)(row))).toBe(false)
     expect(toBooleanPredicate(compileExpression(duplicateAnd)(row))).toBe(true)
-    expect(getStableExpressionHash(duplicateAnd)).not.toBe(
-      getStableExpressionHash(bareAge),
+    expect(getProjectedExpressionIdentity(duplicateAnd)).not.toBe(
+      getProjectedExpressionIdentity(bareAge),
     )
   })
 
   it(`normalizes equality and reversed inequalities`, () => {
-    expect(getStableExpressionHash(new Func(`eq`, [age, new Value(18)]))).toBe(
-      getStableExpressionHash(new Func(`eq`, [new Value(18), age])),
-    )
-    expect(getStableExpressionHash(new Func(`gt`, [age, new Value(18)]))).toBe(
-      getStableExpressionHash(new Func(`lt`, [new Value(18), age])),
-    )
+    expect(
+      getProjectedExpressionIdentity(new Func(`eq`, [age, new Value(18)])),
+    ).toBe(getProjectedExpressionIdentity(new Func(`eq`, [new Value(18), age])))
+    expect(
+      getProjectedExpressionIdentity(new Func(`gt`, [age, new Value(18)])),
+    ).toBe(getProjectedExpressionIdentity(new Func(`lt`, [new Value(18), age])))
   })
 
   it(`preserves order-sensitive function arguments`, () => {
     expect(
-      getStableExpressionHash(new Func(`subtract`, [age, new Value(1)])),
+      getProjectedExpressionIdentity(new Func(`subtract`, [age, new Value(1)])),
     ).not.toBe(
-      getStableExpressionHash(new Func(`subtract`, [new Value(1), age])),
+      getProjectedExpressionIdentity(new Func(`subtract`, [new Value(1), age])),
     )
   })
 
@@ -279,8 +287,8 @@ describe(`semantic expression identity`, () => {
     expect(compileExpression(pair.original)(row)).toBe(
       compileExpression(pair.equivalent)(row),
     )
-    expect(getStableExpressionHash(pair.original)).toBe(
-      getStableExpressionHash(pair.equivalent),
+    expect(getProjectedExpressionIdentity(pair.original)).toBe(
+      getProjectedExpressionIdentity(pair.equivalent),
     )
   })
 
@@ -297,8 +305,8 @@ describe(`semantic expression identity`, () => {
 
       expect(compileExpression(firstPredicate)(row)).toBe(true)
       expect(compileExpression(secondPredicate)(row)).toBe(false)
-      expect(getStableExpressionHash(firstPredicate)).not.toBe(
-        getStableExpressionHash(secondPredicate),
+      expect(getProjectedExpressionIdentity(firstPredicate)).not.toBe(
+        getProjectedExpressionIdentity(secondPredicate),
       )
       expect(
         getLoadSubsetDemandKey({ where: firstPredicate, limit: 1 }),
@@ -312,14 +320,13 @@ describe(`semantic expression identity`, () => {
     vi.resetModules()
 
     try {
-      const { getRuntimeReferenceIdentity } = await import(
-        `../../src/query/runtime-reference-identity.js`
-      )
+      const { getRuntimeReferenceIdentity: getFreshRuntimeReferenceIdentity } =
+        await import(`../../src/query/runtime-reference-identity.js`)
 
       expect(getRandomValues).not.toHaveBeenCalled()
 
-      getRuntimeReferenceIdentity({})
-      getRuntimeReferenceIdentity({})
+      getFreshRuntimeReferenceIdentity({})
+      getFreshRuntimeReferenceIdentity({})
 
       expect(getRandomValues).toHaveBeenCalledOnce()
     } finally {
@@ -457,8 +464,8 @@ describe(`semantic expression identity`, () => {
         compileExpression(reordered)(row),
       )
     }
-    expect(getStableExpressionHash(ordered)).toBe(
-      getStableExpressionHash(reordered),
+    expect(getProjectedExpressionIdentity(ordered)).toBe(
+      getProjectedExpressionIdentity(reordered),
     )
     expect(getLoadSubsetDemandKey({ where: ordered })).toBe(
       getLoadSubsetDemandKey({ where: reordered }),
@@ -597,8 +604,8 @@ describe(`loadSubset demand identity`, () => {
       expect(
         compileExpression(firstPredicate)({ row: { value: secondValue } }),
       ).toBe(true)
-      expect(getStableExpressionHash(firstPredicate)).toBe(
-        getStableExpressionHash(secondPredicate),
+      expect(getProjectedExpressionIdentity(firstPredicate)).toBe(
+        getProjectedExpressionIdentity(secondPredicate),
       )
       expect(getLoadSubsetDemandKey({ where: firstPredicate })).toBe(
         getLoadSubsetDemandKey({ where: secondPredicate }),

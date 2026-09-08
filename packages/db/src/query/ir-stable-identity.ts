@@ -86,18 +86,6 @@ export function getQueryIdentity(query: QueryIR): QueryIdentity {
   return JSON.stringify(canonicalizeQueryIR(query)) as QueryIdentity
 }
 
-/** Returns the semantic identity of one structured expression. */
-export function getStableExpressionHash(expression: BasicExpression): string {
-  return JSON.stringify(
-    canonicalizeExpression(
-      expression,
-      `expression`,
-      new WeakSet(),
-      `exact-output`,
-    ),
-  )
-}
-
 /**
  * Returns the exact semantic identity of a loadSubset request.
  *

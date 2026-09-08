@@ -768,45 +768,6 @@ export class CannotCombineEmptyExpressionListError extends QueryOptimizerError {
 }
 
 /**
- * Internal error when the query optimizer fails to convert a WHERE clause to a collection filter.
- */
-export class WhereClauseConversionError extends QueryOptimizerError {
-  constructor(collectionId: string, alias: string) {
-    super(
-      `Failed to convert WHERE clause to collection filter for collection '${collectionId}' alias '${alias}'. This indicates a bug in the query optimization logic.`,
-    )
-  }
-}
-
-/**
- * Error when a subscription cannot be found during lazy join processing.
- * For subqueries, aliases may be remapped (e.g., 'activeUser' → 'user').
- */
-export class SubscriptionNotFoundError extends QueryCompilationError {
-  constructor(
-    resolvedAlias: string,
-    originalAlias: string,
-    collectionId: string,
-    availableAliases: Array<string>,
-  ) {
-    super(
-      `Internal error: subscription for alias '${resolvedAlias}' (remapped from '${originalAlias}', collection '${collectionId}') is missing in join pipeline. Available aliases: ${availableAliases.join(`, `)}. This indicates a bug in alias tracking.`,
-    )
-  }
-}
-
-/**
- * Error thrown when aggregate expressions are used outside of a GROUP BY context.
- */
-export class AggregateNotSupportedError extends QueryCompilationError {
-  constructor() {
-    super(
-      `Aggregate expressions are not supported in this context. Use GROUP BY clause for aggregates.`,
-    )
-  }
-}
-
-/**
  * Internal error when the compiler returns aliases that don't have corresponding input streams.
  * This should never happen since all aliases come from user declarations.
  */

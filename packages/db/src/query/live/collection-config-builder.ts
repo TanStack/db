@@ -93,9 +93,6 @@ export class CollectionConfigBuilder<
   private readonly collectionSources: ReturnType<
     typeof extractCollectionSources
   >
-  private readonly collectionByAlias: Record<string, Collection<any, any, any>>
-  // Populated during compilation with all aliases (including subquery inner aliases)
-  private compiledAliasToCollectionId: Record<string, string> = {}
 
   // WeakMap to store the keys of the results
   // so that we can retrieve them in the getKey function
@@ -204,12 +201,6 @@ export class CollectionConfigBuilder<
     this.settledWindow = this.initialWindow
     this.collections = extractCollectionsFromQuery(this.query)
     this.collectionSources = extractCollectionSources(this.query)
-    this.collectionByAlias = Object.fromEntries(
-      this.collectionSources.map(({ alias, collection }) => [
-        alias,
-        collection,
-      ]),
-    )
 
     // Create compare function for ordering if the query has orderBy
     if (this.query.orderBy && this.query.orderBy.length > 0) {
@@ -393,29 +384,6 @@ export class CollectionConfigBuilder<
       offset: window.offset ?? 0,
       limit: window.limit ?? 0,
     }
-  }
-
-  /**
-   * Resolves a collection alias to its collection ID.
-   *
-   * Uses a two-tier lookup strategy:
-   * 1. First checks compiled aliases (includes subquery inner aliases)
-   * 2. Falls back to declared aliases from the query's from/join clauses
-   *
-   * @param alias - The alias to resolve (e.g., "employee", "manager")
-   * @returns The collection ID that the alias references
-   * @throws {Error} If the alias is not found in either lookup
-   */
-  getCollectionIdForAlias(alias: string): string {
-    const compiled = this.compiledAliasToCollectionId[alias]
-    if (compiled) {
-      return compiled
-    }
-    const collection = this.collectionByAlias[alias]
-    if (collection) {
-      return collection.id
-    }
-    throw new Error(`Unknown source alias "${alias}"`)
   }
 
   isLazySource(sourceId: string): boolean {
@@ -897,7 +865,6 @@ export class CollectionConfigBuilder<
       Object.keys(this.subscriptions).forEach(
         (key) => delete this.subscriptions[key],
       )
-      this.compiledAliasToCollectionId = {}
 
       // Unregister from scheduler's onClear listener to prevent memory leaks
       // The scheduler's listener Set would otherwise keep a strong reference to this builder
@@ -1000,7 +967,6 @@ export class CollectionConfigBuilder<
     )
     this.pipelineCache = materialized.pipeline
     this.sourceWhereClausesCache = compilation.sourceWhereClauses
-    this.compiledAliasToCollectionId = compilation.aliasToCollectionId
     this.bucketFacadesCache = materialized.facades
 
     const missingSources = this.collectionSources

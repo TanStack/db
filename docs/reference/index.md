@@ -12,7 +12,6 @@ title: "@tanstack/db"
 ## Classes
 
 - [AggregateFunctionNotInSelectError](classes/AggregateFunctionNotInSelectError.md)
-- [AggregateNotSupportedError](classes/AggregateNotSupportedError.md)
 - [BaseIndex](classes/BaseIndex.md)
 - [BaseQueryBuilder](classes/BaseQueryBuilder.md)
 - [BasicIndex](classes/BasicIndex.md)
@@ -89,7 +88,6 @@ title: "@tanstack/db"
 - [StorageError](classes/StorageError.md)
 - [StorageKeyRequiredError](classes/StorageKeyRequiredError.md)
 - [SubQueryMustHaveFromClauseError](classes/SubQueryMustHaveFromClauseError.md)
-- [SubscriptionNotFoundError](classes/SubscriptionNotFoundError.md)
 - [SyncCleanupError](classes/SyncCleanupError.md)
 - [SyncTransactionAbortedError](classes/SyncTransactionAbortedError.md)
 - [SyncTransactionAlreadyCommittedError](classes/SyncTransactionAlreadyCommittedError.md)
@@ -113,7 +111,6 @@ title: "@tanstack/db"
 - [UnsupportedJoinTypeError](classes/UnsupportedJoinTypeError.md)
 - [UnsupportedRootScalarSelectError](classes/UnsupportedRootScalarSelectError.md)
 - [UpdateKeyNotFoundError](classes/UpdateKeyNotFoundError.md)
-- [WhereClauseConversionError](classes/WhereClauseConversionError.md)
 
 ## Interfaces
 

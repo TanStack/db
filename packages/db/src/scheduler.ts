@@ -196,20 +196,6 @@ export class Scheduler {
     const context = this.contexts.get(contextId)
     return !!context && context.jobs.size > 0
   }
-
-  /** Remove a single job from a context and clean up its dependencies. */
-  clearJob(contextId: SchedulerContextId, jobId: unknown): void {
-    const context = this.contexts.get(contextId)
-    if (!context) return
-
-    context.jobs.delete(jobId)
-    context.dependencies.delete(jobId)
-    context.queue = context.queue.filter((id) => id !== jobId)
-
-    if (context.jobs.size === 0) {
-      this.contexts.delete(contextId)
-    }
-  }
 }
 
 export const transactionScopedScheduler = new Scheduler()

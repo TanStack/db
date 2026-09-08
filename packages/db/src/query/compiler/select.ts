@@ -5,10 +5,7 @@ import {
   Value as ValClass,
   isExpressionLike,
 } from '../ir.js'
-import {
-  AggregateNotSupportedError,
-  UnsafeAliasPathError,
-} from '../../errors.js'
+import { UnsafeAliasPathError } from '../../errors.js'
 import { compileExpression, isCaseWhenConditionTrue } from './evaluators.js'
 import { containsAggregate } from './group-by.js'
 import type {
@@ -264,24 +261,6 @@ function isAggregateExpression(
   expr: BasicExpression | Aggregate,
 ): expr is Aggregate {
   return expr.type === `agg`
-}
-
-/**
- * Processes a single argument in a function context
- */
-export function processArgument(
-  arg: BasicExpression | Aggregate,
-  namespacedRow: NamespacedRow,
-): any {
-  if (isAggregateExpression(arg)) {
-    throw new AggregateNotSupportedError()
-  }
-
-  // Pre-compile the expression and evaluate immediately
-  const compiledExpression = compileExpression(arg)
-  const value = compiledExpression(namespacedRow)
-
-  return value
 }
 
 /**

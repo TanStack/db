@@ -107,15 +107,6 @@ export type AllCollectionEvents = {
   [K in CollectionStatus as `status:${K}`]: CollectionStatusEvent<K>
 }
 
-export type CollectionEvent =
-  | AllCollectionEvents[keyof AllCollectionEvents]
-  | CollectionStatusChangeEvent
-  | CollectionSubscribersChangeEvent
-  | CollectionLoadingSubsetChangeEvent
-  | CollectionTruncateEvent
-  | CollectionIndexAddedEvent
-  | CollectionIndexRemovedEvent
-
 export type CollectionEventHandler<T extends keyof AllCollectionEvents> = (
   event: AllCollectionEvents[T],
 ) => void
