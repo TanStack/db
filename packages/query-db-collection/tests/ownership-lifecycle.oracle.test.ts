@@ -212,30 +212,35 @@ describe(`query collection ownership lifecycle`, () => {
     expect(rows(collection)).toEqual([detailOnly.id, shared.id])
   })
 
-  it(`keeps eager rows idle after cache removal and refetches on remount`, async () => {
-    const id = `eager-lifetime-owner`
-    const { collection, queryClient, queryFn } = createOwnershipFixture({
-      id,
-      syncMode: `eager`,
-      results: [[shared], [{ ...shared, name: `Refetched` }]],
-    })
-    await collection.stateWhenReady()
-    const subscription = collection.subscribeChanges(() => {})
-    subscription.unsubscribe()
+  it.each([`remount`, `refetch`] as const)(
+    `keeps eager rows idle after cache removal and recovers on %s`,
+    async (action) => {
+      const id = `eager-lifetime-owner`
+      const { collection, queryClient, queryFn } = createOwnershipFixture({
+        id,
+        syncMode: `eager`,
+        results: [[shared], [{ ...shared, name: `Refetched` }]],
+      })
+      await collection.stateWhenReady()
+      const subscription = collection.subscribeChanges(() => {})
+      subscription.unsubscribe()
 
-    queryClient.removeQueries({ queryKey: [id], exact: true })
+      queryClient.removeQueries({ queryKey: [id], exact: true })
 
-    expect(rows(collection)).toEqual([shared.id])
-    await Promise.resolve()
-    expect(queryFn).toHaveBeenCalledOnce()
+      expect(rows(collection)).toEqual([shared.id])
+      await Promise.resolve()
+      expect(queryFn).toHaveBeenCalledOnce()
 
-    const remounted = collection.subscribeChanges(() => {})
-    await vi.waitFor(() => {
-      expect(queryFn).toHaveBeenCalledTimes(2)
-      expect(collection.get(shared.id)?.name).toBe(`Refetched`)
-    })
-    remounted.unsubscribe()
-  })
+      const remounted =
+        action === `remount` ? collection.subscribeChanges(() => {}) : undefined
+      if (action === `refetch`) await collection.utils.refetch()
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        expect(collection.get(shared.id)?.name).toBe(`Refetched`)
+      })
+      remounted?.unsubscribe()
+    },
+  )
 
   it(`keeps active on-demand rows when the Query cache entry departs`, async () => {
     const id = `active-cache-removal`

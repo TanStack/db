@@ -1744,6 +1744,72 @@ describe(`persistedCollectionOptions`, () => {
     expect(collection.get(`2`)).toBeUndefined()
   })
 
+  it(`does not release or acquire an upstream lease cancelled during hydration`, async () => {
+    const adapter = createRecordingAdapter()
+    const hydrate = adapter.loadSubset
+    let blocked = false
+    let enterHydration!: () => void
+    let finishHydration!: () => void
+    const entered = new Promise<void>((resolve) => {
+      enterHydration = resolve
+    })
+    const gate = new Promise<void>((resolve) => {
+      finishHydration = resolve
+    })
+    adapter.loadSubset = async (...args) => {
+      if (blocked) {
+        enterHydration()
+        await gate
+      }
+      return hydrate(...args)
+    }
+    let leases = 0
+    let loads = 0
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `cancelled-hydration-lease`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                loads++
+                leases++
+                return true
+              },
+              unloadSubset: () => {
+                leases--
+              },
+            }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    collection.startSyncImmediate()
+    const first: LoadSubsetOptions = { limit: 1 }
+    const second: LoadSubsetOptions = { limit: 1 }
+    try {
+      await collection._sync.loadSubset(first)
+      expect(leases).toBe(1)
+      blocked = true
+      const pending = collection._sync.loadSubset(second)
+      await entered
+      collection._sync.unloadSubset(second)
+      expect(leases).toBe(1)
+      finishHydration()
+      await pending
+      expect(loads).toBe(1)
+      collection._sync.unloadSubset(first)
+      expect(leases).toBe(0)
+    } finally {
+      finishHydration()
+      await collection.cleanup()
+    }
+  })
+
   it(`retries queued remote subset ensure after transient failures`, async () => {
     const adapter = createRecordingAdapter()
     let ensureCalls = 0

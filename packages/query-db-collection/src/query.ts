@@ -825,6 +825,7 @@ export function queryCollectionOptions(
   // cache GC may remove the idle cache entry, but that is not a release of the
   // collection's ownership or its materialized rows.
   let collectionLifetimeQuery: string | undefined
+  let ensureCollectionLifetimeQuery = () => {}
 
   const addRowOwner = (rowKey: string | number, hashedQueryKey: string) => {
     const owners = rowToQueries.get(rowKey) || new Set<string>()
@@ -1816,7 +1817,7 @@ export function queryCollectionOptions(
       unsubscribes.clear()
     }
 
-    const ensureCollectionLifetimeQuery = () => {
+    ensureCollectionLifetimeQuery = () => {
       if (
         collectionLifetimeQuery === undefined ||
         state.observers.has(collectionLifetimeQuery)
@@ -2064,6 +2065,7 @@ export function queryCollectionOptions(
       })
 
     const cleanup = () => {
+      ensureCollectionLifetimeQuery = () => {}
       unsubscribeFromCollectionEvents()
       unsubscribeFromQueries()
       persistedRetentionTimers.forEach((timer) => {
@@ -2167,6 +2169,9 @@ export function queryCollectionOptions(
    * @returns Promise that resolves when the refetch is complete, with QueryObserverResult
    */
   const refetch: RefetchFn = async (opts) => {
+    // Cache GC may detach an idle eager observer without retiring its rows.
+    // Explicit refetch, like remount, must restore that collection-owned query.
+    ensureCollectionLifetimeQuery()
     const allQueryKeys = [...hashToQueryKey.values()]
     const refetchPromises = allQueryKeys.map((qKey) => {
       const queryObserver = state.observers.get(hashKey(qKey))!

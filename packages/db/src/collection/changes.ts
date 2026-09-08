@@ -136,11 +136,21 @@ export class CollectionChangesManager<
       // buffered optimistic events with the final changes so subscribers see the
       // whole picture, even if the sync diff is empty.
       if (this.batchedEvents.length > 0) {
-        const finalKeys = new Set(changes.map((change) => change.key))
-        rawEvents = [
-          ...this.batchedEvents.filter((change) => !finalKeys.has(change.key)),
-          ...changes,
-        ]
+        const combined = new Map(
+          this.batchedEvents.map((change) => [change.key, change]),
+        )
+        for (const change of changes) {
+          const pending = combined.get(change.key)
+          // A buffered removal was never delivered. Re-insertion replaces the
+          // subscriber's old row rather than inserting an already-sent key.
+          combined.set(
+            change.key,
+            pending?.type === `delete` && change.type === `insert`
+              ? { ...change, type: `update`, previousValue: pending.value }
+              : change,
+          )
+        }
+        rawEvents = [...combined.values()]
       }
       this.batchedEvents = []
       this.shouldBatchEvents = false

@@ -214,7 +214,13 @@ export class OrderedSourceLoader {
   }
 
   settleFullSourceReplay(): void {
-    if (this.hasFullSourceDemand) this.fullSourceFailed = false
+    if (this.hasFullSourceDemand) {
+      // Replay repaired the retained logical acquisition. A later window
+      // retry must not release that now-successful source demand. A failed
+      // finite page is still obsolete and must be released by that retry.
+      if (this.fullSourceFailed) this.releaseFailedAcquisition = undefined
+      this.fullSourceFailed = false
+    }
   }
 
   invalidateCursor(): void {

@@ -268,6 +268,9 @@ depth, graph-context bookkeeping, and traversal-cache matching and adoption;
 it rejects values that exceed them instead of stalling a graph turn or
 overflowing the JavaScript stack. A failed hash does not publish partial
 structural cache entries, so retrying the same value cannot bypass a guard.
+A graph-run failure marks the current live query as errored and preserves the
+thrown error. It must not continue publishing from a partly advanced graph;
+recovery requires a fresh query session.
 Opaque reference-hashed leaves are resolved before structural traversal and
 cannot consume or change those budgets. The accepted-size cycle tests are
 regression floors, not an unbounded topology guarantee.

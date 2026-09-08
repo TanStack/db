@@ -1898,6 +1898,17 @@ describe(`ordered source work oracle`, () => {
       }
       expect(publications.slice(publicationCount)).toEqual([[0, 0.5, 1, 1.5]])
       expect(escapedErrors).toEqual([])
+      await live.utils.setWindow({ offset: 0, limit: 2 })
+      expect(live.toArray.map(({ rank }) => rank)).toEqual([0, 0.5])
+      const loadsBeforeReplay = fullSourceRequests
+      installed.clear()
+      sync.begin()
+      sync.truncate()
+      const nextReplay = sync.commit()
+      if (nextReplay !== true) await nextReplay
+      await flushPromises()
+      expect(fullSourceRequests).toBeGreaterThan(loadsBeforeReplay)
+      expect(live.toArray.map(({ rank }) => rank)).toEqual([0, 0.5])
     } finally {
       queueMicrotaskSpy?.mockRestore()
       fullSource.resolve()

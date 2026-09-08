@@ -615,7 +615,14 @@ export class CollectionConfigBuilder<
             syncState.graph.pendingWork() ||
             projections.some((stage) => stage.hasWork())
           ) {
-            syncState.graph.run()
+            try {
+              syncState.graph.run()
+            } catch (error) {
+              if (isCurrentSession()) {
+                this.transitionToError(`Live query graph failed`, error)
+              }
+              throw error
+            }
             const next = projections.find((stage) => stage.hasWork())
             next?.advance()
             if (!isCurrentSession()) return false

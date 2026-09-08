@@ -127,7 +127,8 @@ export class CollectionSubscriber<
     } else {
       // Lazy sources load only the subsets demanded by the compiled graph.
       const includeInitialState =
-        this.collectionConfigBuilder.query.limit !== 0 &&
+        (this.collection.config.syncMode !== `on-demand` ||
+          this.collectionConfigBuilder.query.limit !== 0) &&
         !this.collectionConfigBuilder.isLazySource(this.sourceId)
 
       subscription = this.subscribeToMatchingChanges(

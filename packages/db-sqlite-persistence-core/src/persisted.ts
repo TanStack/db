@@ -2278,24 +2278,7 @@ function createWrappedSyncConfig<
       const getOpenTransaction = () =>
         transactionStack[transactionStack.length - 1]
       let fullStartPromise: Promise<void> | null = null
-      const cancelledLoadKeys = new Set<string>()
-      const loadSubscriptionIds = new WeakMap<object, string>()
-      let nextLoadSubscriptionId = 0
-      const getLoadKey = (options: LoadSubsetOptions) => {
-        const subscription = options.subscription as object | undefined
-        if (subscription && typeof subscription === `object`) {
-          const existingId = loadSubscriptionIds.get(subscription)
-          if (existingId) {
-            return `sub:${existingId}`
-          }
-          nextLoadSubscriptionId++
-          const nextId = String(nextLoadSubscriptionId)
-          loadSubscriptionIds.set(subscription, nextId)
-          return `sub:${nextId}`
-        }
-
-        return `opts:${stableSerialize(normalizeSubsetOptionsForKey(options))}`
-      }
+      const acquisitions = new Map<LoadSubsetOptions, { forwarded: boolean }>()
       runtime.setSyncControls({
         begin: params.begin,
         write: params.write as SyncControlFns<T, TKey>[`write`],
@@ -2592,23 +2575,48 @@ function createWrappedSyncConfig<
       return {
         cleanup: () => {
           startupState.cleanedUp = true
+          acquisitions.clear()
           sourceResult.cleanup?.()
           runtime.cleanup()
           runtime.clearSyncControls()
         },
         loadSubset: async (options: LoadSubsetOptions) => {
-          const loadKey = getLoadKey(options)
-          cancelledLoadKeys.delete(loadKey)
+          const acquisition = { forwarded: false }
+          acquisitions.set(options, acquisition)
           await fullStartPromise
           const resolvedSourceResult = await sourceResultPromise
-          if (startupState.cleanedUp || cancelledLoadKeys.has(loadKey)) {
+          if (
+            startupState.cleanedUp ||
+            acquisitions.get(options) !== acquisition
+          ) {
             return
           }
-          return runtime.loadSubset(options, resolvedSourceResult.loadSubset)
+          return runtime.loadSubset(options, (loadOptions) => {
+            // Hydration is another async boundary. A release before this
+            // point owns no upstream lease and must not start one later.
+            if (
+              startupState.cleanedUp ||
+              acquisitions.get(options) !== acquisition
+            ) {
+              return true
+            }
+            if (!resolvedSourceResult.loadSubset) return true
+            acquisition.forwarded = true
+            try {
+              return resolvedSourceResult.loadSubset(loadOptions)
+            } catch (error) {
+              acquisition.forwarded = false
+              throw error
+            }
+          })
         },
         unloadSubset: (options: LoadSubsetOptions) => {
-          cancelledLoadKeys.add(getLoadKey(options))
-          runtime.unloadSubset(options, sourceResult.unloadSubset)
+          const acquisition = acquisitions.get(options)
+          acquisitions.delete(options)
+          runtime.unloadSubset(
+            options,
+            acquisition?.forwarded ? sourceResult.unloadSubset : undefined,
+          )
         },
       }
     },
