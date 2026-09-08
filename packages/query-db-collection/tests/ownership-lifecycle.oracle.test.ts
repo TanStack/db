@@ -1,4 +1,4 @@
-import { QueryClient, hashKey } from '@tanstack/query-core'
+import { QueryClient, hashKey, isCancelledError } from '@tanstack/query-core'
 import { createCollection, eq, getLoadSubsetDemandKey } from '@tanstack/db'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createDeferred } from '../../db/src/deferred.js'
@@ -23,6 +23,7 @@ type OwnershipFixtureOptions = {
   results: Array<Array<Item> | Promise<Array<Item>>>
   syncMode?: `eager` | `on-demand`
   customHash?: boolean
+  staleTime?: number
   metadataRecorder?: MetadataRecorder
   setupMetadata?: (metadata: SyncMetadataApi<string | number>) => void
 }
@@ -45,13 +46,16 @@ const detailOnly = { id: `detail`, category: `detail`, name: `Detail` }
 const listOnly = { id: `list`, category: `list`, name: `List` }
 const cleanups: Array<() => Promise<void>> = []
 
-function createQueryClient(customHash = false): QueryClient {
+function createQueryClient(
+  customHash = false,
+  staleTime = Number.POSITIVE_INFINITY,
+): QueryClient {
   return new QueryClient({
     defaultOptions: {
       queries: {
         gcTime: Number.POSITIVE_INFINITY,
         retry: false,
-        staleTime: Number.POSITIVE_INFINITY,
+        staleTime,
         queryKeyHashFn: customHash
           ? (key) => `custom:${hashKey(key)}`
           : undefined,
@@ -94,8 +98,9 @@ function createOwnershipFixture({
   metadataRecorder,
   setupMetadata,
   customHash,
+  staleTime,
 }: OwnershipFixtureOptions): OwnershipFixture {
-  const queryClient = createQueryClient(customHash)
+  const queryClient = createQueryClient(customHash, staleTime)
   const queryFn = vi.fn<() => Promise<Array<Item>>>()
   results.forEach((result) =>
     queryFn.mockImplementationOnce(() => Promise.resolve(result)),
@@ -267,6 +272,90 @@ describe(`query collection ownership lifecycle`, () => {
       } finally {
         subscription.unsubscribe()
       }
+    },
+  )
+
+  it.each(
+    [false, true].flatMap((mounted) =>
+      [false, true].flatMap((customHash) =>
+        [false, true].map((rejectOld) => ({ mounted, customHash, rejectOld })),
+      ),
+    ),
+  )(
+    `replaces a removed pending eager refetch without reviving idle demand: %j`,
+    async ({ mounted, customHash, rejectOld }) => {
+      const old = createDeferred<Array<Item>>()
+      const next = createDeferred<Array<Item>>()
+      const id = `pending-eager-removal`
+      const { collection, queryClient, queryFn } = createOwnershipFixture({
+        id,
+        customHash,
+        syncMode: `eager`,
+        results: [[shared], old.promise, next.promise],
+      })
+      await collection.stateWhenReady()
+      let subscription = collection.subscribeChanges(() => {})
+      if (!mounted) subscription.unsubscribe()
+      let settled = false
+      const refetch = collection.utils.refetch({ throwOnError: true }).then(
+        () => {
+          settled = true
+        },
+        (error: unknown) => {
+          settled = true
+          return error
+        },
+      )
+      try {
+        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+        queryClient.removeQueries({ queryKey: [id], exact: true })
+        for (let turn = 0; turn < 30; turn++) await Promise.resolve()
+        expect(queryFn).toHaveBeenCalledTimes(mounted ? 3 : 2)
+        expect(collection.get(shared.id)?.name).toBe(`Shared`)
+        if (!mounted) subscription = collection.subscribeChanges(() => {})
+        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(3))
+        next.resolve([{ ...shared, name: `Current` }])
+        await vi.waitFor(() =>
+          expect(collection.get(shared.id)?.name).toBe(`Current`),
+        )
+        if (rejectOld) old.reject(new Error(`retired request failed`))
+        else old.resolve([{ ...shared, name: `Obsolete` }])
+        await vi.waitFor(() => expect(settled).toBe(true))
+        expect(isCancelledError(await refetch)).toBe(true)
+        expect(collection.get(shared.id)?.name).toBe(`Current`)
+        expect(queryFn).toHaveBeenCalledTimes(3)
+        expect(collection.status).toBe(`ready`)
+      } finally {
+        old.resolve([shared])
+        next.resolve([shared])
+        subscription.unsubscribe()
+      }
+    },
+  )
+
+  it.each(
+    [0, Number.POSITIVE_INFINITY].flatMap((staleTime) =>
+      [false, true].map((customHash) => ({ staleTime, customHash })),
+    ),
+  )(
+    `starts only the requested fetch for an idle eager observer: %j`,
+    async ({ staleTime, customHash }) => {
+      const { collection, queryFn } = createOwnershipFixture({
+        id: `idle-explicit-refetch`,
+        syncMode: `eager`,
+        staleTime,
+        customHash,
+        results: [[shared]],
+      })
+      await collection.stateWhenReady()
+      queryFn.mockResolvedValue([{ ...shared, name: `Refetched` }])
+      const subscription = collection.subscribeChanges(() => {})
+      subscription.unsubscribe()
+      for (let turn = 0; turn < 30; turn++) await Promise.resolve()
+      const before = queryFn.mock.calls.length
+      await collection.utils.refetch({ throwOnError: true })
+      expect(queryFn).toHaveBeenCalledTimes(before + 1)
+      expect(collection.subscriberCount).toBe(0)
     },
   )
 

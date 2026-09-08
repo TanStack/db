@@ -822,11 +822,9 @@ export function queryCollectionOptions(
   // 3. Decrements refcount and GCs rows where count reaches 0
   const queryRefCounts = new Map<string, number>()
 
-  // Eager mode owns its base query for the collection's whole lifetime. Query
-  // cache GC may remove the idle cache entry, but that is not a release of the
-  // collection's ownership or its materialized rows.
-  let collectionLifetimeQuery: string | undefined
-  let ensureCollectionLifetimeQuery = () => {}
+  // Eager startup holds one reference until cleanup. Cache removal detaches
+  // observation, not that ownership or its rows.
+  let ensureEagerSubscription = () => {}
 
   const addRowOwner = (rowKey: string | number, hashedQueryKey: string) => {
     const owners = rowToQueries.get(rowKey) || new Set<string>()
@@ -1802,6 +1800,9 @@ export function queryCollectionOptions(
       hashedQueryKey: string,
     ) => {
       if (!isSubscribed(hashedQueryKey)) {
+        // Cache removal does not retire eager ownership. Reattach the observer
+        // to the current cache entry before subscribing to its updates.
+        if (syncMode === `eager`) observer.setOptions(observer.options)
         const cachedQueryKey = hashToQueryKey.get(hashedQueryKey)!
         const handleQueryResult = makeQueryResultHandler(cachedQueryKey)
         const unsubscribeFn = observer.subscribe(handleQueryResult)
@@ -1827,20 +1828,14 @@ export function queryCollectionOptions(
       unsubscribes.clear()
     }
 
-    ensureCollectionLifetimeQuery = () => {
-      if (
-        collectionLifetimeQuery === undefined ||
-        state.observers.has(collectionLifetimeQuery)
-      ) {
-        return
-      }
-
-      const result = createQueryFromOpts({})
-      if (result instanceof Promise) {
-        result.catch(() => {
-          // Errors are handled by the query result handler.
-        })
-      }
+    ensureEagerSubscription = () => {
+      if (syncMode !== `eager`) return
+      state.observers.forEach((observer, key) => {
+        const query = observer.getCurrentQuery()
+        if (queryClient.getQueryCache().get(query.queryHash) !== query) {
+          subscribeToQuery(observer, key)
+        }
+      })
     }
 
     // Mark that sync has started
@@ -1851,7 +1846,6 @@ export function queryCollectionOptions(
       `subscribers:change`,
       ({ subscriberCount }) => {
         if (subscriberCount > 0) {
-          ensureCollectionLifetimeQuery()
           subscribeToQueries()
         } else if (subscriberCount === 0) {
           unsubscribeFromQueries()
@@ -1861,8 +1855,12 @@ export function queryCollectionOptions(
 
     // If syncMode is eager, create the initial query without any predicates
     if (syncMode === `eager`) {
-      collectionLifetimeQuery = hashKey(generateQueryKeyFromOptions({}))
-      ensureCollectionLifetimeQuery()
+      const result = createQueryFromOpts({})
+      if (result instanceof Promise) {
+        void result.catch(() => {
+          // Errors are handled by the query result handler.
+        })
+      }
     } else {
       if (startupRetentionSettled) {
         markReady()
@@ -1957,9 +1955,6 @@ export function queryCollectionOptions(
       queryToRows.delete(hashedQueryKey)
       hashToQueryKey.delete(hashedQueryKey)
       queryRefCounts.delete(hashedQueryKey)
-      if (collectionLifetimeQuery === hashedQueryKey) {
-        collectionLifetimeQuery = undefined
-      }
       effectivePersistedGcTimes.delete(hashedQueryKey)
     }
 
@@ -1972,10 +1967,6 @@ export function queryCollectionOptions(
       const observer = state.observers.get(hashedQueryKey)
       const effectivePersistedGcTime =
         effectivePersistedGcTimes.get(hashedQueryKey)
-
-      if (collectionLifetimeQuery === hashedQueryKey) {
-        return
-      }
 
       if (refcount <= 0) {
         // Drop our subscription so hasListeners reflects only active consumers
@@ -2056,17 +2047,11 @@ export function queryCollectionOptions(
         if (event.type === `removed`) {
           // Only cleanup if this is OUR query (we track it)
           if (hashToQueryKey.has(hashedKey)) {
-            if (collectionLifetimeQuery === hashedKey) {
-              // Cache removal detaches the old observer. Eager mode still owns
-              // this query, so replace that observer without retiring its rows.
+            if (syncMode === `eager`) {
               unsubscribes.get(hashedKey)?.()
               unsubscribes.delete(hashedKey)
               unsubscribePendingReadyListeners(hashedKey)
-              state.observers.delete(hashedKey)
-              queryRefCounts.set(hashedKey, 0)
-              if (collection.subscriberCount > 0) {
-                ensureCollectionLifetimeQuery()
-              }
+              if (collection.subscriberCount > 0) ensureEagerSubscription()
               return
             }
             // TanStack Query GC'd this query after gcTime expired.
@@ -2078,7 +2063,7 @@ export function queryCollectionOptions(
 
     const cleanup = () => {
       pendingStartupLoads.clear()
-      ensureCollectionLifetimeQuery = () => {}
+      ensureEagerSubscription = () => {}
       unsubscribeFromCollectionEvents()
       unsubscribeFromQueries()
       persistedRetentionTimers.forEach((timer) => {
@@ -2184,9 +2169,8 @@ export function queryCollectionOptions(
    * @returns Promise that resolves when the refetch is complete, with QueryObserverResult
    */
   const refetch: RefetchFn = async (opts) => {
-    // Cache GC may detach an idle eager observer without retiring its rows.
-    // Explicit refetch, like remount, must restore that collection-owned query.
-    ensureCollectionLifetimeQuery()
+    // An idle eager observer still owns rows; refetch must deliver its result.
+    ensureEagerSubscription()
     const allQueryKeys = [...hashToQueryKey.values()]
     const refetchPromises = allQueryKeys.map((qKey) => {
       const queryObserver = state.observers.get(hashKey(qKey))!
