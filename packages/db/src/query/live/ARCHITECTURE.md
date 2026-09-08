@@ -1052,6 +1052,7 @@ create recursive Collection machinery.
 | Public-container descriptors and reference-key matches across internal query stages | `packages/db/tests/query/public-container-copy.test.ts` |
 | Cross-formulation equivalence and reference-sensitive route identity        | `packages/db/tests/query/includes-cross-formulation-oracle.property.test.ts` |
 | Query-db ownership                                                          | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`      |
+| Failed replay retention, peer isolation, and explicit consumer-only recovery | `packages/db/tests/query/replay-failure-boundary.test.ts`                    |
 | Reachable nested shape                                                      | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts`    |
 
 Each oracle identifies the first divergent checkpoint and compares either the
