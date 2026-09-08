@@ -2133,63 +2133,82 @@ describe(`On-Demand Sync Mode`, () => {
       )
     })
 
-    it(`should resolve isPersisted when all live queries are cleaned up during a pending mutation`, async () => {
-      const db = await createDatabase()
-      await createTestProducts(db)
+    it.each([`insert`, `update`, `delete`] as const)(
+      `persists a pending %s when its last live query is cleaned up`,
+      async (operation) => {
+        const db = await createDatabase()
+        await createTestProducts(db)
 
-      const collection = createCollection(
-        powerSyncCollectionOptions({
-          database: db,
-          table: APP_SCHEMA.props.products,
-          syncMode: `on-demand`,
-        }),
-      )
-      onTestFinished(() => collection.cleanup())
-      await collection.stateWhenReady()
+        const collection = createCollection(
+          powerSyncCollectionOptions({
+            database: db,
+            table: APP_SCHEMA.props.products,
+            syncMode: `on-demand`,
+          }),
+        )
+        onTestFinished(() => collection.cleanup())
+        await collection.stateWhenReady()
 
-      // Start with 1 live query (electronics)
-      const electronicsQuery = createLiveQueryCollection({
-        query: (q) =>
-          q
-            .from({ product: collection })
-            .where(({ product }) => eq(product.category, `electronics`))
-            .select(({ product }) => ({
-              id: product.id,
-              name: product.name,
-              price: product.price,
-              category: product.category,
-            })),
-      })
+        // Start with 1 live query (electronics)
+        const electronicsQuery = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ product: collection })
+              .where(({ product }) => eq(product.category, `electronics`))
+              .select(({ product }) => ({
+                id: product.id,
+                name: product.name,
+                price: product.price,
+                category: product.category,
+              })),
+        })
 
-      await electronicsQuery.preload()
+        await electronicsQuery.preload()
 
-      await vi.waitFor(
-        () => {
-          expect(electronicsQuery.size).toBe(3)
-        },
-        { timeout: 2000 },
-      )
+        await vi.waitFor(
+          () => {
+            expect(electronicsQuery.size).toBe(3)
+          },
+          { timeout: 2000 },
+        )
 
-      // Insert a new electronics product — creates a pending mutation
-      const insertResult = collection.insert({
-        id: randomUUID(),
-        name: `New Gadget`,
-        price: 99,
-        category: `electronics`,
-      })
+        const existing = Array.from(electronicsQuery.values())[0]!
+        const id = operation === `insert` ? randomUUID() : existing.id
+        const mutation =
+          operation === `insert`
+            ? collection.insert({
+                id,
+                name: `New Gadget`,
+                price: 99,
+                category: `electronics`,
+              })
+            : operation === `update`
+              ? collection.update(id, (draft) => {
+                  draft.name = `New Gadget`
+                })
+              : collection.delete(id)
+        let settled = false
+        const observed = mutation.isPersisted.promise.then(
+          () => {
+            settled = true
+            return { status: `fulfilled` as const }
+          },
+          (error: unknown) => {
+            settled = true
+            return { status: `rejected` as const, reason: error }
+          },
+        )
 
-      // Immediately clean up the only live query — triggers unloadSubset → loadSubset
-      // with 0 predicates (early-return path), which must still call resolveAllPendingFor
-      electronicsQuery.cleanup()
-
-      // isPersisted.promise should resolve — if the bug is present, this hangs forever
-      await vi.waitFor(
-        async () => {
-          await insertResult.isPersisted.promise
-        },
-        { timeout: 5000 },
-      )
-    })
+        // Dropping the last demand must still drain the mutation's diff record
+        // before removing the trigger that acknowledges its persistence.
+        electronicsQuery.cleanup()
+        await vi.waitFor(() => expect(settled).toBe(true), { timeout: 2000 })
+        expect(await observed).toEqual({ status: `fulfilled` })
+        expect(
+          await db.getAll(`SELECT id, name FROM products WHERE id = ?`, [id]),
+        ).toEqual(operation === `delete` ? [] : [{ id, name: `New Gadget` }])
+      },
+    )
   })
 
   describe(`Tracking lifecycle`, () => {
