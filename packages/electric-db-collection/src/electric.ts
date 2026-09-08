@@ -8,6 +8,7 @@ import { Store } from '@tanstack/store'
 import DebugModule from 'debug'
 import {
   DeduplicatedLoadSubset,
+  LoadSubsetOperationAbortedError,
   and,
   withCollectionConfigFactory,
 } from '@tanstack/db'
@@ -565,8 +566,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   const logPrefix = collectionId ? `[${collectionId}] ` : ``
 
   const abortReason = (abortedSignal: AbortSignal): unknown =>
-    abortedSignal.reason ??
-    new DOMException(`The operation was aborted`, `AbortError`)
+    abortedSignal.reason ?? new LoadSubsetOperationAbortedError()
 
   /**
    * Handles errors from snapshot operations. Returns true if the error was
@@ -583,8 +583,11 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
 
   const loadSubset = async (opts: LoadSubsetOptions) => {
     const commitCursor = getCommitCursor()
-    if (signal.aborted) throw abortReason(signal)
-    if (opts.signal?.aborted) throw abortReason(opts.signal)
+    const throwIfAborted = () => {
+      if (signal.aborted) throw abortReason(signal)
+      if (opts.signal?.aborted) throw abortReason(opts.signal)
+    }
+    throwIfAborted()
 
     if (isBufferingInitialSync()) {
       const snapshotParams = compileSQL<T>(opts, compileOptions)
@@ -673,8 +676,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
       }
     }
 
-    if (signal.aborted) throw abortReason(signal)
-    if (opts.signal?.aborted) throw abortReason(opts.signal)
+    throwIfAborted()
 
     // Upstream limitation: ShapeStream.requestSnapshot() publishes its rows
     // through the stream callback before its Promise resolves. It accepts no

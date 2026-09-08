@@ -2945,6 +2945,45 @@ describe(`Electric Integration`, () => {
       },
     )
 
+    it.each([true, false])(
+      `settles reasonless cancellation after refresh with DOMException available %s`,
+      async (hasDOMException) => {
+        const originalDOMException = globalThis.DOMException
+        const controller = new NativeAbortController()
+        const refresh = createDeferred<void>()
+        mockStream.isUpToDate = true
+        mockForceDisconnectAndRefresh.mockReturnValueOnce(refresh.promise)
+        const testCollection = createOnDemandCollection(
+          `reasonless-refresh-abort`,
+        )
+        try {
+          const load = testCollection._sync.loadSubset({
+            limit: 10,
+            signal: controller.signal,
+          })
+          const outcome = Promise.resolve(load).then(
+            () => undefined,
+            (error: unknown) => error,
+          )
+          await Promise.resolve()
+          // Model a platform signal without reason; no event is required for
+          // the post-refresh cancellation check to observe its terminal state.
+          Object.defineProperty(controller.signal, `aborted`, { value: true })
+          Object.defineProperty(controller.signal, `reason`, {
+            value: undefined,
+          })
+          if (!hasDOMException) vi.stubGlobal(`DOMException`, undefined)
+          refresh.resolve()
+          await expect(outcome).resolves.toMatchObject({ name: `AbortError` })
+          expect(mockRequestSnapshot).not.toHaveBeenCalled()
+        } finally {
+          vi.stubGlobal(`DOMException`, originalDOMException)
+          refresh.resolve()
+          await testCollection.cleanup()
+        }
+      },
+    )
+
     it(`cancels a pending refresh wait when the collection is cleaned up`, async () => {
       vi.useFakeTimers()
       const refresh = createDeferred<void>()

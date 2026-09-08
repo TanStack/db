@@ -1,5 +1,6 @@
 import { QueryObserver, hashKey } from '@tanstack/query-core'
 import {
+  LoadSubsetOperationAbortedError,
   deepEquals,
   getLoadSubsetDemandKey,
   withCollectionConfigFactory,
@@ -896,6 +897,7 @@ export function queryCollectionOptions(
     // Track whether sync has been started
     let syncStarted = false
     let startupRetentionSettled = false
+    const pendingStartupLoads = new Set<LoadSubsetOptions>()
     const retainedQueriesPendingRevalidation = new Set<string>()
     const pendingResultApplications = new Map<string, Promise<void>>()
     const failedResultApplications = new Map<string, unknown>()
@@ -1286,7 +1288,7 @@ export function queryCollectionOptions(
             ) {
               unsubscribe()
               const pending = pendingReadyUnsubscribes.get(hashedQueryKey)
-              pending?.delete(unsubscribe)
+              pending?.delete(cancel)
               if (pending?.size === 0) {
                 pendingReadyUnsubscribes.delete(hashedQueryKey)
               }
@@ -1299,9 +1301,13 @@ export function queryCollectionOptions(
             }
           })
         })
+        const cancel = () => {
+          unsubscribe()
+          reject(new LoadSubsetOperationAbortedError())
+        }
         const pending =
           pendingReadyUnsubscribes.get(hashedQueryKey) ?? new Set()
-        pending.add(unsubscribe)
+        pending.add(cancel)
         pendingReadyUnsubscribes.set(hashedQueryKey, pending)
       })
 
@@ -1310,7 +1316,11 @@ export function queryCollectionOptions(
       queryFunction: typeof queryFn = queryFn,
     ): true | Promise<void> => {
       if (!startupRetentionSettled) {
+        pendingStartupLoads.add(opts)
         return startupRetentionMaintenancePromise.then(() => {
+          if (!pendingStartupLoads.delete(opts)) {
+            throw new LoadSubsetOperationAbortedError()
+          }
           const resumed = createQueryFromOpts(opts, queryFunction)
           return resumed === true ? undefined : resumed
         })
@@ -2040,7 +2050,9 @@ export function queryCollectionOptions(
     const unsubscribeQueryCache = queryClient
       .getQueryCache()
       .subscribe((event) => {
-        const hashedKey = event.query.queryHash
+        // Ownership uses our stable key, not the Query client's optional
+        // custom cache hash function.
+        const hashedKey = hashKey(event.query.queryKey)
         if (event.type === `removed`) {
           // Only cleanup if this is OUR query (we track it)
           if (hashToQueryKey.has(hashedKey)) {
@@ -2065,6 +2077,7 @@ export function queryCollectionOptions(
       })
 
     const cleanup = () => {
+      pendingStartupLoads.clear()
       ensureCollectionLifetimeQuery = () => {}
       unsubscribeFromCollectionEvents()
       unsubscribeFromQueries()
@@ -2090,7 +2103,7 @@ export function queryCollectionOptions(
       // Removing a Query destroys it and synchronously cancels its retryer.
       // Finish this before a later collection sync can create a replacement.
       queryClient.removeQueries({
-        predicate: (query) => allHashedKeys.has(query.queryHash),
+        predicate: (query) => allHashedKeys.has(hashKey(query.queryKey)),
       })
     }
 
@@ -2119,6 +2132,8 @@ export function queryCollectionOptions(
      * by TanStack Query, allowing quick remounts to restore data without refetching.
      */
     const unloadSubset = (options: LoadSubsetOptions) => {
+      // No observer lease exists until startup maintenance has finished.
+      if (pendingStartupLoads.delete(options)) return
       // 1. Same predicates → 2. Same queryKey
       const key = generateQueryKeyFromOptions(options)
       const hashedQueryKey = hashKey(key)

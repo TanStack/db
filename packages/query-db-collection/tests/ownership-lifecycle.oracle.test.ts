@@ -1,5 +1,5 @@
 import { QueryClient, hashKey } from '@tanstack/query-core'
-import { createCollection, eq } from '@tanstack/db'
+import { createCollection, eq, getLoadSubsetDemandKey } from '@tanstack/db'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createDeferred } from '../../db/src/deferred.js'
 import { queryCollectionOptions } from '../src/query.js'
@@ -22,6 +22,7 @@ type OwnershipFixtureOptions = {
   id: string
   results: Array<Array<Item> | Promise<Array<Item>>>
   syncMode?: `eager` | `on-demand`
+  customHash?: boolean
   metadataRecorder?: MetadataRecorder
   setupMetadata?: (metadata: SyncMetadataApi<string | number>) => void
 }
@@ -44,13 +45,16 @@ const detailOnly = { id: `detail`, category: `detail`, name: `Detail` }
 const listOnly = { id: `list`, category: `list`, name: `List` }
 const cleanups: Array<() => Promise<void>> = []
 
-function createQueryClient(): QueryClient {
+function createQueryClient(customHash = false): QueryClient {
   return new QueryClient({
     defaultOptions: {
       queries: {
         gcTime: Number.POSITIVE_INFINITY,
         retry: false,
         staleTime: Number.POSITIVE_INFINITY,
+        queryKeyHashFn: customHash
+          ? (key) => `custom:${hashKey(key)}`
+          : undefined,
       },
     },
   })
@@ -89,8 +93,9 @@ function createOwnershipFixture({
   syncMode = `on-demand`,
   metadataRecorder,
   setupMetadata,
+  customHash,
 }: OwnershipFixtureOptions): OwnershipFixture {
-  const queryClient = createQueryClient()
+  const queryClient = createQueryClient(customHash)
   const queryFn = vi.fn<() => Promise<Array<Item>>>()
   results.forEach((result) =>
     queryFn.mockImplementationOnce(() => Promise.resolve(result)),
@@ -241,6 +246,109 @@ describe(`query collection ownership lifecycle`, () => {
       remounted?.unsubscribe()
     },
   )
+
+  it.each([false, true])(
+    `replaces an active eager cache entry with custom hash %s`,
+    async (customHash) => {
+      const id = `active-eager-custom-hash-${customHash}`
+      const { collection, queryClient, queryFn } = createOwnershipFixture({
+        id,
+        customHash,
+        syncMode: `eager`,
+        results: [[shared], [{ ...shared, name: `Replaced` }]],
+      })
+      await collection.stateWhenReady()
+      const subscription = collection.subscribeChanges(() => {})
+      try {
+        queryClient.removeQueries({ queryKey: [id], exact: true })
+        for (let turn = 0; turn < 20; turn++) await Promise.resolve()
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        expect(collection.get(shared.id)?.name).toBe(`Replaced`)
+      } finally {
+        subscription.unsubscribe()
+      }
+    },
+  )
+
+  it.each([`release`, `cleanup`, `retain`] as const)(
+    `honors %s during startup retention maintenance`,
+    async (action) => {
+      const id = `released-startup-retention`
+      const subset = { where: eq(`category`, `shared`) }
+      const key = `queryCollection:gc:${hashKey([id, getLoadSubsetDemandKey(subset)])}`
+      const { collection, queryFn } = createOwnershipFixture({
+        id,
+        results: [[shared]],
+        setupMetadata: (metadata) =>
+          metadata.collection.set(key, {
+            queryHash: hashKey([id, getLoadSubsetDemandKey(subset)]),
+            mode: `until-revalidated`,
+          }),
+      })
+      collection.startSyncImmediate()
+      const result = Promise.resolve(collection._sync.loadSubset(subset)).then(
+        () => `ready`,
+        (error: unknown) => error,
+      )
+      if (action === `release`) collection._sync.unloadSubset(subset)
+      if (action === `cleanup`) await collection.cleanup()
+      for (let turn = 0; turn < 30; turn++) await Promise.resolve()
+      if (action === `retain`) {
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        await expect(result).resolves.toBe(`ready`)
+        expect(collection.size).toBe(1)
+      } else {
+        expect(queryFn).not.toHaveBeenCalled()
+        await expect(result).resolves.toMatchObject({ name: `AbortError` })
+        expect(collection.size).toBe(0)
+      }
+    },
+  )
+
+  it.each([false, true])(
+    `removes owned cache entries on cleanup with custom hash %s`,
+    async (customHash) => {
+      const id = `cleanup-custom-${customHash}`
+      const { collection, queryClient } = createOwnershipFixture({
+        id,
+        customHash,
+        syncMode: `eager`,
+        results: [[shared]],
+      })
+      await collection.stateWhenReady()
+      expect(queryClient.getQueryCache().getAll()).toHaveLength(1)
+      await collection.cleanup()
+      expect(queryClient.getQueryCache().getAll()).toHaveLength(0)
+    },
+  )
+
+  it(`settles an unfinished load when its final owner leaves`, async () => {
+    const pending = createDeferred<Array<Item>>()
+    const { collection } = createOwnershipFixture({
+      id: `release-before-result`,
+      results: [pending.promise],
+    })
+    const subset = { where: eq(`category`, `shared`) }
+    let outcome: unknown = `pending`
+    const load = Promise.resolve(collection._sync.loadSubset(subset)).then(
+      () => {
+        outcome = `ready`
+      },
+      (error: unknown) => {
+        outcome = error
+      },
+    )
+    try {
+      expect(collection.isLoadingSubset).toBe(true)
+      collection._sync.unloadSubset(subset)
+      for (let turn = 0; turn < 20; turn++) await Promise.resolve()
+      expect(outcome).toMatchObject({ name: `AbortError` })
+      expect(collection.isLoadingSubset).toBe(false)
+      await load
+    } finally {
+      pending.resolve([shared])
+    }
+  })
 
   it(`keeps active on-demand rows when the Query cache entry departs`, async () => {
     const id = `active-cache-removal`
