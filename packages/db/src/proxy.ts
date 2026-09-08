@@ -452,30 +452,6 @@ function createMapSetIteratorHandler<T extends object>(
   }
 }
 
-/**
- * Simple debug utility that only logs when debug mode is enabled
- * Set DEBUG to true in localStorage to enable debug logging
- */
-function debugLog(...args: Array<unknown>): void {
-  // Check if we're in a browser environment
-  const isBrowser =
-    typeof window !== `undefined` && typeof localStorage !== `undefined`
-
-  // In browser, check localStorage for debug flag
-  if (isBrowser && localStorage.getItem(`DEBUG`) === `true`) {
-    console.log(`[proxy]`, ...args)
-  }
-  // In Node.js environment, check for environment variable (though this is primarily for browser)
-  else if (
-    // true
-    !isBrowser &&
-    typeof process !== `undefined` &&
-    process.env.DEBUG === `true`
-  ) {
-    console.log(`[proxy]`, ...args)
-  }
-}
-
 // Add TypedArray interface with proper type
 interface TypedArray {
   length: number
@@ -487,7 +463,6 @@ interface ChangeTracker<T extends object> {
   originalObject: T
   modified: boolean
   copy_: T
-  proxyCount: number
   assigned_: Record<string | symbol, boolean>
   parent?:
     | {
@@ -612,12 +587,6 @@ function deepClone<T extends unknown>(
   return clone as T
 }
 
-let count = 0
-function getProxyCount() {
-  count += 1
-  return count
-}
-
 /**
  * Creates a proxy that tracks changes to the target object
  *
@@ -652,7 +621,6 @@ export function createChangeProxy<
     proxy: TInner
     getChanges: () => Record<string | symbol, any>
   } {
-    debugLog(`Object ID:`, innerTarget.constructor.name)
     if (changeProxyCache.has(innerTarget)) {
       return changeProxyCache.get(innerTarget) as {
         proxy: TInner
@@ -673,18 +641,12 @@ export function createChangeProxy<
   const changeTracker: ChangeTracker<T> = {
     copy_: deepClone(target),
     originalObject: deepClone(target),
-    proxyCount: getProxyCount(),
     modified: false,
     assigned_: {},
     parent,
     target, // Store reference to the target object
   }
 
-  debugLog(
-    `createChangeProxy called for target`,
-    target,
-    changeTracker.proxyCount,
-  )
   // Mark this object and all its ancestors as modified
   // Also propagate the actual changes up the chain
   function markChanged(state: ChangeTracker<object>) {
@@ -694,8 +656,6 @@ export function createChangeProxy<
 
     // Propagate the change up the parent chain
     if (state.parent) {
-      debugLog(`propagating change to parent`)
-
       // Check if this is a special Map parent with updateMap function
       if (`updateMap` in state.parent) {
         // Use the special updateMap function for Maps
@@ -718,17 +678,11 @@ export function createChangeProxy<
   function checkIfReverted(
     state: ChangeTracker<Record<string | symbol, unknown>>,
   ): boolean {
-    debugLog(
-      `checkIfReverted called with assigned keys:`,
-      Object.keys(state.assigned_),
-    )
-
     // If there are no assigned properties, object is unchanged
     if (
       Object.keys(state.assigned_).length === 0 &&
       Object.getOwnPropertySymbols(state.assigned_).length === 0
     ) {
-      debugLog(`No assigned properties, returning true`)
       return true
     }
 
@@ -739,21 +693,12 @@ export function createChangeProxy<
         const currentValue = state.copy_[prop]
         const originalValue = (state.originalObject as any)[prop]
 
-        debugLog(
-          `Checking property ${String(prop)}, current:`,
-          currentValue,
-          `original:`,
-          originalValue,
-        )
-
         // If the value is not equal to original, something is still changed
         if (!deepEquals(currentValue, originalValue)) {
-          debugLog(`Property ${String(prop)} is different, returning false`)
           return false
         }
       } else if (state.assigned_[prop] === false) {
         // Property was deleted, so it's different from original
-        debugLog(`Property ${String(prop)} was deleted, returning false`)
         return false
       }
     }
@@ -767,17 +712,14 @@ export function createChangeProxy<
 
         // If the value is not equal to original, something is still changed
         if (!deepEquals(currentValue, originalValue)) {
-          debugLog(`Symbol property is different, returning false`)
           return false
         }
       } else if (state.assigned_[sym] === false) {
         // Property was deleted, so it's different from original
-        debugLog(`Symbol property was deleted, returning false`)
         return false
       }
     }
 
-    debugLog(`All properties match original values, returning true`)
     // All assigned properties match their original values
     return true
   }
@@ -785,48 +727,37 @@ export function createChangeProxy<
   // Update parent status based on child changes
   function checkParentStatus(
     parentState: ChangeTracker<Record<string | symbol, unknown>>,
-    childProp: string | symbol | unknown,
   ) {
-    debugLog(`checkParentStatus called for child prop:`, childProp)
-
     // Check if all properties of the parent are reverted
     const isReverted = checkIfReverted(parentState)
-    debugLog(`Parent checkIfReverted returned:`, isReverted)
 
     if (isReverted) {
-      debugLog(`Parent is fully reverted, clearing tracking`)
       // If everything is reverted, clear the tracking
       parentState.modified = false
       parentState.assigned_ = {}
 
       // Continue up the chain
       if (parentState.parent) {
-        debugLog(`Continuing up the parent chain`)
-        checkParentStatus(parentState.parent.tracker, parentState.parent.prop)
+        checkParentStatus(parentState.parent.tracker)
       }
     }
   }
 
   // Create a proxy for the target object
   function createObjectProxy<TObj extends object>(obj: TObj): TObj {
-    debugLog(`createObjectProxy`, obj)
     // If we've already created a proxy for this object, return it
     if (proxyCache.has(obj)) {
-      debugLog(`proxyCache found match`)
       return proxyCache.get(obj) as TObj
     }
 
     // Create a proxy for the object
     const proxy = new Proxy(obj, {
       get(ptarget, prop) {
-        debugLog(`get`, ptarget, prop)
         const value =
           changeTracker.copy_[prop as keyof T] ??
           changeTracker.originalObject[prop as keyof T]
 
         const originalValue = changeTracker.originalObject[prop as keyof T]
-
-        debugLog(`value (at top of proxy get)`, value)
 
         // If it's a getter, return the value directly
         const desc = Object.getOwnPropertyDescriptor(ptarget, prop)
@@ -922,12 +853,6 @@ export function createChangeProxy<
 
       set(_sobj, prop, value) {
         const currentValue = changeTracker.copy_[prop as keyof T]
-        debugLog(
-          `set called for property ${String(prop)}, current:`,
-          currentValue,
-          `new:`,
-          value,
-        )
 
         // Only track the change if the value is actually different
         if (!deepEquals(currentValue, value)) {
@@ -935,48 +860,31 @@ export function createChangeProxy<
           // Important: Use the originalObject to get the true original value
           const originalValue = changeTracker.originalObject[prop as keyof T]
           const isRevertToOriginal = deepEquals(value, originalValue)
-          debugLog(
-            `value:`,
-            value,
-            `original:`,
-            originalValue,
-            `isRevertToOriginal:`,
-            isRevertToOriginal,
-          )
 
           if (isRevertToOriginal) {
-            debugLog(`Reverting property ${String(prop)} to original value`)
             // If the value is reverted to its original state, remove it from changes
             delete changeTracker.assigned_[prop.toString()]
 
             // Make sure the copy is updated with the original value
-            debugLog(`Updating copy with original value for ${String(prop)}`)
             changeTracker.copy_[prop as keyof T] = deepClone(originalValue)
 
             // Check if all properties in this object have been reverted
-            debugLog(`Checking if all properties reverted`)
             const allReverted = checkIfReverted(changeTracker)
-            debugLog(`All reverted:`, allReverted)
 
             if (allReverted) {
-              debugLog(`All properties reverted, clearing tracking`)
               // If all have been reverted, clear tracking
               changeTracker.modified = false
               changeTracker.assigned_ = {}
 
               // If we're a nested object, check if the parent needs updating
               if (parent) {
-                debugLog(`Updating parent for property:`, parent.prop)
-                checkParentStatus(parent.tracker, parent.prop)
+                checkParentStatus(parent.tracker)
               }
             } else {
               // Some properties are still changed
-              debugLog(`Some properties still changed, keeping modified flag`)
               changeTracker.modified = true
             }
           } else {
-            debugLog(`Setting new value for property ${String(prop)}`)
-
             // Set the value on the copy
             changeTracker.copy_[prop as keyof T] = value
 
@@ -984,11 +892,8 @@ export function createChangeProxy<
             changeTracker.assigned_[prop.toString()] = true
 
             // Mark this object and its ancestors as modified
-            debugLog(`Marking object and ancestors as modified`, changeTracker)
             markChanged(changeTracker)
           }
-        } else {
-          debugLog(`Value unchanged, not tracking`)
         }
 
         return true
@@ -1022,7 +927,6 @@ export function createChangeProxy<
       },
 
       deleteProperty(dobj, prop) {
-        debugLog(`deleteProperty`, dobj, prop)
         const stringProp = typeof prop === `symbol` ? prop.toString() : prop
 
         if (stringProp in dobj) {
@@ -1081,12 +985,8 @@ export function createChangeProxy<
   return {
     proxy,
     getChanges: () => {
-      debugLog(`getChanges called, modified:`, changeTracker.modified)
-      debugLog(changeTracker)
-
       // First, check if the object is still considered modified
       if (!changeTracker.modified) {
-        debugLog(`Object not modified, returning empty object`)
         return {}
       }
 
@@ -1115,7 +1015,7 @@ export function createChangeProxy<
           result[key] = changeTracker.copy_[key]
         }
       }
-      debugLog(`Returning copy:`, result)
+
       return result as unknown as Record<string | symbol, unknown>
     },
   }
