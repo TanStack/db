@@ -155,9 +155,15 @@ export const defaultComparator = makeComparator({
   stringSort: `locale`,
 })
 
-/**
- * Compare two Uint8Arrays for content equality
- */
+/** Include host Buffers when the current realm has a different Uint8Array. */
+export function isUint8Array(value: unknown): value is Uint8Array {
+  return (
+    value instanceof Uint8Array ||
+    (typeof Buffer !== `undefined` && value instanceof Buffer)
+  )
+}
+
+/** Compare two Uint8Arrays for content equality. */
 function areUint8ArraysEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.byteLength !== b.byteLength) {
     return false
@@ -223,11 +229,7 @@ export function normalizeValue(value: any): any {
 
   // Normalize Uint8Arrays/Buffers to a string representation for Map key usage
   // This enables content-based equality for binary data like ULIDs
-  const isUint8Array =
-    (typeof Buffer !== `undefined` && value instanceof Buffer) ||
-    value instanceof Uint8Array
-
-  if (isUint8Array) {
+  if (isUint8Array(value)) {
     return normalizeBinary(value)
   }
 
@@ -337,15 +339,8 @@ export function areValuesEqual(a: any, b: any): boolean {
   }
 
   // Check for Uint8Array/Buffer comparison
-  const aIsUint8Array =
-    (typeof Buffer !== `undefined` && a instanceof Buffer) ||
-    a instanceof Uint8Array
-  const bIsUint8Array =
-    (typeof Buffer !== `undefined` && b instanceof Buffer) ||
-    b instanceof Uint8Array
-
   // If both are Uint8Arrays, compare by content
-  if (aIsUint8Array && bIsUint8Array) {
+  if (isUint8Array(a) && isUint8Array(b)) {
     return areUint8ArraysEqual(a, b)
   }
 
