@@ -10,6 +10,71 @@ import { flushPromises } from './utils'
 import type { LoadSubsetOptions } from '../src/types.js'
 
 describe(`CollectionSubscription status tracking`, () => {
+  it.each([
+    { terms: 2, values: [0, 0] },
+    { terms: 2, values: [0] },
+    { terms: 1, values: [0, 0] },
+  ])(
+    `rejects a $terms-term composite cursor before delivery or acquisition`,
+    async ({ terms, values }) => {
+      const load = vi.fn(() => true as const)
+      const unload = vi.fn()
+      const delivery = vi.fn()
+      const observer = vi.fn()
+      const collection = createCollection<{ id: string; rank: number }>({
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `row`, rank: 1 } })
+            commit()
+            markReady()
+            return { loadSubset: load, unloadSubset: unload }
+          },
+        },
+      })
+      const index = collection.createIndex((row) => row.rank, {
+        indexType: BTreeIndex,
+      })
+      const subscription = collection.subscribeChanges(delivery, {
+        includeInitialState: false,
+      })
+      subscription.setOrderByIndex(index)
+      const orderBy = Array.from({ length: terms }, () => ({
+        expression: new PropRef([`rank`]),
+        compareOptions: { direction: `asc` as const, nulls: `first` as const },
+      }))
+      try {
+        expect(() =>
+          subscription.requestLimitedSnapshot({
+            orderBy,
+            limit: 1,
+            minValues: values,
+            onLoadSubsetResult: observer,
+          }),
+        ).toThrow(`Only single-column cursors are supported`)
+        expect(delivery).not.toHaveBeenCalled()
+        expect(load).not.toHaveBeenCalled()
+        expect(observer).not.toHaveBeenCalled()
+        expect(subscription.status).toBe(`ready`)
+        // A rejected input must not consume local sent keys or an acquisition slot.
+        subscription.requestLimitedSnapshot({
+          orderBy: orderBy.slice(0, 1),
+          limit: 1,
+          minValues: [0],
+        })
+        expect(delivery).toHaveBeenCalledTimes(1)
+        expect(load).toHaveBeenCalledTimes(1)
+        expect(load.mock.calls[0]).toBeDefined()
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+      expect(unload).toHaveBeenCalledTimes(1)
+    },
+  )
+
   it(`subscription starts with status 'ready'`, () => {
     const collection = createCollection<{ id: string; value: string }>({
       id: `test`,

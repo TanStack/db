@@ -55,6 +55,5 @@ whereFrom: BasicExpression<boolean>;
 Defined in: [packages/db/src/types.ts:290](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L290)
 
 Expression for rows greater than (after) the cursor value.
-For multi-column orderBy, this is a composite cursor using OR of conditions.
-Example for [col1 ASC, col2 DESC] with values [v1, v2]:
-  or(gt(col1, v1), and(eq(col1, v1), lt(col2, v2)))
+Core emits cursors for a single order column. Multi-column queries use
+prefix-and-tie loading instead of constructing a composite cursor.

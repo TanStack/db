@@ -700,6 +700,13 @@ behind the active replay barrier.
 
 ### Ordered requests, continuation, and recovery
 
+Core constructs cursors only for one order column. A direct
+`requestLimitedSnapshot()` call with a nonempty `minValues` must supply one
+value and one order term; composite or partial-composite inputs throw before
+local delivery or source acquisition. Multi-column queries remain supported
+through the ordered loader's prefix-and-tie fallback. Its first-column equality
+request closes a tie group; it is not a composite continuation cursor.
+
 Successful settlement proves only that the exact request finished and that its
 writes were applied. It does not prove source exhaustion or broader coverage.
 Ordered loading reaches a fixed point from public rows and exact request

@@ -18,3 +18,5 @@ Remove proxy `DEBUG` logging and automatic index timing statistics to avoid diag
 Remove unused internal helpers and the unused public error classes `WhereClauseConversionError`, `SubscriptionNotFoundError`, and `AggregateNotSupportedError`. These classes have no remaining runtime throw sites; remove any imports of them. Keep the existing query and index behavior and exercise identity/evaluation tests through the production entry points.
 
 Ensure failed mutations roll back even when their rejection value cannot be converted to a string. Preserve ordinary Error instances; report unprintable rejection values as `Unknown error`.
+
+Restrict direct subscription `requestLimitedSnapshot()` cursor inputs to one order term and one `minValues` entry. Composite and partial-composite cursor inputs now throw before local delivery or adapter work. Use normal live-query ordering and window APIs for multi-column pagination; those remain supported through prefix-and-tie loading. Existing adapters need no changes.

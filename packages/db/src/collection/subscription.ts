@@ -46,7 +46,7 @@ type RequestSnapshotOptions = {
 type RequestLimitedSnapshotOptions = {
   orderBy: OrderBy
   limit: number
-  /** All column values for cursor (first value used for local index, all values for sync layer) */
+  /** A single cursor value; composite cursor inputs are rejected. */
   minValues?: Array<unknown>
   /** Row offset for offset-based pagination (passed to sync layer) */
   offset?: number
@@ -1515,9 +1515,8 @@ export class CollectionSubscription
    * Requires a range index to be set with `setOrderByIndex` prior to calling this method.
    * It uses that range index to load the items in the order of the index.
    *
-   * For multi-column orderBy:
-   * - Uses first value from `minValues` for LOCAL index operations (wide bounds, ensures no missed rows)
-   * - Uses all `minValues` to build a precise composite cursor for SYNC layer loadSubset
+   * Cursor requests support one order term and one minValue. Multi-column
+   * queries use the ordered loader's prefix-and-tie fallback instead.
    *
    * Note 1: it may load more rows than the provided LIMIT because it loads all values equal to the first cursor value + limit values greater.
    *         This is needed to ensure that it does not accidentally skip duplicate values when the limit falls in the middle of some duplicated values.
@@ -1539,6 +1538,11 @@ export class CollectionSubscription
         `Ordered snapshot was requested but no index was found. You have to call setOrderByIndex before requesting an ordered snapshot.`,
       )
     }
+
+    // Validate cursor input before local delivery changes sent keys or calls user code.
+    const whereFromCursor = minValues
+      ? buildCursor(orderBy, minValues)
+      : undefined
 
     // Check if minValues has a first element (regardless of its value)
     // This distinguishes between "no min value provided" vs "min value is undefined"
@@ -1576,9 +1580,6 @@ export class CollectionSubscription
     // so if minValue is 3 then the previous snapshot may not have included all 3s
     // e.g. if it was offset 0 and limit 3 it would only have loaded the first 3
     //      so we load all rows equal to minValue first, to be sure we don't skip any duplicate values
-    //
-    // For multi-column orderBy, we use the first column value for index operations (wide bounds)
-    // This may load some duplicates but ensures we never miss any rows.
     let keys: Array<string | number> = []
     if (hasMinValue) {
       // First, get all items with the same FIRST COLUMN value as minValue
@@ -1673,17 +1674,13 @@ export class CollectionSubscription
         }
       | undefined
 
-    if (minValues !== undefined && minValues.length > 0) {
-      const whereFromCursor = buildCursor(orderBy, minValues)
-
-      if (whereFromCursor) {
-        const whereCurrentCursor = buildCursorCurrent(orderBy, minValues)
-        if (whereCurrentCursor) {
-          cursorExpressions = {
-            whereFrom: whereFromCursor,
-            whereCurrent: whereCurrentCursor,
-            lastKey: this.lastSentKey,
-          }
+    if (whereFromCursor && minValues) {
+      const whereCurrentCursor = buildCursorCurrent(orderBy, minValues)
+      if (whereCurrentCursor) {
+        cursorExpressions = {
+          whereFrom: whereFromCursor,
+          whereCurrent: whereCurrentCursor,
+          lastKey: this.lastSentKey,
         }
       }
     }

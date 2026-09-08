@@ -1,5 +1,6 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
+import { createCollection } from '../src/collection/index.js'
 import { PropRef } from '../src/query/ir.js'
 import { buildCursor } from '../src/utils/cursor.js'
 import { evaluateReferenceExpression } from './reference-expression.js'
@@ -58,6 +59,12 @@ function expectCursorDenotation(
   boundary: ReadonlyArray<unknown>,
   candidate: ReadonlyArray<unknown>,
 ): void {
+  if (terms.length !== 1 || boundary.length !== 1) {
+    expect(() => buildCursor(orderBy(terms), [...boundary])).toThrow(
+      `Only single-column cursors are supported`,
+    )
+    return
+  }
   const length = Math.min(terms.length, boundary.length)
   const usedTerms = terms.slice(0, length)
   const usedBoundary = boundary.slice(0, length)
@@ -66,6 +73,57 @@ function expectCursorDenotation(
   expect(Boolean(evaluateReferenceExpression(cursor!, row(candidate)))).toBe(
     compareTuple(candidate, usedBoundary, usedTerms) > 0,
   )
+}
+
+// Keep the nullable mixed-direction ordering law at the retained production
+// snapshot boundary even though direct composite cursor construction is removed.
+async function expectLocalTupleOrder(
+  terms: ReadonlyArray<Term>,
+  boundary: ReadonlyArray<unknown>,
+  candidate: ReadonlyArray<unknown>,
+): Promise<void> {
+  const collection = createCollection<{ id: string; [key: string]: unknown }>({
+    getKey: (value) => value.id,
+    autoIndex: `off`,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        write({ type: `insert`, value: { ...row(candidate), id: `candidate` } })
+        write({ type: `insert`, value: { ...row(boundary), id: `boundary` } })
+        commit()
+        markReady()
+      },
+    },
+  })
+  try {
+    await collection.preload()
+    const expected =
+      compareTuple(candidate, boundary, terms) >= 0
+        ? [`boundary`, `candidate`]
+        : [`candidate`, `boundary`]
+    for (const limit of [1, 2]) {
+      expect(
+        collection
+          .currentStateAsChanges({
+            orderBy: [
+              ...orderBy(terms),
+              {
+                expression: new PropRef([`id`]),
+                compareOptions: {
+                  direction: `asc`,
+                  nulls: `first`,
+                  stringSort: `lexical`,
+                },
+              },
+            ],
+            limit,
+          })
+          ?.map(({ key }) => key),
+      ).toEqual(expected.slice(0, limit))
+    }
+  } finally {
+    await collection.cleanup()
+  }
 }
 
 const exactCursorArbitrary = fc
@@ -87,30 +145,43 @@ const partialCursorArbitrary = fc
   .filter(([terms, boundary]) => terms.length !== boundary.length)
 
 describe(`buildCursor properties`, () => {
-  it(`returns no cursor without terms or boundary values`, () => {
-    expect(buildCursor([], [1])).toBeUndefined()
+  it(`returns no cursor without boundary values and rejects a boundary without an order`, () => {
+    expect(() => buildCursor([], [1])).toThrow(
+      `Only single-column cursors are supported`,
+    )
+    expect(buildCursor([], [])).toBeUndefined()
     expect(
       buildCursor(orderBy([{ direction: `asc`, nulls: `first` }]), []),
     ).toBeUndefined()
   })
 
   fcTest.prop([exactCursorArbitrary], { numRuns: 300 })(
-    `cursor denotation matches nullable mixed-direction tuple order`,
-    ([terms, boundary, candidate]) => {
+    `preserves nullable mixed-direction ordering while restricting cursor width`,
+    async ([terms, boundary, candidate]) => {
       expectCursorDenotation(terms, boundary, candidate)
+      await expectLocalTupleOrder(terms, boundary, candidate)
     },
   )
 
   fcTest.prop([partialCursorArbitrary], { numRuns: 200 })(
-    `uses the shared prefix when term and boundary lengths differ`,
-    ([terms, boundary, candidate]) => {
+    `rejects mismatched cursor widths without restricting local tuple ordering`,
+    async ([terms, boundary, candidate]) => {
       expectCursorDenotation(terms, boundary, candidate)
+      await expectLocalTupleOrder(terms, boundary, candidate)
     },
   )
 
   fcTest.prop([exactCursorArbitrary], { numRuns: 100 })(
-    `is deterministic`,
+    `repeats the same cursor or unsupported-width error`,
     ([terms, boundary]) => {
+      if (terms.length !== 1) {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          expect(() => buildCursor(orderBy(terms), [...boundary])).toThrow(
+            `Only single-column cursors are supported`,
+          )
+        }
+        return
+      }
       expect(buildCursor(orderBy(terms), [...boundary])).toEqual(
         buildCursor(orderBy(terms), [...boundary]),
       )

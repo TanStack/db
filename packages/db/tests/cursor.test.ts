@@ -49,19 +49,21 @@ describe(`buildCursor`, () => {
     expect(matches(nullsLast, [null], { rank: 0 })).toBe(false)
   })
 
-  it(`uses lexicographic equality before later mixed-direction terms`, () => {
+  it(`rejects composite cursors with mixed-direction terms`, () => {
     const order = orderBy([`group`, `asc`, `first`], [`rank`, `desc`, `last`])
 
-    expect(matches(order, [1, 10], { group: 2, rank: 99 })).toBe(true)
-    expect(matches(order, [1, 10], { group: 1, rank: 9 })).toBe(true)
-    expect(matches(order, [1, 10], { group: 1, rank: 11 })).toBe(false)
-    expect(matches(order, [1, 10], { group: 0, rank: 0 })).toBe(false)
+    expect(() => buildCursor(order, [1, 10])).toThrow(
+      `Only single-column cursors are supported`,
+    )
+    expect(canExpressCursorOrder(order, [1, 10])).toBe(false)
   })
 
-  it(`uses only the terms with supplied boundary values`, () => {
+  it(`rejects partial composite cursors instead of silently dropping terms`, () => {
     const order = orderBy([`first`, `asc`, `first`], [`second`, `asc`, `first`])
-    expect(matches(order, [1], { first: 2, second: -100 })).toBe(true)
-    expect(matches(order, [1], { first: 1, second: 100 })).toBe(false)
+    expect(() => buildCursor(order, [1])).toThrow(
+      `Only single-column cursors are supported`,
+    )
+    expect(canExpressCursorOrder(order, [1])).toBe(false)
   })
 
   it(`rejects cursor pushdown when predicates cannot express the order`, () => {
