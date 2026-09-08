@@ -594,13 +594,7 @@ describe(`CollectionSubscription status tracking`, () => {
       )
 
       subscription.unsubscribe()
-      expect(unloaded).toEqual(
-        nestedCleanup === `throw`
-          ? position === `failed-first`
-            ? [loaded[0], loaded[0], loaded[1]]
-            : [loaded[0], loaded[1], loaded[0]]
-          : [loaded[0], loaded[1]],
-      )
+      expect(unloaded).toEqual([loaded[0], loaded[1]])
       expect(subscription.lastError).toBe(primaryFailure)
       expect(reported).toEqual([primaryFailure])
       await collection.cleanup()
@@ -608,7 +602,7 @@ describe(`CollectionSubscription status tracking`, () => {
   )
 
   it.each([`releaseSnapshot`, `unsubscribe`] as const)(
-    `retries a failed exact release through %s`,
+    `attempts a failed exact release only once through %s`,
     async (releaseMode) => {
       const loads: Array<LoadSubsetOptions> = []
       const unloads: Array<LoadSubsetOptions> = []
@@ -659,12 +653,76 @@ describe(`CollectionSubscription status tracking`, () => {
             : subscription.unsubscribe()
         expect(firstRelease).toThrow(failure)
         expect(() => subscription.unsubscribe()).not.toThrow()
-        expect(unloads).toEqual([loads[0], loads[0]])
+        expect(unloads).toEqual([loads[0]])
 
         subscription.unsubscribe()
-        expect(unloads).toHaveLength(2)
+        expect(unloads).toHaveLength(1)
       } finally {
         subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it.each(
+    ([`before`, `after`] as const).flatMap((throwAt) =>
+      [false, true].map((reenter) => ({ throwAt, reenter })),
+    ),
+  )(
+    `bounds throwing adapter cleanup at $throwAt release, reentry=$reenter`,
+    async ({ throwAt, reenter }) => {
+      const failure = new Error(`adapter cleanup failed`)
+      const loads: Array<LoadSubsetOptions> = []
+      const unloads: Array<LoadSubsetOptions> = []
+      const externalLeases = new Set<LoadSubsetOptions>()
+      let dispose = () => {}
+      const collection = createCollection<{ id: string }>({
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options) => {
+                loads.push(options)
+                externalLeases.add(options)
+                return true
+              },
+              unloadSubset: (options) => {
+                unloads.push(options)
+                if (options === loads[0]) {
+                  if (reenter) dispose()
+                  if (throwAt === `before`) throw failure
+                  externalLeases.delete(options)
+                  throw failure
+                }
+                externalLeases.delete(options)
+              },
+            }
+          },
+        },
+      })
+      const subscription = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      dispose = () => subscription.unsubscribe()
+      try {
+        subscription.requestSnapshot({ where: new Value(true) })
+        subscription.requestSnapshot({ where: new Value(false) })
+        expect(dispose).toThrow(failure)
+        expect(dispose).not.toThrow()
+        expect(unloads).toEqual(loads)
+        expect(loads).toHaveLength(2)
+        expect(loads.every(({ signal }) => signal?.aborted)).toBe(true)
+        expect(collection.subscriberCount).toBe(0)
+        expect(subscription.lastError).toBe(failure)
+        // Intentional support boundary: core cannot repair an adapter that throws
+        // before freeing its resource, nor safely repeat a possibly completed release.
+        expect([...externalLeases]).toEqual(
+          throwAt === `before` ? [loads[0]] : [],
+        )
+      } finally {
+        dispose()
         await collection.cleanup()
       }
     },
@@ -731,7 +789,7 @@ describe(`CollectionSubscription status tracking`, () => {
     expect(unloads).toEqual([loads[0], loads[1]])
 
     subscription.unsubscribe()
-    expect(unloads).toEqual([loads[0], loads[1], loads[0]])
+    expect(unloads).toEqual([loads[0], loads[1]])
     expect(subscription.lastError).toBe(primaryFailure)
     await collection.cleanup()
   })
@@ -927,8 +985,8 @@ describe(`CollectionSubscription status tracking`, () => {
       commit()
       await flushPromises()
 
-      // The failed physical release is retried during cleanup, but its logical
-      // demand retired at releaseSnapshot and must not join later replays.
+      // The release attempt retired the demand, even though the adapter threw.
+      // It must not join later replays or be released a second time.
       expect(loads).toHaveLength(3)
       expect(loads[2]?.where).toBe(secondWhere)
     } finally {
@@ -938,7 +996,7 @@ describe(`CollectionSubscription status tracking`, () => {
     }
   })
 
-  it(`retires pending status per demand while exact cleanup debt retries`, async () => {
+  it(`retires pending status per demand even when physical cleanup fails`, async () => {
     const firstLoad = createDeferred<void>()
     const secondLoad = createDeferred<void>()
     const loads: Array<LoadSubsetOptions> = []
@@ -996,9 +1054,9 @@ describe(`CollectionSubscription status tracking`, () => {
       await flushPromises()
       expect(subscription.status).toBe(`ready`)
 
-      expect(() => subscription.unsubscribe()).toThrow(releaseError)
       expect(() => subscription.unsubscribe()).not.toThrow()
-      expect(unloads).toEqual([loads[0], loads[0], loads[1], loads[0]])
+      expect(() => subscription.unsubscribe()).not.toThrow()
+      expect(unloads).toEqual([loads[0], loads[1]])
     } finally {
       firstLoad.resolve()
       secondLoad.resolve()
@@ -1007,7 +1065,7 @@ describe(`CollectionSubscription status tracking`, () => {
     }
   })
 
-  it(`does not retry cleanup debt retired by reentrant teardown`, async () => {
+  it(`attempts both leases once when throwing cleanup reenters teardown`, async () => {
     const releaseFailure = new Error(`release failed`)
     const duplicateFailure = new Error(`duplicate release`)
     const loads: Array<LoadSubsetOptions> = []
@@ -1029,13 +1087,11 @@ describe(`CollectionSubscription status tracking`, () => {
               unloads.push(options)
               const attempt = (attempts.get(options) ?? 0) + 1
               attempts.set(options, attempt)
-              if (attempt <= 2) throw releaseFailure
-              if (options === loads[0] && attempt === 3) {
+              if (attempt > 1) throw duplicateFailure
+              if (options === loads[0]) {
                 subscription.unsubscribe()
               }
-              if (options === loads[1] && attempt === 4) {
-                throw duplicateFailure
-              }
+              throw releaseFailure
             },
           }
         },
@@ -1056,28 +1112,18 @@ describe(`CollectionSubscription status tracking`, () => {
       expect(() => subscription.releaseSnapshot(firstWhere)).toThrow(
         releaseFailure,
       )
-      expect(() => subscription.releaseSnapshot(secondWhere)).toThrow(
-        releaseFailure,
-      )
-      expect(() => subscription.unsubscribe()).toThrow(releaseFailure)
-
+      expect(() => subscription.releaseSnapshot(secondWhere)).not.toThrow()
       expect(() => subscription.unsubscribe()).not.toThrow()
-      expect(unloads).toEqual([
-        loads[0],
-        loads[1],
-        loads[0],
-        loads[1],
-        loads[0],
-        loads[1],
-      ])
+      expect(unloads).toEqual([loads[0], loads[1]])
+      expect(collection.subscriberCount).toBe(0)
 
       subscription.unsubscribe()
-      expect(unloads).toHaveLength(6)
+      expect(unloads).toHaveLength(2)
     } finally {
       try {
         subscription.unsubscribe()
       } catch {
-        // A red run may leave the duplicate-release debt for this final retry.
+        // Keep cleanup available after a red assertion.
       }
       await collection.cleanup()
     }
@@ -1165,7 +1211,7 @@ describe(`CollectionSubscription status tracking`, () => {
     },
   )
 
-  it(`retries the exact in-flight replay release`, async () => {
+  it(`attempts the exact in-flight replay release once`, async () => {
     const replay = createDeferred<void>()
     const loads: Array<LoadSubsetOptions> = []
     const unloads: Array<LoadSubsetOptions> = []
@@ -1219,7 +1265,6 @@ describe(`CollectionSubscription status tracking`, () => {
         loads[0],
       ])
       expect(unloads.filter((options) => options === loads[1])).toEqual([
-        loads[1],
         loads[1],
       ])
     } finally {
@@ -1609,7 +1654,7 @@ describe(`CollectionSubscription status tracking`, () => {
       })),
     ),
   )(
-    `retries a failed release deferred past adapter startup: $name`,
+    `attempts a deferred failed release once after adapter startup: $name`,
     async ({ adapterCatches, result }) => {
       const failure = new Error(`reentrant release failed`)
       const loads: Array<LoadSubsetOptions> = []
@@ -1659,7 +1704,7 @@ describe(`CollectionSubscription status tracking`, () => {
 
         expect(unloads).toEqual([loads[0]])
         expect(() => subscription.unsubscribe()).not.toThrow()
-        expect(unloads).toEqual([loads[0], loads[0]])
+        expect(unloads).toEqual([loads[0]])
       } finally {
         subscription.unsubscribe()
         await collection.cleanup()
@@ -1846,7 +1891,7 @@ describe(`CollectionSubscription status tracking`, () => {
     }
   })
 
-  it(`keeps the old lease when replacing it fails`, async () => {
+  it(`keeps replacement ownership when retiring the old lease fails`, async () => {
     const replay = createDeferred<void>()
     const loads: Array<LoadSubsetOptions> = []
     const unloads: Array<LoadSubsetOptions> = []
@@ -1892,6 +1937,8 @@ describe(`CollectionSubscription status tracking`, () => {
 
       expect(loads).toHaveLength(2)
       expect(subscription.status).toBe(`loadingSubset`)
+      expect(loads[1]?.signal?.aborted).toBe(true)
+      expect(unloads).toEqual([loads[0]])
 
       replay.reject(new DOMException(`replacement abandoned`, `AbortError`))
       await flushPromises()
@@ -1902,7 +1949,7 @@ describe(`CollectionSubscription status tracking`, () => {
 
       subscription.unsubscribe()
       unsubscribed = true
-      expect(unloads).toEqual([loads[0], loads[1], loads[0]])
+      expect(unloads).toEqual([loads[0], loads[1]])
     } finally {
       replay.resolve()
       if (!unsubscribed) subscription.unsubscribe()

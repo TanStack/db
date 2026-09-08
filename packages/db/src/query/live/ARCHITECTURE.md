@@ -105,13 +105,13 @@ reduction that enforces public-key congruence and multiplicity.
 These owners cooperate; they are not phases of one exclusive state machine.
 The detailed loading and publication laws below still apply.
 
-| Owner                             | Accepts / retires                                                                                                                                           | Does not establish                                        |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| Subscription acquisition          | Tentatively installs the candidate before adapter callbacks; `acceptAcquisitionTransfer` hands off the old lease; failed cleanup retains exact release debt | Replay completion or permission to publish                |
-| OrderedSourceLoader               | Tracks request settlement, safe continuation and repair debt; reset discards the cursor, disposal ignores late settlement                                   | Provider exhaustion or acceptance of an imperative window |
-| Subscription replay               | Counts setup and logical acquisition participants; checks completion after reentrant release callbacks; success releases the source replacement hold        | Success of a previously failed window operation           |
-| Query builder                     | Tracks ordered publication participants in one sync session and accepts a window only for its operation generation                                          | Physical adapter ownership or cancellation                |
-| D2 and public Collection boundary | D2 accumulates private result changes; the builder flushes root and child changes when the existing gates allow it                                          | Source completeness merely because graph work drained     |
+| Owner                             | Accepts / retires                                                                                                                                     | Does not establish                                        |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| Subscription acquisition          | Tentatively installs the candidate before adapter callbacks; `acceptAcquisitionTransfer` hands off the old lease; each lease gets one cleanup attempt | Replay completion or permission to publish                |
+| OrderedSourceLoader               | Tracks request settlement, safe continuation and repair debt; reset discards the cursor, disposal ignores late settlement                             | Provider exhaustion or acceptance of an imperative window |
+| Subscription replay               | Counts setup and logical acquisition participants; checks completion after reentrant release callbacks; success releases the source replacement hold  | Success of a previously failed window operation           |
+| Query builder                     | Tracks ordered publication participants in one sync session and accepts a window only for its operation generation                                    | Physical adapter ownership or cancellation                |
+| D2 and public Collection boundary | D2 accumulates private result changes; the builder flushes root and child changes when the existing gates allow it                                    | Source completeness merely because graph work drained     |
 
 Session and participant checks precede changes to the builder's ordered failure
 state, not just scheduling. An obsolete rejection cannot close a replacement
@@ -589,13 +589,15 @@ the source adapter. Reentrant release during `loadSubset` therefore retires the
 logical owner at once, but physical release waits until the adapter returns and
 proves that it established an acquisition. A synchronous `loadSubset` throw
 rolls the tentative owner back without calling `unloadSubset`. Logical demand
-retires even when `unloadSubset` fails. The exact physical acquisition then
-remains as cleanup debt so teardown can retry it without letting a retired
-demand join readiness or a later replay.
-An adapter cannot release the same acquisition again while its unload is still
-on the stack. Error delivery follows the failed adapter attempt, however, so
-an error listener's disposal can retry that exact debt and observe any failure;
-it must not mistake a busy-release no-op for completed cleanup.
+retires even when `unloadSubset` fails. Each physical acquisition gets one release
+attempt, marked before calling adapter or error-listener code. Reentrant and
+repeated teardown cannot repeat it. Other acquisitions still receive cleanup,
+and a cleanup failure cannot replace an earlier request failure. Core reports
+the error but retains no retry debt: a broken adapter can leak external resources
+if it throws before freeing them. Adapters must make their own cleanup reliable.
+If releasing the old lease fails after replacement startup, the replacement
+remains owned, its work is aborted, and replay fails. Ownership cannot roll back
+to an old lease whose cleanup may already have taken effect.
 
 Request predicates describe acquisition, not row ownership. Releasing a demand
 does not delete matching rows from either the public snapshot or an unfinished
@@ -611,10 +613,10 @@ Collection cleanup detaches surviving logical demand from the discarded sync
 session. It aborts that session's physical work and rejects its replay barrier,
 and rejects an unfinished initial preload with `AbortError`. Cleanup never
 invokes first-ready callbacks; those callbacks belong to the discarded run.
-It does not turn still-owned demand into cleanup debt. Physical
-acquisitions and cleanup debt belong to the sync session that created them;
-cleanup retires both instead of sending an old release to a replacement
-adapter. A failed adapter cleanup callback remains retryable only while that
+Physical acquisitions belong to the sync session that created them; cleanup
+retires them instead of sending an old release to a replacement adapter.
+Unlike individual subset releases, a failed sync adapter cleanup callback
+remains retryable only while that
 retirement is current; it cannot replace a newer session's cleanup callback.
 Demand requested while the Collection is cleaned up remains detached
 rather than pretending that a physical acquisition succeeded. When the
@@ -842,8 +844,8 @@ and specific status delivery capture the transition revision and stop before a
 later listener when reentry supersedes it, including an ABA transition back to
 the same status label. Subscription teardown is a one-shot logical transition:
 it stops the listener set already being walked, emits no later status, and
-removes subscriber ownership once. A later `unsubscribe()` may retry physical
-adapter cleanup debt without repeating that logical transition.
+removes subscriber ownership once. A later `unsubscribe()` is a no-op, including
+after a physical subset release failed.
 Failure keeps the last complete result visible and partly replayed source state
 private for both direct subscribers and query graphs. Ordinary source deltas or
 snapshot requests do not reopen that gate because they cannot prove the source

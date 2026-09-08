@@ -669,12 +669,12 @@ describe(`OrderedSourceLoader`, () => {
 
       loader.dispose()
       subscription.unsubscribe()
-      expect(unloads).toEqual([loads[1], loads[1], loads[0]])
+      expect(unloads).toEqual([loads[1], loads[0]])
       expect(subscription.lastError).toBe(requestFailure)
       expect(reported).toEqual([requestFailure])
 
       subscription.unsubscribe()
-      expect(unloads).toEqual([loads[1], loads[1], loads[0]])
+      expect(unloads).toEqual([loads[1], loads[0]])
     } finally {
       loader.dispose()
       subscription.unsubscribe()

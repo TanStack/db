@@ -3302,15 +3302,13 @@ describe(`CollectionSubscription replay oracle`, () => {
         expect(loads).toHaveLength(2)
         // indexOf checks the exact options object, not a structurally equal copy.
         expect(unloads.map((options) => loads.indexOf(options))).toEqual(
-          releaseDemand || failRelease ? [0, 1] : [0],
+          releaseDemand ? [0, 1] : [0],
         )
         expect(loads[1]!.signal?.aborted).toBe(releaseDemand || failRelease)
         subscription.unsubscribe()
-        // Failed old release keeps that exact lease as debt (retired demand)
-        // or as its prior owner (live demand). Success never retries it.
-        expect(unloads.map((options) => loads.indexOf(options))).toEqual(
-          failRelease ? [0, 1, 0] : [0, 1],
-        )
+        // A failed old release is final; the replacement is still owned until
+        // demand retirement, even when failure has aborted its work.
+        expect(unloads.map((options) => loads.indexOf(options))).toEqual([0, 1])
       } finally {
         subscription.unsubscribe()
         await collection.cleanup()
@@ -3946,10 +3944,12 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
     expect(
       unloadAttempts.filter((options) => options === loads[3]),
-    ).toHaveLength(2)
-    expect(unloaded).toHaveLength(4)
+    ).toHaveLength(1)
+    expect(unloaded).toHaveLength(3)
     for (const load of loads) {
-      expect(unloaded.filter((options) => options === load)).toHaveLength(1)
+      expect(unloaded.filter((options) => options === load)).toHaveLength(
+        load === loads[3] ? 0 : 1,
+      )
     }
   })
 

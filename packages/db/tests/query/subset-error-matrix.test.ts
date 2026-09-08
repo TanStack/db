@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
-import { SyncCleanupError } from '../../src/errors.js'
 import { createEffect, createLiveQueryCollection, eq } from '../../src/index.js'
 import { getLoadSubsetDemandKey } from '../../src/query/ir-stable-identity.js'
 import { mockSyncCollectionOptions } from '../utils.js'
@@ -470,14 +469,14 @@ describe(`loadSubset failure matrix`, () => {
       } finally {
         if (effect) await effect.dispose()
         if (live) await live.cleanup()
-        expect(unloadCount).toBe(2)
+        expect(unloadCount).toBe(1)
         await Promise.all([parent.cleanup(), child.cleanup()])
       }
     },
   )
 
   it.each([undefined, NaN, new Error(`release failed`)])(
-    `retries live cleanup after %s survives demand retirement`,
+    `does not repeat failed release after %s survives demand retirement`,
     async (failure) => {
       const parent = createStaticSource(`undefined-cleanup-retry-parent`, [row])
       let unloadCount = 0
@@ -525,28 +524,14 @@ describe(`loadSubset failure matrix`, () => {
           queuedMicrotasks.push(callback)
         }
         await live.cleanup()
-        expect(unloadCount).toBe(2)
-        expect(queuedMicrotasks).toHaveLength(1)
-
-        let cleanupError: unknown
-        try {
-          queuedMicrotasks[0]!()
-        } catch (error) {
-          cleanupError = error
-        }
-        expect(cleanupError).toBeInstanceOf(SyncCleanupError)
-        expect((cleanupError as Error).message).toContain(
-          `error: ${failure instanceof Error ? failure.message : String(failure)}`,
-        )
-        if (failure instanceof Error)
-          expect((cleanupError as Error).cause).toBe(failure)
-
+        expect(unloadCount).toBe(1)
+        expect(queuedMicrotasks).toHaveLength(0)
         await live.cleanup()
-        expect(unloadCount).toBe(3)
+        expect(unloadCount).toBe(1)
         expect(parent.subscriberCount).toBe(0)
         expect(child.subscriberCount).toBe(0)
         await live.cleanup()
-        expect(unloadCount).toBe(3)
+        expect(unloadCount).toBe(1)
       } finally {
         globalThis.queueMicrotask = originalQueueMicrotask
         await Promise.all([live.cleanup(), parent.cleanup(), child.cleanup()])

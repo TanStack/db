@@ -171,7 +171,7 @@ const physicalAcquisitionStates = [
   `starting`,
   `active`,
   `obsolete`,
-  `release-debt`,
+  `failed-release`,
 ] as const
 const physicalInteractionCauses = [
   `release`,
@@ -188,9 +188,9 @@ type PhysicalInteraction =
   | `no-acquisition`
   | `abort-only`
   | `retire`
-  | `preserve-debt`
-  | `discard-debt`
-  | `retry-debt`
+  | `no-repeat-on-truncate`
+  | `no-repeat-on-cleanup`
+  | `no-repeat-on-unsubscribe`
 type PhysicalInteractionCellDefinition =
   | { kind: `covered`; interaction: PhysicalInteraction }
   | { kind: `excluded`; reason: string }
@@ -249,20 +249,26 @@ const physicalInteractionCellDefinitions = {
     kind: `excluded`,
     reason: `unsubscribe retires current ownership; obsolete work was retired once`,
   },
-  'release-debt:release': {
+  'failed-release:release': {
     kind: `excluded`,
-    reason: `logical release already happened; teardown retries physical debt`,
+    reason: `logical release already happened; the physical attempt is final`,
   },
-  'release-debt:abort': {
+  'failed-release:abort': {
     kind: `excluded`,
     reason: `the failed physical release is already aborted`,
   },
-  'release-debt:truncate': {
+  'failed-release:truncate': {
     kind: `covered`,
-    interaction: `preserve-debt`,
+    interaction: `no-repeat-on-truncate`,
   },
-  'release-debt:cleanup': { kind: `covered`, interaction: `discard-debt` },
-  'release-debt:unsubscribe': { kind: `covered`, interaction: `retry-debt` },
+  'failed-release:cleanup': {
+    kind: `covered`,
+    interaction: `no-repeat-on-cleanup`,
+  },
+  'failed-release:unsubscribe': {
+    kind: `covered`,
+    interaction: `no-repeat-on-unsubscribe`,
+  },
 } satisfies Record<PhysicalInteractionCell, PhysicalInteractionCellDefinition>
 
 const requiredPhysicalInteractions = new Map<
@@ -1419,7 +1425,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       subscription.unsubscribe()
       expect(
         unloads.filter((options) => options === oldTargetLoad),
-      ).toHaveLength(outcome === `throw` ? 2 : 1)
+      ).toHaveLength(1)
       const replacement = loads[2]
       expect(
         replacement === undefined
@@ -1428,7 +1434,10 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       ).toHaveLength(Number(reentry === `reacquire-self`))
       expect(unloads.filter((options) => options === peerLoad)).toHaveLength(1)
       if (outcome === `throw` && reentry === `unsubscribe`) {
-        observePhysicalInteraction(`release-debt:unsubscribe`, `retry-debt`)
+        observePhysicalInteraction(
+          `failed-release:unsubscribe`,
+          `no-repeat-on-unsubscribe`,
+        )
       }
       await collection.cleanup()
     },
@@ -3266,7 +3275,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     let unloads = 0
     let sourceCleanups = 0
     const collection = createCollection<{ id: string }>({
-      id: `cleanup-release-debt`,
+      id: `cleanup-failed-release`,
       getKey: ({ id }) => id,
       syncMode: `on-demand`,
       sync: {
@@ -3299,7 +3308,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     await collection.cleanup()
     expect(unloads).toBe(1)
     expect(sourceCleanups).toBe(1)
-    observePhysicalInteraction(`release-debt:cleanup`, `discard-debt`)
+    observePhysicalInteraction(`failed-release:cleanup`, `no-repeat-on-cleanup`)
     subscription.unsubscribe()
   })
 
@@ -3367,7 +3376,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         releaseOwner()
         expect(unloads).toHaveLength(1)
         subscription.unsubscribe()
-        expect(unloads).toHaveLength(outcome === `throw` ? 2 : 1)
+        expect(unloads).toHaveLength(1)
         for (const options of unloads) expect(options).toBe(loads[0])
         expect(loads).toHaveLength(1)
       } finally {
@@ -3382,7 +3391,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       [1, 2].map((failures) => ({ reentry, failures })),
     ),
   )(
-    `retries the exact failed release after $reentry reentry with $failures failures`,
+    `attempts release once across $reentry reentry with $failures configured failures`,
     async ({ reentry, failures }) => {
       const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
       const failure = new Error(`physical release failed`)
@@ -3437,25 +3446,15 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
           releaseError = error
         }
         expect(releaseError).toBe(failure)
-        // Adapter reentry is still inside unload and cannot retry it. Error
-        // delivery is after unload throws: teardown must see a retryable lease.
-        const initialAttempts = reentry === `adapter` ? 1 : 2
-        expect(unloads).toHaveLength(initialAttempts)
+        // Both callback paths see a retired acquisition, including after throw.
+        expect(unloads).toHaveLength(1)
         expect(collection.subscriberCount).toBe(0)
         if (reentry === `error-listener`) expect(errors[0]).toBe(failure)
-        const nestedFailureExpected =
-          reentry === `error-listener` && failures === 2
-        expect(nestedFailures).toHaveLength(nestedFailureExpected ? 1 : 0)
-        if (nestedFailureExpected) expect(nestedFailures[0]).toBe(failure)
-        if (unloads.length <= failures) {
-          if (unloads.length < failures) {
-            expect(() => subscription.unsubscribe()).toThrow(failure)
-          }
-          subscription.unsubscribe()
-        }
-        expect(unloads).toHaveLength(failures + 1)
+        expect(nestedFailures).toEqual([])
+        expect(() => subscription.unsubscribe()).not.toThrow()
+        expect(unloads).toHaveLength(1)
         subscription.unsubscribe()
-        expect(unloads).toHaveLength(failures + 1)
+        expect(unloads).toHaveLength(1)
         expect(loads).toHaveLength(1)
         for (const options of unloads) expect(options).toBe(loads[0])
       } finally {
@@ -3465,13 +3464,13 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     },
   )
 
-  it(`keeps failed physical release debt out of truncate replay`, async () => {
+  it(`keeps failed releases out of truncate replay`, async () => {
     const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
     const releaseFailure = new Error(`release failed`)
     let unloads = 0
     let operations!: Parameters<SyncConfig<{ id: string }, string>[`sync`]>[0]
     const collection = createCollection<{ id: string }, string>({
-      id: `truncate-release-debt`,
+      id: `truncate-failed-release`,
       getKey: ({ id }) => id,
       syncMode: `on-demand`,
       sync: {
@@ -3501,12 +3500,15 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     expect(unloads).toBe(1)
 
     subscription.unsubscribe()
-    expect(unloads).toBe(2)
-    observePhysicalInteraction(`release-debt:truncate`, `preserve-debt`)
+    expect(unloads).toBe(1)
+    observePhysicalInteraction(
+      `failed-release:truncate`,
+      `no-repeat-on-truncate`,
+    )
     await collection.cleanup()
   })
 
-  it(`does not retry cleanup debt through a replacement adapter session`, async () => {
+  it(`does not repeat failed cleanup through a replacement adapter session`, async () => {
     const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
     let syncSession = 0
     const unloadSessions: Array<number> = []

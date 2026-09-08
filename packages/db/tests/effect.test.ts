@@ -724,54 +724,57 @@ describe(`createEffect`, () => {
       { name: `zero`, failure: 0 },
       { name: `empty string`, failure: `` },
       { name: `NaN`, failure: Number.NaN },
-    ])(`retries a falsy cleanup failure: $name`, async ({ name, failure }) => {
-      let unloadCount = 0
-      const source = createCollection<{ id: number }>({
-        id: `effect-falsy-cleanup-${name}`,
-        getKey: (row) => row.id,
-        syncMode: `on-demand`,
-        sync: {
-          sync: ({ markReady }) => {
-            markReady()
-            return {
-              loadSubset: () => true,
-              unloadSubset: () => {
-                unloadCount++
-                if (unloadCount === 1) throw failure
-              },
-            }
+    ])(
+      `reports a falsy cleanup failure once: $name`,
+      async ({ name, failure }) => {
+        let unloadCount = 0
+        const source = createCollection<{ id: number }>({
+          id: `effect-falsy-cleanup-${name}`,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return {
+                loadSubset: () => true,
+                unloadSubset: () => {
+                  unloadCount++
+                  if (unloadCount === 1) throw failure
+                },
+              }
+            },
           },
-        },
-      })
-      const effect = createEffect({
-        query: (q) => q.from({ source }),
-        onBatch: () => {},
-      })
+        })
+        const effect = createEffect({
+          query: (q) => q.from({ source }),
+          onBatch: () => {},
+        })
 
-      try {
-        await flushPromises()
-        let didReject = false
-        let rejection: unknown
         try {
+          await flushPromises()
+          let didReject = false
+          let rejection: unknown
+          try {
+            await effect.dispose()
+          } catch (error) {
+            didReject = true
+            rejection = error
+          }
+          expect(didReject).toBe(true)
+          expect(rejection).toBeInstanceOf(Error)
+          expect((rejection as Error).message).toBe(String(failure))
+          expect(unloadCount).toBe(1)
+
           await effect.dispose()
-        } catch (error) {
-          didReject = true
-          rejection = error
+          expect(unloadCount).toBe(1)
+        } finally {
+          await effect.dispose()
+          await source.cleanup()
         }
-        expect(didReject).toBe(true)
-        expect(rejection).toBeInstanceOf(Error)
-        expect((rejection as Error).message).toBe(String(failure))
-        expect(unloadCount).toBe(1)
+      },
+    )
 
-        await effect.dispose()
-        expect(unloadCount).toBe(2)
-      } finally {
-        await effect.dispose()
-        await source.cleanup()
-      }
-    })
-
-    it(`retains a failed source release across reentrant disposal`, async () => {
+    it(`does not repeat a failed source release across reentrant disposal`, async () => {
       const failure = new Error(`outer source release failed`)
       let unloadCount = 0
       const source = createCollection<{ id: number }>({
@@ -807,10 +810,10 @@ describe(`createEffect`, () => {
         expect(source.subscriberCount).toBe(0)
 
         await effect.dispose()
-        // The failed outer release remains retryable after it unwinds.
-        expect(unloadCount).toBe(2)
+        // Finishing the failed attempt does not make the lease retryable.
+        expect(unloadCount).toBe(1)
         await effect.dispose()
-        expect(unloadCount).toBe(2)
+        expect(unloadCount).toBe(1)
       } finally {
         await effect.dispose()
         await source.cleanup()
@@ -2064,10 +2067,10 @@ describe(`createEffect`, () => {
 
         expect(sourceErrors).toEqual([failure])
         expect(effect.disposed).toBe(true)
-        expect(unloadCount).toBe(2)
+        expect(unloadCount).toBe(1)
 
         await effect.dispose()
-        expect(unloadCount).toBe(3)
+        expect(unloadCount).toBe(1)
       } finally {
         await effect.dispose()
         await Promise.all([users.cleanup(), issues.cleanup()])
@@ -2184,7 +2187,7 @@ describe(`createEffect`, () => {
           cleanupFailure,
         )
       } finally {
-        await expect(effect.dispose()).rejects.toBe(cleanupFailure)
+        await expect(effect.dispose()).resolves.toBeUndefined()
         consoleErrorSpy.mockRestore()
         await users.cleanup()
       }

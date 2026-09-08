@@ -94,6 +94,7 @@ type SubsetAcquisition = {
   loadSubsetSession: number
   abortController?: AbortController
   removeRequestAbortListener?: () => void
+  releaseAttempted?: true
 }
 
 type SubsetDemand = {
@@ -153,8 +154,6 @@ export class CollectionSubscription
    * We store the exact LoadSubsetOptions we passed to loadSubset to ensure symmetric unload.
    */
   private subsetDemands: Array<SubsetDemand> = []
-  private releaseDebts: Array<SubsetAcquisition> = []
-  private releasingAcquisitions = new Set<SubsetAcquisition>()
   private primaryFailureDeliveryDepth = 0
   private readonly requestedSubsetWhere = new WeakMap<
     LoadSubsetOptions,
@@ -285,11 +284,6 @@ export class CollectionSubscription
     this.truncateReplacementPending = false
     this.stalePublishedRows = new Map(this.publishedRows)
     this.pendingLoadSubsetParticipants.clear()
-    for (const acquisition of this.releaseDebts) {
-      acquisition.abortController?.abort()
-      acquisition.removeRequestAbortListener?.()
-    }
-    this.releaseDebts = []
 
     for (const demand of [...this.subsetDemands]) {
       demand.initialResult?.reject(new LoadSubsetOperationAbortedError())
@@ -520,7 +514,7 @@ export class CollectionSubscription
       // Detach before unload can reenter and release that owner.
       demand.acquisitionState = `detached`
       try {
-        if (hadPreviousAcquisition) this.releaseOrRetainAcquisition(previous)
+        if (hadPreviousAcquisition) this.releaseAcquisition(previous)
       } catch (error) {
         fail(error)
       }
@@ -550,10 +544,10 @@ export class CollectionSubscription
         next.removeRequestAbortListener?.()
       } else if (hadPreviousAcquisition) {
         try {
-          this.releaseOrRetainAcquisition(previous)
+          this.releaseAcquisition(previous)
         } catch {
-          // The failed replay already owns the first error. Keep this old lease
-          // as cleanup debt without replacing it.
+          // The failed replay already owns the first error; cleanup must not
+          // replace it, and this release attempt is final.
         }
       }
       if (demandRemains && isCurrentAttempt()) {
@@ -567,9 +561,7 @@ export class CollectionSubscription
       // adapter return. An ordinary replay already released `next`, so retire
       // the old acquisition held on this stack instead.
       try {
-        this.releaseOrRetainAcquisition(
-          hadPreviousAcquisition ? previous : next,
-        )
+        this.releaseAcquisition(hadPreviousAcquisition ? previous : next)
       } catch (error) {
         fail(error)
       }
@@ -584,7 +576,7 @@ export class CollectionSubscription
       this.restoreAcquisitionTransfer(transfer)
       next.abortController.abort()
       try {
-        this.releaseOrRetainAcquisition(next)
+        this.releaseAcquisition(next)
       } catch (error) {
         fail(error)
       }
@@ -606,7 +598,7 @@ export class CollectionSubscription
       // A status listener retired the tentative acquisition. It could not see
       // the old lease held on this stack, so retire that lease exactly once.
       try {
-        this.releaseOrRetainAcquisition(previous)
+        this.releaseAcquisition(previous)
       } catch (error) {
         fail(error)
       }
@@ -619,7 +611,7 @@ export class CollectionSubscription
       this.restoreAcquisitionTransfer(transfer)
       next.abortController.abort()
       try {
-        this.releaseOrRetainAcquisition(next)
+        this.releaseAcquisition(next)
       } catch (error) {
         fail(error)
       }
@@ -636,18 +628,9 @@ export class CollectionSubscription
     try {
       this.acceptAcquisitionTransfer(transfer)
     } catch (error) {
-      // The old lease is still owned because its release failed. Abort and
-      // release the new acquisition, but keep observing its work so rows from
-      // a non-cooperative adapter cannot escape the replay buffer.
-      if (this.subsetDemands.includes(demand)) {
-        next.abortController.abort()
-        try {
-          this.releaseOrRetainAcquisition(next)
-        } catch {
-          // Preserve the first ownership error. The demand still retains the
-          // old acquisition so normal cleanup can retry that release.
-        }
-      }
+      // The replacement remains owned. Failure to release the old acquisition
+      // fails this replay, but cannot roll ownership back to a retired lease.
+      next.abortController.abort()
       this.recordLoadSubsetError(demand.acquisition.options, error, true)
       this.stopStatusParticipant(statusParticipant)
       fail(error)
@@ -1085,7 +1068,7 @@ export class CollectionSubscription
     demand.acquisitionState = previousState
   }
 
-  /** Accept startup, with rollback if releasing the prior lease fails. */
+  /** Accept startup before attempting to release the prior lease. */
   private acceptAcquisitionTransfer(transfer: SubsetAcquisitionTransfer): void {
     this.restoreAcquisitionTransfer(transfer)
     const { demand, candidate: next } = transfer
@@ -1095,45 +1078,21 @@ export class CollectionSubscription
     // adapter may synchronously release the logical demand from unloadSubset;
     // that reentrant release must then see and release the new acquisition.
     demand.acquisition = next
-    try {
-      this.collection._sync.unloadSubset(previous.options)
-    } catch (error) {
-      if (this.subsetDemands.includes(demand)) {
-        demand.acquisition = previous
-      } else if (!this.releaseDebts.includes(previous)) {
-        // Reentrant logical release already retired the replacement. Preserve
-        // the old physical lease so teardown can retry its failed release.
-        this.releaseDebts.push(previous)
-      }
-      throw error
-    }
-    previous.removeRequestAbortListener?.()
+    this.releaseAcquisition(previous, false)
   }
 
-  /** Keep an exact lease visible until one release attempt succeeds. */
-  private releaseOrRetainAcquisition(
+  /** Retire an acquisition before user code; failed cleanup is not retryable. */
+  private releaseAcquisition(
     acquisition: SubsetAcquisition,
     reportReleaseError = this.primaryFailureDeliveryDepth === 0,
   ): void {
-    if (!this.releaseDebts.includes(acquisition)) {
-      this.releaseDebts.push(acquisition)
-    }
-    if (this.releasingAcquisitions.has(acquisition)) return
-    this.releasingAcquisitions.add(acquisition)
+    if (acquisition.releaseAttempted) return
+    acquisition.releaseAttempted = true
     try {
-      try {
-        acquisition.abortController?.abort()
-        if (this.isLoadSubsetSessionCurrent(acquisition.loadSubsetSession)) {
-          this.collection._sync.unloadSubset(acquisition.options)
-        }
-      } finally {
-        // Error listeners may dispose their consumer and retry this debt.
-        // Finish the adapter attempt before delivering that error.
-        this.releasingAcquisitions.delete(acquisition)
-        acquisition.removeRequestAbortListener?.()
+      acquisition.abortController?.abort()
+      if (this.isLoadSubsetSessionCurrent(acquisition.loadSubsetSession)) {
+        this.collection._sync.unloadSubset(acquisition.options)
       }
-      const index = this.releaseDebts.indexOf(acquisition)
-      if (index !== -1) this.releaseDebts.splice(index, 1)
     } catch (error) {
       const normalized = reportReleaseError
         ? this.recordLoadSubsetError(
@@ -1143,6 +1102,8 @@ export class CollectionSubscription
           )
         : normalizeError(error)
       throw normalized
+    } finally {
+      acquisition.removeRequestAbortListener?.()
     }
   }
 
@@ -1230,7 +1191,7 @@ export class CollectionSubscription
 
     demand.acquisitionState = `active`
     if (!this.subsetDemands.includes(demand)) {
-      this.releaseOrRetainAcquisition(acquisition)
+      this.releaseAcquisition(acquisition)
       return { demand, result, started: true }
     }
 
@@ -1494,8 +1455,7 @@ export class CollectionSubscription
         true,
       )
     } finally {
-      // The failed request remains the public error. A release failure is
-      // retained as cleanup debt and may be reported if that later retry fails.
+      // The failed request remains the public error, even if cleanup also fails.
       const index = this.subsetDemands.indexOf(demand)
       if (index !== -1) this.releaseDemandAt(index, false)
     }
@@ -1517,8 +1477,7 @@ export class CollectionSubscription
         ? [
             // Adapter release is a supported reentrancy boundary. A demand
             // started from unload joins this replacement before completion.
-            () =>
-              this.releaseOrRetainAcquisition(acquisition, reportReleaseError),
+            () => this.releaseAcquisition(acquisition, reportReleaseError),
           ]
         : []),
       () => this.retireEmptyReplay(),
@@ -1946,19 +1905,8 @@ export class CollectionSubscription
     this.skipFiltering = true
   }
 
-  private retryReleaseDebts(): void {
-    runAllCallbacks(
-      this.releaseDebts.map((acquisition) => () => {
-        // An earlier release may reenter teardown and retire this debt.
-        if (this.releaseDebts.includes(acquisition)) {
-          this.releaseOrRetainAcquisition(acquisition)
-        }
-      }),
-    )
-  }
-
   unsubscribe() {
-    if (this.unsubscribed) return this.retryReleaseDebts()
+    if (this.unsubscribed) return
     this.unsubscribed = true
     // Stop any status listener set already being iterated. Clearing the
     // emitter's map cannot invalidate that captured Set by itself.
@@ -1985,8 +1933,7 @@ export class CollectionSubscription
         this.truncateReplacementPending = false
         this.stalePublishedRows.clear()
 
-        // Logical demand ends now even if a physical adapter release must be
-        // retried. Retire every owner before an unload can reenter teardown.
+        // Retire every owner before an unload can reenter teardown.
         const acquisitions = this.subsetDemands
           .filter((demand) => demand.acquisitionState === `active`)
           .map((demand) => demand.acquisition)
@@ -1999,12 +1946,11 @@ export class CollectionSubscription
           }
         }
         this.subsetDemands = []
-        for (const acquisition of acquisitions) {
-          if (!this.releaseDebts.includes(acquisition)) {
-            this.releaseDebts.push(acquisition)
-          }
-        }
-        this.retryReleaseDebts()
+        runAllCallbacks(
+          acquisitions.map(
+            (acquisition) => () => this.releaseAcquisition(acquisition),
+          ),
+        )
       },
       () =>
         this.emitInner(`unsubscribed`, {
