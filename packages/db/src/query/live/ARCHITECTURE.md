@@ -261,21 +261,28 @@ paths preserve property descriptors, clean nested references, cycles,
 adversarial keys, and user-owned symbols. Discovery reads data descriptors
 directly and never invokes an accessor merely to find private state. D2 hashes
 enumerable symbol keys and uses exact local-symbol identity plus registry keys
-for registered symbols. Its structural hash records cyclic back-references and
-memoizes a repeated cyclic subgraph only when the same external ancestors hold
-the same relative positions. Structural hashing has fixed limits on recursion
-depth, graph-context bookkeeping, and traversal-cache matching and adoption;
-it rejects values that exceed them instead of stalling a graph turn or
-overflowing the JavaScript stack. A failed hash does not publish partial
+for registered symbols. D2 rejects structural cycles with a clear error, including
+cycles through arrays, Maps, Sets, and enumerable symbol keys. Shared acyclic
+subtrees remain supported and are hashed once per traversal. Structural hashing
+limits recursion depth and value visits; it rejects values that exceed these
+limits instead of expanding a shared graph or overflowing the JavaScript stack.
+This does not bound the cost of arbitrary user getters or key sorting.
+A failed hash does not publish partial
 structural cache entries, so retrying the same value cannot bypass a guard.
 A graph-run failure marks the current live query as errored and preserves the
 thrown error. It must not continue publishing from a partly advanced graph;
 recovery requires a fresh query session.
-Opaque reference-hashed leaves are resolved before structural traversal and
-cannot consume or change those budgets. The accepted-size cycle tests are
-regression floors, not an unbounded topology guarantee.
-Symbol-only changes and supported cycles therefore cannot disappear before
-publication. Neither
+Opaque reference-hashed leaves are resolved before structural recursion; their
+own properties, including self-references, are not traversed. Hash inputs must
+remain immutable once successfully cached, as with other retained D2 values.
+Collections register as opaque handles at construction using the existing hash
+cache. Their identity, not their mutable internal state, is visible to hashing
+operators in a downstream query. This does not add child-row dependencies to a
+functional projection that reads a Collection-valued field.
+The descriptor-preserving boundary walkers may still encounter cycles, but that
+does not make cyclic structural results valid input to a hashing operator.
+Symbol-only changes cannot disappear before publication, and unsupported cycles
+fail rather than silently merge. Neither
 boundary mutates values retained by D2. Compiler-created
 parent contexts use a separate internal
 envelope that keeps projected user aliases apart from the equality identity

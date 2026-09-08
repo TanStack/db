@@ -1,4 +1,5 @@
 import { expect, it } from 'vitest'
+import { MultiSet } from '@tanstack/db-ivm'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { createLiveQueryCollection, eq } from '../src/query/index.js'
@@ -8,6 +9,42 @@ import type { SyncConfig } from '../src/types.js'
 
 type Row = { id: number; value: number }
 type Actions = Parameters<SyncConfig<Row, string | number>[`sync`]>[0]
+
+it(`consolidates Collection handles by instance, not their id or mutable state`, async () => {
+  const makeCollection = () =>
+    createCollection<Row>({
+      id: `shared-definition-id`,
+      getKey: (row) => row.id,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+        },
+      },
+    })
+  const first = makeCollection()
+  const second = makeCollection()
+  try {
+    await Promise.all([first.preload(), second.preload()])
+    const before = new MultiSet([[{ handle: first }, 1]])
+    expect(
+      new MultiSet([
+        [{ handle: first }, 1],
+        [{ handle: second }, -1],
+      ])
+        .consolidate()
+        .getInner(),
+    ).toHaveLength(2)
+    await first.cleanup()
+    expect(
+      before
+        .concat(new MultiSet([[{ handle: first }, -1]]))
+        .consolidate()
+        .getInner(),
+    ).toEqual([])
+  } finally {
+    await Promise.all([first.cleanup(), second.cleanup()])
+  }
+})
 
 it.each([0, 2])(`opens an inner-join window from limit %s`, async (limit) => {
   const makeSource = (collectionId: string) =>
@@ -105,41 +142,57 @@ it.each([1, 99])(
   },
 )
 
-it(`makes a graph hashing failure visible as a query error`, async () => {
-  type DeepRow = { id: number; nested: object }
-  let sync!: Parameters<SyncConfig<DeepRow, string | number>[`sync`]>[0]
-  const source = createCollection<DeepRow>({
-    getKey: (row) => row.id,
-    sync: {
-      sync: (actions) => {
-        sync = actions
-        actions.markReady()
+it.each([`depth`, `cycle`] as const)(
+  `makes a graph hashing $failure failure visible without publishing it`,
+  async (failure) => {
+    type DeepRow = { id: number; nested: object }
+    let sync!: Parameters<SyncConfig<DeepRow, string | number>[`sync`]>[0]
+    const source = createCollection<DeepRow>({
+      getKey: (row) => row.id,
+      sync: {
+        sync: (actions) => {
+          sync = actions
+          actions.markReady()
+        },
       },
-    },
-  })
-  const live = createLiveQueryCollection({
-    query: (q) =>
-      q
-        .from({ source })
-        .select(({ source: row }) => ({ id: row.id, nested: row.nested }))
-        .distinct(),
-  })
-  try {
-    await live.preload()
-    let nested: object = {}
-    for (let depth = 0; depth < 800; depth++) nested = { child: nested }
-    sync.begin()
-    sync.write({ type: `insert`, value: { id: 1, nested } })
-    expect(() => sync.commit()).toThrow(RangeError)
-    expect(source.has(1)).toBe(true)
-    expect(live.status).toBe(`error`)
-    sync.begin()
-    sync.write({ type: `insert`, value: { id: 2, nested: {} } })
-    sync.commit()
-    expect(live.status).toBe(`error`)
-    expect(live.size).toBe(0)
-  } finally {
-    await live.cleanup()
-    await source.cleanup()
-  }
-})
+    })
+    const live = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ source })
+          .select(({ source: row }) => ({ id: row.id, nested: row.nested }))
+          .distinct(),
+    })
+    try {
+      await live.preload()
+      sync.begin()
+      sync.write({ type: `insert`, value: { id: 0, nested: { safe: true } } })
+      sync.commit()
+      const before = [...live.toArray]
+      expect(before).toHaveLength(1)
+      let nested: object = {}
+      if (failure === `depth`) {
+        for (let depth = 0; depth < 800; depth++) nested = { child: nested }
+      } else {
+        Object.assign(nested, { self: nested })
+      }
+      sync.begin()
+      sync.write({ type: `insert`, value: { id: 1, nested } })
+      expect(() => sync.commit()).toThrow(
+        failure === `depth`
+          ? RangeError
+          : `Cannot hash cyclic structural values`,
+      )
+      expect(source.has(1)).toBe(true)
+      expect(live.status).toBe(`error`)
+      sync.begin()
+      sync.write({ type: `insert`, value: { id: 2, nested: {} } })
+      sync.commit()
+      expect(live.status).toBe(`error`)
+      expect(live.toArray).toEqual(before)
+    } finally {
+      await live.cleanup()
+      await source.cleanup()
+    }
+  },
+)

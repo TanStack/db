@@ -1,3 +1,4 @@
+import { registerOpaqueHash } from '@tanstack/db-ivm'
 import { safeRandomUUID } from '../utils/uuid'
 import {
   CollectionConfigurationError,
@@ -350,6 +351,9 @@ export class CollectionImpl<
       )
     }
 
+    // Collections are mutable handles, not structural rows. Downstream queries
+    // must not hash their internal state or follow its ownership cycles.
+    registerOpaqueHash(this)
     this._changes = new CollectionChangesManager()
     this._events = new CollectionEventsManager()
     this._indexes = new CollectionIndexesManager()

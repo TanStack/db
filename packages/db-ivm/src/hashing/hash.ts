@@ -19,14 +19,9 @@ const MAP_MARKER = randomHash()
 const SET_MARKER = randomHash()
 const UINT8ARRAY_MARKER = randomHash()
 const TEMPORAL_MARKER = randomHash()
-const CYCLE_MARKER = randomHash()
-
-// A cyclic subgraph can be reached under exponentially many distinct active
-// ancestor contexts, and checking or adopting cached traversals can itself do
-// too much work. Bound those graph-specific costs: cache matching and adoption,
-// graph-context bookkeeping, and structural recursion depth.
-const MAX_CYCLIC_CACHE_WORK = 65_536
-const MAX_GRAPH_CONTEXT_WORK = 1_000_000
+// Bound structural recursion and value visits. Shared acyclic subtrees are
+// cached; cycles are rejected rather than given context-dependent hashes.
+const MAX_STRUCTURAL_HASH_WORK = 1_000_000
 const MAX_STRUCTURAL_HASH_DEPTH = 768
 
 const temporalTypes = new Set([
@@ -57,33 +52,15 @@ const UINT8ARRAY_CONTENT_HASH_THRESHOLD = 128
 
 const hashCache = new WeakMap<object, number>()
 
+/** @internal Register a mutable handle before it enters a structural value. */
+export function registerOpaqueHash(value: object): void {
+  cachedReferenceHash(value)
+}
+
 type HashContext = {
-  activeObjects: Map<object, number>
-  activeOrder: Array<object>
-  cyclicObjects: Set<object>
-  frames: Array<HashFrame>
-  traversalHashes: WeakMap<object, Array<TraversalHash>>
-  cyclicCacheWork: number
-  graphContextWork: number
+  activeObjects: Set<object>
+  work: number
   pendingHashes: Map<object, number>
-}
-
-type HashDependency = {
-  object: object
-  offset: number
-}
-
-type HashFrame = {
-  startIndex: number
-  visitedObjects: Set<object>
-  externalDependencies: Array<HashDependency>
-}
-
-type TraversalHash = Pick<
-  HashFrame,
-  `visitedObjects` | `externalDependencies`
-> & {
-  valueHash: number
 }
 
 export function hash(input: any): number {
@@ -93,25 +70,13 @@ export function hash(input: any): number {
 }
 
 function hashObject(input: object, context: HashContext): number {
-  if (context.activeOrder.length >= MAX_STRUCTURAL_HASH_DEPTH) {
+  if (context.activeObjects.size >= MAX_STRUCTURAL_HASH_DEPTH) {
     throw new RangeError(
       `Value is too complex to hash safely: structural depth`,
     )
   }
 
-  const startIndex = context.activeOrder.length
-  for (const frame of context.frames) {
-    consumeGraphContextWork(context)
-    frame.visitedObjects.add(input)
-  }
-  const frame: HashFrame = {
-    startIndex,
-    visitedObjects: new Set([input]),
-    externalDependencies: [],
-  }
-  context.frames.push(frame)
-  context.activeObjects.set(input, startIndex)
-  context.activeOrder.push(input)
+  context.activeObjects.add(input)
 
   let valueHash: number | undefined
   try {
@@ -143,17 +108,9 @@ function hashObject(input: object, context: HashContext): number {
     }
   } finally {
     context.activeObjects.delete(input)
-    context.activeOrder.pop()
-    context.frames.pop()
   }
 
-  if (context.cyclicObjects.has(input)) {
-    const traversalHashes = context.traversalHashes.get(input) ?? []
-    traversalHashes.push({ valueHash, ...frame })
-    context.traversalHashes.set(input, traversalHashes)
-  } else {
-    context.pendingHashes.set(input, valueHash)
-  }
+  context.pendingHashes.set(input, valueHash)
   return valueHash
 }
 
@@ -217,6 +174,9 @@ function updateHasher(
   input: unknown,
   context?: HashContext,
 ): void {
+  if (context && ++context.work > MAX_STRUCTURAL_HASH_WORK) {
+    throw new RangeError(`Value is too complex to hash safely: structural work`)
+  }
   if (input === null) {
     hasher.update(NULL)
     return
@@ -261,13 +221,8 @@ function getCachedHash(input: object, context?: HashContext): number {
     // Only an uncached structural root needs graph traversal state. Commit its
     // cache entries after success so a failed traversal cannot poison retries.
     context = {
-      activeObjects: new Map(),
-      activeOrder: [],
-      cyclicObjects: new Set(),
-      frames: [],
-      traversalHashes: new WeakMap(),
-      cyclicCacheWork: 0,
-      graphContextWork: 0,
+      activeObjects: new Set(),
+      work: 0,
       pendingHashes: new Map(),
     }
     const result = hashObject(input, context)
@@ -277,135 +232,18 @@ function getCachedHash(input: object, context?: HashContext): number {
     return result
   }
 
-  const activeIndex = context.activeObjects.get(input)
-  if (activeIndex !== undefined) {
-    for (let index = activeIndex; index < context.activeOrder.length; index++) {
-      consumeGraphContextWork(context)
-      context.cyclicObjects.add(context.activeOrder[index]!)
-    }
-    for (const frame of context.frames) {
-      consumeGraphContextWork(context)
-      if (activeIndex < frame.startIndex) {
-        addDependency(frame, input, activeIndex - frame.startIndex, context)
-      }
-    }
-    const hasher = new MurmurHashStream()
-    hasher.update(CYCLE_MARKER)
-    hasher.update(context.activeOrder.length - activeIndex - 1)
-    return hasher.digest()
+  if (context.activeObjects.has(input)) {
+    throw new TypeError(`Cannot hash cyclic structural values`)
   }
 
   // Opaque leaves cannot contain structural back-references. Resolve them
-  // before entering a traversal frame so their reference cache cannot alter a
-  // failed structural retry's work budget.
+  // before entering structural recursion, even when they have user properties.
   if (isReferenceHashedObject(input)) return cachedReferenceHash(input)
 
   const valueHash = hashCache.get(input) ?? context.pendingHashes.get(input)
   if (valueHash !== undefined) return valueHash
 
-  const startIndex = context.activeOrder.length
-  const traversalHash = findReusableTraversalHash(input, startIndex, context)
-  if (traversalHash) {
-    adoptTraversalHash(traversalHash, context)
-    return traversalHash.valueHash
-  }
-
   return hashObject(input, context)
-}
-
-function findReusableTraversalHash(
-  input: object,
-  startIndex: number,
-  context: HashContext,
-): TraversalHash | undefined {
-  for (const candidate of context.traversalHashes.get(input) ?? []) {
-    let reusable = true
-    for (const object of candidate.visitedObjects) {
-      consumeCyclicCacheWork(context)
-      if (context.activeObjects.has(object)) {
-        reusable = false
-        break
-      }
-    }
-    if (!reusable) continue
-
-    for (const dependency of candidate.externalDependencies) {
-      consumeCyclicCacheWork(context)
-      if (
-        context.activeObjects.get(dependency.object) !==
-        startIndex + dependency.offset
-      ) {
-        reusable = false
-        break
-      }
-    }
-    if (reusable) return candidate
-  }
-  return undefined
-}
-
-function addDependency(
-  frame: HashFrame,
-  object: object,
-  offset: number,
-  context: HashContext,
-): void {
-  for (const dependency of frame.externalDependencies) {
-    consumeGraphContextWork(context)
-    if (dependency.object === object && dependency.offset === offset) return
-  }
-  frame.externalDependencies.push({ object, offset })
-}
-
-/** Merge a reused subtree's graph footprint into every active parent frame. */
-function adoptTraversalHash(
-  traversalHash: TraversalHash,
-  context: HashContext,
-): void {
-  for (const frame of context.frames) {
-    for (const object of traversalHash.visitedObjects) {
-      consumeCyclicCacheWork(context)
-      frame.visitedObjects.add(object)
-    }
-    for (const dependency of traversalHash.externalDependencies) {
-      consumeCyclicCacheWork(context)
-      const activeIndex = context.activeObjects.get(dependency.object)!
-      if (activeIndex < frame.startIndex) {
-        addDependency(
-          frame,
-          dependency.object,
-          activeIndex - frame.startIndex,
-          context,
-        )
-      }
-      for (
-        let index = activeIndex;
-        index < context.activeOrder.length;
-        index++
-      ) {
-        consumeCyclicCacheWork(context)
-        context.cyclicObjects.add(context.activeOrder[index]!)
-      }
-    }
-  }
-}
-
-function consumeCyclicCacheWork(context: HashContext): void {
-  context.cyclicCacheWork++
-  if (context.cyclicCacheWork > MAX_CYCLIC_CACHE_WORK) {
-    throw new RangeError(
-      `Value is too complex to hash safely: cyclic cache work`,
-    )
-  }
-}
-
-function consumeGraphContextWork(context: HashContext): void {
-  context.graphContextWork++
-  if (context.graphContextWork > MAX_GRAPH_CONTEXT_WORK) {
-    throw new RangeError(
-      `Value is too complex to hash safely: graph context work`,
-    )
-  }
 }
 
 function isReferenceHashedObject(input: object): boolean {

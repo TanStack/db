@@ -192,7 +192,7 @@ describe(`hash`, () => {
       )
     })
 
-    it(`hashes structurally equal cycles through symbol keys`, () => {
+    it(`rejects self and mutual cycles through symbol keys`, () => {
       const key = Symbol(`cycle`)
       const first: Record<PropertyKey, unknown> = {}
       const second: Record<PropertyKey, unknown> = {}
@@ -204,13 +204,18 @@ describe(`hash`, () => {
       firstPeer[key] = secondPeer
       secondPeer[key] = firstPeer
 
-      expect(hash(first)).toBe(hash(second))
-      expect(hash(first)).toBe(hash(first))
-      expect(hash(firstPeer)).toBe(hash(secondPeer))
+      for (const input of [first, second, firstPeer, secondPeer]) {
+        expect(() => hash(input)).toThrow(
+          `Cannot hash cyclic structural values`,
+        )
+        expect(() => hash(input)).toThrow(
+          `Cannot hash cyclic structural values`,
+        )
+      }
     })
 
     it.each([`object`, `map`] as const)(
-      `hashes shared cyclic branches through %s with bounded work`,
+      `rejects shared cyclic branches through %s with bounded work`,
       (container) => {
         const size = 14
         let reads = 0
@@ -237,16 +242,18 @@ describe(`hash`, () => {
           }
         }
 
-        const firstHash = hash(nodes[0]!)
+        expect(() => hash(nodes[0]!)).toThrow(
+          `Cannot hash cyclic structural values`,
+        )
         const firstReads = reads
         const copy = structuredClone(nodes[0]!)
 
-        expect(hash(copy)).toBe(firstHash)
+        expect(() => hash(copy)).toThrow(`Cannot hash cyclic structural values`)
         expect(firstReads).toBeLessThanOrEqual(size * 2)
       },
     )
 
-    it(`does not reuse a cyclic child under the wrong active ancestors`, () => {
+    it(`rejects a shared child that cycles to either ancestor`, () => {
       const createGraph = (backBranch: `left` | `right`) => {
         const root: Record<string, unknown> = {}
         const left: Record<string, unknown> = {}
@@ -264,9 +271,11 @@ describe(`hash`, () => {
       const equalLeft = createGraph(`left`)
       const right = createGraph(`right`)
 
-      expect(hash(left)).toBe(hash(equalLeft))
-      expect(hash(left)).not.toBe(hash(right))
-      expect(hash(equalLeft)).toBe(hash(left))
+      for (const input of [left, equalLeft, right]) {
+        expect(() => hash(input)).toThrow(
+          `Cannot hash cyclic structural values`,
+        )
+      }
     })
 
     it(`rejects cyclic graphs with exponentially many ancestor contexts`, () => {
@@ -291,9 +300,9 @@ describe(`hash`, () => {
         shared[depth]![`left${level}`] = left[level]
       }
 
-      expect(() => hash(shared[0])).toThrow(RangeError)
+      expect(() => hash(shared[0])).toThrow(TypeError)
       expect(() => hash(shared[0])).toThrow(
-        /Value is too complex to hash safely/,
+        `Cannot hash cyclic structural values`,
       )
 
       const ring = Array.from(
@@ -303,7 +312,12 @@ describe(`hash`, () => {
       for (let index = 0; index < ring.length; index++) {
         ring[index]!.next = ring[(index + 1) % ring.length]
       }
-      expect(hash(structuredClone(ring[0]))).toBe(hash(ring[0]))
+      expect(() => hash(structuredClone(ring[0]))).toThrow(
+        `Cannot hash cyclic structural values`,
+      )
+      expect(() => hash(ring[0])).toThrow(
+        `Cannot hash cyclic structural values`,
+      )
 
       const independent: Record<string, { self?: unknown }> = {}
       for (let index = 0; index < 600; index++) {
@@ -311,7 +325,12 @@ describe(`hash`, () => {
         cycle.self = cycle
         independent[String(index)] = cycle
       }
-      expect(hash(structuredClone(independent))).toBe(hash(independent))
+      expect(() => hash(structuredClone(independent))).toThrow(
+        `Cannot hash cyclic structural values`,
+      )
+      expect(() => hash(independent)).toThrow(
+        `Cannot hash cyclic structural values`,
+      )
 
       const independentDiamonds: Record<string, unknown> = {}
       for (let index = 0; index < 600; index++) {
@@ -322,16 +341,22 @@ describe(`hash`, () => {
         independentDiamonds[`left${index}`] = leftIngress
         independentDiamonds[`right${index}`] = rightIngress
       }
-      expect(hash(structuredClone(independentDiamonds))).toBe(
-        hash(independentDiamonds),
+      expect(() => hash(structuredClone(independentDiamonds))).toThrow(
+        `Cannot hash cyclic structural values`,
+      )
+      expect(() => hash(independentDiamonds)).toThrow(
+        `Cannot hash cyclic structural values`,
       )
 
       const small: { self?: unknown } = {}
       small.self = small
-      expect(hash(structuredClone(small))).toBe(hash(small))
+      expect(() => hash(structuredClone(small))).toThrow(
+        `Cannot hash cyclic structural values`,
+      )
+      expect(() => hash(small)).toThrow(`Cannot hash cyclic structural values`)
     })
 
-    it(`bounds internal work when adopting cached cyclic traversals`, () => {
+    it(`rejects both small and large repeated cyclic traversals`, () => {
       const createGraph = (size: number) => {
         const nodes = Array.from(
           { length: size },
@@ -345,9 +370,11 @@ describe(`hash`, () => {
         return nodes[0]
       }
 
-      expect(() => hash(createGraph(20))).not.toThrow()
+      expect(() => hash(createGraph(20))).toThrow(
+        `Cannot hash cyclic structural values`,
+      )
       expect(() => hash(createGraph(300))).toThrow(
-        `Value is too complex to hash safely: cyclic cache work`,
+        `Cannot hash cyclic structural values`,
       )
     })
 
@@ -365,12 +392,8 @@ describe(`hash`, () => {
       shared.back = left
       const root = { aSentinel: sentinel, left, right }
 
-      expect(() => hash(root)).toThrow(
-        `Value is too complex to hash safely: cyclic cache work`,
-      )
-      expect(() => hash(root)).toThrow(
-        `Value is too complex to hash safely: cyclic cache work`,
-      )
+      expect(() => hash(root)).toThrow(`Cannot hash cyclic structural values`)
+      expect(() => hash(root)).toThrow(`Cannot hash cyclic structural values`)
       expect(reads).toBe(2)
     })
 
@@ -382,22 +405,23 @@ describe(`hash`, () => {
       `treats a large %s as an opaque leaf before structural work`,
       (_name, createLeaf) => {
         const leaves = Array.from({ length: 700 }, createLeaf)
-        const createRing = () => {
+        for (const leaf of leaves) Object.assign(leaf, { self: leaf })
+        const createChain = () => {
           const ring = leaves.map((leaf, value) => ({
             value,
             leaf,
             next: undefined as unknown,
           }))
           for (let index = 0; index < ring.length; index++) {
-            ring[index]!.next = ring[(index + 1) % ring.length]
+            ring[index]!.next = ring[index + 1]
           }
           return ring[0]
         }
 
-        const first = createRing()
+        const first = createChain()
         const expectedHash = hash(first)
         expect(hash(first)).toBe(expectedHash)
-        expect(hash(createRing())).toBe(expectedHash)
+        expect(hash(createChain())).toBe(expectedHash)
 
         let atDepthBoundary: unknown = createLeaf()
         for (let index = 0; index < 768; index++) {
@@ -412,7 +436,7 @@ describe(`hash`, () => {
             leaf,
           })) as Array<Record<string, unknown>>
           for (let index = 0; index < nodes.length; index++) {
-            const next = nodes[(index + 1) % nodes.length]!
+            const next = nodes[index + 1]
             nodes[index]!.left = { next }
             nodes[index]!.right = { next }
           }
@@ -467,7 +491,7 @@ describe(`hash`, () => {
       )
     })
 
-    it(`bounds first-traversal ancestor bookkeeping`, () => {
+    it(`rejects dense ancestor back-references without warming siblings`, () => {
       const createGraph = (size: number) => {
         const nodes: Array<Record<string, unknown>> = []
         for (let index = 0; index < size; index++) {
@@ -481,7 +505,12 @@ describe(`hash`, () => {
         return nodes[0]!
       }
       const accepted = createGraph(50)
-      expect(hash(structuredClone(accepted))).toBe(hash(accepted))
+      expect(() => hash(structuredClone(accepted))).toThrow(
+        `Cannot hash cyclic structural values`,
+      )
+      expect(() => hash(accepted)).toThrow(
+        `Cannot hash cyclic structural values`,
+      )
 
       let reads = 0
       const sentinel = Object.defineProperty({}, `value`, {
@@ -495,10 +524,10 @@ describe(`hash`, () => {
       })
 
       expect(() => hash(rejected)).toThrow(
-        `Value is too complex to hash safely: graph context work`,
+        `Cannot hash cyclic structural values`,
       )
       expect(() => hash(rejected)).toThrow(
-        `Value is too complex to hash safely: graph context work`,
+        `Cannot hash cyclic structural values`,
       )
       expect(reads).toBe(2)
     })
