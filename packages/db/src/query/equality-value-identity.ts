@@ -45,7 +45,7 @@ function exactIdentity(
     typeof value === `function` ||
     typeof value === `symbol`
   ) {
-    return referenceIdentity(value as object | symbol)
+    return referenceIdentity(value)
   }
   if (typeof value === `number`) {
     if (Object.is(value, -0)) return [`number`, `-0`]
@@ -68,15 +68,6 @@ export function createValueIdentity(): ValueIdentity {
 /** Preserve the value relation used by equality predicates in keyed state. */
 export function getEqualityValueIdentity(value: unknown): unknown {
   return equalityIdentity(value, getRuntimeReferenceIdentity)
-}
-
-export function serializeEqualityValue(value: unknown): string {
-  return serializeValue(getEqualityValueIdentity(value))
-}
-
-/** Preserve exact output identity without traversing opaque runtime values. */
-export function getExactValueIdentity(value: unknown): unknown {
-  return exactIdentity(value, getRuntimeReferenceIdentity)
 }
 
 /** Keep compiler identity outside the namespace that holds user aliases. */

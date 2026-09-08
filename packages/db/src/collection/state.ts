@@ -127,7 +127,6 @@ export class CollectionStateManager<
   public size = 0
 
   // State used for computing the change events
-  public syncedKeys = new Set<TKey>()
   public preSyncVisibleState = new Map<TKey, TOutput>()
   public preSyncVirtualState = new Map<TKey, VirtualRowProps<TKey>>()
   public recentlySyncedKeys = new Set<TKey>()
@@ -1033,7 +1032,6 @@ export class CollectionStateManager<
           truncatePendingLocalOrigins = new Set(this.pendingLocalOrigins)
           this.syncedData.clear()
           this.syncedMetadata.clear()
-          this.syncedKeys.clear()
           this.hydrationSeedKeys.clear()
           this.hydratedKeys.clear()
           this.clearOriginTrackingState()
@@ -1054,7 +1052,6 @@ export class CollectionStateManager<
 
         for (const operation of transaction.operations) {
           const key = operation.key as TKey
-          this.syncedKeys.add(key)
 
           // Determine origin: 'local' for local-only collections or pending local changes
           const retainedLocalOrigin =
@@ -1106,7 +1103,6 @@ export class CollectionStateManager<
             }
             case `delete`:
               this.syncedData.delete(key)
-              this.syncedKeys.delete(key)
               this.syncedMetadata.delete(key)
               // Clean up origin and pending tracking for deleted rows
               this.rowOrigins.delete(key)
@@ -1586,7 +1582,6 @@ export class CollectionStateManager<
     this.isLocalOnly = false
     this.size = 0
     this.pendingSyncedTransactions = []
-    this.syncedKeys.clear()
     this.preSyncVisibleState.clear()
     this.preSyncVirtualState.clear()
     this.recentlySyncedKeys.clear()

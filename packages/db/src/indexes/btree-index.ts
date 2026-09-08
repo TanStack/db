@@ -342,23 +342,6 @@ export class BTreeIndex<
   }
 
   /**
-   * Performs a reversed range query
-   */
-  rangeQueryReversed(options: RangeQueryOptions = {}): Set<TKey> {
-    const { from, to, fromInclusive = true, toInclusive = true } = options
-    const reversed: RangeQueryOptions = {}
-    if (`to` in options) {
-      reversed.from = to
-      reversed.fromInclusive = toInclusive
-    }
-    if (`from` in options) {
-      reversed.to = from
-      reversed.toInclusive = fromInclusive
-    }
-    return this.rangeQuery(reversed)
-  }
-
-  /**
    * Internal method for taking items from the index.
    * @param n - The number of items to return
    * @param nextPair - Function to get the next pair from the BTree

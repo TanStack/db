@@ -179,13 +179,26 @@ export abstract class BaseIndex<
   abstract equalityLookup(value: any): Set<TKey>
   abstract inArrayLookup(values: Array<any>): Set<TKey>
   abstract rangeQuery(options: RangeQueryOptions): Set<TKey>
-  abstract rangeQueryReversed(options: RangeQueryOptions): Set<TKey>
   abstract get orderedEntriesArray(): Array<[any, Set<TKey>]>
   abstract get orderedEntriesArrayReversed(): Array<[any, Set<TKey>]>
   abstract get indexedKeysSet(): Set<TKey>
   abstract get valueMapData(): Map<any, Set<TKey>>
 
   // Common methods
+  rangeQueryReversed(options: RangeQueryOptions = {}): Set<TKey> {
+    const { from, to, fromInclusive = true, toInclusive = true } = options
+    const reversed: RangeQueryOptions = {}
+    if (`to` in options) {
+      reversed.from = to
+      reversed.fromInclusive = toInclusive
+    }
+    if (`from` in options) {
+      reversed.to = from
+      reversed.toInclusive = fromInclusive
+    }
+    return this.rangeQuery(reversed)
+  }
+
   supports(operation: IndexOperation): boolean {
     return this.supportedOperations.has(operation)
   }

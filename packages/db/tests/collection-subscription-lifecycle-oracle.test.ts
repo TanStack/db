@@ -4,7 +4,7 @@ import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
-import { flushPromises } from './utils.js'
+import { createOnDemandCollection, flushPromises } from './utils.js'
 import {
   oraclePropertyOptions,
   oracleRandomParameters,
@@ -512,10 +512,8 @@ async function runAsyncRestartScenario(
     settledAttempts.add(attempt)
   }
 
-  const collection = createCollection<Row>({
+  const collection = createOnDemandCollection<Row>({
     id: `async-restart-lifecycle`,
-    getKey: ({ id }) => id,
-    syncMode: `on-demand`,
     sync: {
       sync: (operations) => {
         session++
@@ -806,7 +804,7 @@ async function runAsyncRestartScenario(
     )
     const reach = new Set([
       `demands:${new Set(attempts.map(({ demand }) => demand)).size}`,
-      `sessions:${new Set(attempts.map(({ session }) => session)).size}`,
+      `sessions:${new Set(attempts.map(({ session: attemptSession }) => attemptSession)).size}`,
       ...[...new Set(currentOutcomes)].map((outcome) => `current:${outcome}`),
       `mixed-current:${new Set(currentOutcomes).size > 1}`,
       `obsolete-reject:${settlements.some(
@@ -950,10 +948,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       let truncate!: () => void
       let runReentry = () => {}
 
-      const collection = createCollection<{ id: string }>({
+      const collection = createOnDemandCollection<{ id: string }>({
         id: `demand-start-${outcome}-${reentry}`,
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
         sync: {
           sync: (operations) => {
             const { markReady } = operations
@@ -1121,10 +1117,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       let truncate = () => {}
       let targetLoadCount = 0
 
-      const collection = createCollection<{ id: string }>({
+      const collection = createOnDemandCollection<{ id: string }>({
         id: `demand-failure-${outcome}-${reentry}`,
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
         sync: {
           sync: (operations) => {
             truncate = () => {
@@ -1351,10 +1345,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       let allowRelease = outcome === `return`
       let runReentry = () => {}
 
-      const collection = createCollection<{ id: string }>({
+      const collection = createOnDemandCollection<{ id: string }>({
         id: `demand-release-${outcome}-${reentry}`,
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
         sync: {
           sync: ({ markReady }) => {
             markReady()
@@ -1459,10 +1451,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const errors: Array<unknown> = []
       const statuses: Array<string> = []
 
-      const collection = createCollection<Row>({
+      const collection = createOnDemandCollection<Row>({
         id: `cleanup-pending-replay-${outcome}`,
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
         sync: {
           sync: (operations) => {
             syncSession++
@@ -1551,10 +1541,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     const loads: Array<LoadSubsetOptions> = []
     const unloads: Array<LoadSubsetOptions> = []
     const visible = new Map<string | number, Row>()
-    const collection = createCollection<Row>({
+    const collection = createOnDemandCollection<Row>({
       id: `restart-surviving-demand`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
       sync: {
         sync: (operations) => {
           syncSession++
@@ -1619,10 +1607,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     let syncSession = 0
     const loads: Array<{ session: number; options: LoadSubsetOptions }> = []
     const unloads: Array<{ session: number; options: LoadSubsetOptions }> = []
-    const collection = createCollection<{ id: string }>({
+    const collection = createOnDemandCollection<{ id: string }>({
       id: `request-while-cleaned-up`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
       sync: {
         sync: ({ markReady }) => {
           const session = syncSession++
@@ -1666,10 +1652,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
     const observed: Array<unknown> = []
     let loads = 0
-    const collection = createCollection<{ id: string }>({
+    const collection = createOnDemandCollection<{ id: string }>({
       id: `detached-demand-settlement`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
       sync: {
         sync: ({ markReady }) => {
           markReady()
@@ -1718,10 +1702,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const unloads: Array<{ session: number; demand: `old` | `new` }> = []
       let session = -1
       let requestOnRestart = false
-      const collection = createCollection<{ id: string }>({
+      const collection = createOnDemandCollection<{ id: string }>({
         id: `restart-status-reentry`,
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
         sync: {
           sync: ({ markReady }) => {
             session++
@@ -1790,10 +1772,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const observed: Array<unknown> = []
       let session = -1
       let requestOnReady = false
-      const collection = createCollection<{ id: string }>({
+      const collection = createOnDemandCollection<{ id: string }>({
         id: `restart-ready-reentry`,
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
         sync: {
           sync: ({ markReady }) => {
             session++
@@ -1871,10 +1851,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const observed: Array<unknown> = []
       let session = -1
       let requestOnError = false
-      const collection = createCollection<{ id: string }>({
+      const collection = createOnDemandCollection<{ id: string }>({
         id: `restart-error-reentry`,
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
         sync: {
           sync: ({ markReady }) => {
             session++
@@ -1956,10 +1934,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const observed: Array<unknown> = []
       let session = -1
       let requestDuringCleanup = false
-      const collection = createCollection<{ id: string }>({
+      const collection = createOnDemandCollection<{ id: string }>({
         id: `adapter-cleanup-reentry`,
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
         sync: {
           sync: ({ markReady }) => {
             session++
@@ -2153,10 +2129,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       let loads = 0
       let unloads = 0
       const errors: Array<unknown> = []
-      const collection = createCollection<{ id: string }>({
+      const collection = createOnDemandCollection<{ id: string }>({
         id: `pre-aborted-subset-ownership`,
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
         sync: {
           sync: ({ markReady }) => {
             markReady()
@@ -2197,10 +2171,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     let loads = 0
     let unloads = 0
     const errors: Array<unknown> = []
-    const collection = createCollection<{ id: string }>({
+    const collection = createOnDemandCollection<{ id: string }>({
       id: `pre-aborted-direct-release`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
       sync: {
         sync: ({ markReady }) => {
           markReady()
@@ -2245,9 +2217,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const unloads: Array<LoadSubsetOptions> = []
       let publications = 0
       let results = 0
-      const collection = createCollection<{ id: string }>({
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
+      const collection = createOnDemandCollection<{ id: string }>({
         sync: {
           sync: ({ begin, write, commit, markReady }) => {
             begin()
@@ -2304,10 +2274,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     const controller = new AbortController()
     const loads: Array<LoadSubsetOptions> = []
     const unloads: Array<LoadSubsetOptions> = []
-    const collection = createCollection<{ id: string }>({
+    const collection = createOnDemandCollection<{ id: string }>({
       id: `detached-abort-without-acquisition`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
       sync: {
         sync: ({ markReady }) => {
           markReady()
@@ -2344,10 +2312,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     const pending = createDeferred<void>()
     const loads: Array<LoadSubsetOptions> = []
     const unloads: Array<LoadSubsetOptions> = []
-    const collection = createCollection<{ id: string }>({
+    const collection = createOnDemandCollection<{ id: string }>({
       id: `active-abort-before-release`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
       sync: {
         sync: ({ markReady }) => {
           markReady()
@@ -2397,11 +2363,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const loads: Array<LoadSubsetOptions> = []
       const unloads: Array<LoadSubsetOptions> = []
       let markReady!: () => void
-      const collection = createCollection<{ id: string }>({
+      const collection = createOnDemandCollection<{ id: string }>({
         id: `installed-loader-before-ready`,
-        getKey: ({ id }) => id,
         startSync: false,
-        syncMode: `on-demand`,
         sync: {
           sync: (operations) => {
             markReady = operations.markReady
@@ -2448,11 +2412,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
         const loads: Array<LoadSubsetOptions> = []
         const unloads: Array<LoadSubsetOptions> = []
-        const collection = createCollection<{ id: string }>({
+        const collection = createOnDemandCollection<{ id: string }>({
           id: `deferred-start-${action}`,
-          getKey: ({ id }) => id,
           startSync: false,
-          syncMode: `on-demand`,
           sync: {
             sync: ({ markReady }) => {
               markReady()
@@ -2496,11 +2458,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
       const observed: Array<true | Promise<void>> = []
       let loads = 0
-      const collection = createCollection<{ id: string }>({
+      const collection = createOnDemandCollection<{ id: string }>({
         id: `deferred-start-cleanup-before-resume`,
-        getKey: ({ id }) => id,
         startSync: false,
-        syncMode: `on-demand`,
         sync: {
           sync: ({ markReady }) => {
             markReady()
@@ -2560,10 +2520,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const observed: Array<unknown> = []
       let session = 0
       let requestOnReady = false
-      const collection = createCollection<{ id: string }>({
+      const collection = createOnDemandCollection<{ id: string }>({
         id: `ready-before-invalid-on-demand-return`,
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
         sync: {
           sync: ({ markReady }) => {
             const ownSession = session++
@@ -2616,10 +2574,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     const cleanupSessions: Array<number> = []
     let session = 0
     let cleanOnReady = false
-    const collection = createCollection<{ id: string }>({
+    const collection = createOnDemandCollection<{ id: string }>({
       id: `obsolete-sync-return`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
       sync: {
         sync: ({ markReady }) => {
           const ownSession = session++
@@ -2669,9 +2625,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const unloads: Array<number> = []
       let session = -1
       let retire = false
-      const collection = createCollection<{ id: string }>({
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
+      const collection = createOnDemandCollection<{ id: string }>({
         sync: {
           sync: ({ markReady }) => {
             const ownSession = ++session
@@ -2752,11 +2706,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const observed: Array<unknown> = []
       let syncSession = 0
       let recover!: () => void
-      const collection = createCollection<{ id: string }>({
+      const collection = createOnDemandCollection<{ id: string }>({
         id: `sync-entry-error-ready-recovery`,
-        getKey: ({ id }) => id,
         startSync: false,
-        syncMode: `on-demand`,
         sync: {
           sync: ({ markError, markReady }) => {
             if (syncSession++ === 0) {
@@ -2859,9 +2811,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const unloads: Array<LoadSubsetOptions> = []
       const rows = new Map<string | number, { id: string }>()
       let operations!: Parameters<SyncConfig<{ id: string }>[`sync`]>[0]
-      const collection = createCollection<{ id: string }>({
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
+      const collection = createOnDemandCollection<{ id: string }>({
         sync: {
           sync: (next) => {
             operations = next
@@ -3014,11 +2964,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     const loads: Array<LoadSubsetOptions> = []
     let markError!: (error: unknown) => void
     let markReady!: () => void
-    const collection = createCollection<{ id: string }>({
+    const collection = createOnDemandCollection<{ id: string }>({
       id: `installed-loader-error-ready-recovery`,
-      getKey: ({ id }) => id,
       startSync: false,
-      syncMode: `on-demand`,
       sync: {
         sync: (operations) => {
           markError = operations.markError
@@ -3055,11 +3003,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     const unloads: Array<LoadSubsetOptions> = []
     let markError!: (error: unknown) => void
     let markReady!: () => void
-    const collection = createCollection<{ id: string }>({
+    const collection = createOnDemandCollection<{ id: string }>({
       id: `release-unavailable-demand`,
-      getKey: ({ id }) => id,
       startSync: false,
-      syncMode: `on-demand`,
       sync: {
         sync: (operations) => {
           markError = operations.markError
@@ -3101,11 +3047,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const loads: Array<LoadSubsetOptions> = []
       let markError!: (error: unknown) => void
       let markReady!: () => void
-      const collection = createCollection<{ id: string }>({
+      const collection = createOnDemandCollection<{ id: string }>({
         id: `installed-loader-initial-error`,
-        getKey: ({ id }) => id,
         startSync: false,
-        syncMode: `on-demand`,
         sync: {
           sync: (operations) => {
             markError = operations.markError
@@ -3161,11 +3105,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
       let cancelOnEntry = false
       const observed: Array<true | Promise<void>> = []
-      const collection = createCollection<{ id: string }>({
+      const collection = createOnDemandCollection<{ id: string }>({
         id: `deferred-resume-cleanup`,
-        getKey: ({ id }) => id,
         startSync: false,
-        syncMode: `on-demand`,
         sync: {
           sync: ({ markReady }) => {
             markReady()
@@ -3241,10 +3183,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   it(`retires restart loading when the replacement sync fails`, async () => {
     const syncFailure = new Error(`replacement sync failed`)
     let session = 0
-    const collection = createCollection<{ id: string }>({
+    const collection = createOnDemandCollection<{ id: string }>({
       id: `failed-sync-restart`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
       sync: {
         sync: ({ markReady }) => {
           if (session++ > 0) throw syncFailure
@@ -3274,10 +3214,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     const releaseFailure = new Error(`release failed`)
     let unloads = 0
     let sourceCleanups = 0
-    const collection = createCollection<{ id: string }>({
+    const collection = createOnDemandCollection<{ id: string }>({
       id: `cleanup-failed-release`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
       sync: {
         sync: ({ markReady }) => {
           markReady()
@@ -3400,10 +3338,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const errors: Array<unknown> = []
       const nestedFailures: Array<unknown> = []
       let releaseOwner = () => {}
-      const collection = createCollection<{ id: string }>({
+      const collection = createOnDemandCollection<{ id: string }>({
         id: `release-reentry-${reentry}-${failures}`,
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
         sync: {
           sync: ({ markReady }) => {
             markReady()
@@ -3513,10 +3449,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     let syncSession = 0
     const unloadSessions: Array<number> = []
     const releaseFailure = new Error(`old session release failed`)
-    const collection = createCollection<{ id: string }>({
+    const collection = createOnDemandCollection<{ id: string }>({
       id: `cleanup-debt-session`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
       sync: {
         sync: ({ markReady }) => {
           const session = syncSession++
@@ -3569,10 +3503,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       let session = -1
       let ranReentry = false
 
-      const collection = createCollection<{ id: string }>({
+      const collection = createOnDemandCollection<{ id: string }>({
         id: `restart-${outcome}-${reentry}`,
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
         sync: {
           sync: ({ markReady }) => {
             session++
@@ -3834,10 +3766,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const unloadSessions: Array<number> = []
       let session = -1
 
-      const collection = createCollection<Row>({
+      const collection = createOnDemandCollection<Row>({
         id: `three-generation-${obsoleteOutcome}-${currentOutcome}-${settlementOrder}`,
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
         sync: {
           sync: (operations) => {
             session++
@@ -3951,10 +3881,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     let truncate!: () => void
     let loadCount = 0
     const visible = new Map<string | number, Row>()
-    const collection = createCollection<Row>({
+    const collection = createOnDemandCollection<Row>({
       id: `externally-aborted-replay`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
       sync: {
         sync: (operations) => {
           begin = operations.begin
@@ -4021,10 +3949,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     let truncate!: () => void
     const loads: Array<LoadSubsetOptions> = []
     const unloads: Array<LoadSubsetOptions> = []
-    const collection = createCollection<{ id: string }>({
+    const collection = createOnDemandCollection<{ id: string }>({
       id: `queued-replay-status`,
-      getKey: ({ id }) => id,
-      syncMode: `on-demand`,
       sync: {
         sync: (operations) => {
           begin = operations.begin
@@ -4088,10 +4014,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const errors: Array<unknown> = []
       const statuses: Array<string> = []
 
-      const collection = createCollection<Row>({
+      const collection = createOnDemandCollection<Row>({
         id: `reentrant-cleanup-${outcome}`,
-        getKey: ({ id }) => id,
-        syncMode: `on-demand`,
         sync: {
           sync: (operations) => {
             begin = operations.begin

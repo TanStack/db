@@ -562,6 +562,8 @@ render, nor does it relax the stable public Collection facade contract above.
 
 ## Demand plane
 
+### Demand grouping and ownership
+
 Demand is derived from data, but it performs asynchronous side effects outside
 D2:
 
@@ -618,6 +620,8 @@ stay private until successful publication; failure preserves the last complete
 snapshot. Query filters and routes, not request release, decide which retained
 source rows belong in a query result.
 
+### Cleanup, restart, and detached waiters
+
 Collection cleanup detaches surviving logical demand from the discarded sync
 session. It aborts that session's physical work and rejects its replay barrier,
 and rejects an unfinished initial preload with `AbortError`. Cleanup never
@@ -663,7 +667,9 @@ state, including deletions for keys that do not return. An empty ready batch
 also reconciles an empty replacement. On-demand sources cannot infer absence
 from their partial installed state; their replay barrier owns replacement.
 
-Its semantic contract is:
+### Source cancellation and applied settlement
+
+The initial-demand contract is:
 
 > Every active, satisfiable bucket must be served by a settled current demand
 > request before initial preload completes.
@@ -702,6 +708,8 @@ as part of that prefix, the subset receipt settles only after the writes are
 visible. Rejected acquisitions establish no result. Canceled or obsolete
 acquisitions either stop before publishing more request-scoped rows or settle
 behind the active replay barrier.
+
+### Ordered requests, continuation, and recovery
 
 Successful settlement proves only that the exact request finished and that its
 writes were applied. It does not prove source exhaustion or broader coverage.
@@ -772,6 +780,8 @@ source-order changes invalidate finite coverage as described below. Cleanup
 and truncate discard the boundary; replay establishes an authoritative source
 replacement instead of reviving a stale cursor.
 
+### Atomic window publication
+
 An initial ordered load or imperative window move includes every page,
 tie-boundary request, and forward refill needed to reach its fixed point. Its
 preload or window promise cannot settle before that chain, and a failure in any
@@ -822,6 +832,8 @@ loader that scheduled it, not a replacement created after cleanup.
 The loader tracks each sequential request as a bounded participant,
 not every recursive suffix of a long refinement chain.
 
+### Replay participants and failure
+
 A truncate replay is one publication barrier. Every acquisition started while
 that replay is active, including ordered full-source recovery, belongs to the
 barrier. Success publishes only after all current acquisitions settle. A
@@ -870,6 +882,8 @@ while the retired transport can no longer gate it. A genuine replay failure is
 normalized once by the subscription.
 The `loadSubset:error` event, `lastSubsetError`, and any window move waiting on
 that replay expose the same `Error` object.
+
+### Mutation boundaries and initial readiness
 
 A transaction `mutationFn` must not start or await collection or live-query
 preloads. User persistence owns the causal queue while that function runs, so a

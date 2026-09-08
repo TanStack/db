@@ -409,39 +409,35 @@ export class OrderedSourceLoader {
     this.needsFullSourceRecovery = true
   }
 
-  private retireProvisionalFailure(
-    observed: {
-      result: LoadSubsetRequestResult
-      options: LoadSubsetOptions
-      release: ReleaseLoadSubset
-    },
-    error: unknown,
+  private failRequest(
+    observed:
+      | {
+          result: LoadSubsetRequestResult
+          options: LoadSubsetOptions
+          release: ReleaseLoadSubset
+        }
+      | undefined,
+    error: Error,
     isFullSource: boolean,
     windowOperationGeneration?: number,
     cancelObservedSettlement = false,
-  ): void {
+  ): Error {
     if (cancelObservedSettlement) {
       this.generation++
       this.pending = undefined
     }
-    this.failSynchronousRequest(isFullSource, windowOperationGeneration)
-    try {
-      observed.release({ error })
-    } catch {
-      // releaseLoadSubset retains cleanup debt for a later retry.
-    }
-  }
-
-  private failSynchronousRequest(
-    isFullSource: boolean,
-    windowOperationGeneration?: number,
-  ): void {
     this.requireFullSourceRecovery()
     this.recordRequestFailure(windowOperationGeneration)
     if (isFullSource) {
       this.hasFullSourceDemand = false
       this.fullSourceFailed = true
     }
+    try {
+      observed?.release({ error })
+    } catch {
+      // Cleanup is attempted once and must not replace the request failure.
+    }
+    return error
   }
 
   /** A failed request blocks ordinary refinement until a new operation. */
@@ -472,40 +468,24 @@ export class OrderedSourceLoader {
         }
       | undefined
     this.requesting = true
+    let observing = false
     try {
-      request((result, options, release) => {
-        observed = {
-          result,
-          options,
-          release:
-            release ??
-            ((primaryFailure) =>
-              this.subscription.releaseLoadSubset(options, primaryFailure)),
-        }
-      })
-    } catch (error) {
-      const normalized = normalizeError(error)
-      // Enter failure state before adapter cleanup. Releasing the provisional
-      // acquisition may call back into the graph, but it cannot start a
-      // replacement while the failed request is still unwinding.
-      // The acquisition began, but later synchronous snapshot or publication
-      // work failed. Retire it without replacing the original failure.
-      if (observed) {
-        this.retireProvisionalFailure(
-          observed,
-          normalized,
-          isFullSource,
-          windowOperationGeneration,
-        )
-      } else {
-        this.failSynchronousRequest(isFullSource, windowOperationGeneration)
+      try {
+        request((result, options, release) => {
+          observed = {
+            result,
+            options,
+            release:
+              release ??
+              ((primaryFailure) =>
+                this.subscription.releaseLoadSubset(options, primaryFailure)),
+          }
+        })
+      } finally {
+        this.requesting = false
       }
-      throw normalized
-    } finally {
-      this.requesting = false
-    }
-    if (!observed) return
-    try {
+      if (!observed) return
+      observing = true
       return this.observe(
         observed.result,
         observed.release,
@@ -514,20 +494,22 @@ export class OrderedSourceLoader {
         observed.options,
       )
     } catch (error) {
+      this.requesting = !observing
       const normalized = normalizeError(error)
+      // Both request and settlement callbacks may reenter through cleanup.
+      // Keep refinement blocked until failure and release finish unwinding.
       this.requesting = true
       try {
-        this.retireProvisionalFailure(
+        throw this.failRequest(
           observed,
           normalized,
           isFullSource,
           windowOperationGeneration,
-          true,
+          observing,
         )
       } finally {
         this.requesting = false
       }
-      throw normalized
     }
   }
 }

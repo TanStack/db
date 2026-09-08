@@ -376,23 +376,6 @@ export class BasicIndex<
   }
 
   /**
-   * Performs a reversed range query
-   */
-  rangeQueryReversed(options: RangeQueryOptions = {}): Set<TKey> {
-    const { from, to, fromInclusive = true, toInclusive = true } = options
-    const reversed: RangeQueryOptions = {}
-    if (`to` in options) {
-      reversed.from = to
-      reversed.fromInclusive = toInclusive
-    }
-    if (`from` in options) {
-      reversed.to = from
-      reversed.toInclusive = fromInclusive
-    }
-    return this.rangeQuery(reversed)
-  }
-
-  /**
    * Returns the next n items in sorted order
    */
   take(n: number, from: any, filterFn?: (key: TKey) => boolean): Array<TKey> {

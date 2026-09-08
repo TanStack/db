@@ -38,11 +38,7 @@ type RequestSnapshotOptions = {
   /** Optional limit to pass to loadSubset for backend optimization */
   limit?: number
   /** Callback that receives the normalized loadSubset result for internal tracking */
-  onLoadSubsetResult?: (
-    result: LoadSubsetRequestResult,
-    options: LoadSubsetOptions,
-    release?: ReleaseLoadSubset,
-  ) => void
+  onLoadSubsetResult?: SubsetResultObserver
   /** Called when the local snapshot must fall back from an index to a scan. */
   onUnoptimized?: () => void
 }
@@ -57,14 +53,16 @@ type RequestLimitedSnapshotOptions = {
   /** Whether to track the loadSubset promise on this subscription (default: true) */
   trackLoadSubsetPromise?: boolean
   /** Callback that receives the normalized loadSubset result for internal tracking */
-  onLoadSubsetResult?: (
-    result: LoadSubsetRequestResult,
-    options: LoadSubsetOptions,
-    release?: ReleaseLoadSubset,
-  ) => void
+  onLoadSubsetResult?: SubsetResultObserver
 }
 
 export type ReleaseLoadSubset = (primaryFailure?: { error: unknown }) => void
+
+type SubsetResultObserver = (
+  result: LoadSubsetRequestResult,
+  options: LoadSubsetOptions,
+  release?: ReleaseLoadSubset,
+) => void
 
 type CollectionSubscriptionOptions = {
   includeInitialState?: boolean
@@ -132,6 +130,11 @@ function createReplayCompletion(): Deferred<void> {
   const completion = createDeferred<void>()
   void completion.promise.catch(() => {})
   return completion
+}
+
+function cancelAcquisition(acquisition: SubsetAcquisition): void {
+  acquisition.abortController?.abort()
+  acquisition.removeRequestAbortListener?.()
 }
 
 export class CollectionSubscription
@@ -287,8 +290,7 @@ export class CollectionSubscription
 
     for (const demand of [...this.subsetDemands]) {
       demand.initialResult?.reject(new LoadSubsetOperationAbortedError())
-      demand.acquisition.abortController?.abort()
-      demand.acquisition.removeRequestAbortListener?.()
+      cancelAcquisition(demand.acquisition)
       if (demand.acquisitionState === `starting`) {
         const index = this.subsetDemands.indexOf(demand)
         if (index !== -1) this.subsetDemands.splice(index, 1)
@@ -540,8 +542,7 @@ export class CollectionSubscription
       const demandRemains = this.subsetDemands.includes(demand)
       this.restoreAcquisitionTransfer(transfer)
       if (demandRemains) {
-        next.abortController.abort()
-        next.removeRequestAbortListener?.()
+        cancelAcquisition(next)
       } else if (hadPreviousAcquisition) {
         try {
           this.releaseAcquisition(previous)
@@ -568,8 +569,7 @@ export class CollectionSubscription
       return
     }
     if (!this.isLoadSubsetSessionCurrent(session.loadSubsetSession)) {
-      next.abortController.abort()
-      next.removeRequestAbortListener?.()
+      cancelAcquisition(next)
       return
     }
     if (!isCurrentAttempt()) {
@@ -1176,16 +1176,14 @@ export class CollectionSubscription
         }
         this.subsetDemands.splice(demandIndex, 1)
       }
-      acquisition.abortController.abort()
-      acquisition.removeRequestAbortListener?.()
+      cancelAcquisition(acquisition)
       throw error
     }
 
     if (!this.isLoadSubsetSessionCurrent(loadSubsetSession)) {
       const demandIndex = this.subsetDemands.indexOf(demand)
       if (demandIndex !== -1) this.subsetDemands.splice(demandIndex, 1)
-      acquisition.abortController.abort()
-      acquisition.removeRequestAbortListener?.()
+      cancelAcquisition(acquisition)
       return { demand, result, started: true }
     }
 
@@ -1234,14 +1232,6 @@ export class CollectionSubscription
       this.primaryFailureDeliveryDepth--
     }
     return normalized
-  }
-
-  hasLoadedInitialState() {
-    return this.loadedInitialState
-  }
-
-  hasSentAtLeastOneSnapshot() {
-    return this.snapshotSent
   }
 
   emitEvents(changes: Array<ChangeMessage<any, any>>): boolean {
@@ -1639,8 +1629,6 @@ export class CollectionSubscription
         : null
 
     while (valuesNeeded() > 0 && !collectionExhausted()) {
-      const insertedKeys = new Set<string | number>() // Track keys we add to `changes` in this iteration
-
       for (const key of keys) {
         const value = this.collection.get(key)!
         changes.push({
@@ -1651,7 +1639,6 @@ export class CollectionSubscription
         // Extract the indexed value (e.g., salary) from the row, not the full row
         // This is needed for index.take() to work correctly with the BTree comparator
         biggestObservedValue = valueExtractor ? valueExtractor(value) : value
-        insertedKeys.add(key) // Track this key
       }
 
       keys = index.take(valuesNeeded(), biggestObservedValue!, filterFn)
@@ -1941,8 +1928,7 @@ export class CollectionSubscription
           demand.initialResult?.reject(new LoadSubsetOperationAbortedError())
           this.stopDemandStatusParticipants(demand)
           if (demand.acquisitionState === `starting`) {
-            demand.acquisition.abortController?.abort()
-            demand.acquisition.removeRequestAbortListener?.()
+            cancelAcquisition(demand.acquisition)
           }
         }
         this.subsetDemands = []

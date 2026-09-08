@@ -167,9 +167,6 @@ function expectRetainedState(
   )
 
   expect(retainedRows).toEqual(expectedRows)
-  expect([...collection._state.syncedKeys].sort((a, b) => a - b)).toEqual(
-    expectedRows.map(([key]) => key),
-  )
   expect(
     [...collection._state.rowOrigins.keys()]
       .filter((key) => !model.has(key))

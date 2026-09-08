@@ -1,4 +1,5 @@
 import { expect } from 'vitest'
+import { createCollection } from '../src/collection/index.js'
 import { BTreeIndex } from '../src/indexes/btree-index'
 import { withCollectionConfigFactory } from '../src/client'
 import type {
@@ -14,6 +15,17 @@ export type OutputWithVirtual<
   T extends object,
   TKey extends string | number = string | number,
 > = WithVirtualProps<T, TKey>
+
+// Keep sync startup, writes, readiness, and load outcomes in the test itself.
+export function createOnDemandCollection<T extends { id: string | number }>(
+  config: Omit<CollectionConfig<T>, `getKey` | `syncMode`>,
+) {
+  return createCollection<T>({
+    ...config,
+    getKey: ({ id }) => id,
+    syncMode: `on-demand`,
+  })
+}
 
 export const stripVirtualProps = <T extends Record<string, any> | undefined>(
   value: T,
