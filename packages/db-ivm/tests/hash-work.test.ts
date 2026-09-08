@@ -23,6 +23,22 @@ function countTraversalAllocations(run: () => void): number {
 }
 
 describe(`hash traversal work`, () => {
+  it.each([`object`, `array`] as const)(
+    `does not let a rejected %s traversal subsidize its own retry`,
+    (kind) => {
+      const left = Array.from({ length: 500_001 }, () => 0)
+      const right = Array.from({ length: 500_001 }, () => 0)
+      const root = kind === `object` ? { left, right } : [left, right]
+      // Either child fits, but this fresh root exceeds the combined work cap.
+      // Keeping the completed left child's cache after failure lets retry pass.
+      for (let attempt = 0; attempt < 2; attempt++) {
+        expect(() => hash(root)).toThrow(
+          `Value is too complex to hash safely: structural work`,
+        )
+      }
+    },
+  )
+
   it(`does not allocate traversal collections for primitive and cached inputs`, () => {
     const cached = { id: 1, title: `cached` }
     hash(cached)
