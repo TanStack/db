@@ -85,8 +85,7 @@ type RowVirtualMetadata = {
 }
 
 type Representative<T> = {
-  rowKey: string
-  identity: unknown
+  key: string
   [RAW_REPRESENTATIVE]: T
 }
 
@@ -119,7 +118,10 @@ function createRepresentative<T>(
   value: T,
   identity: unknown,
 ): Representative<T> {
-  const representative = { rowKey, identity } as Representative<T>
+  // Encode once per contribution, not once per member on every group change.
+  const representative = {
+    key: serializeValue([rowKey, identity]),
+  } as Representative<T>
   Object.defineProperty(representative, RAW_REPRESENTATIVE, { value })
   return representative
 }
@@ -128,13 +130,10 @@ function getRepresentative<T>(
   values: Array<[Representative<T>, number]>,
 ): Representative<T> | undefined {
   let selected: Representative<T> | undefined
-  let selectedKey: string | undefined
   for (const [candidate, multiplicity] of values) {
     if (multiplicity <= 0) continue
-    const candidateKey = serializeValue([candidate.rowKey, candidate.identity])
-    if (selectedKey === undefined || candidateKey < selectedKey) {
+    if (selected === undefined || candidate.key < selected.key) {
       selected = candidate
-      selectedKey = candidateKey
     }
   }
   return selected
