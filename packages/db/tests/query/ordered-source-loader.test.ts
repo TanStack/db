@@ -17,7 +17,7 @@ type RequestOptions = LoadSubsetOptions & {
   onLoadSubsetResult?: (
     result: LoadSubsetRequestResult,
     acquisition: LoadSubsetOptions,
-    release?: ReleaseLoadSubset,
+    release: ReleaseLoadSubset,
   ) => void
 }
 
@@ -86,6 +86,7 @@ describe(`OrderedSourceLoader`, () => {
           options.onLoadSubsetResult?.(
             index < targetIndex ? true : waiting.promise,
             options,
+            () => {},
           )
           return
         }
@@ -427,7 +428,7 @@ describe(`OrderedSourceLoader`, () => {
       let needed = 0
       const request = (method: string, options: RequestOptions) => {
         methods.push(method)
-        options.onLoadSubsetResult?.(true, options)
+        options.onLoadSubsetResult?.(true, options, () => {})
       }
       const subscription = {
         setOrderByIndex: () => {},
@@ -470,10 +471,14 @@ describe(`OrderedSourceLoader`, () => {
     const request = (options: RequestOptions) => {
       const next = createDeferred()
       requests.push(next)
-      options.onLoadSubsetResult?.(next.promise, {
-        orderBy: options.orderBy,
-        limit: options.limit,
-      })
+      options.onLoadSubsetResult?.(
+        next.promise,
+        {
+          orderBy: options.orderBy,
+          limit: options.limit,
+        },
+        () => {},
+      )
     }
     const subscription = {
       readOrderedSnapshot: () => (biggest ? [{ value: biggest }] : []),
@@ -547,13 +552,16 @@ describe(`OrderedSourceLoader`, () => {
           onLoadSubsetResult?: (
             result: true,
             acquisition: LoadSubsetOptions,
+            release: ReleaseLoadSubset,
           ) => void
         },
       ) => {
         methods.push(method)
         if (!fail) return
         fail = false
-        options.onLoadSubsetResult?.(true, {})
+        options.onLoadSubsetResult?.(true, {}, () =>
+          subscription.releaseLoadSubset({}),
+        )
         loader.loadMore()
         throw failure
       }
@@ -593,7 +601,9 @@ describe(`OrderedSourceLoader`, () => {
         methods.push(`snapshot`)
         if (!fail) return
         fail = false
-        options.onLoadSubsetResult?.(true, {})
+        options.onLoadSubsetResult?.(true, {}, () =>
+          subscription.releaseLoadSubset({}),
+        )
         throw failure
       },
     } as unknown as CollectionSubscription
@@ -759,7 +769,9 @@ describe(`OrderedSourceLoader`, () => {
       },
       requestSnapshot: (options: RequestOptions) => {
         methods.push(`snapshot`)
-        options.onLoadSubsetResult?.(true, acquisition)
+        options.onLoadSubsetResult?.(true, acquisition, () =>
+          subscription.releaseLoadSubset(acquisition),
+        )
       },
     } as unknown as CollectionSubscription
     const loader = new OrderedSourceLoader(
@@ -806,6 +818,7 @@ describe(`OrderedSourceLoader`, () => {
         options.onLoadSubsetResult?.(
           Promise.reject(requestFailure),
           acquisition,
+          () => subscription.releaseLoadSubset(acquisition),
         )
       },
     } as unknown as CollectionSubscription
@@ -835,21 +848,32 @@ describe(`OrderedSourceLoader`, () => {
       releaseLoadSubset: () => {},
       requestLimitedSnapshot: (options: RequestOptions) => {
         methods.push(`limited`)
-        options.onLoadSubsetResult?.(true, {
-          orderBy: options.orderBy,
-          limit: options.limit,
-        })
+        options.onLoadSubsetResult?.(
+          true,
+          {
+            orderBy: options.orderBy,
+            limit: options.limit,
+          },
+          () =>
+            subscription.releaseLoadSubset({
+              orderBy: options.orderBy,
+              limit: options.limit,
+            }),
+        )
       },
       requestSnapshot: (options: {
         onLoadSubsetResult?: (
           result: true,
           acquisition: LoadSubsetOptions,
+          release: ReleaseLoadSubset,
         ) => void
       }) => {
         methods.push(`snapshot`)
         if (!failBoundary) return
         failBoundary = false
-        options.onLoadSubsetResult?.(true, {})
+        options.onLoadSubsetResult?.(true, {}, () =>
+          subscription.releaseLoadSubset({}),
+        )
         loader.loadMore()
         throw failure
       },

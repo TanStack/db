@@ -1,3 +1,5 @@
+import { isPlainObject } from '../../utils/type-guards.js'
+
 const ROUTED_SCALAR_VALUE = Symbol(`tanstack_db_routed_scalar_value`)
 const ROUTE_METADATA = Symbol(`tanstack_db_route_metadata`)
 export const INCLUDES_PUBLIC_KEY = Symbol(`includesPublicKey`)
@@ -222,14 +224,6 @@ export function transformPublicContainers(
   }
 
   return copy(value)
-}
-
-export function isPlainObject(
-  value: unknown,
-): value is Record<PropertyKey, unknown> {
-  if (value == null || typeof value !== `object`) return false
-  const prototype = Object.getPrototypeOf(value)
-  return prototype === Object.prototype || prototype === null
 }
 
 function isPublicContainer(value: unknown): value is object {

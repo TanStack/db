@@ -453,7 +453,7 @@ export class OrderedSourceLoader {
       onResult: (
         result: LoadSubsetRequestResult,
         options: LoadSubsetOptions,
-        release?: ReleaseLoadSubset,
+        release: ReleaseLoadSubset,
       ) => void,
     ) => void,
     kind: OrderedRequestKind,
@@ -472,14 +472,7 @@ export class OrderedSourceLoader {
     try {
       try {
         request((result, options, release) => {
-          observed = {
-            result,
-            options,
-            release:
-              release ??
-              ((primaryFailure) =>
-                this.subscription.releaseLoadSubset(options, primaryFailure)),
-          }
+          observed = { result, options, release }
         })
       } finally {
         this.requesting = false

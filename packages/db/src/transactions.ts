@@ -1,5 +1,6 @@
 import { createDeferred } from './deferred'
 import { safeRandomUUID } from './utils/uuid'
+import { normalizeError } from './utils/error.js'
 import './duplicate-instance-check'
 import {
   MissingMutationFunctionError,
@@ -647,8 +648,7 @@ class Transaction<T extends object = Record<string, unknown>> {
       if ((this.state as TransactionState) !== `persisting`) return this
 
       // Preserve the original error for rethrowing
-      const originalError =
-        error instanceof Error ? error : new Error(String(error))
+      const originalError = normalizeError(error)
 
       // Update transaction with error information
       this.error = {

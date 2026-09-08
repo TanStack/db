@@ -10,6 +10,51 @@ import {
 } from '../src/errors'
 
 describe(`Transactions`, () => {
+  it.each([
+    {
+      name: `Error`,
+      reason: new Error(`mutation failed`),
+      message: `mutation failed`,
+    },
+    { name: `string`, reason: `mutation failed`, message: `mutation failed` },
+    {
+      name: `unprintable object`,
+      reason: {
+        toString() {
+          throw new Error(`cannot stringify`)
+        },
+      },
+      message: `Unknown error`,
+    },
+  ])(
+    `rolls back a mutation rejected with an $name`,
+    async ({ reason, message }) => {
+      const collection = createCollection<{ id: number }>({
+        getKey: (row) => row.id,
+        sync: { sync: () => {} },
+      })
+      const transaction = createTransaction({
+        autoCommit: false,
+        mutationFn: () => Promise.reject(reason),
+      })
+      const persisted = transaction.isPersisted.promise.catch(
+        (error: unknown) => error,
+      )
+      try {
+        transaction.mutate(() => collection.insert({ id: 1 }))
+        await expect(transaction.commit()).rejects.toThrow(message)
+        expect(transaction.state).toBe(`failed`)
+        expect(collection.has(1)).toBe(false)
+        expect(await persisted).toBe(transaction.error?.error)
+        if (reason instanceof Error)
+          expect(transaction.error?.error).toBe(reason)
+      } finally {
+        if (transaction.state !== `failed`) transaction.rollback()
+        await collection.cleanup()
+      }
+    },
+  )
+
   it(`keeps a claimed default transaction ambient for later plain collection mutations`, () => {
     const client = new DbClient()
     const clientCollection = client.collection(

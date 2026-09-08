@@ -61,7 +61,7 @@ export type ReleaseLoadSubset = (primaryFailure?: { error: unknown }) => void
 type SubsetResultObserver = (
   result: LoadSubsetRequestResult,
   options: LoadSubsetOptions,
-  release?: ReleaseLoadSubset,
+  release: ReleaseLoadSubset,
 ) => void
 
 type CollectionSubscriptionOptions = {

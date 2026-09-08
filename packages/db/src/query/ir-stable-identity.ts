@@ -1,3 +1,4 @@
+import { isPlainObject } from '../utils/type-guards.js'
 import { normalizeValue } from '../utils/comparison.js'
 import { isRefProxy, toExpression } from './builder/ref-proxy.js'
 import { getQueryIR } from './builder/query-ir.js'
@@ -1144,11 +1145,4 @@ function isExpression(
     expressionType === `val` ||
     expressionType === `includesSubquery`
   )
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== `object`) return false
-
-  const prototype = Object.getPrototypeOf(value)
-  return prototype === Object.prototype || prototype === null
 }

@@ -8,6 +8,8 @@ import {
   serializeValue,
   tap,
 } from '@tanstack/db-ivm'
+import { isPlainObject } from '../../utils/type-guards.js'
+import { getOrCreate } from '../../utils/get-or-create.js'
 import { optimizeQuery } from '../optimizer.js'
 import { materializeCompilation } from '../live/materialized-pipeline.js'
 import {
@@ -64,7 +66,6 @@ import {
   getNamespacedRouteMetadata,
   getRouteMetadata,
   getRoutedScalarMetadata,
-  isPlainObject,
   stripInternalCallbackMetadata,
   stripInternalRouteMetadata,
   stripRouteMetadata,
@@ -343,12 +344,7 @@ export interface CompilationResult {
 const valueIdentitiesByCache = new WeakMap<QueryCache, ValueIdentity>()
 
 function getCompilationValueIdentity(cache: QueryCache): ValueIdentity {
-  let valueIdentity = valueIdentitiesByCache.get(cache)
-  if (!valueIdentity) {
-    valueIdentity = createValueIdentity()
-    valueIdentitiesByCache.set(cache, valueIdentity)
-  }
-  return valueIdentity
+  return getOrCreate(valueIdentitiesByCache, cache, createValueIdentity)
 }
 
 /**

@@ -1,4 +1,6 @@
 import { output, serializeValue } from '@tanstack/db-ivm'
+import { isPlainObject } from '../../utils/type-guards.js'
+import { getOrCreate } from '../../utils/get-or-create.js'
 import { createCollection } from '../../collection/index.js'
 import {
   INCLUDES_ROUTING,
@@ -206,16 +208,8 @@ export class BucketFacadeAdapter {
     row: BucketRow,
     multiplicity: number,
   ): void {
-    let buckets = this.pending.get(edgeId)
-    if (!buckets) {
-      buckets = new Map()
-      this.pending.set(edgeId, buckets)
-    }
-    let rows = buckets.get(bucketKey)
-    if (!rows) {
-      rows = new Map()
-      buckets.set(bucketKey, rows)
-    }
+    const buckets = getOrCreate(this.pending, edgeId, () => new Map())
+    const rows = getOrCreate(buckets, bucketKey, () => new Map())
 
     const key = serializeValue(row.publicKey)
     const change = rows.get(key) ?? {
@@ -326,21 +320,12 @@ export class BucketFacadeAdapter {
     bucketKey: string,
     multiplicity: number,
   ): void {
-    let activity = this.pendingActivity.get(edgeId)
-    if (!activity) {
-      activity = new Map()
-      this.pendingActivity.set(edgeId, activity)
-    }
+    const activity = getOrCreate(this.pendingActivity, edgeId, () => new Map())
     activity.set(bucketKey, (activity.get(bucketKey) ?? 0) + multiplicity)
   }
 
   private getActiveBuckets(edgeId: string): Set<string> {
-    let active = this.activeBuckets.get(edgeId)
-    if (!active) {
-      active = new Set()
-      this.activeBuckets.set(edgeId, active)
-    }
-    return active
+    return getOrCreate(this.activeBuckets, edgeId, () => new Set())
   }
 
   private retireEntry(
@@ -362,20 +347,12 @@ export class BucketFacadeAdapter {
     }
     byBucket!.delete(bucketKey)
     if (byBucket!.size === 0) this.entries.delete(edgeId)
-    let retired = this.retiredEntries.get(edgeId)
-    if (!retired) {
-      retired = new Map()
-      this.retiredEntries.set(edgeId, retired)
-    }
+    const retired = getOrCreate(this.retiredEntries, edgeId, () => new Map())
     retired.set(bucketKey, entry)
   }
 
   private getEntry(edgeId: string, bucketKey: string): FacadeEntry {
-    let byBucket = this.entries.get(edgeId)
-    if (!byBucket) {
-      byBucket = new Map()
-      this.entries.set(edgeId, byBucket)
-    }
+    const byBucket = getOrCreate(this.entries, edgeId, () => new Map())
     const existing = byBucket.get(bucketKey)
     if (existing) return existing
 
@@ -505,10 +482,4 @@ function isBucketFacadeRef(value: unknown): value is BucketFacadeRef {
   return (
     value !== null && typeof value === `object` && BUCKET_FACADE_REF in value
   )
-}
-
-function isPlainObject(value: unknown): value is Record<PropertyKey, unknown> {
-  if (value === null || typeof value !== `object`) return false
-  const prototype = Object.getPrototypeOf(value)
-  return prototype === Object.prototype || prototype === null
 }
