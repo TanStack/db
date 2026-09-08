@@ -81,6 +81,73 @@ describe(`DeduplicatedLoadSubset`, () => {
     expect(deduplicated.loadSubset({ limit: 2 })).toBe(true)
   })
 
+  describe.each([`resolve`, `reject`] as const)(
+    `shared transport %s with deduplication observers`,
+    (outcome) => {
+      it.each([
+        { waiters: 2, throws: false },
+        { waiters: 2, throws: true },
+        { waiters: 3, throws: false },
+        { waiters: 3, throws: true },
+      ])(
+        `preserves settlement without unhandled rejections ($waiters waiters, throws=$throws)`,
+        async ({ waiters, throws }) => {
+          const transportError = new Error(`transport failed`)
+          const observerError = new Error(`deduplication observer failed`)
+          let resolve!: () => void
+          let reject!: (reason: unknown) => void
+          const loadSubset = vi.fn<LoadSubsetFn>(
+            () =>
+              new Promise<void>((done, fail) => {
+                resolve = done
+                reject = fail
+              }),
+          )
+          const onDeduplicate = vi.fn(() => {
+            if (throws) throw observerError
+          })
+          const deduplicated = new DeduplicatedLoadSubset({
+            loadSubset,
+            onDeduplicate,
+          })
+          const unhandled: Array<unknown> = []
+          const recordUnhandled = (reason: unknown) => unhandled.push(reason)
+          process.on(`unhandledRejection`, recordUnhandled)
+          try {
+            const requests = Array.from({ length: waiters }, () =>
+              deduplicated.loadSubset({ limit: 2 }),
+            )
+            const settled = Promise.allSettled(requests)
+            expect(requests.every((request) => request === requests[0])).toBe(
+              true,
+            )
+            expect(loadSubset).toHaveBeenCalledTimes(1)
+            expect(onDeduplicate).not.toHaveBeenCalled()
+
+            if (outcome === `resolve`) resolve()
+            else reject(transportError)
+
+            expect(await settled).toEqual(
+              Array.from({ length: waiters }, () =>
+                outcome === `resolve`
+                  ? { status: `fulfilled`, value: undefined }
+                  : { status: `rejected`, reason: transportError },
+              ),
+            )
+            // Let the host report rejected detached observer promises too.
+            await new Promise<void>((done) => setTimeout(done, 0))
+            expect(onDeduplicate).toHaveBeenCalledTimes(
+              outcome === `resolve` ? waiters - 1 : 0,
+            )
+            expect(unhandled).toEqual([])
+          } finally {
+            process.off(`unhandledRejection`, recordUnhandled)
+          }
+        },
+      )
+    },
+  )
+
   it(`gives independently abortable demands independent transports`, async () => {
     const pending: Array<() => void> = []
     const signals: Array<AbortSignal | undefined> = []

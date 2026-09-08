@@ -28,10 +28,10 @@ export class DeduplicatedLoadSubset {
     // Unabortable requests can share without an ownership protocol.
     const existing = options.signal ? undefined : this.inflight.get(key)
     if (existing) {
-      void existing.then(
-        () => this.options.onDeduplicate?.(options),
-        () => {},
-      )
+      // Observer failures must not reject a detached promise after success.
+      void existing
+        .then(() => this.options.onDeduplicate?.(options))
+        .catch(() => {})
       return existing
     }
 
