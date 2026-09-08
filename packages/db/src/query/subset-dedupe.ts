@@ -1,9 +1,10 @@
 import { getLoadSubsetDemandKey } from './ir-stable-identity.js'
-import { Func, PropRef, Value } from './ir.js'
-import type { BasicExpression } from './ir.js'
 import type { LoadSubsetFn, LoadSubsetOptions } from '../types.js'
 
-/** Deduplicates exact canonical demands without inferring broader coverage. */
+/**
+ * Deduplicates exact canonical demands without inferring broader coverage.
+ * Requests follow the immutable LoadSubsetOptions contract; no copies are made.
+ */
 export class DeduplicatedLoadSubset {
   private readonly completed = new Set<string | undefined>()
   private readonly inflight = new Map<string | undefined, Promise<void>>()
@@ -17,8 +18,7 @@ export class DeduplicatedLoadSubset {
   ) {}
 
   loadSubset = (options: LoadSubsetOptions): true | Promise<void> => {
-    const request = cloneOptions(options)
-    const key = getLoadSubsetDemandKey(request)
+    const key = getLoadSubsetDemandKey(options)
     if (this.completed.has(key)) {
       this.options.onDeduplicate?.(options)
       return true
@@ -36,10 +36,10 @@ export class DeduplicatedLoadSubset {
     }
 
     const generation = this.generation
-    const result = this.options.loadSubset(request)
+    const result = this.options.loadSubset(options)
 
     if (result === true) {
-      if (generation === this.generation && !request.signal?.aborted) {
+      if (generation === this.generation && !options.signal?.aborted) {
         this.completed.add(key)
       }
       return true
@@ -47,7 +47,7 @@ export class DeduplicatedLoadSubset {
 
     const promise = result
       .then((value) => {
-        if (generation === this.generation && !request.signal?.aborted) {
+        if (generation === this.generation && !options.signal?.aborted) {
           this.completed.add(key)
         }
         return value
@@ -66,122 +66,4 @@ export class DeduplicatedLoadSubset {
     this.inflight.clear()
     this.generation++
   }
-}
-
-/** Snapshot a demand before retaining it or crossing an async boundary. */
-export function cloneOptions(options: LoadSubsetOptions): LoadSubsetOptions {
-  return {
-    ...options,
-    where: options.where ? cloneExpression(options.where) : undefined,
-    orderBy: options.orderBy?.map((clause) => ({
-      ...clause,
-      expression: cloneExpression(clause.expression),
-      compareOptions:
-        clause.compareOptions.stringSort === `locale`
-          ? {
-              ...clause.compareOptions,
-              localeOptions: clause.compareOptions.localeOptions
-                ? { ...clause.compareOptions.localeOptions }
-                : undefined,
-            }
-          : { ...clause.compareOptions },
-    })),
-    cursor: options.cursor
-      ? {
-          ...options.cursor,
-          whereFrom: cloneExpression(options.cursor.whereFrom),
-          whereCurrent: cloneExpression(options.cursor.whereCurrent),
-        }
-      : undefined,
-  }
-}
-
-function cloneExpression<T>(
-  expression: BasicExpression<T>,
-  context: `exact` | `equality` | `ordering` | `membership` = `exact`,
-): BasicExpression<T> {
-  switch (expression.type) {
-    case `ref`:
-      return new PropRef<T>([...expression.path])
-    case `val`:
-      return new Value<T>(
-        context === `membership`
-          ? snapshotMembership(expression.value)
-          : context === `ordering`
-            ? snapshotOrdering(expression.value)
-            : context === `equality`
-              ? snapshotComparable(expression.value)
-              : expression.value,
-      )
-    case `func`: {
-      return new Func<T>(
-        expression.name,
-        expression.args.map((arg, index) =>
-          cloneExpression(
-            arg,
-            expression.name === `in` && index === 1
-              ? `membership`
-              : isEquality(expression.name)
-                ? `equality`
-                : isOrdering(expression.name)
-                  ? `ordering`
-                  : context,
-          ),
-        ),
-      )
-    }
-  }
-}
-
-function isEquality(name: string): boolean {
-  return name === `eq`
-}
-
-function isOrdering(name: string): boolean {
-  return name === `gt` || name === `gte` || name === `lt` || name === `lte`
-}
-
-function snapshotComparable<T>(value: T): T {
-  // Match the evaluator and demand identity: foreign-realm objects are opaque
-  // references, not local comparison values. Localizing them changes matches.
-  if (value instanceof Date) {
-    return new Date(Reflect.apply(Date.prototype.getTime, value, [])) as T
-  }
-  if (value instanceof Uint8Array) {
-    const bytes = new Uint8Array(value)
-    return (
-      typeof Buffer !== `undefined` && value instanceof Buffer
-        ? Buffer.from(bytes)
-        : bytes
-    ) as T
-  }
-  // Opaque values compare by reference, so cloning them would change meaning.
-  return value
-}
-
-function snapshotMembership<T>(value: T): T {
-  if (!Array.isArray(value)) return value
-  return snapshotArray(value, snapshotComparable, `membership candidate`) as T
-}
-
-function snapshotOrdering<T>(value: T): T {
-  if (!Array.isArray(value)) return snapshotComparable(value)
-  return snapshotArray(value, snapshotOrdering, `ordering operand`) as T
-}
-
-function snapshotArray(
-  value: ReadonlyArray<unknown>,
-  snapshotElement: (value: unknown) => unknown,
-  context: string,
-): Array<unknown> {
-  const result = new Array<unknown>(value.length)
-  for (let index = 0; index < value.length; index++) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, index)
-    if (!descriptor) continue
-    if (!(`value` in descriptor)) {
-      throw new TypeError(`Cannot snapshot ${context} accessor`)
-    }
-    result[index] = snapshotElement(descriptor.value)
-  }
-  return result
 }

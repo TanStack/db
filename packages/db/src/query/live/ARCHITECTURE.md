@@ -584,6 +584,17 @@ use separate transports, trading duplicate concurrent fetches for simpler
 ownership. An adapter may share its own resources, but releasing one owner
 must not cancel work or remove rows still owned by another.
 
+Request data is immutable from submission onward, including the options,
+expression trees, comparison options, and constant payloads such as Dates,
+byte arrays, and membership arrays. Core and adapters retain that data without
+cloning or freezing it. Changed demand needs new request data, not edits to an
+old constant, even after its first load settles: deduplication and query state
+may retain its identity. Request data uses stable data properties, not stateful
+getters. The signal and subscription references do not change, but their
+lifecycle remains live. Cancellation and release are not data mutations.
+The immutable-demand boundary matrix checks direct and deferred sync startup,
+adapter return and asynchronous settlement, cancellation, and release identity.
+
 A Collection subscription installs each logical subset owner before it calls
 the source adapter. Reentrant release during `loadSubset` therefore retires the
 logical owner at once, but physical release waits until the adapter returns and

@@ -13,7 +13,6 @@ import {
 import { createDeferred } from '../deferred'
 import { deepEquals } from '../utils'
 import { LIVE_QUERY_INTERNAL } from '../query/live/internal.js'
-import { cloneOptions } from '../query/subset-dedupe.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
   ChangeMessageOrDeleteKeyMessage,
@@ -817,11 +816,6 @@ export class CollectionSyncManager<
     if (this.syncStartDeferred) {
       this.syncStartRequested = true
       const deferred = createDeferred<void>()
-      const loadOptions = cloneOptions(options)
-      // This object is an internal acquisition identity. Snapshot mutable
-      // predicate values in place so the later adapter call and unload retain
-      // that same identity without a translation registry.
-      Object.assign(options, loadOptions)
       this.deferredLoadSubsets.push({ options, deferred })
       this.trackLoadPromise(deferred.promise)
       return deferred.promise

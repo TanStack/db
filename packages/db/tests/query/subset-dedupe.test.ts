@@ -1,9 +1,6 @@
 import { runInNewContext } from 'node:vm'
 import { describe, expect, it, vi } from 'vitest'
-import {
-  DeduplicatedLoadSubset,
-  cloneOptions,
-} from '../../src/query/subset-dedupe'
+import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe'
 import { eq, gt } from '../../src/query/builder/functions'
 import { Func, PropRef, Value } from '../../src/query/ir'
 import { compileSingleRowExpression } from '../../src/query/compiler/evaluators'
@@ -272,38 +269,48 @@ describe(`DeduplicatedLoadSubset`, () => {
   it.each([
     {
       name: `Date`,
-      value: new Date(`2025-01-01T00:00:00.000Z`),
-      mutate: (value: Date) => value.setUTCFullYear(2030),
-      read: (value: Date) => value.getUTCFullYear(),
-      expected: 2025,
+      value: new Date(7),
+      equal: new Date(7),
+      different: new Date(8),
     },
     {
       name: `binary`,
-      value: new Uint8Array([1, 2, 3]),
-      mutate: (value: Uint8Array) => (value[0] = 9),
-      read: (value: Uint8Array) => value[0],
-      expected: 1,
+      value: new Uint8Array([1]),
+      equal: new Uint8Array([1]),
+      different: new Uint8Array([2]),
+    },
+    {
+      name: `Buffer`,
+      value: Buffer.from([1]),
+      equal: new Uint8Array([1]),
+      different: Buffer.from([2]),
     },
   ])(
-    `snapshots a mutable $name equality value`,
-    ({ value, mutate, read, expected }) => {
-      let request: LoadSubsetOptions | undefined
-      const deduplicated = new DeduplicatedLoadSubset({
-        loadSubset: (options) => {
-          request = options
-          return true
-        },
-      })
-
-      deduplicated.loadSubset({ where: eq(ref(`key`), val(value)) })
-      mutate(value as never)
-
-      const stored = (request!.where as Func).args[1] as Value<never>
-      expect(read(stored.value)).toBe(expected)
+    `passes immutable $name values through and deduplicates by equality`,
+    ({ value, equal, different }) => {
+      const loadSubset = vi.fn<LoadSubsetFn>().mockReturnValue(true)
+      const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
+      const options = { where: eq(ref(`key`), val(value)) }
+      deduplicated.loadSubset(options)
+      expect(loadSubset.mock.calls[0]![0]).toBe(options)
+      const matches = compileSingleRowExpression(
+        loadSubset.mock.calls[0]![0].where!,
+      )
+      expect([value, equal, different].map((key) => matches({ key }))).toEqual([
+        true,
+        true,
+        false,
+      ])
+      expect(
+        deduplicated.loadSubset({ where: eq(ref(`key`), val(equal)) }),
+      ).toBe(true)
+      expect(loadSubset).toHaveBeenCalledTimes(1)
+      deduplicated.loadSubset({ where: eq(ref(`key`), val(different)) })
+      expect(loadSubset).toHaveBeenCalledTimes(2)
     },
   )
 
-  it(`clones order and cursor structure without changing opaque identity`, () => {
+  it(`keeps immutable order and cursor data with its opaque identity`, () => {
     const opaque = Object.freeze({ id: 1 })
     const options: LoadSubsetOptions = {
       orderBy: [
@@ -313,7 +320,7 @@ describe(`DeduplicatedLoadSubset`, () => {
             direction: `asc`,
             nulls: `first`,
             stringSort: `locale`,
-            localeOptions: { numeric: true },
+            localeOptions: Object.freeze({ numeric: true }),
           },
         },
       ],
@@ -322,99 +329,61 @@ describe(`DeduplicatedLoadSubset`, () => {
         whereCurrent: eq(ref(`rank`), val(opaque)),
       },
     }
-
-    const cloned = cloneOptions(options)
-    expect(cloned).not.toBe(options)
-    expect(cloned.orderBy).not.toBe(options.orderBy)
-    expect(cloned.cursor).not.toBe(options.cursor)
-    expect(((cloned.cursor!.whereFrom as Func).args[1] as Value).value).toBe(
+    const request = captureRequest(options)
+    expect(request).toBe(options)
+    expect(((request.cursor!.whereFrom as Func).args[1] as Value).value).toBe(
       opaque,
     )
-
-    const originalCompareOptions = options.orderBy![0]!.compareOptions
-    const clonedCompareOptions = cloned.orderBy![0]!.compareOptions
-    if (
-      originalCompareOptions.stringSort !== `locale` ||
-      clonedCompareOptions.stringSort !== `locale`
-    ) {
-      throw new Error(`Expected locale comparison options`)
-    }
-    const originalLocaleOptions = originalCompareOptions.localeOptions as {
-      numeric?: boolean
-    }
-    const clonedLocaleOptions = clonedCompareOptions.localeOptions as {
-      numeric?: boolean
-    }
-    originalLocaleOptions.numeric = false
-    expect(clonedLocaleOptions.numeric).toBe(true)
+    expect(
+      compileSingleRowExpression(request.cursor!.whereCurrent)({
+        rank: opaque,
+      }),
+    ).toBe(true)
+    expect(
+      compileSingleRowExpression(request.cursor!.whereCurrent)({
+        rank: { id: 1 },
+      }),
+    ).toBe(false)
   })
 
-  it(`keeps a completed cursor identity stable after its Date is mutated`, async () => {
+  it(`keeps completed cursor requests distinct from replacement Date constants`, async () => {
     const loadSubset = vi.fn<LoadSubsetFn>().mockResolvedValue(undefined)
     const deduplicated = new DeduplicatedLoadSubset({ loadSubset })
-    const boundary = new Date(`2025-01-01T00:00:00.000Z`)
-
-    await deduplicated.loadSubset({
+    const request = (year: number): LoadSubsetOptions => ({
       cursor: {
-        whereFrom: gt(ref(`createdAt`), val(boundary)),
-        whereCurrent: eq(ref(`createdAt`), val(boundary)),
+        whereFrom: gt(ref(`createdAt`), val(new Date(year, 0))),
+        whereCurrent: eq(ref(`createdAt`), val(new Date(year, 0))),
       },
       limit: 10,
     })
-    boundary.setUTCFullYear(2026)
-    await deduplicated.loadSubset({
-      cursor: {
-        whereFrom: gt(
-          ref(`createdAt`),
-          val(new Date(`2026-01-01T00:00:00.000Z`)),
-        ),
-        whereCurrent: eq(
-          ref(`createdAt`),
-          val(new Date(`2026-01-01T00:00:00.000Z`)),
-        ),
-      },
-      limit: 10,
-    })
-
+    await deduplicated.loadSubset(request(2025))
+    await deduplicated.loadSubset(request(2026))
+    expect(deduplicated.loadSubset(request(2025))).toBe(true)
     expect(loadSubset).toHaveBeenCalledTimes(2)
   })
 
-  it(`snapshots comparison values without calling mutable instance methods`, () => {
+  it(`does not substitute comparison payloads with custom instance methods`, () => {
     const date = new Date(2)
-    Object.defineProperty(date, `getTime`, { value: () => 1 })
     const bytes = new Uint8Array([1, 2, 3])
+    Object.defineProperty(date, `getTime`, { value: () => 1 })
     Object.defineProperty(bytes, `slice`, { value: () => bytes })
-
-    const cloned = cloneOptions({
-      where: new Func(`and`, [
-        eq(ref(`date`), val(date)),
-        eq(ref(`bytes`), val(bytes)),
-      ]),
-    })
-    const [dateComparison, byteComparison] = (cloned.where as Func).args as [
-      Func,
-      Func,
+    const where = new Func<boolean>(`and`, [
+      eq(ref(`date`), val(date)),
+      eq(ref(`bytes`), val(bytes)),
+    ])
+    const request = captureRequest({ where })
+    const rows = [
+      { date, bytes },
+      { date: new Date(2), bytes: new Uint8Array([1, 2, 3]) },
     ]
-    const clonedDate = (dateComparison.args[1] as Value<Date>).value
-    const clonedBytes = (byteComparison.args[1] as Value<Uint8Array>).value
-
-    expect(clonedDate.getTime()).toBe(2)
-    expect(clonedBytes).not.toBe(bytes)
-    expect(clonedBytes).toEqual(new Uint8Array([1, 2, 3]))
-  })
-
-  it(`preserves opaque cross-realm binary comparison identity`, () => {
-    const bytes = runInNewContext(`new Uint8Array([1, 2, 3])`) as Uint8Array
-    const cloned = cloneOptions({ where: eq(ref(`bytes`), val(bytes)) })
-    const clonedBytes = ((cloned.where as Func).args[1] as Value<Uint8Array>)
-      .value
-
-    bytes[0] = 9
-    expect(clonedBytes).toBe(bytes)
+    expect(request.where).toBe(where)
+    expect(rows.map(compileSingleRowExpression(request.where!))).toEqual(
+      rows.map(compileSingleRowExpression(where)),
+    )
   })
 
   describe.each([`Date`, `Uint8Array`] as const)(
-    `request cloning preserves %s predicate matches`,
+    `request transport preserves %s predicate matches`,
     (type) => {
       it.each([`local`, `foreign`] as const)(`in the %s realm`, (realm) => {
         const local = type === `Date` ? new Date(2) : new Uint8Array([1, 2])
@@ -422,127 +391,93 @@ describe(`DeduplicatedLoadSubset`, () => {
           type === `Date` ? `new Date(2)` : `new Uint8Array([1, 2])`,
         )
         const value = realm === `local` ? local : foreign
-        for (const predicate of [
+        for (const where of [
           eq(ref(`value`), val(value)),
           new Func<boolean>(`in`, [ref(`value`), val([value])]),
         ]) {
-          const original = compileSingleRowExpression(predicate)
-          const cloned = compileSingleRowExpression(
-            cloneOptions({ where: predicate }).where!,
-          )
-          const rows = [foreign, local].map((item) => ({ value: item }))
-          const expected = realm === `foreign` ? [true, false] : [false, true]
-          expect(rows.map(original)).toEqual(expected)
-          expect(rows.map(cloned)).toEqual(expected)
+          const request = captureRequest({ where })
+          const matches = compileSingleRowExpression(request.where!)
+          expect(
+            [foreign, local].map((item) => matches({ value: item })),
+          ).toEqual(realm === `foreign` ? [true, false] : [false, true])
         }
       })
     },
   )
 
   it.each([`coalesce`, `caseWhen`] as const)(
-    `snapshots membership candidates returned by %s`,
+    `preserves membership results through %s`,
     (wrapper) => {
-      const candidates = [new Uint8Array([1])]
-      const candidateExpression =
+      const candidates = Object.freeze([new Uint8Array([1])])
+      const expression =
         wrapper === `coalesce`
-          ? new Func(`coalesce`, [new Value(candidates)])
-          : new Func(`caseWhen`, [
-              new Value(true),
-              new Value(candidates),
-              new Value([]),
-            ])
-      const cloned = cloneOptions({
-        where: new Func(`in`, [ref(`token`), candidateExpression]),
+          ? new Func(`coalesce`, [val(candidates)])
+          : new Func(`caseWhen`, [val(true), val(candidates), val([])])
+      const request = captureRequest({
+        where: new Func(`in`, [ref(`token`), expression]),
       })
-
-      candidates[0]![0] = 2
-      candidates.push(new Uint8Array([3]))
-
-      const clonedCandidates = (
-        ((cloned.where as Func).args[1] as Func).args[
-          wrapper === `coalesce` ? 0 : 1
-        ] as Value<Array<Uint8Array>>
-      ).value
-      expect(clonedCandidates).toEqual([new Uint8Array([1])])
+      const matches = compileSingleRowExpression(request.where!)
+      expect(
+        [1, 2, 3].map((n) => matches({ token: new Uint8Array([n]) })),
+      ).toEqual([true, false, false])
+      expect(candidates).toEqual([new Uint8Array([1])])
     },
   )
 
-  it(`snapshots array ordering operands by value`, () => {
-    const boundary: [number, Array<number>] = [1, [2]]
-    const cloned = cloneOptions({ where: gt(ref(`tuple`), val(boundary)) })
-    boundary[0] = 9
-    boundary[1][0] = 9
-
-    expect(((cloned.where as Func).args[1] as Value).value).toEqual([1, [2]])
+  it(`preserves immutable array ordering operands`, () => {
+    const boundary = Object.freeze([1, Object.freeze([2])])
+    const request = captureRequest({ where: gt(ref(`tuple`), val(boundary)) })
+    const matches = compileSingleRowExpression(request.where!)
+    expect(
+      [
+        [1, [1]],
+        [1, [2]],
+        [1, [3]],
+      ].map((tuple) => matches({ tuple })),
+    ).toEqual([false, false, true])
   })
 
-  it.each([
-    { name: `in`, context: `membership candidate` },
-    { name: `gt`, context: `ordering operand` },
-  ])(
-    `rejects observable $context accessors without calling them`,
-    ({ name, context }) => {
-      const candidates: Array<number> = []
-      const get = vi.fn(() => 1)
-      Object.defineProperty(candidates, 0, {
-        enumerable: true,
-        get,
-      })
-      candidates.length = 1
-
-      expect(() =>
-        cloneOptions({ where: new Func(name, [ref(`id`), val(candidates)]) }),
-      ).toThrow(`Cannot snapshot ${context} accessor`)
-      expect(get).not.toHaveBeenCalled()
-    },
-  )
+  it.each([`in`, `gt`])(`preserves immutable sparse %s array data`, (name) => {
+    const values = new Array<Date>(3)
+    values[1] = new Date(7)
+    Object.freeze(values)
+    const request = captureRequest({
+      where: new Func(name, [ref(`value`), val(values)]),
+    })
+    const payload = ((request.where as Func).args[1] as Value<Array<Date>>)
+      .value
+    expect(payload).toBe(values)
+    expect(payload.length).toBe(3)
+    expect(Object.hasOwn(payload, 0)).toBe(false)
+    expect(Object.hasOwn(payload, 2)).toBe(false)
+    expect(payload[1]!.getTime()).toBe(7)
+  })
 
   it.each([`in`, `gt`])(
-    `preserves sparse %s arrays without reading inherited entries`,
+    `preserves nested-array comparison semantics for %s`,
     (name) => {
-      const date = new Date(7)
-      const values = new Array<Date>(3)
-      values[1] = date
-      const get = vi.fn(() => new Date(99))
-      Object.setPrototypeOf(
-        values,
-        Object.create(Array.prototype, { 0: { get } }),
-      )
-      const cloned = cloneOptions({
+      const nested = [2]
+      const values = Object.freeze([nested])
+      const request = captureRequest({
         where: new Func(name, [ref(`value`), val(values)]),
       })
-      const snapshot = ((cloned.where as Func).args[1] as Value<Array<Date>>)
-        .value
-
-      expect(snapshot).not.toBe(values)
-      expect(snapshot.length).toBe(3)
-      expect(Object.hasOwn(snapshot, 0)).toBe(false)
-      expect(Object.hasOwn(snapshot, 2)).toBe(false)
-      expect(get).not.toHaveBeenCalled()
-      expect(snapshot[1]).not.toBe(date)
-      date.setTime(9)
-      expect(snapshot[1]!.getTime()).toBe(7)
-    },
-  )
-
-  it.each([`in`, `gt`])(
-    `preserves the nested-array snapshot depth for %s`,
-    (name) => {
-      const nested = [new Date(7)]
-      const cloned = cloneOptions({
-        where: new Func(name, [ref(`value`), val([nested])]),
-      })
-      const snapshot = (
-        (cloned.where as Func).args[1] as Value<Array<Array<Date>>>
-      ).value
-
-      if (name === `in`) expect(snapshot[0]).toBe(nested)
-      else {
-        expect(snapshot[0]).not.toBe(nested)
-        expect(snapshot[0]![0]).not.toBe(nested[0])
-      }
-      nested[0]!.setTime(9)
-      expect(snapshot[0]![0]!.getTime()).toBe(name === `in` ? 9 : 7)
+      const matches = compileSingleRowExpression(request.where!)
+      const rows = name === `in` ? [nested, [2]] : [[[1]], [[2]], [[3]]]
+      expect(rows.map((value) => matches({ value }))).toEqual(
+        name === `in` ? [true, false] : [false, false, true],
+      )
     },
   )
 })
+
+function captureRequest(options: LoadSubsetOptions): LoadSubsetOptions {
+  let request!: LoadSubsetOptions
+  const deduplicated = new DeduplicatedLoadSubset({
+    loadSubset: (value) => {
+      request = value
+      return true
+    },
+  })
+  deduplicated.loadSubset(options)
+  return request
+}

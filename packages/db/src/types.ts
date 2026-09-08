@@ -300,6 +300,15 @@ export type CursorExpressions = {
   lastKey?: string | number
 }
 
+/**
+ * Immutable request data. From submission onward, callers and adapters must
+ * not mutate these options, their expression trees, comparison options, or
+ * constant payloads (including Dates, byte arrays, and membership arrays).
+ * Create new request data to change a demand; core does not clone or freeze it.
+ * Use stable data properties, not stateful getters, for request data.
+ * Signal and subscription references stay fixed, but their lifecycle remains
+ * live: aborting the signal or releasing the subscription is supported.
+ */
 export type LoadSubsetOptions = {
   /** The where expression to filter the data (does NOT include cursor expressions) */
   where?: BasicExpression<boolean>
