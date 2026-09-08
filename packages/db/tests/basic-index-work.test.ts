@@ -51,3 +51,47 @@ describe(`BasicIndex removal work`, () => {
     },
   )
 })
+
+describe(`BasicIndex page filtering work`, () => {
+  it.each(
+    [30, 3000, 100000].flatMap((size) =>
+      [false, true].flatMap((reverse) =>
+        [1, 3].map((stride) => ({ size, reverse, stride })),
+      ),
+    ),
+  )(
+    `filters only visited keys: $size rows, reverse=$reverse, stride=$stride`,
+    ({ size, reverse, stride }) => {
+      const index = new BasicIndex<number>(1, new PropRef([`value`]))
+      const rows = Array.from({ length: size }, (_, id) => ({
+        id,
+        value: id % 3,
+      }))
+      // Deliberately insert backwards; insertion order is not key order.
+      for (const row of [...rows].reverse()) index.add(row.id, row)
+      const ordered = rows
+        .slice()
+        .sort((a, b) => a.value - b.value || a.id - b.id)
+      if (reverse) ordered.reverse()
+      let calls = 0
+      const accept = (key: number) => Math.floor(key / 3) % stride === 0
+      const expected = ordered
+        .filter((row) => accept(row.id))
+        .slice(0, 10)
+        .map((row) => row.id)
+      const filter = (key: number) => {
+        calls++
+        return accept(key)
+      }
+      const actual = reverse
+        ? index.takeReversedFromEnd(10, filter)
+        : index.takeFromStart(10, filter)
+      expect(actual).toEqual(expected)
+      const visits =
+        expected.length === 10
+          ? ordered.findIndex((row) => row.id === expected[9]) + 1
+          : size
+      expect(calls).toBe(visits)
+    },
+  )
+})

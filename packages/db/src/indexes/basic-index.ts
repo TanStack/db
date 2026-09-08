@@ -456,7 +456,7 @@ export class BasicIndex<
       const groupKeys: Array<TKey> = []
       do {
         for (const key of this.valueMap.get(this.sortedValues[index]) ?? []) {
-          if (filterFn?.(key) ?? true) groupKeys.push(key)
+          groupKeys.push(key)
         }
         index += step
       } while (
@@ -466,7 +466,10 @@ export class BasicIndex<
       )
       groupKeys.sort(compareKeys)
       if (step === -1) groupKeys.reverse()
-      result.push(...groupKeys.slice(0, n - result.length))
+      for (const key of groupKeys) {
+        if (filterFn?.(key) ?? true) result.push(key)
+        if (result.length >= n) break
+      }
     }
     return result
   }
