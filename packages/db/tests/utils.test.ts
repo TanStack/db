@@ -154,6 +154,21 @@ describe(`oracle run configuration`, () => {
 })
 
 describe(`deepEquals`, () => {
+  it.each([`later`, Symbol(`later`)])(
+    `checks own-key visibility after a getter runs: %s`,
+    (key) => {
+      const right = { first: 1, [key]: undefined }
+      const left = {
+        get first() {
+          Object.defineProperty(right, key, { enumerable: false })
+          return 1
+        },
+        [key]: undefined,
+      }
+      expect(deepEquals(left, right)).toBe(false)
+    },
+  )
+
   it.each(
     [`field`, Symbol(`field`)].flatMap((key) =>
       [false, true].map((inherited) => ({ key, inherited })),

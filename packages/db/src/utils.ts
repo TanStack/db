@@ -30,6 +30,14 @@ export function deepEquals(a: any, b: any): boolean {
   return deepEqualsInternal(a, b, new Map())
 }
 
+function enumerableOwnKeys(value: object): Array<string | symbol> {
+  const keys: Array<string | symbol> = Object.keys(value)
+  for (const key of Object.getOwnPropertySymbols(value)) {
+    if (Object.prototype.propertyIsEnumerable.call(value, key)) keys.push(key)
+  }
+  return keys
+}
+
 /**
  * Internal implementation with cycle detection to prevent infinite recursion
  */
@@ -190,18 +198,8 @@ function deepEqualsInternal(
 
     // Compare enumerable symbol keys as well as string keys. Query results may
     // use user-owned symbols, and a symbol-only update is still a value change.
-    const keysA = [
-      ...Object.keys(a),
-      ...Object.getOwnPropertySymbols(a).filter((key) =>
-        Object.prototype.propertyIsEnumerable.call(a, key),
-      ),
-    ]
-    const keysB = [
-      ...Object.keys(b),
-      ...Object.getOwnPropertySymbols(b).filter((key) =>
-        Object.prototype.propertyIsEnumerable.call(b, key),
-      ),
-    ]
+    const keysA = enumerableOwnKeys(a)
+    const keysB = enumerableOwnKeys(b)
 
     // Check if they have the same number of keys
     if (keysA.length !== keysB.length) {
