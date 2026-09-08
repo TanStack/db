@@ -63,7 +63,7 @@ it.each(
           collection
             .currentStateAsChanges({ where })
             ?.map(({ key }) => key)
-            .sort((a, b) => a - b),
+            .sort((a, b) => Number(a) - Number(b)),
         ).toEqual(expected)
       }
       visits.push(scanned)

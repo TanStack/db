@@ -259,11 +259,20 @@ compiler-owned fields before invoking user code. The publication boundary
 applies the same copy-on-write walk while resolving facade references. Both
 paths preserve property descriptors, clean nested references, cycles,
 adversarial keys, and user-owned symbols. Discovery reads data descriptors
-directly and never invokes an accessor merely to find private state. D2 hashes
-enumerable symbol keys and uses exact local-symbol identity plus registry keys
-for registered symbols. D2 rejects structural cycles with a clear error, including
-cycles through arrays, Maps, Sets, and enumerable symbol keys. Shared acyclic
-subtrees remain supported and are hashed once per traversal. Structural hashing
+directly and never invokes an accessor merely to find private state.
+
+This walker also strips metadata from a correlated subquery's output before
+its parent query consumes it. Clean object and array references at that internal
+boundary are equality operands, not just render identities. Eagerly cloning
+them can make a later `eq(projected.key, parent.key)` lose a matching row.
+Relaxing cross-publication reference stability does not permit changing these
+internal matches. The public-container copy matrix crosses reference-key type,
+ordered and unordered subqueries, materialization form, and parent/child updates.
+
+D2 hashes enumerable symbol keys and uses exact local-symbol identity plus
+registry keys for registered symbols. D2 rejects structural cycles with a clear
+error, including cycles through arrays, Maps, Sets, and enumerable symbol keys.
+Shared acyclic subtrees remain supported and are hashed once per traversal. Structural hashing
 limits recursion depth and value visits; it rejects values that exceed these
 limits instead of expanding a shared graph or overflowing the JavaScript stack.
 This does not bound the cost of arbitrary user getters or key sorting.
@@ -1022,6 +1031,7 @@ create recursive Collection machinery.
 | Route-context discovery and transport across recursive and join boundaries  | `packages/db/tests/query/includes-context-transport-oracle.test.ts`          |
 | Functional projection input boundaries, timing, and output preservation     | `packages/db/tests/query/includes-functional-projection-oracle.test.ts`      |
 | Functional input rejection and inline alternatives                          | `packages/db/tests/query/includes-functional-input-boundary.test.ts`         |
+| Public-container descriptors and reference-key matches across internal query stages | `packages/db/tests/query/public-container-copy.test.ts` |
 | Cross-formulation equivalence and reference-sensitive route identity        | `packages/db/tests/query/includes-cross-formulation-oracle.property.test.ts` |
 | Query-db ownership                                                          | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`      |
 | Reachable nested shape                                                      | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts`    |
