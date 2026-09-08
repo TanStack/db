@@ -1,6 +1,6 @@
 import type { CompareOptions } from '../query/builder/types'
 import type { OrderByDirection } from '../query/ir'
-import type { IndexInterface, IndexOperation, IndexStats } from './base-index'
+import type { IndexInterface, IndexOperation } from './base-index'
 import type { RangeQueryOptions } from './btree-index'
 
 export class ReverseIndex<
@@ -91,10 +91,6 @@ export class ReverseIndex<
 
   matchesDirection(direction: OrderByDirection): boolean {
     return this.originalIndex.matchesDirection(direction)
-  }
-
-  getStats(): IndexStats {
-    return this.originalIndex.getStats()
   }
 
   add(key: TKey, item: any): void {

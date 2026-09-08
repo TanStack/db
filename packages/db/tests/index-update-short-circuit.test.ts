@@ -24,16 +24,31 @@ describe.each(indexTypes)(`%s update`, (_indexName, IndexType) => {
     return new IndexType(1, new PropRef([`value`]), `test_index`, options)
   }
 
+  it(`looks up rows without collecting timing diagnostics`, () => {
+    const index = createIndex()
+    index.add(`a`, { value: 1 })
+    const now = vi.spyOn(performance, `now`)
+    try {
+      expect(index.lookup(`eq`, 1)).toEqual(new Set([`a`]))
+      expect(index.lookup(`in`, [1, 2])).toEqual(new Set([`a`]))
+      expect(now).not.toHaveBeenCalled()
+    } finally {
+      now.mockRestore()
+    }
+  })
+
   it(`keeps the existing bucket when the indexed value does not change`, () => {
     const index = createIndex()
     index.add(`a`, { value: 1, version: 1 })
     const bucket = index.valueMapData.get(1)
-    const lastUpdated = index.getStats().lastUpdated
+    const add = vi.spyOn(index, `add`)
+    const remove = vi.spyOn(index, `remove`)
 
     index.update(`a`, { value: 1, version: 1 }, { value: 1, version: 2 })
 
     expect(index.valueMapData.get(1)).toBe(bucket)
-    expect(index.getStats().lastUpdated).toBe(lastUpdated)
+    expect(add).not.toHaveBeenCalled()
+    expect(remove).not.toHaveBeenCalled()
     expect(index.lookup(`eq`, 1)).toEqual(new Set([`a`]))
   })
 

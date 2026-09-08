@@ -139,7 +139,6 @@ title: "@tanstack/db"
 - [IndexDevModeConfig](interfaces/IndexDevModeConfig.md)
 - [IndexInterface](interfaces/IndexInterface.md)
 - [IndexOptions](interfaces/IndexOptions.md)
-- [IndexStats](interfaces/IndexStats.md)
 - [IndexSuggestion](interfaces/IndexSuggestion.md)
 - [InsertConfig](interfaces/InsertConfig.md)
 - [LiveQueryCollectionConfig](interfaces/LiveQueryCollectionConfig.md)

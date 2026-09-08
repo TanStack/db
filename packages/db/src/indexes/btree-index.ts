@@ -111,7 +111,6 @@ export class BTreeIndex<
     this.addRangeValue(indexedValue)
 
     this.indexedKeys.add(key)
-    this.updateTimestamp()
   }
 
   private addToBucket(key: TKey, normalizedValue: unknown): void {
@@ -162,7 +161,6 @@ export class BTreeIndex<
     this.removeRangeValue(indexedValue)
 
     this.indexedKeys.delete(key)
-    this.updateTimestamp()
   }
 
   private removeFromBucket(key: TKey, normalizedValue: unknown): void {
@@ -218,7 +216,6 @@ export class BTreeIndex<
     this.addToBucket(key, newValue)
     this.addRangeValue(newIndexedValue)
     this.indexedKeys.add(key)
-    this.updateTimestamp()
   }
 
   /**
@@ -240,15 +237,12 @@ export class BTreeIndex<
     this.valueMap.clear()
     this.indexedKeys.clear()
     this.clearRangeValues()
-    this.updateTimestamp()
   }
 
   /**
    * Performs a lookup operation
    */
   lookup(operation: IndexOperation, value: any): Set<TKey> {
-    const startTime = performance.now()
-
     let result: Set<TKey>
 
     switch (operation) {
@@ -273,8 +267,6 @@ export class BTreeIndex<
       default:
         throw new Error(`Operation ${operation} not supported by BTreeIndex`)
     }
-
-    this.trackLookup(startTime)
     return result
   }
 

@@ -38,16 +38,6 @@ export const IndexOperation = comparisonFunctions
  */
 export type IndexOperation = (typeof comparisonFunctions)[number]
 
-/**
- * Statistics about index usage and performance
- */
-export interface IndexStats {
-  readonly entryCount: number
-  readonly lookupCount: number
-  readonly averageLookupTime: number
-  readonly lastUpdated: Date
-}
-
 export interface IndexInterface<
   TKey extends string | number = string | number,
 > {
@@ -110,8 +100,6 @@ export interface IndexInterface<
   matchesField: (fieldPath: Array<string>) => boolean
   matchesCompareOptions: (compareOptions: CompareOptions) => boolean
   matchesDirection: (direction: OrderByDirection) => boolean
-
-  getStats: () => IndexStats
 }
 
 /**
@@ -124,10 +112,6 @@ export abstract class BaseIndex<
   public readonly name?: string
   public readonly expression: BasicExpression
   public abstract readonly supportedOperations: Set<IndexOperation>
-
-  protected lookupCount = 0
-  protected totalLookupTime = 0
-  protected lastUpdated = new Date()
   protected compareOptions: CompareOptions
   private compiledIndexEvaluator: CompiledSingleRowExpression | undefined
   /**
@@ -283,32 +267,12 @@ export abstract class BaseIndex<
     return this.compareOptions.direction === direction
   }
 
-  getStats(): IndexStats {
-    return {
-      entryCount: this.keyCount,
-      lookupCount: this.lookupCount,
-      averageLookupTime:
-        this.lookupCount > 0 ? this.totalLookupTime / this.lookupCount : 0,
-      lastUpdated: this.lastUpdated,
-    }
-  }
-
   protected abstract initialize(options?: any): void
 
   protected evaluateIndexExpression(item: any): any {
     const evaluator = (this.compiledIndexEvaluator ??=
       compileSingleRowExpression(this.expression))
     return evaluator(item as Record<string, unknown>)
-  }
-
-  protected trackLookup(startTime: number): void {
-    const duration = performance.now() - startTime
-    this.lookupCount++
-    this.totalLookupTime += duration
-  }
-
-  protected updateTimestamp(): void {
-    this.lastUpdated = new Date()
   }
 }
 

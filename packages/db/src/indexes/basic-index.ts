@@ -96,7 +96,6 @@ export class BasicIndex<
     this.addRangeValue(indexedValue)
 
     this.indexedKeys.add(key)
-    this.updateTimestamp()
   }
 
   private addToBucket(key: TKey, normalizedValue: unknown): void {
@@ -131,7 +130,6 @@ export class BasicIndex<
         error,
       )
       this.indexedKeys.delete(key)
-      this.updateTimestamp()
       return
     }
 
@@ -141,7 +139,6 @@ export class BasicIndex<
     this.removeRangeValue(indexedValue)
 
     this.indexedKeys.delete(key)
-    this.updateTimestamp()
   }
 
   private removeFromBucket(key: TKey, normalizedValue: unknown): void {
@@ -209,7 +206,6 @@ export class BasicIndex<
     this.addToBucket(key, newValue)
     this.addRangeValue(newIndexedValue)
     this.indexedKeys.add(key)
-    this.updateTimestamp()
   }
 
   /**
@@ -246,8 +242,6 @@ export class BasicIndex<
 
     // Build sorted array from unique values
     this.sortedValues = Array.from(this.valueMap.keys()).sort(this.compareFn)
-
-    this.updateTimestamp()
   }
 
   /**
@@ -258,15 +252,12 @@ export class BasicIndex<
     this.sortedValues = []
     this.indexedKeys.clear()
     this.clearRangeValues()
-    this.updateTimestamp()
   }
 
   /**
    * Performs a lookup operation
    */
   lookup(operation: IndexOperation, value: any): Set<TKey> {
-    const startTime = performance.now()
-
     let result: Set<TKey>
 
     switch (operation) {
@@ -291,8 +282,6 @@ export class BasicIndex<
       default:
         throw new Error(`Operation ${operation} not supported by BasicIndex`)
     }
-
-    this.trackLookup(startTime)
     return result
   }
 
