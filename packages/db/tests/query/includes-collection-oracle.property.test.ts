@@ -848,7 +848,7 @@ describe(`Collection-valued includes oracle`, () => {
   )
 
   fcTest(
-    `outer fn.select receives a public Collection for a bare union include`,
+    `outer fn.select rejects a bare union include before invoking the callback`,
     async () => {
       class Box {
         constructor(readonly child: unknown) {}
@@ -865,76 +865,40 @@ describe(`Collection-valued includes oracle`, () => {
         { id: 10, parentGroup: 1, value: 1 },
         { id: 20, parentGroup: 2, value: 2 },
       ])
-      const live = createLiveQueryCollection((q) => {
-        const messageRows = q
-          .from({ message: messages.collection })
-          .select(({ message }) => ({
-            kind: `message` as const,
-            id: message.id,
-            children: q
-              .from({ messageChild: children.collection })
-              .where(({ messageChild }) =>
-                eq(messageChild.parentGroup, message.group),
-              ),
-          }))
-        const toolRows = q
-          .from({ tool: tools.collection })
-          .select(({ tool }) => ({
-            kind: `tool` as const,
-            id: tool.id,
-          }))
+      const buildQuery = () =>
+        createLiveQueryCollection((q) => {
+          const messageRows = q
+            .from({ message: messages.collection })
+            .select(({ message }) => ({
+              kind: `message` as const,
+              id: message.id,
+              children: q
+                .from({ messageChild: children.collection })
+                .where(({ messageChild }) =>
+                  eq(messageChild.parentGroup, message.group),
+                ),
+            }))
+          const toolRows = q
+            .from({ tool: tools.collection })
+            .select(({ tool }) => ({
+              kind: `tool` as const,
+              id: tool.id,
+            }))
 
-        return q.unionAll(messageRows, toolRows).fn.select((row) => {
-          const child = `children` in row ? row.children : undefined
-          callbackChildren.push(child)
-          return { kind: row.kind, id: row.id, box: new Box(child) }
+          return q.unionAll(messageRows, toolRows).fn.select((row) => {
+            const child = `children` in row ? row.children : undefined
+            callbackChildren.push(child)
+            return { kind: row.kind, id: row.id, box: new Box(child) }
+          })
         })
-      })
 
       try {
-        await live.preload()
-        const message = live.toArray.find((row) => row.kind === `message`)!
-        const facade = message.box.child as Collection<
-          { id: number; parentGroup: number; value: number },
-          number
-        >
-
-        expect(
-          facade.toArray.map(({ id, parentGroup, value }) => ({
-            id,
-            parentGroup,
-            value,
-          })),
-        ).toEqual([{ id: 10, parentGroup: 1, value: 1 }])
-
-        children.write(`update`, { id: 10, parentGroup: 1, value: 3 })
-        expect(
-          (
-            live.toArray.find((row) => row.kind === `message`)!.box
-              .child as typeof facade
-          ).toArray.map(({ id, value }) => ({
-            id,
-            value,
-          })),
-        ).toEqual([{ id: 10, value: 3 }])
-
-        messages.write(`update`, { id: 1, group: 2 })
-        const movedFacade = live.toArray.find((row) => row.kind === `message`)!
-          .box.child as typeof facade
-        expect(movedFacade).not.toBe(facade)
-        expect(
-          movedFacade.toArray.map(({ id, value }) => ({ id, value })),
-        ).toEqual([{ id: 20, value: 2 }])
-        expect(
-          callbackChildren
-            .filter((value) => value !== null && value !== undefined)
-            .every((value) =>
-              Array.isArray((value as Collection<any, any>).toArray),
-            ),
-        ).toBe(true)
+        expect(buildQuery).toThrow(
+          `fn.select() cannot consume Collection-valued includes`,
+        )
+        expect(callbackChildren).toEqual([])
       } finally {
         await Promise.all([
-          live.cleanup(),
           messages.collection.cleanup(),
           tools.collection.cleanup(),
           children.collection.cleanup(),

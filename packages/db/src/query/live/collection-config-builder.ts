@@ -19,7 +19,6 @@ import { getCollectionBuilder } from './collection-registry.js'
 import { LIVE_QUERY_INTERNAL } from './internal.js'
 import { materializeCompilation } from './materialized-pipeline.js'
 import { BucketFacadeAdapter } from './bucket-facade-adapter.js'
-import { facadeProjections } from './facade-projection.js'
 import {
   buildQueryFromConfig,
   extractCollectionFromSource,
@@ -610,11 +609,7 @@ export class CollectionConfigBuilder<
       if (syncState.subscribedToAllCollections) {
         let callbackCalled = false
         const drainGraph = () => {
-          const projections = facadeProjections(syncState.graph)
-          while (
-            syncState.graph.pendingWork() ||
-            projections.some((stage) => stage.hasWork())
-          ) {
+          while (syncState.graph.pendingWork()) {
             try {
               syncState.graph.run()
             } catch (error) {
@@ -623,8 +618,6 @@ export class CollectionConfigBuilder<
               }
               throw error
             }
-            const next = projections.find((stage) => stage.hasWork())
-            next?.advance()
             if (!isCurrentSession()) return false
             callback?.()
             if (!isCurrentSession()) return false
@@ -1061,17 +1054,12 @@ export class CollectionConfigBuilder<
       },
     )
     syncState.unsubscribeCallbacks.add(() => bucketFacades.cleanup())
-    const projections = facadeProjections(graph)
-    for (const stage of projections)
-      syncState.unsubscribeCallbacks.add(() => stage.cleanup())
 
     // Flush pending changes and reset the accumulator.
     // Called at the end of each graph run to commit all accumulated changes.
     syncState.flushPendingChanges = () => {
       const hasParentChanges = pendingChanges.size > 0
-      const hasChildChanges =
-        bucketFacades.hasPendingChanges() ||
-        projections.some((stage) => stage.hasPublication())
+      const hasChildChanges = bucketFacades.hasPendingChanges()
 
       if (!hasParentChanges && !hasChildChanges) {
         return
@@ -1093,7 +1081,6 @@ export class CollectionConfigBuilder<
         | ReturnType<Collection[`_deferPublication`]>
         | undefined
       try {
-        for (const stage of projections) stage.prepare()
         facadePublication = bucketFacades.flush()
         rootPublication = hasParentChanges
           ? config.collection._deferPublication()
@@ -1127,21 +1114,14 @@ export class CollectionConfigBuilder<
       } catch (error) {
         rootPublication?.discard()
         facadePublication?.rollback()
-        for (const stage of [...projections].reverse()) stage.rollback()
         throw error
       }
       pendingChanges = new Map()
-      for (const stage of projections) {
-        stage.reveal()
-        syncState.messagesCount += stage.messages
-        stage.messages = 0
-      }
 
       let publicationError: unknown
       for (const publish of [
         rootPublication?.publish,
         facadePublication.publish,
-        ...projections.map((stage) => () => stage.publish()),
       ]) {
         if (!publish) continue
         try {

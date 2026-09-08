@@ -39,13 +39,13 @@ describe(`BucketFacadeAdapter`, () => {
       [`insert`, `replace`, `cancel`].map((change) => ({ present, change })),
     ),
   )(
-    `keeps draft and published membership equal: $present / $change`,
+    `publishes consolidated membership: $present / $change`,
     async ({ present, change }) => {
       const graph = new D2()
       const rows = graph.newInput<[string, BucketRow]>()
       const activeBuckets = graph.newInput<[string, true]>()
       const adapter = new BucketFacadeAdapter(
-        `draft-membership`,
+        `public-membership`,
         [{ edgeId: `children`, rows, activeBuckets, hasOrderBy: false }],
         () => {},
       )
@@ -78,7 +78,7 @@ describe(`BucketFacadeAdapter`, () => {
           send(newRow, 1)
         }
         graph.run()
-        const draft = adapter.resolveDraft(ref) as unknown as Collection<
+        const published = adapter.resolve(ref) as unknown as Collection<
           { id: number; name: string },
           number
         >
@@ -86,12 +86,13 @@ describe(`BucketFacadeAdapter`, () => {
           change !== `insert` && !present
             ? []
             : [{ id: 1, name: change === `cancel` ? `old` : `new` }]
-        expect(draft.toArray.map(stripVirtualProps)).toEqual(expected)
+        expect(published.toArray.map(stripVirtualProps)).toEqual(
+          present ? [{ id: 1, name: `old` }] : [],
+        )
         adapter.flush().publish()
-        const published = adapter.resolve(ref) as unknown as typeof draft
+        expect(adapter.resolve(ref)).toBe(published)
         expect(published.toArray.map(stripVirtualProps)).toEqual(expected)
       } finally {
-        adapter.publishDrafts()
         await adapter.cleanup()
       }
     },
@@ -102,13 +103,13 @@ describe(`BucketFacadeAdapter`, () => {
       [false, true].map((ordered) => ({ size, ordered })),
     ),
   )(
-    `copies a $size-row draft once for repeated reads (ordered=$ordered)`,
+    `reads a $size-row facade without repeated scans (ordered=$ordered)`,
     ({ size, ordered }) => {
       const graph = new D2()
       const rows = graph.newInput<[string, BucketRow]>()
       const activeBuckets = graph.newInput<[string, true]>()
       const adapter = new BucketFacadeAdapter(
-        `draft-read-work`,
+        `facade-read-work`,
         [{ edgeId: `children`, rows, activeBuckets, hasOrderBy: ordered }],
         () => {},
       )
@@ -153,13 +154,13 @@ describe(`BucketFacadeAdapter`, () => {
           }
         })
       try {
-        const draft = adapter.resolveDraft(ref) as unknown as typeof publicView
+        const published = publicView
         for (const { id } of values) {
-          expect(draft.get(id)?.id).toBe(id)
-          expect(draft.has(id)).toBe(true)
-          expect(draft.size).toBe(size)
+          expect(published.get(id)?.id).toBe(id)
+          expect(published.has(id)).toBe(true)
+          expect(published.size).toBe(size)
         }
-        expect([...draft.keys()]).toEqual(
+        expect([...published.keys()]).toEqual(
           ordered
             ? values.map(({ id }) => id).reverse()
             : values.map(({ id }) => id),
@@ -169,7 +170,6 @@ describe(`BucketFacadeAdapter`, () => {
           .soft(scan.mock.calls.length, `full bucket scans`)
           .toBeLessThanOrEqual(1)
         expect.soft(visited, `source rows visited`).toBeLessThanOrEqual(size)
-        adapter.publishDrafts()
         const inserted = { id: size }
         rows.sendData(
           new MultiSet([
@@ -184,11 +184,10 @@ describe(`BucketFacadeAdapter`, () => {
         )
         graph.run()
         adapter.flush().publish()
-        expect(draft.get(size)?.id).toBe(size)
-        expect(draft.size).toBe(size + 1)
+        expect(published.get(size)?.id).toBe(size)
+        expect(published.size).toBe(size + 1)
       } finally {
         scan.mockRestore()
-        adapter.publishDrafts()
         adapter.cleanup()
       }
     },

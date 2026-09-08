@@ -96,6 +96,14 @@ function publicRows(rows: ReadonlyArray<Child>) {
     .sort((left, right) => left.id - right.id)
 }
 
+const collectionInputError = `fn.select() cannot consume Collection-valued includes`
+function rejectsCollectionInput(
+  form: string,
+  ...functional: Array<boolean>
+): boolean {
+  return form === `collection` && functional.some(Boolean)
+}
+
 class Projection {
   constructor(
     readonly id: number,
@@ -106,135 +114,6 @@ class Projection {
 }
 
 describe(`functional projection output compatibility`, () => {
-  it.each([`none`, `callback`, `flush`] as const)(
-    `keeps two continuation stages coherent through %s failure`,
-    async (failureAt) => {
-      const parents = createControlledCollection(`two-stage-parent`, [
-        { id: 1, groupId: 1 },
-      ])
-      const children = createControlledCollection(`two-stage-child`, [
-        { id: 10, groupId: 1 },
-        { id: 20, groupId: 2 },
-      ])
-      const peers = createControlledCollection(`two-stage-peer`, [
-        { id: 100, groupId: 1 },
-        { id: 200, groupId: 2 },
-      ])
-      const trace: Array<string> = []
-      const failure = new Error(`second continuation ${failureAt} failure`)
-      let failing = false
-      let prepared = 0
-      const originalFlush = BucketFacadeAdapter.prototype.flush
-      const flush =
-        failureAt === `flush`
-          ? vi
-              .spyOn(BucketFacadeAdapter.prototype, `flush`)
-              .mockImplementation(function (this: BucketFacadeAdapter) {
-                const publication = originalFlush.call(this)
-                return {
-                  ...publication,
-                  prepare: () => {
-                    publication.prepare()
-                    if (failing && ++prepared === 2) throw failure
-                  },
-                }
-              })
-          : undefined
-      const query = createLiveQueryCollection((q) => {
-        const included = q
-          .from({ parent: parents.collection })
-          .select(({ parent }) => ({
-            id: parent.id,
-            groupId: parent.groupId,
-            children: q
-              .from({ child: children.collection })
-              .where(({ child }) => eq(child.groupId, parent.groupId)),
-          }))
-        const first = q.from({ row: included }).fn.select(({ row }) => {
-          trace.push(`first:${row.groupId}`)
-          expect(row.children.toArray.map((child) => child.id)).toEqual([
-            row.groupId * 10,
-          ])
-          return { id: row.id, groupId: row.groupId, children: row.children }
-        })
-        const added = q.from({ row: first }).select(({ row }) => ({
-          id: row.id,
-          groupId: row.groupId,
-          children: row.children,
-          peers: q
-            .from({ peer: peers.collection })
-            .where(({ peer }) => eq(peer.groupId, row.groupId)),
-        }))
-        return q.from({ row: added }).fn.select(({ row }) => {
-          trace.push(`second:${row.groupId}`)
-          expect(row.children.toArray.map((child) => child.id)).toEqual([
-            row.groupId * 10,
-          ])
-          expect(row.peers.toArray.map((peer) => peer.id)).toEqual([
-            row.groupId * 100,
-          ])
-          if (failing && failureAt === `callback`) throw failure
-          return {
-            id: row.id,
-            groupId: row.groupId,
-            children: row.children,
-            peers: row.peers,
-          }
-        })
-      })
-      try {
-        await query.preload()
-        expect(trace).toEqual([`first:1`, `second:1`])
-        const original = query.get(1)!
-        failing = failureAt !== `none`
-        let thrown: unknown
-        try {
-          parents.write(`update`, { id: 1, groupId: 2 })
-        } catch (error) {
-          thrown = error
-        }
-        expect(trace).toEqual([`first:1`, `second:1`, `first:2`, `second:2`])
-        if (failing) {
-          expect(thrown).toBe(failure)
-          expect(query.get(1)).toBe(original)
-          expect(original.children.toArray.map((child) => child.id)).toEqual([
-            10,
-          ])
-          expect(original.peers.toArray.map((peer) => peer.id)).toEqual([100])
-          if (failureAt === `flush`) expect(prepared).toBe(2)
-        } else {
-          expect(thrown).toBeUndefined()
-          expect(original.children.toArray).toEqual([])
-          expect(original.peers.toArray).toEqual([])
-          expect(
-            query.get(1)!.children.toArray.map((child) => child.id),
-          ).toEqual([20])
-          expect(query.get(1)!.peers.toArray.map((peer) => peer.id)).toEqual([
-            200,
-          ])
-        }
-        await query.cleanup()
-        failing = false
-        await query.preload()
-        expect(query.get(1)!.children.toArray.map((child) => child.id)).toEqual(
-          [20],
-        )
-        expect(query.get(1)!.peers.toArray.map((peer) => peer.id)).toEqual([
-          200,
-        ])
-        expect(original.children.toArray).toEqual([])
-        expect(original.peers.toArray).toEqual([])
-      } finally {
-        failing = false
-        flush?.mockRestore()
-        await query.cleanup()
-        await parents.collection.cleanup()
-        await children.collection.cleanup()
-        await peers.collection.cleanup()
-      }
-    },
-  )
-
   it.each(
     ([`expression`, `functional`] as const).flatMap((projection) =>
       ([`resolve`, `reject`, `cleanup-resolve`, `cleanup-reject`] as const).map(
@@ -271,22 +150,36 @@ describe(`functional projection output compatibility`, () => {
         },
       })
       const captured: Array<Pick<typeof children, `toArray`>> = []
-      const query = createLiveQueryCollection((q) => {
-        const source = q.from({
-          row: q.from({ parent: parents.collection }).select(({ parent }) => ({
-            id: parent.id,
-            children: q
-              .from({ child: children })
-              .where(({ child }) => eq(child.groupId, parent.groupId)),
-          })),
+      const buildQuery = () =>
+        createLiveQueryCollection((q) => {
+          const source = q.from({
+            row: q
+              .from({ parent: parents.collection })
+              .select(({ parent }) => ({
+                id: parent.id,
+                children: q
+                  .from({ child: children })
+                  .where(({ child }) => eq(child.groupId, parent.groupId)),
+              })),
+          })
+          return projection === `expression`
+            ? source.select(({ row }) => row)
+            : source.fn.select(({ row }) => {
+                captured.push(row.children)
+                return { id: row.id, children: row.children }
+              })
         })
-        return projection === `expression`
-          ? source.select(({ row }) => row)
-          : source.fn.select(({ row }) => {
-              captured.push(row.children)
-              return { id: row.id, children: row.children }
-            })
-      })
+      if (rejectsCollectionInput(`collection`, projection === `functional`)) {
+        try {
+          expect(buildQuery).toThrow(collectionInputError)
+          expect(captured).toEqual([])
+        } finally {
+          await parents.collection.cleanup()
+          await children.cleanup()
+        }
+        return
+      }
+      const query = buildQuery()
       const failure = new Error(`pending child failed`)
       // Attach both outcomes immediately; no pending-length assertion may
       // leave a rejected preload promise unobserved.
@@ -365,7 +258,7 @@ describe(`functional projection output compatibility`, () => {
   )
 
   it.each(
-    ([`draft`, `published`] as const).flatMap((subscribeAt) =>
+    ([`publication`, `after-preload`] as const).flatMap((subscribeAt) =>
       ([`none`, `callback`, `flush`] as const).map((failureAt) => ({
         subscribeAt,
         failureAt,
@@ -429,30 +322,36 @@ describe(`functional projection output compatibility`, () => {
                 }
               })
           : undefined
-      const query = createLiveQueryCollection((q) =>
-        q
-          .from({
-            row: q
-              .from({ parent: parents.collection })
-              .select(({ parent }) => ({
-                id: parent.id,
-                groupId: parent.groupId,
-                children: q
-                  .from({ child: children.collection })
-                  .where(({ child }) => eq(child.groupId, parent.groupId)),
-              })),
-          })
-          .fn.select(({ row }) => {
-            if (subscribeAt === `draft`) observe(row.children)
+      const query = createLiveQueryCollection((q) => {
+        const projected = q
+          .from({ parent: parents.collection })
+          .fn.select(({ parent }) => {
             if (failing && failureAt === `callback`) throw failure
-            return { id: row.id, groupId: row.groupId, children: row.children }
-          }),
-      )
+            return parent
+          })
+        return q.from({ row: projected }).select(({ row }) => ({
+          id: row.id,
+          groupId: row.groupId,
+          children: q
+            .from({ child: children.collection })
+            .where(({ child }) => eq(child.groupId, row.groupId)),
+        }))
+      })
+      if (subscribeAt === `publication`) {
+        const rootSubscription = query.subscribeChanges(
+          (changes) => {
+            for (const change of changes)
+              if (change.type !== `delete`) observe(change.value.children)
+          },
+          { includeInitialState: true },
+        )
+        releases.push(() => rootSubscription.unsubscribe())
+      }
       const ids = (observer: (typeof observers)[number]) =>
         [...observer.rows].sort((a, b) => a - b)
       try {
         await query.preload()
-        if (subscribeAt === `published`) observe(query.get(1)!.children)
+        if (subscribeAt === `after-preload`) observe(query.get(1)!.children)
         const first = observers[0]!
         expect(ids(first), `initial subscription snapshot`).toEqual([10])
         children.write(`insert`, { id: 11, groupId: 1 })
@@ -474,21 +373,11 @@ describe(`functional projection output compatibility`, () => {
           expect(first.batches.length, `no partial public events`).toBe(
             beforeFailure,
           )
-          if (subscribeAt === `draft`) {
-            expect(observers).toHaveLength(2)
-            expect(
-              ids(observers[1]!),
-              `failed subscriber sees no private rows`,
-            ).toEqual([])
-            expect(
-              observers[1]!.batches.flat(),
-              `no transient private changes`,
-            ).toEqual([])
-          }
+          expect(observers).toHaveLength(1)
           if (failureAt === `flush`) expect(flushReached).toBe(true)
         } else {
           move()
-          if (subscribeAt === `published`) observe(query.get(1)!.children)
+          if (subscribeAt === `after-preload`) observe(query.get(1)!.children)
           expect(ids(first), `retired route`).toEqual([])
           expect(ids(observers[1]!), `destination subscription`).toEqual([20])
         }
@@ -502,7 +391,7 @@ describe(`functional projection output compatibility`, () => {
         )
         failing = false
         await query.preload()
-        if (subscribeAt === `published`) observe(query.get(1)!.children)
+        if (subscribeAt === `after-preload`) observe(query.get(1)!.children)
         expect(observers).toHaveLength(oldObservers.length + 1)
         expect(query.get(1)!.groupId, `restart uses current source`).toBe(2)
         const restarted = observers.at(-1)!
@@ -530,7 +419,6 @@ describe(`functional projection output compatibility`, () => {
     },
   )
 
-  const draftIndexError = `createIndex() cannot run on a temporary Collection inside fn.select(). Create the index on the published child Collection instead.`
   const readSurfaces = [
     `toArray`,
     `get`,
@@ -552,7 +440,7 @@ describe(`functional projection output compatibility`, () => {
       [false, true].map((ordered) => ({ surface, ordered })),
     ),
   )(
-    `enforces the $surface read boundary for projection inputs (ordered=$ordered)`,
+    `keeps published $surface reads live (ordered=$ordered)`,
     async ({ surface, ordered }) => {
       const parents = createControlledCollection(`read-api-parent`, [
         { id: 1, groupId: 1 },
@@ -565,9 +453,8 @@ describe(`functional projection output compatibility`, () => {
       ])
       const readers = new Map<
         number,
-        (keys: Array<number>, draft?: boolean) => Array<number | string>
+        (keys: Array<number>) => Array<number | string>
       >()
-      let checkPublishedIndex: (() => void) | undefined
       const query = createLiveQueryCollection((q) =>
         q
           .from({
@@ -584,91 +471,74 @@ describe(`functional projection output compatibility`, () => {
               }
             }),
           })
-          .fn.select(({ row }) => {
-            const view = row.children
-            const expectedKeys = [row.groupId * 10, row.groupId * 10 + 1]
-            const createIndex = view.createIndex.bind(view)
-            const read = (keys: Array<number>, draft = false) => {
-              let ids: Array<number | string>
-              switch (surface) {
-                case `toArray`:
-                  ids = view.toArray.map((child) => child.id)
-                  break
-                case `get`:
-                  ids = keys.flatMap((key) => view.get(key)?.id ?? [])
-                  break
-                case `has`:
-                  ids = keys.filter((key) => view.has(key))
-                  break
-                case `size`:
-                  ids = [view.size]
-                  break
-                case `keys`:
-                  ids = [...view.keys()]
-                  break
-                case `values`:
-                  ids = [...view.values()].map((child) => child.id)
-                  break
-                case `entries`:
-                  ids = [...view.entries()].map(([key]) => key)
-                  break
-                case `iterator`:
-                  ids = [...view].map(([key]) => key)
-                  break
-                case `forEach`:
-                  ids = []
-                  view.forEach((child) => ids.push(child.id))
-                  break
-                case `map`:
-                  ids = view.map((child) => child.id)
-                  break
-                case `state`:
-                  ids = [...view.state.keys()]
-                  break
-                case `virtual-key`:
-                  ids = view.toArray.map((child) => child.$key)
-                  break
-                case `virtual-metadata`:
-                  ids = view.toArray.map((child) => {
-                    expect(child.$collectionId).toBe(children.collection.id)
-                    expect(child.$synced).toBe(true)
-                    expect(child.$origin).toBe(`remote`)
-                    return child.id
-                  })
-                  break
-                case `index`: {
-                  // Capturing the method is safe. Calling it on private input is not.
-                  if (!draft) {
-                    const index = createIndex((child) => child.id, {
-                      indexType: BasicIndex,
-                    })
-                    return keys.flatMap((key) => [...index.lookup(`eq`, key)])
-                  }
-                  expect(() =>
-                    createIndex((child) => child.id, {
-                      indexType: BasicIndex,
-                    }),
-                  ).toThrow(new Error(draftIndexError))
-                  expect(view.indexes.size).toBe(0)
-                  checkPublishedIndex = () => {
-                    const index = createIndex((child) => child.id, {
-                      indexType: BasicIndex,
-                    })
-                    for (const key of expectedKeys)
-                      expect(index.lookup(`eq`, key)).toEqual(new Set([key]))
-                    expect(index.lookup(`eq`, 22)).toEqual(new Set([22]))
-                  }
-                  ids = keys.flatMap((key) => view.get(key)?.id ?? [])
-                  break
-                }
-              }
-              return ids
-            }
-            readers.set(row.groupId, read)
-            const ids = read(expectedKeys, true)
-            return { id: row.id, ids, children: view }
-          }),
+          .select(({ row }) => row),
       )
+      const capture = (row: NonNullable<ReturnType<typeof query.get>>) => {
+        const view = row.children
+        const expectedKeys = [row.groupId * 10, row.groupId * 10 + 1]
+        const createIndex = view.createIndex.bind(view)
+        const read = (keys: Array<number>) => {
+          let ids: Array<number | string>
+          switch (surface) {
+            case `toArray`:
+              ids = view.toArray.map((child) => child.id)
+              break
+            case `get`:
+              ids = keys.flatMap((key) => view.get(key)?.id ?? [])
+              break
+            case `has`:
+              ids = keys.filter((key) => view.has(key))
+              break
+            case `size`:
+              ids = [view.size]
+              break
+            case `keys`:
+              ids = [...view.keys()]
+              break
+            case `values`:
+              ids = [...view.values()].map((child) => child.id)
+              break
+            case `entries`:
+              ids = [...view.entries()].map(([key]) => key)
+              break
+            case `iterator`:
+              ids = [...view].map(([key]) => key)
+              break
+            case `forEach`:
+              ids = []
+              view.forEach((child) => ids.push(child.id))
+              break
+            case `map`:
+              ids = view.map((child) => child.id)
+              break
+            case `state`:
+              ids = [...view.state.keys()]
+              break
+            case `virtual-key`:
+              ids = view.toArray.map((child) => child.$key)
+              break
+            case `virtual-metadata`:
+              ids = view.toArray.map((child) => {
+                expect(child.$collectionId).toBe(children.collection.id)
+                expect(child.$synced).toBe(true)
+                expect(child.$origin).toBe(`remote`)
+                return child.id
+              })
+              break
+            case `index`: {
+              const index = createIndex((child) => child.id, {
+                indexType: BasicIndex,
+              })
+              ids = keys.flatMap((key) => [...index.lookup(`eq`, key)])
+              break
+            }
+          }
+          return ids
+        }
+        readers.set(row.groupId, read)
+        const ids = read(expectedKeys)
+        return { id: row.id, ids, children: view }
+      }
       const expected = (group: number) => {
         if (surface === `size`) return [2]
         const ids = [group * 10, group * 10 + 1]
@@ -696,14 +566,14 @@ describe(`functional projection output compatibility`, () => {
       }
       try {
         await query.preload()
+        const initialRead = capture(query.get(1)!)
         checkPublished(1, [10, 11], `initial published read`)
         expect
-          .soft(query.get(1)!.ids, `initial callback input`)
+          .soft(initialRead.ids, `initial published input`)
           .toEqual(expected(1))
         parents.write(`update`, { id: 1, groupId: 2 })
-        expect
-          .soft(query.get(1)!.ids, `moved callback input`)
-          .toEqual(expected(2))
+        const movedRead = capture(query.get(1)!)
+        expect.soft(movedRead.ids, `moved published input`).toEqual(expected(2))
         checkPublished(1, [], `retired route read`)
         checkPublished(2, [20, 21], `moved published read`)
         const held = query.get(1)!.children
@@ -711,7 +581,6 @@ describe(`functional projection output compatibility`, () => {
         expect(held.toArray.map((child) => child.id)).toEqual(
           ordered ? [22, 21, 20] : [20, 21, 22],
         )
-        checkPublishedIndex?.()
         checkPublished(1, [], `retired route ignores later insert`)
         checkPublished(2, [20, 21, 22], `published insertion read`)
         children.write(`delete`, { id: 21, groupId: 2 })
@@ -724,73 +593,14 @@ describe(`functional projection output compatibility`, () => {
     },
   )
 
-  it.each([`initial`, `update`] as const)(
-    `reports uncaught draft index creation during %s without publishing partial rows`,
-    async (phase) => {
-      const parents = createControlledCollection(`index-guard-parent`, [
-        { id: 1, revision: 0 },
-      ])
-      const children = createControlledCollection(`index-guard-child`, [
-        { id: 10, parentId: 1 },
-      ])
-      let rejectIndex = phase === `initial`
-      const query = createLiveQueryCollection((q) =>
-        q
-          .from({
-            row: q
-              .from({ parent: parents.collection })
-              .select(({ parent }) => ({
-                id: parent.id,
-                revision: parent.revision,
-                children: q
-                  .from({ child: children.collection })
-                  .where(({ child }) => eq(child.parentId, parent.id)),
-              })),
-          })
-          .fn.select(({ row }) => {
-            if (rejectIndex)
-              row.children.createIndex((child) => child.id, {
-                indexType: BasicIndex,
-              })
-            return row
-          }),
-      )
-      try {
-        if (phase === `initial`) {
-          await expect(query.preload()).rejects.toThrow(
-            new Error(draftIndexError),
-          )
-          expect(query.size).toBe(0)
-        } else {
-          await query.preload()
-          const original = query.get(1)!
-          const index = original.children.createIndex((child) => child.id, {
-            indexType: BasicIndex,
-          })
-          rejectIndex = true
-          expect(() => parents.write(`update`, { id: 1, revision: 1 })).toThrow(
-            new Error(draftIndexError),
-          )
-          expect(query.get(1)).toBe(original)
-          expect(original.revision).toBe(0)
-          expect(index.lookup(`eq`, 10)).toEqual(new Set([10]))
-        }
-      } finally {
-        await query.cleanup()
-        await parents.collection.cleanup()
-        await children.collection.cleanup()
-      }
-    },
-  )
-
   it.each([`expression`, `plain`, `opaque`, `closure`] as const)(
     `keeps retained views live across a same-route parent update through a %s holder`,
     async (holder) => {
-      const parents = createControlledCollection(`draft-identity-parent`, [
+      const parents = createControlledCollection(`facade-identity-parent`, [
         { id: 1, groupId: 1, label: `first` },
         { id: 2, groupId: 1, label: `second` },
       ])
-      const childSource = createControlledCollection(`draft-identity-child`, [
+      const childSource = createControlledCollection(`facade-identity-child`, [
         { id: 10, groupId: 1 },
       ])
       class Holder<T> {
@@ -806,33 +616,26 @@ describe(`functional projection output compatibility`, () => {
               .where(({ child }) => eq(child.groupId, parent.groupId)),
           })),
         })
-        if (holder === `expression`)
-          return source.select(({ row }) => ({
-            id: row.id,
-            label: row.label,
-            box: { children: row.children },
-          }))
-        return source.fn.select(({ row }) => {
-          const captured = row.children
-          return {
-            id: row.id,
-            label: row.label,
-            box:
-              holder === `plain`
-                ? { children: row.children }
-                : holder === `opaque`
-                  ? new Holder(row.children)
-                  : {
-                      get children() {
-                        return captured
-                      },
-                    },
-          }
-        })
+        return source.select(({ row }) => ({
+          id: row.id,
+          label: row.label,
+          box: { children: row.children },
+        }))
       })
       try {
         await query.preload()
-        const held = query.get(1)!.box.children
+        const childrenAtPublication = query.get(1)!.box.children
+        const retained =
+          holder === `opaque`
+            ? new Holder(childrenAtPublication)
+            : holder === `closure`
+              ? {
+                  get children() {
+                    return childrenAtPublication
+                  },
+                }
+              : { children: childrenAtPublication }
+        const held = retained.children
         expect
           .soft(
             held.toArray.map((child) => child.id),
@@ -846,13 +649,7 @@ describe(`functional projection output compatibility`, () => {
         expect
           .soft(query.get(1)!.label, `parent update is visible`)
           .toBe(`changed`)
-        // Expression projections share the public facade. Separate functional
-        // calls may return distinct views, but every retained view stays live.
-        if (holder === `expression`) {
-          expect
-            .soft(query.get(1)!.box.children, `shared public facade`)
-            .toBe(held)
-        }
+        expect(query.get(1)!.box.children).toBe(held)
         expect
           .soft(
             query.get(2)!.box.children,
@@ -881,7 +678,7 @@ describe(`functional projection output compatibility`, () => {
   )
 
   it.each([`rows`, `index`, `callback-read`, `captured-method`] as const)(
-    `keeps held facade %s unchanged when a later projection throws`,
+    `keeps held facade %s unchanged when a parent projection throws`,
     async (surface) => {
       const parents = createControlledCollection(`snapshot-parent`, [
         { id: 1, groupId: 1 },
@@ -890,38 +687,33 @@ describe(`functional projection output compatibility`, () => {
         { id: 10, groupId: 1 },
         { id: 20, groupId: 2 },
       ])
-      const failure = new Error(`projection failed after draft preparation`)
+      const failure = new Error(`parent projection failed`)
       let fail = false
-      let prepared: Array<number> = []
       let readPublished: (() => Array<number>) | undefined
       let capturedGet: ((key: number) => { id: number } | undefined) | undefined
       let observed: Array<number> | undefined
-      const query = createLiveQueryCollection((q) =>
-        q
-          .from({
-            row: q
-              .from({ parent: parents.collection })
-              .select(({ parent }) => ({
-                id: parent.id,
-                children: q
-                  .from({ child: children.collection })
-                  .where(({ child }) => eq(child.groupId, parent.groupId)),
-              })),
-          })
-          .fn.select(({ row }) => {
-            prepared = row.children.toArray.map((child) => child.id)
+      const query = createLiveQueryCollection((q) => {
+        const projected = q
+          .from({ parent: parents.collection })
+          .fn.select(({ parent }) => {
             if (fail) {
               observed = readPublished?.()
               throw failure
             }
-            capturedGet = row.children.get.bind(row.children)
-            return { id: row.id, children: row.children }
-          }),
-      )
+            return parent
+          })
+        return q.from({ row: projected }).select(({ row }) => ({
+          id: row.id,
+          children: q
+            .from({ child: children.collection })
+            .where(({ child }) => eq(child.groupId, row.groupId)),
+        }))
+      })
       try {
         await query.preload()
         const original = query.get(1)!
         const held = original.children
+        capturedGet = held.get.bind(held)
         readPublished = () =>
           surface === `captured-method`
             ? [capturedGet?.(10)?.id].filter((id) => id !== undefined)
@@ -935,7 +727,6 @@ describe(`functional projection output compatibility`, () => {
         expect(() => parents.write(`update`, { id: 1, groupId: 2 })).toThrow(
           failure,
         )
-        expect(prepared).toEqual([20])
         expect(query.get(1)).toBe(original)
         if (surface === `rows`) {
           expect(held.toArray.map((child) => child.id)).toEqual([10])
@@ -1039,48 +830,60 @@ describe(`functional projection output compatibility`, () => {
         [2, 5],
       ])
       const observed: Array<ChildView> = []
-      const live = createLiveQueryCollection({
-        query: (q) => {
-          const source = q
-            .from({ parent: parents.collection })
-            .select(({ parent }) => {
-              const childRows = q
-                .from({ child: children.collection })
-                .where(({ child }) => eq(child.parentGroup, parent.group))
+      const buildQuery = () =>
+        createLiveQueryCollection({
+          query: (q) => {
+            const source = q
+              .from({ parent: parents.collection })
+              .select(({ parent }) => {
+                const childRows = q
+                  .from({ child: children.collection })
+                  .where(({ child }) => eq(child.parentGroup, parent.group))
+                return {
+                  id: parent.id,
+                  base: parent.base,
+                  children:
+                    form === `collection`
+                      ? childRows
+                      : form === `array`
+                        ? toArray(childRows)
+                        : materialize(childRows),
+                }
+              })
+            const projected = q.from({ row: source }).fn.select(({ row }) => {
+              const view = readsInclude
+                ? readChildren(row.children, form)
+                : undefined
+              if (view) observed.push({ ...view, rows: publicRows(view.rows) })
               return {
-                id: parent.id,
-                base: parent.base,
-                children:
-                  form === `collection`
-                    ? childRows
-                    : form === `array`
-                      ? toArray(childRows)
-                      : materialize(childRows),
+                id: operator === `distinct` ? 0 : row.id,
+                score: view
+                  ? view.rows.reduce((sum, child) => sum + child.value, 0)
+                  : row.base,
               }
             })
-          const projected = q.from({ row: source }).fn.select(({ row }) => {
-            const view = readsInclude
-              ? readChildren(row.children, form)
-              : undefined
-            if (view) observed.push({ ...view, rows: publicRows(view.rows) })
-            return {
-              id: operator === `distinct` ? 0 : row.id,
-              score: view
-                ? view.rows.reduce((sum, child) => sum + child.value, 0)
-                : row.base,
-            }
-          })
-          if (operator === `distinct`) return projected.distinct()
-          if (operator === `selected-order`)
+            if (operator === `distinct`) return projected.distinct()
+            if (operator === `selected-order`)
+              return projected
+                .orderBy(({ $selected }) => $selected.score, `desc`)
+                .orderBy(({ $selected }) => $selected.id)
+                .limit(1)
             return projected
-              .orderBy(({ $selected }) => $selected.score, `desc`)
-              .orderBy(({ $selected }) => $selected.id)
-              .limit(1)
-          return projected
-        },
-        getKey:
-          operator === `custom-key` ? (row) => `result:${row.id}` : undefined,
-      })
+          },
+          getKey:
+            operator === `custom-key` ? (row) => `result:${row.id}` : undefined,
+        })
+      if (rejectsCollectionInput(form, true)) {
+        try {
+          expect(buildQuery).toThrow(collectionInputError)
+          expect(observed).toEqual([])
+        } finally {
+          await parents.collection.cleanup()
+          await children.collection.cleanup()
+        }
+        return
+      }
+      const live = buildQuery()
       const check = () => {
         let expected = [...expectedScores].map(([id, score]) => ({ id, score }))
         if (operator === `distinct`)
@@ -1169,50 +972,61 @@ describe(`functional projection output compatibility`, () => {
             }
         }
       }
-      const live = createLiveQueryCollection((q) => {
-        const source = q
-          .from({ parent: parents.collection })
-          .select(({ parent }) => {
-            const childRows = q
-              .from({ child: children.collection })
-              .where(({ child }) => eq(child.parentId, parent.id))
-            return {
-              id: parent.id,
-              value: parent.value,
-              ...(withInclude
-                ? {
-                    children:
-                      form === `collection`
-                        ? childRows
-                        : form === `array`
-                          ? toArray(childRows)
-                          : materialize(childRows),
-                  }
-                : {}),
+      const buildQuery = () =>
+        createLiveQueryCollection((q) => {
+          const source = q
+            .from({ parent: parents.collection })
+            .select(({ parent }) => {
+              const childRows = q
+                .from({ child: children.collection })
+                .where(({ child }) => eq(child.parentId, parent.id))
+              return {
+                id: parent.id,
+                value: parent.value,
+                ...(withInclude
+                  ? {
+                      children:
+                        form === `collection`
+                          ? childRows
+                          : form === `array`
+                            ? toArray(childRows)
+                            : materialize(childRows),
+                    }
+                  : {}),
+              }
+            })
+          const projected = q.from({ row: source }).fn.select(({ row }) => {
+            switch (shape) {
+              case `number`:
+                return row.value
+              case `null`:
+                return null
+              case `date`:
+                return new Date(row.value * 1000)
+              case `dropped-record`:
+                return { code: row.value }
             }
           })
-        const projected = q.from({ row: source }).fn.select(({ row }) => {
-          switch (shape) {
-            case `number`:
-              return row.value
-            case `null`:
-              return null
-            case `date`:
-              return new Date(row.value * 1000)
-            case `dropped-record`:
-              return { code: row.value }
-          }
+          const outer = q.from({ result: projected })
+          return consumer === `expression`
+            ? outer.select(({ result }) => ({ value: result }))
+            : outer.fn.select(({ result }) => {
+                // Observe the value on entry, including retract callbacks. Those
+                // may carry an earlier value, but must still have its proper type.
+                assertValue(result)
+                return { value: result }
+              })
         })
-        const outer = q.from({ result: projected })
-        return consumer === `expression`
-          ? outer.select(({ result }) => ({ value: result }))
-          : outer.fn.select(({ result }) => {
-              // Observe the value on entry, including retract callbacks. Those
-              // may carry an earlier value, but must still have its proper type.
-              assertValue(result)
-              return { value: result }
-            })
-      })
+      if (rejectsCollectionInput(form, withInclude)) {
+        try {
+          expect(buildQuery).toThrow(collectionInputError)
+        } finally {
+          await parents.collection.cleanup()
+          await children.collection.cleanup()
+        }
+        return
+      }
+      const live = buildQuery()
       const check = () => {
         expect.soft(live.toArray).toHaveLength(1)
         assertValue(live.toArray[0]?.value, expectedValue)
@@ -1273,64 +1087,84 @@ describe(`functional projection output compatibility`, () => {
           (second?.rows.reduce((sum, row) => sum + row.value, 0) ?? 0)
         )
       }
-      const live = createLiveQueryCollection((q) => {
-        const source = q
-          .from({ parent: parents.collection })
-          .select(({ parent }) => {
-            const primary = q
-              .from({ child: children.collection })
-              .where(({ child }) => eq(child.parentGroup, parent.group))
-            const sibling = q
-              .from({ other: children.collection })
-              .where(({ other }) => eq(other.parentGroup, parent.siblingGroup))
-            return {
-              id: parent.id,
-              children:
-                form === `collection`
-                  ? primary
-                  : form === `array`
-                    ? toArray(primary)
-                    : materialize(primary),
-              ...(withSibling
-                ? {
-                    sibling:
-                      form === `collection`
-                        ? sibling
-                        : form === `array`
-                          ? toArray(sibling)
-                          : materialize(sibling),
-                  }
-                : {}),
-            }
-          })
-        const input = q.from({ row: source })
-        const projected =
-          projection === `expression`
-            ? input.select(({ row }) => ({
-                id: row.id,
-                renamed: { primary: row.children, sibling: row.sibling },
-                total: 0,
+      const buildQuery = () =>
+        createLiveQueryCollection((q) => {
+          const source = q
+            .from({ parent: parents.collection })
+            .select(({ parent }) => {
+              const primary = q
+                .from({ child: children.collection })
+                .where(({ child }) => eq(child.parentGroup, parent.group))
+              const sibling = q
+                .from({ other: children.collection })
+                .where(({ other }) =>
+                  eq(other.parentGroup, parent.siblingGroup),
+                )
+              return {
+                id: parent.id,
+                children:
+                  form === `collection`
+                    ? primary
+                    : form === `array`
+                      ? toArray(primary)
+                      : materialize(primary),
+                ...(withSibling
+                  ? {
+                      sibling:
+                        form === `collection`
+                          ? sibling
+                          : form === `array`
+                            ? toArray(sibling)
+                            : materialize(sibling),
+                    }
+                  : {}),
+              }
+            })
+          const input = q.from({ row: source })
+          const projected =
+            projection === `expression`
+              ? input.select(({ row }) => ({
+                  id: row.id,
+                  renamed: { primary: row.children, sibling: row.sibling },
+                  total: 0,
+                }))
+              : input.fn.select(({ row }) => ({
+                  id: row.id,
+                  renamed: { primary: row.children, sibling: row.sibling },
+                  total: inspect(`projection`, row.children, row.sibling),
+                }))
+          const outer = q.from({ result: projected })
+          return consumer === `expression`
+            ? outer.select(({ result }) => ({ value: result }))
+            : outer.fn.select(({ result }) => ({
+                value: {
+                  id: result.id,
+                  renamed: result.renamed,
+                  total: inspect(
+                    `consumer`,
+                    result.renamed.primary,
+                    result.renamed.sibling,
+                  ),
+                },
               }))
-            : input.fn.select(({ row }) => ({
-                id: row.id,
-                renamed: { primary: row.children, sibling: row.sibling },
-                total: inspect(`projection`, row.children, row.sibling),
-              }))
-        const outer = q.from({ result: projected })
-        return consumer === `expression`
-          ? outer.select(({ result }) => ({ value: result }))
-          : outer.fn.select(({ result }) => ({
-              value: {
-                id: result.id,
-                renamed: result.renamed,
-                total: inspect(
-                  `consumer`,
-                  result.renamed.primary,
-                  result.renamed.sibling,
-                ),
-              },
-            }))
-      })
+        })
+      if (
+        rejectsCollectionInput(
+          form,
+          projection === `functional`,
+          consumer === `functional`,
+        )
+      ) {
+        try {
+          expect(buildQuery).toThrow(collectionInputError)
+          expect(calls).toEqual([])
+        } finally {
+          await parents.collection.cleanup()
+          await children.collection.cleanup()
+        }
+        return
+      }
+      const live = buildQuery()
       const check = () => {
         const row = live.toArray[0]?.value
         expect.soft(live.toArray, `${phase}: row count`).toHaveLength(1)
@@ -1542,56 +1376,69 @@ describe(`functional include projection boundary grammar`, () => {
           ? new Projection(row.id, row.kind, child, total)
           : { id: row.id, kind: row.kind, children: child, total }
       }
-      const live = createLiveQueryCollection((q) => {
-        const included = q
-          .from({ parent: parents.collection })
-          .select(({ parent }) => {
-            const childRows = q
-              .from({ child: children.collection })
-              .where(({ child }) => eq(child.parentGroup, parent.group))
-              .orderBy(({ child }) => child.id)
-              .select(({ child }) => ({
-                id: child.id,
-                parentGroup: child.parentGroup,
-                value: child.value,
+      const buildQuery = () =>
+        createLiveQueryCollection((q) => {
+          const included = q
+            .from({ parent: parents.collection })
+            .select(({ parent }) => {
+              const childRows = q
+                .from({ child: children.collection })
+                .where(({ child }) => eq(child.parentGroup, parent.group))
+                .orderBy(({ child }) => child.id)
+                .select(({ child }) => ({
+                  id: child.id,
+                  parentGroup: child.parentGroup,
+                  value: child.value,
+                }))
+              return {
+                id: parent.id,
+                kind: `included`,
+                total: 0,
+                children:
+                  form === `collection`
+                    ? childRows
+                    : form === `array`
+                      ? toArray(childRows)
+                      : materialize(childRows),
+              }
+            })
+          if (boundary === `union`) {
+            const withoutInclude = q
+              .from({ other: absent.collection })
+              .select(({ other }) => ({
+                id: other.id,
+                kind: `absent`,
+                total: 0,
               }))
-            return {
-              id: parent.id,
-              kind: `included`,
-              total: 0,
-              children:
-                form === `collection`
-                  ? childRows
-                  : form === `array`
-                    ? toArray(childRows)
-                    : materialize(childRows),
-            }
-          })
-        if (boundary === `union`) {
-          const withoutInclude = q
-            .from({ other: absent.collection })
-            .select(({ other }) => ({
-              id: other.id,
-              kind: `absent`,
-              total: 0,
-            }))
-          const union = q.unionAll(included, withoutInclude)
-          return output === `expression` ? union : union.fn.select(project)
-        }
-        if (boundary === `recursive-query-ref`) {
-          const intermediate = q
-            .from({ inner: included })
-            .select(({ inner }) => inner)
-          const outer = q.from({ row: intermediate })
+            const union = q.unionAll(included, withoutInclude)
+            return output === `expression` ? union : union.fn.select(project)
+          }
+          if (boundary === `recursive-query-ref`) {
+            const intermediate = q
+              .from({ inner: included })
+              .select(({ inner }) => inner)
+            const outer = q.from({ row: intermediate })
+            return output === `expression`
+              ? outer.select(({ row }) => row)
+              : outer.fn.select(({ row }) => project(row))
+          }
+          const outer = q.from({ row: included })
           return output === `expression`
             ? outer.select(({ row }) => row)
             : outer.fn.select(({ row }) => project(row))
+        })
+      if (rejectsCollectionInput(form, output !== `expression`)) {
+        try {
+          expect(buildQuery).toThrow(collectionInputError)
+          expect(calls).toEqual([])
+        } finally {
+          await parents.collection.cleanup()
+          await children.collection.cleanup()
+          await absent.collection.cleanup()
         }
-        const outer = q.from({ row: included })
-        return output === `expression`
-          ? outer.select(({ row }) => row)
-          : outer.fn.select(({ row }) => project(row))
-      })
+        return
+      }
+      const live = buildQuery()
       let facade: unknown
       const check = () => {
         const row: (Input & { total: number }) | undefined = live.toArray.find(

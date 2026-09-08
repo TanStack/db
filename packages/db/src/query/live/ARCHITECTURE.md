@@ -11,8 +11,8 @@ The central rule is simple:
 > Collection boundaries.
 
 The correlated-materialization oracle suites listed below are behavioral
-contracts for this design. The bounded functional-projection suite passes;
-other draft-view API and async/failure gates remain open. Suites for
+contracts for this design. Functional projections accept inline include values,
+not compiled Collection-valued inputs. Suites for
 adjacent planner and query-db ownership boundaries may also contain exact
 classifiers for defects outside this graph.
 
@@ -291,57 +291,37 @@ state. This avoids reserving user aliases or selected field names while keeping
 the context stable across D2 operators without collapsing two
 reference-sensitive leaf values that happen to have the same object shape.
 
-A functional projection consumes fully materialized input before downstream
-operators run. Collection-valued inputs use separate temporary read views:
-the graph drains the child relation, then feeds resolved inputs into a
-continuation in the same D2 graph. The real public facade and its indexes stay
-unchanged while the callback runs. D2's existing reduction retains callback
-outputs for retractions; retractions do not rerun the callback against changed
-child contents. No callback is stored in a result row or run at publication.
+A functional projection consumes fully materialized inline input before
+downstream operators run. Compiled Collection-valued includes are not supported
+as `fn.select()` inputs, including nested descendants. The compiler rejects
+the plan before invoking the callback, even if the callback would ignore or
+pass through the Collection. This keeps callbacks inside the ordinary D2
+pipeline without temporary Collection views or graph continuations.
 
-Each temporary view copies its bucket rows once when the input is resolved;
-repeated keyed reads do not rescan or sort the bucket. At publication, the view
-switches permanently to the public Collection and drops its private snapshot.
-Captured read methods follow that
-switch too. Separate functional projection calls may return different views
-of the same bucket; cross-call object identity is not a contract. Retained
-views must still expose that bucket's later public changes. Expression-only
-projections continue to share the stable public facade. Child-only updates do
-not rerun scalar projections or republish parents merely to update a view.
-
-Collection helper methods use the temporary view as their receiver, so
-iteration, `forEach`, `map`, and `state` reuse the existing Collection code
-while reading the staged rows. Calling `createIndex()` on a temporary input
-throws a clear error directing the caller to the published child Collection.
-The guard checks invocation, not method access: a captured method works after
-publication. No private index state is created. This restriction does not
-affect index creation on published child Collections.
+Use `toArray()` or `materialize()` in the upstream expression `select()` to
+make child values available to a functional callback. Child changes then
+update the inline value and rerun the projection. To keep live child
+Collections, use expression projections, or do parent-only functional work
+before adding the Collection-valued include. This restriction concerns compiled
+include inputs; it does not inspect arbitrary source-row fields or captured
+Collections. Reading an already published Collection from a callback does not
+add a child-row dependency.
 
 Include paths describe a functional projection's input, not its arbitrary
 output. A callback may drop or rename a field, or return a scalar. Its input
 paths must not be attached to that output by a downstream QueryRef consumer.
-
-The compiler materializes a functional projection's input through the existing
-D2 materializer. It consumes the input's include descriptors there;
+The compiler consumes those descriptors through the existing D2 materializer;
 downstream keys, distinct, ordering, and QueryRef consumers see the callback's
-actual output. The compiler owns the validated callback wrapper. Inline-only
-inputs need no Collection continuation. Queries without includes keep their
-original pipeline unless they consume a staged input elsewhere in the graph.
-The projection oracle checks the draft index guard and subscriptions created
-during a callback or after publication across synchronous success, callback
-failure, flush failure, and cleanup/restart. Pending child loads cover success,
-rejection, and obsolete settlement after restart, with expression controls.
-Two chained continuations cover synchronous success, second-callback failure,
-and second-prepare failure. Retained readers check remote virtual metadata.
-These bounded cases do not establish every async/optimistic/nested API cross.
-Work counters bound one view's snapshot scan to its bucket size. A manual
-forced-GC probe checks released views and captured methods after adapter
-cleanup; it is not a whole-application heap or throughput measurement.
+actual output. Queries without includes keep their original pipeline.
 
-Every valid plan is checked as a Collection, `toArray`, and `materialize`
-include at initial load, after a parent-route update, and after a child update.
-The grammar declarations generate the cases; individual reported defects do
-not get one-off tests outside that product.
+The projection matrices keep Collection-input cases as rejection checks and
+exercise supported inline forms across route changes, child updates, recursive
+sources, unions, and chained callbacks. Expression controls retain ordinary
+Collection reads, indexes, subscriptions, rollback, pending loads, and
+cleanup/restart coverage. Work counters check repeated reads on public facades.
+A manual forced-GC probe checks retained public handles and captured methods
+after cleanup, with live facades as a positive retention control; it is not a
+whole-application heap or throughput measurement.
 
 A materialization cell identifies one include field on one parent-row
 occurrence:
@@ -1030,20 +1010,21 @@ create recursive Collection machinery.
 
 ## Executable contracts
 
-| Contract                                                                      | Test suite                                                                   |
-| ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| State equivalence, route lifecycle, transition history, and batch partition   | `packages/db/tests/query/includes-oracle.property.test.ts`                   |
-| Joined multiplicity, alias identity, and null-key normalization               | `packages/db/tests/query/includes-query-shape-oracle.test.ts`                |
-| Demand, cancellation, and progressive timing                                  | `packages/db/tests/query/includes-temporal-oracle.test.ts`                   |
-| Optimistic confirmation, rollback, and later reactivity                       | `packages/db/tests/query/includes-optimistic-oracle.property.test.ts`        |
-| Coherent layered publication                                                  | `packages/db/tests/query/includes-publication-oracle.test.ts`                |
-| Collection facades, event coherence, and route activation                     | `packages/db/tests/query/includes-collection-oracle.property.test.ts`        |
-| Correlated physical work                                                      | `packages/db/tests/query/includes-work-counter-oracle.test.ts`               |
-| Route-context discovery and transport across recursive and join boundaries    | `packages/db/tests/query/includes-context-transport-oracle.test.ts`          |
-| Functional projection timing, output preservation, and bounded view isolation | `packages/db/tests/query/includes-functional-projection-oracle.test.ts`      |
-| Cross-formulation equivalence and reference-sensitive route identity          | `packages/db/tests/query/includes-cross-formulation-oracle.property.test.ts` |
-| Query-db ownership                                                            | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`      |
-| Reachable nested shape                                                        | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts`    |
+| Contract                                                                    | Test suite                                                                   |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| State equivalence, route lifecycle, transition history, and batch partition | `packages/db/tests/query/includes-oracle.property.test.ts`                   |
+| Joined multiplicity, alias identity, and null-key normalization             | `packages/db/tests/query/includes-query-shape-oracle.test.ts`                |
+| Demand, cancellation, and progressive timing                                | `packages/db/tests/query/includes-temporal-oracle.test.ts`                   |
+| Optimistic confirmation, rollback, and later reactivity                     | `packages/db/tests/query/includes-optimistic-oracle.property.test.ts`        |
+| Coherent layered publication                                                | `packages/db/tests/query/includes-publication-oracle.test.ts`                |
+| Collection facades, event coherence, and route activation                   | `packages/db/tests/query/includes-collection-oracle.property.test.ts`        |
+| Correlated physical work                                                    | `packages/db/tests/query/includes-work-counter-oracle.test.ts`               |
+| Route-context discovery and transport across recursive and join boundaries  | `packages/db/tests/query/includes-context-transport-oracle.test.ts`          |
+| Functional projection input boundaries, timing, and output preservation     | `packages/db/tests/query/includes-functional-projection-oracle.test.ts`      |
+| Functional input rejection and inline alternatives                          | `packages/db/tests/query/includes-functional-input-boundary.test.ts`         |
+| Cross-formulation equivalence and reference-sensitive route identity        | `packages/db/tests/query/includes-cross-formulation-oracle.property.test.ts` |
+| Query-db ownership                                                          | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`      |
+| Reachable nested shape                                                      | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts`    |
 
 Each oracle identifies the first divergent checkpoint and compares either the
 whole result or one exact structural difference. Correlated-materialization

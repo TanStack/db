@@ -11,10 +11,6 @@ import {
 import { optimizeQuery } from '../optimizer.js'
 import { materializeCompilation } from '../live/materialized-pipeline.js'
 import {
-  facadeProjections,
-  stageFacadeProjection,
-} from '../live/facade-projection.js'
-import {
   createParentContext,
   createValueIdentity,
   getParentContextIdentity,
@@ -991,6 +987,11 @@ export function compileQuery(
       ]),
     )
   if (materializeSelectInput) {
+    if (!inputIncludes.every(isInlineInclude)) {
+      throw new Error(
+        `fn.select() cannot consume Collection-valued includes. Use toArray() or materialize() in the upstream select(), or use an expression select() to keep live Collections.`,
+      )
+    }
     // Input paths belong before the callback: its arbitrary output may rename
     // or discard them. Inline values need no public Collection boundary.
     const inputPipeline = pipeline.pipe(
@@ -1022,10 +1023,7 @@ export function compileQuery(
       aliasToCollectionId,
       aliasRemapping,
     })
-    const projectedInput = inputIncludes.every(isInlineInclude)
-      ? materializedInput.pipeline
-      : stageFacadeProjection(mainCollectionId, materializedInput)
-    pipeline = projectedInput.pipe(
+    pipeline = materializedInput.pipeline.pipe(
       map(([key, [value]]) => {
         const row = { ...value }
         delete row[INCLUDES_ROUTING]
@@ -1069,14 +1067,7 @@ export function compileQuery(
         $selected: selected,
       }
     }
-    pipeline =
-      facadeProjections(pipeline.graph).length > 0
-        ? pipeline.pipe(
-            reduce((rows) =>
-              rows.map(([row, weight]) => [projectRow(row), weight]),
-            ),
-          )
-        : pipeline.pipe(map(([key, row]) => [key, projectRow(row)]))
+    pipeline = pipeline.pipe(map(([key, row]) => [key, projectRow(row)]))
   } else if (query.select) {
     pipeline = processSelect(pipeline, query.select, allInputs)
   } else {

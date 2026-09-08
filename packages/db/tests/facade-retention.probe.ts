@@ -1,4 +1,4 @@
-// Run manually: node --expose-gc --import tsx tests/facade-draft-retention.probe.ts
+// Run manually: node --expose-gc --import tsx tests/facade-retention.probe.ts
 // This probes reachability, not total application heap size or GC latency.
 import assert from 'node:assert/strict'
 import { setImmediate } from 'node:timers/promises'
@@ -17,7 +17,7 @@ if (!gc) throw new Error(`Run this probe with --expose-gc`)
 function capture(
   released: boolean,
   holder: `view` | `method`,
-  rollback: boolean,
+  pendingUpdate: boolean,
 ) {
   const graph = new D2()
   const rows = graph.newInput<[string, BucketRow]>()
@@ -50,29 +50,34 @@ function capture(
   const ref: BucketFacadeRef = {
     [BUCKET_FACADE_REF]: { edgeId: `children`, bucketKey },
   }
-  const view = adapter.resolveDraft(ref) as unknown as Collection<
+  adapter.flush().publish()
+  const view = adapter.resolve(ref) as unknown as Collection<
     typeof value,
     number
   >
   assert.equal(view.get(1)?.id, 1)
   const retained = holder === `view` ? view : view.get.bind(view)
-  const publication = adapter.flush()
-  if (rollback) publication.rollback()
-  else publication.publish()
-  if (released) adapter.publishDrafts()
-  adapter.cleanup()
+  if (pendingUpdate) {
+    rows.sendData(
+      new MultiSet([
+        [[bucketKey, { publicKey: 2, value: { id: 2 }, order: undefined }], 1],
+      ]),
+    )
+    graph.run()
+  }
+  if (released) adapter.cleanup()
   return { retained, value: new WeakRef(value), adapter: new WeakRef(adapter) }
 }
 
 const cells = [false, true].flatMap((released) =>
   ([`view`, `method`] as const).flatMap((holder) =>
-    [false, true].map((rollback) => ({ released, holder, rollback })),
+    [false, true].map((pendingUpdate) => ({ released, holder, pendingUpdate })),
   ),
 )
 const results = cells.map((cell) => ({
   ...cell,
   samples: Array.from({ length: 10 }, () =>
-    capture(cell.released, cell.holder, cell.rollback),
+    capture(cell.released, cell.holder, cell.pendingUpdate),
   ),
 }))
 
@@ -84,14 +89,14 @@ for (let turn = 0; turn < 5; turn++) {
 }
 await setImmediate()
 
-const report = results.map(({ released, holder, rollback, samples }) => {
+const report = results.map(({ released, holder, pendingUpdate, samples }) => {
   const retainedValues = samples.filter(
     (sample) => sample.value.deref() !== undefined,
   ).length
   const retainedAdapters = samples.filter(
     (sample) => sample.adapter.deref() !== undefined,
   ).length
-  // Unreleased snapshots are the positive control: this probe must detect them.
+  // Live public facades are the positive control: this probe must detect them.
   assert.equal(retainedValues, released ? 0 : samples.length)
   assert.equal(retainedAdapters, 0)
   assert.equal(samples.length, 10)
@@ -103,7 +108,7 @@ const report = results.map(({ released, holder, rollback, samples }) => {
   return {
     released,
     holder,
-    rollback,
+    pendingUpdate,
     samples: samples.length,
     retainedValues,
     retainedAdapters,
