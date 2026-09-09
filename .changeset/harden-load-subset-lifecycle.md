@@ -1,5 +1,5 @@
 ---
-'@tanstack/db': patch
+'@tanstack/db': minor
 '@tanstack/db-ivm': patch
 '@tanstack/db-sqlite-persistence-core': patch
 '@tanstack/electric-db-collection': patch
