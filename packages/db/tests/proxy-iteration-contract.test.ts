@@ -331,8 +331,11 @@ it.each([`entries`, `values`] as const)(
       return iterator
     })
     try {
-      values[protocol]().next()
-      expect(visits).toBeLessThanOrEqual(1)
+      expect(values[protocol]().next()).toEqual({
+        done: false,
+        value: protocol === `entries` ? [0, 0] : 0,
+      })
+      expect(visits).toBe(1)
     } finally {
       spy.mockRestore()
     }
