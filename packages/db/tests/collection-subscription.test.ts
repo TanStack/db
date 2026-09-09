@@ -10,6 +10,87 @@ import { flushPromises } from './utils'
 import type { LoadSubsetOptions } from '../src/types.js'
 
 describe(`CollectionSubscription status tracking`, () => {
+  it.each(
+    ([`release`, `restart`] as const).flatMap((boundary) =>
+      [false, true].flatMap((rejectOld) =>
+        [false, true].map((oldFirst) => ({ boundary, rejectOld, oldFirst })),
+      ),
+    ),
+  )(
+    `isolates pending status across retired work: %j`,
+    async ({ boundary, rejectOld, oldFirst }) => {
+      const old = createDeferred<void>()
+      const current = createDeferred<void>()
+      const last = createDeferred<void>()
+      const pending = [old, current, last]
+      let loadCount = 0
+      const load = vi.fn(() => pending[loadCount++]!.promise)
+      const collection = createCollection<{ id: string }>({
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return { loadSubset: load, unloadSubset: () => {} }
+          },
+        },
+      })
+      const subscription = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
+      const statuses: Array<string> = []
+      subscription.on(`status:change`, ({ status }) => statuses.push(status))
+      const settleOld = async () => {
+        if (rejectOld) old.reject(new Error(`retired work failed`))
+        else old.resolve()
+        await flushPromises()
+      }
+
+      try {
+        subscription.requestSnapshot({ where })
+        expect(subscription.status).toBe(`loadingSubset`)
+        if (boundary === `release`) {
+          subscription.releaseSnapshot(where)
+          subscription.releaseSnapshot(where)
+          expect(subscription.status).toBe(`ready`)
+          subscription.requestSnapshot({ where })
+        } else {
+          await collection.cleanup()
+          collection.startSyncImmediate()
+        }
+        await flushPromises()
+        expect(load).toHaveBeenCalledTimes(2)
+        expect(subscription.status).toBe(`loadingSubset`)
+        const before = [...statuses]
+        if (oldFirst) {
+          await settleOld()
+          expect(subscription.status).toBe(`loadingSubset`)
+          expect(statuses).toEqual(before)
+        }
+        current.resolve()
+        await flushPromises()
+        expect(subscription.status).toBe(`ready`)
+        if (!oldFirst) {
+          const after = [...statuses]
+          await settleOld()
+          expect(statuses).toEqual(after)
+        }
+        // A double decrement can hide until the next load starts.
+        subscription.requestSnapshot({ where })
+        expect(load).toHaveBeenCalledTimes(3)
+        expect(subscription.status).toBe(`loadingSubset`)
+        last.resolve()
+        await flushPromises()
+        expect(subscription.status).toBe(`ready`)
+      } finally {
+        for (const result of pending) result.resolve()
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
   it.each([
     { terms: 2, values: [0, 0] },
     { terms: 2, values: [0] },
