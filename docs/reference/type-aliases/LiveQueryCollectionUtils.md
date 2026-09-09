@@ -19,16 +19,6 @@ Defined in: [packages/db/src/query/live/collection-config-builder.ts:50](https:/
 [LIVE_QUERY_INTERNAL]: LiveQueryInternalUtils;
 ```
 
-### getRunCount()
-
-```ts
-getRunCount: () => number;
-```
-
-#### Returns
-
-`number`
-
 ### getWindow()
 
 ```ts

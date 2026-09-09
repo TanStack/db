@@ -12,6 +12,7 @@ import {
   withPublicationContext,
 } from '../../src/scheduler.js'
 import { CollectionConfigBuilder } from '../../src/query/live/collection-config-builder.js'
+import { getCollectionBuilder } from '../../src/query/live/collection-registry.js'
 import { CollectionSubscriber } from '../../src/query/live/collection-subscriber.js'
 import { Query, createEffect } from '../../src/index.js'
 import {
@@ -1226,7 +1227,7 @@ describe(`live query scheduler`, () => {
       liveQueryB.preload(),
       liveQueryJoin.preload(),
     ])
-    const baseRunCount = liveQueryJoin.utils.getRunCount()
+    const runs = vi.spyOn(getCollectionBuilder(liveQueryJoin)!, `maybeRunGraph`)
 
     const tx = createTransaction({
       mutationFn: async () => {},
@@ -1241,7 +1242,7 @@ describe(`live query scheduler`, () => {
     expect(liveQueryJoin.toArray.map((row) => stripVirtualProps(row))).toEqual([
       { left: `A1`, right: `B1` },
     ])
-    expect(liveQueryJoin.utils.getRunCount()).toBe(baseRunCount + 1)
+    expect(runs).toHaveBeenCalledTimes(1)
 
     tx.mutate(() => {
       collectionA.update(1, (draft) => {
@@ -1255,8 +1256,9 @@ describe(`live query scheduler`, () => {
     expect(liveQueryJoin.toArray.map((row) => stripVirtualProps(row))).toEqual([
       { left: `A1b`, right: `B1b` },
     ])
-    expect(liveQueryJoin.utils.getRunCount()).toBe(baseRunCount + 2)
+    expect(runs).toHaveBeenCalledTimes(2)
     tx.rollback()
+    runs.mockRestore()
   })
 
   it(`runs hybrid joins once when they observe both a live query and a collection`, async () => {
@@ -1313,7 +1315,7 @@ describe(`live query scheduler`, () => {
     })
 
     await Promise.all([liveQueryA.preload(), hybridJoin.preload()])
-    const baseRunCount = hybridJoin.utils.getRunCount()
+    const runs = vi.spyOn(getCollectionBuilder(hybridJoin)!, `maybeRunGraph`)
 
     const tx = createTransaction({
       mutationFn: async () => {},
@@ -1328,7 +1330,7 @@ describe(`live query scheduler`, () => {
     expect(hybridJoin.toArray.map((row) => stripVirtualProps(row))).toEqual([
       { left: `A7`, right: `B7` },
     ])
-    expect(hybridJoin.utils.getRunCount()).toBe(baseRunCount + 1)
+    expect(runs).toHaveBeenCalledTimes(1)
 
     tx.mutate(() => {
       collectionA.update(7, (draft) => {
@@ -1342,8 +1344,9 @@ describe(`live query scheduler`, () => {
     expect(hybridJoin.toArray.map((row) => stripVirtualProps(row))).toEqual([
       { left: `A7b`, right: `B7b` },
     ])
-    expect(hybridJoin.utils.getRunCount()).toBe(baseRunCount + 2)
+    expect(runs).toHaveBeenCalledTimes(2)
     tx.rollback()
+    runs.mockRestore()
   })
 
   it(`currently single batch when the join sees right-side data before the left`, async () => {
@@ -1400,7 +1403,7 @@ describe(`live query scheduler`, () => {
     })
 
     await Promise.all([liveQueryA.preload(), join.preload()])
-    const baseRunCount = join.utils.getRunCount()
+    const runs = vi.spyOn(getCollectionBuilder(join)!, `maybeRunGraph`)
 
     const tx = createTransaction({
       mutationFn: async () => {},
@@ -1415,8 +1418,9 @@ describe(`live query scheduler`, () => {
     expect(join.toArray.map((row) => stripVirtualProps(row))).toEqual([
       { left: `left-later`, right: `right-first` },
     ])
-    expect(join.utils.getRunCount()).toBe(baseRunCount + 1)
+    expect(runs).toHaveBeenCalledTimes(1)
     tx.rollback()
+    runs.mockRestore()
   })
 
   it.each(

@@ -52,7 +52,6 @@ import type {
 import type { AllCollectionEvents } from '../../collection/events.js'
 
 export type LiveQueryCollectionUtils = UtilsRecord & {
-  getRunCount: () => number
   /** Most recent subset-load failure observed by this live query. */
   readonly lastSubsetError: unknown | undefined
   /**
@@ -105,7 +104,6 @@ export class CollectionConfigBuilder<
   private readonly compareOptions?: StringCollationConfig
 
   private isGraphRunning = false
-  private runCount = 0
 
   // Current sync session state (set when sync starts, cleared when it stops)
   // Public for testing purposes (CollectionConfigBuilder is internal, not public API)
@@ -269,7 +267,6 @@ export class CollectionConfigBuilder<
       startSync: this.config.startSync,
       singleResult: this.query.singleResult,
       utils: {
-        getRunCount: this.getRunCount.bind(this),
         get lastSubsetError() {
           return builder.lastSubsetError
         },
@@ -773,8 +770,6 @@ export class CollectionConfigBuilder<
       return
     }
 
-    this.incrementRunCount()
-
     this.maybeRunGraph(() => runAllCallbacks(pending.loadCallbacks))
   }
 
@@ -783,14 +778,6 @@ export class CollectionConfigBuilder<
       rowUpdateMode: `full`,
       sync: this.syncFn.bind(this),
     }
-  }
-
-  incrementRunCount() {
-    this.runCount++
-  }
-
-  getRunCount() {
-    return this.runCount
   }
 
   private syncFn(config: SyncMethods<TResult>) {
