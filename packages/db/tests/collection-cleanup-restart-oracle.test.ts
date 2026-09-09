@@ -162,7 +162,7 @@ describe(`Collection cleanup admission oracle`, () => {
       let starts = 0
       let armed = false
       let ops!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
-      const source = createCollection<Row>({
+      const source = createCollection<Row, number>({
         getKey: (row) => row.id,
         sync: {
           sync: (methods) => {
