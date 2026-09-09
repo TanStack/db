@@ -1,4 +1,5 @@
 import { D2, output } from '@tanstack/db-ivm'
+import { createDeferred } from '../deferred.js'
 import {
   getActivePublicationContext,
   transactionScopedScheduler,
@@ -138,7 +139,10 @@ export interface EffectConfig<
 
 /** Handle returned by createEffect */
 export interface Effect {
-  /** Dispose the effect. Returns a promise that resolves when in-flight handlers complete. */
+  /**
+   * Dispose the effect and await in-flight handlers. Calls during one cleanup
+   * attempt, including calls from abort/release callbacks, share its outcome.
+   */
   dispose: () => Promise<void>
   /** Whether this effect has been disposed */
   readonly disposed: boolean
@@ -251,12 +255,17 @@ export function createEffect<
   let disposalPromise: Promise<void> | undefined
   const dispose = (): Promise<void> => {
     if (disposalPromise) return disposalPromise
+    // Abort and source-release callbacks may synchronously call dispose again.
+    // Publish the shared result before entering either user callback boundary.
+    const completion = createDeferred<void>()
+    const attempt = completion.promise
+    disposalPromise = attempt
     disposed = true
 
     // Abort signal for in-flight handlers
     abortController.abort()
 
-    const attempt = (async () => {
+    void (async () => {
       // Tear down the pipeline (unsubscribe from sources, etc.)
       let cleanupFailed = false
       let cleanupError: unknown
@@ -273,8 +282,7 @@ export function createEffect<
       }
 
       if (cleanupFailed) throw cleanupError
-    })()
-    disposalPromise = attempt
+    })().then(completion.resolve, completion.reject)
     void attempt.then(
       () => {},
       () => {
