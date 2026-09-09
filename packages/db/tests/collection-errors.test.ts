@@ -29,6 +29,52 @@ describe(`Collection Error Handling`, () => {
 
   describe(`Cleanup Error Handling`, () => {
     it.each([false, true])(
+      `finishes adapter resource cleanup after a failure, already released=%s`,
+      async (releaseBeforeThrow) => {
+        const resources = new Set<object>()
+        const failure = new Error(`adapter cleanup interrupted`)
+        let attempts = 0
+        const collection = createCollection<{ id: string }>({
+          getKey: (row) => row.id,
+          sync: {
+            sync: ({ markReady }) => {
+              const resource = {}
+              resources.add(resource)
+              markReady()
+              return () => {
+                attempts++
+                if (attempts === 1) {
+                  if (releaseBeforeThrow) resources.delete(resource)
+                  throw failure
+                }
+                resources.delete(resource)
+              }
+            },
+          },
+        })
+        collection.startSyncImmediate()
+        try {
+          expect(resources.size).toBe(1)
+          await collection.cleanup()
+          expect(collection.status).toBe(`cleaned-up`)
+          expect(resources.size).toBe(releaseBeforeThrow ? 0 : 1)
+          expect(mockQueueMicrotask).toHaveBeenCalledTimes(1)
+          expect(() => mockQueueMicrotask.mock.calls[0]![0]()).toThrow(
+            SyncCleanupError,
+          )
+
+          // The Collection's public status alone does not prove resource release.
+          await collection.cleanup()
+          expect(resources.size).toBe(0)
+          expect(attempts).toBe(2)
+          expect(mockQueueMicrotask).toHaveBeenCalledTimes(1)
+        } finally {
+          await collection.cleanup()
+        }
+      },
+    )
+
+    it.each([false, true])(
       `retries failed cleanup only before replacement, nested restart=%s`,
       async (restart) => {
         const failure = new Error(`cleanup failed`)
