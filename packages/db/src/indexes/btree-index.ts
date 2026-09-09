@@ -1,4 +1,5 @@
 import { compareKeys } from '@tanstack/db-ivm'
+import { compareKeysReversed } from '../utils/array-utils.js'
 import { BTree } from '../utils/btree.js'
 import {
   areSameValueZeroEqual,
@@ -347,23 +348,20 @@ export class BTreeIndex<
     filterFn?: (key: TKey) => boolean,
     reversed: boolean = false,
   ): Array<TKey> {
-    const keysInResult: Set<TKey> = new Set()
     const result: Array<TKey> = []
     let pair: [any, OrderedBucket<TKey>] | undefined
     let key = from // Use as-is - it's already normalized by the caller
 
+    // Every key owns exactly one bucket, so the walk never repeats a key.
     while ((pair = nextPair(key)) !== undefined && result.length < n) {
       key = pair[0]
-      const keys = pair[1].keys
-      // Sort keys for deterministic order, reverse if needed
-      const sorted = Array.from(keys).sort(compareKeys)
-      if (reversed) sorted.reverse()
+      // Sort keys for deterministic order within a comparator position.
+      const sorted = Array.from(pair[1].keys).sort(
+        reversed ? compareKeysReversed : compareKeys,
+      )
       for (const ks of sorted) {
         if (result.length >= n) break
-        if (!keysInResult.has(ks) && (filterFn?.(ks) ?? true)) {
-          result.push(ks)
-          keysInResult.add(ks)
-        }
+        if (filterFn?.(ks) ?? true) result.push(ks)
       }
     }
 
@@ -441,39 +439,6 @@ export class BTreeIndex<
       }
     }
 
-    return result
-  }
-
-  // Getter methods for testing compatibility
-  get indexedKeysSet(): Set<TKey> {
-    return this.indexedKeys
-  }
-
-  get orderedEntriesArray(): Array<[any, Set<TKey>]> {
-    return this.orderedEntries
-      .keysArray()
-      .map((key) => [
-        denormalizeUndefined(key),
-        this.orderedEntries.get(key)?.keys ?? new Set(),
-      ])
-  }
-
-  get orderedEntriesArrayReversed(): Array<[any, Set<TKey>]> {
-    return this.orderedEntries
-      .keysArray()
-      .reverse()
-      .map((key) => [
-        denormalizeUndefined(key),
-        this.orderedEntries.get(key)?.keys ?? new Set(),
-      ])
-  }
-
-  get valueMapData(): Map<any, Set<TKey>> {
-    // Return a new Map with denormalized keys
-    const result = new Map<any, Set<TKey>>()
-    for (const [key, value] of this.valueMap) {
-      result.set(denormalizeUndefined(key), value.keys)
-    }
     return result
   }
 }

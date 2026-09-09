@@ -801,65 +801,18 @@ export class CollectionConfigBuilder<
     let tornDown = false
     const teardown = () => {
       if (tornDown) return
+      tornDown = true
       if (this.syncSession === syncSession) this.syncSession++
 
-      let firstCleanupError: unknown
-      for (const unsubscribe of syncState.unsubscribeCallbacks) {
-        try {
-          unsubscribe()
-          syncState.unsubscribeCallbacks.delete(unsubscribe)
-        } catch (error) {
-          firstCleanupError ??= error
-        }
+      // Release every source in one attempt; the first failure wins after the
+      // peers finish. Each subscription release is itself one-shot, so the
+      // Collection's cleanup retry has nothing left to repeat here.
+      try {
+        runAllCallbacks(syncState.unsubscribeCallbacks)
+      } finally {
+        syncState.unsubscribeCallbacks.clear()
+        this.clearSyncSessionState()
       }
-
-      // Late window settlement belongs to the discarded graph, not its restart.
-      this.windowOperationGeneration++
-      // Clear current sync session state
-      this.currentSyncConfig = undefined
-      this.currentSyncState = undefined
-      this.maybeRunGraphFn = undefined
-      this.currentWindow = undefined
-      this.settledWindow = this.initialWindow
-      this.isInErrorState = false
-      this.fatalQueryError = false
-      this.erroredSourceIds.clear()
-
-      // Clear all pending graph runs to prevent memory leaks from in-flight transactions
-      // that may flush after the sync session ends
-      this.pendingGraphRuns.clear()
-
-      // Reset caches so a fresh graph/pipeline is compiled on next start
-      // This avoids reusing a finalized D2 graph across GC restarts
-      this.graphCache = undefined
-      this.inputsCache = undefined
-      this.pipelineCache = undefined
-      this.sourceWhereClausesCache = undefined
-      this.bucketFacadesCache = undefined
-
-      // Reset lazy source alias state
-      this.lazySources.clear()
-      this.demandGenerations.clear()
-      this.activeDemands.clear()
-      this.pendingOrderedLoads.clear()
-      this.orderedLoadFailed = false
-      this.windowFailed = false
-      this.optimizableOrderByCollections = {}
-      this.lazySourcesCallbacks = {}
-
-      // Clear subscription references to prevent memory leaks
-      // Note: Individual subscriptions are already unsubscribed via unsubscribeCallbacks
-      Object.keys(this.subscriptions).forEach(
-        (key) => delete this.subscriptions[key],
-      )
-
-      // Unregister from scheduler's onClear listener to prevent memory leaks
-      // The scheduler's listener Set would otherwise keep a strong reference to this builder
-      this.unsubscribeFromSchedulerClears?.()
-      this.unsubscribeFromSchedulerClears = undefined
-
-      if (firstCleanupError !== undefined) throw firstCleanupError
-      tornDown = true
     }
 
     try {
@@ -914,6 +867,53 @@ export class CollectionConfigBuilder<
     }
 
     return teardown
+  }
+
+  private clearSyncSessionState(): void {
+    // Late window settlement belongs to the discarded graph, not its restart.
+    this.windowOperationGeneration++
+    // Clear current sync session state
+    this.currentSyncConfig = undefined
+    this.currentSyncState = undefined
+    this.maybeRunGraphFn = undefined
+    this.currentWindow = undefined
+    this.settledWindow = this.initialWindow
+    this.isInErrorState = false
+    this.fatalQueryError = false
+    this.erroredSourceIds.clear()
+
+    // Clear all pending graph runs to prevent memory leaks from in-flight transactions
+    // that may flush after the sync session ends
+    this.pendingGraphRuns.clear()
+
+    // Reset caches so a fresh graph/pipeline is compiled on next start
+    // This avoids reusing a finalized D2 graph across GC restarts
+    this.graphCache = undefined
+    this.inputsCache = undefined
+    this.pipelineCache = undefined
+    this.sourceWhereClausesCache = undefined
+    this.bucketFacadesCache = undefined
+
+    // Reset lazy source alias state
+    this.lazySources.clear()
+    this.demandGenerations.clear()
+    this.activeDemands.clear()
+    this.pendingOrderedLoads.clear()
+    this.orderedLoadFailed = false
+    this.windowFailed = false
+    this.optimizableOrderByCollections = {}
+    this.lazySourcesCallbacks = {}
+
+    // Clear subscription references to prevent memory leaks
+    // Note: Individual subscriptions are already unsubscribed via unsubscribeCallbacks
+    Object.keys(this.subscriptions).forEach(
+      (key) => delete this.subscriptions[key],
+    )
+
+    // Unregister from scheduler's onClear listener to prevent memory leaks
+    // The scheduler's listener Set would otherwise keep a strong reference to this builder
+    this.unsubscribeFromSchedulerClears?.()
+    this.unsubscribeFromSchedulerClears = undefined
   }
 
   /**

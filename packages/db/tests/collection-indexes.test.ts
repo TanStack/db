@@ -19,7 +19,15 @@ import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { DEFAULT_COMPARE_OPTIONS } from '../src/utils.js'
 import { findIndexForField } from '../src/utils/index-optimization.js'
 import { makeComparator } from '../src/utils/comparison.js'
-import { expectIndexUsage, stripVirtualProps, withIndexTracking } from './utils'
+import {
+  expectIndexUsage,
+  indexedKeysSet,
+  orderedEntriesArray,
+  orderedEntriesArrayReversed,
+  stripVirtualProps,
+  valueMapData,
+  withIndexTracking,
+} from './utils'
 import type { Collection } from '../src/collection/index.js'
 import type { MutationFn, PendingMutation } from '../src/types'
 
@@ -153,7 +161,7 @@ describe(`Collection Indexes`, () => {
       expect(index.id).toBeGreaterThan(0)
       expect(index.name).toBeUndefined()
       expect(index.expression.type).toBe(`ref`)
-      expect(index.indexedKeysSet.size).toBe(5)
+      expect(indexedKeysSet(index).size).toBe(5)
     })
 
     it(`should create a named index`, () => {
@@ -162,7 +170,7 @@ describe(`Collection Indexes`, () => {
       })
 
       expect(index.name).toBe(`ageIndex`)
-      expect(index.indexedKeysSet.size).toBe(5)
+      expect(indexedKeysSet(index).size).toBe(5)
     })
 
     it(`should match compare options by collation semantics`, () => {
@@ -238,15 +246,15 @@ describe(`Collection Indexes`, () => {
       const ageIndex = collection.createIndex((row) => row.age)
 
       expect(statusIndex.id).not.toBe(ageIndex.id)
-      expect(statusIndex.indexedKeysSet.size).toBe(5)
-      expect(ageIndex.indexedKeysSet.size).toBe(5)
+      expect(indexedKeysSet(statusIndex).size).toBe(5)
+      expect(indexedKeysSet(ageIndex).size).toBe(5)
     })
 
     it(`should maintain ordered entries`, () => {
       const ageIndex = collection.createIndex((row) => row.age)
 
       // Ages should be ordered: 22, 25, 28, 30, 35
-      const orderedAges = ageIndex.orderedEntriesArray.map(([age]) => age)
+      const orderedAges = orderedEntriesArray(ageIndex).map(([age]) => age)
       expect(orderedAges).toEqual([22, 25, 28, 30, 35])
     })
 
@@ -254,10 +262,10 @@ describe(`Collection Indexes`, () => {
       const statusIndex = collection.createIndex((row) => row.status)
 
       // Should have 3 unique status values
-      expect(statusIndex.orderedEntriesArray.length).toBe(3)
+      expect(orderedEntriesArray(statusIndex).length).toBe(3)
 
       // "active" status should have 3 items
-      const activeKeys = statusIndex.valueMapData.get(`active`)
+      const activeKeys = valueMapData(statusIndex).get(`active`)
       expect(activeKeys?.size).toBe(3)
     })
 
@@ -265,10 +273,10 @@ describe(`Collection Indexes`, () => {
       const scoreIndex = collection.createIndex((row) => row.score)
 
       // Should include the item with undefined score
-      expect(scoreIndex.indexedKeysSet.size).toBe(5)
+      expect(indexedKeysSet(scoreIndex).size).toBe(5)
 
       // undefined should be first in ordered entries
-      const firstValue = scoreIndex.orderedEntriesArray[0]?.[0]
+      const firstValue = orderedEntriesArray(scoreIndex)[0]?.[0]
       expect(firstValue).toBeUndefined()
     })
   })
@@ -1704,10 +1712,10 @@ describe(`Collection Indexes`, () => {
       const index = groupedCollection.createIndex((row) => row.value)
 
       expect(index.takeFromStart(2)).toEqual([`first`, `second`])
-      expect(index.orderedEntriesArray[0]?.[1]).toEqual(
+      expect(orderedEntriesArray(index)[0]?.[1]).toEqual(
         new Set([`first`, `second`]),
       )
-      expect(index.orderedEntriesArrayReversed[0]?.[1]).toEqual(
+      expect(orderedEntriesArrayReversed(index)[0]?.[1]).toEqual(
         new Set([`first`, `second`]),
       )
     })
@@ -2241,11 +2249,11 @@ describe(`Collection Indexes`, () => {
       const ageIndex = specialCollection.createIndex((row) => row.age)
 
       // Verify index contains all items including special values
-      expect(ageIndex.indexedKeysSet.size).toBe(8) // Original 5 + 3 special
-      expect(ageIndex.orderedEntriesArray).toHaveLength(8) // 8 unique age values (including null)
+      expect(indexedKeysSet(ageIndex).size).toBe(8) // Original 5 + 3 special
+      expect(orderedEntriesArray(ageIndex)).toHaveLength(8) // 8 unique age values (including null)
 
       // Null/undefined should be ordered first
-      const firstValue = ageIndex.orderedEntriesArray[0]?.[0]
+      const firstValue = orderedEntriesArray(ageIndex)[0]?.[0]
       expect(firstValue == null).toBe(true)
 
       // Test that queries with special values use indexes correctly
@@ -2289,17 +2297,17 @@ describe(`Collection Indexes`, () => {
 
       const index = emptyCollection.createIndex((row) => row.age)
 
-      expect(index.indexedKeysSet.size).toBe(0)
-      expect(index.orderedEntriesArray).toHaveLength(0)
-      expect(index.valueMapData.size).toBe(0)
+      expect(indexedKeysSet(index).size).toBe(0)
+      expect(orderedEntriesArray(index)).toHaveLength(0)
+      expect(valueMapData(index).size).toBe(0)
     })
 
     it(`should handle index updates when data changes through sync`, async () => {
       const ageIndex = collection.createIndex((row) => row.age)
 
       // Original index should have 5 items
-      expect(ageIndex.indexedKeysSet.size).toBe(5)
-      expect(ageIndex.orderedEntriesArray).toHaveLength(5)
+      expect(indexedKeysSet(ageIndex).size).toBe(5)
+      expect(orderedEntriesArray(ageIndex)).toHaveLength(5)
 
       // Perform mutations that will sync back and update indexes
       const tx1 = createTransaction({ mutationFn })
@@ -2333,7 +2341,7 @@ describe(`Collection Indexes`, () => {
       await new Promise((resolve) => setTimeout(resolve, 10))
 
       // Verify that indexes are updated after sync
-      expect(ageIndex.indexedKeysSet.size).toBe(5) // 5 original - 1 deleted + 1 inserted
+      expect(indexedKeysSet(ageIndex).size).toBe(5) // 5 original - 1 deleted + 1 inserted
 
       // Test that index-optimized queries work with the updated data
       withIndexTracking(collection, (tracker) => {

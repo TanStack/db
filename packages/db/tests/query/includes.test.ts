@@ -11,12 +11,12 @@ import {
   toArray,
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
-import { CleanupQueue } from '../../src/collection/cleanup-queue.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { localOnlyCollectionOptions } from '../../src/local-only.js'
 import {
   flushPromises,
   mockSyncCollectionOptions,
+  resetCleanupQueue,
   stripVirtualProps,
 } from '../utils.js'
 import type { SyncConfig } from '../../src/types.js'
@@ -5044,12 +5044,12 @@ describe(`includes subqueries`, () => {
   describe(`child collection garbage collection`, () => {
     beforeEach(() => {
       vi.useFakeTimers()
-      CleanupQueue.resetInstance()
+      resetCleanupQueue()
     })
 
     afterEach(() => {
       vi.useRealTimers()
-      CleanupQueue.resetInstance()
+      resetCleanupQueue()
     })
 
     it(`child collections should not be garbage collected when external subscribers unmount`, async () => {

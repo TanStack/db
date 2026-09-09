@@ -39,6 +39,7 @@ export type {
   IndexInterface,
   IndexConstructor,
   IndexOperation,
+  IndexReader,
 } from './indexes/base-index.js'
 export { type IndexOptions } from './indexes/index-options.js'
 

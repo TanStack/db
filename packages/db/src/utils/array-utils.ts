@@ -1,3 +1,13 @@
+import { compareKeys } from '@tanstack/db-ivm'
+
+/** Key order for descending pages, so no page needs a separate reverse pass. */
+export function compareKeysReversed(
+  a: string | number,
+  b: string | number,
+): number {
+  return compareKeys(b, a)
+}
+
 /**
  * Finds the correct insert position for a value in a sorted array using binary search
  * @param sortedArray The sorted array to search in

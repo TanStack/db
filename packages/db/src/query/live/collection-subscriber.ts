@@ -164,8 +164,11 @@ export class CollectionSubscriber<
         deferred.resolve()
       }
 
-      this.demand.clear()
-      subscription.unsubscribe()
+      try {
+        this.demand.clear()
+      } finally {
+        subscription.unsubscribe()
+      }
     }
     // currentSyncState is always defined when subscribe() is called
     // (called during sync session setup)

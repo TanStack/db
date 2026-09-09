@@ -7,6 +7,7 @@ import {
   transactionScopedScheduler,
   withPublicationContext,
 } from '../src/scheduler.js'
+import { resetCleanupQueue } from './utils'
 
 // Mock setTimeout and clearTimeout for testing GC behavior
 const originalSetTimeout = global.setTimeout
@@ -185,7 +186,7 @@ describe(`Collection Lifecycle Management`, () => {
     global.setTimeout = originalSetTimeout
     global.clearTimeout = originalClearTimeout
     vi.clearAllMocks()
-    CleanupQueue.resetInstance()
+    resetCleanupQueue()
   })
 
   const triggerAllTimeouts = () => {

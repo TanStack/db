@@ -168,15 +168,6 @@ export class Scheduler {
     this.contexts.delete(contextId)
   }
 
-  /**
-   * Flush all contexts with pending work. Useful during tear-down.
-   */
-  flushAll(): void {
-    for (const contextId of Array.from(this.contexts.keys())) {
-      this.flush(contextId)
-    }
-  }
-
   /** Clear all scheduled jobs for a context. */
   clear(contextId: SchedulerContextId): void {
     this.contexts.delete(contextId)
@@ -189,12 +180,6 @@ export class Scheduler {
   onClear(listener: (contextId: SchedulerContextId) => void): () => void {
     this.clearListeners.add(listener)
     return () => this.clearListeners.delete(listener)
-  }
-
-  /** Check if a context has pending jobs. */
-  hasPendingJobs(contextId: SchedulerContextId): boolean {
-    const context = this.contexts.get(contextId)
-    return !!context && context.jobs.size > 0
   }
 }
 

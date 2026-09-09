@@ -20,7 +20,7 @@ import { ReverseIndex } from '../indexes/reverse-index.js'
 import { hasVirtualPropPath } from '../virtual-props.js'
 import { makeComparator } from './comparison.js'
 import type { CompareOptions } from '../query/builder/types.js'
-import type { IndexInterface, IndexOperation } from '../indexes/base-index.js'
+import type { IndexOperation, IndexReader } from '../indexes/base-index.js'
 import type { BasicExpression } from '../query/ir.js'
 import type { CollectionLike } from '../types.js'
 
@@ -46,7 +46,7 @@ export function findIndexForField<TKey extends string | number>(
   collection: CollectionLike<any, TKey>,
   fieldPath: Array<string>,
   compareOptions?: CompareOptions,
-): IndexInterface<TKey> | undefined {
+): IndexReader<TKey> | undefined {
   if (hasVirtualPropPath(fieldPath)) {
     return undefined
   }
@@ -183,7 +183,7 @@ function isRangeOrderingDivergent(
  */
 function canRangeOptimize(
   value: unknown,
-  index: IndexInterface<any>,
+  index: IndexReader<any>,
   collection: CollectionLike<any, any>,
 ): boolean {
   return (

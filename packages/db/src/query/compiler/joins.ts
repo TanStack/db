@@ -22,6 +22,7 @@ import {
   getParentContextValue,
 } from '../equality-value-identity.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
+import { getFromSources } from '../ir.js'
 import { compileExpression } from './evaluators.js'
 import { getSourceAliasesFromExpression } from './expressions.js'
 import { getLazyLoadTargets } from './lazy-targets.js'
@@ -701,15 +702,7 @@ function processJoinSource(
 }
 
 function getFirstFromAlias(query: QueryIR): string | undefined {
-  if (query.from.type === `unionFrom`) {
-    return query.from.sources[0]?.alias
-  }
-
-  if (query.from.type === `unionAll`) {
-    return undefined
-  }
-
-  return query.from.alias
+  return getFromSources(query.from)[0]?.alias
 }
 
 /**

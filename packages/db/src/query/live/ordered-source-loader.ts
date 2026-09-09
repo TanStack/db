@@ -20,17 +20,18 @@ type OrderedRequestKind = `ordered` | `boundary` | `full-source`
 /** Owns the conservative provider-loading policy for one ordered source. */
 export class OrderedSourceLoader {
   private pending: Promise<unknown> | undefined
-  // Exact request settlement is not provider extent. Reset may discard its
-  // boundary without undoing settlement; an empty page retains the boundary.
+  // Exact request settlement is not provider extent. This latch only records
+  // that some request once completed; reset may discard the boundary, and an
+  // empty page retains it. A failure never reads it before a full-source
+  // completion sets it again, so it never needs clearing.
   private hasSettledSourceRequest = false
   private settledSourceBoundary: Record<string, unknown> | undefined
   // Independent of finite success: only full-source success repairs ordering.
   private needsFullSourceRecovery = false
   private requesting = false
   // Retaining a demand does not prove it succeeded. Async failure retains it
-  // for replay; a synchronous startup failure does not.
-  private hasFullSourceDemand = false
-  private fullSourceFailed = false
+  // (`failed`) for replay; a synchronous startup failure retains nothing.
+  private fullSource: `none` | `held` | `failed` = `none`
   // The record's presence blocks automatic retry, including initial requests
   // that have no explicit window-operation generation.
   private failedRequest:
@@ -53,10 +54,6 @@ export class OrderedSourceLoader {
     ) => void = () => {},
   ) {
     this.info.isRequesting = () => this.requesting
-  }
-
-  get pendingPromise(): Promise<unknown> | undefined {
-    return this.pending
   }
 
   /** Derive invalidation from actual contributions, not a second cursor. */
@@ -129,11 +126,8 @@ export class OrderedSourceLoader {
         if (!this.active) return
       }
     }
-    if (this.fullSourceFailed) {
-      this.hasFullSourceDemand = false
-      this.fullSourceFailed = false
-    }
-    if (this.hasFullSourceDemand) return this.pending
+    if (this.fullSource === `failed`) this.fullSource = `none`
+    else if (this.fullSource === `held`) return this.pending
     if (this.needsFullSourceRecovery || this.info.requiresFullSource) {
       this.loadFullSource(windowOperationGeneration)
       return this.pending
@@ -145,14 +139,13 @@ export class OrderedSourceLoader {
       )
       return this.pending
     }
-    if (!this.info.dataNeeded) return this.pending
+    if (!this.info.dataNeeded || this.pending) return this.pending
+    // A recorded failure always carries recovery debt, so it cannot reach this
+    // finite path; only the first request needs the whole prefix here.
     let count = Math.max(
       this.info.dataNeeded(),
-      this.failedRequest !== undefined || !this.hasSettledSourceRequest
-        ? this.info.offset + this.info.limit
-        : 0,
+      this.hasSettledSourceRequest ? 0 : this.info.offset + this.info.limit,
     )
-    if (this.pending) return this.pending
     if (
       windowOperationGeneration !== undefined &&
       this.settledSourceBoundary !== undefined
@@ -167,9 +160,8 @@ export class OrderedSourceLoader {
   }
 
   loadFullSource(windowOperationGeneration?: number): void {
-    if (!this.active || this.hasFullSourceDemand) return
-    this.fullSourceFailed = false
-    this.hasFullSourceDemand = true
+    if (!this.active || this.fullSource !== `none`) return
+    this.fullSource = `held`
     this.requestAndObserve(
       (onLoadSubsetResult) => {
         this.subscription.requestSnapshot({
@@ -214,12 +206,12 @@ export class OrderedSourceLoader {
   }
 
   settleFullSourceReplay(): void {
-    if (this.hasFullSourceDemand) {
-      // Replay repaired the retained logical acquisition. A later window
-      // retry must not release that now-successful source demand. A failed
-      // finite page is still obsolete and must be released by that retry.
-      if (this.fullSourceFailed) this.releaseFailedAcquisition = undefined
-      this.fullSourceFailed = false
+    // Replay repaired the retained logical acquisition. A later window retry
+    // must not release that now-successful source demand. A failed finite
+    // page is still obsolete and must be released by that retry.
+    if (this.fullSource === `failed`) {
+      this.releaseFailedAcquisition = undefined
+      this.fullSource = `held`
     }
   }
 
@@ -324,10 +316,7 @@ export class OrderedSourceLoader {
           }
         }
       }
-      if (isFullSource) {
-        this.fullSourceFailed = false
-        this.needsFullSourceRecovery = false
-      }
+      if (isFullSource) this.needsFullSourceRecovery = false
       if (kind === `ordered`) {
         this.loadBoundary(windowOperationGeneration)
         return
@@ -345,12 +334,10 @@ export class OrderedSourceLoader {
       // None of those rows is a safe continuation boundary.
       this.requireFullSourceRecovery()
       if (generation !== this.generation) return
-      if (isFullSource) {
-        // A failed request proves no full-source coverage. An explicit
-        // window move or later replay may retry it, but an ordinary graph
-        // pass must not start an eager retry loop.
-        this.fullSourceFailed = true
-      }
+      // A failed request proves no full-source coverage. An explicit window
+      // move or later replay may retry it, but an ordinary graph pass must
+      // not start an eager retry loop.
+      if (isFullSource) this.fullSource = `failed`
       this.recordRequestFailure(windowOperationGeneration)
       this.releaseFailedAcquisition = releaseAcquisition
       throw error
@@ -404,7 +391,6 @@ export class OrderedSourceLoader {
   }
 
   private requireFullSourceRecovery(): void {
-    this.hasSettledSourceRequest = false
     this.settledSourceBoundary = undefined
     this.needsFullSourceRecovery = true
   }
@@ -428,10 +414,7 @@ export class OrderedSourceLoader {
     }
     this.requireFullSourceRecovery()
     this.recordRequestFailure(windowOperationGeneration)
-    if (isFullSource) {
-      this.hasFullSourceDemand = false
-      this.fullSourceFailed = true
-    }
+    if (isFullSource) this.fullSource = `none`
     try {
       observed?.release({ error })
     } catch {
@@ -487,15 +470,13 @@ export class OrderedSourceLoader {
         observed.options,
       )
     } catch (error) {
-      this.requesting = !observing
-      const normalized = normalizeError(error)
       // Both request and settlement callbacks may reenter through cleanup.
       // Keep refinement blocked until failure and release finish unwinding.
       this.requesting = true
       try {
         throw this.failRequest(
           observed,
-          normalized,
+          normalizeError(error),
           isFullSource,
           windowOperationGeneration,
           observing,

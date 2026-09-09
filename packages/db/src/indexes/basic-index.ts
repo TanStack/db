@@ -5,7 +5,10 @@ import {
   makeComparator,
   normalizeValue,
 } from '../utils/comparison.js'
-import { findInsertPositionInArray } from '../utils/array-utils.js'
+import {
+  compareKeysReversed,
+  findInsertPositionInArray,
+} from '../utils/array-utils.js'
 import { BaseIndex } from './base-index.js'
 import type { CompareOptions } from '../query/builder/types.js'
 import type { BasicExpression } from '../query/ir.js'
@@ -453,8 +456,7 @@ export class BasicIndex<
         index < this.sortedValues.length &&
         this.compareFn(this.sortedValues[index], groupValue) === 0
       )
-      groupKeys.sort(compareKeys)
-      if (step === -1) groupKeys.reverse()
+      groupKeys.sort(step === 1 ? compareKeys : compareKeysReversed)
       for (const key of groupKeys) {
         if (filterFn?.(key) ?? true) result.push(key)
         if (result.length >= n) break
@@ -478,30 +480,5 @@ export class BasicIndex<
     }
 
     return result
-  }
-
-  // Getter methods for testing/compatibility
-  get indexedKeysSet(): Set<TKey> {
-    return this.indexedKeys
-  }
-
-  get orderedEntriesArray(): Array<[any, Set<TKey>]> {
-    return this.sortedValues.map((value) => [
-      value,
-      this.valueMap.get(value) ?? new Set(),
-    ])
-  }
-
-  get orderedEntriesArrayReversed(): Array<[any, Set<TKey>]> {
-    const result: Array<[any, Set<TKey>]> = []
-    for (let i = this.sortedValues.length - 1; i >= 0; i--) {
-      const value = this.sortedValues[i]
-      result.push([value, this.valueMap.get(value) ?? new Set()])
-    }
-    return result
-  }
-
-  get valueMapData(): Map<any, Set<TKey>> {
-    return this.valueMap
   }
 }

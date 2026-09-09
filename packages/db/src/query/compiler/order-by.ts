@@ -25,7 +25,7 @@ import type {
   NamespacedRow,
 } from '../../types.js'
 import type { IStreamBuilder, KeyValue } from '@tanstack/db-ivm'
-import type { IndexInterface } from '../../indexes/base-index.js'
+import type { IndexReader } from '../../indexes/base-index.js'
 import type { Collection } from '../../collection/index.js'
 
 export type OrderByOptimizationInfo = {
@@ -41,7 +41,7 @@ export type OrderByOptimizationInfo = {
   /** Extracts all orderBy column values from a raw row (array for multi-column) */
   valueExtractorForRawRow: (row: Record<string, unknown>) => unknown
   /** Index on the first orderBy column - used for lazy loading */
-  index?: IndexInterface<string | number>
+  index?: IndexReader<string | number>
   dataNeeded?: () => number
   /** Reads the source loader's synchronous request guard, when installed. */
   isRequesting?: () => boolean
@@ -147,7 +147,7 @@ export function processOrderBy(
     rawQuery.from.type !== `unionFrom` &&
     rawQuery.from.type !== `unionAll`
   ) {
-    let index: IndexInterface<string | number> | undefined
+    let index: IndexReader<string | number> | undefined
     let followRefCollection: Collection | undefined
     let orderByAlias: string = rawQuery.from.alias
     let orderBySourceId: string | undefined

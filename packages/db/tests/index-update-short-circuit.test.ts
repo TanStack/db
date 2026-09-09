@@ -3,6 +3,7 @@ import { BasicIndex } from '../src/indexes/basic-index.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { PropRef } from '../src/query/ir.js'
 import { normalizeValue } from '../src/utils/comparison.js'
+import { valueMapData } from './utils'
 import type { BaseIndex } from '../src/indexes/base-index.js'
 
 type IndexConstructor = new (
@@ -10,9 +11,7 @@ type IndexConstructor = new (
   expression: PropRef,
   name?: string,
   options?: unknown,
-) => BaseIndex<string> & {
-  valueMapData: Map<unknown, Set<string>>
-}
+) => BaseIndex<string>
 
 const indexTypes: Array<[string, IndexConstructor]> = [
   [`BasicIndex`, BasicIndex as IndexConstructor],
@@ -40,13 +39,13 @@ describe.each(indexTypes)(`%s update`, (_indexName, IndexType) => {
   it(`keeps the existing bucket when the indexed value does not change`, () => {
     const index = createIndex()
     index.add(`a`, { value: 1, version: 1 })
-    const bucket = index.valueMapData.get(1)
+    const bucket = valueMapData(index).get(1)
     const add = vi.spyOn(index, `add`)
     const remove = vi.spyOn(index, `remove`)
 
     index.update(`a`, { value: 1, version: 1 }, { value: 1, version: 2 })
 
-    expect(index.valueMapData.get(1)).toBe(bucket)
+    expect(valueMapData(index).get(1)).toBe(bucket)
     expect(add).not.toHaveBeenCalled()
     expect(remove).not.toHaveBeenCalled()
     expect(index.lookup(`eq`, 1)).toEqual(new Set([`a`]))
@@ -61,12 +60,12 @@ describe.each(indexTypes)(`%s update`, (_indexName, IndexType) => {
   ])(`keeps the existing bucket for %s`, (_caseName, oldValue, newValue) => {
     const index = createIndex()
     index.add(`a`, { value: oldValue })
-    const bucket = index.valueMapData.get(normalizeValue(oldValue))
+    const bucket = valueMapData(index).get(normalizeValue(oldValue))
     expect(bucket).toBeDefined()
 
     index.update(`a`, { value: oldValue }, { value: newValue })
 
-    expect(index.valueMapData.get(normalizeValue(newValue))).toBe(bucket)
+    expect(valueMapData(index).get(normalizeValue(newValue))).toBe(bucket)
   })
 
   it(`moves the key when the indexed value changes`, () => {

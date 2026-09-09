@@ -35,6 +35,7 @@ import {
   stripInternalCallbackMetadata,
 } from './route-metadata.js'
 import type { ValueIdentity } from '../equality-value-identity.js'
+import type { RouteMetadata } from './route-metadata.js'
 import type {
   Aggregate,
   BasicExpression,
@@ -56,10 +57,8 @@ function createInternalGroupFields(groupCount: number, selectClause?: Select) {
   while (aliases.some((alias) => alias.startsWith(prefix))) prefix += `_`
 
   return {
-    synced: `${prefix}synced`,
-    hasLocal: `${prefix}has_local`,
-    correlationKey: `${prefix}correlation_key`,
-    parentContext: `${prefix}parent_context`,
+    virtual: `${prefix}virtual`,
+    route: `${prefix}route`,
     correlationIdentity: `${prefix}correlation_identity`,
     parentContextIdentity: `${prefix}parent_context_identity`,
     singleGroup: `${prefix}single_group`,
@@ -163,43 +162,38 @@ function addCorrelationRouteIdentityToGroupKey(
   }
 }
 
-function addCorrelationRouteAggregates(
+/** One representative carries the whole route so both parts come from one row. */
+function addCorrelationRouteAggregate(
   aggregates: Record<string, any>,
   mainSource: string,
   fields: InternalGroupFields,
   valueIdentity: ValueIdentity,
 ): void {
-  aggregates[fields.correlationKey] = {
-    preMap: ([rowKey, row]: [string, NamespacedRow]) =>
-      createRepresentative(
-        rowKey,
-        getNamespacedRouteMetadata(row, mainSource)?.correlationKey,
-        valueIdentity.exact(
-          getNamespacedRouteMetadata(row, mainSource)?.correlationKey,
-        ),
-      ),
+  aggregates[fields.route] = {
+    preMap: ([rowKey, row]: [string, NamespacedRow]) => {
+      const route = getNamespacedRouteMetadata(row, mainSource)
+      return createRepresentative(rowKey, route, [
+        valueIdentity.exact(route?.correlationKey),
+        getParentContextIdentity(route?.parentContext),
+      ])
+    },
     reduce: getRepresentative,
     postMap: unwrapRepresentative,
   }
-  aggregates[fields.parentContext] = {
-    preMap: ([rowKey, row]: [string, NamespacedRow]) =>
-      createRepresentative(
-        rowKey,
-        getNamespacedRouteMetadata(row, mainSource)?.parentContext,
-        getParentContextIdentity(
-          getNamespacedRouteMetadata(row, mainSource)?.parentContext,
-        ),
-      ),
-    reduce: getRepresentative,
-    postMap: unwrapRepresentative,
-  }
+}
+
+function getGroupRoute(
+  aggregatedRow: Record<string, unknown>,
+  fields: InternalGroupFields,
+): RouteMetadata | undefined {
+  return aggregatedRow[fields.route] as RouteMetadata | undefined
 }
 
 function getCorrelationRouteIdentity(
   aggregatedRow: Record<string, unknown>,
   fields: InternalGroupFields,
 ): unknown {
-  return aggregatedRow[fields.parentContext] == null
+  return getGroupRoute(aggregatedRow, fields)?.parentContext == null
     ? aggregatedRow[fields.correlationIdentity]
     : [
         aggregatedRow[fields.correlationIdentity],
@@ -212,9 +206,8 @@ function getGroupEvaluationRow(
   fields: InternalGroupFields,
   selected = row.$selected as Record<string, unknown>,
 ): NamespacedRow {
-  const parentContext = row[fields.parentContext]
   return {
-    ...getParentContextValue(parentContext),
+    ...getParentContextValue(getGroupRoute(row, fields)?.parentContext),
     $selected: selected,
   }
 }
@@ -304,34 +297,22 @@ export function processGroupBy(
 ): NamespacedAndKeyedStream {
   const fields = createInternalGroupFields(groupByClause.length, selectClause)
   const virtualAggregates: Record<string, any> = {
-    [fields.synced]: {
-      preMap: ([, row]: [string, NamespacedRow]) =>
-        getRowVirtualMetadata(row).synced,
-      reduce: (values: Array<[boolean, number]>) => {
-        for (const [isSynced, multiplicity] of values) {
-          if (!isSynced && multiplicity > 0) {
-            return false
-          }
+    [fields.virtual]: {
+      preMap: ([, row]: [string, NamespacedRow]) => getRowVirtualMetadata(row),
+      reduce: (values: Array<[RowVirtualMetadata, number]>) => {
+        const group: RowVirtualMetadata = { synced: true, hasLocal: false }
+        for (const [metadata, multiplicity] of values) {
+          if (multiplicity <= 0) continue
+          if (!metadata.synced) group.synced = false
+          if (metadata.hasLocal) group.hasLocal = true
         }
-        return true
-      },
-    },
-    [fields.hasLocal]: {
-      preMap: ([, row]: [string, NamespacedRow]) =>
-        getRowVirtualMetadata(row).hasLocal,
-      reduce: (values: Array<[boolean, number]>) => {
-        for (const [isLocal, multiplicity] of values) {
-          if (isLocal && multiplicity > 0) {
-            return true
-          }
-        }
-        return false
+        return group
       },
     },
   }
 
   if (mainSource) {
-    addCorrelationRouteAggregates(
+    addCorrelationRouteAggregate(
       virtualAggregates,
       mainSource,
       fields,
@@ -473,9 +454,10 @@ export function processGroupBy(
       // Generate a simple key for the live collection using group values.
       // In includes mode, add the complete route so correlated groups do not
       // collide.
-      const correlationKey = mainSource
-        ? (aggregatedRow as any)[fields.correlationKey]
+      const route = mainSource
+        ? getGroupRoute(aggregatedRow, fields)
         : undefined
+      const correlationKey = route?.correlationKey
       const correlationRoute = mainSource
         ? getCorrelationRouteIdentity(aggregatedRow, fields)
         : undefined
@@ -504,13 +486,12 @@ export function processGroupBy(
         ...(aggregatedRow as Record<string, any>),
         $selected: finalResults,
       }
-      const groupSynced = (aggregatedRow as Record<string, any>)[fields.synced]
-      const groupHasLocal = (aggregatedRow as Record<string, any>)[
-        fields.hasLocal
-      ]
-      resultRow.$synced = groupSynced ?? true
+      const virtual = (aggregatedRow as Record<string, any>)[fields.virtual] as
+        | RowVirtualMetadata
+        | undefined
+      resultRow.$synced = virtual?.synced ?? true
       resultRow.$origin = (
-        groupHasLocal ? `local` : `remote`
+        virtual?.hasLocal ? `local` : `remote`
       ) satisfies VirtualOrigin
       resultRow.$key = publicKey
       resultRow.$collectionId = aggregateCollectionId ?? resultRow.$collectionId
@@ -519,7 +500,7 @@ export function processGroupBy(
         attachRouteMetadata(
           resultRow,
           correlationKey,
-          aggregatedRow[fields.parentContext] ?? null,
+          route?.parentContext ?? null,
         )
       }
       return [mainSource ? finalKey : publicKey, resultRow] as [

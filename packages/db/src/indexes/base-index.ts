@@ -38,6 +38,19 @@ export const IndexOperation = comparisonFunctions
  */
 export type IndexOperation = (typeof comparisonFunctions)[number]
 
+/** The read-side surface consumers use on a resolved (possibly reversed) index. */
+export type IndexReader<TKey extends string | number = string | number> = Pick<
+  IndexInterface<TKey>,
+  | `lookup`
+  | `rangeQuery`
+  | `take`
+  | `takeFromStart`
+  | `keyCount`
+  | `supports`
+  | `supportsRangeOptimization`
+  | `canOptimizeRangeFor`
+>
+
 export interface IndexInterface<
   TKey extends string | number = string | number,
 > {
@@ -73,12 +86,6 @@ export interface IndexInterface<
   ) => Array<TKey>
 
   get keyCount(): number
-  get orderedEntriesArray(): Array<[any, Set<TKey>]>
-  get orderedEntriesArrayReversed(): Array<[any, Set<TKey>]>
-
-  get indexedKeysSet(): Set<TKey>
-  get valueMapData(): Map<any, Set<TKey>>
-
   supports: (operation: IndexOperation) => boolean
 
   /**
@@ -163,10 +170,6 @@ export abstract class BaseIndex<
   abstract equalityLookup(value: any): Set<TKey>
   abstract inArrayLookup(values: Array<any>): Set<TKey>
   abstract rangeQuery(options: RangeQueryOptions): Set<TKey>
-  abstract get orderedEntriesArray(): Array<[any, Set<TKey>]>
-  abstract get orderedEntriesArrayReversed(): Array<[any, Set<TKey>]>
-  abstract get indexedKeysSet(): Set<TKey>
-  abstract get valueMapData(): Map<any, Set<TKey>>
 
   // Common methods
   rangeQueryReversed(options: RangeQueryOptions = {}): Set<TKey> {

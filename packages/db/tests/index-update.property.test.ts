@@ -6,6 +6,7 @@ import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { PropRef } from '../src/query/ir.js'
 import { DEFAULT_COMPARE_OPTIONS } from '../src/utils.js'
 import { makeComparator } from '../src/utils/comparison.js'
+import { indexedKeysSet, orderedEntriesArray, valueMapData } from './utils'
 import type { BaseIndex, IndexInterface } from '../src/indexes/base-index.js'
 
 type IndexValue = number
@@ -71,9 +72,9 @@ function expectIndexMatchesModel(
   const groups = groupKeysByValue(rows)
 
   expect(index.keyCount).toBe(rows.size)
-  expect(index.indexedKeysSet).toEqual(new Set(rows.keys()))
-  expect(index.valueMapData).toEqual(groups)
-  expect(index.orderedEntriesArray).toEqual(
+  expect(indexedKeysSet(index)).toEqual(new Set(rows.keys()))
+  expect(valueMapData(index)).toEqual(groups)
+  expect(orderedEntriesArray(index)).toEqual(
     [...groups].sort(([left], [right]) => left - right),
   )
 
@@ -274,7 +275,7 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
         expect(subject.takeReversedFromEnd(currentRows.length)).toEqual(
           reversed,
         )
-        for (const [representative, keys] of subject.orderedEntriesArray) {
+        for (const [representative, keys] of orderedEntriesArray(subject)) {
           expect(
             currentRows.some(
               (row) => row.value === representative && keys.has(row.key),

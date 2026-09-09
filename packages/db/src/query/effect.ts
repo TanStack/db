@@ -4,6 +4,7 @@ import {
   transactionScopedScheduler,
 } from '../scheduler.js'
 import { getActiveTransaction } from '../transactions.js'
+import { runAllCallbacks } from '../utils/callbacks.js'
 import { normalizeError } from '../utils/error.js'
 import { compileQuery } from './compiler/index.js'
 import { normalizeExpressionPaths } from './compiler/expressions.js'
@@ -584,8 +585,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       this.subscriptions[sourceId] = subscription
 
       const unsubscribe = () => {
-        subscription.unsubscribe()
         delete this.subscriptions[sourceId]
+        subscription.unsubscribe()
       }
 
       // subscribeChanges can synchronously report a source error and dispose
@@ -943,30 +944,22 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   /** Tear down subscriptions and clear state */
   dispose(): void {
-    if (this.disposed && this.unsubscribeCallbacks.size === 0) return
-    const firstAttempt = !this.disposed
+    if (this.disposed) return
     this.disposed = true
     this.subscribedToAllCollections = false
 
-    // Immediately unsubscribe from every source, even if one release fails.
-    let firstCleanupFailure: { error: unknown } | undefined
-    for (const unsubscribe of [...this.unsubscribeCallbacks]) {
-      try {
-        unsubscribe()
-        this.unsubscribeCallbacks.delete(unsubscribe)
-      } catch (error) {
-        // A reentrant dispose can remove this callback while the outer call is
-        // still running. The failing attempt still owns the release.
-        this.unsubscribeCallbacks.add(unsubscribe)
-        firstCleanupFailure ??= { error }
-      }
+    // Release every source in one attempt; the first failure wins after the
+    // peers finish. A reentrant dispose returns at the guard above, so this
+    // call still owns each release exactly once.
+    try {
+      runAllCallbacks(this.unsubscribeCallbacks)
+    } finally {
+      this.unsubscribeCallbacks.clear()
+      this.clearPipelineState()
     }
+  }
 
-    if (!firstAttempt) {
-      if (firstCleanupFailure) throw firstCleanupFailure.error
-      return
-    }
-
+  private clearPipelineState(): void {
     this.sentToD2RowsBySource.clear()
     this.pendingChanges.clear()
     this.lazySources.clear()
@@ -989,8 +982,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.inputs = undefined
     this.pipeline = undefined
     this.sourceWhereClauses = undefined
-
-    if (firstCleanupFailure) throw firstCleanupFailure.error
   }
 }
 

@@ -20,9 +20,26 @@ import {
   mockSyncCollectionOptions,
   stripVirtualProps,
 } from '../utils.js'
+import type { SchedulerContextId } from '../../src/scheduler.js'
 import type { OutputWithVirtual } from '../utils.js'
 import type { FullSyncState } from '../../src/query/live/types.js'
 import type { SyncConfig } from '../../src/types.js'
+
+type SchedulerInternals = {
+  contexts: Map<SchedulerContextId, { jobs: Map<unknown, unknown> }>
+}
+const flushAll = (scheduler: Scheduler) => {
+  const { contexts } = scheduler as unknown as SchedulerInternals
+  for (const contextId of Array.from(contexts.keys()))
+    scheduler.flush(contextId)
+}
+const hasPendingJobs = (
+  scheduler: Scheduler,
+  contextId: SchedulerContextId,
+) => {
+  const { contexts } = scheduler as unknown as SchedulerInternals
+  return (contexts.get(contextId)?.jobs.size ?? 0) > 0
+}
 
 interface ChangeMessageLike {
   type: string
@@ -109,7 +126,7 @@ function recordBatches(collection: any) {
 }
 
 afterEach(() => {
-  transactionScopedScheduler.flushAll()
+  flushAll(transactionScopedScheduler)
 })
 
 describe(`Scheduler dependency reentry`, () => {
@@ -157,7 +174,7 @@ describe(`Scheduler dependency reentry`, () => {
       scheduler.flush(contextId)
       expect(sourceRuns).toBe(requeue ? 2 : 1)
       expect(observedRuns).toEqual([sourceRuns])
-      expect(scheduler.hasPendingJobs(contextId)).toBe(false)
+      expect(hasPendingJobs(scheduler, contextId)).toBe(false)
     },
   )
 })
@@ -182,7 +199,7 @@ describe(`Collection publication scheduler context`, () => {
       }),
     ).toThrow(listenerFailure)
     expect(graphJob).toHaveBeenCalledOnce()
-    expect(transactionScopedScheduler.hasPendingJobs(contextId!)).toBe(false)
+    expect(hasPendingJobs(transactionScopedScheduler, contextId!)).toBe(false)
     expect(getActivePublicationContext()).toBeUndefined()
   })
 
@@ -233,7 +250,7 @@ describe(`Collection publication scheduler context`, () => {
 
     expect(run).not.toHaveBeenCalled()
     expect(getActivePublicationContext()).toBeUndefined()
-    expect(transactionScopedScheduler.hasPendingJobs(contextId!)).toBe(false)
+    expect(hasPendingJobs(transactionScopedScheduler, contextId!)).toBe(false)
   })
 
   it(`preserves a falsy graph failure through a publication boundary`, () => {
@@ -999,7 +1016,7 @@ describe(`live query scheduler`, () => {
       const latestBatch = recorder.batches.at(-1)!
       expect(latestBatch[0]?.type).toBe(`delete`)
     }
-    expect(transactionScopedScheduler.hasPendingJobs(tx.id)).toBe(false)
+    expect(hasPendingJobs(transactionScopedScheduler, tx.id)).toBe(false)
     // We emit the optimistic insert and, after the explicit rollback, possibly a
     // compensating delete – but no duplicate inserts.
     expect(recorder.batches[0]![0]).toMatchObject({ type: `insert` })
@@ -1976,7 +1993,7 @@ describe(`live query scheduler`, () => {
       await new Promise((resolve) => setTimeout(resolve, 10))
 
       // The scheduler should flush successfully without detecting unresolved dependencies
-      transactionScopedScheduler.flushAll()
+      flushAll(transactionScopedScheduler)
     } catch (e) {
       error = e as Error
     }
@@ -2063,7 +2080,7 @@ describe(`live query scheduler`, () => {
     try {
       action(`1`)
       await new Promise((resolve) => setTimeout(resolve, 10))
-      transactionScopedScheduler.flushAll()
+      flushAll(transactionScopedScheduler)
     } catch (e) {
       error = e as Error
     }
