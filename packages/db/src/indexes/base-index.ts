@@ -220,8 +220,9 @@ export abstract class BaseIndex<
     const domain = rangeValueDomain(value)
     if (domain === undefined) return true
     if (!isNativeRangeDomain(domain)) return false
-    return [...this.rangeValueDomains.keys()].every(
-      (storedDomain) => storedDomain === domain,
+    return (
+      this.rangeValueDomains.size === 0 ||
+      (this.rangeValueDomains.size === 1 && this.rangeValueDomains.has(domain))
     )
   }
 

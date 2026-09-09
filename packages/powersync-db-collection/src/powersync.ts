@@ -702,18 +702,21 @@ function createPowerSyncCollectionConfig<
           }
         }
 
-        const rebuildTracking = (): Promise<void> => {
-          rebuildPromise ??= reconcileTracking()
-            .catch((error) => {
-              // A rebuild may already have removed every active diff trigger.
-              // Do not leave healthy consumers ready against a stale source.
-              if (!stopped) markError(error)
-              throw error
-            })
-            .finally(() => {
-              rebuildPromise = null
-            })
-          return rebuildPromise
+        const rebuildTracking = async (): Promise<void> => {
+          // New demand can join after reconciliation exits but before its
+          // shared promise clears. Each waiter must check its revision again.
+          while (!stopped && reconciledTrackingRevision !== trackingRevision) {
+            await (rebuildPromise ??= reconcileTracking()
+              .catch((error) => {
+                // A rebuild may already have removed every active diff trigger.
+                // Do not leave healthy consumers ready against a stale source.
+                if (!stopped) markError(error)
+                throw error
+              })
+              .finally(() => {
+                rebuildPromise = null
+              }))
+          }
         }
 
         const loadSubset = async (

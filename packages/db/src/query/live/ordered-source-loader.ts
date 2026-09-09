@@ -3,6 +3,7 @@ import {
   canExpressCursorOrder,
 } from '../../utils/cursor.js'
 import { normalizeError } from '../../utils/error.js'
+import { runAllCallbacks } from '../../utils/callbacks.js'
 import { normalizeOrderByPaths } from '../compiler/expressions.js'
 import type {
   CollectionSubscription,
@@ -37,7 +38,7 @@ export class OrderedSourceLoader {
   private failedRequest:
     | { windowOperationGeneration: number | undefined }
     | undefined
-  private releaseFailedAcquisition: ReleaseLoadSubset | undefined
+  private failedAcquisitions = new Map<ReleaseLoadSubset, OrderedRequestKind>()
   private active = true
   private generation = 0
   private lastPage: { count: number; boundary: unknown } | undefined
@@ -104,7 +105,7 @@ export class OrderedSourceLoader {
           this.failedRequest.windowOperationGeneration)
     if (!mayRetryFailure) return this.pending
     if (
-      (this.failedRequest || this.releaseFailedAcquisition) &&
+      (this.failedRequest || this.failedAcquisitions.size > 0) &&
       windowOperationGeneration !== undefined
     ) {
       // Move ownership to the explicit replacement before releasing the old
@@ -112,12 +113,12 @@ export class OrderedSourceLoader {
       if (this.failedRequest) {
         this.failedRequest.windowOperationGeneration = windowOperationGeneration
       }
-      const releaseFailedAcquisition = this.releaseFailedAcquisition
-      this.releaseFailedAcquisition = undefined
-      if (releaseFailedAcquisition) {
+      const failedAcquisitions = this.failedAcquisitions
+      this.failedAcquisitions = new Map()
+      if (failedAcquisitions.size > 0) {
         this.requesting = true
         try {
-          releaseFailedAcquisition()
+          runAllCallbacks(failedAcquisitions.keys())
         } finally {
           this.requesting = false
         }
@@ -210,7 +211,9 @@ export class OrderedSourceLoader {
     // must not release that now-successful source demand. A failed finite
     // page is still obsolete and must be released by that retry.
     if (this.fullSource === `failed`) {
-      this.releaseFailedAcquisition = undefined
+      for (const [release, kind] of this.failedAcquisitions) {
+        if (kind === `full-source`) this.failedAcquisitions.delete(release)
+      }
       this.fullSource = `held`
     }
   }
@@ -228,6 +231,7 @@ export class OrderedSourceLoader {
   dispose(): void {
     this.active = false
     this.resetCursor()
+    this.failedAcquisitions.clear()
   }
 
   private countAcquiredRows(): number {
@@ -343,7 +347,7 @@ export class OrderedSourceLoader {
       // not start an eager retry loop.
       if (isFullSource) this.fullSource = `failed`
       this.recordRequestFailure(windowOperationGeneration)
-      this.releaseFailedAcquisition = releaseAcquisition
+      this.failedAcquisitions.set(releaseAcquisition, kind)
       throw error
     }
     const tracked = request.then(complete, fail)

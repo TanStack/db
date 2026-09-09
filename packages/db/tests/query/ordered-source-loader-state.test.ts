@@ -73,6 +73,7 @@ type Observed = {
 function fakeSubscription(
   requests: Array<Observed>,
   releases: Array<LoadSubsetOptions>,
+  onRelease: () => void = () => {},
 ) {
   const request = (method: Observed[`method`], options: RequestOptions) => {
     const acquisition: LoadSubsetOptions = {
@@ -82,9 +83,10 @@ function fakeSubscription(
     }
     const deferred = createDeferred()
     requests.push({ method, options, acquisition, deferred })
-    options.onLoadSubsetResult?.(deferred.promise, acquisition, () =>
-      releases.push(acquisition),
-    )
+    options.onLoadSubsetResult?.(deferred.promise, acquisition, () => {
+      releases.push(acquisition)
+      onRelease()
+    })
   }
   return {
     readOrderedSnapshot: () => [],
@@ -96,164 +98,177 @@ function fakeSubscription(
 }
 
 describe(`Ordered source request ownership`, () => {
-  it(`keeps a failed public window private when its older tie request finishes`, async () => {
-    type Row = { id: number; rank: number }
-    const truth: Array<Row> = [1, 2, 3].map((id) => ({ id, rank: id }))
-    const requests: Array<{
-      kind: `page` | `boundary` | `full`
-      options: LoadSubsetOptions
-      gate: ReturnType<typeof createDeferred>
-    }> = []
-    const releases: Array<LoadSubsetOptions> = []
-    let hold = false
-    let update!: (row: Row) => void
-    const source = createCollection<Row, number>({
-      getKey: (row) => row.id,
-      syncMode: `on-demand`,
-      autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
-      sync: {
-        sync: (sync) => {
-          const installed = new Map<number, Row>()
-          update = (row) => {
-            installed.set(row.id, row)
-            sync.begin()
-            sync.write({ type: `update`, value: row })
-            sync.commit()
-          }
-          sync.markReady()
-          return {
-            loadSubset: async (options) => {
-              const kind = options.orderBy
-                ? `page`
-                : options.where
-                  ? `boundary`
-                  : `full`
-              const gate = createDeferred()
-              requests.push({ kind, options, gate })
-              if (!hold || kind === `page`) gate.resolve()
-              await gate.promise
-              if (options.signal?.aborted) return
-              const rows = truth
-                .filter(
-                  (row) =>
-                    (!options.where ||
-                      evaluateReferenceExpression(options.where, row) ===
-                        true) &&
-                    (!options.cursor ||
-                      evaluateReferenceExpression(
-                        options.cursor.whereFrom,
-                        row,
-                      ) === true),
-                )
-                .sort((a, b) => a.rank - b.rank)
-              const offset = options.cursor ? 0 : (options.offset ?? 0)
-              const selected = rows.slice(
-                offset,
-                options.limit === undefined
-                  ? undefined
-                  : offset + options.limit,
-              )
+  it.each([`success`, `failure`] as const)(
+    `keeps a failed public window private when its older tie request ends in %s`,
+    async (olderOutcome) => {
+      type Row = { id: number; rank: number }
+      const truth: Array<Row> = [1, 2, 3].map((id) => ({ id, rank: id }))
+      const requests: Array<{
+        kind: `page` | `boundary` | `full`
+        options: LoadSubsetOptions
+        gate: ReturnType<typeof createDeferred>
+      }> = []
+      const releases: Array<LoadSubsetOptions> = []
+      let hold = false
+      let update!: (row: Row) => void
+      const source = createCollection<Row, number>({
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: (sync) => {
+            const installed = new Map<number, Row>()
+            update = (row) => {
+              installed.set(row.id, row)
               sync.begin()
-              for (const row of selected) {
-                if (installed.get(row.id) === row) continue
-                sync.write({
-                  type: installed.has(row.id) ? `update` : `insert`,
-                  value: row,
-                })
-                installed.set(row.id, row)
-              }
-              await sync.commit()
-            },
-            unloadSubset: (options) => {
-              releases.push(options)
-            },
-          }
+              sync.write({ type: `update`, value: row })
+              sync.commit()
+            }
+            sync.markReady()
+            return {
+              loadSubset: async (options) => {
+                const kind = options.orderBy
+                  ? `page`
+                  : options.where
+                    ? `boundary`
+                    : `full`
+                const gate = createDeferred()
+                requests.push({ kind, options, gate })
+                if (!hold || kind === `page`) gate.resolve()
+                await gate.promise
+                if (options.signal?.aborted) return
+                const rows = truth
+                  .filter(
+                    (row) =>
+                      (!options.where ||
+                        evaluateReferenceExpression(options.where, row) ===
+                          true) &&
+                      (!options.cursor ||
+                        evaluateReferenceExpression(
+                          options.cursor.whereFrom,
+                          row,
+                        ) === true),
+                  )
+                  .sort((a, b) => a.rank - b.rank)
+                const offset = options.cursor ? 0 : (options.offset ?? 0)
+                const selected = rows.slice(
+                  offset,
+                  options.limit === undefined
+                    ? undefined
+                    : offset + options.limit,
+                )
+                sync.begin()
+                for (const row of selected) {
+                  if (installed.get(row.id) === row) continue
+                  sync.write({
+                    type: installed.has(row.id) ? `update` : `insert`,
+                    value: row,
+                  })
+                  installed.set(row.id, row)
+                }
+                await sync.commit()
+              },
+              unloadSubset: (options) => {
+                releases.push(options)
+              },
+            }
+          },
         },
-      },
-    })
-    const live = createLiveQueryCollection((q) =>
-      q
-        .from({ row: source })
-        .orderBy(({ row }) => row.rank)
-        .limit(1)
-        .select(({ row }) => ({ id: row.id, rank: row.rank })),
-    )
-    const visibleRows = () => live.toArray.map(({ id, rank }) => ({ id, rank }))
-    const publications: Array<Array<Row>> = []
-    live.subscribeChanges(
-      (batch) => {
-        if (batch.length) publications.push(visibleRows())
-      },
-      { includeInitialState: false },
-    )
-    try {
-      await live.preload()
-      expect(visibleRows()).toEqual([{ id: 1, rank: 1 }])
-      publications.length = 0
-      hold = true
-      const move = Promise.resolve(live.utils.setWindow({ limit: 2 })).then(
-        () => ({ status: `fulfilled` as const }),
-        (error) => ({ status: `rejected` as const, error }),
+      })
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank)
+          .limit(1)
+          .select(({ row }) => ({ id: row.id, rank: row.rank })),
       )
-      await flushPromises()
-      const boundary = requests.at(-1)!
-      expect(boundary.kind).toBe(`boundary`)
-      truth[0] = { id: 1, rank: 10 }
-      update(truth[0])
-      await flushPromises()
-      const full = requests.at(-1)!
-      expect(full.kind).toBe(`full`)
-      const count = requests.length
-      const failure = new Error(`authoritative repair failed`)
-      full.gate.reject(failure)
-      // The window still waits for its older publication participant to settle.
-      await flushPromises()
-      boundary.gate.resolve()
-      await flushPromises()
-      expect(requests).toHaveLength(count)
-      expect(await move).toEqual({ status: `rejected`, error: failure })
-      expect(releases).toEqual([])
-      expect(publications).toEqual([])
-      expect(visibleRows()).toEqual([{ id: 1, rank: 1 }])
-      expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
+      const visibleRows = () =>
+        live.toArray.map(({ id, rank }) => ({ id, rank }))
+      const publications: Array<Array<Row>> = []
+      live.subscribeChanges(
+        (batch) => {
+          if (batch.length) publications.push(visibleRows())
+        },
+        { includeInitialState: false },
+      )
+      try {
+        await live.preload()
+        expect(visibleRows()).toEqual([{ id: 1, rank: 1 }])
+        publications.length = 0
+        hold = true
+        const move = Promise.resolve(live.utils.setWindow({ limit: 2 })).then(
+          () => ({ status: `fulfilled` as const }),
+          (error) => ({ status: `rejected` as const, error }),
+        )
+        await flushPromises()
+        const boundary = requests.at(-1)!
+        expect(boundary.kind).toBe(`boundary`)
+        truth[0] = { id: 1, rank: 10 }
+        update(truth[0])
+        await flushPromises()
+        const full = requests.at(-1)!
+        expect(full.kind).toBe(`full`)
+        const count = requests.length
+        const failure = new Error(`authoritative repair failed`)
+        full.gate.reject(failure)
+        // The window still waits for its older publication participant to settle.
+        await flushPromises()
+        if (olderOutcome === `failure`)
+          boundary.gate.reject(new Error(`older tie failed`))
+        else boundary.gate.resolve()
+        await flushPromises()
+        expect(requests).toHaveLength(count)
+        expect(await move).toEqual({ status: `rejected`, error: failure })
+        expect(releases).toEqual([])
+        expect(publications).toEqual([])
+        expect(visibleRows()).toEqual([{ id: 1, rank: 1 }])
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
 
-      hold = false
-      await live.utils.setWindow({ limit: 2 })
-      expect(requests).toHaveLength(count + 1)
-      expect(releases).toEqual([full.options])
-      expect(visibleRows()).toEqual([
-        { id: 2, rank: 2 },
-        { id: 3, rank: 3 },
-      ])
-      expect(publications).toEqual([
-        [
+        hold = false
+        await live.utils.setWindow({ limit: 2 })
+        expect(requests).toHaveLength(count + 1)
+        expect(releases).toEqual(
+          olderOutcome === `failure`
+            ? [full.options, boundary.options]
+            : [full.options],
+        )
+        expect(visibleRows()).toEqual([
           { id: 2, rank: 2 },
           { id: 3, rank: 3 },
-        ],
-      ])
-    } finally {
-      await live.cleanup()
-      for (const request of requests) request.gate.resolve()
-      await source.cleanup()
-    }
-  })
+        ])
+        expect(publications).toEqual([
+          [
+            { id: 2, rank: 2 },
+            { id: 3, rank: 3 },
+          ],
+        ])
+      } finally {
+        await live.cleanup()
+        for (const request of requests) request.gate.resolve()
+        await source.cleanup()
+      }
+    },
+  )
 
   // Finite success is not authority to repair a newer full-source failure.
   // Cross request kind with settlement order instead of testing each alone.
   it.each(
     ([`page`, `boundary`] as const).flatMap((olderKind) =>
       ([`older-first`, `full-first`] as const).flatMap((order) =>
-        ([`success`, `failure`] as const).map((outcome) => ({
-          olderKind,
-          order,
-          outcome,
-        })),
+        ([`success`, `failure`] as const).flatMap((outcome) =>
+          ([`success`, `failure`] as const).map((olderOutcome) => ({
+            olderKind,
+            order,
+            outcome,
+            olderOutcome,
+          })),
+        ),
       ),
     ),
   )(
     `keeps full-source recovery authoritative across overlap: %j`,
-    async ({ olderKind, order, outcome }) => {
+    async ({ olderKind, order, outcome, olderOutcome }) => {
       const requests: Array<Observed> = []
       const releases: Array<LoadSubsetOptions> = []
       const participants: Array<Promise<unknown>> = []
@@ -286,9 +301,15 @@ describe(`Ordered source request ownership`, () => {
         expect(requests[fullIndex]!.options.orderBy).toBeUndefined()
         expect(requests[fullIndex]!.options.where).toBeUndefined()
         const failure = new Error(`full-source failed`)
+        const olderFailure = new Error(`older request failed`)
         const settleOlder = async () => {
-          requests[olderIndex]!.deferred.resolve()
-          await participants[olderIndex]
+          if (olderOutcome === `failure`) {
+            requests[olderIndex]!.deferred.reject(olderFailure)
+            await expect(participants[olderIndex]).rejects.toBe(olderFailure)
+          } else {
+            requests[olderIndex]!.deferred.resolve()
+            await participants[olderIndex]
+          }
           expect(requests).toHaveLength(count)
         }
         const settleFull = async () => {
@@ -313,14 +334,81 @@ describe(`Ordered source request ownership`, () => {
         expect(releases).toEqual([])
 
         loader.loadMore(1)
+        const failedIndices = (
+          order === `older-first`
+            ? [olderIndex, fullIndex]
+            : [fullIndex, olderIndex]
+        ).filter(
+          (index) =>
+            (index === olderIndex ? olderOutcome : outcome) === `failure`,
+        )
+        expect(releases).toEqual(
+          failedIndices.map((index) => requests[index]!.acquisition),
+        )
         if (outcome === `failure`) {
           expect(requests).toHaveLength(count + 1)
-          expect(releases).toEqual([requests[fullIndex]!.acquisition])
           loader.loadMore(1)
           expect(requests).toHaveLength(count + 1)
           requests[count]!.deferred.resolve()
           await participants[count]
         } else expect(requests).toHaveLength(count)
+      } finally {
+        loader.dispose()
+        for (const request of requests) request.deferred.resolve()
+        await Promise.allSettled(participants)
+      }
+    },
+  )
+
+  it.each(
+    [false, true].flatMap((fullFirst) =>
+      [false, true].flatMap((replayed) =>
+        [false, true].map((releaseThrows) => ({
+          fullFirst,
+          replayed,
+          releaseThrows,
+        })),
+      ),
+    ),
+  )(
+    `retains each failed release while replay repairs only full-source work: %j`,
+    async ({ fullFirst, replayed, releaseThrows }) => {
+      const requests: Array<Observed> = []
+      const releases: Array<LoadSubsetOptions> = []
+      const participants: Array<Promise<unknown>> = []
+      const cleanupError = new Error(`release failed`)
+      const loader = new OrderedSourceLoader(
+        createOrderByInfo(),
+        fakeSubscription(requests, releases, () => {
+          if (releaseThrows) throw cleanupError
+        }),
+        `row`,
+        (result) => {
+          if (result instanceof Promise) participants.push(result)
+        },
+      )
+      try {
+        loader.start()
+        loader.invalidateSourceOrdering()
+        loader.loadMore()
+        expect(requests).toHaveLength(2)
+        const order = fullFirst ? [1, 0] : [0, 1]
+        for (const index of order) {
+          const failure = new Error(`request ${index} failed`)
+          requests[index]!.deferred.reject(failure)
+          await expect(participants[index]).rejects.toBe(failure)
+        }
+        if (replayed) loader.settleFullSourceReplay()
+        if (releaseThrows)
+          expect(() => loader.loadMore(1)).toThrow(cleanupError)
+        else loader.loadMore(1)
+        const expected = order
+          .filter((index) => !replayed || index === 0)
+          .map((index) => requests[index]!.acquisition)
+        expect(releases).toEqual(expected)
+        loader.loadMore(2)
+        expect(releases).toEqual(expected)
+        expect(requests).toHaveLength(replayed ? 2 : 3)
       } finally {
         loader.dispose()
         for (const request of requests) request.deferred.resolve()

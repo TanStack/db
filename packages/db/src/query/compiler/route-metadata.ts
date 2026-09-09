@@ -146,7 +146,7 @@ export function transformPublicContainers(
   omittedKeys: ReadonlySet<PropertyKey>,
 ): unknown {
   const rootReplacement = transformLeaf(value)
-  if (rootReplacement !== value) return rootReplacement
+  if (!Object.is(rootReplacement, value)) return rootReplacement
   if (!isPublicContainer(value)) return value
 
   const parents = new WeakMap<object, Set<object>>()
@@ -154,11 +154,9 @@ export function transformPublicContainers(
     object,
     Map<PropertyKey, PublicContainerProperty>
   >()
-  const visited = new WeakSet<object>()
   const dirty = new Set<object>()
   const visit = (current: object): void => {
-    if (visited.has(current)) return
-    visited.add(current)
+    if (properties.has(current)) return
     const currentProperties = new Map<PropertyKey, PublicContainerProperty>()
     properties.set(current, currentProperties)
     for (const key of Reflect.ownKeys(current)) {
@@ -174,7 +172,7 @@ export function transformPublicContainers(
       const child = descriptor.value
       const replacement = transformLeaf(child)
       property.value = { original: child, replacement }
-      if (replacement !== child) {
+      if (!Object.is(replacement, child)) {
         dirty.add(current)
         continue
       }
@@ -211,12 +209,11 @@ export function transformPublicContainers(
       const descriptor = { ...property.descriptor }
       if (property.value) {
         const { original, replacement } = property.value
-        descriptor.value =
-          replacement !== original
-            ? replacement
-            : isPublicContainer(original)
-              ? copy(original)
-              : original
+        descriptor.value = !Object.is(replacement, original)
+          ? replacement
+          : isPublicContainer(original)
+            ? copy(original)
+            : original
       }
       Object.defineProperty(result, key, descriptor)
     }

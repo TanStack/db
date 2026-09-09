@@ -371,9 +371,9 @@ export type SyncAppliedReceipt = true | Promise<void>
  * Releases the exact acquisition created for `options`.
  *
  * Implementations must be idempotent and must not throw. An adapter owns any
- * remote unsubscribe retry needed to make release reliable. Core preserves a
- * failed release defensively so a later cleanup attempt can retry the same
- * acquisition identity.
+ * remote unsubscribe retry needed to make release reliable. Core attempts
+ * each acquisition's release once, reports failures, and continues retiring
+ * other acquisitions. It does not retry a failed subset release.
  */
 export type UnloadSubsetFn = (options: LoadSubsetOptions) => void
 

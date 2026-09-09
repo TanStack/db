@@ -10,21 +10,23 @@ import { createControlledCollection } from './includes-oracle-helpers.js'
 
 it.each(
   ([`object`, `array`] as const).flatMap((kind) =>
-    [false, true].map((ordered) => ({ kind, ordered })),
+    [false, true].flatMap((ordered) =>
+      [1, NaN].map((code) => ({ kind, ordered, code })),
+    ),
   ),
 )(
-  `preserves $kind reference-key matches through an ordered=$ordered projected source`,
-  async ({ kind, ordered }) => {
-    const makeKey = (code: number): object =>
-      kind === `object` ? { code } : [code]
-    const key = makeKey(1)
+  `preserves $kind reference-key matches through an ordered=$ordered projected source with code=$code`,
+  async ({ kind, ordered, code }) => {
+    const makeKey = (value: number): object =>
+      kind === `object` ? { code: value } : [value]
+    const key = makeKey(code)
     const other = makeKey(2)
     const parents = createControlledCollection(`copy-parents`, [
       { id: 1, group: 1, key },
     ])
     const children = createControlledCollection(`copy-children`, [
       { id: 10, group: 1, key },
-      { id: 20, group: 1, key: makeKey(1) },
+      { id: 20, group: 1, key: makeKey(code) },
       { id: 30, group: 1, key: other },
     ])
     const live = createLiveQueryCollection((q) =>
@@ -77,6 +79,37 @@ it.each(
     }
   },
 )
+
+it.each([NaN, -0, 0, undefined, null, Infinity])(
+  `preserves every reference under an identity transform of %s`,
+  (value) => {
+    const key = { value }
+    const array = [value, key]
+    const input = { key, array, self: undefined as unknown }
+    input.self = input
+    expect(transformPublicContainers(input, (leaf) => leaf, new Set())).toBe(
+      input,
+    )
+    expect(transformPublicContainers(array, (leaf) => leaf, new Set())).toBe(
+      array,
+    )
+    expect(transformPublicContainers(key, (leaf) => leaf, new Set())).toBe(key)
+  },
+)
+
+it(`preserves a signed-zero replacement at the root and in nested containers`, () => {
+  const transform = (value: unknown) => (Object.is(value, -0) ? 0 : value)
+  expect(transformPublicContainers(-0, transform, new Set())).toBe(0)
+  const input = { key: [-0] }
+  const result = transformPublicContainers(
+    input,
+    transform,
+    new Set(),
+  ) as typeof input
+  expect(result).not.toBe(input)
+  expect(result.key[0]).toBe(0)
+  expect(input.key[0]).toBe(-0)
+})
 
 it.each([false, true])(
   `copies public descriptors with null prototype=%s`,

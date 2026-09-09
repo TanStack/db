@@ -2413,6 +2413,58 @@ describe(`On-Demand Sync Mode`, () => {
       }
     })
 
+    it.each(Array.from({ length: 12 }, (_, turn) => turn))(
+      `covers demand admitted %s microtasks after the final applied receipt`,
+      async (turn) => {
+        const db = await createDatabase()
+        vi.spyOn(db, `writeLock`).mockImplementation(async (callback) =>
+          callback({
+            getAll: () => Promise.resolve([]),
+            execute: () => Promise.resolve({}),
+          } as never),
+        )
+        const applied = pDefer<void>()
+        const entered = pDefer<void>()
+        const createDiffTrigger = vi
+          .spyOn(db.triggers, `createDiffTrigger`)
+          .mockImplementation(async (options) => {
+            await options.hooks?.beforeCreate?.({
+              getAll: () => Promise.resolve([]),
+            } as never)
+            return vi.fn()
+          })
+        const commit = vi.fn(() => {
+          entered.resolve()
+          return applied.promise
+        })
+        const { sync, loadSubset } = startOnDemandSync(db, {}, { commit })
+        const first = Promise.resolve(
+          loadSubset({ where: eq(`category`, `electronics`) }),
+        )
+        let second: Promise<unknown> | undefined
+        try {
+          await entered.promise
+          // Allow setup to reach the applied-receipt barrier, then vary only
+          // admission around its promise finalization, not wall-clock timing.
+          for (let i = 0; i < 20; i++) await Promise.resolve()
+          applied.resolve()
+          for (let i = 0; i < turn; i++) await Promise.resolve()
+          second = Promise.resolve(
+            loadSubset({ where: eq(`category`, `clothing`) }),
+          )
+          await second
+          const when = createDiffTrigger.mock.calls.at(-1)?.[0].when
+          expect(when?.INSERT).toContain(`electronics`)
+          expect(when?.INSERT).toContain(`clothing`)
+          await first
+        } finally {
+          applied.resolve()
+          await Promise.allSettled([first, second])
+          sync.cleanup?.()
+        }
+      },
+    )
+
     it(`disposes a trigger superseded while it is being created`, async () => {
       const db = await createDatabase()
       const triggerStarted = pDefer<void>()

@@ -771,6 +771,9 @@ repair starts. Its later success still settles its publication participant,
 but cannot clear a recorded failure, change the repair's state, or start more
 finite work. The full-source request owns that repair outcome. Explicit retry
 releases a failed full-source acquisition once before replacing it.
+If overlapping finite and full-source requests both fail, retry retires every
+failed acquisition, even if one release throws. A successful full-source replay
+repairs only that demand; obsolete failed finite demands still retire on retry.
 
 An ordered request cannot start another ordered request through its own
 synchronous writes. If the adapter then throws, graph callbacks scheduled by

@@ -67,9 +67,9 @@ export class SubsetDemandController {
       try {
         subscription.releaseSnapshot(segment.where)
       } catch {
-        // The subscription reports adapter cleanup failures and keeps the
-        // physical acquisition for a later unsubscribe retry. Demand changes
-        // must still reach the graph instead of escaping the source commit.
+        // The subscription reports adapter cleanup failures after its one
+        // release attempt. Demand changes must still reach the graph instead
+        // of escaping the source commit; adapters own any remote retry.
       }
     }
 
