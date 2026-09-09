@@ -321,7 +321,10 @@ describe(`OrderedSourceLoader`, () => {
         expect(retry.method).toBe(`snapshot`)
         retry.deferred.resolve()
         await pendingPromise(loader)
-        expect(releases).toEqual([target.acquisition])
+        expect(releases).toEqual([
+          target.acquisition,
+          ...(route === `boundary` ? [requests[0]!.acquisition] : []),
+        ])
       }
 
       loader.dispose()

@@ -32,7 +32,10 @@ export class OrderedSourceLoader {
   private requesting = false
   // Retaining a demand does not prove it succeeded. Async failure retains it
   // (`failed`) for replay; a synchronous startup failure retains nothing.
-  private fullSource: `none` | `held` | `failed` = `none`
+  private fullSource: `none` | `held` | `complete` | `failed` = `none`
+  // Keep callbacks, not copied requests or rows. Successful full-source work
+  // subsumes these logical owners; unfinished transports remain observed.
+  private settledFiniteAcquisitions = new Set<ReleaseLoadSubset>()
   // The record's presence blocks automatic retry, including initial requests
   // that have no explicit window-operation generation.
   private failedRequest:
@@ -128,7 +131,7 @@ export class OrderedSourceLoader {
       }
     }
     if (this.fullSource === `failed`) this.fullSource = `none`
-    else if (this.fullSource === `held`) return this.pending
+    else if (this.fullSource !== `none`) return this.pending
     if (this.needsFullSourceRecovery || this.info.requiresFullSource) {
       this.loadFullSource(windowOperationGeneration)
       return this.pending
@@ -200,6 +203,7 @@ export class OrderedSourceLoader {
 
   resetCursor(): void {
     this.generation++
+    if (this.fullSource === `complete`) this.fullSource = `held`
     this.pending = undefined
     this.lastBoundary = undefined
     this.settledSourceBoundary = undefined
@@ -216,6 +220,26 @@ export class OrderedSourceLoader {
       }
       this.fullSource = `held`
     }
+    if (this.fullSource !== `none`) {
+      this.fullSource = `complete`
+      this.retireSettledFiniteAcquisitions()
+    }
+  }
+
+  private retireSettledFiniteAcquisitions(): void {
+    if (
+      this.fullSource !== `complete` ||
+      this.subscription.hasPendingTruncateReplacement
+    )
+      return
+    const generation = this.generation
+    runAllCallbacks(
+      Array.from(this.settledFiniteAcquisitions, (release) => () => {
+        if (!this.active || generation !== this.generation) return
+        this.settledFiniteAcquisitions.delete(release)
+        release()
+      }),
+    )
   }
 
   invalidateCursor(): void {
@@ -232,6 +256,7 @@ export class OrderedSourceLoader {
     this.active = false
     this.resetCursor()
     this.failedAcquisitions.clear()
+    this.settledFiniteAcquisitions.clear()
   }
 
   private countAcquiredRows(): number {
@@ -302,7 +327,14 @@ export class OrderedSourceLoader {
     const generation = this.generation
     const complete = (): void => {
       if (this.pending === tracked) this.pending = undefined
-      if (!this.active || generation !== this.generation) return
+      if (!this.active) return
+      if (!isFullSource) {
+        // A replay can replace the physical lease while this older transport
+        // finishes. Retire its logical owner only outside the replay barrier.
+        this.settledFiniteAcquisitions.add(releaseAcquisition)
+        this.retireSettledFiniteAcquisitions()
+      }
+      if (generation !== this.generation) return
       // A finite request may finish behind an authoritative repair. It cannot
       // clear that repair's failure or resume finite refinement around it.
       if (!isFullSource && (this.failedRequest || this.fullSource !== `none`))
@@ -324,7 +356,11 @@ export class OrderedSourceLoader {
           }
         }
       }
-      if (isFullSource) this.needsFullSourceRecovery = false
+      if (isFullSource) {
+        this.needsFullSourceRecovery = false
+        this.fullSource = `complete`
+        this.retireSettledFiniteAcquisitions()
+      }
       if (kind === `ordered`) {
         this.loadBoundary(windowOperationGeneration)
         return
@@ -336,6 +372,7 @@ export class OrderedSourceLoader {
     const settlesAsync = result instanceof Promise
     const request = settlesAsync ? result : Promise.resolve()
     const fail = (error: unknown) => {
+      this.settledFiniteAcquisitions.delete(releaseAcquisition)
       if (this.pending === tracked) this.pending = undefined
       if (!this.active) return
       // A failed request may already have written only part of its result.

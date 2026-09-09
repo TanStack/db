@@ -228,10 +228,9 @@ describe(`Ordered source request ownership`, () => {
         hold = false
         await live.utils.setWindow({ limit: 2 })
         expect(requests).toHaveLength(count + 1)
-        expect(releases).toEqual(
-          olderOutcome === `failure`
-            ? [full.options, boundary.options]
-            : [full.options],
+        expect(releases).toHaveLength(count)
+        expect(new Set(releases)).toEqual(
+          new Set(requests.slice(0, count).map(({ options }) => options)),
         )
         expect(visibleRows()).toEqual([
           { id: 2, rank: 2 },
@@ -331,7 +330,17 @@ describe(`Ordered source request ownership`, () => {
         }
         loader.loadMore()
         expect(requests).toHaveLength(count)
-        expect(releases).toEqual([])
+        const successfulFinite =
+          outcome === `success`
+            ? requests
+                .slice(0, fullIndex)
+                .filter(
+                  (_, index) =>
+                    index !== olderIndex || olderOutcome === `success`,
+                )
+                .map(({ acquisition }) => acquisition)
+            : []
+        expect(releases).toEqual(successfulFinite)
 
         loader.loadMore(1)
         const failedIndices = (
@@ -342,9 +351,10 @@ describe(`Ordered source request ownership`, () => {
           (index) =>
             (index === olderIndex ? olderOutcome : outcome) === `failure`,
         )
-        expect(releases).toEqual(
-          failedIndices.map((index) => requests[index]!.acquisition),
-        )
+        expect(releases).toEqual([
+          ...successfulFinite,
+          ...failedIndices.map((index) => requests[index]!.acquisition),
+        ])
         if (outcome === `failure`) {
           expect(requests).toHaveLength(count + 1)
           loader.loadMore(1)
@@ -696,8 +706,12 @@ describe(`Ordered source request ownership`, () => {
         `cursor-page`,
         `full`,
       ])
-      // The explicit retry released exactly the failed page acquisition.
-      expect(unloads).toEqual([requests[initialRequests]!.options])
+      // Retry retires the failed page; successful repair then retires earlier
+      // finite demands while keeping the new authoritative demand.
+      expect(unloads).toEqual([
+        requests[initialRequests]!.options,
+        ...requests.slice(0, initialRequests).map(({ options }) => options),
+      ])
 
       await flushPromises()
       expect(requests).toHaveLength(initialRequests + 2)
@@ -706,4 +720,116 @@ describe(`Ordered source request ownership`, () => {
       await source.cleanup()
     }
   })
+})
+
+describe(`Successful finite demand retirement`, () => {
+  it.each([`none`, `throw`, `truncate`, `dispose`] as const)(
+    `attempts releases once across %s reentry`,
+    async (action) => {
+      const requests: Array<Observed> = []
+      const releases: Array<LoadSubsetOptions> = []
+      const participants: Array<Promise<unknown>> = []
+      const failure = new Error(`release failed`)
+      let first = true
+      const subscription = fakeSubscription(requests, releases, () => {
+        if (!first) return
+        first = false
+        if (action === `throw`) throw failure
+        if (action === `truncate`) loader.resetCursor()
+        if (action === `dispose`) loader.dispose()
+      })
+      subscription.readOrderedSnapshot = () => [
+        { type: `insert`, key: 1, value: { id: 1, rank: 1 } },
+      ]
+      const loader = new OrderedSourceLoader(
+        createOrderByInfo({ dataNeeded: () => 0 }),
+        subscription,
+        `row`,
+        (result) => {
+          if (result instanceof Promise) participants.push(result)
+        },
+      )
+      try {
+        loader.start()
+        requests[0]!.deferred.resolve()
+        await participants[0]
+        requests[1]!.deferred.resolve()
+        await participants[1]
+        loader.invalidateSourceOrdering()
+        loader.loadMore()
+        requests[2]!.deferred.resolve()
+        if (action === `throw`)
+          await expect(participants[2]).rejects.toBe(failure)
+        else await participants[2]
+        expect(releases).toEqual(
+          requests
+            .slice(0, action === `truncate` || action === `dispose` ? 1 : 2)
+            .map(({ acquisition }) => acquisition),
+        )
+        if (action === `truncate`) {
+          loader.settleFullSourceReplay()
+          expect(releases).toEqual(
+            requests.slice(0, 2).map(({ acquisition }) => acquisition),
+          )
+        }
+        loader.loadMore(1)
+        expect(new Set(releases).size).toBe(releases.length)
+        expect(requests).toHaveLength(3)
+      } finally {
+        loader.dispose()
+        for (const request of requests) request.deferred.resolve()
+        await Promise.allSettled(participants)
+      }
+    },
+  )
+
+  it.each([`before-replay`, `after-replay`] as const)(
+    `keeps unfinished physical work observed when it settles %s`,
+    async (when) => {
+      const requests: Array<Observed> = []
+      const releases: Array<LoadSubsetOptions> = []
+      const participants: Array<Promise<unknown>> = []
+      const subscription = fakeSubscription(requests, releases)
+      let replaying = false
+      Object.defineProperty(subscription, `hasPendingTruncateReplacement`, {
+        get: () => replaying,
+      })
+      const loader = new OrderedSourceLoader(
+        createOrderByInfo(),
+        subscription,
+        `row`,
+        (result) => {
+          if (result instanceof Promise) participants.push(result)
+        },
+      )
+      try {
+        loader.start()
+        replaying = true
+        loader.resetCursor()
+        loader.loadFullSource()
+        requests[1]!.deferred.resolve()
+        await participants[1]
+        expect(releases).toEqual([])
+        const settlePage = async () => {
+          requests[0]!.deferred.resolve()
+          await participants[0]
+        }
+        if (when === `before-replay`) {
+          await settlePage()
+          expect(releases).toEqual([])
+        }
+        replaying = false
+        loader.settleFullSourceReplay()
+        if (when === `after-replay`) {
+          expect(releases).toEqual([])
+          await settlePage()
+        }
+        expect(releases).toEqual([requests[0]!.acquisition])
+      } finally {
+        loader.dispose()
+        for (const request of requests) request.deferred.resolve()
+        await Promise.allSettled(participants)
+      }
+    },
+  )
 })

@@ -775,6 +775,15 @@ If overlapping finite and full-source requests both fail, retry retires every
 failed acquisition, even if one release throws. A successful full-source replay
 repairs only that demand; obsolete failed finite demands still retire on retry.
 
+Successful authoritative full-source recovery also retires settled successful
+page and tie demands. Later replay therefore reacquires the full source without
+repeating those finite requests. Retirement waits for each original request to
+settle and for any active replay to finish; it does not cancel unfinished work
+merely because the full-source request finished first. Failed finite demands
+still follow the explicit-retry rule above. Release callbacks retire ownership
+before adapter code runs, and reentrant truncate or disposal stops the current
+retirement pass. No copied rows or additional cursor history are retained.
+
 An ordered request cannot start another ordered request through its own
 synchronous writes. If the adapter then throws, graph callbacks scheduled by
 those writes still belong to the failed window operation and cannot retry it.
