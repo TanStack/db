@@ -75,7 +75,7 @@ describe(`Collection Error Handling`, () => {
     )
 
     it.each([false, true])(
-      `retries failed cleanup only before replacement, nested restart=%s`,
+      `retries failed cleanup only before replacement, restart after rejection=%s`,
       async (restart) => {
         const failure = new Error(`cleanup failed`)
         const cleanups: Array<number> = []
@@ -92,7 +92,9 @@ describe(`Collection Error Handling`, () => {
                 if (cleanups.length !== 1) return
                 if (restart) {
                   void collection.cleanup()
-                  collection.startSyncImmediate()
+                  expect(() => collection.startSyncImmediate()).toThrow(
+                    `after cleanup() completes`,
+                  )
                 }
                 throw failure
               }
@@ -114,6 +116,8 @@ describe(`Collection Error Handling`, () => {
           expect(reportedError).toBeInstanceOf(SyncCleanupError)
           expect((reportedError as Error).cause).toBe(failure)
 
+          expect(session).toBe(1)
+          if (restart) collection.startSyncImmediate()
           await collection.cleanup()
           expect(cleanups).toEqual(restart ? [0, 1] : [0, 0])
           await collection.cleanup()

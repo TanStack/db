@@ -39,6 +39,7 @@ export class CollectionLifecycleManager<
   private idleCallbackId: number | null = null
   private syncError: unknown
   private statusRevision = 0
+  private cleaningUp = false
 
   /**
    * Creates a new CollectionLifecycleManager instance
@@ -204,6 +205,14 @@ export class CollectionLifecycleManager<
     return this.syncError
   }
 
+  public assertCanStartSync(): void {
+    if (this.cleaningUp) {
+      throw new CollectionStateError(
+        `Cannot start collection "${this.id}" during cleanup. Restart after cleanup() completes.`,
+      )
+    }
+  }
+
   /**
    * Start the garbage collection timer
    * Called when the collection becomes inactive (no subscribers)
@@ -274,26 +283,33 @@ export class CollectionLifecycleManager<
    * @returns true if cleanup was completed, false if it was rescheduled
    */
   private performCleanup(deadline?: IdleCallbackDeadline): boolean {
+    // Nested cleanup belongs to this retirement, not a new lifecycle turn.
+    if (this.cleaningUp) return true
     // If we have a deadline, we can potentially split cleanup into chunks
     // For now, we'll do all cleanup at once but check if we have time
     const hasTime =
       !deadline || deadline.timeRemaining() > 0 || deadline.didTimeout
 
     if (hasTime) {
-      // Perform all cleanup operations except events
-      this.sync.cleanup()
-      this.state.cleanup()
-      this.changes.cleanup()
-      this.indexes.cleanup()
+      this.cleaningUp = true
+      try {
+        // Perform all cleanup operations except events
+        this.sync.cleanup()
+        this.state.cleanup()
+        this.changes.cleanup()
+        this.indexes.cleanup()
 
-      CleanupQueue.getInstance().cancel(this)
+        CleanupQueue.getInstance().cancel(this)
 
-      this.hasBeenReady = false
-      this.syncError = undefined
+        this.hasBeenReady = false
+        this.syncError = undefined
 
-      // Cleanup is not readiness. Sync cleanup rejects pending preload callers;
-      // first-ready listeners belong to the discarded run.
-      this.onFirstReadyCallbacks = []
+        // Cleanup is not readiness. Sync cleanup rejects pending preload callers;
+        // first-ready listeners belong to the discarded run.
+        this.onFirstReadyCallbacks = []
+      } finally {
+        this.cleaningUp = false
+      }
 
       // Set status to cleaned-up after everything is cleaned up
       // This fires the status:change event to notify listeners

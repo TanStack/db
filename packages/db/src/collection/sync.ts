@@ -107,6 +107,7 @@ export class CollectionSyncManager<
    * This is called when the collection is first accessed or preloaded
    */
   public startSync(): void {
+    this.lifecycle.assertCanStartSync()
     if (
       this.lifecycle.status !== `idle` &&
       this.lifecycle.status !== `cleaned-up`
@@ -547,6 +548,11 @@ export class CollectionSyncManager<
    * Multiple concurrent calls will share the same promise
    */
   public preload(): Promise<void> {
+    try {
+      this.lifecycle.assertCanStartSync()
+    } catch (error) {
+      return Promise.reject(error)
+    }
     if (this.preloadPromise) {
       return this.preloadPromise
     }

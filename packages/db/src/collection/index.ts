@@ -504,6 +504,7 @@ export class CollectionImpl<
   /**
    * Start sync immediately - internal method for compiled queries
    * This bypasses lazy loading for special cases like live query results
+   * Throws during active cleanup; restart after cleanup completes instead.
    */
   public startSyncImmediate(): void {
     this._sync.startSync()
@@ -1048,6 +1049,8 @@ export class CollectionImpl<
   /**
    * Clean up the collection by stopping sync and clearing data
    * This can be called manually or automatically by garbage collection
+   * Cleanup callbacks must not restart this collection or call its preload().
+   * Wait until cleanup completes before starting a new sync session.
    */
   public async cleanup(): Promise<void> {
     this._lifecycle.cleanup()

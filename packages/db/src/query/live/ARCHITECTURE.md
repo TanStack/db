@@ -630,6 +630,14 @@ source rows belong in a query result.
 
 ### Cleanup, restart, and detached waiters
 
+Restart is not allowed inside an active cleanup callback. `startSyncImmediate()`
+throws `CollectionStateError` and `preload()` rejects with it before acquiring
+new work. Nested cleanup does not open a new lifecycle turn. The Collection
+holds this guard until sync, state, subscriptions, and indexes finish retiring;
+it releases the guard even if teardown throws. Restart after cleanup completes,
+including from its final `cleaned-up` status event, remains supported. This
+avoids letting old teardown clear a replacement graph or its source ownership.
+
 Collection cleanup detaches surviving logical demand from the discarded sync
 session. It aborts that session's physical work and rejects its replay barrier,
 and rejects an unfinished initial preload with `AbortError`. Cleanup never
