@@ -758,6 +758,12 @@ successful authoritative replay clears its source-recovery gate, but it does
 not clear an unrelated failed window operation. A later explicit window move
 revalidates that physical window before publishing it.
 
+A finite page or tie-boundary request can remain in flight when full-source
+repair starts. Its later success still settles its publication participant,
+but cannot clear a recorded failure, change the repair's state, or start more
+finite work. The full-source request owns that repair outcome. Explicit retry
+releases a failed full-source acquisition once before replacing it.
+
 An ordered request cannot start another ordered request through its own
 synchronous writes. If the adapter then throws, graph callbacks scheduled by
 those writes still belong to the failed window operation and cannot retry it.

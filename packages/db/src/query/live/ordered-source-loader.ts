@@ -299,6 +299,10 @@ export class OrderedSourceLoader {
     const complete = (): void => {
       if (this.pending === tracked) this.pending = undefined
       if (!this.active || generation !== this.generation) return
+      // A finite request may finish behind an authoritative repair. It cannot
+      // clear that repair's failure or resume finite refinement around it.
+      if (!isFullSource && (this.failedRequest || this.fullSource !== `none`))
+        return
       this.failedRequest = undefined
       if (kind !== `boundary`) {
         this.hasSettledSourceRequest = true
