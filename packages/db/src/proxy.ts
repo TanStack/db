@@ -327,6 +327,7 @@ interface ChangeParent {
 }
 
 interface ChangeTracker<T extends object> {
+  valueCopies: WeakMap<object, unknown>
   originalObject: T
   modified: boolean
   copy_: T
@@ -484,10 +485,15 @@ export function createChangeProxy<
   // and handles circular references
   const proxyCache = new Map<object, object>()
 
-  // Create a change tracker to track changes to the object
-  const valueCopies = new WeakMap<object, unknown>()
+  // Existing values share one private copy per row. Newly inserted objects
+  // retain normal references during the callback; the result is detached below.
+  const valueCopies =
+    parent?.tracker.valueCopies ?? new WeakMap<object, unknown>()
   const changeTracker: ChangeTracker<T> = {
-    copy_: parent?.retainIdentity ? target : deepClone(target, valueCopies),
+    valueCopies,
+    copy_: parent
+      ? ((valueCopies.get(target) ?? target) as T)
+      : deepClone(target, valueCopies),
     originalObject: deepClone(target),
     modified: false,
     assigned_: {},
@@ -609,8 +615,6 @@ export function createChangeProxy<
           changeTracker.copy_[prop as keyof T] ??
           changeTracker.originalObject[prop as keyof T]
 
-        const originalValue = changeTracker.originalObject[prop as keyof T]
-
         // If it's a getter, return the value directly
         const desc = Object.getOwnPropertyDescriptor(ptarget, prop)
         if (desc?.get) {
@@ -661,10 +665,6 @@ export function createChangeProxy<
                 ? (valueCopies.get(raw) ?? raw)
                 : raw
             }
-            const copyValue = (entry: unknown) => {
-              const raw = unwrapDraft(entry)
-              return raw !== entry ? raw : deepClone(raw, valueCopies)
-            }
 
             if (
               methodName === `has` ||
@@ -673,12 +673,8 @@ export function createChangeProxy<
               methodName === `set`
             ) {
               return (...args: Array<unknown>) => {
-                if (ptarget instanceof Set)
-                  args[0] =
-                    methodName === `add`
-                      ? copyValue(args[0])
-                      : resolveValue(args[0])
-                else if (methodName === `set`) args[1] = copyValue(args[1])
+                if (ptarget instanceof Set) args[0] = resolveValue(args[0])
+                else if (methodName === `set`) args[1] = resolveValue(args[1])
                 const result = value.apply(ptarget, args)
                 if (methodName !== `has`) markChanged(changeTracker)
                 return result === ptarget ? receiver : result
@@ -731,7 +727,7 @@ export function createChangeProxy<
 
           // Create a proxy for the nested object
           const { proxy: nestedProxy } = memoizedCreateChangeProxy(
-            originalValue,
+            value,
             nestedParent,
           )
 
@@ -898,12 +894,24 @@ export function createChangeProxy<
       }
 
       const result: Record<string, any | undefined> = {}
+      const mayHaveChangedAliases = Object.keys(changeTracker.assigned_).some(
+        (key) => typeof changeTracker.copy_[key] === `object`,
+      )
 
       // Iterate through keys in keyObj
       for (const key in changeTracker.copy_) {
-        // If the key's value is true and the key exists in valueObj
+        const value: unknown = changeTracker.copy_[key]
+        const original: unknown = changeTracker.originalObject[key]
+        // Include sibling aliases changed through another route. An untouched
+        // link back to this row does not add a field to its sparse change set.
         if (
-          changeTracker.assigned_[key] === true &&
+          (changeTracker.assigned_[key] === true ||
+            (mayHaveChangedAliases &&
+              changeTracker.copy_[key] !== changeTracker.copy_ &&
+              !deepEquals(
+                value instanceof Set ? Array.from(value) : value,
+                original instanceof Set ? Array.from(original) : original,
+              ))) &&
           key in changeTracker.copy_
         ) {
           result[key] = changeTracker.copy_[key]
@@ -951,7 +959,7 @@ export function withChangeTracking<T extends object>(
 
   callback(proxy)
 
-  return getChanges()
+  return deepClone(getChanges())
 }
 
 /**
@@ -970,5 +978,5 @@ export function withArrayChangeTracking<T extends object>(
 
   callback(proxies)
 
-  return getChanges()
+  return deepClone(getChanges())
 }

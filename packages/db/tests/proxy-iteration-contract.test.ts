@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
-import { createChangeProxy, withChangeTracking } from '../src/proxy.js'
+import {
+  createChangeProxy,
+  withArrayChangeTracking,
+  withChangeTracking,
+} from '../src/proxy.js'
 
 // Drafts preserve native live membership, even if a snapshot iterator would
 // make mutation tracking simpler. Nested field edits have separate laws.
@@ -55,7 +59,170 @@ describe.each([`Map`, `Set`] as const)(`%s draft iteration`, (kind) => {
 })
 
 type Item = { x: number }
+
+describe.each([`Map`, `Set`] as const)(
+  `%s caller-owned insertion values`,
+  (kind) => {
+    it.each([`mutate`, `delete-readd`, `second-entry`] as const)(
+      `matches native raw-object mutation after insertion: %s`,
+      (operation) => {
+        const run = (values: Map<string, Item> | Set<Item>) => {
+          const item = { x: 1 }
+          if (values instanceof Map) values.set(`a`, item)
+          else values.add(item)
+          if (operation === `delete-readd`) {
+            if (values instanceof Map) values.delete(`a`)
+            else values.delete(item)
+          }
+          item.x = 2
+          if (operation !== `mutate`) {
+            if (values instanceof Map)
+              values.set(operation === `second-entry` ? `b` : `a`, item)
+            else values.add(item)
+          }
+        }
+        const make = () =>
+          kind === `Map` ? new Map<string, Item>() : new Set<Item>()
+        const expected = make()
+        run(expected)
+        const changes = withChangeTracking({ values: make() }, (draft) =>
+          run(draft.values),
+        )
+        expect([
+          ...(changes.values as ReturnType<typeof make>).values(),
+        ]).toEqual([...expected.values()])
+      },
+    )
+  },
+)
 const protocols = [`values`, `entries`, `iterator`, `forEach`] as const
+
+describe(`Whole-draft identity boundary`, () => {
+  it.each([`object`, `array`, `Map`, `Set`] as const)(
+    `%s preserves existing data when a callback throws after editing a new object`,
+    (kind) => {
+      const item = { x: 1 }
+      const original = { x: 10 }
+      const input = {
+        original,
+        object: undefined as Item | undefined,
+        array: [] as Array<Item>,
+        map: new Map<string, Item>(),
+        set: new Set<Item>(),
+      }
+      const failure = new Error(`callback failed`)
+      expect(() =>
+        withChangeTracking(input, (draft) => {
+          draft.original.x = 20
+          let added: Item
+          if (kind === `object`) {
+            draft.object = item
+            added = draft.object
+          } else if (kind === `array`) {
+            draft.array.push(item)
+            added = draft.array[0]!
+          } else if (kind === `Map`) {
+            draft.map.set(`item`, item)
+            added = draft.map.get(`item`)!
+          } else {
+            draft.set.add(item)
+            added = draft.set.values().next().value!
+          }
+          added.x = 2
+          expect(item.x).toBe(2)
+          throw failure
+        }),
+      ).toThrow(failure)
+      expect(item.x).toBe(2)
+      expect(original.x).toBe(10)
+      expect(input.object).toBeUndefined()
+      expect(input.array).toEqual([])
+      expect(input.map.size).toBe(0)
+      expect(input.set.size).toBe(0)
+    },
+  )
+
+  it.each([`Map`, `Set`] as const)(
+    `shares a new object across two row drafts through %s and detaches both results`,
+    (kind) => {
+      const item = { x: 1 }
+      const rows = [1, 2].map((id) => ({
+        id,
+        values: kind === `Map` ? new Map<string, Item>() : new Set<Item>(),
+      }))
+      const changes = withArrayChangeTracking(rows, (drafts) => {
+        for (const draft of drafts) {
+          if (draft.values instanceof Map) draft.values.set(`item`, item)
+          else draft.values.add(item)
+        }
+        drafts[0]!.values.values().next().value!.x = 2
+        expect(drafts[1]!.values.values().next().value!.x).toBe(2)
+        expect(item.x).toBe(2)
+      })
+      item.x = 3
+      for (const change of changes) {
+        expect([
+          ...(change.values as (typeof rows)[number][`values`]).values(),
+        ]).toEqual([{ x: 2 }])
+      }
+      expect(rows.map((row) => row.values.size)).toEqual([0, 0])
+    },
+  )
+
+  it(`reports replacing a self link while omitting an untouched self link`, () => {
+    type Linked = { name: string; self?: Linked }
+    const input: Linked = { name: `before` }
+    input.self = input
+    const untouched = withChangeTracking(input, (draft) => {
+      draft.name = `after`
+    })
+    expect(untouched).toEqual({ name: `after` })
+    const replaced = withChangeTracking(input, (draft) => {
+      draft.name = `after`
+      draft.self = { name: `replacement` }
+    })
+    expect(replaced).toEqual({ name: `after`, self: { name: `replacement` } })
+    expect(input.self).toBe(input)
+    expect(input.name).toBe(`before`)
+  })
+
+  it.each(
+    ([`object`, `array`, `Map`, `Set`] as const).flatMap((kind) =>
+      [false, true].map((throughAlias) => ({ kind, throughAlias })),
+    ),
+  )(
+    `publishes both aliases for $kind, throughAlias=$throughAlias`,
+    ({ kind, throughAlias }) => {
+      const item = { x: 1 }
+      const alias =
+        kind === `object`
+          ? { item }
+          : kind === `array`
+            ? [item]
+            : kind === `Map`
+              ? new Map([[`item`, item]])
+              : new Set([item])
+      const input = { item, alias }
+      const readAlias = (container: typeof alias) =>
+        container instanceof Map
+          ? container.get(`item`)!
+          : container instanceof Set
+            ? container.values().next().value!
+            : Array.isArray(container)
+              ? container[0]!
+              : container.item
+      const changes = withChangeTracking(input, (draft) => {
+        const value = throughAlias ? readAlias(draft.alias) : draft.item
+        value.x = 2
+      })
+      const result = { ...input, ...changes }
+      expect(result.item.x).toBe(2)
+      expect(readAlias(result.alias).x).toBe(2)
+      expect(readAlias(result.alias)).toBe(result.item)
+      expect(item.x).toBe(1)
+    },
+  )
+})
 type Protocol = (typeof protocols)[number]
 
 function visit(
@@ -80,6 +247,28 @@ function visit(
 }
 
 describe.each([`Map`, `Set`] as const)(`%s nested iteration laws`, (kind) => {
+  it(`reuses an original member handle without duplicating or splitting its draft identity`, () => {
+    const item = { x: 1 }
+    const values = kind === `Map` ? new Map([[`old`, item]]) : new Set([item])
+    const changes = withChangeTracking({ values }, (draft) => {
+      if (draft.values instanceof Map) {
+        draft.values.set(`new`, item)
+        draft.values.get(`new`)!.x = 2
+        expect(draft.values.get(`old`)!.x).toBe(2)
+      } else {
+        draft.values.add(item)
+        expect(draft.values.size).toBe(1)
+        draft.values.values().next().value!.x = 2
+      }
+    })
+    expect(item.x).toBe(1)
+    expect(
+      [...(changes.values as typeof values).values()].every(
+        (value) => value.x === 2,
+      ),
+    ).toBe(true)
+  })
+
   it.each(protocols)(
     `%s tracks each nested edit once and leaves the input untouched`,
     (protocol) => {
@@ -186,7 +375,7 @@ describe.each([`Map`, `Set`] as const)(`%s nested iteration laws`, (kind) => {
     },
   )
 
-  it(`keeps newly added values private and supports chained mutators`, () => {
+  it(`shares newly added values during chained mutators and detaches the result`, () => {
     const item = { x: 1 }
     const values = kind === `Map` ? new Map<unknown, Item>() : new Set<Item>()
     const changes = withChangeTracking({ values }, (draft) => {
@@ -201,7 +390,8 @@ describe.each([`Map`, `Set`] as const)(`%s nested iteration laws`, (kind) => {
         expect(draft.values.size).toBe(1)
       }
     })
-    expect(item.x).toBe(1)
+    expect(item.x).toBe(2)
+    item.x = 3
     expect(
       [...(changes.values as typeof values).values()].every(
         (value) => value.x === 2,
@@ -308,6 +498,43 @@ it(`Map for-of nested writes reach collection.update`, async () => {
     await collection.cleanup()
   }
 })
+
+it.each([`Map`, `Set`] as const)(
+  `%s accepts raw edits inside the callback but detaches committed values afterward`,
+  async (kind) => {
+    type Row = { id: number; values: Map<string, Item> | Set<Item> }
+    const collection = createCollection<Row>({
+      getKey: (row) => row.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 1, values: kind === `Map` ? new Map() : new Set() },
+          })
+          commit()
+          markReady()
+        },
+      },
+      onUpdate: () => Promise.resolve(),
+    })
+    try {
+      const item = { x: 1 }
+      const tx = collection.update(1, (draft) => {
+        if (draft.values instanceof Map) draft.values.set(`a`, item)
+        else draft.values.add(item)
+        item.x = 2
+      })
+      expect([...collection.get(1)!.values.values()]).toEqual([{ x: 2 }])
+      item.x = 3
+      expect([...collection.get(1)!.values.values()]).toEqual([{ x: 2 }])
+      await tx.isPersisted.promise
+    } finally {
+      await collection.cleanup()
+    }
+  },
+)
 
 it.each([`entries`, `values`] as const)(
   `taking one Map %s value does not scan every entry`,
