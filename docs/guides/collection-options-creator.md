@@ -451,10 +451,10 @@ sync: {
 
 For complete, production-ready examples, see the collection packages in the TanStack DB repository:
 
-- **[@tanstack/query-collection](https://github.com/TanStack/db/tree/main/packages/query-collection)** - Pattern A: User-provided handlers with full refetch strategy
-- **[@tanstack/trailbase-collection](https://github.com/TanStack/db/tree/main/packages/trailbase-collection)** - Pattern B: Built-in handlers with ID-based tracking  
-- **[@tanstack/electric-collection](https://github.com/TanStack/db/tree/main/packages/electric-collection)** - Pattern A: Transaction ID tracking with complex sync protocols
-- **[@tanstack/rxdb-collection](https://github.com/TanStack/db/tree/main/packages/rxdb-collection)** - Pattern B: Built-in handlers that bridge [RxDB](https://rxdb.info) change streams into TanStack DB's sync lifecycle
+- **[@tanstack/query-db-collection](https://github.com/TanStack/db/tree/main/packages/query-db-collection)** - Pattern A: User-provided handlers with full refetch strategy
+- **[@tanstack/trailbase-db-collection](https://github.com/TanStack/db/tree/main/packages/trailbase-db-collection)** - Pattern B: Built-in handlers with ID-based tracking  
+- **[@tanstack/electric-db-collection](https://github.com/TanStack/db/tree/main/packages/electric-db-collection)** - Pattern A: Transaction ID tracking with complex sync protocols
+- **[@tanstack/rxdb-db-collection](https://github.com/TanStack/db/tree/main/packages/rxdb-db-collection)** - Pattern B: Built-in handlers that bridge [RxDB](https://rxdb.info) change streams into TanStack DB's sync lifecycle
 
 ### Key Lessons from Production Collections
 
