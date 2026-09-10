@@ -38,17 +38,17 @@ Use a normal merge, never rewrite published history or restore an old tree.
 
 All 30 paths in the old merge-base diff are accounted for:
 
-| Old area | Disposition |
-| --- | --- |
-| Core Collection construction and lifecycle (2 files) | Retain per-instance sync materialization and pre-start cleanup, preserving main's cleanup/reentrancy guards. |
-| Persistence runtime and tests (2 files) | Retain generation and hydration fences; preserve newer object-identity acquisitions, failure handling, and one-shot refresh behavior. |
-| Electric runtime, package, three test files and mutation ledger (6 files) | Retain lifecycle owner, sparse presence validation, reset reconciliation, and all tests; remove the replaced Store dependency. |
-| Query runtime and two ownership test files (3 files) | Keep main: it already has the refcount guard, persisted ownership ordering, and stronger public ownership laws. Textual merge had duplicated a refcount guard; removed that duplicate. |
-| Runtime identity code, test, and its changeset (3 files) | Already shipped. Keep main's lazy initialization plus symbol support and test; remove duplicate release note. |
-| Facade adapter, builder, internal utils, architecture (4 files) | Keep main; do not restore metrics API or retained builder pointer. Add only a test-contract reference in docs. |
-| Nested space fixture, test, benchmark, core package (4 files) | Retain tests and command entry points; count returned facade entries and retained maps through test-only instrumentation. |
-| getKey planning and React/Solid tests (3 files) | Retain added behavior tests; no production changes to these boundaries. |
-| AGENTS.md, lifecycle changeset, lockfile (3 files) | Keep independent-oracle rules; narrow release note to unshipped packages; retain Store dependency removal. |
+| Old area                                                                  | Disposition                                                                                                                                                                            |
+| ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Core Collection construction and lifecycle (2 files)                      | Retain per-instance sync materialization and pre-start cleanup, preserving main's cleanup/reentrancy guards.                                                                           |
+| Persistence runtime and tests (2 files)                                   | Retain generation and hydration fences; preserve newer object-identity acquisitions, failure handling, and one-shot refresh behavior.                                                  |
+| Electric runtime, package, three test files and mutation ledger (6 files) | Retain lifecycle owner, sparse presence validation, reset reconciliation, and all tests; remove the replaced Store dependency.                                                         |
+| Query runtime and two ownership test files (3 files)                      | Keep main: it already has the refcount guard, persisted ownership ordering, and stronger public ownership laws. Textual merge had duplicated a refcount guard; removed that duplicate. |
+| Runtime identity code, test, and its changeset (3 files)                  | Already shipped. Keep main's lazy initialization plus symbol support and test; remove duplicate release note.                                                                          |
+| Facade adapter, builder, internal utils, architecture (4 files)           | Keep main; do not restore metrics API or retained builder pointer. Add only a test-contract reference in docs.                                                                         |
+| Nested space fixture, test, benchmark, core package (4 files)             | Retain tests and command entry points; count returned facade entries and retained maps through test-only instrumentation.                                                              |
+| getKey planning and React/Solid tests (3 files)                           | Retain added behavior tests; no production changes to these boundaries.                                                                                                                |
+| AGENTS.md, lifecycle changeset, lockfile (3 files)                        | Keep independent-oracle rules; narrow release note to unshipped packages; retain Store dependency removal.                                                                             |
 
 ## RED/GREEN evidence
 
@@ -106,10 +106,10 @@ dependencies, and source aliases for core and db-ivm. Baseline source for each
 changed runtime file was supplied from git show, without editing the worktree.
 These are diagnostic entry bundles, not application download-size estimates.
 
-| Entry | Main minified / gzip | Reconciled minified / gzip | Gzip delta |
-| --- | --- | --- | --- |
-| Core all exports | 347,757 / 98,632 | 348,349 / 98,793 | +161 bytes |
-| Electric all exports | 96,396 / 31,749 | 95,220 / 31,022 | -727 bytes |
+| Entry                | Main minified / gzip | Reconciled minified / gzip | Gzip delta |
+| -------------------- | -------------------- | -------------------------- | ---------- |
+| Core all exports     | 347,757 / 98,632     | 348,349 / 98,793           | +161 bytes |
+| Electric all exports | 96,396 / 31,749      | 95,220 / 31,022            | -727 bytes |
 
 Runtime TypeScript delta: +410 lines (core +69, persistence +83, Electric +258).
 No Query DB runtime changes or facade metrics remain in this PR.

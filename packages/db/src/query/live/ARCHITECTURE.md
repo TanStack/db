@@ -1101,7 +1101,7 @@ create recursive Collection machinery.
 | Coherent layered publication                                                        | `packages/db/tests/query/includes-publication-oracle.test.ts`                |
 | Collection facades, event coherence, and route activation                           | `packages/db/tests/query/includes-collection-oracle.property.test.ts`        |
 | Correlated physical work                                                            | `packages/db/tests/query/includes-work-counter-oracle.test.ts`               |
-| Constructed and retained facades in a nested Collection tree                         | `packages/db/tests/query/includes-space-oracle.test.ts`                      |
+| Constructed and retained facades in a nested Collection tree                        | `packages/db/tests/query/includes-space-oracle.test.ts`                      |
 | Route-context discovery and transport across recursive and join boundaries          | `packages/db/tests/query/includes-context-transport-oracle.test.ts`          |
 | Functional projection input boundaries, timing, and output preservation             | `packages/db/tests/query/includes-functional-projection-oracle.test.ts`      |
 | Functional input rejection and inline alternatives                                  | `packages/db/tests/query/includes-functional-input-boundary.test.ts`         |
