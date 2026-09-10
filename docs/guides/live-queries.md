@@ -1542,6 +1542,76 @@ const orderStats = createCollection(liveQueryCollectionOptions({
 
 See the [Aggregate Functions](#aggregate-functions) section for a complete list of available aggregate functions.
 
+### Custom Aggregate Functions
+
+If the built-in aggregates aren't enough, register your own with `createAggregate`. It registers the aggregate and returns a typed helper you can call in `select`:
+
+```ts
+import { createAggregate, createCollection, liveQueryCollectionOptions } from '@tanstack/db'
+
+// Concatenates the values of a group, ordered by row key
+const groupConcat = createAggregate<string, [separator?: string]>(
+  'group_concat',
+  (ctx, [separator = ',']) => ({
+    // Pair each value with its row key so rows stay distinct
+    preMap: (entry) => [ctx.key(entry), String(ctx.value(entry) ?? '')],
+    reduce: (values) => {
+      const rows: Array<[string, string]> = []
+      for (const [row, multiplicity] of values) {
+        for (let i = 0; i < multiplicity; i++) rows.push(row)
+      }
+      rows.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      return rows.map(([, text]) => text).join(separator)
+    },
+  })
+)
+
+const listSummaries = createCollection(liveQueryCollectionOptions({
+  query: (q) =>
+    q
+      .from({ todo: todosCollection })
+      .groupBy(({ todo }) => todo.listId)
+      .select(({ todo }) => ({
+        listId: todo.listId,
+        allNames: groupConcat(todo.text, ' | '), // typed as string
+      }))
+}))
+```
+
+An implementation has three parts:
+
+- `preMap(entry)` — maps one row to the value that gets aggregated. Use `ctx.value(entry)` for the raw value of the first argument (no numeric coercion) and `ctx.key(entry)` for the row's key.
+- `reduce(values)` — receives the **entire group** on every change as `[value, multiplicity]` pairs and returns the reduced value. It is a full recompute, not a delta, so no accumulator bookkeeping is needed.
+- `postMap(result)` — optional final transformation of the reduced value.
+
+Arguments after the first one become the `params` tuple passed to your factory. They are evaluated once at query-compile time and must be constants — referencing a column throws `NonConstantAggregateArgumentError`.
+
+> [!IMPORTANT]
+> Values returned by `preMap` are consolidated by value: two rows producing the same value become a single entry with a multiplicity of `2`, and iteration order is not row order. Ignoring `multiplicity` silently drops duplicates. When order or per-row identity matters, include `ctx.key(entry)` in the `preMap` output (as above) and sort in `reduce`.
+
+For dynamic scenarios there is also a lower-level API:
+
+```ts
+import type { Aggregate, ExpressionLike } from '@tanstack/db'
+import { registerAggregate, unregisterAggregate, getRegisteredAggregates, IR, toExpression } from '@tanstack/db'
+
+registerAggregate('bit_or', (ctx) => ({
+  preMap: (entry) => Number(ctx.value(entry)) | 0,
+  reduce: (values) => values.reduce((acc, [value]) => acc | value, 0),
+}))
+
+// Build the IR node yourself
+const bitOr = (arg: ExpressionLike): Aggregate<number> =>
+  new IR.Aggregate<number>('bit_or', [toExpression(arg)])
+
+getRegisteredAggregates() // ReadonlySet<string> of registered names
+unregisterAggregate('bit_or') // true if a registration existed
+```
+
+Registration is global and case-insensitive. Registering a name that already exists — including a built-in like `sum` — replaces it for queries compiled *afterward* and logs a warning in development. Queries already compiled keep the implementation they were compiled with, so overriding built-ins can produce inconsistent results across your app; prefer a distinct name. Unregistering a name that shadowed a built-in restores the built-in.
+
+Custom aggregates work anywhere built-ins do, including `having` and ordering by `$selected.<alias>`. Because factories are plain functions, they cannot be serialized: with SSR, make sure the same registrations run on both the server and the client.
+
 ### Having Clauses
 
 Filter aggregated results using `having` - this is similar to the `where` clause, but is applied after the aggregation has been performed.

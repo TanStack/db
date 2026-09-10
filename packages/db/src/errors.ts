@@ -653,8 +653,26 @@ export class NonAggregateExpressionNotInGroupByError extends GroupByError {
 }
 
 export class UnsupportedAggregateFunctionError extends GroupByError {
-  constructor(functionName: string) {
-    super(`Unsupported aggregate function: ${functionName}`)
+  constructor(functionName: string, registeredNames?: Iterable<string>) {
+    const registered = registeredNames ? [...registeredNames] : []
+    super(
+      `Unsupported aggregate function: ${functionName}` +
+        (registered.length > 0
+          ? `. Registered custom aggregates: ${registered.join(`, `)}`
+          : ``),
+    )
+  }
+}
+
+/**
+ * Error thrown when an argument after the first of an aggregate expression
+ * is not a constant (e.g. it references a column).
+ */
+export class NonConstantAggregateArgumentError extends GroupByError {
+  constructor(functionName: string, argIndex: number) {
+    super(
+      `Argument ${argIndex} of aggregate function '${functionName}' must be a constant expression, not a column reference`,
+    )
   }
 }
 
