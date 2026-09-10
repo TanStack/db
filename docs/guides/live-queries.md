@@ -2822,6 +2822,11 @@ The functional variant API provides an alternative to the standard API, offering
 ### Functional Select
 
 > [!WARNING]
+> `fn.select()` cannot consume Collection-valued includes, even when the callback ignores or passes through that field. This also applies to nested Collection-valued includes. Use `toArray()` or `materialize()` in the upstream `.select()` to provide inline child values. Keep these helpers outside the functional callback.
+
+Inline child updates rerun the functional projection. Arrays support JavaScript calculations, but do not expose Collection methods such as `get()`, `createIndex()`, or `subscribeChanges()`. To keep live child Collections, use standard `.select()`, or perform parent-only `.fn.select()` work before adding the child include.
+
+> [!WARNING]
 > `fn.select()` cannot be used with `groupBy()`. The `groupBy` operator needs to statically analyze the `select` clause to discover which aggregate functions to compute, which is not possible with an opaque JavaScript function. Use the standard `.select()` API for grouped queries.
 
 Use `fn.select()` for complex transformations with JavaScript logic:

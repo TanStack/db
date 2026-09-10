@@ -1,3 +1,5 @@
+import { runAllCallbacks } from './utils/callbacks.js'
+
 /**
  * Identifier used to scope scheduled work. Maps to a transaction id for live queries.
  */
@@ -16,13 +18,13 @@ interface ScheduleOptions {
 
 /**
  * State per context. Queue preserves order, jobs hold run functions, dependencies track
- * prerequisites, and completed records which jobs have run during the current flush.
+ * prerequisites. A job leaves the pending map before its callback runs, so work
+ * queued by that callback is a new pending dependency.
  */
 interface SchedulerContextState {
   queue: Array<unknown>
   jobs: Map<unknown, () => void>
   dependencies: Map<unknown, Set<unknown>>
-  completed: Set<unknown>
 }
 
 interface PendingAwareJob {
@@ -62,7 +64,6 @@ export class Scheduler {
         queue: [],
         jobs: new Map(),
         dependencies: new Map(),
-        completed: new Set(),
       }
       this.contexts.set(contextId, context)
     }
@@ -98,9 +99,6 @@ export class Scheduler {
     } else if (!context.dependencies.has(jobId)) {
       context.dependencies.set(jobId, new Set())
     }
-
-    // Clear completion status since we're rescheduling
-    context.completed.delete(jobId)
   }
 
   /**
@@ -111,7 +109,7 @@ export class Scheduler {
     const context = this.contexts.get(contextId)
     if (!context) return
 
-    const { queue, jobs, dependencies, completed } = context
+    const { queue, jobs, dependencies } = context
 
     while (queue.length > 0) {
       let ranThisPass = false
@@ -122,7 +120,6 @@ export class Scheduler {
         const run = jobs.get(jobId)
         if (!run) {
           dependencies.delete(jobId)
-          completed.delete(jobId)
           continue
         }
 
@@ -137,13 +134,10 @@ export class Scheduler {
               isPendingAwareJob(dep) && dep.hasPendingGraphRun(contextId)
 
             // Treat dependencies as blocking if the dep has a pending run in this
-            // context or if it's enqueued and not yet complete. If the dep is
+            // context or if it's enqueued. If the dep is
             // neither pending nor enqueued, consider it satisfied to avoid deadlocks
             // on lazy sources that never schedule work.
-            if (
-              (jobs.has(dep) && !completed.has(dep)) ||
-              (!jobs.has(dep) && depHasPending)
-            ) {
+            if (jobs.has(dep) || depHasPending) {
               ready = false
               break
             }
@@ -153,10 +147,9 @@ export class Scheduler {
         if (ready) {
           jobs.delete(jobId)
           dependencies.delete(jobId)
-          // Run the job. If it throws, we don't mark it complete, allowing the
-          // error to propagate while maintaining scheduler state consistency.
+          // A reentrant schedule now owns a fresh pending job; finishing this
+          // callback must not mark that replacement as complete.
           run()
-          completed.add(jobId)
           ranThisPass = true
         } else {
           queue.push(jobId)
@@ -175,20 +168,12 @@ export class Scheduler {
     this.contexts.delete(contextId)
   }
 
-  /**
-   * Flush all contexts with pending work. Useful during tear-down.
-   */
-  flushAll(): void {
-    for (const contextId of Array.from(this.contexts.keys())) {
-      this.flush(contextId)
-    }
-  }
-
   /** Clear all scheduled jobs for a context. */
   clear(contextId: SchedulerContextId): void {
     this.contexts.delete(contextId)
-    // Notify listeners that this context was cleared
-    this.clearListeners.forEach((listener) => listener(contextId))
+    runAllCallbacks(
+      [...this.clearListeners].map((listener) => () => listener(contextId)),
+    )
   }
 
   /** Register a listener to be notified when a context is cleared. */
@@ -196,32 +181,16 @@ export class Scheduler {
     this.clearListeners.add(listener)
     return () => this.clearListeners.delete(listener)
   }
-
-  /** Check if a context has pending jobs. */
-  hasPendingJobs(contextId: SchedulerContextId): boolean {
-    const context = this.contexts.get(contextId)
-    return !!context && context.jobs.size > 0
-  }
-
-  /** Remove a single job from a context and clean up its dependencies. */
-  clearJob(contextId: SchedulerContextId, jobId: unknown): void {
-    const context = this.contexts.get(contextId)
-    if (!context) return
-
-    context.jobs.delete(jobId)
-    context.dependencies.delete(jobId)
-    context.completed.delete(jobId)
-    context.queue = context.queue.filter((id) => id !== jobId)
-
-    if (context.jobs.size === 0) {
-      this.contexts.delete(contextId)
-    }
-  }
 }
 
 export const transactionScopedScheduler = new Scheduler()
 
 let activePublicationContext: SchedulerContextId | undefined
+let activePublicationFailure: { error: unknown } | undefined
+
+function getActivePublicationFailure(): { error: unknown } | undefined {
+  return activePublicationFailure
+}
 
 /**
  * Returns the Collection publication that currently owns synchronous change
@@ -230,6 +199,12 @@ let activePublicationContext: SchedulerContextId | undefined
  */
 export function getActivePublicationContext(): SchedulerContextId | undefined {
   return activePublicationContext
+}
+
+/** Report a listener failure after the whole publication graph has drained. */
+export function recordPublicationError(error: unknown): void {
+  if (activePublicationContext === undefined) throw error
+  activePublicationFailure ??= { error }
 }
 
 /**
@@ -242,14 +217,29 @@ export function withPublicationContext<T>(publish: () => T): T {
 
   const contextId = Symbol(`collection-publication`)
   activePublicationContext = contextId
+  activePublicationFailure = undefined
+  let result!: T
+  let listenerFailure: { error: unknown } | undefined
   try {
-    const result = publish()
+    result = publish()
     transactionScopedScheduler.flush(contextId)
-    return result
+    listenerFailure = getActivePublicationFailure()
   } catch (error) {
-    transactionScopedScheduler.clear(contextId)
+    try {
+      transactionScopedScheduler.clear(contextId)
+    } catch {
+      // Keep the earlier publication or graph failure.
+    }
+    // Keep the first reported failure, including one from an earlier listener.
+    const publicationFailure = getActivePublicationFailure()
+    if (publicationFailure) {
+      throw publicationFailure.error
+    }
     throw error
   } finally {
     activePublicationContext = undefined
+    activePublicationFailure = undefined
   }
+  if (listenerFailure) throw listenerFailure.error
+  return result
 }

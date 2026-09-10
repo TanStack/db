@@ -2191,7 +2191,9 @@ describe(`Electric adapter laws`, () => {
     )
     const pendingMatch = collection.utils.awaitMatch(() => false, 100)
     const pendingTxid = collection.utils.awaitTxId(702, 100)
-    const preload = collection.preload()
+    const preload = expect(collection.preload()).rejects.toMatchObject({
+      name: `AbortError`,
+    })
     await metadataStarted.promise
     const matchOutcome = expect(pendingMatch).rejects.toThrow(/aborted/i)
     const txidOutcome = expect(pendingTxid).rejects.toThrow(/aborted/i)
@@ -2234,7 +2236,9 @@ describe(`Electric adapter laws`, () => {
     )
     const pendingMatch = collection.utils.awaitMatch(() => false, 5000)
     const pendingTxid = collection.utils.awaitTxId(703, 5000)
-    const preload = collection.preload()
+    const preload = expect(collection.preload()).rejects.toMatchObject({
+      name: `AbortError`,
+    })
     await vi.waitFor(
       () => expect(adapter.loadCollectionMetadata).toHaveBeenCalledOnce(),
       { interval: 1, timeout: 250 },

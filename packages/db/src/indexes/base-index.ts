@@ -6,6 +6,28 @@ import type { RangeQueryOptions } from './btree-index.js'
 import type { CompareOptions } from '../query/builder/types.js'
 import type { BasicExpression, OrderByDirection } from '../query/ir.js'
 
+function normalizeLocaleOptions(options: object | undefined): object {
+  return Object.fromEntries(
+    Object.entries(options ?? {}).filter(([, value]) => value !== undefined),
+  )
+}
+
+function canonicalizeLocale(locale: string | undefined): string | undefined {
+  return locale === undefined ? undefined : Intl.getCanonicalLocales(locale)[0]
+}
+
+type LocaleCompareOptions = CompareOptions & {
+  stringSort?: `locale`
+  locale?: string
+  localeOptions?: object
+}
+
+function usesLocaleCollation(
+  options: CompareOptions,
+): options is LocaleCompareOptions {
+  return (options.stringSort ?? DEFAULT_COMPARE_OPTIONS.stringSort) === `locale`
+}
+
 /**
  * Operations that indexes can support, imported from available comparison functions
  */
@@ -16,15 +38,18 @@ export const IndexOperation = comparisonFunctions
  */
 export type IndexOperation = (typeof comparisonFunctions)[number]
 
-/**
- * Statistics about index usage and performance
- */
-export interface IndexStats {
-  readonly entryCount: number
-  readonly lookupCount: number
-  readonly averageLookupTime: number
-  readonly lastUpdated: Date
-}
+/** The read-side surface consumers use on a resolved (possibly reversed) index. */
+export type IndexReader<TKey extends string | number = string | number> = Pick<
+  IndexInterface<TKey>,
+  | `lookup`
+  | `rangeQuery`
+  | `take`
+  | `takeFromStart`
+  | `keyCount`
+  | `supports`
+  | `supportsRangeOptimization`
+  | `canOptimizeRangeFor`
+>
 
 export interface IndexInterface<
   TKey extends string | number = string | number,
@@ -46,13 +71,13 @@ export interface IndexInterface<
 
   take: (
     n: number,
-    from: TKey,
+    from: unknown,
     filterFn?: (key: TKey) => boolean,
   ) => Array<TKey>
   takeFromStart: (n: number, filterFn?: (key: TKey) => boolean) => Array<TKey>
   takeReversed: (
     n: number,
-    from: TKey,
+    from: unknown,
     filterFn?: (key: TKey) => boolean,
   ) => Array<TKey>
   takeReversedFromEnd: (
@@ -61,12 +86,6 @@ export interface IndexInterface<
   ) => Array<TKey>
 
   get keyCount(): number
-  get orderedEntriesArray(): Array<[any, Set<TKey>]>
-  get orderedEntriesArrayReversed(): Array<[any, Set<TKey>]>
-
-  get indexedKeysSet(): Set<TKey>
-  get valueMapData(): Map<any, Set<TKey>>
-
   supports: (operation: IndexOperation) => boolean
 
   /**
@@ -78,11 +97,16 @@ export interface IndexInterface<
    */
   get supportsRangeOptimization(): boolean
 
+  /**
+   * Whether the live values in this index share the predicate operand's
+   * relational domain. Mixed domains can sort differently in the index and
+   * WHERE evaluator, which can make a range lookup omit matching rows.
+   */
+  canOptimizeRangeFor?: (value: unknown) => boolean
+
   matchesField: (fieldPath: Array<string>) => boolean
   matchesCompareOptions: (compareOptions: CompareOptions) => boolean
   matchesDirection: (direction: OrderByDirection) => boolean
-
-  getStats: () => IndexStats
 }
 
 /**
@@ -95,10 +119,6 @@ export abstract class BaseIndex<
   public readonly name?: string
   public readonly expression: BasicExpression
   public abstract readonly supportedOperations: Set<IndexOperation>
-
-  protected lookupCount = 0
-  protected totalLookupTime = 0
-  protected lastUpdated = new Date()
   protected compareOptions: CompareOptions
   private compiledIndexEvaluator: CompiledSingleRowExpression | undefined
   /**
@@ -106,6 +126,7 @@ export abstract class BaseIndex<
    * ordering may not match the WHERE evaluator's relational operators.
    */
   protected hasCustomComparator = false
+  private rangeValueDomains = new Map<string, number>()
 
   constructor(
     id: number,
@@ -129,7 +150,7 @@ export abstract class BaseIndex<
   abstract lookup(operation: IndexOperation, value: any): Set<TKey>
   abstract take(
     n: number,
-    from: TKey,
+    from: unknown,
     filterFn?: (key: TKey) => boolean,
   ): Array<TKey>
   abstract takeFromStart(
@@ -138,7 +159,7 @@ export abstract class BaseIndex<
   ): Array<TKey>
   abstract takeReversed(
     n: number,
-    from: TKey,
+    from: unknown,
     filterFn?: (key: TKey) => boolean,
   ): Array<TKey>
   abstract takeReversedFromEnd(
@@ -149,19 +170,60 @@ export abstract class BaseIndex<
   abstract equalityLookup(value: any): Set<TKey>
   abstract inArrayLookup(values: Array<any>): Set<TKey>
   abstract rangeQuery(options: RangeQueryOptions): Set<TKey>
-  abstract rangeQueryReversed(options: RangeQueryOptions): Set<TKey>
-  abstract get orderedEntriesArray(): Array<[any, Set<TKey>]>
-  abstract get orderedEntriesArrayReversed(): Array<[any, Set<TKey>]>
-  abstract get indexedKeysSet(): Set<TKey>
-  abstract get valueMapData(): Map<any, Set<TKey>>
 
   // Common methods
+  rangeQueryReversed(options: RangeQueryOptions = {}): Set<TKey> {
+    const { from, to, fromInclusive = true, toInclusive = true } = options
+    const reversed: RangeQueryOptions = {}
+    if (`to` in options) {
+      reversed.from = to
+      reversed.fromInclusive = toInclusive
+    }
+    if (`from` in options) {
+      reversed.to = from
+      reversed.toInclusive = fromInclusive
+    }
+    return this.rangeQuery(reversed)
+  }
+
   supports(operation: IndexOperation): boolean {
     return this.supportedOperations.has(operation)
   }
 
   get supportsRangeOptimization(): boolean {
     return !this.hasCustomComparator
+  }
+
+  protected addRangeValue(value: unknown): void {
+    const domain = rangeValueDomain(value)
+    if (domain === undefined) return
+    this.rangeValueDomains.set(
+      domain,
+      (this.rangeValueDomains.get(domain) ?? 0) + 1,
+    )
+  }
+
+  protected removeRangeValue(value: unknown): void {
+    const domain = rangeValueDomain(value)
+    if (domain === undefined) return
+    const count = this.rangeValueDomains.get(domain)
+    if (count === undefined) return
+    if (count === 1) this.rangeValueDomains.delete(domain)
+    else this.rangeValueDomains.set(domain, count - 1)
+  }
+
+  protected clearRangeValues(): void {
+    this.rangeValueDomains.clear()
+  }
+
+  canOptimizeRangeFor(value: unknown): boolean {
+    const domain = rangeValueDomain(value)
+    if (domain === undefined) return true
+    if (!isNativeRangeDomain(domain)) return false
+    return (
+      this.rangeValueDomains.size === 0 ||
+      (this.rangeValueDomains.size === 1 && this.rangeValueDomains.has(domain))
+    )
   }
 
   matchesField(fieldPath: Array<string>): boolean {
@@ -177,18 +239,28 @@ export abstract class BaseIndex<
    * The direction is ignored because the index can be reversed if the direction is different.
    */
   matchesCompareOptions(compareOptions: CompareOptions): boolean {
-    const thisCompareOptionsWithoutDirection = {
-      ...this.compareOptions,
-      direction: undefined,
-    }
-    const compareOptionsWithoutDirection = {
-      ...compareOptions,
-      direction: undefined,
+    const indexCompareOptions = this.compareOptions
+    const indexUsesLocale = usesLocaleCollation(indexCompareOptions)
+    const requestedUsesLocale = usesLocaleCollation(compareOptions)
+
+    if (
+      indexCompareOptions.nulls !== compareOptions.nulls ||
+      indexUsesLocale !== requestedUsesLocale
+    ) {
+      return false
     }
 
-    return deepEquals(
-      thisCompareOptionsWithoutDirection,
-      compareOptionsWithoutDirection,
+    if (!indexUsesLocale || !requestedUsesLocale) {
+      return true
+    }
+
+    return (
+      canonicalizeLocale(indexCompareOptions.locale) ===
+        canonicalizeLocale(compareOptions.locale) &&
+      deepEquals(
+        normalizeLocaleOptions(indexCompareOptions.localeOptions),
+        normalizeLocaleOptions(compareOptions.localeOptions),
+      )
     )
   }
 
@@ -199,16 +271,6 @@ export abstract class BaseIndex<
     return this.compareOptions.direction === direction
   }
 
-  getStats(): IndexStats {
-    return {
-      entryCount: this.keyCount,
-      lookupCount: this.lookupCount,
-      averageLookupTime:
-        this.lookupCount > 0 ? this.totalLookupTime / this.lookupCount : 0,
-      lastUpdated: this.lastUpdated,
-    }
-  }
-
   protected abstract initialize(options?: any): void
 
   protected evaluateIndexExpression(item: any): any {
@@ -216,16 +278,22 @@ export abstract class BaseIndex<
       compileSingleRowExpression(this.expression))
     return evaluator(item as Record<string, unknown>)
   }
+}
 
-  protected trackLookup(startTime: number): void {
-    const duration = performance.now() - startTime
-    this.lookupCount++
-    this.totalLookupTime += duration
-  }
+function rangeValueDomain(value: unknown): string | undefined {
+  if (value == null) return undefined
+  if (value instanceof Date) return `date`
+  return typeof value
+}
 
-  protected updateTimestamp(): void {
-    this.lastUpdated = new Date()
-  }
+function isNativeRangeDomain(domain: string): boolean {
+  return (
+    domain === `number` ||
+    domain === `bigint` ||
+    domain === `boolean` ||
+    domain === `string` ||
+    domain === `date`
+  )
 }
 
 /**

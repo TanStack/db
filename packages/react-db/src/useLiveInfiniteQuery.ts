@@ -340,8 +340,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     isCleanedUp: snapshot.isCleanedUp,
     collection:
       snapshot.collection as EnabledLiveQueryReturn<TContext>[`collection`],
-    isEnabled:
-      snapshot.isEnabled as EnabledLiveQueryReturn<TContext>[`isEnabled`],
+    isEnabled: snapshot.isEnabled,
     pages: snapshot.pages as Array<Array<InferResultType<TContext>[number]>>,
     pageParams: snapshot.pageParams as Array<number>,
     fetchNextPage,

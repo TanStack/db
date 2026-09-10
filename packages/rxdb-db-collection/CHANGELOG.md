@@ -1,5 +1,26 @@
 # @tanstack/rxdb-db-collection
 
+## 0.1.95
+
+### Patch Changes
+
+- Updated dependencies [[`cfb01ce`](https://github.com/TanStack/db/commit/cfb01cee34de7d0378e008dc8c01c1df5253c1e2)]:
+  - @tanstack/db@0.9.0
+
+## 0.1.94
+
+### Patch Changes
+
+- Updated dependencies [[`bbc9edf`](https://github.com/TanStack/db/commit/bbc9edf28ef707c8fb3c451fe2c4724039a0037a)]:
+  - @tanstack/db@0.8.7
+
+## 0.1.93
+
+### Patch Changes
+
+- Updated dependencies [[`ae2fe74`](https://github.com/TanStack/db/commit/ae2fe74e4cb4e74500a90034e6db7987bbd90bd8)]:
+  - @tanstack/db@0.8.6
+
 ## 0.1.92
 
 ### Patch Changes

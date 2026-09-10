@@ -11,12 +11,12 @@ import {
   toArray,
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
-import { CleanupQueue } from '../../src/collection/cleanup-queue.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { localOnlyCollectionOptions } from '../../src/local-only.js'
 import {
   flushPromises,
   mockSyncCollectionOptions,
+  resetCleanupQueue,
   stripVirtualProps,
 } from '../utils.js'
 import type { SyncConfig } from '../../src/types.js'
@@ -1607,7 +1607,10 @@ describe(`includes subqueries`, () => {
         defaultIndexType: BTreeIndex,
         sync: {
           sync: ({ begin, write, commit, markReady }) => ({
-            loadSubset: () => {
+            loadSubset: (options) => {
+              // The current tie class is already present. A boundary probe
+              // must not consume the next page of source rows.
+              if (options.where) return true
               loadCount += 1
               const row = sourceRows[nextRow++]
               if (row) {
@@ -1662,7 +1665,8 @@ describe(`includes subqueries`, () => {
 
       try {
         await collection.preload()
-        expect(loadCount).toBe(3)
+        // Bounded tie probes carry `where` and are not counted as page loads.
+        expect(loadCount).toBe(sourceRows.length)
         for (const observation of observations) {
           for (const parent of observation) {
             expect(parent.childIds).toEqual([parent.id * 10])
@@ -5040,12 +5044,12 @@ describe(`includes subqueries`, () => {
   describe(`child collection garbage collection`, () => {
     beforeEach(() => {
       vi.useFakeTimers()
-      CleanupQueue.resetInstance()
+      resetCleanupQueue()
     })
 
     afterEach(() => {
       vi.useRealTimers()
-      CleanupQueue.resetInstance()
+      resetCleanupQueue()
     })
 
     it(`child collections should not be garbage collected when external subscribers unmount`, async () => {
@@ -5745,182 +5749,209 @@ describe(`includes subqueries`, () => {
       expect(data().runs[0].texts[0].text).toBe(`Hello world`)
     })
 
-    it(`deep buffer change for one parent does not emit spurious update for sibling parent`, async () => {
-      const TIMELINE_KEY = `tl-spurious`
+    it.each([0, 1])(
+      `deep buffer change for run %i leaves its sibling's values and notifications unchanged`,
+      async (changedIndex) => {
+        const siblingIndex = 1 - changedIndex
+        const TIMELINE_KEY = `tl-spurious`
 
-      type Seed = { key: string }
-      type Run = { key: string; _seq: number; status: string }
-      type Text = {
-        key: string
-        run_id: string
-        _seq: number
-        status: string
-      }
-      type TextDelta = {
-        key: string
-        text_id: string
-        run_id: string
-        _seq: number
-        delta: string
-      }
-
-      const seed = createCollection(
-        localOnlyCollectionOptions<Seed>({
-          id: `spurious-seed`,
-          getKey: (s) => s.key,
-          initialData: [{ key: TIMELINE_KEY }],
-        }),
-      )
-
-      const runs = createCollection(
-        localOnlyCollectionOptions<Run>({
-          id: `spurious-runs`,
-          getKey: (r) => r.key,
-          initialData: [],
-        }),
-      )
-
-      const texts = createCollection(
-        localOnlyCollectionOptions<Text>({
-          id: `spurious-texts`,
-          getKey: (t) => t.key,
-          initialData: [],
-        }),
-      )
-
-      const textDeltas = createCollection(
-        localOnlyCollectionOptions<TextDelta>({
-          id: `spurious-deltas`,
-          getKey: (d) => d.key,
-          initialData: [],
-        }),
-      )
-
-      const runsLive = createLiveQueryCollection({
-        id: `spurious-runs-live`,
-        query: (q) =>
-          q.from({ run: runs }).select(({ run }) => ({
-            timelineKey: TIMELINE_KEY,
-            key: run.key,
-            order: coalesce(run._seq, -1),
-            status: run.status,
-          })),
-      })
-
-      const textsLive = createLiveQueryCollection({
-        id: `spurious-texts-live`,
-        query: (q) =>
-          q.from({ text: texts }).select(({ text }) => ({
-            timelineKey: TIMELINE_KEY,
-            key: text.key,
-            run_id: text.run_id,
-            order: coalesce(text._seq, -1),
-            status: text.status,
-          })),
-      })
-
-      const textDeltasLive = createLiveQueryCollection({
-        id: `spurious-deltas-live`,
-        query: (q) =>
-          q.from({ delta: textDeltas }).select(({ delta }) => ({
-            timelineKey: TIMELINE_KEY,
-            key: delta.key,
-            text_id: delta.text_id,
-            run_id: delta.run_id,
-            order: coalesce(delta._seq, -1),
-            delta: delta.delta,
-          })),
-      })
-
-      const timeline = createLiveQueryCollection({
-        id: `spurious-timeline`,
-        query: (q) =>
-          q.from({ s: seed }).select(({ s }) => ({
-            key: s.key,
-            runs: toArray(
-              q
-                .from({ run: runsLive })
-                .where(({ run }) => eq(run.timelineKey, s.key))
-                .orderBy(({ run }) => run.order)
-                .select(({ run }) => ({
-                  key: run.key,
-                  order: run.order,
-                  status: run.status,
-                  texts: toArray(
-                    q
-                      .from({ text: textsLive })
-                      .where(({ text }) => eq(text.run_id, run.key))
-                      .orderBy(({ text }) => text.order)
-                      .select(({ text }) => ({
-                        key: text.key,
-                        run_id: text.run_id,
-                        order: text.order,
-                        status: text.status,
-                        text: concat(
-                          toArray(
-                            q
-                              .from({ delta: textDeltasLive })
-                              .where(({ delta }) => eq(delta.text_id, text.key))
-                              .orderBy(({ delta }) => delta.order)
-                              .select(({ delta }) => delta.delta),
-                          ),
-                        ),
-                      })),
-                  ),
-                })),
-            ),
-          })),
-      })
-
-      await timeline.preload()
-
-      const data = () => timeline.get(TIMELINE_KEY) as any
-
-      runs.insert({ key: `run-1`, _seq: 1, status: `started` })
-      runs.insert({ key: `run-2`, _seq: 2, status: `started` })
-      texts.insert({
-        key: `text-1`,
-        run_id: `run-1`,
-        _seq: 3,
-        status: `streaming`,
-      })
-      texts.insert({
-        key: `text-2`,
-        run_id: `run-2`,
-        _seq: 4,
-        status: `streaming`,
-      })
-      await new Promise((r) => setTimeout(r, 100))
-
-      expect(data().runs).toHaveLength(2)
-      expect(data().runs[0].texts[0].text).toBe(``)
-      expect(data().runs[1].texts[0].text).toBe(``)
-
-      const timelineRowBefore = data()
-      const run1TextsBefore = timelineRowBefore.runs[0].texts
-      const updateEvents: Array<any> = []
-      timeline.subscribeChanges((changes) => {
-        for (const change of changes) {
-          if (change.type === `update`) {
-            updateEvents.push(change)
-          }
+        type Seed = { key: string }
+        type Run = { key: string; _seq: number; status: string }
+        type Text = {
+          key: string
+          run_id: string
+          _seq: number
+          status: string
         }
-      })
+        type TextDelta = {
+          key: string
+          text_id: string
+          run_id: string
+          _seq: number
+          delta: string
+        }
 
-      textDeltas.insert({
-        key: `td-1`,
-        text_id: `text-2`,
-        run_id: `run-2`,
-        _seq: 5,
-        delta: `Hello`,
-      })
-      await new Promise((r) => setTimeout(r, 100))
+        const seed = createCollection(
+          localOnlyCollectionOptions<Seed>({
+            id: `spurious-seed`,
+            getKey: (s) => s.key,
+            initialData: [{ key: TIMELINE_KEY }],
+          }),
+        )
 
-      expect(data().runs[1].texts[0].text).toBe(`Hello`)
-      expect(data().runs[0].texts[0].text).toBe(``)
+        const runs = createCollection(
+          localOnlyCollectionOptions<Run>({
+            id: `spurious-runs`,
+            getKey: (r) => r.key,
+            initialData: [],
+          }),
+        )
 
-      expect(data().runs[0].texts).toBe(run1TextsBefore)
-    })
+        const texts = createCollection(
+          localOnlyCollectionOptions<Text>({
+            id: `spurious-texts`,
+            getKey: (t) => t.key,
+            initialData: [],
+          }),
+        )
+
+        const textDeltas = createCollection(
+          localOnlyCollectionOptions<TextDelta>({
+            id: `spurious-deltas`,
+            getKey: (d) => d.key,
+            initialData: [],
+          }),
+        )
+
+        const runsLive = createLiveQueryCollection({
+          id: `spurious-runs-live`,
+          query: (q) =>
+            q.from({ run: runs }).select(({ run }) => ({
+              timelineKey: TIMELINE_KEY,
+              key: run.key,
+              order: coalesce(run._seq, -1),
+              status: run.status,
+            })),
+        })
+
+        const textsLive = createLiveQueryCollection({
+          id: `spurious-texts-live`,
+          query: (q) =>
+            q.from({ text: texts }).select(({ text }) => ({
+              timelineKey: TIMELINE_KEY,
+              key: text.key,
+              run_id: text.run_id,
+              order: coalesce(text._seq, -1),
+              status: text.status,
+            })),
+        })
+
+        const textDeltasLive = createLiveQueryCollection({
+          id: `spurious-deltas-live`,
+          query: (q) =>
+            q.from({ delta: textDeltas }).select(({ delta }) => ({
+              timelineKey: TIMELINE_KEY,
+              key: delta.key,
+              text_id: delta.text_id,
+              run_id: delta.run_id,
+              order: coalesce(delta._seq, -1),
+              delta: delta.delta,
+            })),
+        })
+
+        const timeline = createLiveQueryCollection({
+          id: `spurious-timeline`,
+          query: (q) =>
+            q.from({ s: seed }).select(({ s }) => ({
+              key: s.key,
+              runs: toArray(
+                q
+                  .from({ run: runsLive })
+                  .where(({ run }) => eq(run.timelineKey, s.key))
+                  .orderBy(({ run }) => run.order)
+                  .select(({ run }) => ({
+                    key: run.key,
+                    order: run.order,
+                    status: run.status,
+                    texts: toArray(
+                      q
+                        .from({ text: textsLive })
+                        .where(({ text }) => eq(text.run_id, run.key))
+                        .orderBy(({ text }) => text.order)
+                        .select(({ text }) => ({
+                          key: text.key,
+                          run_id: text.run_id,
+                          order: text.order,
+                          status: text.status,
+                          text: concat(
+                            toArray(
+                              q
+                                .from({ delta: textDeltasLive })
+                                .where(({ delta }) =>
+                                  eq(delta.text_id, text.key),
+                                )
+                                .orderBy(({ delta }) => delta.order)
+                                .select(({ delta }) => delta.delta),
+                            ),
+                          ),
+                        })),
+                    ),
+                  })),
+              ),
+            })),
+        })
+
+        await timeline.preload()
+
+        const data = () => timeline.get(TIMELINE_KEY) as any
+
+        runs.insert({ key: `run-1`, _seq: 1, status: `started` })
+        runs.insert({ key: `run-2`, _seq: 2, status: `started` })
+        texts.insert({
+          key: `text-1`,
+          run_id: `run-1`,
+          _seq: 3,
+          status: `streaming`,
+        })
+        texts.insert({
+          key: `text-2`,
+          run_id: `run-2`,
+          _seq: 4,
+          status: `streaming`,
+        })
+        await new Promise((r) => setTimeout(r, 100))
+
+        expect(data().runs).toHaveLength(2)
+        expect(data().runs[0].texts[0].text).toBe(``)
+        expect(data().runs[1].texts[0].text).toBe(``)
+
+        const timelineRowBefore = data()
+        const siblingTextsBefore = timelineRowBefore.runs[siblingIndex].texts
+        const sibling = createLiveQueryCollection({
+          query: (q) =>
+            q.from({ row: timeline }).fn.select(({ row }) => ({
+              key: row.key,
+              texts: row.runs[siblingIndex]!.texts,
+            })),
+          getKey: (row) => row.key,
+        })
+        await sibling.preload()
+        const siblingEvents = vi.fn()
+        const siblingSubscription = sibling.subscribeChanges(siblingEvents, {
+          includeInitialState: false,
+        })
+        const updateEvents = vi.fn()
+        const timelineSubscription = timeline.subscribeChanges(updateEvents, {
+          includeInitialState: false,
+        })
+
+        try {
+          textDeltas.insert({
+            key: `td-1`,
+            text_id: `text-${changedIndex + 1}`,
+            run_id: `run-${changedIndex + 1}`,
+            _seq: 5,
+            delta: `Hello`,
+          })
+          await new Promise((r) => setTimeout(r, 100))
+
+          expect(data().runs[changedIndex].texts[0].text).toBe(`Hello`)
+          expect(data().runs[siblingIndex].texts[0].text).toBe(``)
+
+          expect(updateEvents).toHaveBeenCalledTimes(1)
+          expect(updateEvents.mock.calls[0]![0]).toMatchObject([
+            { type: `update`, key: TIMELINE_KEY, value: data() },
+          ])
+          expect(data().runs[siblingIndex].texts).toEqual(siblingTextsBefore)
+          expect(timelineRowBefore.runs[changedIndex].texts[0].text).toBe(``)
+          expect(siblingEvents).not.toHaveBeenCalled()
+        } finally {
+          timelineSubscription.unsubscribe()
+          siblingSubscription.unsubscribe()
+          await sibling.cleanup()
+        }
+      },
+    )
 
     // Three collection levels (products -> priceRanges -> region). When two
     // price ranges in different parent groups point at the same deepest

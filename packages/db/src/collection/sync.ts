@@ -1,7 +1,9 @@
 import {
   CollectionConfigurationError,
   CollectionIsInErrorStateError,
+  CollectionPreloadAbortedError,
   DuplicateKeySyncError,
+  LoadSubsetOperationAbortedError,
   NoPendingSyncTransactionCommitError,
   NoPendingSyncTransactionWriteError,
   SyncCleanupError,
@@ -16,7 +18,9 @@ import type {
   ChangeMessageOrDeleteKeyMessage,
   CleanupFn,
   CollectionConfig,
+  LoadSubsetFn,
   LoadSubsetOptions,
+  LoadSubsetRequestResult,
   OptimisticChangeMessage,
   SyncConfigRes,
   SyncMetadataApi,
@@ -34,7 +38,7 @@ type DeferredLoadSubset = {
 }
 
 type LoadSubsetOperation = {
-  pending: Set<Promise<void>>
+  pending: Set<Promise<unknown>>
   waiting: boolean
   completed: boolean
   hasError: boolean
@@ -57,14 +61,13 @@ export class CollectionSyncManager<
   private syncMode: `eager` | `on-demand`
 
   public preloadPromise: Promise<void> | null = null
+  private rejectPreload?: (error: unknown) => void
   public syncCleanupFn: (() => void) | null = null
-  public syncLoadSubsetFn:
-    | ((options: LoadSubsetOptions) => true | Promise<void>)
-    | null = null
+  public syncLoadSubsetFn: LoadSubsetFn | null = null
   public syncUnloadSubsetFn: ((options: LoadSubsetOptions) => void) | null =
     null
 
-  private pendingLoadSubsetPromises: Set<Promise<void>> = new Set()
+  private pendingLoadSubsetPromises: Set<Promise<unknown>> = new Set()
   private activeLoadSubsetOperation: LoadSubsetOperation | undefined
   private loadSubsetOperations = new Set<LoadSubsetOperation>()
   private syncStartDeferred = false
@@ -104,6 +107,7 @@ export class CollectionSyncManager<
    * This is called when the collection is first accessed or preloaded
    */
   public startSync(): void {
+    this.lifecycle.assertCanStartSync()
     if (
       this.lifecycle.status !== `idle` &&
       this.lifecycle.status !== `cleaned-up`
@@ -119,6 +123,9 @@ export class CollectionSyncManager<
     const syncEpoch = ++this.syncEpoch
     const isCurrentSync = () => syncEpoch === this.syncEpoch
     this.lifecycle.setStatus(`loading`)
+    if (!isCurrentSync()) return
+    let syncEntryActive = true
+    let readyEffectFailure: { error: unknown } | undefined
 
     try {
       const syncRes = normalizeSyncFnResult(
@@ -279,7 +286,12 @@ export class CollectionSyncManager<
             return receipt
           },
           markReady: () => {
-            if (isCurrentSync()) this.lifecycle.markReady()
+            if (!isCurrentSync()) return
+            if (syncEntryActive) {
+              readyEffectFailure ??= this.lifecycle.markReadyDuringSyncStart()
+            } else {
+              this.lifecycle.markReady()
+            }
           },
           markError: (error?: unknown) => {
             if (isCurrentSync()) this.lifecycle.markError(error)
@@ -323,6 +335,13 @@ export class CollectionSyncManager<
           metadata: this.createSyncMetadataApi(isCurrentSync),
         }),
       )
+      syncEntryActive = false
+
+      if (!isCurrentSync()) {
+        syncRes?.cleanup?.()
+        if (readyEffectFailure) throw readyEffectFailure.error
+        return
+      }
 
       // Store cleanup function if provided
       this.syncCleanupFn = syncRes?.cleanup ?? null
@@ -341,9 +360,11 @@ export class CollectionSyncManager<
         )
       }
     } catch (error) {
-      this.lifecycle.markError(error)
+      syncEntryActive = false
+      if (isCurrentSync()) this.lifecycle.markError(error)
       throw error
     }
+    if (readyEffectFailure) throw readyEffectFailure.error
   }
 
   public deferStart(): boolean {
@@ -369,6 +390,7 @@ export class CollectionSyncManager<
     this.syncStartRequested = false
     const deferredLoadSubsets = this.deferredLoadSubsets
     this.deferredLoadSubsets = []
+    const loadSubsetSession = this.loadSubsetSession
 
     try {
       if (shouldStart) {
@@ -382,11 +404,18 @@ export class CollectionSyncManager<
     }
 
     for (const { options, deferred } of deferredLoadSubsets) {
+      const loadSubset = this.syncLoadSubsetFn
       try {
-        const result = this.syncLoadSubsetFn?.(options) ?? true
+        if (
+          loadSubsetSession !== this.loadSubsetSession ||
+          options.signal?.aborted
+        ) {
+          throw new LoadSubsetOperationAbortedError()
+        }
+        const result = loadSubset?.(options) ?? true
         if (result instanceof Promise) {
           void result.then(
-            () => deferred.resolve(undefined),
+            (sourceResult) => deferred.resolve(sourceResult),
             (error: unknown) => deferred.reject(error),
           )
         } else {
@@ -519,6 +548,11 @@ export class CollectionSyncManager<
    * Multiple concurrent calls will share the same promise
    */
   public preload(): Promise<void> {
+    try {
+      this.lifecycle.assertCanStartSync()
+    } catch (error) {
+      return Promise.reject(error)
+    }
     if (this.preloadPromise) {
       return this.preloadPromise
     }
@@ -545,14 +579,19 @@ export class CollectionSyncManager<
       }
 
       let settled = false
-      let startingSync = false
+      const syncStartState = { active: false, ready: false }
       let unsubscribeError = () => {}
       let unsubscribeReady = () => {}
       const resolveReady = () => {
+        if (syncStartState.active) {
+          syncStartState.ready = true
+          return
+        }
         if (settled) return
         settled = true
         unsubscribeError()
         unsubscribeReady()
+        if (this.rejectPreload === rejectError) this.rejectPreload = undefined
         resolve()
       }
       const rejectError = (error: unknown) => {
@@ -560,13 +599,15 @@ export class CollectionSyncManager<
         settled = true
         unsubscribeError()
         unsubscribeReady()
+        if (this.rejectPreload === rejectError) this.rejectPreload = undefined
         reject(error)
       }
 
       // Register callback BEFORE starting sync to avoid race condition
+      this.rejectPreload = rejectError
       unsubscribeReady = this.lifecycle.onFirstReady(resolveReady)
       unsubscribeError = this.collection.on(`status:error`, () => {
-        if (startingSync) {
+        if (syncStartState.active) {
           return
         }
         rejectError(this.getPreloadError())
@@ -577,17 +618,24 @@ export class CollectionSyncManager<
         this.lifecycle.status === `idle` ||
         this.lifecycle.status === `cleaned-up`
       ) {
-        startingSync = true
+        syncStartState.active = true
+        let startFailure: { error: unknown } | undefined
         try {
           this.startSync()
         } catch (error) {
-          rejectError(error)
-          return
+          startFailure = { error }
         } finally {
-          startingSync = false
+          syncStartState.active = false
         }
         if (this.collection.status === `error`) {
           rejectError(this.getPreloadError())
+        } else if (syncStartState.ready) {
+          // A first-ready listener can throw after readiness is established.
+          // That failure still escapes direct startSync(), but preload follows
+          // the final collection state after synchronous adapter entry.
+          resolveReady()
+        } else if (startFailure) {
+          rejectError(startFailure.error)
         }
       }
     })
@@ -615,17 +663,12 @@ export class CollectionSyncManager<
     return this.pendingLoadSubsetPromises.size > 0
   }
 
-  /** Wait for the subset loads that are active during the current operation. */
-  public waitForCurrentLoadSubset(): true | Promise<void> {
-    if (this.pendingLoadSubsetPromises.size === 0) return true
-    return this.waitForPendingLoadSubset()
-  }
-
   /** @internal Observe subset requests caused by one imperative operation. */
   public beginLoadSubsetOperation(): {
     wait: () => true | Promise<void>
     cancel: () => void
   } {
+    const previousOperation = this.activeLoadSubsetOperation
     const operation: LoadSubsetOperation = {
       pending: new Set(),
       waiting: false,
@@ -643,7 +686,9 @@ export class CollectionSyncManager<
         operation.completed = true
         this.loadSubsetOperations.delete(operation)
         if (this.activeLoadSubsetOperation === operation) {
-          this.activeLoadSubsetOperation = undefined
+          this.activeLoadSubsetOperation = previousOperation?.completed
+            ? undefined
+            : previousOperation
         }
       },
     }
@@ -667,7 +712,7 @@ export class CollectionSyncManager<
 
   private settleLoadSubsetOperation(
     operation: LoadSubsetOperation,
-    promise: Promise<void>,
+    promise: Promise<unknown>,
     outcome: { ok: true } | { ok: false; error: unknown },
   ): void {
     if (operation.completed) return
@@ -697,7 +742,7 @@ export class CollectionSyncManager<
   }
 
   /** @internal Attach a relevant existing request to the active operation. */
-  public trackLoadSubsetOperationPromise(promise: Promise<void>): void {
+  public trackLoadSubsetOperationPromise(promise: Promise<unknown>): void {
     const operation = this.activeLoadSubsetOperation
     if (!operation || operation.pending.has(promise)) return
 
@@ -712,17 +757,11 @@ export class CollectionSyncManager<
     )
   }
 
-  private async waitForPendingLoadSubset(): Promise<void> {
-    do {
-      await Promise.all([...this.pendingLoadSubsetPromises])
-    } while (this.pendingLoadSubsetPromises.size > 0)
-  }
-
   /**
    * Tracks a load promise for isLoadingSubset state.
    * @internal This is for internal coordination (e.g., live-query glue code), not for general use.
    */
-  public trackLoadPromise(promise: Promise<void>): void {
+  public trackLoadPromise(promise: Promise<unknown>): void {
     const loadSubsetSession = this.loadSubsetSession
     const loadingStarting = !this.isLoadingSubset
     this.pendingLoadSubsetPromises.add(promise)
@@ -759,15 +798,20 @@ export class CollectionSyncManager<
     void promise.then(finish, finish)
   }
 
+  /** @internal Generation fence for subscription-owned async work. */
+  public getLoadSubsetSession(): number {
+    return this.loadSubsetSession
+  }
+
   /**
    * Requests the sync layer to load more data.
    * @param options Options to control what data is being loaded
    * @returns If data loading is asynchronous, this method returns a promise that resolves when the data is loaded.
    *          Returns true if no sync function is configured, if syncMode is 'eager', or if there is no work to do.
    */
-  public loadSubset(options: LoadSubsetOptions): Promise<void> | true {
+  public loadSubset(options: LoadSubsetOptions): LoadSubsetRequestResult {
     if (options.signal?.aborted) {
-      return true
+      return Promise.reject(new LoadSubsetOperationAbortedError())
     }
 
     // Bypass loadSubset when syncMode is 'eager'
@@ -800,13 +844,16 @@ export class CollectionSyncManager<
    * @param options Options that identify what data is being unloaded
    */
   public unloadSubset(options: LoadSubsetOptions): void {
+    // Eager loading bypasses subset acquisition, so there is no lease to release.
+    if (this.syncMode === `eager`) return
+
     if (this.syncStartDeferred) {
       this.deferredLoadSubsets = this.deferredLoadSubsets.filter((request) => {
         if (request.options !== options) {
           return true
         }
 
-        request.deferred.resolve(undefined)
+        request.deferred.reject(new LoadSubsetOperationAbortedError())
         return false
       })
       return
@@ -820,14 +867,19 @@ export class CollectionSyncManager<
   public cleanup(): void {
     // Invalidate callbacks retained by asynchronous work from this session
     // before invoking adapter cleanup or allowing a new session to start.
-    this.syncEpoch++
+    const cleanupEpoch = ++this.syncEpoch
     this.loadSubsetSession++
+    this.rejectPreload?.(new CollectionPreloadAbortedError())
+    const cleanup = this.syncCleanupFn
+    this.syncCleanupFn = null
+    this.syncLoadSubsetFn = null
+    this.syncUnloadSubsetFn = null
     try {
-      if (this.syncCleanupFn) {
-        this.syncCleanupFn()
-        this.syncCleanupFn = null
-      }
+      cleanup?.()
     } catch (error) {
+      // Keep failed cleanup retryable, but never overwrite a replacement
+      // session installed by reentrant adapter code.
+      if (this.syncEpoch === cleanupEpoch) this.syncCleanupFn = cleanup
       // Re-throw in a microtask to surface the error after cleanup completes
       queueMicrotask(() => {
         if (error instanceof Error) {
@@ -842,8 +894,6 @@ export class CollectionSyncManager<
       })
     }
     this.preloadPromise = null
-    this.syncLoadSubsetFn = null
-    this.syncUnloadSubsetFn = null
     this.syncStartDeferred = false
     this.syncStartRequested = false
     const wasLoadingSubset = this.pendingLoadSubsetPromises.size > 0
@@ -862,14 +912,16 @@ export class CollectionSyncManager<
       if (!operation.completed) {
         operation.completed = true
         operation.pending.clear()
-        operation.deferred?.resolve()
+        operation.hasError = true
+        operation.error = new LoadSubsetOperationAbortedError()
+        operation.deferred?.reject(operation.error)
       }
     }
     this.loadSubsetOperations.clear()
     const deferredLoadSubsets = this.deferredLoadSubsets
     this.deferredLoadSubsets = []
-    for (const { deferred } of deferredLoadSubsets) {
-      deferred.resolve(undefined)
+    for (const request of deferredLoadSubsets) {
+      request.deferred.reject(new LoadSubsetOperationAbortedError())
     }
   }
 }

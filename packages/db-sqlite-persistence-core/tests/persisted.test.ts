@@ -1899,6 +1899,332 @@ describe(`persistedCollectionOptions`, () => {
     await collection.cleanup()
   })
 
+  it.each(
+    [false, true].flatMap((sharedSubscription) =>
+      [false, true].map((identical) => ({ sharedSubscription, identical })),
+    ),
+  )(
+    `keeps sibling requests owned after one release: %j`,
+    async ({ sharedSubscription, identical }) => {
+      const adapter = createRecordingAdapter([{ id: `1`, title: `Before` }])
+      const coordinator = createCoordinatorHarness()
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `sync-present`,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      collection.startSyncImmediate()
+      const subscription = collection.subscribeChanges(() => {})
+      const owner = sharedSubscription ? { subscription } : {}
+      const page: LoadSubsetOptions = {
+        ...owner,
+        ...(identical ? {} : { limit: 1 }),
+      }
+      const all: LoadSubsetOptions = { ...owner }
+      try {
+        await collection._sync.loadSubset(page)
+        await collection._sync.loadSubset(all)
+        collection._sync.unloadSubset(page)
+        coordinator.emit({
+          type: `tx:committed`,
+          term: 1,
+          seq: 1,
+          txId: `sibling-update`,
+          latestRowVersion: 1,
+          requiresFullReload: false,
+          changedRows: [{ key: `1`, value: { id: `1`, title: `After` } }],
+          deletedKeys: [],
+        })
+        await flushAsyncWork()
+        expect(stripVirtualProps(collection.get(`1`))).toEqual({
+          id: `1`,
+          title: `After`,
+        })
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it(`does not retain refresh history as permanent subset demand`, async () => {
+    const adapter = createRecordingAdapter([{ id: `1`, title: `Before` }])
+    const coordinator = createCoordinatorHarness()
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        persistence: { adapter, coordinator },
+      }),
+    )
+    collection.startSyncImmediate()
+    try {
+      await collection._sync.loadSubset({ limit: 1 })
+      for (let i = 0; i < 20; i++)
+        await collection.utils.forceReloadSubset!({ limit: 1 })
+      const before = adapter.loadSubsetCalls.length
+      coordinator.emit({
+        type: `tx:committed`,
+        term: 1,
+        seq: 1,
+        txId: `refresh-invalidation`,
+        latestRowVersion: 1,
+        requiresFullReload: true,
+      })
+      await flushAsyncWork()
+      await flushAsyncWork()
+      expect(adapter.loadSubsetCalls.length - before).toBe(1)
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  it(`reports a non-abort upstream failure rather than treating hydration as remote success`, async () => {
+    const failure = new Error(`remote acquisition failed`)
+    const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `remote-acquisition-failure`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => Promise.reject(failure),
+            }
+          },
+        },
+        persistence: {
+          adapter: createRecordingAdapter([
+            { id: `cached`, title: `Last known row` },
+          ]),
+        },
+      }),
+    )
+    collection.startSyncImmediate()
+    try {
+      await expect(
+        Promise.resolve(collection._sync.loadSubset({})),
+      ).rejects.toBe(failure)
+      expect(stripVirtualProps(collection.get(`cached`))).toEqual({
+        id: `cached`,
+        title: `Last known row`,
+      })
+    } finally {
+      warn.mockRestore()
+      await collection.cleanup()
+    }
+  })
+
+  it.each([`throw`, `reject`] as const)(
+    `releases only transferred upstream ownership after a load %s`,
+    async (mode) => {
+      const failure = new Error(`failed upstream load`)
+      const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const peer: LoadSubsetOptions = { limit: 1 }
+      const failed: LoadSubsetOptions = { limit: 1 }
+      const leases = new Set<LoadSubsetOptions>()
+      let publish!: (title: string) => Promise<void>
+      const unload = vi.fn((options: LoadSubsetOptions) => {
+        leases.delete(options)
+      })
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `failed-load-ownership-${mode}`,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          sync: {
+            sync: ({ begin, write, commit, markReady }) => {
+              publish = async (title) => {
+                if (!leases.has(peer)) return
+                begin()
+                write({
+                  type: collection.has(`live`) ? `update` : `insert`,
+                  value: { id: `live`, title },
+                })
+                await commit()
+              }
+              markReady()
+              return {
+                loadSubset: (options) => {
+                  if (options === failed && mode === `throw`) throw failure
+                  // Returning a promise transfers the ongoing lease, even if
+                  // fetching its initial snapshot subsequently fails.
+                  leases.add(options)
+                  return options === failed ? Promise.reject(failure) : true
+                },
+                unloadSubset: unload,
+              }
+            },
+          },
+          persistence: { adapter: createRecordingAdapter() },
+        }),
+      )
+      collection.startSyncImmediate()
+      try {
+        await collection._sync.loadSubset(peer)
+        await expect(collection._sync.loadSubset(failed)).rejects.toBe(failure)
+        expect(leases.has(failed)).toBe(mode === `reject`)
+        collection._sync.unloadSubset(failed)
+        expect(unload.mock.calls.map(([options]) => options)).toEqual(
+          mode === `reject` ? [failed] : [],
+        )
+        expect(leases).toEqual(new Set([peer]))
+        await publish(`Peer still live`)
+        expect(collection.get(`live`)?.title).toBe(`Peer still live`)
+        collection._sync.unloadSubset(peer)
+        expect(leases.size).toBe(0)
+        await publish(`Must not arrive`)
+        expect(collection.get(`live`)?.title).toBe(`Peer still live`)
+      } finally {
+        warn.mockRestore()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it(`does not release or acquire an upstream lease cancelled during hydration`, async () => {
+    const adapter = createRecordingAdapter()
+    const hydrate = adapter.loadSubset
+    let blocked = false
+    let enterHydration!: () => void
+    let finishHydration!: () => void
+    const entered = new Promise<void>((resolve) => {
+      enterHydration = resolve
+    })
+    const gate = new Promise<void>((resolve) => {
+      finishHydration = resolve
+    })
+    adapter.loadSubset = async (...args) => {
+      if (blocked) {
+        enterHydration()
+        await gate
+      }
+      return hydrate(...args)
+    }
+    let leases = 0
+    let loads = 0
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `cancelled-hydration-lease`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                loads++
+                leases++
+                return true
+              },
+              unloadSubset: () => {
+                leases--
+              },
+            }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    collection.startSyncImmediate()
+    const first: LoadSubsetOptions = { limit: 1 }
+    const second: LoadSubsetOptions = { limit: 1 }
+    try {
+      await collection._sync.loadSubset(first)
+      expect(leases).toBe(1)
+      blocked = true
+      const pending = collection._sync.loadSubset(second)
+      await entered
+      collection._sync.unloadSubset(second)
+      expect(leases).toBe(1)
+      finishHydration()
+      await pending
+      expect(loads).toBe(1)
+      collection._sync.unloadSubset(first)
+      expect(leases).toBe(0)
+    } finally {
+      finishHydration()
+      await collection.cleanup()
+    }
+  })
+
+  it.each([`abort`, `release`, `offline`] as const)(
+    `handles remote ensure after %s without resurrecting cancelled demand`,
+    async (action) => {
+      vi.useFakeTimers()
+      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const failure = Object.assign(new Error(action), {
+        name: action === `abort` ? `AbortError` : `Error`,
+      })
+      const ensure = vi.fn(async () => {
+        throw new Error(`offline`)
+      })
+      const coordinator: PersistedCollectionCoordinator = {
+        getNodeId: () => `cancel-ensure`,
+        subscribe: () => () => {},
+        publish: () => {},
+        isLeader: () => true,
+        ensureLeadership: async () => {},
+        requestEnsurePersistedIndex: async () => {},
+        requestEnsureRemoteSubset: ensure,
+      }
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `cancel-ensure-${action}`,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return {
+                loadSubset: async () => {
+                  throw failure
+                },
+              }
+            },
+          },
+          persistence: { adapter: createRecordingAdapter(), coordinator },
+        }),
+      )
+      const options = { limit: 1 }
+      try {
+        collection.startSyncImmediate()
+        const result = await Promise.resolve(
+          collection._sync.loadSubset(options),
+        ).then(
+          () => `ready`,
+          (error: unknown) => error,
+        )
+        if (action === `release`) collection._sync.unloadSubset(options)
+        const callsBeforeRetry = ensure.mock.calls.length
+        await vi.advanceTimersByTimeAsync(200)
+        if (action === `offline`) {
+          expect(result).toBe(failure)
+          expect(ensure.mock.calls.length).toBeGreaterThan(callsBeforeRetry)
+        } else {
+          if (action === `abort`) expect(result).toBe(failure)
+          expect(ensure).toHaveBeenCalledTimes(callsBeforeRetry)
+        }
+      } finally {
+        await collection.cleanup()
+        warning.mockRestore()
+        vi.useRealTimers()
+      }
+    },
+  )
+
   it(`retries queued remote subset ensure after transient failures`, async () => {
     const adapter = createRecordingAdapter()
     let ensureCalls = 0

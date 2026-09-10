@@ -128,6 +128,82 @@ function makeControlledTruncateSource() {
 }
 
 describe(`createLiveQueryObserver`, () => {
+  it.each(
+    ([`granular`, `wholesale`] as const).flatMap((mode) =>
+      ([`ordinary`, `reentrant`, `dispose`] as const).flatMap((scenario) =>
+        [false, true].map((throwUndefined) => ({
+          mode,
+          scenario,
+          throwUndefined,
+        })),
+      ),
+    ),
+  )(
+    `delivers peer publications before reporting a listener failure: %j`,
+    async ({ mode, scenario, throwUndefined }) => {
+      const source = makeSource()
+      const observer = createLiveQueryObserver(source, { mode })
+      const firstError = throwUndefined
+        ? undefined
+        : new Error(`First listener failed`)
+      const secondError = new Error(`Peer listener failed`)
+      const peerRows = new Map<string | number, Row>()
+      const publications: Array<Array<string | number>> = []
+      let armed = false
+      observer.subscribe(() => {
+        if (!armed) return
+        armed = false
+        if (scenario === `reentrant`) {
+          source.utils.begin()
+          source.utils.write({ type: `insert`, value: { id: `4`, name: `D` } })
+          source.utils.commit()
+        }
+        if (scenario === `dispose`) observer.dispose()
+        throw firstError
+      })
+      observer.subscribe((changes) => {
+        if (mode === `wholesale`) {
+          peerRows.clear()
+          for (const [key, row] of observer.getSnapshot().state ?? [])
+            peerRows.set(key, row)
+        } else {
+          for (const change of changes ?? []) {
+            if (change.type === `delete`) peerRows.delete(change.key)
+            else peerRows.set(change.key, change.value)
+          }
+        }
+        publications.push([...peerRows.keys()].sort())
+        if (peerRows.has(`3`)) throw secondError
+      })
+      publications.length = 0
+      armed = true
+      try {
+        source.utils.begin()
+        source.utils.write({ type: `insert`, value: { id: `3`, name: `C` } })
+        let caught: { error: unknown } | undefined
+        try {
+          source.utils.commit()
+        } catch (error) {
+          caught = { error }
+        }
+        expect(caught).toEqual({ error: firstError })
+        expect(publications).toEqual(
+          scenario === `dispose`
+            ? []
+            : scenario === `reentrant`
+              ? [
+                  [`1`, `2`, `3`],
+                  [`1`, `2`, `3`, `4`],
+                ]
+              : [[`1`, `2`, `3`]],
+        )
+      } finally {
+        observer.dispose()
+        await source.cleanup()
+      }
+    },
+  )
+
   it(`registers SSR live-query resources for client-owned cleanup`, async () => {
     const errorSpy = vi.spyOn(console, `error`).mockImplementation(() => {})
     const client = new DbClient()

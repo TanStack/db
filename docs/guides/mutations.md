@@ -344,6 +344,33 @@ todoCollection.update(
 > [!IMPORTANT]
 > The `updater` function uses an Immer-like pattern to capture changes as immutable updates. You must not reassign the draft parameter itself—only mutate its properties.
 
+Existing row values stay isolated from draft edits. New objects you assign or
+add to a draft keep normal shared references during the synchronous callback:
+
+```ts
+const tag = { label: 'new' }
+todoCollection.update(todoId, (draft) => {
+  draft.tags.add(tag) // tags is a Set
+  tag.label = 'edited' // included in the update
+  for (const value of draft.tags) value.label = 'final'
+  // tag.label is now 'final' too
+})
+tag.label = 'later' // does not change the stored row
+```
+
+The completed changes are copied when the callback returns. This applies to
+new Map values, Set members, and objects assigned to draft properties. If you
+need to keep a new caller-owned object unchanged during the callback, insert
+your own copy. A thrown callback does not roll back edits to that caller-owned
+object; it leaves existing collection data unchanged.
+
+Arbitrary class instances are an exception: newly assigned instances stay by
+reference so their methods, prototypes, and private fields remain intact.
+Later changes to such an instance can therefore affect stored data without a
+new update or notification. Treat those instances as immutable, or convert them
+to plain data before assignment when you need isolation. Supported native values
+such as `URL`, `Date`, `RegExp`, and typed arrays are copied instead.
+
 ### Delete
 
 Remove items from a collection:

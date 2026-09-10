@@ -145,6 +145,11 @@ toArray(), and materialize() cannot be returned from fn.select(). Use
 them as fields in select() so the compiler can add them to the query
 graph.
 
+Compiled Collection-valued includes cannot be inputs to fn.select(),
+including nested descendants. Use toArray() or materialize() in the
+upstream select(), or do parent-only functional work before adding
+live Collection includes with select().
+
 ###### where()
 
 ```ts

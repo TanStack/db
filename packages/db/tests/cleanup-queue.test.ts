@@ -1,15 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CleanupQueue } from '../src/collection/cleanup-queue'
+import { resetCleanupQueue } from './utils'
 
 describe('CleanupQueue', () => {
   beforeEach(() => {
     vi.useFakeTimers()
-    CleanupQueue.resetInstance()
+    resetCleanupQueue()
   })
 
   afterEach(() => {
     vi.useRealTimers()
-    CleanupQueue.resetInstance()
+    resetCleanupQueue()
   })
 
   it('batches setTimeout creations across multiple synchronous schedules', async () => {

@@ -2,13 +2,6 @@ import type { BasicExpression } from '../src/query/ir.js'
 
 function compareReferenceValues(left: unknown, right: unknown): number {
   if (left === right) return 0
-  // Query order cursors use nulls-first ordering. Missing reference paths are
-  // equivalent to null so adapters can evaluate the same boundary independently.
-  const leftNullish = left === null || left === undefined
-  const rightNullish = right === null || right === undefined
-  if (leftNullish && rightNullish) return 0
-  if (leftNullish) return -1
-  if (rightNullish) return 1
   if (typeof left === `number` && typeof right === `number`) {
     return left < right ? -1 : 1
   }
@@ -43,15 +36,24 @@ export function evaluateReferenceExpression(
       return args.some(Boolean)
     case `not`:
       return !args[0]
+    case `isNull`:
+      return args[0] === null
+    case `isUndefined`:
+      return args[0] === undefined
     case `eq`:
+      if (args[0] == null || args[1] == null) return null
       return args[0] === args[1]
     case `gt`:
+      if (args[0] == null || args[1] == null) return null
       return compareReferenceValues(args[0], args[1]) > 0
     case `gte`:
+      if (args[0] == null || args[1] == null) return null
       return compareReferenceValues(args[0], args[1]) >= 0
     case `lt`:
+      if (args[0] == null || args[1] == null) return null
       return compareReferenceValues(args[0], args[1]) < 0
     case `lte`:
+      if (args[0] == null || args[1] == null) return null
       return compareReferenceValues(args[0], args[1]) <= 0
     case `in`:
       if (!Array.isArray(args[1])) throw new Error(`IN requires an array`)

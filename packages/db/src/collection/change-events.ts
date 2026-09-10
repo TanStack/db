@@ -1,8 +1,4 @@
 import {
-  createSingleRowRefProxy,
-  toExpression,
-} from '../query/builder/ref-proxy'
-import {
   compileSingleRowExpression,
   toBooleanPredicate,
 } from '../query/compiler/evaluators.js'
@@ -20,7 +16,6 @@ import type {
   SubscribeChangesOptions,
 } from '../types'
 import type { CollectionImpl } from './index.js'
-import type { SingleRowRefProxy } from '../query/builder/ref-proxy'
 import type { BasicExpression, OrderBy } from '../query/ir.js'
 import type { WithVirtualProps } from '../virtual-props.js'
 
@@ -178,44 +173,6 @@ export function currentStateAsChanges<
     }
 
     return collectFilteredResults(filterFn)
-  }
-}
-
-/**
- * Creates a filter function from a where callback
- * @param whereCallback - The callback function that defines the filter condition
- * @returns A function that takes an item and returns true if it matches the filter
- */
-export function createFilterFunction<T extends object>(
-  whereCallback: (row: SingleRowRefProxy<T>) => any,
-): (item: T) => boolean {
-  return (item: T): boolean => {
-    try {
-      // First try the RefProxy approach for query builder functions
-      const singleRowRefProxy = createSingleRowRefProxy<T>()
-      const whereExpression = whereCallback(singleRowRefProxy)
-      const expression = toExpression(whereExpression)
-      const evaluator = compileSingleRowExpression(expression)
-      const result = evaluator(item as Record<string, unknown>)
-      // WHERE clauses should always evaluate to boolean predicates (Kevin's feedback)
-      return toBooleanPredicate(result)
-    } catch {
-      // If RefProxy approach fails (e.g., arithmetic operations), fall back to direct evaluation
-      try {
-        // Create a simple proxy that returns actual values for arithmetic operations
-        const simpleProxy = new Proxy(item as any, {
-          get(target, prop) {
-            return target[prop]
-          },
-        }) as SingleRowRefProxy<T>
-
-        const result = whereCallback(simpleProxy)
-        return toBooleanPredicate(result)
-      } catch {
-        // If both approaches fail, exclude the item
-        return false
-      }
-    }
   }
 }
 

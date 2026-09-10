@@ -323,6 +323,7 @@ function createPowerSyncCollectionConfig<
       let disposeTracking:
         | ((options?: { context?: LockContext }) => Promise<void>)
         | null = null
+      let trackingSetup: Promise<void> | null = null
 
       if (syncMode === `eager`) {
         return runEagerSync()
@@ -337,6 +338,13 @@ function createPowerSyncCollectionConfig<
       async function safelyDisposeTracking(
         context?: LockContext,
       ): Promise<void> {
+        // Cleanup can race trigger creation. Wait until the disposer has been
+        // published so an abort cannot strand a freshly-created trigger.
+        const setup = trackingSetup
+        if (setup) {
+          await setup.catch(() => undefined)
+        }
+
         const dispose = disposeTracking
         if (!dispose) {
           return
@@ -344,6 +352,25 @@ function createPowerSyncCollectionConfig<
 
         disposeTracking = null
         await dispose(context ? { context } : undefined)
+      }
+
+      async function establishTracking(
+        options: Parameters<typeof createDiffTrigger>[0],
+        appliedReceipts: Array<SyncAppliedReceipt>,
+      ): Promise<void> {
+        const setup = (async () => {
+          const dispose = await createDiffTrigger(options, appliedReceipts)
+          disposeTracking = dispose
+        })()
+        trackingSetup = setup
+
+        try {
+          await setup
+        } finally {
+          if (trackingSetup === setup) {
+            trackingSetup = null
+          }
+        }
       }
 
       async function createDiffTrigger(
@@ -398,6 +425,17 @@ function createPowerSyncCollectionConfig<
       }
 
       async function flushDiffRecords(): Promise<void> {
+        // PowerSync can notify after creating the tracking table but before its
+        // create call returns. Preserve that notification until the disposer,
+        // which proves the trigger is usable, has been published.
+        const setup = trackingSetup
+        if (setup) {
+          await setup.catch(() => undefined)
+        }
+        if (!disposeTracking) {
+          return
+        }
+
         const ignoredReceipts: Array<SyncAppliedReceipt> = []
         await database
           .writeTransaction(async (context) => {
@@ -512,10 +550,15 @@ function createPowerSyncCollectionConfig<
         let onUnload: CleanupFn | void | null = null
 
         start(async () => {
-          onUnload = await restConfig.onLoad?.()
+          const cleanup = await restConfig.onLoad?.()
+          if (abortController.signal.aborted) {
+            cleanup?.()
+            return
+          }
+          onUnload = cleanup
 
           const appliedReceipts: Array<SyncAppliedReceipt> = []
-          disposeTracking = await createDiffTrigger(
+          await establishTracking(
             {
               // Initial eager hydration must make the source usable before
               // PowerSync can persist a mutation queued during startup.
@@ -562,110 +605,181 @@ function createPowerSyncCollectionConfig<
       // On-demand mode.
       // Registers a diff trigger for the active WHERE expressions.
       function runOnDemandSync() {
-        const unloadSubsetCallbacks = new Map<LoadSubsetOptions, CleanupFn>()
-        const releasedSubsets = new WeakSet<LoadSubsetOptions>()
-        let stopped = false
-        const hasStopped = () => stopped
+        type DemandRecord = {
+          options: LoadSubsetOptions
+          active: boolean
+          cleanup?: CleanupFn
+        }
+        type PendingRelease = {
+          options: LoadSubsetOptions
+          failures: number
+        }
 
-        start().catch((error) =>
+        const demands = new Map<LoadSubsetOptions, DemandRecord>()
+        const releasedSubsets = new WeakSet<LoadSubsetOptions>()
+        const pendingReleases: Array<PendingRelease> = []
+        let stopped = false
+        let trackingRevision = 0
+        let reconciledTrackingRevision = 0
+        let rebuildPromise: Promise<void> | null = null
+        let drainingReleases = false
+        let releaseRetryTimer: ReturnType<typeof setTimeout> | undefined
+        const startup = start()
+        void startup.catch((error) =>
           database.logger.error(
             `Could not start syncing process for ${viewName} into ${trackedTableName}`,
             error,
           ),
         )
 
-        // Tracks all active WHERE expressions for on-demand sync filtering.
-        // Each loadSubset call pushes its predicate; unloadSubset removes it.
-        const activeWhereExpressions: Array<LoadSubsetOptions['where']> = []
+        const activeWhereExpressions = () =>
+          Array.from(demands.values())
+            .filter((demand) => demand.active)
+            .map((demand) => demand.options.where)
 
-        const loadSubset = async (
-          options?: LoadSubsetOptions,
-        ): Promise<void> => {
-          if (hasStopped()) return
-          const appliedReceipts: Array<SyncAppliedReceipt> = []
+        // One reconciliation owns every queued revision so callers cannot
+        // settle against a stale trigger configuration.
+        const reconcileTracking = async (): Promise<void> => {
+          while (!stopped && reconciledTrackingRevision !== trackingRevision) {
+            const revision = trackingRevision
+            const isCurrent = () => !stopped && trackingRevision === revision
+            const appliedReceipts: Array<SyncAppliedReceipt> = []
 
-          if (options) {
-            activeWhereExpressions.push(options.where)
-            const cleanup = await restConfig.onLoadSubset?.(options)
-            if (hasStopped()) {
-              cleanup?.()
-              return
-            }
-            if (cleanup) {
-              if (releasedSubsets.has(options) || options.signal?.aborted) {
-                cleanup()
-              } else {
-                unloadSubsetCallbacks.set(options, cleanup)
-              }
-            }
-          }
-
-          // No predicates remain, so stop tracking entirely. Both calls are no-ops
-          // when no tracking table is currently active.
-          if (activeWhereExpressions.length === 0) {
             await database.writeLock(async (ctx) => {
+              if (!isCurrent()) return
               await flushDiffRecordsWithContext(ctx, appliedReceipts)
+              if (!isCurrent()) return
               await safelyDisposeTracking(ctx)
+              if (!isCurrent()) return
+
+              const active = activeWhereExpressions()
+              // Tracking was absent during an error. Positive baseline rows
+              // alone cannot reveal deletes or predicate exits from that gap.
+              const missing =
+                collection.status === `error`
+                  ? new Set(collection.keys())
+                  : undefined
+              if (active.length > 0) {
+                const combinedWhere =
+                  active.length === 1
+                    ? active[0]
+                    : or(active[0], active[1], ...active.slice(2))
+                const compiledNewData = compileSQLite(
+                  { where: combinedWhere },
+                  { jsonColumn: 'NEW.data' },
+                )
+                const compiledOldData = compileSQLite(
+                  { where: combinedWhere },
+                  { jsonColumn: 'OLD.data' },
+                )
+                const compiledView = compileSQLite({ where: combinedWhere })
+                const newDataWhenClause = toInlinedWhereClause(compiledNewData)
+                const oldDataWhenClause = toInlinedWhereClause(compiledOldData)
+                const viewWhereClause = toInlinedWhereClause(compiledView)
+                await establishTracking(
+                  {
+                    setupContext: ctx,
+                    when: {
+                      [DiffTriggerOperation.INSERT]: newDataWhenClause,
+                      [DiffTriggerOperation.UPDATE]: `(${newDataWhenClause}) OR (${oldDataWhenClause})`,
+                      [DiffTriggerOperation.DELETE]: oldDataWhenClause,
+                    },
+                    writeType: (rowId: string) =>
+                      collection.has(rowId) ? `update` : `insert`,
+                    batchQuery: (
+                      lockContext: LockContext,
+                      batchSize: number,
+                      cursor: number,
+                    ) =>
+                      lockContext
+                        .getAll<TableType>(
+                          `SELECT * FROM ${viewName} WHERE ${viewWhereClause} LIMIT ? OFFSET ?`,
+                          [batchSize, cursor],
+                        )
+                        .then((rows) => {
+                          for (const row of rows) missing?.delete(row.id)
+                          return rows
+                        }),
+                  },
+                  appliedReceipts,
+                )
+              }
+              if (!isCurrent()) await safelyDisposeTracking(ctx)
+              else if (missing?.size) {
+                begin()
+                for (const key of missing) write({ type: `delete`, key })
+                appliedReceipts.push(commit())
+              }
             })
             await Promise.all(appliedReceipts)
+            if (isCurrent()) {
+              reconciledTrackingRevision = revision
+              // Replacing the trigger alone is not recovery: its baseline
+              // writes must also be applied before the source is ready again.
+              if (collection.status === `error`) markReady()
+            }
+          }
+        }
+
+        const rebuildTracking = async (): Promise<void> => {
+          // New demand can join after reconciliation exits but before its
+          // shared promise clears. Each waiter must check its revision again.
+          while (!stopped && reconciledTrackingRevision !== trackingRevision) {
+            await (rebuildPromise ??= reconcileTracking()
+              .catch((error) => {
+                // A rebuild may already have removed every active diff trigger.
+                // Do not leave healthy consumers ready against a stale source.
+                if (!stopped) markError(error)
+                throw error
+              })
+              .finally(() => {
+                rebuildPromise = null
+              }))
+          }
+        }
+
+        const loadSubset = async (
+          options: LoadSubsetOptions,
+        ): Promise<void> => {
+          if (stopped) return
+          // Never create a trigger that has no observer to drain its diff table.
+          await startup
+          if (
+            // Cleanup can run while startup is pending.
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+            stopped ||
+            releasedSubsets.has(options) ||
+            options.signal?.aborted
+          ) {
             return
           }
 
-          const combinedWhere =
-            activeWhereExpressions.length === 1
-              ? activeWhereExpressions[0]
-              : or(
-                  activeWhereExpressions[0],
-                  activeWhereExpressions[1],
-                  ...activeWhereExpressions.slice(2),
-                )
+          const demand: DemandRecord = { options, active: false }
+          demands.set(options, demand)
+          try {
+            const cleanup = await restConfig.onLoadSubset?.(options)
+            if (cleanup) demand.cleanup = cleanup
+          } catch (error) {
+            demands.delete(options)
+            throw error
+          }
 
-          const compiledNewData = compileSQLite(
-            { where: combinedWhere },
-            { jsonColumn: 'NEW.data' },
-          )
+          if (
+            // The user hook can reenter cleanup.
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+            stopped ||
+            releasedSubsets.has(options) ||
+            options.signal?.aborted ||
+            demands.get(options) !== demand
+          ) {
+            demands.delete(options)
+            demand.cleanup?.()
+            return
+          }
 
-          const compiledOldData = compileSQLite(
-            { where: combinedWhere },
-            { jsonColumn: 'OLD.data' },
-          )
-
-          const compiledView = compileSQLite({ where: combinedWhere })
-
-          const newDataWhenClause = toInlinedWhereClause(compiledNewData)
-          const oldDataWhenClause = toInlinedWhereClause(compiledOldData)
-          const viewWhereClause = toInlinedWhereClause(compiledView)
-
-          await database.writeLock(async (ctx) => {
-            // Replace any active tracking with one covering the new set of
-            // predicates.
-            await flushDiffRecordsWithContext(ctx, appliedReceipts)
-            await safelyDisposeTracking(ctx)
-
-            disposeTracking = await createDiffTrigger(
-              {
-                setupContext: ctx,
-                when: {
-                  [DiffTriggerOperation.INSERT]: newDataWhenClause,
-                  [DiffTriggerOperation.UPDATE]: `(${newDataWhenClause}) OR (${oldDataWhenClause})`,
-                  [DiffTriggerOperation.DELETE]: oldDataWhenClause,
-                },
-                writeType: (rowId: string) =>
-                  collection.has(rowId) ? `update` : `insert`,
-                batchQuery: (
-                  lockContext: LockContext,
-                  batchSize: number,
-                  cursor: number,
-                ) =>
-                  lockContext.getAll<TableType>(
-                    `SELECT * FROM ${viewName} WHERE ${viewWhereClause} LIMIT ? OFFSET ?`,
-                    [batchSize, cursor],
-                  ),
-              },
-              appliedReceipts,
-            )
-          })
-          await Promise.all(appliedReceipts)
+          demand.active = true
+          trackingRevision++
+          await rebuildTracking()
         }
 
         const toInlinedWhereClause = (compiled: {
@@ -680,56 +794,118 @@ function createPowerSyncCollectionConfig<
           )
         }
 
-        const unloadSubset = async (options: LoadSubsetOptions) => {
-          releasedSubsets.add(options)
-          unloadSubsetCallbacks.get(options)?.()
-          unloadSubsetCallbacks.delete(options)
-
-          const idx = activeWhereExpressions.indexOf(options.where)
-          if (idx !== -1) {
-            activeWhereExpressions.splice(idx, 1)
+        const cleanupDemand = (demand: DemandRecord): void => {
+          demands.delete(demand.options)
+          try {
+            demand.cleanup?.()
+          } catch (error) {
+            database.logger.error(
+              `Could not clean up subset hook for ${viewName}`,
+              error,
+            )
           }
+        }
 
-          // Evict rows that were exclusively loaded by the departing predicate.
-          // These are rows matching the departing WHERE that are no longer covered
-          // by any remaining active predicate.
+        const performPhysicalRelease = async (
+          options: LoadSubsetOptions,
+        ): Promise<void> => {
           const compiledDeparting = compileSQLite({ where: options.where })
           const departingWhereSQL = toInlinedWhereClause(compiledDeparting)
+          let rowsToEvict: Array<{ id: string }>
+          for (;;) {
+            if (stopped) return
+            const revision = trackingRevision
+            const active = activeWhereExpressions()
+            let evictionSQL: string
+            if (active.length === 0) {
+              evictionSQL = `SELECT id FROM ${viewName} WHERE ${departingWhereSQL}`
+            } else {
+              const combinedRemaining =
+                active.length === 1
+                  ? active[0]!
+                  : or(active[0], active[1], ...active.slice(2))
+              const compiledRemaining = compileSQLite({
+                where: combinedRemaining,
+              })
+              const remainingWhereSQL = toInlinedWhereClause(compiledRemaining)
+              evictionSQL = `SELECT id FROM ${viewName} WHERE (${departingWhereSQL}) AND NOT (${remainingWhereSQL})`
+            }
 
-          let evictionSQL: string
-          if (activeWhereExpressions.length === 0) {
-            evictionSQL = `SELECT id FROM ${viewName} WHERE ${departingWhereSQL}`
-          } else {
-            const combinedRemaining =
-              activeWhereExpressions.length === 1
-                ? activeWhereExpressions[0]!
-                : or(
-                    activeWhereExpressions[0],
-                    activeWhereExpressions[1],
-                    ...activeWhereExpressions.slice(2),
-                  )
-            const compiledRemaining = compileSQLite({
-              where: combinedRemaining,
-            })
-            const remainingWhereSQL = toInlinedWhereClause(compiledRemaining)
-            evictionSQL = `SELECT id FROM ${viewName} WHERE (${departingWhereSQL}) AND NOT (${remainingWhereSQL})`
+            rowsToEvict = await database.getAll<{ id: string }>(evictionSQL)
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- cleanup can run during the query
+            if (stopped) return
+            if (trackingRevision === revision) break
           }
-
-          const rowsToEvict = await database.getAll<{ id: string }>(evictionSQL)
           if (rowsToEvict.length > 0) {
             begin()
             for (const { id } of rowsToEvict) {
               write({ type: `delete`, key: id })
             }
-            // Eviction does not establish new subset coverage. Keep trigger
-            // replacement in the same unload turn even when this delete waits
-            // behind a persisting mutation; the later load tracks its own
-            // establishing receipts.
             void commit()
           }
+          await rebuildTracking()
+        }
 
-          // Recreate the diff trigger for the remaining active WHERE expressions.
-          await loadSubset()
+        function scheduleReleaseDrain(delay = 0): void {
+          if (stopped || drainingReleases || releaseRetryTimer) return
+          if (delay > 0) {
+            releaseRetryTimer = setTimeout(() => {
+              releaseRetryTimer = undefined
+              void drainReleases()
+            }, delay)
+            return
+          }
+          void drainReleases()
+        }
+
+        async function drainReleases(): Promise<void> {
+          if (stopped || drainingReleases) return
+          drainingReleases = true
+          let retryDelay = 0
+          try {
+            const attempts = pendingReleases.length
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- each release can reenter cleanup
+            for (let index = 0; !stopped && index < attempts; index++) {
+              const pending = pendingReleases.shift()!
+              try {
+                await performPhysicalRelease(pending.options)
+              } catch (error) {
+                pending.failures++
+                pendingReleases.push(pending)
+                const delay = Math.min(
+                  1000 * 2 ** (pending.failures - 1),
+                  30000,
+                )
+                retryDelay =
+                  retryDelay === 0 ? delay : Math.min(retryDelay, delay)
+                database.logger.error(
+                  `Could not release subset tracking for ${viewName}; retrying`,
+                  error,
+                )
+              }
+            }
+          } finally {
+            drainingReleases = false
+          }
+          if (pendingReleases.length > 0) scheduleReleaseDrain(retryDelay)
+        }
+
+        const unloadSubset = (options: LoadSubsetOptions): void => {
+          releasedSubsets.add(options)
+          const demand = demands.get(options)
+          if (!demand) return
+
+          const wasActive = demand.active
+          if (wasActive) trackingRevision++
+          cleanupDemand(demand)
+
+          if (wasActive) {
+            pendingReleases.push({ options, failures: 0 })
+            // New work must not wait for another release's backoff.
+            clearTimeout(releaseRetryTimer)
+            releaseRetryTimer = undefined
+            scheduleReleaseDrain()
+          }
         }
 
         markReady()
@@ -737,16 +913,19 @@ function createPowerSyncCollectionConfig<
         return {
           cleanup: () => {
             stopped = true
+            clearTimeout(releaseRetryTimer)
+            releaseRetryTimer = undefined
             database.logger.info(
               `Sync has been stopped for ${viewName} into ${trackedTableName}`,
             )
             abortController.abort()
-            for (const cleanup of unloadSubsetCallbacks.values()) cleanup()
-            unloadSubsetCallbacks.clear()
-            activeWhereExpressions.length = 0
+            for (const demand of demands.values()) {
+              cleanupDemand(demand)
+            }
+            pendingReleases.length = 0
           },
           loadSubset: (options: LoadSubsetOptions) => loadSubset(options),
-          unloadSubset: (options: LoadSubsetOptions) => unloadSubset(options),
+          unloadSubset,
         }
       }
     },

@@ -283,9 +283,8 @@ export interface Subscription extends EventEmitter<SubscriptionEvents> {
 export type CursorExpressions = {
   /**
    * Expression for rows greater than (after) the cursor value.
-   * For multi-column orderBy, this is a composite cursor using OR of conditions.
-   * Example for [col1 ASC, col2 DESC] with values [v1, v2]:
-   *   or(gt(col1, v1), and(eq(col1, v1), lt(col2, v2)))
+   * Core emits cursors for a single order column. Multi-column queries use
+   * prefix-and-tie loading instead of constructing a composite cursor.
    */
   whereFrom: BasicExpression<boolean>
   /**
@@ -301,6 +300,15 @@ export type CursorExpressions = {
   lastKey?: string | number
 }
 
+/**
+ * Immutable request data. From submission onward, callers and adapters must
+ * not mutate these options, their expression trees, comparison options, or
+ * constant payloads (including Dates, byte arrays, and membership arrays).
+ * Create new request data to change a demand; core does not clone or freeze it.
+ * Use stable data properties, not stateful getters, for request data.
+ * Signal and subscription references stay fixed, but their lifecycle remains
+ * live: aborting the signal or releasing the subscription is supported.
+ */
 export type LoadSubsetOptions = {
   /** The where expression to filter the data (does NOT include cursor expressions) */
   where?: BasicExpression<boolean>
@@ -321,8 +329,10 @@ export type LoadSubsetOptions = {
   offset?: number
   /**
    * Aborted when this exact subset request is no longer current. Cancellation
-   * is cooperative: async sync adapters must check the signal immediately
-   * before installing a baseline or later request-scoped rows.
+   * is cooperative: async adapters should stop before installing more
+   * request-scoped rows. If an in-flight baseline cannot be canceled, the
+   * returned load promise must settle after those writes become visible so
+   * core can keep overlapping replay private until then.
    */
   signal?: AbortSignal
   /**
@@ -336,12 +346,16 @@ export type LoadSubsetOptions = {
   subscription?: Subscription
 }
 
+/** @internal Result returned by the collection's normalized subset boundary. */
+export type LoadSubsetRequestResult = true | Promise<void>
+
 /**
  * Loads one subset and transfers its ongoing resource ownership only after
  * returning `true` or a promise. An implementation that throws synchronously
  * must release any partially acquired resource before throwing. A successful
  * implementation must await or return every applied receipt from the sync
- * `commit()` calls that establish the loaded subset.
+ * `commit()` calls that establish the loaded subset. A result describes only
+ * the exact `options` passed to this call.
  */
 export type LoadSubsetFn = (options: LoadSubsetOptions) => true | Promise<void>
 
@@ -353,6 +367,14 @@ export type LoadSubsetFn = (options: LoadSubsetOptions) => true | Promise<void>
  */
 export type SyncAppliedReceipt = true | Promise<void>
 
+/**
+ * Releases the exact acquisition created for `options`.
+ *
+ * Implementations must be idempotent and must not throw. An adapter owns any
+ * remote unsubscribe retry needed to make release reliable. Core attempts
+ * each acquisition's release once, reports failures, and continues retiring
+ * other acquisitions. It does not retry a failed subset release.
+ */
 export type UnloadSubsetFn = (options: LoadSubsetOptions) => void
 
 export type CleanupFn = () => void
@@ -933,9 +955,14 @@ export interface SubscribeChangesOptions<
    * Allows the caller to directly track the loading promise for isReady status.
    * @internal
    */
-  onLoadSubsetResult?: (result: Promise<void> | true) => void
+  onLoadSubsetResult?: (result: LoadSubsetRequestResult) => void
   /** Receives subset-load failures scoped to this subscription. @internal */
   onLoadSubsetError?: (event: SubscriptionLoadSubsetErrorEvent) => void
+  /** Lets a live-query graph retain its last publication during replay. @internal */
+  truncateReplayPublication?: {
+    readonly start: () => void
+    readonly succeed: () => void
+  }
 }
 
 export interface SubscribeChangesSnapshotOptions<

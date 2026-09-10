@@ -1014,6 +1014,17 @@ describe(`DbClient`, () => {
 
     expect(() => adapterWrite({ id: `1`, name: `adapter` })).not.toThrow()
     expect(collection.get(`1`)?.name).toBe(`adapter`)
+
+    client.hydrate({
+      collections: [
+        {
+          collectionId: `ready-hydration-seed`,
+          rows: [{ key: `1`, value: { id: `1`, name: `late hydration` } }],
+        },
+      ],
+    })
+
+    expect(collection.get(`1`)?.name).toBe(`adapter`)
   })
 
   it(`does not let a late stream chunk overwrite adapter rows or metadata`, async () => {

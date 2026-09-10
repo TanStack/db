@@ -7,6 +7,7 @@ import {
 import DebugModule from 'debug'
 import {
   DeduplicatedLoadSubset,
+  LoadSubsetOperationAbortedError,
   and,
   withCollectionConfigFactory,
   withCollectionSyncConfigCleanup,
@@ -675,6 +676,9 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   const compileOptions = encodeColumnName ? { encodeColumnName } : undefined
   const logPrefix = collectionId ? `[${collectionId}] ` : ``
 
+  const abortReason = (abortedSignal: AbortSignal): unknown =>
+    abortedSignal.reason ?? new LoadSubsetOperationAbortedError()
+
   /**
    * Handles errors from snapshot operations. Returns true if the error was
    * handled (signal aborted during cleanup), false if it should be re-thrown.
@@ -691,7 +695,11 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   const loadSubset = async (opts: LoadSubsetOptions) => {
     onLoadSubset?.()
     const commitCursor = getCommitCursor()
-    if (opts.signal?.aborted) return
+    const throwIfAborted = () => {
+      if (signal.aborted) throw abortReason(signal)
+      if (opts.signal?.aborted) throw abortReason(opts.signal)
+    }
+    throwIfAborted()
 
     if (isBufferingInitialSync()) {
       const snapshotParams = compileSQL<T>(opts, compileOptions)
@@ -740,6 +748,18 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
     // still works.
     if (stream.isUpToDate) {
       let timeoutId: ReturnType<typeof setTimeout> | undefined
+      const abortSignals = [signal, opts.signal].filter(
+        (candidate): candidate is AbortSignal => candidate !== undefined,
+      )
+      let rejectAbort: (reason: unknown) => void = () => {}
+      const aborted = new Promise<never>((_resolve, reject) => {
+        rejectAbort = reject
+      })
+      const abort = (event: Event) =>
+        rejectAbort(abortReason(event.currentTarget as AbortSignal))
+      for (const abortSignal of abortSignals) {
+        abortSignal.addEventListener(`abort`, abort, { once: true })
+      }
       try {
         await Promise.race([
           stream.forceDisconnectAndRefresh(),
@@ -749,8 +769,10 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
               FORCE_DISCONNECT_AND_REFRESH_TIMEOUT_MS,
             )
           }),
+          aborted,
         ])
       } catch (error) {
+        if (signal.aborted || opts.signal?.aborted) throw error
         if (handleSnapshotError(error, `forceDisconnectAndRefresh`)) {
           return
         }
@@ -760,10 +782,13 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
         )
       } finally {
         clearTimeout(timeoutId)
+        for (const abortSignal of abortSignals) {
+          abortSignal.removeEventListener(`abort`, abort)
+        }
       }
     }
 
-    if (opts.signal?.aborted) return
+    throwIfAborted()
 
     // Upstream limitation: ShapeStream.requestSnapshot() publishes its rows
     // through the stream callback before its Promise resolves. It accepts no
@@ -1737,17 +1762,12 @@ function createElectricSync<T extends Row<unknown>>(
 
       // Abort controller for the stream - wraps the signal if provided
       const abortController = new AbortController()
+      const forwardExternalAbort = () => abortController.abort()
 
       if (shapeOptions.signal) {
-        shapeOptions.signal.addEventListener(
-          `abort`,
-          () => {
-            abortController.abort()
-          },
-          {
-            once: true,
-          },
-        )
+        shapeOptions.signal.addEventListener(`abort`, forwardExternalAbort, {
+          once: true,
+        })
         if (shapeOptions.signal.aborted) {
           abortController.abort()
         }
@@ -2322,6 +2342,10 @@ function createElectricSync<T extends Row<unknown>>(
       return {
         loadSubset: loadSubsetDedupe?.loadSubset,
         cleanup: () => {
+          shapeOptions.signal?.removeEventListener(
+            `abort`,
+            forwardExternalAbort,
+          )
           // Unsubscribe from the stream
           unsubscribeStream()
           // Abort the abort controller to stop the stream

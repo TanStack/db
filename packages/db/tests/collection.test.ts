@@ -7,6 +7,7 @@ import {
   DuplicateKeySyncError,
   InvalidKeyError,
   KeyUpdateNotAllowedError,
+  LoadSubsetOperationAbortedError,
   MissingDeleteHandlerError,
   MissingInsertHandlerError,
   MissingUpdateHandlerError,
@@ -132,14 +133,14 @@ describe(`Collection`, () => {
     const liveCollection = createLiveQueryCollection((q) =>
       q
         .from({ collection })
-        .where(({ collection }) => eq(collection.project_id, 1))
-        .select(({ collection }) => ({
-          id: collection.id,
-          text: collection.text,
-          project_id: collection.project_id,
-          $synced: collection.$synced,
-          $origin: collection.$origin,
-          $key: collection.$key,
+        .where(({ collection: item }) => eq(item.project_id, 1))
+        .select(({ collection: item }) => ({
+          id: item.id,
+          text: item.text,
+          project_id: item.project_id,
+          $synced: item.$synced,
+          $origin: item.$origin,
+          $key: item.$key,
         })),
     )
 
@@ -2328,5 +2329,85 @@ describe(`Collection isLoadingSubset property`, () => {
     const result = collection._sync.loadSubset({})
     expect(result).toBe(true)
     expect(collection.isLoadingSubset).toBe(false)
+  })
+
+  it(`rejects an already-aborted subset request before the adapter branch`, async () => {
+    const loadSubset = vi.fn(() => true as const)
+    const collection = createCollection<{ id: string; value: string }>({
+      id: `already-aborted-subset-request`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return { loadSubset }
+        },
+      },
+    })
+    const request = new AbortController()
+    request.abort()
+
+    await expect(
+      collection._sync.loadSubset({ signal: request.signal }),
+    ).rejects.toBeInstanceOf(LoadSubsetOperationAbortedError)
+
+    expect(loadSubset).not.toHaveBeenCalled()
+    expect(collection.isLoadingSubset).toBe(false)
+    await collection.cleanup()
+  })
+
+  it(`rejects an already-aborted subset request before the eager return`, async () => {
+    const loadSubset = vi.fn(() => true as const)
+    const collection = createCollection<{ id: string; value: string }>({
+      id: `already-aborted-eager-subset-request`,
+      getKey: (item) => item.id,
+      syncMode: `eager`,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return { loadSubset }
+        },
+      },
+    })
+    const request = new AbortController()
+    request.abort()
+
+    await expect(
+      collection._sync.loadSubset({ signal: request.signal }),
+    ).rejects.toMatchObject({ name: `AbortError` })
+
+    expect(loadSubset).not.toHaveBeenCalled()
+    expect(collection.isLoadingSubset).toBe(false)
+    await collection.cleanup()
+  })
+
+  it(`rejects an already-aborted subset request before deferred start`, async () => {
+    const loadSubset = vi.fn(() => true as const)
+    const collection = createCollection<{ id: string; value: string }>({
+      id: `already-aborted-deferred-subset-request`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return { loadSubset }
+        },
+      },
+    })
+    expect(collection._deferSyncStart()).toBe(true)
+    const request = new AbortController()
+    request.abort()
+
+    await expect(
+      collection._sync.loadSubset({ signal: request.signal }),
+    ).rejects.toMatchObject({ name: `AbortError` })
+
+    expect(loadSubset).not.toHaveBeenCalled()
+    expect(collection.isLoadingSubset).toBe(false)
+    collection._resumeSyncStart()
+    expect(loadSubset).not.toHaveBeenCalled()
+    await collection.cleanup()
   })
 })

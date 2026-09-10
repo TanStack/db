@@ -11,6 +11,13 @@ type LoadSubsetOptions = object;
 
 Defined in: [packages/db/src/types.ts:304](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L304)
 
+Request data is immutable from submission onward. Callers and adapters must not
+mutate options, expression trees, comparison options, or constant payloads such
+as Dates, byte arrays, and membership arrays. Create new request data to change
+a demand. Core does not clone or freeze it. Use stable data properties, not
+stateful getters. Signal and subscription references stay fixed, but aborting
+the signal or releasing the subscription remains supported.
+
 ## Properties
 
 ### cursor?

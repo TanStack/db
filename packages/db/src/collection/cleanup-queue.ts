@@ -90,16 +90,4 @@ export class CleanupQueue {
       this.updateTimeout()
     }
   }
-
-  /**
-   * Resets the singleton instance for tests.
-   */
-  public static resetInstance(): void {
-    if (CleanupQueue.instance) {
-      if (CleanupQueue.instance.timeoutId !== null) {
-        clearTimeout(CleanupQueue.instance.timeoutId)
-      }
-      CleanupQueue.instance = null
-    }
-  }
 }

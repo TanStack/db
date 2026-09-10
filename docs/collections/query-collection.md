@@ -411,6 +411,13 @@ Derived projections, such as `select: (response) => response.edges.map((edge) =>
 
 The `meta` option allows you to pass additional metadata to your query function. By default, Query Collections automatically include `loadSubsetOptions` in the meta object, which contains filtering, sorting, and pagination options for on-demand queries.
 
+Treat `ctx.meta.loadSubsetOptions` and its nested request data as read-only.
+Do not edit expression nodes, ordering options, Dates, byte arrays, or membership
+arrays. Build separate API parameters instead. Core retains request data without
+cloning it; changing submitted data can make the request disagree with its cache
+key. To change a query constant, supply a new value rather than mutating the old
+one. Cancellation through the request's `AbortSignal` remains supported.
+
 ### Type-Safe Meta Access
 
 The `ctx.meta.loadSubsetOptions` property is automatically typed as `LoadSubsetOptions` without requiring any additional imports or type assertions:
