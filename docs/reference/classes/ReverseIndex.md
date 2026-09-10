@@ -259,23 +259,6 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:120](https://github.com/Ta
 
 ***
 
-### getStats()
-
-```ts
-getStats(): IndexStats;
-```
-
-Defined in: [packages/db/src/indexes/reverse-index.ts:92](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L92)
-
-#### Returns
-
-[`IndexStats`](../interfaces/IndexStats.md)
-
-#### Implementation of
-
-[`IndexInterface`](../interfaces/IndexInterface.md).[`getStats`](../interfaces/IndexInterface.md#getstats)
-
-***
 
 ### inArrayLookup()
 

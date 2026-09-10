@@ -301,6 +301,13 @@ const collectionScenarioArbitrary = fc.record({
   actions: fc.array(actionArbitrary, { minLength: 1, maxLength: 16 }),
 })
 
+const orderSwapArbitrary = fc.integer({ min: 2, max: 8 }).chain((length) =>
+  fc.integer({ min: 0, max: length - 2 }).map((swapIndex) => ({
+    length,
+    swapIndex,
+  })),
+)
+
 function enumerateActionSequences(
   actions: ReadonlyArray<CollectionAction>,
   maxLength: number,
@@ -326,7 +333,10 @@ const exhaustiveActions: ReadonlyArray<CollectionAction> = [
 ]
 
 describe(`Collection-valued includes oracle`, () => {
-  fcTest.prop([collectionScenarioArbitrary], oraclePropertyOptions(30))(
+  fcTest.prop(
+    [collectionScenarioArbitrary],
+    oraclePropertyOptions(30, `includes-collection.relationship-history`),
+  )(
     `keeps Collection, toArray, and materialize equivalent across generated relationship histories`,
     ({ parentGroup, childValue, actions }) =>
       runTrace({
@@ -765,6 +775,7 @@ describe(`Collection-valued includes oracle`, () => {
   fcTest(
     `outer fn.select recomputes nested values after a union branch include changes`,
     async () => {
+      const callbackRows: Array<Record<PropertyKey, unknown>> = []
       const messages = createControlledCollection(`fn-select-messages`, [
         { id: 1, group: 1 },
       ])
@@ -799,11 +810,14 @@ describe(`Collection-valued includes oracle`, () => {
             id: tool.id,
           }))
 
-        return q.unionAll(messageRows, toolRows).fn.select((row) => ({
-          kind: row.kind,
-          id: row.id,
-          payload: { children: row.children },
-        }))
+        return q.unionAll(messageRows, toolRows).fn.select((row) => {
+          callbackRows.push(row)
+          return {
+            kind: row.kind,
+            id: row.id,
+            payload: { children: row.children },
+          }
+        })
       })
 
       try {
@@ -819,9 +833,72 @@ describe(`Collection-valued includes oracle`, () => {
         expect(
           live.toArray.find((row) => row.kind === `message`)!.payload.children,
         ).toEqual([{ id: 10, value: 2 }])
+        expect(
+          callbackRows.flatMap((row) => Object.getOwnPropertySymbols(row)),
+        ).toEqual([])
       } finally {
         await Promise.all([
           live.cleanup(),
+          messages.collection.cleanup(),
+          tools.collection.cleanup(),
+          children.collection.cleanup(),
+        ])
+      }
+    },
+  )
+
+  fcTest(
+    `outer fn.select rejects a bare union include before invoking the callback`,
+    async () => {
+      class Box {
+        constructor(readonly child: unknown) {}
+      }
+
+      const callbackChildren: Array<unknown> = []
+      const messages = createControlledCollection(`fn-select-bare-messages`, [
+        { id: 1, group: 1 },
+      ])
+      const tools = createControlledCollection(`fn-select-bare-tools`, [
+        { id: 2, group: 2 },
+      ])
+      const children = createControlledCollection(`fn-select-bare-children`, [
+        { id: 10, parentGroup: 1, value: 1 },
+        { id: 20, parentGroup: 2, value: 2 },
+      ])
+      const buildQuery = () =>
+        createLiveQueryCollection((q) => {
+          const messageRows = q
+            .from({ message: messages.collection })
+            .select(({ message }) => ({
+              kind: `message` as const,
+              id: message.id,
+              children: q
+                .from({ messageChild: children.collection })
+                .where(({ messageChild }) =>
+                  eq(messageChild.parentGroup, message.group),
+                ),
+            }))
+          const toolRows = q
+            .from({ tool: tools.collection })
+            .select(({ tool }) => ({
+              kind: `tool` as const,
+              id: tool.id,
+            }))
+
+          return q.unionAll(messageRows, toolRows).fn.select((row) => {
+            const child = `children` in row ? row.children : undefined
+            callbackChildren.push(child)
+            return { kind: row.kind, id: row.id, box: new Box(child) }
+          })
+        })
+
+      try {
+        expect(buildQuery).toThrow(
+          `fn.select() cannot consume Collection-valued includes`,
+        )
+        expect(callbackChildren).toEqual([])
+      } finally {
+        await Promise.all([
           messages.collection.cleanup(),
           tools.collection.cleanup(),
           children.collection.cleanup(),
@@ -1041,6 +1118,75 @@ describe(`Collection-valued includes oracle`, () => {
   })
 
   fcTest(
+    `cleanup during root publication suppresses the prepared facade callback`,
+    async () => {
+      type NodeRow = {
+        id: number
+        kind: `parent` | `child`
+        group: number
+        value: number
+      }
+      const nodes = createControlledCollection<NodeRow>(`publication-cleanup`, [
+        { id: 1, kind: `parent`, group: 1, value: 1 },
+        { id: 10, kind: `child`, group: 1, value: 1 },
+      ])
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ parent: nodes.collection })
+          .where(({ parent }) => eq(parent.kind, `parent`))
+          .select(({ parent }) => ({
+            id: parent.id,
+            value: parent.value,
+            children: q
+              .from({ child: nodes.collection })
+              .where(({ child }) => eq(child.kind, `child`))
+              .where(({ child }) => eq(child.group, parent.group)),
+          })),
+      )
+
+      await live.preload()
+      const facade = live.get(1)!.children
+      const rootSnapshots: Array<Array<number>> = []
+      const facadeSnapshots: Array<Array<number>> = []
+      let cleanup: Promise<void> | undefined
+      const rootSubscription = live.subscribeChanges(
+        () => {
+          rootSnapshots.push(facade.toArray.map(({ value }) => value))
+          cleanup = facade.cleanup()
+        },
+        { includeInitialState: false },
+      )
+      const facadeSubscription = facade.subscribeChanges(
+        () => facadeSnapshots.push(facade.toArray.map(({ value }) => value)),
+        { includeInitialState: false },
+      )
+
+      try {
+        nodes.writeBatch([
+          {
+            type: `update`,
+            value: { id: 1, kind: `parent`, group: 1, value: 2 },
+          },
+          {
+            type: `update`,
+            value: { id: 10, kind: `child`, group: 1, value: 2 },
+          },
+        ])
+        await cleanup
+
+        expect(rootSnapshots).toEqual([[2]])
+        expect(facadeSnapshots).toEqual([])
+        expect(facade.status).toBe(`cleaned-up`)
+        expect(facade.toArray).toEqual([])
+      } finally {
+        rootSubscription.unsubscribe()
+        facadeSubscription.unsubscribe()
+        await Promise.all([live.cleanup(), nodes.collection.cleanup()])
+      }
+    },
+  )
+
+  fcTest(
     `shared facades remain active until their last parent departs`,
     async () => {
       const driver = createCollectionDriver(
@@ -1107,7 +1253,7 @@ describe(`Collection-valued includes oracle`, () => {
         wideId: fc.integer({ min: 10, max: 19 }),
       }),
     ],
-    oraclePropertyOptions(20),
+    oraclePropertyOptions(20, `includes-collection.public-key-order`),
   )(
     `uses one raw public-key order across Collection and inline materializations`,
     async ({ smallId, wideId }) => {
@@ -1167,19 +1313,29 @@ describe(`Collection-valued includes oracle`, () => {
     },
   )
 
-  fcTest(
-    `propagates an order-only child move through every materialization`,
-    async () => {
+  fcTest.prop(
+    [orderSwapArbitrary],
+    oraclePropertyOptions(20, `includes-collection.layout-swap`),
+  )(
+    `propagates generated order-only child swaps through every materialization`,
+    async ({ length, swapIndex }) => {
       type OrderedChild = ChildRow & { position: number; label: string }
       const parents = createControlledCollection(`order-move-parents`, [
         { id: 1, group: 1 },
       ])
+      const initialRows: Array<OrderedChild> = Array.from(
+        { length },
+        (_, index) => ({
+          id: index + 1,
+          parentGroup: 1,
+          value: index + 1,
+          position: index,
+          label: String(index + 1),
+        }),
+      )
       const children = createControlledCollection<OrderedChild>(
         `order-move-children`,
-        [
-          { id: 10, parentGroup: 1, value: 1, position: 0, label: `a` },
-          { id: 20, parentGroup: 1, value: 2, position: 1, label: `b` },
-        ],
+        initialRows,
       )
       const live = createLiveQueryCollection((q) =>
         q.from({ parent: parents.collection }).select(({ parent }) => {
@@ -1229,27 +1385,30 @@ describe(`Collection-valued includes oracle`, () => {
       try {
         await live.preload()
         const facade = live.get(1)!.facade
-        const revision = facade._layoutRevision
+        const initialIds = initialRows.map(({ id }) => id)
         expect(project()).toEqual({
-          ...expectedMaterializations([10, 20]),
-          first: 10,
-          joined: `ab`,
+          ...expectedMaterializations(initialIds),
+          first: initialIds[0],
+          joined: initialRows.map(({ label }) => label).join(``),
         })
 
-        children.write(`update`, {
-          id: 10,
-          parentGroup: 1,
-          value: 1,
-          position: 2,
-          label: `a`,
-        })
+        const first = initialRows[swapIndex]!
+        const second = initialRows[swapIndex + 1]!
+        children.writeBatch([
+          { type: `update`, value: { ...first, position: second.position } },
+          { type: `update`, value: { ...second, position: first.position } },
+        ])
+        const expectedIds = [...initialIds]
+        ;[expectedIds[swapIndex], expectedIds[swapIndex + 1]] = [
+          expectedIds[swapIndex + 1]!,
+          expectedIds[swapIndex]!,
+        ]
 
         expect(live.get(1)!.facade).toBe(facade)
-        expect(facade._layoutRevision).toBeGreaterThan(revision)
         expect(project()).toEqual({
-          ...expectedMaterializations([20, 10]),
-          first: 20,
-          joined: `ba`,
+          ...expectedMaterializations(expectedIds),
+          first: expectedIds[0],
+          joined: expectedIds.join(``),
         })
       } finally {
         await Promise.all([
@@ -1770,7 +1929,7 @@ describe(`Collection-valued includes oracle`, () => {
         value: fc.integer({ min: -10, max: 10 }),
       }),
     ],
-    oraclePropertyOptions(20),
+    oraclePropertyOptions(20, `includes-collection.optimistic-child-history`),
   )(
     `matches recomputation through optimistic child insert and delete confirmation and rollback`,
     async ({ group, insertedId, confirmedId, value }) => {

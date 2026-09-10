@@ -14,7 +14,6 @@ Defined in: [packages/db/src/errors.ts:741](https://github.com/TanStack/db/blob/
 ## Extended by
 
 - [`CannotCombineEmptyExpressionListError`](CannotCombineEmptyExpressionListError.md)
-- [`WhereClauseConversionError`](WhereClauseConversionError.md)
 
 ## Constructors
 

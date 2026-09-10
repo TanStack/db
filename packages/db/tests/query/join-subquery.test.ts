@@ -476,7 +476,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
         })
       })
 
-      test(`should use subquery in LEFT JOIN clause - left join with ordered subquery with limit`, () => {
+      test(`should use subquery in LEFT JOIN clause - left join with ordered subquery with limit`, async () => {
         const joinSubquery = createLiveQueryCollection({
           query: (q) => {
             return q
@@ -498,6 +498,9 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
           startSync: true,
         })
 
+        // Initial ordered refinement may hold publication beyond startSync.
+        await joinSubquery.preload()
+        expect(joinSubquery.isReady()).toBe(true)
         const results = joinSubquery.toArray.map((row) => ({
           ...stripVirtualProps(row),
           issue: stripVirtualProps(row.issue),
@@ -517,7 +520,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
         ])
       })
 
-      test(`should use subquery in RIGHT JOIN clause - left join with ordered subquery with limit`, () => {
+      test(`should use subquery in RIGHT JOIN clause - left join with ordered subquery with limit`, async () => {
         const joinSubquery = createLiveQueryCollection({
           query: (q) => {
             return q
@@ -539,6 +542,8 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
           startSync: true,
         })
 
+        await joinSubquery.preload()
+        expect(joinSubquery.isReady()).toBe(true)
         const results = joinSubquery.toArray.map((row) => ({
           ...stripVirtualProps(row),
           issue: stripVirtualProps(row.issue),

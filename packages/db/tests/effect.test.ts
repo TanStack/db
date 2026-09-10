@@ -716,6 +716,109 @@ describe(`createEffect`, () => {
       await expect(secondDispose).rejects.toBe(failure)
       await source.cleanup()
     })
+
+    it.each([
+      { name: `undefined`, failure: undefined },
+      { name: `null`, failure: null },
+      { name: `false`, failure: false },
+      { name: `zero`, failure: 0 },
+      { name: `empty string`, failure: `` },
+      { name: `NaN`, failure: Number.NaN },
+    ])(
+      `reports a falsy cleanup failure once: $name`,
+      async ({ name, failure }) => {
+        let unloadCount = 0
+        const source = createCollection<{ id: number }>({
+          id: `effect-falsy-cleanup-${name}`,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return {
+                loadSubset: () => true,
+                unloadSubset: () => {
+                  unloadCount++
+                  if (unloadCount === 1) throw failure
+                },
+              }
+            },
+          },
+        })
+        const effect = createEffect({
+          query: (q) => q.from({ source }),
+          onBatch: () => {},
+        })
+
+        try {
+          await flushPromises()
+          let didReject = false
+          let rejection: unknown
+          try {
+            await effect.dispose()
+          } catch (error) {
+            didReject = true
+            rejection = error
+          }
+          expect(didReject).toBe(true)
+          expect(rejection).toBeInstanceOf(Error)
+          expect((rejection as Error).message).toBe(String(failure))
+          expect(unloadCount).toBe(1)
+
+          await effect.dispose()
+          expect(unloadCount).toBe(1)
+        } finally {
+          await effect.dispose()
+          await source.cleanup()
+        }
+      },
+    )
+
+    it(`does not repeat a failed source release across reentrant disposal`, async () => {
+      const failure = new Error(`outer source release failed`)
+      let unloadCount = 0
+      const source = createCollection<{ id: number }>({
+        id: `effect-reentrant-cleanup-error`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => true,
+              unloadSubset: () => {
+                unloadCount++
+                if (unloadCount === 1) {
+                  void effect.dispose()
+                  throw failure
+                }
+              },
+            }
+          },
+        },
+      })
+      const effect = createEffect({
+        query: (q) => q.from({ source }),
+        onBatch: () => {},
+      })
+
+      try {
+        await flushPromises()
+        await expect(effect.dispose()).rejects.toBe(failure)
+        // Reentrant disposal cannot repeat an unload still on the stack.
+        expect(unloadCount).toBe(1)
+        expect(source.subscriberCount).toBe(0)
+
+        await effect.dispose()
+        // Finishing the failed attempt does not make the lease retryable.
+        expect(unloadCount).toBe(1)
+        await effect.dispose()
+        expect(unloadCount).toBe(1)
+      } finally {
+        await effect.dispose()
+        await source.cleanup()
+      }
+    })
   })
 
   describe(`auto-generated IDs`, () => {
@@ -1899,12 +2002,85 @@ describe(`createEffect`, () => {
       }
     })
 
+    it(`reports failed obsolete-demand release without failing the source commit`, async () => {
+      const failure = new Error(`obsolete effect demand release failed`)
+      const users = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `effect-obsolete-release-users`,
+          getKey: (user) => user.id,
+          initialData: [sampleUsers[0]!],
+        }),
+      )
+      let loadCount = 0
+      let unloadCount = 0
+      const consoleError = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+      const issues = createCollection<Issue>({
+        id: `effect-obsolete-release-issues`,
+        getKey: (issue) => issue.id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                loadCount++
+                return true
+              },
+              unloadSubset: () => {
+                unloadCount++
+                if (unloadCount <= 2) throw failure
+              },
+            }
+          },
+        },
+      })
+      const sourceErrors: Array<Error> = []
+      const effect = createEffect({
+        query: (q) =>
+          q
+            .from({ user: users })
+            .leftJoin({ issue: issues }, ({ user, issue }) =>
+              eq(user.id, issue.userId),
+            )
+            .select(({ user, issue }) => ({
+              id: user.id,
+              issueId: issue.id,
+            })),
+        onBatch: () => {},
+        onSourceError: (error) => sourceErrors.push(error),
+      })
+
+      try {
+        await flushPromises()
+        expect(loadCount).toBe(1)
+
+        expect(() => {
+          users.utils.begin()
+          users.utils.write({ type: `delete`, value: sampleUsers[0]! })
+          users.utils.commit()
+        }).not.toThrow()
+        await flushPromises()
+
+        expect(sourceErrors).toEqual([failure])
+        expect(effect.disposed).toBe(true)
+        expect(unloadCount).toBe(1)
+
+        await effect.dispose()
+        expect(unloadCount).toBe(1)
+      } finally {
+        await effect.dispose()
+        await Promise.all([users.cleanup(), issues.cleanup()])
+        consoleError.mockRestore()
+      }
+    })
+
     it(`reports a rejected ordered subset load and disposes the effect`, async () => {
       const failure = new Error(`ordered subset failed`)
       let loadCount = 0
-      let removeVisibleRow: () => void = () => {
-        throw new Error(`source has not started`)
-      }
       const users = createCollection<User>({
         id: `effect-rejected-ordered-users`,
         getKey: (user) => user.id,
@@ -1914,11 +2090,6 @@ describe(`createEffect`, () => {
         sync: {
           sync: ({ begin, write, commit, markReady }) => {
             markReady()
-            removeVisibleRow = () => {
-              begin()
-              write({ type: `delete`, value: sampleUsers[0]! })
-              commit()
-            }
             return {
               loadSubset: () => {
                 loadCount++
@@ -1945,11 +2116,6 @@ describe(`createEffect`, () => {
 
       try {
         await flushPromises()
-        expect(sourceErrors).toEqual([])
-
-        removeVisibleRow()
-        await flushPromises()
-
         expect(sourceErrors).toEqual([failure])
         expect(effect.disposed).toBe(true)
       } finally {
@@ -2021,7 +2187,7 @@ describe(`createEffect`, () => {
           cleanupFailure,
         )
       } finally {
-        await expect(effect.dispose()).rejects.toBe(cleanupFailure)
+        await expect(effect.dispose()).resolves.toBeUndefined()
         consoleErrorSpy.mockRestore()
         await users.cleanup()
       }
@@ -2265,6 +2431,101 @@ describe(`createEffect`, () => {
 
       await effect.dispose()
     })
+
+    it.each(
+      ([`projection`, `delivery`] as const).flatMap((phase) =>
+        [false, true].map((throwRelease) => ({ phase, throwRelease })),
+      ),
+    )(
+      `isolates in-turn disposal and nested publication: %j`,
+      async ({ phase, throwRelease }) => {
+        const users = createUsersCollection([])
+        const issues = createIssuesCollection([])
+        const peerEvents: Array<DeltaEvent<User, number>> = []
+        const peer = createEffect<User, number>({
+          query: (q) => q.from({ user: users }),
+          onEnter: (event) => {
+            peerEvents.push(event)
+          },
+        })
+        const failure = new Error(`unsubscribe failed after releasing`)
+        let shouldThrow = throwRelease
+        const subscribe = users.subscribeChanges.bind(users)
+        vi.spyOn(users, `subscribeChanges`).mockImplementation((...args) => {
+          const subscription = subscribe(...args)
+          const unsubscribe = subscription.unsubscribe.bind(subscription)
+          vi.spyOn(subscription, `unsubscribe`).mockImplementation(() => {
+            unsubscribe()
+            if (shouldThrow) {
+              shouldThrow = false
+              throw failure
+            }
+          })
+          return subscription
+        })
+        const events: Array<DeltaEvent<User, number>> = []
+        let disposeInTurn: (() => void) | undefined
+        let outcome: Promise<unknown> | undefined
+        const effect = createEffect<User, number>({
+          query: (q) =>
+            q
+              .from({ user: users })
+              .leftJoin({ issue: issues }, ({ user, issue }) =>
+                eq(user.id, issue.userId),
+              )
+              .fn.select(({ user }) => {
+                if (phase === `projection`) disposeInTurn?.()
+                return user
+              }),
+          onEnter: (event) => {
+            events.push(event)
+            if (phase === `delivery`) disposeInTurn?.()
+          },
+        })
+        try {
+          await flushPromises()
+          expect(users.subscriberCount).toBe(2)
+          expect(issues.subscriberCount).toBe(1)
+          disposeInTurn = () => {
+            disposeInTurn = undefined
+            outcome = effect.dispose().then(
+              () => ({ status: `fulfilled` }),
+              (error: unknown) => ({ status: `rejected`, reason: error }),
+            )
+            users.utils.begin()
+            users.utils.write({
+              type: `insert`,
+              value: { id: 3, name: `Nested`, active: true },
+            })
+            users.utils.commit()
+          }
+          users.utils.begin()
+          for (const id of [1, 2]) {
+            users.utils.write({
+              type: `insert`,
+              value: { id, name: `User ${id}`, active: true },
+            })
+          }
+          users.utils.commit()
+          await flushPromises()
+          expect(outcome).toBeDefined()
+          expect(await outcome).toEqual(
+            throwRelease
+              ? { status: `rejected`, reason: failure }
+              : { status: `fulfilled` },
+          )
+          expect(effect.disposed).toBe(true)
+          expect(events).toHaveLength(phase === `projection` ? 0 : 1)
+          expect(peerEvents.map(({ key }) => key).sort()).toEqual([1, 2, 3])
+          expect(users.subscriberCount).toBe(1)
+          expect(issues.subscriberCount).toBe(0)
+        } finally {
+          await effect.dispose()
+          await peer.dispose()
+          await Promise.all([users.cleanup(), issues.cleanup()])
+        }
+      },
+    )
 
     it(`disposing inside handler should not throw and should stop further events`, async () => {
       const users = createUsersCollection()

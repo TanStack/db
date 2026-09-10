@@ -9,6 +9,7 @@ import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import {
   createLiveQueryCollection,
   eq,
+  materialize,
   toArray,
 } from '../../src/query/index.js'
 import { runTrace } from '../trace-runner.js'
@@ -163,6 +164,114 @@ function createColdComments(): {
   })
   return { collection, loads }
 }
+
+it.each(
+  ([`array`, `materialized`] as const).flatMap((form) =>
+    ([`expression`, `functional`] as const).map((projection) => ({
+      form,
+      projection,
+    })),
+  ),
+)(
+  `$form / $projection preserves child demand and applied settlement across projection`,
+  async ({ form, projection }) => {
+    const posts = createColdPosts([{ id: 1, authorId: `one`, title: `post` }])
+    const started = createDeferred<void>()
+    const release = createDeferred<void>()
+    const loads: Array<LoadSubsetOptions> = []
+    const comments = createCollection<Comment>({
+      id: nextCollectionId(`projection-pending-comments`),
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => ({
+          loadSubset: (options) => {
+            loads.push(options)
+            const keys = correlationKeys([options], `postId`)
+            started.resolve()
+            return release.promise.then(async () => {
+              if (options.signal?.aborted) return
+              begin()
+              if (keys.includes(1))
+                write({
+                  type: `insert`,
+                  value: { id: 100, postId: 1, body: `one` },
+                })
+              await commit()
+              markReady()
+            })
+          },
+        }),
+      },
+    })
+    const live = createLiveQueryCollection((q) => {
+      const included = q.from({ post: posts.collection }).select(({ post }) => {
+        const childRows = q
+          .from({ comment: comments })
+          .where(({ comment }) => eq(comment.postId, post.id))
+        return {
+          id: post.id,
+          comments:
+            form === `array` ? toArray(childRows) : materialize(childRows),
+          count: 0,
+        }
+      })
+      const outer = q.from({ row: included })
+      return projection === `expression`
+        ? outer.select(({ row }) => row)
+        : outer.fn.select(({ row }) => {
+            expect
+              .soft(
+                Array.isArray(row.comments),
+                `callback receives an inline value`,
+              )
+              .toBe(true)
+            return {
+              id: row.id,
+              comments: row.comments,
+              count: Array.isArray(row.comments) ? row.comments.length : -1,
+            }
+          })
+    })
+    let settled = false
+    const preload = live.preload()
+    const observed = preload.then(
+      () => {
+        settled = true
+      },
+      () => {
+        settled = true
+      },
+    )
+    try {
+      await Promise.race([started.promise, preload])
+      expect(loads).toHaveLength(1)
+      expect(correlationKeys(loads, `postId`)).toEqual([1])
+      expect(settled).toBe(false)
+      release.resolve()
+      await preload
+      expect(live.toArray).toHaveLength(1)
+      // Observe the runtime boundary: a broken projection can omit this value.
+      const publishedComments = live.toArray[0]?.comments as unknown as
+        | Array<Comment>
+        | undefined
+      expect(
+        publishedComments?.map(({ id, postId, body }) => ({
+          id,
+          postId,
+          body,
+        })),
+      ).toEqual([{ id: 100, postId: 1, body: `one` }])
+      if (projection === `functional`) expect(live.toArray[0]?.count).toBe(1)
+    } finally {
+      release.resolve()
+      await live.cleanup()
+      await observed
+      await posts.collection.cleanup()
+      await comments.cleanup()
+    }
+  },
+)
 
 type ReadinessObservation = {
   ready: boolean
@@ -839,6 +948,201 @@ async function expectFailedDemandRetriesSameCoverage(): Promise<void> {
   }
 }
 
+async function expectDemandReactivationRetriesAfterReleaseFailure(
+  keys: ReadonlyArray<number>,
+): Promise<void> {
+  let loadCount = 0
+  let allowUnload = false
+  const releaseError = new Error(`child release failed`)
+  const comments = createCollection<Comment>({
+    id: nextCollectionId(`temporal-release-retry-comments`),
+    getKey: (comment) => comment.id,
+    syncMode: `on-demand`,
+    autoIndex: `eager`,
+    defaultIndexType: BasicIndex,
+    sync: {
+      sync: ({ markReady }) => ({
+        loadSubset: () => {
+          loadCount += 1
+          markReady()
+          return true
+        },
+        unloadSubset: () => {
+          if (!allowUnload) throw releaseError
+        },
+      }),
+    },
+  })
+  comments.createIndex((comment) => comment.postId)
+  const subscription = comments.subscribeChanges(() => {}, {
+    includeInitialState: false,
+  })
+  const controller = new SubsetDemandController()
+  const plan: LazyDemandPlan = {
+    id: `release-failure-retry`,
+    path: [`postId`],
+    collectionId: comments.id,
+    initialKeys: new Set(),
+  }
+
+  try {
+    expect(
+      controller.setDemand(subscription, plan, new Set(keys)),
+    ).toMatchObject({ changed: true, empty: false })
+    expect(loadCount).toBe(1)
+
+    const retired = controller.setDemand(subscription, plan, new Set())
+    expect(retired).toMatchObject({ changed: true, empty: true })
+
+    const reactivated = controller.setDemand(subscription, plan, new Set(keys))
+    expect(reactivated).toMatchObject({ changed: true, empty: false })
+    expect(loadCount).toBe(2)
+  } finally {
+    allowUnload = true
+    controller.clear()
+    subscription.unsubscribe()
+    await comments.cleanup()
+  }
+}
+
+async function expectRetiredDemandStaysNonfatalAfterReleaseFailure(): Promise<void> {
+  const post = { id: 1, authorId: `selected`, title: `one` }
+  const posts = createMutablePosts([post])
+  let loadCount = 0
+  let allowUnload = false
+  const releaseError = new Error(`child release failed`)
+  const comments = createCollection<Comment>({
+    id: nextCollectionId(`temporal-retired-release-comments`),
+    getKey: (comment) => comment.id,
+    syncMode: `on-demand`,
+    autoIndex: `eager`,
+    defaultIndexType: BasicIndex,
+    sync: {
+      sync: ({ markReady }) => ({
+        loadSubset: () => {
+          loadCount += 1
+          markReady()
+          return true
+        },
+        unloadSubset: () => {
+          if (!allowUnload) throw releaseError
+        },
+      }),
+    },
+  })
+  const live = createPostsWithCommentsLive(posts.collection, comments)
+  const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+
+  try {
+    await live.preload()
+    expect(loadCount).toBe(1)
+    expect(live.status).toBe(`ready`)
+
+    posts.write(`delete`, post)
+    await flushPromises()
+    expect(live.size).toBe(0)
+    expect(live.status).toBe(`ready`)
+    expect(live.utils.lastSubsetError).toBe(releaseError)
+
+    posts.write(`insert`, post)
+    await flushPromises()
+    expect(loadCount).toBe(2)
+    expect(live.status).toBe(`ready`)
+  } finally {
+    allowUnload = true
+    await live.cleanup()
+    await Promise.all([posts.collection.cleanup(), comments.cleanup()])
+    consoleError.mockRestore()
+  }
+}
+
+async function expectFailedReplayStopsGatingAfterLastDemandRetires(): Promise<void> {
+  const post = { id: 1, authorId: `selected`, title: `one` }
+  const posts = createMutablePosts([post])
+  const replay = createDeferred<void>()
+  let begin!: () => void
+  let write!: (message: { type: `insert`; value: Comment }) => void
+  let commit!: () => true | Promise<void>
+  let truncate!: () => void
+  let loadCount = 0
+  const comments = createCollection<Comment>({
+    id: nextCollectionId(`temporal-retired-replay-comments`),
+    getKey: (comment) => comment.id,
+    syncMode: `on-demand`,
+    autoIndex: `eager`,
+    defaultIndexType: BasicIndex,
+    sync: {
+      sync: (operations) => {
+        begin = operations.begin
+        write = operations.write
+        commit = operations.commit
+        truncate = operations.truncate
+        operations.markReady()
+        return {
+          loadSubset: () => {
+            loadCount += 1
+            if (loadCount === 1) {
+              begin()
+              write({
+                type: `insert`,
+                value: { id: 10, postId: post.id, body: `old` },
+              })
+              commit()
+              return true
+            }
+            begin()
+            write({
+              type: `insert`,
+              value: { id: 20, postId: post.id, body: `private replacement` },
+            })
+            commit()
+            return replay.promise
+          },
+          unloadSubset: () => {},
+        }
+      },
+    },
+  })
+  const live = createPostsWithCommentsLive(posts.collection, comments)
+  const publications: Array<Array<number>> = []
+  const subscription = live.subscribeChanges(
+    () => publications.push(live.toArray.map(({ id }) => id)),
+    { includeInitialState: false },
+  )
+  const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+
+  try {
+    await live.preload()
+    expect(live.get(post.id)?.comments.map(({ id }) => id)).toEqual([10])
+    publications.length = 0
+
+    begin()
+    truncate()
+    commit()
+    await flushPromises()
+    expect(loadCount).toBe(2)
+
+    replay.reject(new Error(`replacement failed`))
+    await flushPromises()
+    expect(live.get(post.id)?.comments.map(({ id }) => id)).toEqual([10])
+    expect(publications).toEqual([])
+
+    posts.write(`delete`, post)
+    await flushPromises()
+
+    // Once the parent retires the last child demand, its failed replay can no
+    // longer gate unrelated parent changes in the shared graph.
+    expect(live.size).toBe(0)
+    expect(publications).toEqual([[]])
+  } finally {
+    replay.resolve()
+    subscription.unsubscribe()
+    await live.cleanup()
+    await Promise.all([posts.collection.cleanup(), comments.cleanup()])
+    consoleError.mockRestore()
+  }
+}
+
 async function expectSynchronousEmptyDemandIsReady(): Promise<void> {
   const posts = createMutablePosts([
     { id: 1, authorId: `selected`, title: `one` },
@@ -1196,7 +1500,10 @@ describe(`includes temporal oracle`, () => {
     expectObsoleteDemandCannotPublishAfterReactivation,
   )
 
-  fcTest.prop([fc.scheduler()], oraclePropertyOptions(20))(
+  fcTest.prop(
+    [fc.scheduler()],
+    oraclePropertyOptions(20, `includes-temporal.demand-scheduling`),
+  )(
     `obsolete and current demand completions are generation-safe in either order`,
     expectScheduledDemandCompletionsStayGenerationSafe,
   )
@@ -1216,6 +1523,32 @@ describe(`includes temporal oracle`, () => {
   it(
     `failed demand retries the same coverage`,
     expectFailedDemandRetriesSameCoverage,
+  )
+
+  it(`reactivated demand retries after its prior release fails`, () =>
+    expectDemandReactivationRetriesAfterReleaseFailure([1]))
+
+  fcTest.prop(
+    [
+      fc.uniqueArray(fc.integer({ min: -3, max: 3 }), {
+        minLength: 1,
+        maxLength: 5,
+      }),
+    ],
+    oraclePropertyOptions(20, `includes-temporal.release-reentry`),
+  )(
+    `failed release never suppresses a later demand incarnation`,
+    expectDemandReactivationRetriesAfterReleaseFailure,
+  )
+
+  it(
+    `failed release retires an empty live-query demand without poisoning reentry`,
+    expectRetiredDemandStaysNonfatalAfterReleaseFailure,
+  )
+
+  it(
+    `failed replay stops gating after its last demand retires`,
+    expectFailedReplayStopsGatingAfterLastDemandRetires,
   )
 
   it(

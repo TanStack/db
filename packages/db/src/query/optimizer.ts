@@ -130,6 +130,7 @@ import {
   UnionAll as UnionAllClass,
   UnionFrom as UnionFromClass,
   createResidualWhere,
+  getFromSources,
   getWhereExpression,
   isResidualWhere,
 } from './ir.js'
@@ -898,16 +899,6 @@ function optimizeNestedFrom(from: From): From {
   }
 
   return from
-}
-
-function getFromSources(from: From): Array<CollectionRefClass | QueryRefClass> {
-  if (from.type === `unionFrom`) {
-    return from.sources
-  }
-  if (from.type === `unionAll`) {
-    return []
-  }
-  return [from]
 }
 
 function getFirstFromAlias(query: QueryIR): string | undefined {

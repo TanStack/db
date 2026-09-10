@@ -3155,7 +3155,7 @@ describe(`Query Collections`, () => {
       warnSpy.mockRestore()
     })
 
-    it(`warns when a structured query captures an opaque runtime value without queryKey`, () => {
+    it(`uses runtime identity for opaque values in a structured query without queryKey`, () => {
       const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({
@@ -3165,24 +3165,27 @@ describe(`Query Collections`, () => {
         }),
       )
 
-      expect(() =>
-        renderHook(() =>
+      const runtimeValue = () => `John Doe`
+      const { result, rerender } = renderHook(
+        ({ value }) =>
           useLiveQuery({
             query: (q) =>
               q
                 .from({ people: collection })
-                .where(({ people }) =>
-                  eq(people.name, (() => `John Doe`) as never),
-                ),
+                .where(({ people }) => eq(people.name, value as never)),
           }),
-        ),
-      ).not.toThrow()
+        { initialProps: { value: runtimeValue } },
+      )
+      const firstCollection = result.current.collection
+      rerender({ value: runtimeValue })
+      expect(result.current.collection).toBe(firstCollection)
+      rerender({ value: () => `John Doe` })
+      expect(result.current.collection).not.toBe(firstCollection)
 
       const warnings = warnSpy.mock.calls.filter(([message]) =>
         String(message).includes(`function value`),
       )
-      expect(warnings).toHaveLength(1)
-      expect(warnings[0]![0]).toContain(`queryKey`)
+      expect(warnings).toHaveLength(0)
       warnSpy.mockRestore()
     })
 

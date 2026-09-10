@@ -93,19 +93,6 @@ Defined in: [packages/db/src/indexes/base-index.ts:63](https://github.com/TanSta
 
 ***
 
-### getStats()
-
-```ts
-getStats: () => IndexStats;
-```
-
-Defined in: [packages/db/src/indexes/base-index.ts:107](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L107)
-
-#### Returns
-
-[`IndexStats`](IndexStats.md)
-
-***
 
 ### inArrayLookup()
 

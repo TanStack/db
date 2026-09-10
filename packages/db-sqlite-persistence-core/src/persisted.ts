@@ -21,6 +21,7 @@ import type {
   CollectionIndexMetadata,
   DeleteMutationFnParams,
   InsertMutationFnParams,
+  LoadSubsetFn,
   LoadSubsetOptions,
   PendingMutation,
   SyncAppliedReceipt,
@@ -1015,7 +1016,7 @@ class PersistedCollectionRuntime<
 
   async loadSubset(
     options: LoadSubsetOptions,
-    upstreamLoadSubset?: (options: LoadSubsetOptions) => true | Promise<void>,
+    upstreamLoadSubset?: LoadSubsetFn,
   ): Promise<void> {
     this.activeSubsets.set(this.getSubsetKey(options), options)
 
@@ -1029,17 +1030,18 @@ class PersistedCollectionRuntime<
 
     if (upstreamLoadSubset) {
       try {
-        const maybePromise = upstreamLoadSubset(options)
-        if (maybePromise instanceof Promise) {
-          await maybePromise.catch((error) => {
-            console.warn(
-              `Failed to load remote subset in persisted wrapper:`,
-              error,
-            )
-            this.queueRemoteSubsetEnsure(options)
-          })
-        }
+        await upstreamLoadSubset(options)
       } catch (error) {
+        if (
+          options.signal?.aborted ||
+          (typeof error === `object` &&
+            error !== null &&
+            `name` in error &&
+            error.name === `AbortError`)
+        ) {
+          this.pendingRemoteSubsetEnsures.delete(this.getSubsetKey(options))
+          throw error
+        }
         console.warn(`Failed to trigger remote subset load:`, error)
         this.queueRemoteSubsetEnsure(options)
       }
@@ -1051,6 +1053,7 @@ class PersistedCollectionRuntime<
     upstreamUnloadSubset?: (options: LoadSubsetOptions) => void,
   ): void {
     this.activeSubsets.delete(this.getSubsetKey(options))
+    this.pendingRemoteSubsetEnsures.delete(this.getSubsetKey(options))
     upstreamUnloadSubset?.(options)
   }
 
@@ -1824,7 +1827,8 @@ class PersistedCollectionRuntime<
   private queueRemoteSubsetEnsure(options: LoadSubsetOptions): void {
     if (
       this.mode !== `sync-present` ||
-      !this.persistence.coordinator.requestEnsureRemoteSubset
+      !this.persistence.coordinator.requestEnsureRemoteSubset ||
+      this.activeSubsets.get(this.getSubsetKey(options)) !== options
     ) {
       return
     }
@@ -2276,24 +2280,7 @@ function createWrappedSyncConfig<
       const getOpenTransaction = () =>
         transactionStack[transactionStack.length - 1]
       let fullStartPromise: Promise<void> | null = null
-      const cancelledLoadKeys = new Set<string>()
-      const loadSubscriptionIds = new WeakMap<object, string>()
-      let nextLoadSubscriptionId = 0
-      const getLoadKey = (options: LoadSubsetOptions) => {
-        const subscription = options.subscription as object | undefined
-        if (subscription && typeof subscription === `object`) {
-          const existingId = loadSubscriptionIds.get(subscription)
-          if (existingId) {
-            return `sub:${existingId}`
-          }
-          nextLoadSubscriptionId++
-          const nextId = String(nextLoadSubscriptionId)
-          loadSubscriptionIds.set(subscription, nextId)
-          return `sub:${nextId}`
-        }
-
-        return `opts:${stableSerialize(normalizeSubsetOptionsForKey(options))}`
-      }
+      const acquisitions = new Map<LoadSubsetOptions, { forwarded: boolean }>()
       runtime.setSyncControls({
         begin: params.begin,
         write: params.write as SyncControlFns<T, TKey>[`write`],
@@ -2590,23 +2577,48 @@ function createWrappedSyncConfig<
       return {
         cleanup: () => {
           startupState.cleanedUp = true
+          acquisitions.clear()
           sourceResult.cleanup?.()
           runtime.cleanup()
           runtime.clearSyncControls()
         },
         loadSubset: async (options: LoadSubsetOptions) => {
-          const loadKey = getLoadKey(options)
-          cancelledLoadKeys.delete(loadKey)
+          const acquisition = { forwarded: false }
+          acquisitions.set(options, acquisition)
           await fullStartPromise
           const resolvedSourceResult = await sourceResultPromise
-          if (startupState.cleanedUp || cancelledLoadKeys.has(loadKey)) {
+          if (
+            startupState.cleanedUp ||
+            acquisitions.get(options) !== acquisition
+          ) {
             return
           }
-          await runtime.loadSubset(options, resolvedSourceResult.loadSubset)
+          return runtime.loadSubset(options, (loadOptions) => {
+            // Hydration is another async boundary. A release before this
+            // point owns no upstream lease and must not start one later.
+            if (
+              startupState.cleanedUp ||
+              acquisitions.get(options) !== acquisition
+            ) {
+              return true
+            }
+            if (!resolvedSourceResult.loadSubset) return true
+            acquisition.forwarded = true
+            try {
+              return resolvedSourceResult.loadSubset(loadOptions)
+            } catch (error) {
+              acquisition.forwarded = false
+              throw error
+            }
+          })
         },
         unloadSubset: (options: LoadSubsetOptions) => {
-          cancelledLoadKeys.add(getLoadKey(options))
-          runtime.unloadSubset(options, sourceResult.unloadSubset)
+          const acquisition = acquisitions.get(options)
+          acquisitions.delete(options)
+          runtime.unloadSubset(
+            options,
+            acquisition?.forwarded ? sourceResult.unloadSubset : undefined,
+          )
         },
       }
     },

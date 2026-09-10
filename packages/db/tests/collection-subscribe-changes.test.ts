@@ -2671,6 +2671,58 @@ describe(`Virtual properties`, () => {
     expect(collection.state.get(`row-1`)?.$origin).toBe(`remote`)
   })
 
+  it(`replaces a completed direct mutation with an authoritative truncate row`, async () => {
+    let syncFns:
+      | {
+          begin: () => void
+          write: (change: {
+            type: `insert`
+            value: { id: string; value: string }
+          }) => void
+          commit: () => true | Promise<void>
+          truncate: () => void
+        }
+      | undefined
+
+    const collection = createCollection<{ id: string; value: string }, string>({
+      id: `truncate-replaces-completed-direct-mutation`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, truncate, markReady }) => {
+          syncFns = { begin, write, commit, truncate }
+          markReady()
+        },
+      },
+      onInsert: () => Promise.resolve(),
+    })
+
+    await collection.stateWhenReady()
+    const transaction = collection.insert({ id: `row-1`, value: `client` })
+    await transaction.isPersisted.promise
+    expect(collection.get(`row-1`)).toMatchObject({
+      id: `row-1`,
+      value: `client`,
+    })
+
+    if (!syncFns) throw new Error(`Sync not ready`)
+    syncFns.begin()
+    syncFns.truncate()
+    syncFns.write({
+      type: `insert`,
+      value: { id: `row-1`, value: `server` },
+    })
+    const applied = syncFns.commit()
+    if (applied !== true) await applied
+    await waitForChanges()
+
+    expect(collection.get(`row-1`)).toMatchObject({
+      id: `row-1`,
+      value: `server`,
+    })
+    expect(collection.state.get(`row-1`)?.$origin).toBe(`remote`)
+  })
+
   it(`should preserve local origin for rows confirmed in the same truncate batch`, async () => {
     let syncFns:
       | {

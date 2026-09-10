@@ -281,7 +281,7 @@ if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
   fc.statistics(
     scenarioArbitrary,
     classifyScenarioCoverage,
-    oraclePropertyOptions(1_000),
+    oraclePropertyOptions(1_000, `includes.scenario-statistics`),
   )
 }
 
@@ -4295,7 +4295,10 @@ describe(`includes recompute oracle`, () => {
     })
   })
 
-  fcTest.prop([scenarioArbitrary], oraclePropertyOptions(40))(
+  fcTest.prop(
+    [scenarioArbitrary],
+    oraclePropertyOptions(40, `includes.incremental-history`),
+  )(
     `matches naive recomputation after every incremental change`,
     expectScenarioMatches,
   )
@@ -4306,7 +4309,7 @@ describe(`includes recompute oracle`, () => {
         ({ sharedIntermediate }) => !sharedIntermediate,
       ),
     ],
-    oraclePropertyOptions(30),
+    oraclePropertyOptions(30, `includes.nested-scalar-materialization`),
   )(
     `matches recomputation for nested scalar materialization`,
     expectMaterializeScenarioMatches,
@@ -4334,7 +4337,7 @@ describe(`includes recompute oracle`, () => {
         { selector: (row) => row.id, maxLength: 7 },
       ),
     ],
-    oraclePropertyOptions(25),
+    oraclePropertyOptions(25, `includes.alpha-renaming`),
   )(
     `is unchanged by alpha-renaming, sibling declaration order, or an unrelated sibling`,
     async (rootRows, childRows) => {
@@ -4446,7 +4449,7 @@ describe(`includes recompute oracle`, () => {
 
   fcTest.prop(
     [fc.integer({ min: -5, max: 5 }).filter((value) => value !== 0)],
-    oraclePropertyOptions(15),
+    oraclePropertyOptions(15, `includes.optimistic-convergence`),
   )(
     `optimistic updates converge to confirmed-only state`,
     async (confirmedValue) => {

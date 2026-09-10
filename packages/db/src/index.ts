@@ -38,8 +38,8 @@ export { BaseIndex } from './indexes/base-index.js'
 export type {
   IndexInterface,
   IndexConstructor,
-  IndexStats,
   IndexOperation,
+  IndexReader,
 } from './indexes/base-index.js'
 export { type IndexOptions } from './indexes/index-options.js'
 

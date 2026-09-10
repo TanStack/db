@@ -9,6 +9,7 @@ import {
   normalizeLiveQueryWindowPageSize,
 } from '../src/live-query-window-controller.js'
 import { mockSyncCollectionOptions } from './utils.js'
+import { evaluateReferenceExpression } from './reference-expression.js'
 import type { Collection } from '../src/collection/index.js'
 
 interface Row {
@@ -49,6 +50,42 @@ const flush = () => new Promise((r) => setTimeout(r, 0))
 const ids = (snap: { data: ReadonlyArray<any> }) => snap.data.map((r) => r.id)
 
 describe(`createLiveQueryWindowController`, () => {
+  it.each(
+    [0, 2, 5].flatMap((rowCount) =>
+      [`fetch`, `reset`, `dispose`].map((action) => ({ rowCount, action })),
+    ),
+  )(
+    `handles $action during initial loading with $rowCount rows`,
+    async ({ rowCount, action }) => {
+      const source = makeSource(ROWS.slice(0, rowCount))
+      const lq = makeOrderedLiveQuery(source, 2)
+      const controller = createLiveQueryWindowController(lq, {
+        pageSize: 2,
+      })
+      const unsubscribe = controller.subscribe(() => {})
+      try {
+        expect(controller.getSnapshot().isLoading).toBe(true)
+        const fetch = controller.fetchNextPage()
+        expect(controller.fetchNextPage()).toBe(fetch)
+        if (action === `reset`) await controller.reset()
+        if (action === `dispose`) controller.dispose()
+        await fetch
+        const visibleCount = action === `fetch` ? 4 : 2
+        expect(ids(controller.getSnapshot())).toEqual(
+          ROWS.slice(0, Math.min(rowCount, visibleCount)).map((row) => row.id),
+        )
+        expect(controller.getSnapshot().pages).toHaveLength(
+          action === `fetch` && rowCount > 2 ? 2 : 1,
+        )
+      } finally {
+        unsubscribe()
+        controller.dispose()
+        await lq.cleanup()
+        await source.cleanup()
+      }
+    },
+  )
+
   it.each([
     { pageSize: undefined, normalized: 20 },
     { pageSize: 0, normalized: 20 },
@@ -274,33 +311,45 @@ describe(`createLiveQueryWindowController`, () => {
     controller.dispose()
   })
 
-  it(`restores the initial operator window when a graph run throws`, () => {
+  it(`retains the settled public window after a graph throw until retry`, async () => {
     const lq = makeOrderedLiveQuery(makeSource(), 2)
+    await lq.preload()
+    const settledRows = lq.toArray
     const builder = lq.utils[LIVE_QUERY_INTERNAL].getBuilder()
     const originalWindowFn = Reflect.get(builder, `windowFn`) as (options: {
       offset?: number
       limit?: number
     }) => void
     const windowFn = vi.fn(originalWindowFn)
+    const originalRunGraph = Reflect.get(
+      builder,
+      `maybeRunGraphFn`,
+    ) as () => void
     const requestedError = new Error(`requested window failed`)
-    const maybeRunGraph = vi
-      .fn()
-      .mockImplementationOnce(() => {
-        throw requestedError
-      })
-      .mockImplementationOnce(() => {
-        throw new Error(`rollback failed`)
-      })
+    const maybeRunGraph = vi.fn(originalRunGraph).mockImplementationOnce(() => {
+      throw requestedError
+    })
     Reflect.set(builder, `windowFn`, windowFn)
     Reflect.set(builder, `maybeRunGraphFn`, maybeRunGraph)
 
-    expect(() => lq.utils.setWindow({ offset: 0, limit: 5 })).toThrow(
-      requestedError,
-    )
+    let caught: unknown
+    try {
+      lq.utils.setWindow({ offset: 0, limit: 5 })
+    } catch (error) {
+      caught = error
+    }
+    expect(caught).toBe(requestedError)
     expect(windowFn).toHaveBeenNthCalledWith(1, { offset: 0, limit: 5 })
-    expect(windowFn).toHaveBeenNthCalledWith(2, { offset: 0, limit: 3 })
-    expect(maybeRunGraph).toHaveBeenCalledTimes(2)
+    // Retain public state, not a rollback of the already advanced private graph.
+    expect(windowFn).toHaveBeenCalledTimes(1)
+    expect(maybeRunGraph).toHaveBeenCalledTimes(1)
     expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 3 })
+    expect(lq.toArray).toEqual(settledRows)
+
+    await lq.utils.setWindow({ offset: 0, limit: 5 })
+    expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 5 })
+    expect(lq.toArray.map(({ id, n }) => ({ id, n }))).toEqual(ROWS)
+    await lq.cleanup()
   })
 
   it(`keeps the committed page retryable when a window load rejects`, async () => {
@@ -384,33 +433,68 @@ describe(`createLiveQueryWindowController`, () => {
     controller.dispose()
   })
 
-  it(`does not shrink the physical window when preload overlaps a page fetch`, async () => {
-    const lq = makeOrderedLiveQuery(makeSource(), 2)
-    const controller = createLiveQueryWindowController<Row, string>(lq as any, {
-      pageSize: 2,
-    })
-    controller.subscribe(() => {})
-    await lq.preload()
+  it.each([`resolve`, `reject`] as const)(
+    `preload joins a pending page fetch that will %s`,
+    async (outcome) => {
+      const lq = makeOrderedLiveQuery(makeSource(), 2)
+      const controller = createLiveQueryWindowController<Row, string>(
+        lq as any,
+        {
+          pageSize: 2,
+        },
+      )
+      controller.subscribe(() => {})
+      await lq.preload()
 
-    const originalSetWindow = lq.utils.setWindow.bind(lq.utils)
-    let resolveExpansion!: () => void
-    vi.spyOn(lq.utils, `setWindow`).mockImplementation((options) => {
-      const result = originalSetWindow(options)
-      if (options.limit !== 5) return result
-      return new Promise<void>((resolve) => {
-        resolveExpansion = resolve
-      })
-    })
+      const originalSetWindow = lq.utils.setWindow.bind(lq.utils)
+      let resolveExpansion!: () => void
+      let rejectExpansion!: (error: unknown) => void
+      const failure = new Error(`expansion failed`)
+      const setWindow = vi
+        .spyOn(lq.utils, `setWindow`)
+        .mockImplementationOnce((options) => {
+          const pending = new Promise<void>((resolve, reject) => {
+            resolveExpansion = resolve
+            rejectExpansion = reject
+          })
+          return Promise.resolve(originalSetWindow(options)).then(() => pending)
+        })
 
-    const expansion = controller.fetchNextPage()
-    const preload = controller.preload()
-    resolveExpansion()
-    await Promise.all([expansion, preload])
+      const expansion = controller.fetchNextPage()
+      const expansionOutcome = expansion.catch((error: unknown) => error)
+      const preload = controller.preload()
+      let preloadSettled = false
+      const preloadOutcome = preload.then(
+        () => {
+          preloadSettled = true
+        },
+        (error: unknown) => {
+          preloadSettled = true
+          return error
+        },
+      )
+      await flush()
+      expect(setWindow).toHaveBeenCalledTimes(1)
+      expect(preloadSettled).toBe(false)
+      if (outcome === `reject`) {
+        rejectExpansion(failure)
+        expect(await expansionOutcome).toBe(failure)
+        expect(await preloadOutcome).toBe(failure)
+        expect(controller.getSnapshot().pages).toHaveLength(1)
+        expect(controller.getSnapshot().error).toBe(failure)
+        await controller.fetchNextPage()
+      } else {
+        resolveExpansion()
+        expect(await expansionOutcome).toBeUndefined()
+        expect(await preloadOutcome).toBeUndefined()
+      }
 
-    expect(controller.getSnapshot().pages).toHaveLength(2)
-    expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 5 })
-    controller.dispose()
-  })
+      expect(controller.getSnapshot().pages).toHaveLength(2)
+      expect(ids(controller.getSnapshot())).toEqual([`1`, `2`, `3`, `4`])
+      expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 5 })
+      controller.dispose()
+    },
+  )
 
   it(`publishes source changes while a page fetch is pending`, async () => {
     const source = makeSource()
@@ -457,8 +541,11 @@ describe(`createLiveQueryWindowController`, () => {
         sync: ({ begin, write, commit, markReady }) => {
           markReady()
           return {
-            loadSubset: (options) =>
-              new Promise<void>((resolve, reject) => {
+            loadSubset: (options) => {
+              // Boundary refinement asks only for the last loaded tie class.
+              // The source has already supplied that row.
+              if (options.where) return Promise.resolve()
+              return new Promise<void>((resolve, reject) => {
                 queueMicrotask(() => {
                   if (rejectLoads) {
                     reject(failure)
@@ -471,7 +558,8 @@ describe(`createLiveQueryWindowController`, () => {
                   commit()
                   resolve()
                 })
-              }),
+              })
+            },
           }
         },
       },
@@ -507,6 +595,8 @@ describe(`createLiveQueryWindowController`, () => {
   })
 
   it(`reset supersedes an in-flight page expansion`, async () => {
+    // Isolate controller generations: the mock accepts reset without source work.
+    // The real source publication barrier is tested separately below.
     const lq = makeOrderedLiveQuery(makeSource(), 2)
     const controller = createLiveQueryWindowController<Row, string>(lq as any, {
       pageSize: 2,
@@ -539,94 +629,169 @@ describe(`createLiveQueryWindowController`, () => {
     controller.dispose()
   })
 
-  it(`reset does not inherit a superseded expansion failure`, async () => {
-    const failure = new Error(`superseded expansion failed`)
-    let loadCount = 0
-    const rejectLoads = new Map<number, (error: unknown) => void>()
-    const loaded = new Set<string>()
-    const source = createCollection<Row>({
-      id: `window-reset-real-source-${seq++}`,
-      getKey: (row) => row.id,
-      syncMode: `on-demand`,
-      startSync: true,
-      autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
-      sync: {
-        sync: ({ begin, write, commit, markReady }) => {
-          markReady()
-          return {
-            loadSubset: (options) => {
-              loadCount++
-              if (loadCount === 2) {
-                return new Promise<void>((_resolve, reject) => {
-                  rejectLoads.set(loadCount, reject)
+  it.each([`resolve`, `reject`] as const)(
+    `reset waits for publication-blocking source work that will %s`,
+    async (outcome) => {
+      const failure = new Error(`superseded expansion failed`)
+      let holdNextRequest = false
+      let settleExpansion: (() => void) | undefined
+      const loaded = new Set<string>()
+      const source = createCollection<Row>({
+        id: `window-reset-real-source-${seq++}`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options) => {
+                const matching = ROWS.filter(
+                  (row) =>
+                    !options.where ||
+                    evaluateReferenceExpression(options.where, row) === true,
+                )
+                const cursor = options.cursor
+                const from = cursor
+                  ? matching.filter(
+                      (row) =>
+                        evaluateReferenceExpression(cursor.whereFrom, row) ===
+                        true,
+                    )
+                  : matching.slice(options.offset ?? 0)
+                const limited = from.slice(0, options.limit)
+                const requested = cursor
+                  ? matching.filter(
+                      (row) =>
+                        limited.includes(row) ||
+                        evaluateReferenceExpression(
+                          cursor.whereCurrent,
+                          row,
+                        ) === true,
+                    )
+                  : limited
+                const apply = () => {
+                  begin()
+                  requested.forEach((row) => {
+                    if (loaded.has(row.id)) return
+                    loaded.add(row.id)
+                    write({ type: `insert`, value: row })
+                  })
+                  return commit()
+                }
+                if (!holdNextRequest)
+                  return Promise.resolve(apply()).then(() => {})
+                holdNextRequest = false
+                return new Promise<void>((resolve, reject) => {
+                  settleExpansion = () => {
+                    if (outcome === `reject`) reject(failure)
+                    else
+                      void Promise.resolve(apply()).then(
+                        () => resolve(),
+                        reject,
+                      )
+                  }
                 })
-              }
-              begin()
-              ROWS.slice(0, options.limit).forEach((row) => {
-                if (loaded.has(row.id)) return
-                loaded.add(row.id)
-                write({ type: `insert`, value: row })
-              })
-              commit()
-              return Promise.resolve()
-            },
-          }
+              },
+            }
+          },
         },
-      },
-    })
-    const lq = makeOrderedLiveQuery(source, 2)
-    const controller = createLiveQueryWindowController<Row, string>(lq as any, {
-      pageSize: 2,
-    })
-    controller.subscribe(() => {})
+      })
+      const lq = makeOrderedLiveQuery(source, 2)
+      const controller = createLiveQueryWindowController<Row, string>(
+        lq as any,
+        {
+          pageSize: 2,
+        },
+      )
+      controller.subscribe(() => {})
 
-    try {
-      await controller.preload()
-      const expansion = Promise.resolve(controller.fetchNextPage())
-      expect(loadCount).toBe(2)
-      const rejectExpansion = rejectLoads.get(2)
-      expect(rejectExpansion).toBeDefined()
-      const reset = Promise.resolve(controller.reset())
-      void expansion.catch(() => undefined)
-      void reset.catch(() => undefined)
+      try {
+        await controller.preload()
+        expect(ids(controller.getSnapshot())).toEqual([`1`, `2`])
+        holdNextRequest = true
+        const expansion = Promise.resolve(controller.fetchNextPage())
+        const expansionOutcome = expansion.catch((error: unknown) => error)
+        expect(holdNextRequest).toBe(false)
+        expect(settleExpansion).toBeTypeOf(`function`)
+        const reset = Promise.resolve(controller.reset())
+        let resetSettled = false
+        const resetOutcome = reset.then(
+          () => {
+            resetSettled = true
+          },
+          (error: unknown) => {
+            resetSettled = true
+            return error
+          },
+        )
+        await flush()
+        expect(resetSettled).toBe(false)
+        expect(ids(controller.getSnapshot())).toEqual([`1`, `2`])
+        settleExpansion!()
+        if (outcome === `reject`) {
+          expect(await resetOutcome).toBe(failure)
+          expect(await expansionOutcome).toBe(failure)
+          expect(controller.getSnapshot().error).toBe(failure)
+          expect(ids(controller.getSnapshot())).toEqual([`1`, `2`])
+          await controller.reset()
+        } else {
+          expect(await resetOutcome).toBeUndefined()
+          expect(await expansionOutcome).toBeUndefined()
+        }
+        expect(controller.getSnapshot().pages).toHaveLength(1)
+        expect(controller.getSnapshot().isError).toBe(false)
+        expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 3 })
+        await controller.fetchNextPage()
+        expect(ids(controller.getSnapshot())).toEqual([`1`, `2`, `3`, `4`])
+      } finally {
+        controller.dispose()
+        await Promise.all([lq.cleanup(), source.cleanup()])
+      }
+    },
+  )
 
-      rejectExpansion!(failure)
+  it.each(
+    [false, true].flatMap((waitBeforeCleanup) =>
+      [false, true].map((pendingLoad) => ({ waitBeforeCleanup, pendingLoad })),
+    ),
+  )(
+    `cleanup cancels unfinished operations with waitFirst=$waitBeforeCleanup, pending=$pendingLoad`,
+    async ({ waitBeforeCleanup, pendingLoad }) => {
+      const lq = makeOrderedLiveQuery(makeSource(), 2)
+      await lq.preload()
 
-      await expect(reset).resolves.toBeUndefined()
-      await expect(expansion).rejects.toBe(failure)
-      expect(controller.getSnapshot().pages).toHaveLength(1)
-    } finally {
-      controller.dispose()
-      await Promise.all([lq.cleanup(), source.cleanup()])
-    }
-  })
+      let resolveLoad!: () => void
+      const load = new Promise<void>((resolve) => {
+        resolveLoad = resolve
+      })
+      const operation = lq._sync.beginLoadSubsetOperation()
+      if (pendingLoad) lq._sync.trackLoadPromise(load)
+      const beforeCleanup = waitBeforeCleanup ? operation.wait() : undefined
+      const observe = (result: true | Promise<void>) =>
+        Promise.resolve(result).then(
+          () => undefined,
+          (error: unknown) => error,
+        )
+      const observedBefore =
+        beforeCleanup === undefined ? undefined : observe(beforeCleanup)
+      lq._sync.cleanup()
+      const observed = observedBefore ?? observe(operation.wait())
+      const outcome = await observed
+      if (waitBeforeCleanup && !pendingLoad) {
+        expect(beforeCleanup).toBe(true)
+        expect(outcome).toBeUndefined()
+      } else {
+        expect(outcome).toMatchObject({ name: `AbortError` })
+      }
 
-  it(`cleanup settles the active load operation before another sync session`, async () => {
-    const lq = makeOrderedLiveQuery(makeSource(), 2)
-    await lq.preload()
-
-    let resolveLoad!: () => void
-    const load = new Promise<void>((resolve) => {
-      resolveLoad = resolve
-    })
-    const operation = lq._sync.beginLoadSubsetOperation()
-    lq._sync.trackLoadPromise(load)
-    const waiting = Promise.resolve(operation.wait())
-    let settled = false
-    void waiting.then(() => {
-      settled = true
-    })
-
-    lq._sync.cleanup()
-    await Promise.resolve()
-
-    expect(settled).toBe(true)
-
-    resolveLoad()
-    await waiting
-    await lq.cleanup()
-  })
+      resolveLoad()
+      expect(await observed).toBe(outcome)
+      await lq.cleanup()
+    },
+  )
 
   it(`cleanup settles every superseded load operation`, async () => {
     const lq = makeOrderedLiveQuery(makeSource(), 2)
@@ -642,10 +807,10 @@ describe(`createLiveQueryWindowController`, () => {
     lq._sync.trackLoadPromise(secondLoad)
     const secondWaiting = Promise.resolve(secondOperation.wait())
     const settled = [false, false]
-    void firstWaiting.then(() => {
+    void firstWaiting.catch(() => {
       settled[0] = true
     })
-    void secondWaiting.then(() => {
+    void secondWaiting.catch(() => {
       settled[1] = true
     })
 
@@ -653,7 +818,8 @@ describe(`createLiveQueryWindowController`, () => {
     await Promise.resolve()
 
     expect(settled).toEqual([true, true])
-    await Promise.all([firstWaiting, secondWaiting])
+    await expect(firstWaiting).rejects.toMatchObject({ name: `AbortError` })
+    await expect(secondWaiting).rejects.toMatchObject({ name: `AbortError` })
     await lq.cleanup()
   })
 
@@ -765,8 +931,13 @@ describe(`createLiveQueryWindowController`, () => {
     await smaller.fetchNextPage()
     expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 5 })
 
+    const setWindow = vi.spyOn(lq.utils, `setWindow`)
     larger.dispose()
+    expect(setWindow).toHaveBeenLastCalledWith({ offset: 0, limit: 3 })
+    expect(setWindow.mock.results.at(-1)!.type).toBe(`return`)
+    await setWindow.mock.results.at(-1)!.value
     expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 3 })
+    expect(lq.toArray.map(({ id, n }) => ({ id, n }))).toEqual(ROWS.slice(0, 3))
     smaller.dispose()
   })
 
@@ -853,10 +1024,14 @@ describe(`createLiveQueryWindowController`, () => {
     await controller.fetchNextPage()
     expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 5 })
 
+    const setWindow = vi.spyOn(lq.utils, `setWindow`)
     unsubscribe()
 
+    expect(setWindow).toHaveBeenLastCalledWith({ offset: 0, limit: 3 })
+    expect(setWindow.mock.results.at(-1)!.type).toBe(`return`)
+    await setWindow.mock.results.at(-1)!.value
     expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 3 })
-    expect(lq.toArray).toHaveLength(3)
+    expect(lq.toArray.map(({ id, n }) => ({ id, n }))).toEqual(ROWS.slice(0, 3))
     controller.dispose()
     await lq.cleanup()
   })
@@ -891,7 +1066,13 @@ describe(`createLiveQueryWindowController`, () => {
       const unsubscribeSecond = second.subscribe(() => {})
       unsubscribeSecond()
 
+      expect(setWindow).toHaveBeenLastCalledWith({ offset: 0, limit: 4 })
+      expect(setWindow.mock.results.at(-1)!.type).toBe(`return`)
+      await setWindow.mock.results.at(-1)!.value
       expect(lq.utils.getWindow()).toEqual({ offset: 0, limit: 4 })
+      expect(lq.toArray.map(({ id, n }) => ({ id, n }))).toEqual(
+        ROWS.slice(0, 4),
+      )
       first.dispose()
       second.dispose()
       await lq.cleanup()

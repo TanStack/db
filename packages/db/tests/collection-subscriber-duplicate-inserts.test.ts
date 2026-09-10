@@ -15,8 +15,9 @@ import type { ChangeMessage } from '../src/types.js'
  * If duplicate inserts reach D2, multiplicity becomes > 1, and deletes won't
  * properly remove items (multiplicity goes from 2 to 1, not triggering removal).
  *
- * The fix: CollectionSubscriber tracks keys sent to D2 (sentToD2Keys) and
- * filters out duplicate inserts before they reach the pipeline.
+ * The source boundary tracks the exact row sent for each key. It filters
+ * duplicate inserts and uses the stored row for later D2 retractions. The
+ * generated reconciliation oracle covers that stateful boundary directly.
  *
  * Additionally, for JOIN queries with lazy sources:
  * - The includeInitialState fix ensures internal lazy-loading subscriptions

@@ -1,26 +1,25 @@
 import { D2, output } from '@tanstack/db-ivm'
+import { createDeferred } from '../deferred.js'
 import {
   getActivePublicationContext,
   transactionScopedScheduler,
 } from '../scheduler.js'
 import { getActiveTransaction } from '../transactions.js'
+import { runAllCallbacks } from '../utils/callbacks.js'
+import { normalizeError } from '../utils/error.js'
 import { compileQuery } from './compiler/index.js'
-import {
-  normalizeExpressionPaths,
-  normalizeOrderByPaths,
-} from './compiler/expressions.js'
+import { normalizeExpressionPaths } from './compiler/expressions.js'
 import { getCollectionBuilder } from './live/collection-registry.js'
 import { SubsetDemandController } from './live/subset-demand-controller.js'
+import { OrderedSourceLoader } from './live/ordered-source-loader.js'
 import {
   buildQueryFromConfig,
-  computeOrderedLoadCursor,
   computeSubscriptionOrderByHints,
   extractCollectionSources,
   extractCollectionsFromQuery,
-  filterDuplicateInserts,
+  reconcileChangesForD2,
   sendChangesToInput,
   splitUpdates,
-  trackBiggestSentValue,
 } from './live/utils.js'
 import type { RootStreamBuilder } from '@tanstack/db-ivm'
 import type { Collection } from '../collection/index.js'
@@ -140,7 +139,10 @@ export interface EffectConfig<
 
 /** Handle returned by createEffect */
 export interface Effect {
-  /** Dispose the effect. Returns a promise that resolves when in-flight handlers complete. */
+  /**
+   * Dispose the effect and await in-flight handlers. Calls during one cleanup
+   * attempt, including calls from abort/release callbacks, share its outcome.
+   */
   dispose: () => Promise<void>
   /** Whether this effect has been disposed */
   readonly disposed: boolean
@@ -253,17 +255,24 @@ export function createEffect<
   let disposalPromise: Promise<void> | undefined
   const dispose = (): Promise<void> => {
     if (disposalPromise) return disposalPromise
+    // Abort and source-release callbacks may synchronously call dispose again.
+    // Publish the shared result before entering either user callback boundary.
+    const completion = createDeferred<void>()
+    const attempt = completion.promise
+    disposalPromise = attempt
     disposed = true
 
     // Abort signal for in-flight handlers
     abortController.abort()
 
-    disposalPromise = (async () => {
+    void (async () => {
       // Tear down the pipeline (unsubscribe from sources, etc.)
+      let cleanupFailed = false
       let cleanupError: unknown
       try {
         runner.dispose()
       } catch (error) {
+        cleanupFailed = true
         cleanupError = error
       }
 
@@ -272,9 +281,15 @@ export function createEffect<
         await Promise.allSettled([...inFlightHandlers])
       }
 
-      if (cleanupError !== undefined) throw cleanupError
-    })()
-    return disposalPromise
+      if (cleanupFailed) throw cleanupError
+    })().then(completion.resolve, completion.reject)
+    void attempt.then(
+      () => {},
+      () => {
+        if (disposalPromise === attempt) disposalPromise = undefined
+      },
+    )
+    return attempt
   }
 
   // Create and start the pipeline
@@ -382,16 +397,14 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   > = {}
 
   // Ordered subscription state for cursor-based loading
-  private readonly biggestSentValue = new Map<string, any>()
-  private readonly lastLoadRequestKey = new Map<string, string>()
-  private pendingOrderedLoadPromise: Promise<void> | undefined
+  private readonly orderedLoaders = new Map<string, OrderedSourceLoader>()
 
   // Subscription management
   private readonly unsubscribeCallbacks = new Set<() => void>()
-  // Duplicate insert prevention per lexical source
-  private readonly sentToD2KeysBySource = new Map<
+  // Exact row last contributed to D2 per lexical source key.
+  private readonly sentToD2RowsBySource = new Map<
     string,
-    Set<string | number>
+    Map<string | number, Record<string, unknown>>
   >()
 
   // Output accumulator
@@ -404,14 +417,11 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   // Scheduler integration
   private subscribedToAllCollections = false
   private readonly builderDependencies = new Set<unknown>()
-  private readonly sourceDependencies: Record<string, Array<unknown>> = {}
 
   // Reentrance guard
   private isGraphRunning = false
   private starting = false
   private disposed = false
-  // When dispose() is called mid-graph-run, defer heavy cleanup until the run completes
-  private deferredCleanup = false
 
   private readonly onBatchProcessed: (
     events: Array<DeltaEvent<TRow, TKey>>,
@@ -513,17 +523,13 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       const { sourceId, alias, collection } = source
       const collectionId = collection.id
 
-      // Initialise per-source duplicate tracking
-      this.sentToD2KeysBySource.set(sourceId, new Set())
+      this.sentToD2RowsBySource.set(sourceId, new Map())
 
       // Discover dependencies: if source collection is itself a live query
       // collection, its builder must run first during transaction flushes.
       const dependencyBuilder = getCollectionBuilder(collection)
       if (dependencyBuilder) {
-        this.sourceDependencies[sourceId] = [dependencyBuilder]
         this.builderDependencies.add(dependencyBuilder)
-      } else {
-        this.sourceDependencies[sourceId] = []
       }
 
       // Get where clause for this alias (for predicate push-down)
@@ -546,13 +552,18 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       const orderByInfo = this.getOrderByInfoForSource(sourceId)
 
       // Build the change callback — for ordered aliases, split updates into
-      // delete+insert and track the biggest sent value for cursor positioning.
+      // delete+insert and invalidate loading state from changed contributions.
       const changeCallback = orderByInfo
         ? (changes: Array<ChangeMessage<any, string | number>>) => {
             if (pendingBuffers.has(sourceId)) {
               pendingBuffers.get(sourceId)!.push(changes)
             } else {
-              this.trackSentValues(sourceId, changes, orderByInfo.comparator)
+              this.orderedLoaders
+                .get(sourceId)
+                ?.onSourceChanges(
+                  changes,
+                  this.sentToD2RowsBySource.get(sourceId),
+                )
               const split = [...splitUpdates(changes)]
               this.handleSourceChanges(sourceId, split)
             }
@@ -574,7 +585,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
           whereExpression,
         ),
         onLoadSubsetError: ({ error }) => {
-          this.onSourceError(normaliseError(error))
+          this.onSourceError(normalizeError(error))
         },
       })
 
@@ -582,8 +593,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       this.subscriptions[sourceId] = subscription
 
       const unsubscribe = () => {
-        subscription.unsubscribe()
         delete this.subscriptions[sourceId]
+        subscription.unsubscribe()
       }
 
       // subscribeChanges can synchronously report a source error and dispose
@@ -613,7 +624,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       // For ordered aliases with an index, trigger the initial limited snapshot.
       // This loads only the top N rows rather than the entire collection.
       if (orderByInfo) {
-        this.requestInitialOrderedSnapshot(alias, orderByInfo, subscription)
+        const loader = new OrderedSourceLoader(orderByInfo, subscription, alias)
+        this.orderedLoaders.set(sourceId, loader)
+        loader.start()
       }
 
       // Listen for status changes on source collections
@@ -675,7 +688,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       // through handleSourceChanges directly (not back into this buffer).
       for (const changes of buffer) {
         if (orderByInfo) {
-          this.trackSentValues(sourceId, changes, orderByInfo.comparator)
+          this.orderedLoaders
+            .get(sourceId)
+            ?.onSourceChanges(changes, this.sentToD2RowsBySource.get(sourceId))
           const split = [...splitUpdates(changes)]
           this.sendChangesToD2(sourceId, split)
         } else {
@@ -704,7 +719,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     changes: Array<ChangeMessage<any, string | number>>,
   ): void {
     this.sendChangesToD2(sourceId, changes)
-    this.scheduleGraphRun(sourceId)
+    this.scheduleGraphRun()
   }
 
   private setDemand(
@@ -719,7 +734,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       // The subscription error event already reports adapter failures and
       // disposes this effect. Do not let that query-local failure escape the
       // source commit, but keep unrelated graph errors visible.
-      if (subscription.lastError !== error) throw error
+      if (!Object.is(subscription.lastError, error)) throw error
       if (this.starting) throw error
       return
     }
@@ -741,20 +756,12 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
    * Dependencies are discovered from source collections that are themselves
    * live query collections, ensuring parent queries run before effects.
    */
-  private scheduleGraphRun(sourceId?: string): void {
+  private scheduleGraphRun(): void {
     const contextId =
       getActiveTransaction()?.id ?? getActivePublicationContext()
 
-    // Collect dependencies for this schedule call
-    const deps = new Set(this.builderDependencies)
-    if (sourceId) {
-      const sourceDeps = this.sourceDependencies[sourceId]
-      if (sourceDeps) {
-        for (const dep of sourceDeps) {
-          deps.add(dep)
-        }
-      }
-    }
+    // Snapshot before scheduling parents, which can reenter source setup.
+    const deps = [...this.builderDependencies]
 
     // Ensure dependent builders are scheduled in this context so that
     // dependency edges always point to a real job.
@@ -801,11 +808,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     const input = this.inputs[sourceId]
     if (!input) return 0
 
-    // Filter duplicates per lexical source
-    const sentKeys = this.sentToD2KeysBySource.get(sourceId)!
-    const filtered = filterDuplicateInserts(changes, sentKeys)
+    const sentRows = this.sentToD2RowsBySource.get(sourceId)!
+    const reconciled = reconcileChangesForD2(changes, sentRows)
 
-    return sendChangesToInput(input, filtered)
+    return sendChangesToInput(input, reconciled)
   }
 
   /**
@@ -820,7 +826,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
     this.isGraphRunning = true
     try {
-      while (this.graph.pendingWork()) {
+      // Ordered refill can also dispose the runner between graph steps.
+      while (!this.isDisposed() && this.graph.pendingWork()) {
         this.graph.run()
         // A handler (via onBatchProcessed) or source error callback may have
         // called dispose() during graph.run(). Stop early to avoid operating
@@ -837,13 +844,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       this.flushPendingChanges()
     } finally {
       this.isGraphRunning = false
-      // If dispose() was called during this graph run, it deferred the heavy
-      // cleanup (clearing graph/inputs/pipeline) to avoid nulling references
-      // mid-loop. Complete that cleanup now.
-      if (this.deferredCleanup) {
-        this.deferredCleanup = false
-        this.finalCleanup()
-      }
     }
   }
 
@@ -895,6 +895,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     orderBy?: any
     limit?: number
   } {
+    if (this.query.limit === 0) {
+      return { includeInitialState: false, whereExpression }
+    }
+
     // Ordered aliases explicitly disable initial state — data is loaded
     // via requestLimitedSnapshot/requestSnapshot after subscription setup.
     if (orderByInfo) {
@@ -915,35 +919,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     }
   }
 
-  /**
-   * Request the initial ordered snapshot for an alias.
-   * Uses requestLimitedSnapshot (index-based cursor) or requestSnapshot
-   * (full load with limit) depending on whether an index is available.
-   */
-  private requestInitialOrderedSnapshot(
-    alias: string,
-    orderByInfo: OrderByOptimizationInfo,
-    subscription: CollectionSubscription,
-  ): void {
-    const { orderBy, offset, limit, index } = orderByInfo
-    const normalizedOrderBy = normalizeOrderByPaths(orderBy, alias)
-
-    if (index) {
-      subscription.setOrderByIndex(index)
-      subscription.requestLimitedSnapshot({
-        limit: offset + limit,
-        orderBy: normalizedOrderBy,
-        trackLoadSubsetPromise: false,
-      })
-    } else {
-      subscription.requestSnapshot({
-        orderBy: normalizedOrderBy,
-        limit: offset + limit,
-        trackLoadSubsetPromise: false,
-      })
-    }
-  }
-
   /** Get orderBy optimization info for one lexical source. */
   private getOrderByInfoForSource(
     sourceId: string,
@@ -960,96 +935,18 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
    * needs more data. If so, load more rows via requestLimitedSnapshot.
    */
   private loadMoreIfNeeded(): void {
-    for (const [, orderByInfo] of Object.entries(
-      this.optimizableOrderByCollections,
-    )) {
-      if (!orderByInfo.dataNeeded || !orderByInfo.index) continue
-
-      if (this.pendingOrderedLoadPromise) {
-        // Wait for in-flight loads to complete before requesting more
-        continue
+    for (const loader of this.orderedLoaders.values()) {
+      try {
+        loader.loadMore()
+      } catch (error) {
+        if (
+          !this.disposed &&
+          !Object.values(this.subscriptions).some((subscription) =>
+            Object.is(subscription.lastError, error),
+          )
+        )
+          throw error
       }
-
-      const n = orderByInfo.dataNeeded()
-      if (n > 0) {
-        this.loadNextItems(orderByInfo, n)
-      }
-    }
-  }
-
-  /**
-   * Load n more items from the source collection, starting from the cursor
-   * position (the biggest value sent so far).
-   */
-  private loadNextItems(orderByInfo: OrderByOptimizationInfo, n: number): void {
-    const { alias, sourceId } = orderByInfo
-    const source = this.collectionSources.find(
-      (candidate) => candidate.sourceId === sourceId,
-    )
-    if (!source) return
-    const subscription = this.subscriptions[sourceId]
-    if (!subscription) return
-
-    const cursor = computeOrderedLoadCursor(
-      orderByInfo,
-      this.biggestSentValue.get(sourceId),
-      this.lastLoadRequestKey.get(sourceId),
-      alias,
-      n,
-    )
-    if (!cursor) return // Duplicate request — skip
-
-    this.lastLoadRequestKey.set(sourceId, cursor.loadRequestKey)
-
-    try {
-      subscription.requestLimitedSnapshot({
-        orderBy: cursor.normalizedOrderBy,
-        limit: n,
-        minValues: cursor.minValues,
-        trackLoadSubsetPromise: false,
-        onLoadSubsetResult: (loadResult: Promise<void> | true) => {
-          // Track in-flight load to prevent redundant concurrent requests
-          if (loadResult instanceof Promise) {
-            this.pendingOrderedLoadPromise = loadResult
-            const finish = () => {
-              if (this.pendingOrderedLoadPromise === loadResult) {
-                this.pendingOrderedLoadPromise = undefined
-              }
-            }
-            void loadResult.then(finish, finish)
-          }
-        },
-      })
-    } catch (error) {
-      if (subscription.lastError !== error) throw error
-      // subscribeChanges already routed the error through onSourceError. Do
-      // not let an automatic refill fail the source transaction that exposed
-      // the missing row.
-      if (this.lastLoadRequestKey.get(sourceId) === cursor.loadRequestKey) {
-        this.lastLoadRequestKey.delete(sourceId)
-      }
-    }
-  }
-
-  /**
-   * Track the biggest value sent for a given ordered alias.
-   * Used for cursor-based pagination in loadNextItems.
-   */
-  private trackSentValues(
-    sourceId: string,
-    changes: Array<ChangeMessage<any, string | number>>,
-    comparator: (a: any, b: any) => number,
-  ): void {
-    const sentKeys = this.sentToD2KeysBySource.get(sourceId) ?? new Set()
-    const result = trackBiggestSentValue(
-      changes,
-      this.biggestSentValue.get(sourceId),
-      sentKeys,
-      comparator,
-    )
-    this.biggestSentValue.set(sourceId, result.biggest)
-    if (result.shouldResetLoadKey) {
-      this.lastLoadRequestKey.delete(sourceId)
     }
   }
 
@@ -1059,49 +956,36 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.disposed = true
     this.subscribedToAllCollections = false
 
-    // Immediately unsubscribe from every source, even if one release fails.
-    let firstCleanupError: unknown
-    for (const unsubscribe of this.unsubscribeCallbacks) {
-      try {
-        unsubscribe()
-      } catch (error) {
-        firstCleanupError ??= error
-      }
+    // Release every source in one attempt; the first failure wins after the
+    // peers finish. A reentrant dispose returns at the guard above, so this
+    // call still owns each release exactly once.
+    try {
+      runAllCallbacks(this.unsubscribeCallbacks)
+    } finally {
+      this.unsubscribeCallbacks.clear()
+      this.clearPipelineState()
     }
-    this.unsubscribeCallbacks.clear()
-    this.sentToD2KeysBySource.clear()
+  }
+
+  private clearPipelineState(): void {
+    this.sentToD2RowsBySource.clear()
     this.pendingChanges.clear()
     this.lazySources.clear()
     this.demand.clear()
     this.builderDependencies.clear()
-    this.biggestSentValue.clear()
-    this.lastLoadRequestKey.clear()
-    this.pendingOrderedLoadPromise = undefined
+    for (const loader of this.orderedLoaders.values()) loader.dispose()
+    this.orderedLoaders.clear()
 
     // Clear mutable objects
     for (const key of Object.keys(this.lazySourcesCallbacks)) {
       delete this.lazySourcesCallbacks[key]
     }
-    for (const key of Object.keys(this.sourceDependencies)) {
-      delete this.sourceDependencies[key]
-    }
     for (const key of Object.keys(this.optimizableOrderByCollections)) {
       delete this.optimizableOrderByCollections[key]
     }
 
-    // If the graph is currently running, defer clearing graph/inputs/pipeline
-    // until runGraph() completes — otherwise we'd null references mid-loop.
-    if (this.isGraphRunning) {
-      this.deferredCleanup = true
-    } else {
-      this.finalCleanup()
-    }
-
-    if (firstCleanupError !== undefined) throw firstCleanupError
-  }
-
-  /** Clear graph references — called after graph run completes or immediately from dispose */
-  private finalCleanup(): void {
+    // graph.run() keeps its own stack reference. The disposed guard prevents
+    // another step or new input; clearing our references does not destroy it.
     this.graph = undefined
     this.inputs = undefined
     this.pipeline = undefined
@@ -1210,7 +1094,7 @@ function reportError<TRow extends object, TKey extends string | number>(
   event: DeltaEvent<TRow, TKey>,
   onError?: (error: Error, event: DeltaEvent<TRow, TKey>) => void,
 ): void {
-  const normalised = normaliseError(error)
+  const normalised = normalizeError(error)
   if (onError) {
     try {
       onError(normalised, event)
@@ -1222,8 +1106,4 @@ function reportError<TRow extends object, TKey extends string | number>(
   } else {
     console.error(`[Effect] Unhandled error in handler:`, normalised)
   }
-}
-
-function normaliseError(error: unknown): Error {
-  return error instanceof Error ? error : new Error(String(error))
 }

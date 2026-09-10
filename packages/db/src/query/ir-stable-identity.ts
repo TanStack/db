@@ -1,6 +1,7 @@
+import { isPlainObject } from '../utils/type-guards.js'
 import { normalizeValue } from '../utils/comparison.js'
 import { isRefProxy, toExpression } from './builder/ref-proxy.js'
-import { getQueryIR } from './builder/index.js'
+import { getQueryIR } from './builder/query-ir.js'
 import { getRuntimeReferenceIdentity } from './runtime-reference-identity.js'
 import type {
   Aggregate,
@@ -84,18 +85,6 @@ export function getStableValueHash(value: unknown, path = `value`): string {
  */
 export function getQueryIdentity(query: QueryIR): QueryIdentity {
   return JSON.stringify(canonicalizeQueryIR(query)) as QueryIdentity
-}
-
-/** Returns the semantic identity of one structured expression. */
-export function getStableExpressionHash(expression: BasicExpression): string {
-  return JSON.stringify(
-    canonicalizeExpression(
-      expression,
-      `expression`,
-      new WeakSet(),
-      `exact-output`,
-    ),
-  )
 }
 
 /**
@@ -999,7 +988,11 @@ function canonicalizeExactOutputRuntimeValue(
   path: string,
   seen: WeakSet<object>,
 ): StableIdentityValue {
-  if (typeof value === `object` && value !== null) {
+  if (
+    (typeof value === `object` && value !== null) ||
+    typeof value === `function` ||
+    typeof value === `symbol`
+  ) {
     return getRuntimeReferenceIdentity(value)
   }
 
@@ -1040,7 +1033,11 @@ function canonicalizeEqualityRuntimeValue(
     return canonicalizeRuntimeValue(normalized, path, seen)
   }
 
-  if (typeof value === `object` && value !== null) {
+  if (
+    (typeof value === `object` && value !== null) ||
+    typeof value === `function` ||
+    typeof value === `symbol`
+  ) {
     return getRuntimeReferenceIdentity(value)
   }
 
@@ -1148,11 +1145,4 @@ function isExpression(
     expressionType === `val` ||
     expressionType === `includesSubquery`
   )
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== `object`) return false
-
-  const prototype = Object.getPrototypeOf(value)
-  return prototype === Object.prototype || prototype === null
 }

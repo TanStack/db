@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ShapeStream } from '@electric-sql/client'
 import {
   CollectionImpl,
+  IR,
   createCollection,
   createTransaction,
 } from '@tanstack/db'
@@ -2659,6 +2660,53 @@ describe(`Electric Integration`, () => {
 
   // Tests for syncMode configuration
   describe(`syncMode configuration`, () => {
+    const createOnDemandCollection = (id: string) =>
+      createCollection(
+        electricCollectionOptions({
+          id,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+          },
+          syncMode: `on-demand`,
+          getKey: (item: Row) => item.id as number,
+          startSync: true,
+        }),
+      )
+
+    it(`removes the external shape abort listener across cleanup and restart`, async () => {
+      const externalAbort = new NativeAbortController()
+      const addSpy = vi.spyOn(externalAbort.signal, `addEventListener`)
+      const removeSpy = vi.spyOn(externalAbort.signal, `removeEventListener`)
+      const testCollection = createCollection(
+        electricCollectionOptions({
+          id: `shape-signal-listener-cleanup-test`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+            signal: externalAbort.signal,
+          },
+          syncMode: `progressive`,
+          getKey: (item: Row) => item.id as number,
+          startSync: true,
+        }),
+      )
+
+      await testCollection.cleanup()
+      const subscription = testCollection.subscribeChanges(() => {})
+      await testCollection.cleanup()
+      subscription.unsubscribe()
+
+      const addedListeners = addSpy.mock.calls
+        .filter(([type]) => type === `abort`)
+        .map(([, listener]) => listener)
+      const removedListeners = removeSpy.mock.calls
+        .filter(([type]) => type === `abort`)
+        .map(([, listener]) => listener)
+      expect(addedListeners).toHaveLength(2)
+      expect(removedListeners).toEqual(addedListeners)
+    })
+
     it(`should not request snapshots during subscription in eager mode`, () => {
       vi.clearAllMocks()
 
@@ -2746,6 +2794,229 @@ describe(`Electric Integration`, () => {
         expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
       } finally {
         await testCollection.cleanup()
+      }
+    })
+
+    it(`waits for an on-demand commit to become public`, async () => {
+      const request = createDeferred<void>()
+      mockRequestSnapshot.mockReturnValueOnce(request.promise)
+      const testCollection = createOnDemandCollection(
+        `on-demand-successful-parked-commit-test`,
+      )
+      const persistence = createDeferred<void>()
+      const transaction = createTransaction({
+        mutationFn: () => persistence.promise,
+      })
+
+      try {
+        transaction.mutate(() =>
+          testCollection.insert({ id: 3, name: `Local row` }),
+        )
+        const load = Promise.resolve(
+          testCollection._sync.loadSubset({ limit: 10 }),
+        )
+        await vi.waitFor(() =>
+          expect(mockRequestSnapshot).toHaveBeenCalledOnce(),
+        )
+        subscriber([
+          {
+            key: `2`,
+            value: { id: 2, name: `Applied parked row` },
+            headers: { operation: `insert` },
+          },
+          { headers: { control: `subset-end` } },
+        ])
+        request.resolve()
+
+        const nextTurn = new Promise<`next-turn`>((resolve) =>
+          setTimeout(() => resolve(`next-turn`), 0),
+        )
+        await expect(
+          Promise.race([load.then(() => `load-settled` as const), nextTurn]),
+        ).resolves.toBe(`next-turn`)
+        expect(testCollection.has(2)).toBe(false)
+
+        persistence.resolve()
+        await transaction.isPersisted.promise
+        await load
+        expect(stripVirtualProps(testCollection.get(2))).toEqual({
+          id: 2,
+          name: `Applied parked row`,
+        })
+      } finally {
+        request.resolve()
+        persistence.resolve()
+        await transaction.isPersisted.promise.catch(() => undefined)
+        await testCollection.cleanup()
+      }
+    })
+
+    it(`waits for both physical requests of one cursor demand`, async () => {
+      const whereCurrent = createDeferred<void>()
+      const whereFrom = createDeferred<void>()
+      mockRequestSnapshot
+        .mockReturnValueOnce(whereCurrent.promise)
+        .mockReturnValueOnce(whereFrom.promise)
+      const testCollection = createOnDemandCollection(
+        `on-demand-cursor-all-requests-test`,
+      )
+      const id = new IR.PropRef([`id`])
+
+      try {
+        const load = Promise.resolve(
+          testCollection._sync.loadSubset({
+            limit: 10,
+            orderBy: [
+              {
+                expression: id,
+                compareOptions: {
+                  direction: `asc`,
+                  nulls: `last`,
+                  stringSort: `lexical`,
+                },
+              },
+            ],
+            cursor: {
+              whereCurrent: new IR.Func(`eq`, [id, new IR.Value(1)]),
+              whereFrom: new IR.Func(`gt`, [id, new IR.Value(1)]),
+              lastKey: 1,
+            },
+          }),
+        )
+        await vi.waitFor(() =>
+          expect(mockRequestSnapshot).toHaveBeenCalledTimes(2),
+        )
+
+        whereCurrent.resolve()
+        const nextTurn = new Promise<`next-turn`>((resolve) =>
+          setTimeout(() => resolve(`next-turn`), 0),
+        )
+        await expect(
+          Promise.race([load.then(() => `load-settled` as const), nextTurn]),
+        ).resolves.toBe(`next-turn`)
+
+        whereFrom.resolve()
+        await load
+      } finally {
+        whereCurrent.resolve()
+        whereFrom.resolve()
+        await testCollection.cleanup()
+      }
+    })
+
+    it.each([
+      { syncMode: `on-demand`, signalSource: `collection` },
+      { syncMode: `on-demand`, signalSource: `request` },
+      { syncMode: `progressive`, signalSource: `collection` },
+      { syncMode: `progressive`, signalSource: `request` },
+    ] as const)(
+      `starts no $syncMode work for an already-aborted $signalSource signal`,
+      async ({ syncMode, signalSource }) => {
+        const abortController = new AbortController()
+        abortController.abort()
+        const testCollection = createCollection(
+          electricCollectionOptions({
+            id: `${syncMode}-${signalSource}-already-aborted`,
+            shapeOptions: {
+              url: `http://test-url`,
+              params: { table: `test_table` },
+              signal:
+                signalSource === `collection`
+                  ? abortController.signal
+                  : undefined,
+            },
+            syncMode,
+            getKey: (item: Row) => item.id as number,
+            startSync: true,
+          }),
+        )
+
+        await expect(
+          testCollection._sync.loadSubset({
+            limit: 10,
+            signal:
+              signalSource === `request` ? abortController.signal : undefined,
+          }),
+        ).rejects.toMatchObject({ name: `AbortError` })
+        expect(mockForceDisconnectAndRefresh).not.toHaveBeenCalled()
+        expect(mockRequestSnapshot).not.toHaveBeenCalled()
+        expect(mockFetchSnapshot).not.toHaveBeenCalled()
+        await testCollection.cleanup()
+      },
+    )
+
+    it.each([true, false])(
+      `settles reasonless cancellation after refresh with DOMException available %s`,
+      async (hasDOMException) => {
+        const originalDOMException = globalThis.DOMException
+        const controller = new NativeAbortController()
+        const refresh = createDeferred<void>()
+        mockStream.isUpToDate = true
+        mockForceDisconnectAndRefresh.mockReturnValueOnce(refresh.promise)
+        const testCollection = createOnDemandCollection(
+          `reasonless-refresh-abort`,
+        )
+        try {
+          const load = testCollection._sync.loadSubset({
+            limit: 10,
+            signal: controller.signal,
+          })
+          const outcome = Promise.resolve(load).then(
+            () => undefined,
+            (error: unknown) => error,
+          )
+          await Promise.resolve()
+          // Model a platform signal without reason; no event is required for
+          // the post-refresh cancellation check to observe its terminal state.
+          Object.defineProperty(controller.signal, `aborted`, { value: true })
+          Object.defineProperty(controller.signal, `reason`, {
+            value: undefined,
+          })
+          if (!hasDOMException) vi.stubGlobal(`DOMException`, undefined)
+          refresh.resolve()
+          await expect(outcome).resolves.toMatchObject({ name: `AbortError` })
+          expect(mockRequestSnapshot).not.toHaveBeenCalled()
+        } finally {
+          vi.stubGlobal(`DOMException`, originalDOMException)
+          refresh.resolve()
+          await testCollection.cleanup()
+        }
+      },
+    )
+
+    it(`cancels a pending refresh wait when the collection is cleaned up`, async () => {
+      vi.useFakeTimers()
+      const refresh = createDeferred<void>()
+      try {
+        mockStream.isUpToDate = true
+        mockForceDisconnectAndRefresh.mockReturnValueOnce(refresh.promise)
+        const testCollection = createOnDemandCollection(
+          `on-demand-refresh-cleanup-test`,
+        )
+        const load = Promise.resolve(
+          testCollection._sync.loadSubset({ limit: 10 }),
+        )
+        const loadError = load.then(
+          () => undefined,
+          (error: unknown) => error,
+        )
+
+        await Promise.resolve()
+        await testCollection.cleanup()
+        await vi.advanceTimersByTimeAsync(0)
+
+        await expect(loadError).resolves.toMatchObject({ name: `AbortError` })
+        expect(mockRequestSnapshot).not.toHaveBeenCalled()
+        expect(vi.getTimerCount()).toBe(0)
+
+        refresh.resolve()
+        await refresh.promise
+        await load.catch(() => undefined)
+        expect(mockRequestSnapshot).not.toHaveBeenCalled()
+      } finally {
+        refresh.resolve()
+        await vi.runOnlyPendingTimersAsync()
+        vi.useRealTimers()
       }
     })
 

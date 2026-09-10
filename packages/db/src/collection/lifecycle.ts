@@ -7,6 +7,7 @@ import {
   safeCancelIdleCallback,
   safeRequestIdleCallback,
 } from '../utils/browser-polyfills'
+import { runAllCallbacks } from '../utils/callbacks'
 import { CleanupQueue } from './cleanup-queue'
 import type { IdleCallbackDeadline } from '../utils/browser-polyfills'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
@@ -37,6 +38,8 @@ export class CollectionLifecycleManager<
   public onFirstReadyCallbacks: Array<() => void> = []
   private idleCallbackId: number | null = null
   private syncError: unknown
+  private statusRevision = 0
+  private cleaningUp = false
 
   /**
    * Creates a new CollectionLifecycleManager instance
@@ -104,11 +107,16 @@ export class CollectionLifecycleManager<
       )
     }
     this.validateStatusTransition(this.status, newStatus)
+    const revision = ++this.statusRevision
     const previousStatus = this.status
     this.status = newStatus
 
     // Emit event
-    this.events.emitStatusChange(newStatus, previousStatus)
+    this.events.emitStatusChange(
+      newStatus,
+      previousStatus,
+      () => this.statusRevision === revision,
+    )
   }
 
   /**
@@ -133,11 +141,33 @@ export class CollectionLifecycleManager<
    * @private - Should only be called by sync implementations
    */
   public markReady(): void {
+    const failure = this.applyReadyTransition()
+    if (failure) throw failure.error
+  }
+
+  /** @internal Capture ready-effect failures while the sync entry completes. */
+  public markReadyDuringSyncStart(): { error: unknown } | undefined {
+    return this.applyReadyTransition()
+  }
+
+  private applyReadyTransition(): { error: unknown } | undefined {
     this.validateStatusTransition(this.status, `ready`)
     // A successful initial sync or recovery establishes a ready snapshot.
     if (this.status === `loading` || this.status === `error`) {
       this.syncError = undefined
+      const readyRevision = this.statusRevision + 1
       this.setStatus(`ready`, true)
+
+      // A status listener can synchronously supersede this transition, even
+      // when it restarts the Collection back to ready before returning.
+      if (
+        (this.status as CollectionStatus) !== `ready` ||
+        this.statusRevision !== readyRevision
+      ) {
+        return undefined
+      }
+
+      const readyEffects: Array<() => void> = []
 
       // Call any registered first ready callbacks (only on first time becoming ready)
       if (!this.hasBeenReady) {
@@ -148,16 +178,19 @@ export class CollectionLifecycleManager<
           this.hasReceivedFirstCommit = true
         }
 
-        const callbacks = [...this.onFirstReadyCallbacks]
+        readyEffects.push(...this.onFirstReadyCallbacks)
         this.onFirstReadyCallbacks = []
-        callbacks.forEach((callback) => callback())
       }
       // Notify dependents when markReady is called, after status is set
       // This ensures live queries get notified when their dependencies become ready
-      if (this.changes.changeSubscriptions.size > 0) {
-        this.changes.emitEmptyReadyEvent()
+      readyEffects.push(() => this.changes.emitEmptyReadyEvent())
+      try {
+        runAllCallbacks(readyEffects)
+      } catch (error) {
+        return { error }
       }
     }
+    return undefined
   }
 
   /** Mark an asynchronous sync failure after sync has started. */
@@ -170,6 +203,14 @@ export class CollectionLifecycleManager<
   /** Return the cause supplied by the current sync session, if any. */
   public getSyncError(): unknown {
     return this.syncError
+  }
+
+  public assertCanStartSync(): void {
+    if (this.cleaningUp) {
+      throw new CollectionStateError(
+        `Cannot start collection "${this.id}" during cleanup. Restart after cleanup() completes.`,
+      )
+    }
   }
 
   /**
@@ -242,37 +283,33 @@ export class CollectionLifecycleManager<
    * @returns true if cleanup was completed, false if it was rescheduled
    */
   private performCleanup(deadline?: IdleCallbackDeadline): boolean {
+    // Nested cleanup belongs to this retirement, not a new lifecycle turn.
+    if (this.cleaningUp) return true
     // If we have a deadline, we can potentially split cleanup into chunks
     // For now, we'll do all cleanup at once but check if we have time
     const hasTime =
       !deadline || deadline.timeRemaining() > 0 || deadline.didTimeout
 
     if (hasTime) {
-      // Perform all cleanup operations except events
-      this.sync.cleanup()
-      this.state.cleanup()
-      this.changes.cleanup()
-      this.indexes.cleanup()
+      this.cleaningUp = true
+      try {
+        // Perform all cleanup operations except events
+        this.sync.cleanup()
+        this.state.cleanup()
+        this.changes.cleanup()
+        this.indexes.cleanup()
 
-      CleanupQueue.getInstance().cancel(this)
+        CleanupQueue.getInstance().cancel(this)
 
-      this.hasBeenReady = false
-      this.syncError = undefined
+        this.hasBeenReady = false
+        this.syncError = undefined
 
-      // Call any pending onFirstReady callbacks before clearing them.
-      // This ensures preload() promises resolve during cleanup instead of hanging.
-      const callbacks = [...this.onFirstReadyCallbacks]
-      this.onFirstReadyCallbacks = []
-      callbacks.forEach((callback) => {
-        try {
-          callback()
-        } catch (error) {
-          console.error(
-            `${this.config.id ? `[${this.config.id}] ` : ``}Error in onFirstReady callback during cleanup:`,
-            error,
-          )
-        }
-      })
+        // Cleanup is not readiness. Sync cleanup rejects pending preload callers;
+        // first-ready listeners belong to the discarded run.
+        this.onFirstReadyCallbacks = []
+      } finally {
+        this.cleaningUp = false
+      }
 
       // Set status to cleaned-up after everything is cleaned up
       // This fires the status:change event to notify listeners

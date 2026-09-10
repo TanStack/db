@@ -1,5 +1,6 @@
 import { createDeferred } from './deferred'
 import { safeRandomUUID } from './utils/uuid'
+import { normalizeError } from './utils/error.js'
 import './duplicate-instance-check'
 import {
   MissingMutationFunctionError,
@@ -535,6 +536,7 @@ class Transaction<T extends object = Record<string, unknown>> {
     if (this.state === `completed`) {
       throw new TransactionAlreadyCompletedRollbackError()
     }
+    if (this.state === `failed`) return this
 
     this.setState(`failed`)
 
@@ -636,14 +638,17 @@ class Transaction<T extends object = Record<string, unknown>> {
         transaction: this as unknown as TransactionWithMutations<T>,
       })
 
+      if ((this.state as TransactionState) !== `persisting`) return this
+
       this.setState(`completed`)
       this.touchCollection()
 
       this.isPersisted.resolve(this)
     } catch (error) {
+      if ((this.state as TransactionState) !== `persisting`) return this
+
       // Preserve the original error for rethrowing
-      const originalError =
-        error instanceof Error ? error : new Error(String(error))
+      const originalError = normalizeError(error)
 
       // Update transaction with error information
       this.error = {

@@ -1,4 +1,5 @@
 import { sanitizeSQL } from '@powersync/common'
+import { LoadSubsetOperationAbortedError } from '@tanstack/db'
 import DebugModule from 'debug'
 import { PendingOperationStore } from './PendingOperationStore'
 import { asPowerSyncRecord, mapOperationToPowerSync } from './helpers'
@@ -94,7 +95,29 @@ export class PowerSyncTransactor {
         if (collection.isReady()) {
           return
         }
-        await new Promise<void>((resolve) => collection.onFirstReady(resolve))
+        // Observe this session without starting new demand from mutationFn.
+        // Cleanup and startup failure must settle the wait before taking a lock.
+        await new Promise<void>((resolve, reject) => {
+          const check = () => {
+            if (collection.isReady()) {
+              unsubscribe()
+              resolve()
+            } else if (
+              collection.status === `error` ||
+              collection.status === `cleaned-up`
+            ) {
+              unsubscribe()
+              reject(
+                collection.status === `error`
+                  ? (collection._lifecycle.getSyncError() ??
+                      new Error(`Collection failed before readiness`))
+                  : new LoadSubsetOperationAbortedError(),
+              )
+            }
+          }
+          const unsubscribe = collection.on(`status:change`, check)
+          check()
+        })
       }),
     )
 

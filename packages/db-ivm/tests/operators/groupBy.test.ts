@@ -132,6 +132,39 @@ describe(`Operators`, () => {
       expect(result).toEqual(expectedResult)
     })
 
+    test(`does not reserve an aggregate name for its original group key`, () => {
+      const graph = new D2()
+      const input = graph.newInput<{ category: string }>()
+      let latestMessage: MultiSet<unknown> | undefined
+
+      input.pipe(
+        groupBy((data) => ({ category: data.category }), {
+          __original_key__: count(),
+        }),
+        output((message) => {
+          latestMessage = message
+        }),
+      )
+      graph.finalize()
+      input.sendData(
+        new MultiSet([
+          [{ category: `A` }, 1],
+          [{ category: `A` }, 1],
+        ]),
+      )
+      graph.run()
+
+      expect(latestMessage?.getInner()).toEqual([
+        [
+          [
+            serializeValue({ category: `A` }),
+            { category: `A`, __original_key__: 2 },
+          ],
+          1,
+        ],
+      ])
+    })
+
     test(`with sum and count aggregates`, () => {
       const graph = new D2()
       const input = graph.newInput<{

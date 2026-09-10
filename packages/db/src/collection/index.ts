@@ -1,3 +1,4 @@
+import { registerOpaqueHash } from '@tanstack/db-ivm'
 import { safeRandomUUID } from '../utils/uuid'
 import {
   CollectionConfigurationError,
@@ -350,6 +351,9 @@ export class CollectionImpl<
       )
     }
 
+    // Collections are mutable handles, not structural rows. Downstream queries
+    // must not hash their internal state or follow its ownership cycles.
+    registerOpaqueHash(this)
     this._changes = new CollectionChangesManager()
     this._events = new CollectionEventsManager()
     this._indexes = new CollectionIndexesManager()
@@ -457,6 +461,11 @@ export class CollectionImpl<
   /**
    * Register a callback to be executed when the collection first becomes ready
    * Useful for preloading collections
+   * Every callback queued before the transition runs. Because ready state is
+   * established first, callbacks registered during or after delivery run
+   * immediately. If one throws, the collection remains ready. Direct sync
+   * startup rethrows the first failure; preload resolves from ready state.
+   * Cleanup discards pending callbacks without invoking them.
    * @param callback Function to call when the collection first becomes ready
    * @example
    * collection.onFirstReady(() => {
@@ -495,6 +504,7 @@ export class CollectionImpl<
   /**
    * Start sync immediately - internal method for compiled queries
    * This bypasses lazy loading for special cases like live query results
+   * Throws during active cleanup; restart after cleanup completes instead.
    */
   public startSyncImmediate(): void {
     this._sync.startSync()
@@ -1039,6 +1049,8 @@ export class CollectionImpl<
   /**
    * Clean up the collection by stopping sync and clearing data
    * This can be called manually or automatically by garbage collection
+   * Cleanup callbacks must not restart this collection or call its preload().
+   * Wait until cleanup completes before starting a new sync session.
    */
   public async cleanup(): Promise<void> {
     this._lifecycle.cleanup()

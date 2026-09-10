@@ -1,4 +1,4 @@
-import { PropRef, followRef } from '../ir.js'
+import { PropRef, followRef, getFromSources } from '../ir.js'
 import type {
   BasicExpression,
   CollectionRef,
@@ -189,14 +189,7 @@ function getSourceFromAlias(
     }
   }
 
-  const from = query.from
-  const sources =
-    from.type === `unionFrom`
-      ? from.sources
-      : from.type === `unionAll`
-        ? []
-        : [from]
-  return sources.find((source) => source.alias === alias)
+  return getFromSources(query.from).find((source) => source.alias === alias)
 }
 
 function resolveLazySource(
@@ -227,11 +220,7 @@ function findCollectionSource(
   collection: Collection,
 ): CollectionRef | undefined {
   const sources = [
-    ...(query.from.type === `unionFrom`
-      ? query.from.sources
-      : query.from.type === `unionAll`
-        ? []
-        : [query.from]),
+    ...getFromSources(query.from),
     ...(query.join?.map((join) => join.from) ?? []),
   ]
 

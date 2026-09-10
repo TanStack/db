@@ -21,6 +21,7 @@
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
     "test": "vitest run",
+    "test:oracles": "vitest run tests/includes-work-counter-oracle.test.ts tests/load-subset-lifecycle-oracle.test.ts tests/ownership-lifecycle.oracle.test.ts",
     "test:e2e": "vitest run --config vitest.e2e.config.ts"
   },
   "type": "module",

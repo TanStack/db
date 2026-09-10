@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   BasicIndex,
   DbClient,
@@ -1743,6 +1743,137 @@ describe(`persistedCollectionOptions`, () => {
 
     expect(collection.get(`2`)).toBeUndefined()
   })
+
+  it(`does not release or acquire an upstream lease cancelled during hydration`, async () => {
+    const adapter = createRecordingAdapter()
+    const hydrate = adapter.loadSubset
+    let blocked = false
+    let enterHydration!: () => void
+    let finishHydration!: () => void
+    const entered = new Promise<void>((resolve) => {
+      enterHydration = resolve
+    })
+    const gate = new Promise<void>((resolve) => {
+      finishHydration = resolve
+    })
+    adapter.loadSubset = async (...args) => {
+      if (blocked) {
+        enterHydration()
+        await gate
+      }
+      return hydrate(...args)
+    }
+    let leases = 0
+    let loads = 0
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `cancelled-hydration-lease`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                loads++
+                leases++
+                return true
+              },
+              unloadSubset: () => {
+                leases--
+              },
+            }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    collection.startSyncImmediate()
+    const first: LoadSubsetOptions = { limit: 1 }
+    const second: LoadSubsetOptions = { limit: 1 }
+    try {
+      await collection._sync.loadSubset(first)
+      expect(leases).toBe(1)
+      blocked = true
+      const pending = collection._sync.loadSubset(second)
+      await entered
+      collection._sync.unloadSubset(second)
+      expect(leases).toBe(1)
+      finishHydration()
+      await pending
+      expect(loads).toBe(1)
+      collection._sync.unloadSubset(first)
+      expect(leases).toBe(0)
+    } finally {
+      finishHydration()
+      await collection.cleanup()
+    }
+  })
+
+  it.each([`abort`, `release`, `offline`] as const)(
+    `handles remote ensure after %s without resurrecting cancelled demand`,
+    async (action) => {
+      vi.useFakeTimers()
+      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const failure = Object.assign(new Error(action), {
+        name: action === `abort` ? `AbortError` : `Error`,
+      })
+      const ensure = vi.fn(async () => {
+        throw new Error(`offline`)
+      })
+      const coordinator: PersistedCollectionCoordinator = {
+        getNodeId: () => `cancel-ensure`,
+        subscribe: () => () => {},
+        publish: () => {},
+        isLeader: () => true,
+        ensureLeadership: async () => {},
+        requestEnsurePersistedIndex: async () => {},
+        requestEnsureRemoteSubset: ensure,
+      }
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `cancel-ensure-${action}`,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return {
+                loadSubset: async () => {
+                  throw failure
+                },
+              }
+            },
+          },
+          persistence: { adapter: createRecordingAdapter(), coordinator },
+        }),
+      )
+      const options = { limit: 1 }
+      try {
+        collection.startSyncImmediate()
+        const result = await Promise.resolve(
+          collection._sync.loadSubset(options),
+        ).then(
+          () => `ready`,
+          (error: unknown) => error,
+        )
+        if (action === `release`) collection._sync.unloadSubset(options)
+        const callsBeforeRetry = ensure.mock.calls.length
+        await vi.advanceTimersByTimeAsync(200)
+        if (action === `offline`) {
+          expect(result).toBe(`ready`)
+          expect(ensure.mock.calls.length).toBeGreaterThan(callsBeforeRetry)
+        } else {
+          if (action === `abort`) expect(result).toBe(failure)
+          expect(ensure).toHaveBeenCalledTimes(callsBeforeRetry)
+        }
+      } finally {
+        await collection.cleanup()
+        warning.mockRestore()
+        vi.useRealTimers()
+      }
+    },
+  )
 
   it(`retries queued remote subset ensure after transient failures`, async () => {
     const adapter = createRecordingAdapter()

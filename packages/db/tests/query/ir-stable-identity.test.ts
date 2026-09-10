@@ -32,7 +32,6 @@ import {
   UnhashableQueryIRError,
   getLoadSubsetDemandKey,
   getQueryIdentity,
-  getStableExpressionHash,
   getStableQueryIRHash,
   getStableValueHash,
 } from '../../src/query/ir-stable-identity.js'
@@ -49,8 +48,11 @@ import {
   compileExpression,
   toBooleanPredicate,
 } from '../../src/query/compiler/evaluators.js'
-import { isLoadSubsetRequestSubsumedBy } from '../../src/query/predicate-utils.js'
-import { createRuntimeReferenceIdentityFactory } from '../../src/query/runtime-reference-identity.js'
+import {
+  createRuntimeReferenceIdentityFactory,
+  getRuntimeReferenceIdentity,
+} from '../../src/query/runtime-reference-identity.js'
+import { createValueIdentity } from '../../src/query/equality-value-identity.js'
 import type { BasicExpression, QueryIR } from '../../src/query/ir.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 
@@ -73,6 +75,13 @@ interface User {
   }
   blob?: Uint8Array
   largeViewCount?: bigint
+}
+
+function getProjectedExpressionIdentity(expression: BasicExpression): string {
+  return getQueryIdentity({
+    ...getQueryIR(new Query().from({ user: usersCollection })),
+    select: { value: expression },
+  })
 }
 
 const referenceSemanticPairArbitrary = fc.oneof(
@@ -232,9 +241,11 @@ describe(`semantic expression identity`, () => {
     ])
     const flat = new Func<boolean>(`and`, [adult, enabled])
 
-    expect(getStableExpressionHash(nested)).toBe(getStableExpressionHash(flat))
-    expect(getStableExpressionHash(new Func(`or`, [adult, adult]))).toBe(
-      getStableExpressionHash(new Func(`or`, [adult])),
+    expect(getProjectedExpressionIdentity(nested)).toBe(
+      getProjectedExpressionIdentity(flat),
+    )
+    expect(getProjectedExpressionIdentity(new Func(`or`, [adult, adult]))).toBe(
+      getProjectedExpressionIdentity(new Func(`or`, [adult])),
     )
   })
 
@@ -245,25 +256,25 @@ describe(`semantic expression identity`, () => {
 
     expect(toBooleanPredicate(compileExpression(bareAge)(row))).toBe(false)
     expect(toBooleanPredicate(compileExpression(duplicateAnd)(row))).toBe(true)
-    expect(getStableExpressionHash(duplicateAnd)).not.toBe(
-      getStableExpressionHash(bareAge),
+    expect(getProjectedExpressionIdentity(duplicateAnd)).not.toBe(
+      getProjectedExpressionIdentity(bareAge),
     )
   })
 
   it(`normalizes equality and reversed inequalities`, () => {
-    expect(getStableExpressionHash(new Func(`eq`, [age, new Value(18)]))).toBe(
-      getStableExpressionHash(new Func(`eq`, [new Value(18), age])),
-    )
-    expect(getStableExpressionHash(new Func(`gt`, [age, new Value(18)]))).toBe(
-      getStableExpressionHash(new Func(`lt`, [new Value(18), age])),
-    )
+    expect(
+      getProjectedExpressionIdentity(new Func(`eq`, [age, new Value(18)])),
+    ).toBe(getProjectedExpressionIdentity(new Func(`eq`, [new Value(18), age])))
+    expect(
+      getProjectedExpressionIdentity(new Func(`gt`, [age, new Value(18)])),
+    ).toBe(getProjectedExpressionIdentity(new Func(`lt`, [new Value(18), age])))
   })
 
   it(`preserves order-sensitive function arguments`, () => {
     expect(
-      getStableExpressionHash(new Func(`subtract`, [age, new Value(1)])),
+      getProjectedExpressionIdentity(new Func(`subtract`, [age, new Value(1)])),
     ).not.toBe(
-      getStableExpressionHash(new Func(`subtract`, [new Value(1), age])),
+      getProjectedExpressionIdentity(new Func(`subtract`, [new Value(1), age])),
     )
   })
 
@@ -276,13 +287,13 @@ describe(`semantic expression identity`, () => {
     expect(compileExpression(pair.original)(row)).toBe(
       compileExpression(pair.equivalent)(row),
     )
-    expect(getStableExpressionHash(pair.original)).toBe(
-      getStableExpressionHash(pair.equivalent),
+    expect(getProjectedExpressionIdentity(pair.original)).toBe(
+      getProjectedExpressionIdentity(pair.equivalent),
     )
   })
 
   fcTest.prop([referenceSemanticPairArbitrary])(
-    `keeps reference-semantic values distinct across identity and coverage`,
+    `keeps reference-semantic values distinct across expression and demand identity`,
     ([first, second]) => {
       const value = new PropRef<unknown>([`row`, `value`])
       const firstPredicate = new Func<boolean>(`eq`, [value, new Value(first)])
@@ -294,18 +305,12 @@ describe(`semantic expression identity`, () => {
 
       expect(compileExpression(firstPredicate)(row)).toBe(true)
       expect(compileExpression(secondPredicate)(row)).toBe(false)
-      expect(getStableExpressionHash(firstPredicate)).not.toBe(
-        getStableExpressionHash(secondPredicate),
+      expect(getProjectedExpressionIdentity(firstPredicate)).not.toBe(
+        getProjectedExpressionIdentity(secondPredicate),
       )
       expect(
         getLoadSubsetDemandKey({ where: firstPredicate, limit: 1 }),
       ).not.toBe(getLoadSubsetDemandKey({ where: secondPredicate, limit: 1 }))
-      expect(
-        isLoadSubsetRequestSubsumedBy(
-          { where: firstPredicate, limit: 1 },
-          { where: secondPredicate, limit: 1 },
-        ),
-      ).toBe(false)
     },
   )
 
@@ -315,14 +320,13 @@ describe(`semantic expression identity`, () => {
     vi.resetModules()
 
     try {
-      const { getRuntimeReferenceIdentity } = await import(
-        `../../src/query/runtime-reference-identity.js`
-      )
+      const { getRuntimeReferenceIdentity: getFreshRuntimeReferenceIdentity } =
+        await import(`../../src/query/runtime-reference-identity.js`)
 
       expect(getRandomValues).not.toHaveBeenCalled()
 
-      getRuntimeReferenceIdentity({})
-      getRuntimeReferenceIdentity({})
+      getFreshRuntimeReferenceIdentity({})
+      getFreshRuntimeReferenceIdentity({})
 
       expect(getRandomValues).toHaveBeenCalledOnce()
     } finally {
@@ -335,6 +339,95 @@ describe(`semantic expression identity`, () => {
     const secondRuntime = createRuntimeReferenceIdentityFactory()
 
     expect(firstRuntime({ a: 1 })).not.toEqual(secondRuntime({ b: 2 }))
+  })
+
+  it(`allocates runtime entropy only when the first identity is requested`, () => {
+    const getRandomValues = vi.fn((values: Uint32Array) => values)
+    vi.stubGlobal(`crypto`, { getRandomValues })
+    try {
+      const runtime = createRuntimeReferenceIdentityFactory()
+      expect(getRandomValues).not.toHaveBeenCalled()
+
+      runtime({})
+      runtime({})
+      expect(getRandomValues).toHaveBeenCalledOnce()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it(`keeps symbol identities stable and distinct`, () => {
+    const first = Symbol(`value`)
+    const second = Symbol(`value`)
+
+    expect(getRuntimeReferenceIdentity(first)).toEqual(
+      getRuntimeReferenceIdentity(first),
+    )
+    expect(getRuntimeReferenceIdentity(first)).not.toEqual(
+      getRuntimeReferenceIdentity(second),
+    )
+  })
+
+  it(`does not retain symbols in strong identity maps when weak symbol keys are supported`, () => {
+    const NativeMap = Map
+    const stronglyStoredSymbols = new Set<symbol>()
+    class TrackingMap<K, V> extends NativeMap<K, V> {
+      override set(key: K, value: V): this {
+        if (typeof key === `symbol`) stronglyStoredSymbols.add(key)
+        return super.set(key, value)
+      }
+    }
+    const local = Symbol(`local`)
+    const registered = Symbol.for(
+      `tanstack-db-runtime-reference-test-${Date.now()}`,
+    )
+
+    vi.stubGlobal(`Map`, TrackingMap)
+    try {
+      const runtime = createRuntimeReferenceIdentityFactory()
+      runtime(local)
+      runtime(registered)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+
+    expect(stronglyStoredSymbols).not.toContain(local)
+    expect(stronglyStoredSymbols).not.toContain(registered)
+  })
+
+  it(`keeps correct symbol identity when weak symbol keys are unavailable`, () => {
+    const NativeWeakMap = WeakMap
+    class ObjectOnlyWeakMap<K extends object, V> extends NativeWeakMap<K, V> {
+      override set(key: K, value: V): this {
+        if (typeof key === `symbol`) {
+          throw new TypeError(`Symbols cannot be weak keys`)
+        }
+        return super.set(key, value)
+      }
+    }
+    const first = Symbol(`value`)
+    const second = Symbol(`value`)
+
+    vi.stubGlobal(`WeakMap`, ObjectOnlyWeakMap)
+    try {
+      const runtime = createRuntimeReferenceIdentityFactory()
+
+      expect(runtime(first)).toEqual(runtime(first))
+      expect(runtime(first)).not.toEqual(runtime(second))
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it(`scopes opaque value identities to their owner`, () => {
+    const firstScope = createValueIdentity()
+    const secondScope = createValueIdentity()
+    const first = Symbol(`value`)
+    const second = Symbol(`value`)
+
+    expect(firstScope.equality(first)).toEqual(firstScope.equality(first))
+    expect(firstScope.equality(first)).not.toEqual(firstScope.equality(second))
+    expect(firstScope.equality(first)).not.toEqual(secondScope.equality(first))
   })
 
   it(`falls back when the runtime crypto object lacks getRandomValues`, () => {
@@ -371,8 +464,8 @@ describe(`semantic expression identity`, () => {
         compileExpression(reordered)(row),
       )
     }
-    expect(getStableExpressionHash(ordered)).toBe(
-      getStableExpressionHash(reordered),
+    expect(getProjectedExpressionIdentity(ordered)).toBe(
+      getProjectedExpressionIdentity(reordered),
     )
     expect(getLoadSubsetDemandKey({ where: ordered })).toBe(
       getLoadSubsetDemandKey({ where: reordered }),
@@ -461,6 +554,23 @@ describe(`loadSubset demand identity`, () => {
   })
 
   it.each([
+    [`function`, () => `value`, () => `value`],
+    [`symbol`, Symbol(`value`), Symbol(`value`)],
+  ])(`uses runtime reference identity for %s demand values`, (_name, a, b) => {
+    const field = new PropRef<unknown>([`row`, `value`])
+    const demand = (value: unknown): LoadSubsetOptions => ({
+      where: new Func(`eq`, [field, new Value(value)]),
+    })
+
+    expect(getLoadSubsetDemandKey(demand(a))).toBe(
+      getLoadSubsetDemandKey(demand(a)),
+    )
+    expect(getLoadSubsetDemandKey(demand(a))).not.toBe(
+      getLoadSubsetDemandKey(demand(b)),
+    )
+  })
+
+  it.each([
     [`signed zero`, -0, 0],
     [`invalid Date`, new Date(Number.NaN), new Date(Number.NaN)],
     [
@@ -494,8 +604,8 @@ describe(`loadSubset demand identity`, () => {
       expect(
         compileExpression(firstPredicate)({ row: { value: secondValue } }),
       ).toBe(true)
-      expect(getStableExpressionHash(firstPredicate)).toBe(
-        getStableExpressionHash(secondPredicate),
+      expect(getProjectedExpressionIdentity(firstPredicate)).toBe(
+        getProjectedExpressionIdentity(secondPredicate),
       )
       expect(getLoadSubsetDemandKey({ where: firstPredicate })).toBe(
         getLoadSubsetDemandKey({ where: secondPredicate }),
@@ -1459,34 +1569,21 @@ describe(`stable QueryIR identity smoke test`, () => {
     }
   })
 
-  it(`rejects function and symbol values inside structured expressions`, () => {
-    const queries = [
-      [
-        `function value`,
-        getQueryIR(
-          new Query()
-            .from({ user: usersCollection })
-            .where(({ user }) => eq(user.name, (() => `Tanner`) as never)),
-        ),
-        /function value/,
-      ],
-      [
-        `symbol value`,
-        getQueryIR(
-          new Query()
-            .from({ user: usersCollection })
-            .where(({ user }) => eq(user.name, Symbol(`name`) as never)),
-        ),
-        /symbol value/,
-      ],
-    ] as const
-
-    for (const [name, query, message] of queries) {
-      expect(() => getStableQueryIRHash(query), name).toThrow(
-        UnhashableQueryIRError,
+  it.each([
+    [`function`, () => `Tanner`, () => `Tanner`],
+    [`symbol`, Symbol(`name`), Symbol(`name`)],
+  ])(`keeps %s query values distinct by reference`, (_name, a, b) => {
+    const query = (value: unknown) =>
+      getQueryIR(
+        new Query()
+          .from({ user: usersCollection })
+          .where(({ user }) => eq(user.name, value as never)),
       )
-      expect(() => getStableQueryIRHash(query), name).toThrow(message)
-    }
+
+    expect(getStableQueryIRHash(query(a))).toBe(getStableQueryIRHash(query(a)))
+    expect(getStableQueryIRHash(query(a))).not.toBe(
+      getStableQueryIRHash(query(b)),
+    )
   })
 
   it(`accepts opaque object values by reference`, () => {

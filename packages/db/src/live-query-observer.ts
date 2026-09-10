@@ -766,6 +766,7 @@ class LiveQueryObserverImpl<
   private flushPublications(deliver = true): void {
     if (this.dispatching) return
 
+    let failure: { error: unknown } | undefined
     this.dispatching = true
     try {
       // A dispose() during dispatch empties the queue, ending this loop.
@@ -793,14 +794,19 @@ class LiveQueryObserverImpl<
         // one added later does not. Late-subscriber seeds use the same queue.
         if (deliver) {
           for (const subRecord of publication.targets) {
-            if (this.disposed) return
-            subRecord.listener(publication.changes)
+            if (this.disposed) break
+            try {
+              subRecord.listener(publication.changes)
+            } catch (error) {
+              failure ??= { error }
+            }
           }
         }
       }
     } finally {
       this.dispatching = false
     }
+    if (failure) throw failure.error
   }
 
   preload(): Promise<void> {

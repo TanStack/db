@@ -127,33 +127,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:116](https://github.com/TanSt
 
 ***
 
-### lastUpdated
 
-```ts
-protected lastUpdated: Date;
-```
-
-Defined in: [packages/db/src/indexes/base-index.ts:123](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L123)
-
-#### Inherited from
-
-[`BaseIndex`](BaseIndex.md).[`lastUpdated`](BaseIndex.md#lastupdated)
-
-***
-
-### lookupCount
-
-```ts
-protected lookupCount: number = 0;
-```
-
-Defined in: [packages/db/src/indexes/base-index.ts:121](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L121)
-
-#### Inherited from
-
-[`BaseIndex`](BaseIndex.md).[`lookupCount`](BaseIndex.md#lookupcount)
-
-***
 
 ### name?
 
@@ -183,17 +157,6 @@ Defined in: [packages/db/src/indexes/basic-index.ts:46](https://github.com/TanSt
 
 ***
 
-### totalLookupTime
-
-```ts
-protected totalLookupTime: number = 0;
-```
-
-Defined in: [packages/db/src/indexes/base-index.ts:122](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L122)
-
-#### Inherited from
-
-[`BaseIndex`](BaseIndex.md).[`totalLookupTime`](BaseIndex.md#totallookuptime)
 
 ## Accessors
 
@@ -451,23 +414,6 @@ Defined in: [packages/db/src/indexes/base-index.ts:246](https://github.com/TanSt
 
 ***
 
-### getStats()
-
-```ts
-getStats(): IndexStats;
-```
-
-Defined in: [packages/db/src/indexes/base-index.ts:234](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L234)
-
-#### Returns
-
-[`IndexStats`](../interfaces/IndexStats.md)
-
-#### Inherited from
-
-[`BaseIndex`](BaseIndex.md).[`getStats`](BaseIndex.md#getstats)
-
-***
 
 ### inArrayLookup()
 
@@ -866,29 +812,6 @@ Returns the first n items in reverse sorted order (from the end)
 
 ***
 
-### trackLookup()
-
-```ts
-protected trackLookup(startTime): void;
-```
-
-Defined in: [packages/db/src/indexes/base-index.ts:252](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L252)
-
-#### Parameters
-
-##### startTime
-
-`number`
-
-#### Returns
-
-`void`
-
-#### Inherited from
-
-[`BaseIndex`](BaseIndex.md).[`trackLookup`](BaseIndex.md#tracklookup)
-
-***
 
 ### update()
 
@@ -926,19 +849,3 @@ Updates a value in the index
 [`BaseIndex`](BaseIndex.md).[`update`](BaseIndex.md#update)
 
 ***
-
-### updateTimestamp()
-
-```ts
-protected updateTimestamp(): void;
-```
-
-Defined in: [packages/db/src/indexes/base-index.ts:258](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L258)
-
-#### Returns
-
-`void`
-
-#### Inherited from
-
-[`BaseIndex`](BaseIndex.md).[`updateTimestamp`](BaseIndex.md#updatetimestamp)

@@ -7,13 +7,10 @@ import {
   reduce,
   serializeValue,
 } from '@tanstack/db-ivm'
-import {
-  FN_SELECT_STATE,
-  INCLUDES_ROUTING,
-  validateFnSelectResult,
-} from '../compiler/index.js'
-import { VIRTUAL_PROP_NAMES } from '../../virtual-props.js'
 import { deepEquals } from '../../utils.js'
+import { getParentContextIdentity } from '../equality-value-identity.js'
+import { INCLUDES_ROUTING } from '../compiler/route-metadata.js'
+import type { ValueIdentity } from '../equality-value-identity.js'
 import type {
   CompilationResult,
   IncludesCompilationResult,
@@ -37,11 +34,6 @@ type IncludeRoute = {
   active: boolean
   correlationKey: unknown
   parentContext: Record<string, any> | null
-}
-
-type FnSelectState = {
-  sourceRow: Record<PropertyKey, any>
-  fnSelect: (row: any) => unknown
 }
 
 type CanonicalResult = {
@@ -128,6 +120,7 @@ function materializeRelation(
     exposeRouting(compilation.pipeline),
     getKey,
     scope,
+    compilation.valueIdentity,
   )
   const facades: Array<BucketFacadeCompilation> = []
 
@@ -140,10 +133,17 @@ function materializeRelation(
     )
     facades.push(...child.facades)
 
-    const bucketRows = createBucketRows(child.pipeline)
+    const bucketRows = createBucketRows(
+      child.pipeline,
+      include.childCompilationResult.valueIdentity,
+    )
     if (include.materialization === `collection`) {
       const edgeId = `bucket-facade-${++nextBucketFacadeEdgeId}`
-      const activeBuckets = createActiveBuckets(pipeline, include)
+      const activeBuckets = createActiveBuckets(
+        pipeline,
+        include,
+        compilation.valueIdentity,
+      )
       const activeBucketRows = activeBuckets.pipe(
         join(bucketRows),
         map(([bucketKey, [, row]]) => [bucketKey, row]),
@@ -154,9 +154,21 @@ function materializeRelation(
         activeBuckets,
         hasOrderBy: include.hasOrderBy,
       })
-      pipeline = attachCollectionInclude(pipeline, include, edgeId, scope)
+      pipeline = attachCollectionInclude(
+        pipeline,
+        include,
+        edgeId,
+        scope,
+        compilation.valueIdentity,
+      )
     } else {
-      pipeline = attachInlineInclude(pipeline, bucketRows, include, scope)
+      pipeline = attachInlineInclude(
+        pipeline,
+        bucketRows,
+        include,
+        scope,
+        compilation.valueIdentity,
+      )
     }
   }
 
@@ -194,6 +206,7 @@ function canonicalizeByPublicKey(
   pipeline: ResultStream,
   getKey: ((row: any) => unknown) | undefined,
   scope: RelationScope,
+  valueIdentity: ValueIdentity,
 ): ResultStream {
   return pipeline.pipe(
     map(([internalKey, rawTuple]) => {
@@ -202,7 +215,10 @@ function canonicalizeByPublicKey(
       const relationKey =
         scope === `root`
           ? serializeValue([`root`, publicKey])
-          : serializeValue([routeKey(tuple[2], tuple[3]), publicKey])
+          : serializeValue([
+              routeKey(tuple[2], tuple[3], valueIdentity),
+              publicKey,
+            ])
       return [relationKey, { publicKey, tuple }] as [string, CanonicalResult]
     }),
     reduce((values: Array<[CanonicalResult, number]>) => {
@@ -261,6 +277,7 @@ function attachInlineInclude(
   bucketRows: IStreamBuilder<[string, BucketRow]>,
   include: IncludesCompilationResult,
   scope: RelationScope,
+  valueIdentity: ValueIdentity,
 ): ResultStream {
   const bucketValues = bucketRows.pipe(
     reduce((values: Array<[BucketRow, number]>) => {
@@ -286,7 +303,11 @@ function attachInlineInclude(
       return [
         routing?.active !== true
           ? `inactive:${serializeValue(parentKey)}`
-          : routeKey(routing.correlationKey, routing.parentContext),
+          : routeKey(
+              routing.correlationKey,
+              routing.parentContext,
+              valueIdentity,
+            ),
         { parentKey, tuple },
       ] as [string, { parentKey: unknown; tuple: ResultTuple }]
     }),
@@ -308,7 +329,7 @@ function attachInlineInclude(
       return [
         parent!.parentKey,
         [
-          setMaterializedInclude(value, include.resultPath, materialized),
+          setNestedValue(value, include.resultPath, materialized),
           order,
           correlationKey,
           parentContext,
@@ -325,18 +346,20 @@ function attachInlineInclude(
     routedParents as ResultStream,
     undefined,
     scope,
+    valueIdentity,
   )
 }
 
 function createBucketRows(
   childPipeline: ResultStream,
+  valueIdentity: ValueIdentity,
 ): IStreamBuilder<[string, BucketRow]> {
   return childPipeline.pipe(
     map(([internalKey, rawTuple]) => {
       const [value, order, correlationKey, parentContext, , publicKey] =
         rawTuple as ResultTuple
       return [
-        routeKey(correlationKey, parentContext),
+        routeKey(correlationKey, parentContext, valueIdentity),
         { publicKey: publicKey ?? internalKey, value, order },
       ] as [string, BucketRow]
     }),
@@ -348,6 +371,7 @@ function attachCollectionInclude(
   include: IncludesCompilationResult,
   edgeId: string,
   scope: RelationScope,
+  valueIdentity: ValueIdentity,
 ): ResultStream {
   const routedParents = parentPipeline.pipe(
     map(([parentKey, rawTuple]) => {
@@ -356,12 +380,12 @@ function attachCollectionInclude(
       if (routing?.active !== true) return [parentKey, tuple]
       const facade = createBucketFacadeRef(
         edgeId,
-        routeKey(routing.correlationKey, routing.parentContext),
+        routeKey(routing.correlationKey, routing.parentContext, valueIdentity),
       )
       return [
         parentKey,
         [
-          setMaterializedInclude(tuple[0], include.resultPath, facade),
+          setNestedValue(tuple[0], include.resultPath, facade),
           tuple[1],
           tuple[2],
           tuple[3],
@@ -375,12 +399,14 @@ function attachCollectionInclude(
     routedParents as ResultStream,
     undefined,
     scope,
+    valueIdentity,
   )
 }
 
 function createActiveBuckets(
   parentPipeline: ResultStream,
   include: IncludesCompilationResult,
+  valueIdentity: ValueIdentity,
 ): IStreamBuilder<[string, true]> {
   return parentPipeline.pipe(
     map(([parentKey, rawTuple]) => {
@@ -388,7 +414,11 @@ function createActiveBuckets(
       const routing = getIncludeRoute(tuple, include.fieldName)
       const bucketKey =
         routing?.active === true
-          ? routeKey(routing.correlationKey, routing.parentContext)
+          ? routeKey(
+              routing.correlationKey,
+              routing.parentContext,
+              valueIdentity,
+            )
           : undefined
       return [parentKey, bucketKey] as [unknown, string | undefined]
     }),
@@ -415,8 +445,12 @@ function getIncludeRoute(
 function routeKey(
   correlationKey: unknown,
   parentContext: Record<string, any> | null | undefined,
+  valueIdentity: ValueIdentity,
 ): string {
-  return serializeValue([correlationKey ?? null, parentContext ?? null])
+  return serializeValue([
+    valueIdentity.equality(correlationKey ?? null),
+    getParentContextIdentity(parentContext ?? null),
+  ])
 }
 
 function compareBucketRows(left: BucketRow, right: BucketRow): number {
@@ -484,36 +518,4 @@ function setNestedValue(
 
   target[path[path.length - 1]!] = value
   return root
-}
-
-function setMaterializedInclude(
-  value: Record<PropertyKey, any>,
-  path: Array<string>,
-  materialized: unknown,
-): Record<PropertyKey, any> {
-  const state = value[FN_SELECT_STATE] as FnSelectState | undefined
-  if (!state) return setNestedValue(value, path, materialized)
-
-  const sourceRow = setNestedValue(state.sourceRow, path, materialized)
-  const selectedValue = state.fnSelect(sourceRow)
-  validateFnSelectResult(selectedValue)
-  if (!selectedValue || typeof selectedValue !== `object`) {
-    throw new Error(`fn.select must return an object when it projects includes`)
-  }
-
-  const selected: Record<PropertyKey, any> = Array.isArray(selectedValue)
-    ? [...selectedValue]
-    : { ...selectedValue }
-  for (const property of VIRTUAL_PROP_NAMES) {
-    if (property in value && !(property in selected)) {
-      selected[property] = value[property]
-    }
-  }
-  selected[INCLUDES_ROUTING] = value[INCLUDES_ROUTING]
-  Object.defineProperty(selected, FN_SELECT_STATE, {
-    value: { sourceRow, fnSelect: state.fnSelect },
-    enumerable: true,
-    configurable: true,
-  })
-  return selected
 }

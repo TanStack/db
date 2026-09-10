@@ -23,6 +23,7 @@ import {
   QueryMustHaveFromClauseError,
   SubQueryMustHaveFromClauseError,
 } from '../../errors.js'
+import { getQueryIR } from './query-ir.js'
 import {
   createRefProxy,
   createRefProxyWithSelected,
@@ -945,6 +946,11 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
        * toArray(), and materialize() cannot be returned from fn.select(). Use
        * them as fields in select() so the compiler can add them to the query
        * graph.
+       *
+       * Compiled Collection-valued includes cannot be inputs to fn.select(),
+       * including nested descendants. Use toArray() or materialize() in the
+       * upstream select(), or do parent-only functional work before adding
+       * live Collection includes with select().
        */
       select<TFuncSelectResult>(
         callback: (row: TContext[`schema`]) => TFuncSelectResult,
@@ -1614,12 +1620,7 @@ export function buildQuery<TContext extends Context>(
   return getQueryIR(result)
 }
 
-// Internal function to get the QueryIR from a builder
-export function getQueryIR(
-  builder: BaseQueryBuilder | QueryBuilder<any> | InitialQueryBuilder,
-): QueryIR {
-  return (builder as unknown as BaseQueryBuilder)._getQuery()
-}
+export { getQueryIR }
 
 // Type-only exports for the query builder
 export type InitialQueryBuilder = Pick<

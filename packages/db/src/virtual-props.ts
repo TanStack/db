@@ -158,34 +158,6 @@ export function hasVirtualProps(
 }
 
 /**
- * Creates virtual properties for a row in a source collection.
- *
- * This is the internal function used by collections to add virtual properties
- * to rows when emitting change messages.
- *
- * @param key - The row's key
- * @param collectionId - The collection's ID
- * @param isSynced - Whether the row is synced (not optimistic)
- * @param origin - Whether the change was local or remote
- * @returns Virtual properties object to merge with the row
- *
- * @internal
- */
-export function createVirtualProps<TKey extends string | number>(
-  key: TKey,
-  collectionId: string,
-  isSynced: boolean,
-  origin: VirtualOrigin,
-): VirtualRowProps<TKey> {
-  return {
-    $synced: isSynced,
-    $origin: origin,
-    $key: key,
-    $collectionId: collectionId,
-  }
-}
-
-/**
  * Enriches a row with virtual properties using the "add-if-missing" pattern.
  *
  * If the row already has virtual properties (from an upstream collection),
@@ -224,39 +196,6 @@ export function enrichRowWithVirtualProps<
     $key: existingRow.$key ?? key,
     $collectionId: existingRow.$collectionId ?? collectionId,
   } as WithVirtualProps<T, TKey>
-}
-
-/**
- * Computes aggregate virtual properties for a group of rows.
- *
- * For aggregates:
- * - `$synced`: true if ALL rows in the group are synced; false if ANY row is optimistic
- * - `$origin`: 'local' if ANY row in the group is local; otherwise 'remote'
- *
- * @param rows - The rows in the group
- * @param groupKey - The group key
- * @param collectionId - The collection ID
- * @returns Virtual properties for the aggregate row
- *
- * @internal
- */
-export function computeAggregateVirtualProps<TKey extends string | number>(
-  rows: Array<Partial<VirtualRowProps<string | number>>>,
-  groupKey: TKey,
-  collectionId: string,
-): VirtualRowProps<TKey> {
-  // $synced = true only if ALL rows are synced (false if ANY is optimistic)
-  const allSynced = rows.every((row) => row.$synced ?? true)
-
-  // $origin = 'local' if ANY row is local (consistent with "local influence" semantics)
-  const hasLocal = rows.some((row) => row.$origin === 'local')
-
-  return {
-    $synced: allSynced,
-    $origin: hasLocal ? 'local' : 'remote',
-    $key: groupKey,
-    $collectionId: collectionId,
-  }
 }
 
 /**

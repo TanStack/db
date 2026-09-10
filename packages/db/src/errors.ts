@@ -737,6 +737,22 @@ export class SyncTransactionAbortedError extends Error {
   }
 }
 
+/** A collection was cleaned up before its initial preload became ready. */
+export class CollectionPreloadAbortedError extends Error {
+  constructor() {
+    super(`Collection preload was abandoned during cleanup`)
+    this.name = `AbortError`
+  }
+}
+
+/** A subset operation was canceled before its result became visible. */
+export class LoadSubsetOperationAbortedError extends Error {
+  constructor() {
+    super(`Load subset operation was aborted before its result became visible`)
+    this.name = `AbortError`
+  }
+}
+
 // Query Optimizer Errors
 export class QueryOptimizerError extends TanStackDBError {
   constructor(message: string) {
@@ -748,45 +764,6 @@ export class QueryOptimizerError extends TanStackDBError {
 export class CannotCombineEmptyExpressionListError extends QueryOptimizerError {
   constructor() {
     super(`Cannot combine empty expression list`)
-  }
-}
-
-/**
- * Internal error when the query optimizer fails to convert a WHERE clause to a collection filter.
- */
-export class WhereClauseConversionError extends QueryOptimizerError {
-  constructor(collectionId: string, alias: string) {
-    super(
-      `Failed to convert WHERE clause to collection filter for collection '${collectionId}' alias '${alias}'. This indicates a bug in the query optimization logic.`,
-    )
-  }
-}
-
-/**
- * Error when a subscription cannot be found during lazy join processing.
- * For subqueries, aliases may be remapped (e.g., 'activeUser' → 'user').
- */
-export class SubscriptionNotFoundError extends QueryCompilationError {
-  constructor(
-    resolvedAlias: string,
-    originalAlias: string,
-    collectionId: string,
-    availableAliases: Array<string>,
-  ) {
-    super(
-      `Internal error: subscription for alias '${resolvedAlias}' (remapped from '${originalAlias}', collection '${collectionId}') is missing in join pipeline. Available aliases: ${availableAliases.join(`, `)}. This indicates a bug in alias tracking.`,
-    )
-  }
-}
-
-/**
- * Error thrown when aggregate expressions are used outside of a GROUP BY context.
- */
-export class AggregateNotSupportedError extends QueryCompilationError {
-  constructor() {
-    super(
-      `Aggregate expressions are not supported in this context. Use GROUP BY clause for aggregates.`,
-    )
   }
 }
 
@@ -812,5 +789,15 @@ export class SetWindowRequiresOrderByError extends QueryCompilationError {
       `setWindow() can only be called on collections with an ORDER BY clause. ` +
         `Add .orderBy() to your query to enable window movement.`,
     )
+  }
+}
+
+/** Error thrown when setWindow is called from inside another setWindow call. */
+export class SetWindowReentrancyError extends TanStackDBError {
+  constructor() {
+    super(
+      `setWindow() cannot run reentrantly. Wait for the current window operation to return before starting another one.`,
+    )
+    this.name = `SetWindowReentrancyError`
   }
 }
