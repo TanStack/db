@@ -171,6 +171,25 @@ The sync process follows this lifecycle:
 4. **markReady()** - Signal that a usable initial or recovered snapshot exists
 5. **markError(error?)** - Signal that initial sync failed before producing a usable snapshot; pass the cause so readiness waits reject with it
 
+`commit()` returns `true` if its writes and events are already visible, or a
+promise that resolves when they become visible. A commit can wait behind a
+pending optimistic transaction; receiving a server response is not the same as
+applying its rows. A successful `loadSubset` must await or return every commit
+receipt that establishes its result. Do not use `begin({ immediate: true })` to
+bypass that ordering just to settle a load.
+
+For request-scoped writes, pass the request's abort signal to `commit(signal)`.
+Cancellation before application rejects the receipt with `AbortError`; aborting
+after application does not undo published rows. Do not attach one request's
+signal to a shared stream transaction.
+
+If an adapter supplies `unloadSubset`, release only the acquisition belonging to
+the supplied options. Release must be idempotent and non-throwing; the adapter
+owns any remote unsubscribe retry. A synchronous `loadSubset` throw must clean
+up resources acquired before it throws. Returning a promise transfers ownership
+even if that promise later rejects, so failed acquisitions must remain safe to
+release without affecting peers.
+
 **Race Condition Prevention:**
 Many sync engines start real-time subscriptions before the initial sync completes. Your implementation MUST deduplicate events that arrive via subscription that represent the same data as the initial sync. Consider:
 - Starting the listener BEFORE initial fetch and buffering events

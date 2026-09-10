@@ -335,6 +335,25 @@ await todosCollection.utils.awaitMatch(
 )
 ```
 
+### Cleanup and resume safety
+
+Transaction evidence and pending `awaitTxId`/`awaitMatch` calls belong to one
+collection lifecycle. Explicit cleanup and automatic garbage collection reject
+pending waits with `StreamAbortedError`; callbacks from the retired stream cannot
+settle waits in a restarted collection. Observe these promises even when the
+component or collection may be disposed before they settle.
+
+Persisted resumes wait for the cached row baseline to finish hydrating. If the
+persistence wrapper cannot verify hydration completion, Electric starts a fresh
+snapshot instead of using the saved offset and handle.
+
+An eager or progressive resume cannot apply a partial update to an unknown row.
+The adapter rejects that batch, enters an error state, and records a reset so the
+next sync starts from a full snapshot. This does not silently retry the failed
+stream. Complete updates from an explicit `replica: 'full'` stream remain valid.
+On-demand streams can observe updates outside their loaded subsets; unknown
+partial rows are ignored, while transaction acknowledgement evidence is retained.
+
 ### Helper Functions
 
 The package exports helper functions for use in custom match functions:

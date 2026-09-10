@@ -17,8 +17,9 @@ Use a normal merge, never rewrite published history or restore an old tree.
 - [x] Preserve useful space tests without adding production diagnostic APIs.
 - [x] Rebuilt-core Electric, persistence, Query DB, framework and core gates.
 - [x] Review resulting diff and size; narrow changeset to unshipped packages.
-- [ ] Publish normal merge commit and refresh PR body against it.
-- [ ] Final RFC adapter/docs audit; separately own remaining feature reports.
+- [x] Publish normal merge commit and refresh PR body against it (368a1f24c).
+- [x] Audit RFC contracts/docs and retain explicit owners for unresolved reports.
+- [ ] CI and service-backed adapter E2E on the published reconciliation; RFC closure remains blocked.
 
 ## Reconciliation decisions
 
@@ -112,3 +113,29 @@ These are diagnostic entry bundles, not application download-size estimates.
 
 Runtime TypeScript delta: +410 lines (core +69, persistence +83, Electric +258).
 No Query DB runtime changes or facade metrics remain in this PR.
+
+## RFC contract/docs audit
+
+- Applied settlement and request-scoped cancellation: core LoadSubsetFn and
+  SyncConfig contracts plus transaction/refinement oracles; add the missing
+  plain-language explanation to the adapter guide.
+- Exact acquisition release: core UnloadSubsetFn contract, current Query DB
+  ownership oracle, persisted failed-peer isolation tests; guide now states
+  synchronous failure cleanup and asynchronous failure release obligations.
+- Private replay, stale rows and bounded repair: error-handling guide and
+  replay/ordered lifecycle suites agree; do not reinterpret transport completion
+  as proof of source exhaustion.
+- Electric lifecycle/resume: all 56 oracle cases pass. Add docs distinguishing
+  invalid eager/progressive resume (error plus reset for next sync), unverifiable
+  persisted hydration (fresh snapshot), and ignored out-of-subset partial rows.
+- PowerSync: full package gate passes, 131 checks / eight files, no type errors.
+  Log: /private/tmp/1785-powersync-full.log.
+- #1017 is OPEN and remains pinned as an exact expected assertion failure in
+  load-subset-oracle.property.test.ts: source rows are still hidden while a
+  derived optimistic mutation persists. The full core run exercised that pin;
+  passing the suite does not mean the desired behavior passes.
+- #968 is OPEN. React still declares but does not invoke getNextPageParam;
+  server-page bridging/source extent remain separate from this resume fix.
+- #836/#1521/#1615/#1659/#1741 and the feature reports remain separately owned
+  as listed in the RFC. No broad cross-adapter conformance or service-backed E2E
+  claim follows from these local gates. RFC closure is not justified yet.
