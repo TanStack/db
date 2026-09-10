@@ -89,14 +89,22 @@ export function withCollectionSyncConfigCleanup<TSync extends object>(
   return sync
 }
 
-function materializeCollectionSyncConfig<TSync extends object>(
-  sync: TSync,
-  utilities: object,
-): TSync {
+function materializeCollectionSyncConfig<
+  TSync extends object,
+  TUtils extends object,
+>(sync: TSync, utilities: TUtils): { sync: TSync; utilities: TUtils } {
   const factory = (
     sync as unknown as Partial<CollectionSyncConfigWithFactory<TSync>>
   )[collectionSyncConfigFactory]
-  return factory ? factory.call(sync, utilities) : sync
+  if (!factory) return { sync, utilities }
+  // Binding mutates adapter utilities. Reused/spread descriptors must not
+  // retarget helpers that already belong to another Collection. Preserve
+  // accessors and the prototype rather than evaluating them during a spread.
+  const ownedUtilities = Object.create(
+    Object.getPrototypeOf(utilities),
+    Object.getOwnPropertyDescriptors(utilities),
+  ) as TUtils
+  return { sync: factory.call(sync, ownedUtilities), utilities: ownedUtilities }
 }
 
 function cleanupCollectionSyncConfig(sync: object): void {
@@ -387,11 +395,8 @@ export class CollectionImpl<
     }
 
     // Set default values for optional config properties
-    const collectionUtils = config.utils ?? {}
-    const collectionSync = materializeCollectionSyncConfig(
-      config.sync,
-      collectionUtils,
-    )
+    const { sync: collectionSync, utilities: collectionUtils } =
+      materializeCollectionSyncConfig(config.sync, config.utils ?? {})
     this.config = {
       ...config,
       sync: collectionSync,

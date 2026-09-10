@@ -67,14 +67,11 @@ import type {
   ShapeStreamOptions,
 } from '@electric-sql/client'
 
-type ElectricSyncMetadataWithPersistedScan = SyncMetadataApi<
-  string | number
-> & {
+type ElectricSyncMetadataWithHydration = SyncMetadataApi<string | number> & {
   row: SyncMetadataApi<string | number>[`row`] & {
     whenHydrated?: () => Promise<void>
-    scanPersisted?: (options?: {
-      metadataOnly?: boolean
-    }) => Promise<Array<{ key: string | number }>>
+    // Capability marker for wrappers predating the hydration barrier.
+    scanPersisted?: unknown
   }
 }
 
@@ -508,47 +505,6 @@ function isMustRefetchMessage<T extends Row<unknown>>(
   return isControlMessage(message) && message.headers.control === `must-refetch`
 }
 
-function planBatchPresence<T extends Row<unknown>>(
-  messages: ReadonlyArray<Message<T>>,
-  getKey: (row: T) => string | number,
-  hasKnownKey: (key: string | number) => boolean,
-  validatesResume: boolean,
-): {
-  messageKeys: Map<Message<T>, string | number>
-  hasUnseenUpdate: boolean
-} {
-  const presence = new Map<string | number, boolean>()
-  const messageKeys = new Map<Message<T>, string | number>()
-  let usesKnownBaseline = true
-
-  for (const message of messages) {
-    if (isMustRefetchMessage(message)) {
-      presence.clear()
-      usesKnownBaseline = false
-      validatesResume = false
-      continue
-    }
-    if (!isChangeMessage(message)) continue
-
-    const rowId = getKey(message.value)
-    messageKeys.set(message, rowId)
-    const operation = message.headers.operation
-    if (operation === `delete`) {
-      presence.set(rowId, false)
-      continue
-    }
-
-    const isKnown =
-      presence.get(rowId) ?? (usesKnownBaseline && hasKnownKey(rowId))
-    if (validatesResume && operation === `update` && !isKnown) {
-      return { messageKeys, hasUnseenUpdate: true }
-    }
-    presence.set(rowId, true)
-  }
-
-  return { messageKeys, hasUnseenUpdate: false }
-}
-
 function isSnapshotEndMessage<T extends Row<unknown>>(
   message: Message<T>,
 ): message is SnapshotEndMessage {
@@ -639,7 +595,6 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   commit,
   getCommitCursor,
   waitForCommitsAfter,
-  onLoadSubset,
   collectionId,
   encodeColumnName,
   signal,
@@ -656,7 +611,6 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   commit: (signal?: AbortSignal) => SyncAppliedReceipt
   getCommitCursor: () => number
   waitForCommitsAfter: (cursor: number) => Promise<void>
-  onLoadSubset?: () => void
   collectionId?: string
   /**
    * Optional function to encode column names (e.g., camelCase to snake_case).
@@ -693,7 +647,6 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   }
 
   const loadSubset = async (opts: LoadSubsetOptions) => {
-    onLoadSubset?.()
     const commitCursor = getCommitCursor()
     const throwIfAborted = () => {
       if (signal.aborted) throw abortReason(signal)
@@ -1343,316 +1296,335 @@ function createElectricSync<T extends Row<unknown>>(
   const { getLifecycle, syncMode, collectionId, testHooks } = options
 
   let relationSchema: string | undefined
+  let warnedUnverifiableResume = false
 
-  const tagCache = new Map<MoveTag, ParsedMoveTag>()
+  const createTagState = () => {
+    const tagCache = new Map<MoveTag, ParsedMoveTag>()
 
-  // Parses a tag string into a ParsedMoveTag.
-  // It memoizes the result parsed tag such that future calls
-  // for the same tag string return the same ParsedMoveTag array.
-  const parseTag = (tag: MoveTag): ParsedMoveTag => {
-    const cachedTag = tagCache.get(tag)
-    if (cachedTag) {
-      return cachedTag
-    }
-
-    const parsedTag = parseTagString(tag)
-    tagCache.set(tag, parsedTag)
-    return parsedTag
-  }
-
-  // Tag tracking state
-  const rowTagSets = new Map<RowId, Set<MoveTag>>()
-  const tagIndex: TagIndex = []
-  let tagLength: number | undefined = undefined
-
-  // DNF state: active_conditions are per-row, disjunct_positions are global
-  // (fixed by the shape's WHERE clause, derived once from the first tagged message).
-  const rowActiveConditions = new Map<RowId, ActiveConditions>()
-  let disjunctPositions: DisjunctPositions | undefined = undefined
-
-  /**
-   * Initialize the tag index with the correct length
-   */
-  const initializeTagIndex = (length: number): void => {
-    if (tagIndex.length < length) {
-      // Extend the index array to the required length
-      for (let i = tagIndex.length; i < length; i++) {
-        tagIndex[i] = new Map()
-      }
-    }
-  }
-
-  /**
-   * Add tags to a row and update the tag index
-   */
-  const addTagsToRow = (
-    tags: Array<MoveTag>,
-    rowId: RowId,
-    rowTagSet: Set<MoveTag>,
-  ): void => {
-    for (const tag of tags) {
-      const parsedTag = parseTag(tag)
-
-      // Infer tag length from first tag
-      if (tagLength === undefined) {
-        tagLength = getTagLength(parsedTag)
-        initializeTagIndex(tagLength)
+    // Parses a tag string into a ParsedMoveTag.
+    // It memoizes the result parsed tag such that future calls
+    // for the same tag string return the same ParsedMoveTag array.
+    const parseTag = (tag: MoveTag): ParsedMoveTag => {
+      const cachedTag = tagCache.get(tag)
+      if (cachedTag) {
+        return cachedTag
       }
 
-      // Validate tag length matches
-      const currentTagLength = getTagLength(parsedTag)
-      if (currentTagLength !== tagLength) {
-        debug(
-          `${collectionId ? `[${collectionId}] ` : ``}Tag length mismatch: expected ${tagLength}, got ${currentTagLength}`,
-        )
-        continue
-      }
-
-      rowTagSet.add(tag)
-      addTagToIndex(parsedTag, rowId, tagIndex, tagLength)
-    }
-  }
-
-  /**
-   * Remove tags from a row and update the tag index
-   */
-  const removeTagsFromRow = (
-    removedTags: Array<MoveTag>,
-    rowId: RowId,
-    rowTagSet: Set<MoveTag>,
-  ): void => {
-    if (tagLength === undefined) {
-      return
+      const parsedTag = parseTagString(tag)
+      tagCache.set(tag, parsedTag)
+      return parsedTag
     }
 
-    for (const tag of removedTags) {
-      const parsedTag = parseTag(tag)
-      rowTagSet.delete(tag)
-      removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength)
-      // We aggresively evict the tag from the cache
-      // if this tag is shared with another row
-      // and is not removed from that other row
-      // then next time we encounter the tag it will be parsed again
-      tagCache.delete(tag)
-    }
-  }
+    // Tag tracking state
+    const rowTagSets = new Map<RowId, Set<MoveTag>>()
+    const tagIndex: TagIndex = []
+    let tagLength: number | undefined = undefined
 
-  /**
-   * Process tags for a change message (add and remove tags)
-   */
-  const processTagsForChangeMessage = (
-    tags: Array<MoveTag> | undefined,
-    removedTags: Array<MoveTag> | undefined,
-    rowId: RowId,
-    activeConditions?: ActiveConditions,
-  ): Set<MoveTag> => {
-    // Initialize tag set for this row if it doesn't exist (needed for checking deletion)
-    if (!rowTagSets.has(rowId)) {
-      rowTagSets.set(rowId, new Set())
-    }
-    const rowTagSet = rowTagSets.get(rowId)!
+    // DNF state: active_conditions are per-row, disjunct_positions are global
+    // (fixed by the shape's WHERE clause, derived once from the first tagged message).
+    const rowActiveConditions = new Map<RowId, ActiveConditions>()
+    let disjunctPositions: DisjunctPositions | undefined = undefined
 
-    // Add new tags
-    if (tags) {
-      addTagsToRow(tags, rowId, rowTagSet)
-
-      // Derive disjunct positions once — they are fixed by the shape's WHERE clause.
-      if (disjunctPositions === undefined) {
-        const parsedTags = tags.map(parseTag)
-        disjunctPositions = deriveDisjunctPositions(parsedTags)
-      }
-    }
-
-    // Remove tags
-    if (removedTags) {
-      removeTagsFromRow(removedTags, rowId, rowTagSet)
-    }
-
-    // Store active conditions if provided (overwrite on re-send)
-    if (activeConditions && activeConditions.length > 0) {
-      rowActiveConditions.set(rowId, [...activeConditions])
-    }
-
-    return rowTagSet
-  }
-
-  /**
-   * Clear all tag tracking state (used when truncating)
-   */
-  const clearTagTrackingState = (): void => {
-    rowTagSets.clear()
-    tagIndex.length = 0
-    tagLength = undefined
-    rowActiveConditions.clear()
-    disjunctPositions = undefined
-  }
-
-  /**
-   * Remove all tags for a row from both the tag set and the index
-   * Used when a row is deleted
-   */
-  const clearTagsForRow = (rowId: RowId): void => {
-    if (tagLength === undefined) {
-      return
-    }
-
-    const rowTagSet = rowTagSets.get(rowId)
-    if (!rowTagSet) {
-      return
-    }
-
-    // Remove each tag from the index
-    for (const tag of rowTagSet) {
-      const parsedTag = parseTag(tag)
-      const currentTagLength = getTagLength(parsedTag)
-      if (currentTagLength === tagLength) {
-        removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength)
-      }
-      tagCache.delete(tag)
-    }
-
-    // Remove the row from the tag sets map
-    rowTagSets.delete(rowId)
-    rowActiveConditions.delete(rowId)
-  }
-
-  /**
-   * Remove matching tags from a row based on a pattern
-   * Returns true if the row should be deleted (no longer visible)
-   */
-  const removeMatchingTagsFromRow = (
-    rowId: RowId,
-    pattern: MovePattern,
-  ): boolean => {
-    const rowTagSet = rowTagSets.get(rowId)
-    if (!rowTagSet) {
-      return false
-    }
-
-    // DNF mode: check visibility using active conditions.
-    // Tag index entries are preserved so that move-in can re-activate positions.
-    const activeConditions = rowActiveConditions.get(rowId)
-    if (activeConditions && disjunctPositions) {
-      // Set the condition at this pattern's position to false
-      activeConditions[pattern.pos] = false
-
-      if (!rowVisible(activeConditions, disjunctPositions)) {
-        // Row is no longer visible — clean up all state including tag index
-        for (const tag of rowTagSet) {
-          const parsedTag = parseTag(tag)
-          removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength!)
-          tagCache.delete(tag)
+    /**
+     * Initialize the tag index with the correct length
+     */
+    const initializeTagIndex = (length: number): void => {
+      if (tagIndex.length < length) {
+        // Extend the index array to the required length
+        for (let i = tagIndex.length; i < length; i++) {
+          tagIndex[i] = new Map()
         }
+      }
+    }
+
+    /**
+     * Add tags to a row and update the tag index
+     */
+    const addTagsToRow = (
+      tags: Array<MoveTag>,
+      rowId: RowId,
+      rowTagSet: Set<MoveTag>,
+    ): void => {
+      for (const tag of tags) {
+        const parsedTag = parseTag(tag)
+
+        // Infer tag length from first tag
+        if (tagLength === undefined) {
+          tagLength = getTagLength(parsedTag)
+          initializeTagIndex(tagLength)
+        }
+
+        // Validate tag length matches
+        const currentTagLength = getTagLength(parsedTag)
+        if (currentTagLength !== tagLength) {
+          debug(
+            `${collectionId ? `[${collectionId}] ` : ``}Tag length mismatch: expected ${tagLength}, got ${currentTagLength}`,
+          )
+          continue
+        }
+
+        rowTagSet.add(tag)
+        addTagToIndex(parsedTag, rowId, tagIndex, tagLength)
+      }
+    }
+
+    /**
+     * Remove tags from a row and update the tag index
+     */
+    const removeTagsFromRow = (
+      removedTags: Array<MoveTag>,
+      rowId: RowId,
+      rowTagSet: Set<MoveTag>,
+    ): void => {
+      if (tagLength === undefined) {
+        return
+      }
+
+      for (const tag of removedTags) {
+        const parsedTag = parseTag(tag)
+        rowTagSet.delete(tag)
+        removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength)
+        // We aggresively evict the tag from the cache
+        // if this tag is shared with another row
+        // and is not removed from that other row
+        // then next time we encounter the tag it will be parsed again
+        tagCache.delete(tag)
+      }
+    }
+
+    /**
+     * Process tags for a change message (add and remove tags)
+     */
+    const processTagsForChangeMessage = (
+      tags: Array<MoveTag> | undefined,
+      removedTags: Array<MoveTag> | undefined,
+      rowId: RowId,
+      activeConditions?: ActiveConditions,
+    ): Set<MoveTag> => {
+      // Initialize tag set for this row if it doesn't exist (needed for checking deletion)
+      if (!rowTagSets.has(rowId)) {
+        rowTagSets.set(rowId, new Set())
+      }
+      const rowTagSet = rowTagSets.get(rowId)!
+
+      // Add new tags
+      if (tags) {
+        addTagsToRow(tags, rowId, rowTagSet)
+
+        // Derive disjunct positions once — they are fixed by the shape's WHERE clause.
+        if (disjunctPositions === undefined) {
+          const parsedTags = tags.map(parseTag)
+          disjunctPositions = deriveDisjunctPositions(parsedTags)
+        }
+      }
+
+      // Remove tags
+      if (removedTags) {
+        removeTagsFromRow(removedTags, rowId, rowTagSet)
+      }
+
+      // Store active conditions if provided (overwrite on re-send)
+      if (activeConditions && activeConditions.length > 0) {
+        rowActiveConditions.set(rowId, [...activeConditions])
+      }
+
+      return rowTagSet
+    }
+
+    /**
+     * Clear all tag tracking state (used when truncating)
+     */
+    const clearTagTrackingState = (): void => {
+      rowTagSets.clear()
+      tagIndex.length = 0
+      tagLength = undefined
+      rowActiveConditions.clear()
+      disjunctPositions = undefined
+    }
+
+    /**
+     * Remove all tags for a row from both the tag set and the index
+     * Used when a row is deleted
+     */
+    const clearTagsForRow = (rowId: RowId): void => {
+      if (tagLength === undefined) {
+        return
+      }
+
+      const rowTagSet = rowTagSets.get(rowId)
+      if (!rowTagSet) {
+        return
+      }
+
+      // Remove each tag from the index
+      for (const tag of rowTagSet) {
+        const parsedTag = parseTag(tag)
+        const currentTagLength = getTagLength(parsedTag)
+        if (currentTagLength === tagLength) {
+          removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength)
+        }
+        tagCache.delete(tag)
+      }
+
+      // Remove the row from the tag sets map
+      rowTagSets.delete(rowId)
+      rowActiveConditions.delete(rowId)
+    }
+
+    /**
+     * Remove matching tags from a row based on a pattern
+     * Returns true if the row should be deleted (no longer visible)
+     */
+    const removeMatchingTagsFromRow = (
+      rowId: RowId,
+      pattern: MovePattern,
+    ): boolean => {
+      const rowTagSet = rowTagSets.get(rowId)
+      if (!rowTagSet) {
+        return false
+      }
+
+      // DNF mode: check visibility using active conditions.
+      // Tag index entries are preserved so that move-in can re-activate positions.
+      const activeConditions = rowActiveConditions.get(rowId)
+      if (activeConditions && disjunctPositions) {
+        // Set the condition at this pattern's position to false
+        activeConditions[pattern.pos] = false
+
+        if (!rowVisible(activeConditions, disjunctPositions)) {
+          // Row is no longer visible — clean up all state including tag index
+          for (const tag of rowTagSet) {
+            const parsedTag = parseTag(tag)
+            removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength!)
+            tagCache.delete(tag)
+          }
+          rowTagSets.delete(rowId)
+          rowActiveConditions.delete(rowId)
+          return true
+        }
+        return false
+      }
+
+      // Simple shape (no subquery dependencies — server sends no active_conditions):
+      // Remove matching tags and delete if tag set is empty
+      for (const tag of rowTagSet) {
+        const parsedTag = parseTag(tag)
+        if (tagMatchesPattern(parsedTag, pattern)) {
+          rowTagSet.delete(tag)
+          removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength!)
+        }
+      }
+
+      if (rowTagSet.size === 0) {
         rowTagSets.delete(rowId)
-        rowActiveConditions.delete(rowId)
         return true
       }
+
       return false
     }
 
-    // Simple shape (no subquery dependencies — server sends no active_conditions):
-    // Remove matching tags and delete if tag set is empty
-    for (const tag of rowTagSet) {
-      const parsedTag = parseTag(tag)
-      if (tagMatchesPattern(parsedTag, pattern)) {
-        rowTagSet.delete(tag)
-        removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength!)
+    /**
+     * Process move-out event: remove matching tags from rows and delete rows with empty tag sets
+     */
+    const processMoveOutEvent = (
+      patterns: Array<MovePattern>,
+      begin: () => void,
+      write: (message: ChangeMessageOrDeleteKeyMessage<T>) => void,
+      transactionStarted: boolean,
+      onDelete: (rowId: RowId) => void,
+    ): boolean => {
+      if (tagLength === undefined) {
+        debug(
+          `${collectionId ? `[${collectionId}] ` : ``}Received move-out message but no tag length set yet, ignoring`,
+        )
+        return transactionStarted
       }
-    }
 
-    if (rowTagSet.size === 0) {
-      rowTagSets.delete(rowId)
-      return true
-    }
+      let txStarted = transactionStarted
 
-    return false
-  }
+      // Process all patterns and collect rows to delete
+      for (const pattern of patterns) {
+        // Find all rows that match this pattern
+        const affectedRowIds = findRowsMatchingPattern(pattern, tagIndex)
 
-  /**
-   * Process move-out event: remove matching tags from rows and delete rows with empty tag sets
-   */
-  const processMoveOutEvent = (
-    patterns: Array<MovePattern>,
-    begin: () => void,
-    write: (message: ChangeMessageOrDeleteKeyMessage<T>) => void,
-    transactionStarted: boolean,
-    onDelete: (rowId: RowId) => void,
-  ): boolean => {
-    if (tagLength === undefined) {
-      debug(
-        `${collectionId ? `[${collectionId}] ` : ``}Received move-out message but no tag length set yet, ignoring`,
-      )
-      return transactionStarted
-    }
+        for (const rowId of affectedRowIds) {
+          if (removeMatchingTagsFromRow(rowId, pattern)) {
+            // Delete rows with empty tag sets
+            if (!txStarted) {
+              begin()
+              txStarted = true
+            }
 
-    let txStarted = transactionStarted
-
-    // Process all patterns and collect rows to delete
-    for (const pattern of patterns) {
-      // Find all rows that match this pattern
-      const affectedRowIds = findRowsMatchingPattern(pattern, tagIndex)
-
-      for (const rowId of affectedRowIds) {
-        if (removeMatchingTagsFromRow(rowId, pattern)) {
-          // Delete rows with empty tag sets
-          if (!txStarted) {
-            begin()
-            txStarted = true
+            write({
+              type: `delete`,
+              key: rowId,
+            })
+            onDelete(rowId)
           }
+        }
+      }
 
-          write({
-            type: `delete`,
-            key: rowId,
-          })
-          onDelete(rowId)
+      return txStarted
+    }
+
+    /**
+     * Process move-in event: re-activate conditions for rows matching the patterns.
+     * This is a silent operation — no messages are emitted to the collection.
+     */
+    const processMoveInEvent = (patterns: Array<MovePattern>): void => {
+      if (tagLength === undefined) {
+        debug(
+          `${collectionId ? `[${collectionId}] ` : ``}Received move-in message but no tag length set yet, ignoring`,
+        )
+        return
+      }
+
+      for (const pattern of patterns) {
+        const affectedRowIds = findRowsMatchingPattern(pattern, tagIndex)
+
+        for (const rowId of affectedRowIds) {
+          const activeConditions = rowActiveConditions.get(rowId)
+          if (activeConditions) {
+            activeConditions[pattern.pos] = true
+          }
         }
       }
     }
-
-    return txStarted
-  }
-
-  /**
-   * Process move-in event: re-activate conditions for rows matching the patterns.
-   * This is a silent operation — no messages are emitted to the collection.
-   */
-  const processMoveInEvent = (patterns: Array<MovePattern>): void => {
-    if (tagLength === undefined) {
-      debug(
-        `${collectionId ? `[${collectionId}] ` : ``}Received move-in message but no tag length set yet, ignoring`,
-      )
-      return
-    }
-
-    for (const pattern of patterns) {
-      const affectedRowIds = findRowsMatchingPattern(pattern, tagIndex)
-
-      for (const rowId of affectedRowIds) {
-        const activeConditions = rowActiveConditions.get(rowId)
-        if (activeConditions) {
-          activeConditions[pattern.pos] = true
-        }
-      }
-    }
-  }
-
-  /**
-   * Get the sync metadata for insert operations
-   * @returns Record containing relation information
-   */
-  const getSyncMetadata = (): Record<string, unknown> => {
-    // Use the stored schema if available, otherwise default to 'public'
-    const schema = relationSchema || `public`
 
     return {
-      relation: shapeOptions.params?.table
-        ? [schema, shapeOptions.params.table]
-        : undefined,
+      processTagsForChangeMessage,
+      clearTagTrackingState,
+      clearTagsForRow,
+      processMoveOutEvent,
+      processMoveInEvent,
     }
   }
+  // Tags belong to a collection, and survive a compatible resume of that
+  // collection. Reusing an options descriptor must not share visibility.
+  const collectionTags = new WeakMap<
+    object,
+    ReturnType<typeof createTagState>
+  >()
 
   return {
+    getSyncMetadata: () => ({
+      relation: shapeOptions.params?.table
+        ? [relationSchema || `public`, shapeOptions.params.table]
+        : undefined,
+    }),
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
+      let tagState = collectionTags.get(params.collection)
+      if (!tagState) {
+        tagState = createTagState()
+        collectionTags.set(params.collection, tagState)
+      }
+      const {
+        processTagsForChangeMessage,
+        clearTagTrackingState,
+        clearTagsForRow,
+        processMoveOutEvent,
+        processMoveInEvent,
+      } = tagState
       const lifecycle = getLifecycle(params.collection)
       const lifecycleEpoch = lifecycle.start()
       const isActiveLifecycle = () => lifecycle.isActive(lifecycleEpoch)
@@ -1694,7 +1666,7 @@ function createElectricSync<T extends Row<unknown>>(
       }
 
       const persistedMetadata = metadata as
-        | ElectricSyncMetadataWithPersistedScan
+        | ElectricSyncMetadataWithHydration
         | undefined
       const scanPersisted = persistedMetadata?.row.scanPersisted
       const whenHydrated = persistedMetadata?.row.whenHydrated
@@ -1716,6 +1688,12 @@ function createElectricSync<T extends Row<unknown>>(
         persistedResumeState?.kind === `resume` &&
         scanPersisted !== undefined &&
         whenHydrated === undefined
+      if (hasUnverifiablePersistedResume && !warnedUnverifiableResume) {
+        warnedUnverifiableResume = true
+        console.warn(
+          `Electric persistence cannot verify hydration for saved resume state. Update the persistence adapter alongside Electric to enable safe resume.`,
+        )
+      }
       const canUsePersistedResume =
         shapeOptions.offset === undefined &&
         shapeOptions.handle === undefined &&
@@ -1724,6 +1702,9 @@ function createElectricSync<T extends Row<unknown>>(
         !hasUnverifiablePersistedResume
       const hasExplicitResumeOffset =
         shapeOptions.offset !== undefined && shapeOptions.offset !== `-1`
+      if (!canUsePersistedResume && !hasExplicitResumeOffset) {
+        clearTagTrackingState()
+      }
       const receivesCompleteRows = shapeOptions.params?.replica === `full`
       // Eager and progressive streams that start after the initial offset can
       // only apply partial updates when the local materialization is complete.
@@ -1731,6 +1712,13 @@ function createElectricSync<T extends Row<unknown>>(
         syncMode !== `on-demand` &&
         (canUsePersistedResume ||
           (hasExplicitResumeOffset && !receivesCompleteRows))
+      // A fresh eager snapshot replaces its hydrated cache; omitting the old
+      // offset alone would merge rows that no longer exist on the server.
+      let freshSnapshotPending =
+        syncMode === `eager` &&
+        !canUsePersistedResume &&
+        !hasExplicitResumeOffset &&
+        whenHydrated !== undefined
 
       // Wrap markReady to wait for test hook in progressive mode
       let progressiveReadyGate: Promise<void> | null = null
@@ -1847,12 +1835,6 @@ function createElectricSync<T extends Row<unknown>>(
       // for each response. We convert subsequent inserts to updates to avoid
       // duplicate key errors when the row's data has changed between requests.
       const syncedKeys = new Set<string | number>()
-      // This is the logical key set for the current stream generation. Unlike
-      // collection.keys(), it includes uncommitted changes from earlier
-      // callbacks, so accepting an update cannot depend on batch partitioning.
-      const knownKeys = new Set<string | number>(
-        collection._state.syncedData.keys(),
-      )
       let resumeInvalid = false
 
       const stageResumeMetadata = () => {
@@ -1962,11 +1944,6 @@ function createElectricSync<T extends Row<unknown>>(
         commit,
         getCommitCursor: () => commitSequence,
         waitForCommitsAfter,
-        onLoadSubset: () => {
-          for (const rowId of collection._state.syncedData.keys()) {
-            knownKeys.add(rowId)
-          }
-        },
         collectionId,
         // Pass the columnMapper's encode function to transform column names
         // (e.g., camelCase to snake_case) when compiling SQL for subset queries
@@ -1975,55 +1952,73 @@ function createElectricSync<T extends Row<unknown>>(
         signal: abortController.signal,
       })
 
-      const resumeKeysPromise = !requiresCompleteResume
-        ? undefined
-        : whenHydrated
-          ? whenHydrated().then(() => [] as Array<{ key: string | number }>)
+      const resumeKeysPromise =
+        requiresCompleteResume || freshSnapshotPending
+          ? whenHydrated?.()
           : undefined
-      let areResumeKeysReady = !requiresCompleteResume || !resumeKeysPromise
+      let areResumeKeysReady = !resumeKeysPromise
       const pendingResumeBatches: Array<Array<Message<T>>> = []
       let unsubscribeStream: () => void = () => {}
+
+      const invalidateResume = () => {
+        resumeInvalid = true
+        if (transactionStarted) {
+          const cancellation = new AbortController()
+          cancellation.abort()
+          commit(cancellation.signal)
+          transactionStarted = false
+        }
+        syncedKeys.clear()
+        newTxids.clear()
+        newSnapshots.length = 0
+        commitResetResumeMetadataImmediately()
+        streamErrorVersion++
+        unsubscribeStream()
+        abortController.abort()
+        markError(
+          new Error(
+            `Electric resume state referenced an unseen row; a full snapshot is required`,
+          ),
+        )
+      }
 
       const processMessages = (messages: Array<Message<T>>): void => {
         if (!isActiveLifecycle() || resumeInvalid) {
           return
         }
 
-        // Plan against a sparse callback overlay. This keeps one-row live
-        // updates O(batch size), regardless of the materialized row count.
-        const { messageKeys, hasUnseenUpdate } = planBatchPresence(
-          messages,
-          (row) => collection.getKeyFromItem(row),
-          (rowId) => knownKeys.has(rowId),
-          requiresCompleteResume && !isResettingSnapshot,
-        )
-
-        // A resumed eager/progressive stream assumes its persisted rows form a
-        // complete materialization at the saved offset. Electric updates only
-        // carry changed columns, so applying one without a prior row would
-        // create a durable partial row. Reject the whole batch and persist a
-        // reset marker so the next sync starts from a full snapshot.
-        if (requiresCompleteResume && hasUnseenUpdate) {
-          resumeInvalid = true
-          if (transactionStarted) {
-            const cancellation = new AbortController()
-            cancellation.abort()
-            commit(cancellation.signal)
-            transactionStarted = false
-          }
+        if (freshSnapshotPending) {
+          freshSnapshotPending = false
+          begin()
+          transactionStarted = true
+          truncate()
           syncedKeys.clear()
-          newTxids.clear()
-          newSnapshots.length = 0
-          commitResetResumeMetadataImmediately()
-          streamErrorVersion++
-          unsubscribeStream()
-          abortController.abort()
-          markError(
-            new Error(
-              `Electric resume state referenced an unseen row; a full snapshot is required`,
-            ),
-          )
-          return
+          clearTagTrackingState()
+          isResettingSnapshot = true
+          resetGeneration++
+        }
+
+        // Applied rows can also arrive through persistence invalidations.
+        // Overlay only unapplied writes, once per callback rather than once
+        // per message. A queued truncate fences off the previous snapshot.
+        const pendingPresence = new Map<string | number, boolean>()
+        let usesBaseline = true
+        for (const pending of collection._state.pendingSyncedTransactions) {
+          if (pending.truncate) {
+            pendingPresence.clear()
+            usesBaseline = false
+          }
+          for (const operation of pending.operations) {
+            pendingPresence.set(operation.key, operation.type !== `delete`)
+          }
+        }
+        for (const message of bufferedMessages) {
+          if (isChangeMessage(message)) {
+            pendingPresence.set(
+              collection.getKeyFromItem(message.value),
+              message.headers.operation !== `delete`,
+            )
+          }
         }
 
         // Track commit point type - up-to-date takes precedence as it also triggers progressive mode atomic swap
@@ -2046,20 +2041,22 @@ function createElectricSync<T extends Row<unknown>>(
           }
 
           if (isChangeMessage(message)) {
-            const rowId = messageKeys.get(message)!
+            const rowId = collection.getKeyFromItem(message.value)
             const operation = message.headers.operation
-            if (
-              operation === `update` &&
-              !receivesCompleteRows &&
-              !knownKeys.has(rowId)
-            ) {
-              continue
+            const hasKnownRow =
+              pendingPresence.get(rowId) ??
+              (usesBaseline && collection._state.syncedData.has(rowId))
+            if (operation === `update` && !hasKnownRow) {
+              // Validate after all earlier events, including tag move-outs.
+              // Cancel staged writes before publishing any part of an invalid
+              // resumed callback; the next lifecycle must take a full snapshot.
+              if (requiresCompleteResume && !isResettingSnapshot) {
+                invalidateResume()
+                return
+              }
+              if (!receivesCompleteRows) continue
             }
-            if (operation === `delete`) {
-              knownKeys.delete(rowId)
-            } else {
-              knownKeys.add(rowId)
-            }
+            pendingPresence.set(rowId, operation !== `delete`)
           }
 
           if (isChangeMessage(message)) {
@@ -2114,7 +2111,7 @@ function createElectricSync<T extends Row<unknown>>(
                 write,
                 transactionStarted,
                 (rowId) => {
-                  knownKeys.delete(rowId)
+                  pendingPresence.set(rowId, false)
                   syncedKeys.delete(rowId)
                 },
               )
@@ -2147,7 +2144,8 @@ function createElectricSync<T extends Row<unknown>>(
 
             // Clear synced keys tracking since we're starting fresh
             syncedKeys.clear()
-            knownKeys.clear()
+            pendingPresence.clear()
+            usesBaseline = false
             isResettingSnapshot = true
             resetGeneration++
 
@@ -2214,7 +2212,7 @@ function createElectricSync<T extends Row<unknown>>(
                   write,
                   transactionStarted,
                   (rowId) => {
-                    knownKeys.delete(rowId)
+                    pendingPresence.set(rowId, false)
                     syncedKeys.delete(rowId)
                   },
                 )
@@ -2311,13 +2309,9 @@ function createElectricSync<T extends Row<unknown>>(
 
       if (!areResumeKeysReady && resumeKeysPromise) {
         void resumeKeysPromise.then(
-          (rows) => {
+          () => {
             if (abortController.signal.aborted) return
 
-            rows.forEach((row) => knownKeys.add(row.key))
-            for (const rowId of collection._state.syncedData.keys()) {
-              knownKeys.add(rowId)
-            }
             areResumeKeysReady = true
 
             const queuedBatches = pendingResumeBatches.splice(0)
@@ -2357,7 +2351,5 @@ function createElectricSync<T extends Row<unknown>>(
         },
       }
     },
-    // Expose the getSyncMetadata function
-    getSyncMetadata,
   }
 }

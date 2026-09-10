@@ -139,3 +139,123 @@ No Query DB runtime changes or facade metrics remain in this PR.
 - #836/#1521/#1615/#1659/#1741 and the feature reports remain separately owned
   as listed in the RFC. No broad cross-adapter conformance or service-backed E2E
   claim follows from these local gates. RFC closure is not justified yet.
+
+## External review fixes — 2026-09-10
+
+Starting head: `885ed1c9165fbbebd5dfb278189d2452ff25574e`. Changes below are
+local follow-ups to that head, not a new published verification claim.
+
+- [x] Fresh eager recovery replaces the hydrated cache at commit. The integrated
+      recovery oracle crosses eager/progressive, empty/nonempty replacement, and
+      hydration before/after the stream callback. It asserts public and persisted
+      rows. Four eager cases were RED before the fix; all ten cases, including two
+      valid-resume controls, are GREEN.
+- [x] Subset acquisition cannot resurrect logically removed row presence. The
+      fix reads the existing pending sync queue and progressive buffer instead of
+      maintaining another history. A nine-cell reset/delete/move-out × acquisition
+      timing matrix and a generated acquisition-history oracle cover the path.
+      Reintroducing unconditional baseline refresh makes the generated oracle RED;
+      its shrunk trace is retained as a committed example alongside random runs.
+- [x] Resumed invalid-update validation follows executed visibility changes.
+      Removed the separate preflight planner, which omitted move-outs. Generated
+      delete/move-out histories now cross eager/progressive and every contiguous
+      callback partition, checking rows, error state and persisted reset together.
+      Cancellation preserves the prior public snapshot and discards staged evidence.
+- [x] Reusing raw or once-spread options does not rebind another collection's
+      utilities. Only adapter-factory utilities are copied, preserving descriptors
+      and prototype; ordinary utilities retain their existing object identity.
+- [x] Tag visibility belongs to each Collection, not the reusable descriptor.
+      A first per-session fix failed a compatible persisted-restart probe. The
+      final Collection-keyed tracker retains that state across compatible resume
+      and clears it on fresh snapshot/reset. All 20 descriptor/restart tests pass.
+- [x] Corrected the mutation ledger's collection-local evidence attribution.
+      Fresh-descriptor process generation does not prove shared-descriptor safety.
+      Added all new suites to the package's `test:oracles` command and documented
+      authoritative fresh replacement and descriptor reuse in the adapter guide.
+
+Lessons: stream markers do not substitute for actual acquisition calls;
+published presence can lag logical deletion; fresh transport startup does not
+itself replace a durable snapshot. Partition laws must include tag events.
+Ownership tests must cross both peer collections and compatible same-owner
+restart, not assume every session should discard every state cell.
+
+Scope: retaining in-memory tags for the same Collection does not add cold-start
+restoration of tag indexes from persisted metadata. That pre-existing limitation
+and different-schema reuse of a static shape were not established as new PR
+bugs and are not claimed fixed by these tests. The review's original sandbox
+artifacts were unavailable; all three reported traces were independently rebuilt
+against the actual Collection/Electric/persistence path.
+
+Verification: 4,865 core runtime tests (150 files) and 355 Electric runtime tests
+(9 files) pass. Core and Electric standalone TypeScript checks and focused lint
+pass. Final persistence rerun and loss-audit closeout are recorded below.
+Logs: `/private/tmp/1785-review-fixes-{core,electric,persistence}-final.log`.
+Detailed source-order evidence: `/private/tmp/evaluate-1785-external-fd82-ledger.md`.
+
+Final persistence rerun: 75/75 tests pass (two files), bringing these runtime
+gates to 5,295 passing tests. The final bounded peer review confirms all its
+findings are accounted for: descriptor tests 20/20, collateral probes 3/3, and
+original lifecycle probes 7/7 GREEN. External source-order loss audit: seven
+items fixed, one deferred original-artifact retrieval only; no unresolved
+behavioral evidence gap. Utilities/tag isolation and mutation attribution from
+the prior review are also fixed. Net production change versus reviewed head:
+nine added TypeScript lines; no compressed-size measurement claimed here.
+
+## Second external review follow-up — 2026-09-10
+
+Still local to reviewed head `885ed1c9165fbbebd5dfb278189d2452ff25574e`.
+
+- [x] R1: partial updates use the applied baseline plus pending writes. Removed
+      the retained `knownKeys` copy. Independent persistence publications now
+      reach Electric without an intervening subset acquisition. All six
+      eager/progressive/on-demand × targeted/full-reload cases were RED before
+      the fix and are GREEN now. The generated history crosses peer insertion,
+      deletion, reload, and subsequent partial updates, asserting public and
+      durable rows after each transition. It waits on a coordinator publication
+      marker even when the row set is unchanged; equality alone would false-green.
+- [x] R6: new and deduplicated acquisitions both perform zero applied-key scans
+      in deterministic 10/100-row work tests. Stream callbacks inspect the
+      pending sync queue and progressive buffer once, then use keyed lookups.
+      This avoids O(applied rows) copies, not all work on queued operations.
+- [x] R3: warn once per options descriptor when an older persistence wrapper
+      cannot attest hydration for a saved resume. Keep the safe fresh-fetch
+      fallback and give explicit package-update guidance. Compatible cleanup/
+      restart does not repeat the warning. No mandatory persistence dependency.
+- [x] R7: remove the stale row-returning capability type. Hydration is a barrier,
+      not a second persisted-row query; `scanPersisted` is a presence marker.
+- [x] R4: retain the review's exact persisted-wrapper/real-insert path as a
+      regression, in addition to raw/once-spread utility tests. An acknowledgement
+      on A resolves A's insert after B starts; the prior shared-utils mutant
+      rejected that insert despite A receiving its txid.
+- [x] Keep R8's requested todo record. R2's unknown-partial-resume error remains
+      intentional: main's apparent success materialized an incomplete row.
+
+Test-integrity checks: removing the applied-baseline fallback makes the peer
+publication property RED; ignoring the pending overlay makes parked delete and
+move-out RED (reset remains a passing control because truncation drains at once).
+The random differential property also exposed an oracle-domain bug: its partition
+filter checked only the first reset, admitting reset/subset/reset in one callback.
+Validate every reset and pin that history. Do not change production semantics or
+increase timeouts to accommodate an illegal publication-epoch partition.
+
+Limits retained from the source-order audit: cold-new-Collection tag restoration
+is not added; different schemas for the same static shape and hand-copied wrappers
+remain unproven paths, not refuted supported cases. Bounded match-buffer work and
+live-session snapshot-evidence growth remain separate performance questions.
+No service-backed or installed mixed-version conformance claim follows from the
+mocked stream and capability-shape tests.
+
+Electric: 368/368 runtime tests in nine files; persistence: 75/75 runtime tests
+in two files. Electric tsc and focused lint pass. The 92-test descriptor/oracle
+rerun passes after the final diagnostic wording/type adjustment. Detailed logs:
+`/private/tmp/1785-second-{electric,persistence,types,lint}-final.log`,
+`/private/tmp/1785-second-final-focused.log`, and the two
+`/private/tmp/1785-no-{baseline,overlay}-mutant-final-red.log` files.
+Updated mutation recipes live in `packages/electric-db-collection/tests/ORACLE_MUTATIONS.md`.
+Full source-order ledger: `/private/tmp/evaluate-1785-second-2bf032-ledger.md`.
+Combined production diff versus the reviewed head: three fewer TypeScript lines
+(core +5, Electric -8); this is not a bundle-size measurement. No commit or push.
+
+Final core rerun: 4,865/4,865 runtime tests, 150 files, at the same local runtime
+(`/private/tmp/1785-second-core-final.log`). Total core/Electric/persistence:
+5,308 passing runtime tests. No test was skipped to clear a failure.
