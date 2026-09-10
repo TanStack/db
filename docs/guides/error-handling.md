@@ -155,6 +155,19 @@ try {
 Effects report subset failures through `onSourceError` and dispose because
 their incremental result can no longer be kept complete.
 
+When a source change invalidates an ordered window, automatic full-source
+repair keeps the last complete snapshot visible. A failed repair exposes
+`utils.lastSubsetError` and retries at most twice, after 250 ms and 500 ms.
+Exhausting those retries does not put an already-ready query into a terminal
+error state or clear its rows. The app can show the error and explicitly retry
+with `setWindow()`. Cleanup or truncate cancels the old repair timer. Failed
+imperative window moves and initial loads do not use this background retry.
+
+For SQLite-persisted on-demand collections, a failed upstream `loadSubset`
+rejects even when hydration succeeded. Cached rows remain readable; their
+availability does not mean the remote request succeeded. Background coordinator
+retry, where supported, does not change the failed caller's outcome.
+
 When a must-refetch truncate cannot reload every active subset, a subscription
 keeps its last successful snapshot and reports the subset error. It discards
 the incomplete replay batch and keeps later source changes private because they
@@ -322,6 +335,18 @@ try {
   console.log(tx.error) // { message: "API failed", error: Error }
 }
 ```
+
+Explicit cancellation is different from a mutation failure. If you call
+`tx.rollback()` while `mutationFn` is pending, the rollback settles
+`tx.isPersisted.promise` as rejected. A later result or rejection from that
+mutation function is ignored: the outstanding `commit()` call resolves and
+`tx.error` is not populated by that late rejection. Observe `isPersisted.promise`
+when you need the transaction's outcome, including explicit cancellation.
+
+After the mutation function succeeds, a publication listener can still throw
+while the completed transaction updates its collections. In that case
+`commit()` rejects with the listener error, but `isPersisted.promise` resolves
+and the transaction remains completed. This is not a persistence failure.
 
 ## Collection Operation Errors
 

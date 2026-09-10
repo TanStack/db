@@ -2671,57 +2671,122 @@ describe(`Virtual properties`, () => {
     expect(collection.state.get(`row-1`)?.$origin).toBe(`remote`)
   })
 
-  it(`replaces a completed direct mutation with an authoritative truncate row`, async () => {
-    let syncFns:
-      | {
-          begin: () => void
-          write: (change: {
-            type: `insert`
-            value: { id: string; value: string }
-          }) => void
-          commit: () => true | Promise<void>
-          truncate: () => void
-        }
-      | undefined
-
-    const collection = createCollection<{ id: string; value: string }, string>({
-      id: `truncate-replaces-completed-direct-mutation`,
-      getKey: (item) => item.id,
-      startSync: true,
-      sync: {
-        sync: ({ begin, write, commit, truncate, markReady }) => {
-          syncFns = { begin, write, commit, truncate }
-          markReady()
+  it.each([false, true])(
+    `keeps a completed reinsert visible before its sync echo (delete echoed: %s)`,
+    async (deleteEchoed) => {
+      let echoDelete!: () => void
+      const collection = createCollection<
+        { id: string; value: string },
+        string
+      >({
+        getKey: (row) => row.id,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `row`, value: `original` } })
+            commit()
+            markReady()
+            echoDelete = () => {
+              begin()
+              write({ type: `delete`, value: { id: `row`, value: `original` } })
+              commit()
+            }
+          },
         },
-      },
-      onInsert: () => Promise.resolve(),
-    })
+        onDelete: () => Promise.resolve(),
+        onInsert: () => Promise.resolve(),
+      })
+      try {
+        await collection.delete(`row`).isPersisted.promise
+        expect(collection.has(`row`)).toBe(false)
+        if (deleteEchoed) echoDelete()
+        await collection.insert({ id: `row`, value: `replacement` }).isPersisted
+          .promise
+        expect(collection.get(`row`)?.value).toBe(`replacement`)
+      } finally {
+        await collection.cleanup()
+      }
+    },
+  )
 
-    await collection.stateWhenReady()
-    const transaction = collection.insert({ id: `row-1`, value: `client` })
-    await transaction.isPersisted.promise
-    expect(collection.get(`row-1`)).toMatchObject({
-      id: `row-1`,
-      value: `client`,
-    })
+  it.each([`before`, `after`] as const)(
+    `replaces a direct mutation settling %s truncate with its authoritative row`,
+    async (settlement) => {
+      let finishMutation!: () => void
+      const mutation = new Promise<void>((resolve) => {
+        finishMutation = resolve
+      })
+      let syncFns:
+        | {
+            begin: () => void
+            write: (change: {
+              type: `insert`
+              value: { id: string; value: string }
+            }) => void
+            commit: () => true | Promise<void>
+            truncate: () => void
+          }
+        | undefined
 
-    if (!syncFns) throw new Error(`Sync not ready`)
-    syncFns.begin()
-    syncFns.truncate()
-    syncFns.write({
-      type: `insert`,
-      value: { id: `row-1`, value: `server` },
-    })
-    const applied = syncFns.commit()
-    if (applied !== true) await applied
-    await waitForChanges()
+      const collection = createCollection<
+        { id: string; value: string },
+        string
+      >({
+        id: `truncate-replaces-completed-direct-mutation`,
+        getKey: (item) => item.id,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, truncate, markReady }) => {
+            syncFns = { begin, write, commit, truncate }
+            markReady()
+          },
+        },
+        onInsert: () => mutation,
+      })
 
-    expect(collection.get(`row-1`)).toMatchObject({
-      id: `row-1`,
-      value: `server`,
-    })
-    expect(collection.state.get(`row-1`)?.$origin).toBe(`remote`)
-  })
+      await collection.stateWhenReady()
+      const transaction = collection.insert({ id: `row-1`, value: `client` })
+      if (settlement === `before`) {
+        finishMutation()
+        await transaction.isPersisted.promise
+      }
+      expect(collection.get(`row-1`)).toMatchObject({
+        id: `row-1`,
+        value: `client`,
+      })
+
+      if (!syncFns) throw new Error(`Sync not ready`)
+      syncFns.begin()
+      syncFns.truncate()
+      syncFns.write({
+        type: `insert`,
+        value: { id: `row-1`, value: `server` },
+      })
+      const applied = syncFns.commit()
+      if (settlement === `after`) {
+        // An unrelated mutation recomputes the optimistic overlay before the
+        // acknowledged insertion completes; it must not erase that evidence.
+        const peer = collection.insert({ id: `other`, value: `peer` })
+        finishMutation()
+        await transaction.isPersisted.promise
+        await peer.isPersisted.promise
+      }
+      if (applied !== true) await applied
+      await waitForChanges()
+
+      expect(collection.get(`row-1`)).toMatchObject({
+        id: `row-1`,
+        value: `server`,
+      })
+      expect(collection.state.get(`row-1`)?.$synced).toBe(true)
+      // A same-key sync during the active mutation is a local acknowledgement;
+      // after completion, truncate is an independent remote replacement.
+      expect(collection.state.get(`row-1`)?.$origin).toBe(
+        settlement === `after` ? `local` : `remote`,
+      )
+    },
+  )
 
   it(`should preserve local origin for rows confirmed in the same truncate batch`, async () => {
     let syncFns:

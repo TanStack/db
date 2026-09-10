@@ -637,13 +637,6 @@ class Transaction<T extends object = Record<string, unknown>> {
       await this.mutationFn({
         transaction: this as unknown as TransactionWithMutations<T>,
       })
-
-      if ((this.state as TransactionState) !== `persisting`) return this
-
-      this.setState(`completed`)
-      this.touchCollection()
-
-      this.isPersisted.resolve(this)
     } catch (error) {
       if ((this.state as TransactionState) !== `persisting`) return this
 
@@ -661,6 +654,17 @@ class Transaction<T extends object = Record<string, unknown>> {
 
       // Re-throw the original error to preserve identity and stack
       throw originalError
+    }
+
+    if ((this.state as TransactionState) !== `persisting`) return this
+
+    this.setState(`completed`)
+    // Publication errors cannot undo persistence or leave its receipt pending.
+    // Keep normal publication queued before callers resume from the receipt.
+    try {
+      this.touchCollection()
+    } finally {
+      this.isPersisted.resolve(this)
     }
 
     return this

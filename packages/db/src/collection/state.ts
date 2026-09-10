@@ -92,6 +92,7 @@ export class CollectionStateManager<
   public pendingOptimisticDeletes = new Set<TKey>()
   public pendingOptimisticDirectUpserts = new Set<TKey>()
   public pendingOptimisticDirectDeletes = new Set<TKey>()
+  private acknowledgedInserts = new WeakSet<object>()
 
   /**
    * Tracks the origin of confirmed changes for each row.
@@ -518,6 +519,15 @@ export class CollectionStateManager<
           if (!this.isThisCollection(mutation.collection)) {
             continue
           }
+          // Only a sync write during this insertion acknowledges it. A stale
+          // base row can also exist after an optimistic delete and reinsert.
+          if (
+            isDirectTransaction &&
+            mutation.type === `insert` &&
+            this.acknowledgedInserts.has(mutation)
+          ) {
+            continue
+          }
           this.pendingLocalOrigins.add(mutation.key)
           if (!mutation.optimistic) {
             continue
@@ -939,9 +949,12 @@ export class CollectionStateManager<
 
       // First collect all keys that will be affected by sync operations
       const changedKeys = new Set<TKey>()
+      const syncedInsertedOrUpdatedKeys = new Set<TKey>()
       for (const transaction of committedSyncedTransactions) {
         for (const operation of transaction.operations) {
           changedKeys.add(operation.key as TKey)
+          if (operation.type !== `delete`)
+            syncedInsertedOrUpdatedKeys.add(operation.key as TKey)
         }
         for (const [key] of transaction.rowMetadataWrites) {
           changedKeys.add(key)
@@ -1145,16 +1158,6 @@ export class CollectionStateManager<
       // the UI preserves local intent while respecting server rebuild semantics.
       // Ordering: deletes (above) -> server ops (just applied) -> optimistic upserts.
       if (hasTruncateSync) {
-        // Avoid duplicating keys that were inserted/updated by synced operations in this commit
-        const syncedInsertedOrUpdatedKeys = new Set<TKey>()
-        for (const t of committedSyncedTransactions) {
-          for (const op of t.operations) {
-            if (op.type === `insert` || op.type === `update`) {
-              syncedInsertedOrUpdatedKeys.add(op.key as TKey)
-            }
-          }
-        }
-
         // Build re-apply sets from the snapshot taken at the start of this function.
         // This prevents losing optimistic state if transactions complete during truncate processing.
         const reapplyUpserts = new Map<TKey, TOutput>(
@@ -1242,6 +1245,13 @@ export class CollectionStateManager<
       for (const transaction of this.transactions.values()) {
         if (![`completed`, `failed`].includes(transaction.state)) {
           for (const mutation of transaction.mutations) {
+            if (
+              this.isThisCollection(mutation.collection) &&
+              mutation.type === `insert` &&
+              syncedInsertedOrUpdatedKeys.has(mutation.key)
+            ) {
+              this.acknowledgedInserts.add(mutation)
+            }
             if (
               this.isThisCollection(mutation.collection) &&
               mutation.optimistic

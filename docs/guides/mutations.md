@@ -364,6 +364,13 @@ need to keep a new caller-owned object unchanged during the callback, insert
 your own copy. A thrown callback does not roll back edits to that caller-owned
 object; it leaves existing collection data unchanged.
 
+Arbitrary class instances are an exception: newly assigned instances stay by
+reference so their methods, prototypes, and private fields remain intact.
+Later changes to such an instance can therefore affect stored data without a
+new update or notification. Treat those instances as immutable, or convert them
+to plain data before assignment when you need isolation. Supported native values
+such as `URL`, `Date`, `RegExp`, and typed arrays are copied instead.
+
 ### Delete
 
 Remove items from a collection:

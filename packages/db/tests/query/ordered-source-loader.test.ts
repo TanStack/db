@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { OrderedSourceLoader } from '../../src/query/live/ordered-source-loader.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
@@ -63,6 +63,73 @@ function createOrderByInfo(
 }
 
 describe(`OrderedSourceLoader`, () => {
+  it(`settles a larger prefix after an older lease release throws`, async () => {
+    const failure = new Error(`old prefix release failed`)
+    const requests: Array<LoadSubsetOptions> = []
+    const source = createCollection<{ id: number; rank: number }>({
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          for (let id = 1; id <= 3; id++)
+            write({ type: `insert`, value: { id, rank: id } })
+          commit()
+          markReady()
+          return {
+            loadSubset: (options) => {
+              requests.push(options)
+              return Promise.resolve()
+            },
+            unloadSubset: (options) => {
+              if (options === requests[0]) throw failure
+            },
+          }
+        },
+      },
+    })
+    const subscription = source.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const reads = vi.spyOn(subscription, `readOrderedSnapshot`)
+    const info = createOrderByInfo({ index: undefined, dataNeeded: () => 0 })
+    const loader = new OrderedSourceLoader(
+      info,
+      subscription as unknown as CollectionSubscription,
+      `row`,
+    )
+    try {
+      loader.start()
+      await pendingPromise(loader)
+      reads.mockClear()
+      info.limit = 2
+      await expect(loader.loadMore(1)).rejects.toBe(failure)
+      expect(reads).toHaveBeenCalledWith(expect.objectContaining({ limit: 2 }))
+      expect(subscription.lastError).toBe(failure)
+      info.limit = 3
+      await loader.loadMore(2)
+      expect(requests.map((request) => request.limit)).toEqual([
+        1,
+        undefined,
+        2,
+        undefined,
+        3,
+        undefined,
+      ])
+      expect(
+        requests
+          .filter((request) => request.limit === undefined)
+          .every((request) => request.where !== undefined),
+      ).toBe(true)
+      expect(source.size).toBe(3)
+    } finally {
+      loader.dispose()
+      subscription.unsubscribe()
+      await source.cleanup()
+    }
+  })
+
   const syncRouteCells = (
     [`page`, `prefix`, `boundary`, `full-source`] as const
   ).flatMap((route) =>

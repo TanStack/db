@@ -352,6 +352,7 @@ export interface PersistedCollectionUtils extends UtilsRecord {
     mutations: Array<PendingMutation<Record<string, unknown>>>
   }) => Promise<void> | void
   getLeadershipState?: () => PersistedCollectionLeadershipState
+  /** Hydrate once without acquiring a new ongoing subset lease. */
   forceReloadSubset?: (options: LoadSubsetOptions) => Promise<void> | void
 }
 
@@ -707,18 +708,6 @@ function stableSerialize(value: unknown): string {
   return JSON.stringify(toStableSerializable(value) ?? null)
 }
 
-function normalizeSubsetOptionsForKey(
-  options: LoadSubsetOptions,
-): Record<string, unknown> {
-  return {
-    where: toStableSerializable(options.where),
-    orderBy: toStableSerializable(options.orderBy),
-    limit: options.limit,
-    cursor: toStableSerializable(options.cursor),
-    offset: options.offset,
-  }
-}
-
 function normalizeSyncFnResult(result: void | (() => void) | SyncConfigRes) {
   if (typeof result === `function`) {
     return { cleanup: result } satisfies SyncConfigRes
@@ -802,7 +791,7 @@ class PersistedCollectionRuntime<
     BufferedSyncTransaction<T, TKey>
   > = []
   private readonly queuedTxCommitted: Array<TxCommitted> = []
-  private readonly subscriptionIds = new WeakMap<object, string>()
+  private readonly requestIds = new WeakMap<LoadSubsetOptions, string>()
 
   private collection: Collection<T, TKey, PersistedCollectionUtils> | null =
     null
@@ -824,7 +813,7 @@ class PersistedCollectionRuntime<
   private indexAddedUnsubscribe: (() => void) | null = null
   private indexRemovedUnsubscribe: (() => void) | null = null
   private remoteEnsureRetryTimer: ReturnType<typeof setTimeout> | null = null
-  private nextSubscriptionId = 0
+  private nextRequestId = 0
 
   private latestTerm = 0
   private latestSeq = 0
@@ -938,7 +927,8 @@ class PersistedCollectionRuntime<
     await this.bootstrapPersistedIndexes(indexBootstrapSnapshot)
 
     if (this.syncMode !== `on-demand`) {
-      this.activeSubsets.set(this.getSubsetKey({}), {})
+      const initialSubset = {}
+      this.activeSubsets.set(this.getSubsetKey(initialSubset), initialSubset)
       const appliedCursor = this.appliedReceiptSequence
       await this.applyMutex.run(() =>
         this.hydrateSubsetUnsafe({}, { requestRemoteEnsure: false }),
@@ -1044,6 +1034,8 @@ class PersistedCollectionRuntime<
         }
         console.warn(`Failed to trigger remote subset load:`, error)
         this.queueRemoteSubsetEnsure(options)
+        // Hydration remains readable, but it does not satisfy remote demand.
+        throw error
       }
     }
   }
@@ -1058,7 +1050,7 @@ class PersistedCollectionRuntime<
   }
 
   async forceReloadSubset(options: LoadSubsetOptions): Promise<void> {
-    this.activeSubsets.set(this.getSubsetKey(options), options)
+    // A one-shot refresh does not acquire an enduring subscription lease.
     await this.applyMutex.run(() =>
       this.hydrateSubsetUnsafe(options, { requestRemoteEnsure: false }),
     )
@@ -1808,20 +1800,14 @@ class PersistedCollectionRuntime<
   }
 
   private getSubsetKey(options: LoadSubsetOptions): string {
-    const subscription = options.subscription as object | undefined
-    if (subscription && typeof subscription === `object`) {
-      const existingId = this.subscriptionIds.get(subscription)
-      if (existingId) {
-        return existingId
-      }
-
-      this.nextSubscriptionId++
-      const id = `sub:${this.nextSubscriptionId}`
-      this.subscriptionIds.set(subscription, id)
-      return id
+    // A subscription can own several independent acquisitions, including
+    // identical requests. Only releasing this options object ends its lease.
+    let id = this.requestIds.get(options)
+    if (id === undefined) {
+      id = `request:${++this.nextRequestId}`
+      this.requestIds.set(options, id)
     }
-
-    return `opts:${stableSerialize(normalizeSubsetOptionsForKey(options))}`
+    return id
   }
 
   private queueRemoteSubsetEnsure(options: LoadSubsetOptions): void {
@@ -2605,6 +2591,8 @@ function createWrappedSyncConfig<
             if (!resolvedSourceResult.loadSubset) return true
             acquisition.forwarded = true
             try {
+              // Returning a promise transfers its lease even if it rejects.
+              // Only a synchronous throw leaves no upstream lease to release.
               return resolvedSourceResult.loadSubset(loadOptions)
             } catch (error) {
               acquisition.forwarded = false
