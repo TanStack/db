@@ -155,6 +155,16 @@ describe(`Mutation result detachment`, () => {
             ? saved.s.values().next().value!.back
             : saved.arr[0]!.owner
         expect(back.count).toBe(1)
+        // The draft becomes a detached snapshot, not the published row wrapper.
+        // Its containers must still lead back to that same snapshot.
+        expect(kind === `Set` ? back.s : back.arr).toBe(
+          kind === `Set` ? saved.s : saved.arr,
+        )
+        const cycle =
+          kind === `Set`
+            ? back.s.values().next().value!.back
+            : back.arr[0]!.owner
+        expect(cycle).toBe(back)
         await tx.isPersisted.promise
       } finally {
         await collection.cleanup()

@@ -352,56 +352,67 @@ export class OrderedSourceLoader {
     const complete = (): void => {
       if (this.pending === tracked) this.pending = undefined
       if (!this.active) return
-      if (!isFullSource) {
-        // A replay can replace the physical lease while this older transport
-        // finishes. Retire its logical owner only outside the replay barrier.
-        const prefixCount =
-          options?.orderBy && !options.cursor ? options.limit : undefined
-        this.settledFiniteAcquisitions.set(releaseAcquisition, prefixCount)
-        this.retireSettledFiniteAcquisitions()
-        if (generation === this.generation && prefixCount !== undefined) {
-          this.retireSettledFiniteAcquisitions({
-            release: releaseAcquisition,
-            count: prefixCount,
-          })
-        }
-      }
-      if (generation !== this.generation) return
-      // A finite request may finish behind an authoritative repair. It cannot
-      // clear that repair's failure or resume finite refinement around it.
-      if (!isFullSource && (this.failedRequest || this.fullSource !== `none`))
-        return
-      this.failedRequest = undefined
-      if (kind !== `boundary`) {
-        this.hasSettledSourceRequest = true
-        // Source delivery can invalidate the in-flight prefix marker.
-        if (options?.orderBy && !options.cursor) {
-          this.lastPrefixCount = options.limit
-        }
-        if (!isFullSource && options?.orderBy) {
-          try {
-            this.settledSourceBoundary =
-              this.subscription.readOrderedSnapshot(options).at(-1)?.value ??
-              this.settledSourceBoundary
-          } catch (error) {
-            fail(error)
+      // Retirement failure does not undo a successful acquisition. Finish its
+      // boundary and continuation, then report the first cleanup error.
+      runAllCallbacks([
+        () => {
+          if (!isFullSource) {
+            // A replay can replace the physical lease while this older transport
+            // finishes. Retire its logical owner only outside the replay barrier.
+            const prefixCount =
+              options?.orderBy && !options.cursor ? options.limit : undefined
+            this.settledFiniteAcquisitions.set(releaseAcquisition, prefixCount)
+            this.retireSettledFiniteAcquisitions()
+            if (generation === this.generation && prefixCount !== undefined) {
+              this.retireSettledFiniteAcquisitions({
+                release: releaseAcquisition,
+                count: prefixCount,
+              })
+            }
           }
-        }
-      }
-      if (isFullSource) {
-        this.cancelRepairRetry()
-        this.repairRetries = 0
-        this.needsFullSourceRecovery = false
-        this.fullSource = `complete`
-        this.retireSettledFiniteAcquisitions()
-      }
-      if (kind === `ordered`) {
-        this.loadBoundary(windowOperationGeneration)
-        return
-      }
-      // A boundary request may add tied rows without filling the query's
-      // window. Resume forward loading once it settles.
-      this.loadMore()
+        },
+        () => {
+          if (generation !== this.generation) return
+          // A finite request may finish behind an authoritative repair. It cannot
+          // clear that repair's failure or resume finite refinement around it.
+          if (
+            !isFullSource &&
+            (this.failedRequest || this.fullSource !== `none`)
+          )
+            return
+          this.failedRequest = undefined
+          if (kind !== `boundary`) {
+            this.hasSettledSourceRequest = true
+            // Source delivery can invalidate the in-flight prefix marker.
+            if (options?.orderBy && !options.cursor) {
+              this.lastPrefixCount = options.limit
+            }
+            if (!isFullSource && options?.orderBy) {
+              try {
+                this.settledSourceBoundary =
+                  this.subscription.readOrderedSnapshot(options).at(-1)
+                    ?.value ?? this.settledSourceBoundary
+              } catch (error) {
+                fail(error)
+              }
+            }
+          }
+          if (isFullSource) {
+            this.cancelRepairRetry()
+            this.repairRetries = 0
+            this.needsFullSourceRecovery = false
+            this.fullSource = `complete`
+            this.retireSettledFiniteAcquisitions()
+          }
+          if (kind === `ordered`) {
+            this.loadBoundary(windowOperationGeneration)
+            return
+          }
+          // A boundary request may add tied rows without filling the query's
+          // window. Resume forward loading once it settles.
+          this.loadMore()
+        },
+      ])
     }
     const settlesAsync = result instanceof Promise
     const request = settlesAsync ? result : Promise.resolve()

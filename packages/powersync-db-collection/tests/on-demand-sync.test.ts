@@ -2771,48 +2771,72 @@ describe(`On-Demand Sync Mode`, () => {
       }
     })
 
-    it(`does not silently stay errored after a release rebuild retries successfully`, async () => {
-      vi.useFakeTimers()
-      const db = await createDatabase()
-      await db.execute(
-        `INSERT INTO products (id, name, price, category) VALUES ('retained', 'Before', 10, 'clothing')`,
-      )
-      vi.spyOn(db.logger, `error`).mockImplementation(() => {})
-      const collection = createCollection(
-        powerSyncCollectionOptions({
-          database: db,
-          table: APP_SCHEMA.props.products,
-          syncMode: `on-demand`,
-        }),
-      )
-      const first = { where: categoryEquals(`electronics`) }
-      const second = { where: categoryEquals(`clothing`) }
-      try {
-        await collection._sync.loadSubset(first)
-        await collection._sync.loadSubset(second)
-        const trigger = vi
-          .spyOn(db.triggers, `createDiffTrigger`)
-          .mockRejectedValueOnce(new Error(`release rebuild failed`))
-        collection._sync.unloadSubset(first)
-        await vi.waitFor(() => expect(collection.status).toBe(`error`))
-        await vi.advanceTimersByTimeAsync(1_000)
-        await vi.waitFor(() =>
-          expect(trigger.mock.calls.length).toBeGreaterThan(1),
-        )
-        await vi.waitFor(() => expect(collection.status).toBe(`ready`))
-        expect(collection.get(`retained`)?.name).toBe(`Before`)
+    it.each([`unchanged`, `delete`, `predicate exit`, `release-last`] as const)(
+      `reconciles rows after a release rebuild outage with %s`,
+      async (change) => {
+        vi.useFakeTimers()
+        const db = await createDatabase()
         await db.execute(
-          `UPDATE products SET name = 'After' WHERE id = 'retained'`,
+          `INSERT INTO products (id, name, price, category) VALUES ('retained', 'Before', 10, 'clothing')`,
         )
-        await vi.waitFor(() =>
-          expect(collection.get(`retained`)?.name).toBe(`After`),
+        vi.spyOn(db.logger, `error`).mockImplementation(() => {})
+        const collection = createCollection(
+          powerSyncCollectionOptions({
+            database: db,
+            table: APP_SCHEMA.props.products,
+            syncMode: `on-demand`,
+          }),
         )
-      } finally {
-        await collection.cleanup()
-        await vi.runOnlyPendingTimersAsync()
-        vi.useRealTimers()
-      }
-    })
+        const first = { where: categoryEquals(`electronics`) }
+        const second = { where: categoryEquals(`clothing`) }
+        try {
+          await collection._sync.loadSubset(first)
+          await collection._sync.loadSubset(second)
+          const trigger = vi
+            .spyOn(db.triggers, `createDiffTrigger`)
+            .mockRejectedValueOnce(new Error(`release rebuild failed`))
+          collection._sync.unloadSubset(first)
+          await vi.waitFor(() => expect(collection.status).toBe(`error`))
+          if (change === `delete` || change === `release-last`) {
+            await db.execute(`DELETE FROM products WHERE id = 'retained'`)
+          } else if (change === `predicate exit`) {
+            await db.execute(
+              `UPDATE products SET category = 'outdoors' WHERE id = 'retained'`,
+            )
+          }
+          if (change === `release-last`) collection._sync.unloadSubset(second)
+          await vi.advanceTimersByTimeAsync(1_000)
+          if (change !== `release-last`)
+            await vi.waitFor(() =>
+              expect(trigger.mock.calls.length).toBeGreaterThan(1),
+            )
+          await vi.waitFor(() => expect(collection.status).toBe(`ready`))
+          expect([...collection.keys()]).toEqual(
+            change === `unchanged` ? [`retained`] : [],
+          )
+          if (change === `release-last`)
+            await collection._sync.loadSubset({ ...second })
+          if (change !== `unchanged`) {
+            await db.execute(
+              `INSERT OR REPLACE INTO products (id, name, price, category) VALUES ('retained', 'Before', 10, 'clothing')`,
+            )
+            await vi.waitFor(() =>
+              expect(collection.get(`retained`)?.name).toBe(`Before`),
+            )
+          }
+          await db.execute(
+            `UPDATE products SET name = 'After' WHERE id = 'retained'`,
+          )
+          await vi.waitFor(() =>
+            expect(collection.get(`retained`)?.name).toBe(`After`),
+          )
+        } finally {
+          await collection.cleanup()
+          await vi.runOnlyPendingTimersAsync()
+          vi.useRealTimers()
+        }
+      },
+    )
 
     it(`retries a failed physical release`, async () => {
       vi.useFakeTimers()

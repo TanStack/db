@@ -653,47 +653,63 @@ function createPowerSyncCollectionConfig<
               if (!isCurrent()) return
 
               const active = activeWhereExpressions()
-              if (active.length === 0) return
-              const combinedWhere =
-                active.length === 1
-                  ? active[0]
-                  : or(active[0], active[1], ...active.slice(2))
-              const compiledNewData = compileSQLite(
-                { where: combinedWhere },
-                { jsonColumn: 'NEW.data' },
-              )
-              const compiledOldData = compileSQLite(
-                { where: combinedWhere },
-                { jsonColumn: 'OLD.data' },
-              )
-              const compiledView = compileSQLite({ where: combinedWhere })
-              const newDataWhenClause = toInlinedWhereClause(compiledNewData)
-              const oldDataWhenClause = toInlinedWhereClause(compiledOldData)
-              const viewWhereClause = toInlinedWhereClause(compiledView)
-
-              await establishTracking(
-                {
-                  setupContext: ctx,
-                  when: {
-                    [DiffTriggerOperation.INSERT]: newDataWhenClause,
-                    [DiffTriggerOperation.UPDATE]: `(${newDataWhenClause}) OR (${oldDataWhenClause})`,
-                    [DiffTriggerOperation.DELETE]: oldDataWhenClause,
+              // Tracking was absent during an error. Positive baseline rows
+              // alone cannot reveal deletes or predicate exits from that gap.
+              const missing =
+                collection.status === `error`
+                  ? new Set(collection.keys())
+                  : undefined
+              if (active.length > 0) {
+                const combinedWhere =
+                  active.length === 1
+                    ? active[0]
+                    : or(active[0], active[1], ...active.slice(2))
+                const compiledNewData = compileSQLite(
+                  { where: combinedWhere },
+                  { jsonColumn: 'NEW.data' },
+                )
+                const compiledOldData = compileSQLite(
+                  { where: combinedWhere },
+                  { jsonColumn: 'OLD.data' },
+                )
+                const compiledView = compileSQLite({ where: combinedWhere })
+                const newDataWhenClause = toInlinedWhereClause(compiledNewData)
+                const oldDataWhenClause = toInlinedWhereClause(compiledOldData)
+                const viewWhereClause = toInlinedWhereClause(compiledView)
+                await establishTracking(
+                  {
+                    setupContext: ctx,
+                    when: {
+                      [DiffTriggerOperation.INSERT]: newDataWhenClause,
+                      [DiffTriggerOperation.UPDATE]: `(${newDataWhenClause}) OR (${oldDataWhenClause})`,
+                      [DiffTriggerOperation.DELETE]: oldDataWhenClause,
+                    },
+                    writeType: (rowId: string) =>
+                      collection.has(rowId) ? `update` : `insert`,
+                    batchQuery: (
+                      lockContext: LockContext,
+                      batchSize: number,
+                      cursor: number,
+                    ) =>
+                      lockContext
+                        .getAll<TableType>(
+                          `SELECT * FROM ${viewName} WHERE ${viewWhereClause} LIMIT ? OFFSET ?`,
+                          [batchSize, cursor],
+                        )
+                        .then((rows) => {
+                          for (const row of rows) missing?.delete(row.id)
+                          return rows
+                        }),
                   },
-                  writeType: (rowId: string) =>
-                    collection.has(rowId) ? `update` : `insert`,
-                  batchQuery: (
-                    lockContext: LockContext,
-                    batchSize: number,
-                    cursor: number,
-                  ) =>
-                    lockContext.getAll<TableType>(
-                      `SELECT * FROM ${viewName} WHERE ${viewWhereClause} LIMIT ? OFFSET ?`,
-                      [batchSize, cursor],
-                    ),
-                },
-                appliedReceipts,
-              )
+                  appliedReceipts,
+                )
+              }
               if (!isCurrent()) await safelyDisposeTracking(ctx)
+              else if (missing?.size) {
+                begin()
+                for (const key of missing) write({ type: `delete`, key })
+                appliedReceipts.push(commit())
+              }
             })
             await Promise.all(appliedReceipts)
             if (isCurrent()) {

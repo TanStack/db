@@ -352,6 +352,7 @@ export interface PersistedCollectionUtils extends UtilsRecord {
     mutations: Array<PendingMutation<Record<string, unknown>>>
   }) => Promise<void> | void
   getLeadershipState?: () => PersistedCollectionLeadershipState
+  /** Hydrate once without acquiring a new ongoing subset lease. */
   forceReloadSubset?: (options: LoadSubsetOptions) => Promise<void> | void
 }
 
@@ -1049,7 +1050,7 @@ class PersistedCollectionRuntime<
   }
 
   async forceReloadSubset(options: LoadSubsetOptions): Promise<void> {
-    this.activeSubsets.set(this.getSubsetKey(options), options)
+    // A one-shot refresh does not acquire an enduring subscription lease.
     await this.applyMutex.run(() =>
       this.hydrateSubsetUnsafe(options, { requestRemoteEnsure: false }),
     )
@@ -2590,6 +2591,8 @@ function createWrappedSyncConfig<
             if (!resolvedSourceResult.loadSubset) return true
             acquisition.forwarded = true
             try {
+              // Returning a promise transfers its lease even if it rejects.
+              // Only a synchronous throw leaves no upstream lease to release.
               return resolvedSourceResult.loadSubset(loadOptions)
             } catch (error) {
               acquisition.forwarded = false

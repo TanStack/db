@@ -820,6 +820,9 @@ A successful larger prefix retires settled smaller prefix acquisitions from
 the same ordered source plan, after the replacement has applied. It does not
 retire cursor suffixes, ties, unfinished work, or another subscription's leases.
 Adapter eviction must still preserve rows owned by the replacement or peers.
+If an older prefix's release throws, the successful replacement still finishes
+its boundary and continuation bookkeeping before surfacing the cleanup error.
+Cleanup failure does not turn the successful acquisition into a failed load.
 
 Automatic full-source repair after an established window fails can retry twice,
 after 250 ms and 500 ms. Every retry releases failed acquisitions before starting

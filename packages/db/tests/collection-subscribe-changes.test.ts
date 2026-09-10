@@ -2671,6 +2671,45 @@ describe(`Virtual properties`, () => {
     expect(collection.state.get(`row-1`)?.$origin).toBe(`remote`)
   })
 
+  it.each([false, true])(
+    `keeps a completed reinsert visible before its sync echo (delete echoed: %s)`,
+    async (deleteEchoed) => {
+      let echoDelete!: () => void
+      const collection = createCollection<
+        { id: string; value: string },
+        string
+      >({
+        getKey: (row) => row.id,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `row`, value: `original` } })
+            commit()
+            markReady()
+            echoDelete = () => {
+              begin()
+              write({ type: `delete`, value: { id: `row`, value: `original` } })
+              commit()
+            }
+          },
+        },
+        onDelete: () => Promise.resolve(),
+        onInsert: () => Promise.resolve(),
+      })
+      try {
+        await collection.delete(`row`).isPersisted.promise
+        expect(collection.has(`row`)).toBe(false)
+        if (deleteEchoed) echoDelete()
+        await collection.insert({ id: `row`, value: `replacement` }).isPersisted
+          .promise
+        expect(collection.get(`row`)?.value).toBe(`replacement`)
+      } finally {
+        await collection.cleanup()
+      }
+    },
+  )
+
   it.each([`before`, `after`] as const)(
     `replaces a direct mutation settling %s truncate with its authoritative row`,
     async (settlement) => {
@@ -2726,8 +2765,12 @@ describe(`Virtual properties`, () => {
       })
       const applied = syncFns.commit()
       if (settlement === `after`) {
+        // An unrelated mutation recomputes the optimistic overlay before the
+        // acknowledged insertion completes; it must not erase that evidence.
+        const peer = collection.insert({ id: `other`, value: `peer` })
         finishMutation()
         await transaction.isPersisted.promise
+        await peer.isPersisted.promise
       }
       if (applied !== true) await applied
       await waitForChanges()
