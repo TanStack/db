@@ -138,6 +138,64 @@ async function expectWildcardFailureSettlesPreload(): Promise<void> {
 }
 
 describe(`TrailBase Integration`, () => {
+  it.each([`close`, `error`] as const)(
+    `releases a settled stream without unhandled rejection after %s`,
+    async (ending) => {
+      const recordApi = new MockRecordApi<Data>()
+      const row: Data = { id: 1, updated: 0, data: `retained` }
+      recordApi.list.mockResolvedValue({ records: [row] })
+      let controller!: ReadableStreamDefaultController<Event>
+      const stream = new ReadableStream<Event>({
+        start(value) {
+          controller = value
+        },
+      })
+      recordApi.subscribe.mockResolvedValue(stream)
+      const failure = new Error(`connection lost`)
+      const errors: Array<unknown> = []
+      const recordUnhandled = (error: unknown) => errors.push(error)
+      const reported = vi.spyOn(console, `error`).mockImplementation(() => {})
+      const intervals = vi.spyOn(globalThis, `setInterval`)
+      const clear = vi.spyOn(globalThis, `clearInterval`)
+      process.on(`unhandledRejection`, recordUnhandled)
+      const collection = createCollection(setUp(recordApi))
+
+      try {
+        await collection.preload()
+        const timer = intervals.mock.results.at(-1)?.value
+        expect(timer).toBeDefined()
+        if (ending === `error`) controller.error(failure)
+        else controller.close()
+        await new Promise((resolve) => setTimeout(resolve, 0))
+
+        expect(errors).toEqual([])
+        expect(clear).toHaveBeenCalledWith(timer)
+        expect(stream.locked).toBe(false)
+        expect(collection.status).toBe(`ready`)
+        expect(stripState(collection.state)).toEqual(new Map([[1, row]]))
+        expect(recordApi.subscribe).toHaveBeenCalledOnce()
+        expect(recordApi.list).toHaveBeenCalledOnce()
+        if (ending === `error`) {
+          expect(reported).toHaveBeenCalledExactlyOnceWith(
+            `TrailBase subscription failed`,
+            failure,
+          )
+        } else expect(reported).not.toHaveBeenCalled()
+
+        await collection.cleanup()
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        expect(errors).toEqual([])
+      } finally {
+        await collection.cleanup()
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        process.off(`unhandledRejection`, recordUnhandled)
+        reported.mockRestore()
+        intervals.mockRestore()
+        clear.mockRestore()
+      }
+    },
+  )
+
   it(`marks initial sync ready only after its rows are applied`, async () => {
     const recordApi = new MockRecordApi<Data>()
     let resolveList!: (response: ListResponse<Data>) => void

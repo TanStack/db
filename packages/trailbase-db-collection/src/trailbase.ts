@@ -381,12 +381,18 @@ export function trailBaseCollectionOptions<
           })
         }, 120 * 1000)
 
-        reader.closed.finally(() => {
+        const subscribedReader = reader
+        const releaseReader = () => {
           if (periodicCleanupTask !== undefined) {
             clearInterval(periodicCleanupTask)
             periodicCleanupTask = undefined
           }
-        })
+          subscribedReader.releaseLock()
+          if (eventReader === subscribedReader) eventReader = undefined
+        }
+        // listen() reports read errors. Observe this separate promise too, and
+        // retire the reader so later cleanup cannot cancel an errored stream.
+        void subscribedReader.closed.then(releaseReader, releaseReader)
       }
 
       void start()
