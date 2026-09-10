@@ -3,6 +3,8 @@ id: QueryResult
 title: QueryResult
 ---
 
+# Type Alias: QueryResult\<T\>
+
 ```ts
 type QueryResult<T> = GetResult<ExtractContext<T>>;
 ```

@@ -3,6 +3,8 @@ id: SyncMode
 title: SyncMode
 ---
 
+# Type Alias: SyncMode
+
 ```ts
 type SyncMode = "eager" | "on-demand";
 ```

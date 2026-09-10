@@ -3,6 +3,8 @@ id: FunctionalHavingRow
 title: FunctionalHavingRow
 ---
 
+# Type Alias: FunctionalHavingRow\<TContext\>
+
 ```ts
 type FunctionalHavingRow<TContext> = TContext["schema"] & TContext["hasResult"] extends true ? object : object;
 ```

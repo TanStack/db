@@ -3,6 +3,8 @@ id: SimpleComparison
 title: SimpleComparison
 ---
 
+# Interface: SimpleComparison
+
 Defined in: [packages/db/src/query/expression-helpers.ts:44](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L44)
 
 Represents a simple comparison operation

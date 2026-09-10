@@ -3,6 +3,8 @@ id: HydrationBoundary
 title: HydrationBoundary
 ---
 
+# Function: HydrationBoundary()
+
 ```ts
 function HydrationBoundary(__namedParameters): ReactNode;
 ```

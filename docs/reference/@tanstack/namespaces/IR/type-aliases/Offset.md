@@ -3,6 +3,8 @@ id: Offset
 title: Offset
 ---
 
+# Type Alias: Offset
+
 ```ts
 type Offset = number;
 ```

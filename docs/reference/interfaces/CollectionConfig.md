@@ -3,6 +3,8 @@ id: CollectionConfig
 title: CollectionConfig
 ---
 
+# Interface: CollectionConfig\<T, TKey, TSchema, TUtils\>
+
 Defined in: [packages/db/src/types.ts:817](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L817)
 
 ## Extends

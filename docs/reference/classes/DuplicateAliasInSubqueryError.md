@@ -3,6 +3,8 @@ id: DuplicateAliasInSubqueryError
 title: DuplicateAliasInSubqueryError
 ---
 
+# Class: DuplicateAliasInSubqueryError
+
 Defined in: [packages/db/src/errors.ts:542](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L542)
 
 Error thrown when a subquery uses the same alias as its parent query.

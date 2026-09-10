@@ -3,6 +3,8 @@ id: DuplicateKeySyncError
 title: DuplicateKeySyncError
 ---
 
+# Class: DuplicateKeySyncError
+
 Defined in: [packages/db/src/errors.ts:183](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L183)
 
 ## Extends

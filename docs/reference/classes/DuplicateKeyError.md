@@ -3,6 +3,8 @@ id: DuplicateKeyError
 title: DuplicateKeyError
 ---
 
+# Class: DuplicateKeyError
+
 Defined in: [packages/db/src/errors.ts:175](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L175)
 
 ## Extends

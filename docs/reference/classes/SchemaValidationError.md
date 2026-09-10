@@ -3,6 +3,8 @@ id: SchemaValidationError
 title: SchemaValidationError
 ---
 
+# Class: SchemaValidationError
+
 Defined in: [packages/db/src/errors.ts:18](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L18)
 
 ## Extends

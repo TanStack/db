@@ -3,6 +3,8 @@ id: ilike
 title: ilike
 ---
 
+# Function: ilike()
+
 ```ts
 function ilike(left, right): BasicExpression<boolean>;
 ```

@@ -3,6 +3,8 @@ id: NonSingleResult
 title: NonSingleResult
 ---
 
+# Type Alias: NonSingleResult
+
 ```ts
 type NonSingleResult = object;
 ```

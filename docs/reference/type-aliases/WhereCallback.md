@@ -3,6 +3,8 @@ id: WhereCallback
 title: WhereCallback
 ---
 
+# Type Alias: WhereCallback()\<TContext\>
+
 ```ts
 type WhereCallback<TContext> = (refs) => any;
 ```

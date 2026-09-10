@@ -3,6 +3,8 @@ id: getStableQueryBuilderHash
 title: getStableQueryBuilderHash
 ---
 
+# Function: getStableQueryBuilderHash()
+
 ```ts
 function getStableQueryBuilderHash(query): string;
 ```

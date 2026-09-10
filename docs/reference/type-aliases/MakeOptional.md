@@ -3,6 +3,8 @@ id: MakeOptional
 title: MakeOptional
 ---
 
+# Type Alias: MakeOptional\<T, K\>
+
 ```ts
 type MakeOptional<T, K> = Omit<T, K> & Partial<Pick<T, K>>;
 ```

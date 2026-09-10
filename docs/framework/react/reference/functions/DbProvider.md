@@ -3,6 +3,8 @@ id: DbProvider
 title: DbProvider
 ---
 
+# Function: DbProvider()
+
 ```ts
 function DbProvider(props): Element;
 ```

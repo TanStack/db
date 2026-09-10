@@ -3,6 +3,8 @@ id: canonicalizeQueryIR
 title: canonicalizeQueryIR
 ---
 
+# Function: canonicalizeQueryIR()
+
 ```ts
 function canonicalizeQueryIR(query): StableIdentityValue;
 ```

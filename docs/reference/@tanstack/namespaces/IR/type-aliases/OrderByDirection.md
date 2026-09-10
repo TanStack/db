@@ -3,6 +3,8 @@ id: OrderByDirection
 title: OrderByDirection
 ---
 
+# Type Alias: OrderByDirection
+
 ```ts
 type OrderByDirection = "asc" | "desc";
 ```

@@ -3,6 +3,8 @@ id: LoadSubsetFn
 title: LoadSubsetFn
 ---
 
+# Type Alias: LoadSubsetFn()
+
 ```ts
 type LoadSubsetFn = (options) => true | Promise<void>;
 ```

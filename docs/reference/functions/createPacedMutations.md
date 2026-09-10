@@ -3,6 +3,8 @@ id: createPacedMutations
 title: createPacedMutations
 ---
 
+# Function: createPacedMutations()
+
 ```ts
 function createPacedMutations<TVariables, T>(config): (variables) => Transaction<T>;
 ```

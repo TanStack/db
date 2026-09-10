@@ -3,6 +3,8 @@ id: getLiveQueryWindowCollectionWarning
 title: getLiveQueryWindowCollectionWarning
 ---
 
+# Function: getLiveQueryWindowCollectionWarning()
+
 ```ts
 function getLiveQueryWindowCollectionWarning(collection, expectedLimit): string | undefined;
 ```

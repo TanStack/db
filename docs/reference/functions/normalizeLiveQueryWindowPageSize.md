@@ -3,6 +3,8 @@ id: normalizeLiveQueryWindowPageSize
 title: normalizeLiveQueryWindowPageSize
 ---
 
+# Function: normalizeLiveQueryWindowPageSize()
+
 ```ts
 function normalizeLiveQueryWindowPageSize(pageSize): number;
 ```

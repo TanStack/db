@@ -3,6 +3,8 @@ id: QueryMustHaveFromClauseError
 title: QueryMustHaveFromClauseError
 ---
 
+# Class: QueryMustHaveFromClauseError
+
 Defined in: [packages/db/src/errors.ts:430](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L430)
 
 ## Extends

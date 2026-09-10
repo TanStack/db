@@ -3,6 +3,8 @@ id: InjectLiveQueryResultWithSingleResultCollection
 title: InjectLiveQueryResultWithSingleResultCollection
 ---
 
+# Interface: InjectLiveQueryResultWithSingleResultCollection\<TResult, TKey, TUtils\>
+
 Defined in: [index.ts:77](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L77)
 
 ## Type Parameters

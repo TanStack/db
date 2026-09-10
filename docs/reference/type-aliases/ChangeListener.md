@@ -3,6 +3,8 @@ id: ChangeListener
 title: ChangeListener
 ---
 
+# Type Alias: ChangeListener()\<T, TKey\>
+
 ```ts
 type ChangeListener<T, TKey> = (changes) => void;
 ```

@@ -3,6 +3,8 @@ id: createLiveQueryWindowController
 title: createLiveQueryWindowController
 ---
 
+# Function: createLiveQueryWindowController()
+
 ```ts
 function createLiveQueryWindowController<T, TKey>(collection, options): LiveQueryWindowController<T, TKey>;
 ```

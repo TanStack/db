@@ -3,6 +3,8 @@ id: queryCollectionOptions
 title: queryCollectionOptions
 ---
 
+# Function: queryCollectionOptions()
+
 ## Call Signature
 
 ```ts

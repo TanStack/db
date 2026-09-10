@@ -3,6 +3,8 @@ id: withArrayChangeTracking
 title: withArrayChangeTracking
 ---
 
+# Function: withArrayChangeTracking()
+
 ```ts
 function withArrayChangeTracking<T>(targets, callback): Record<string | symbol, unknown>[];
 ```

@@ -3,6 +3,8 @@ id: CollectionConfigSingleRowOption
 title: CollectionConfigSingleRowOption
 ---
 
+# Type Alias: CollectionConfigSingleRowOption\<T, TKey, TSchema, TUtils\>
+
 ```ts
 type CollectionConfigSingleRowOption<T, TKey, TSchema, TUtils> = CollectionConfig<T, TKey, TSchema, TUtils> & MaybeSingleResult;
 ```

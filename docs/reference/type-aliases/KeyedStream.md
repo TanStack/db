@@ -3,6 +3,8 @@ id: KeyedStream
 title: KeyedStream
 ---
 
+# Type Alias: KeyedStream
+
 ```ts
 type KeyedStream = IStreamBuilder<InputRow>;
 ```

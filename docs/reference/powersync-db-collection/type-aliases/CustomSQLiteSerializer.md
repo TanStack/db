@@ -3,6 +3,8 @@ id: CustomSQLiteSerializer
 title: CustomSQLiteSerializer
 ---
 
+# Type Alias: CustomSQLiteSerializer\<TOutput, TSQLite\>
+
 ```ts
 type CustomSQLiteSerializer<TOutput, TSQLite> = Partial<{ [Key in keyof TOutput]: (value: TOutput[Key]) => Key extends keyof TSQLite ? TSQLite[Key] : never }>;
 ```

@@ -3,6 +3,8 @@ id: isOrderBySubset
 title: isOrderBySubset
 ---
 
+# Function: isOrderBySubset()
+
 ```ts
 function isOrderBySubset(subset, superset): boolean;
 ```

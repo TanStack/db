@@ -3,6 +3,8 @@ id: hasVirtualProps
 title: hasVirtualProps
 ---
 
+# Function: hasVirtualProps()
+
 ```ts
 function hasVirtualProps(value): value is VirtualRowProps<string | number>;
 ```

@@ -3,6 +3,8 @@ id: DeltaType
 title: DeltaType
 ---
 
+# Type Alias: DeltaType
+
 ```ts
 type DeltaType = "enter" | "exit" | "update";
 ```

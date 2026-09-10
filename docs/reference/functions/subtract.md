@@ -3,6 +3,8 @@ id: subtract
 title: subtract
 ---
 
+# Function: subtract()
+
 ```ts
 function subtract<T1, T2>(left, right): BinaryNumericReturnType;
 ```

@@ -3,6 +3,8 @@ id: MissingUpdateHandlerError
 title: MissingUpdateHandlerError
 ---
 
+# Class: MissingUpdateHandlerError
+
 Defined in: [packages/db/src/errors.ts:281](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L281)
 
 ## Extends

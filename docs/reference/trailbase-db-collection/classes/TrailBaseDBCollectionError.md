@@ -3,6 +3,8 @@ id: TrailBaseDBCollectionError
 title: TrailBaseDBCollectionError
 ---
 
+# Class: TrailBaseDBCollectionError
+
 Defined in: [packages/trailbase-db-collection/src/errors.ts:4](https://github.com/TanStack/db/blob/main/packages/trailbase-db-collection/src/errors.ts#L4)
 
 ## Extends

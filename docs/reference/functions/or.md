@@ -3,6 +3,8 @@ id: or
 title: or
 ---
 
+# Function: or()
+
 ## Call Signature
 
 ```ts

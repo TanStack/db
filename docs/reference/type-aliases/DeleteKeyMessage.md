@@ -3,6 +3,8 @@ id: DeleteKeyMessage
 title: DeleteKeyMessage
 ---
 
+# Type Alias: DeleteKeyMessage\<TKey\>
+
 ```ts
 type DeleteKeyMessage<TKey> = Omit<ChangeMessage<any, TKey>, "value" | "previousValue" | "type"> & object;
 ```

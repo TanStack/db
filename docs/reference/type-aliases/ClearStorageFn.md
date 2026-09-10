@@ -3,6 +3,8 @@ id: ClearStorageFn
 title: ClearStorageFn
 ---
 
+# Type Alias: ClearStorageFn()
+
 ```ts
 type ClearStorageFn = () => void;
 ```

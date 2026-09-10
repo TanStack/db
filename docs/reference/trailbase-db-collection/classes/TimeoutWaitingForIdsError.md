@@ -3,6 +3,8 @@ id: TimeoutWaitingForIdsError
 title: TimeoutWaitingForIdsError
 ---
 
+# Class: TimeoutWaitingForIdsError
+
 Defined in: [packages/trailbase-db-collection/src/errors.ts:11](https://github.com/TanStack/db/blob/main/packages/trailbase-db-collection/src/errors.ts#L11)
 
 ## Extends

@@ -3,6 +3,8 @@ id: VirtualOrigin
 title: VirtualOrigin
 ---
 
+# Type Alias: VirtualOrigin
+
 ```ts
 type VirtualOrigin = "local" | "remote";
 ```

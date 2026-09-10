@@ -3,6 +3,8 @@ id: useLiveQuery
 title: useLiveQuery
 ---
 
+# Function: useLiveQuery()
+
 ## Call Signature
 
 ```ts

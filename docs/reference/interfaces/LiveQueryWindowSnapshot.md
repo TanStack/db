@@ -3,6 +3,8 @@ id: LiveQueryWindowSnapshot
 title: LiveQueryWindowSnapshot
 ---
 
+# Interface: LiveQueryWindowSnapshot\<T, TKey\>
+
 Defined in: [packages/db/src/live-query-window-controller.ts:474](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L474)
 
 **`Internal`**

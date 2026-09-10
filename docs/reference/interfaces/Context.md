@@ -3,6 +3,8 @@ id: Context
 title: Context
 ---
 
+# Interface: Context
+
 Defined in: [packages/db/src/query/builder/types.ts:44](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L44)
 
 Context - The central state container for query builder operations

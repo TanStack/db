@@ -3,6 +3,8 @@ id: StorageApi
 title: StorageApi
 ---
 
+# Type Alias: StorageApi
+
 ```ts
 type StorageApi = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 ```

@@ -3,6 +3,8 @@ id: UseLiveInfiniteQueryReturn
 title: UseLiveInfiniteQueryReturn
 ---
 
+# Type Alias: UseLiveInfiniteQueryReturn\<TContext\>
+
 ```ts
 type UseLiveInfiniteQueryReturn<TContext> = Omit<ReturnType<typeof useLiveQuery>, "data"> & object;
 ```

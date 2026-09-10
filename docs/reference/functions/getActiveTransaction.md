@@ -3,6 +3,8 @@ id: getActiveTransaction
 title: getActiveTransaction
 ---
 
+# Function: getActiveTransaction()
+
 ```ts
 function getActiveTransaction(): 
   | Transaction<Record<string, unknown>>

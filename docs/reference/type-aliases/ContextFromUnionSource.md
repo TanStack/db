@@ -3,6 +3,8 @@ id: ContextFromUnionSource
 title: ContextFromUnionSource
 ---
 
+# Type Alias: ContextFromUnionSource\<TSource\>
+
 ```ts
 type ContextFromUnionSource<TSource> = IsUnion<keyof TSource & string> extends true ? object : ContextFromSource<TSource>;
 ```

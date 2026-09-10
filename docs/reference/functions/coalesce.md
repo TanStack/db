@@ -3,6 +3,8 @@ id: coalesce
 title: coalesce
 ---
 
+# Function: coalesce()
+
 ```ts
 function coalesce<T>(...args): CoalesceReturnType<T>;
 ```

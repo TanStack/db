@@ -3,6 +3,8 @@ id: ConfigWithSQLiteInputType
 title: ConfigWithSQLiteInputType
 ---
 
+# Type Alias: ConfigWithSQLiteInputType\<TTable, TSchema\>
+
 ```ts
 type ConfigWithSQLiteInputType<TTable, TSchema> = SerializerConfig<StandardSchemaV1.InferOutput<TSchema>, ExtractedTable<TTable>> & object;
 ```

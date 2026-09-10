@@ -3,6 +3,8 @@ id: MissingAliasInputsError
 title: MissingAliasInputsError
 ---
 
+# Class: MissingAliasInputsError
+
 Defined in: [packages/db/src/errors.ts:797](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L797)
 
 Internal error when the compiler returns aliases that don't have corresponding input streams.

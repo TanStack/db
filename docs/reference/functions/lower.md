@@ -3,6 +3,8 @@ id: lower
 title: lower
 ---
 
+# Function: lower()
+
 ```ts
 function lower<T>(arg): StringFunctionReturnType<T>;
 ```

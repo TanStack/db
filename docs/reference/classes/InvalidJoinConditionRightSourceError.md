@@ -3,6 +3,8 @@ id: InvalidJoinConditionRightSourceError
 title: InvalidJoinConditionRightSourceError
 ---
 
+# Class: InvalidJoinConditionRightSourceError
+
 Defined in: [packages/db/src/errors.ts:619](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L619)
 
 ## Extends

@@ -3,6 +3,8 @@ id: queueStrategy
 title: queueStrategy
 ---
 
+# Function: queueStrategy()
+
 ```ts
 function queueStrategy(options?): QueueStrategy;
 ```

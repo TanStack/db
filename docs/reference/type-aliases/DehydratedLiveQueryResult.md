@@ -3,6 +3,8 @@ id: DehydratedLiveQueryResult
 title: DehydratedLiveQueryResult
 ---
 
+# Type Alias: DehydratedLiveQueryResult\<T, TKey\>
+
 ```ts
 type DehydratedLiveQueryResult<T, TKey> = object;
 ```

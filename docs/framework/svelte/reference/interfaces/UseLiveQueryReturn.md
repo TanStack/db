@@ -3,6 +3,8 @@ id: UseLiveQueryReturn
 title: UseLiveQueryReturn
 ---
 
+# Interface: UseLiveQueryReturn\<T, TData\>
+
 Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:47](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L47)
 
 Return type for useLiveQuery hook

@@ -3,6 +3,8 @@ id: count
 title: count
 ---
 
+# Function: count()
+
 ```ts
 function count(arg): Aggregate<number>;
 ```

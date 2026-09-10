@@ -3,6 +3,8 @@ id: IndexDevModeConfig
 title: IndexDevModeConfig
 ---
 
+# Interface: IndexDevModeConfig
+
 Defined in: [packages/db/src/indexes/index-registry.ts:15](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L15)
 
 ## Properties

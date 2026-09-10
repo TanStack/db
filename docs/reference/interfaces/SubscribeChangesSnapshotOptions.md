@@ -3,6 +3,8 @@ id: SubscribeChangesSnapshotOptions
 title: SubscribeChangesSnapshotOptions
 ---
 
+# Interface: SubscribeChangesSnapshotOptions\<T, TKey\>
+
 Defined in: [packages/db/src/types.ts:941](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L941)
 
 ## Extends

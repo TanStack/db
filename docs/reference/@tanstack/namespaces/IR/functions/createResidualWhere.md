@@ -3,6 +3,8 @@ id: createResidualWhere
 title: createResidualWhere
 ---
 
+# Function: createResidualWhere()
+
 ```ts
 function createResidualWhere(expression): Where;
 ```

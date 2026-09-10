@@ -3,6 +3,8 @@ id: QueryBuilder
 title: QueryBuilder
 ---
 
+# Type Alias: QueryBuilder\<TContext\>
+
 ```ts
 type QueryBuilder<TContext> = Omit<BaseQueryBuilder<TContext>, "from" | "unionAll" | "_getQuery">;
 ```

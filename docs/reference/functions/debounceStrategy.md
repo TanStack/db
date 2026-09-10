@@ -3,6 +3,8 @@ id: debounceStrategy
 title: debounceStrategy
 ---
 
+# Function: debounceStrategy()
+
 ```ts
 function debounceStrategy(options): DebounceStrategy;
 ```

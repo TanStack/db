@@ -3,6 +3,8 @@ id: ContextFromUnionBranches
 title: ContextFromUnionBranches
 ---
 
+# Type Alias: ContextFromUnionBranches\<TBranches\>
+
 ```ts
 type ContextFromUnionBranches<TBranches> = object;
 ```

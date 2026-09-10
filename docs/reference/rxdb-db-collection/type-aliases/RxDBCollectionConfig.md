@@ -3,6 +3,8 @@ id: RxDBCollectionConfig
 title: RxDBCollectionConfig
 ---
 
+# Type Alias: RxDBCollectionConfig\<T, TSchema\>
+
 ```ts
 type RxDBCollectionConfig<T, TSchema> = Omit<BaseCollectionConfig<T, string, TSchema>, "onInsert" | "onUpdate" | "onDelete" | "getKey"> & object;
 ```

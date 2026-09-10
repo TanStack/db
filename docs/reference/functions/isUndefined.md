@@ -3,6 +3,8 @@ id: isUndefined
 title: isUndefined
 ---
 
+# Function: isUndefined()
+
 ```ts
 function isUndefined(value): BasicExpression<boolean>;
 ```

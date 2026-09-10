@@ -3,6 +3,8 @@ id: ResolveTransactionChanges
 title: ResolveTransactionChanges
 ---
 
+# Type Alias: ResolveTransactionChanges\<T, TOperation\>
+
 ```ts
 type ResolveTransactionChanges<T, TOperation> = TOperation extends "delete" ? T : Partial<T>;
 ```

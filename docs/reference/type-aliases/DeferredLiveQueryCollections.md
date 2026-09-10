@@ -3,6 +3,8 @@ id: DeferredLiveQueryCollections
 title: DeferredLiveQueryCollections
 ---
 
+# Type Alias: DeferredLiveQueryCollections
+
 ```ts
 type DeferredLiveQueryCollections = Set<CollectionImpl<any, string | number, any, any, any>>;
 ```

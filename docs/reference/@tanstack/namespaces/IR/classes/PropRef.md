@@ -3,6 +3,8 @@ id: PropRef
 title: PropRef
 ---
 
+# Class: PropRef\<T\>
+
 Defined in: [packages/db/src/query/ir.ts:141](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L141)
 
 ## Extends

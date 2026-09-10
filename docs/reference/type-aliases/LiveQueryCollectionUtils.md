@@ -3,6 +3,8 @@ id: LiveQueryCollectionUtils
 title: LiveQueryCollectionUtils
 ---
 
+# Type Alias: LiveQueryCollectionUtils
+
 ```ts
 type LiveQueryCollectionUtils = UtilsRecord & object;
 ```

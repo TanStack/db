@@ -3,6 +3,8 @@ id: SubscriptionLoadSubsetErrorEvent
 title: SubscriptionLoadSubsetErrorEvent
 ---
 
+# Interface: SubscriptionLoadSubsetErrorEvent
+
 Defined in: [packages/db/src/types.ts:239](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L239)
 
 Event emitted when a subset requested by this subscription fails to load.

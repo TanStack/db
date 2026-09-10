@@ -3,6 +3,8 @@ id: TimeoutWaitingForMatchError
 title: TimeoutWaitingForMatchError
 ---
 
+# Class: TimeoutWaitingForMatchError
+
 Defined in: [packages/electric-db-collection/src/errors.ts:25](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/errors.ts#L25)
 
 ## Extends

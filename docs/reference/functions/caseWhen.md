@@ -3,6 +3,8 @@ id: caseWhen
 title: caseWhen
 ---
 
+# Function: caseWhen()
+
 ## Call Signature
 
 ```ts

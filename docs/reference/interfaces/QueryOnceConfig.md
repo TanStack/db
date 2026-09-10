@@ -3,6 +3,8 @@ id: QueryOnceConfig
 title: QueryOnceConfig
 ---
 
+# Interface: QueryOnceConfig\<TContext\>
+
 Defined in: [packages/db/src/query/query-once.ts:18](https://github.com/TanStack/db/blob/main/packages/db/src/query/query-once.ts#L18)
 
 Configuration options for queryOnce

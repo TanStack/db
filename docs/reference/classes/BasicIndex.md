@@ -3,6 +3,8 @@ id: BasicIndex
 title: BasicIndex
 ---
 
+# Class: BasicIndex\<TKey\>
+
 Defined in: [packages/db/src/indexes/basic-index.ts:43](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/basic-index.ts#L43)
 
 Basic index using Map + sorted Array.

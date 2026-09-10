@@ -3,6 +3,8 @@ id: StorageKeyRequiredError
 title: StorageKeyRequiredError
 ---
 
+# Class: StorageKeyRequiredError
+
 Defined in: [packages/db/src/errors.ts:699](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L699)
 
 ## Extends

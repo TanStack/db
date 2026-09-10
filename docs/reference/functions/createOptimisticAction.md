@@ -3,6 +3,8 @@ id: createOptimisticAction
 title: createOptimisticAction
 ---
 
+# Function: createOptimisticAction()
+
 ```ts
 function createOptimisticAction<TVariables>(options): (variables) => Transaction;
 ```

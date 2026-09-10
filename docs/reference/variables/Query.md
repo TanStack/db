@@ -3,6 +3,8 @@ id: Query
 title: Query
 ---
 
+# Variable: Query
+
 ```ts
 const Query: InitialQueryBuilderConstructor = BaseQueryBuilder;
 ```

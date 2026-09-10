@@ -3,6 +3,8 @@ id: isControlMessage
 title: isControlMessage
 ---
 
+# Function: isControlMessage()
+
 ```ts
 function isControlMessage<T>(message): message is ControlMessage;
 ```

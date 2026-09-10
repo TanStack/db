@@ -3,6 +3,8 @@ id: isLoadSubsetRequestSubsumedBy
 title: isLoadSubsetRequestSubsumedBy
 ---
 
+# Function: isLoadSubsetRequestSubsumedBy()
+
 ```ts
 function isLoadSubsetRequestSubsumedBy(demand, acquisitionRequest): boolean;
 ```

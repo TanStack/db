@@ -3,6 +3,8 @@ id: TransactionError
 title: TransactionError
 ---
 
+# Class: TransactionError
+
 Defined in: [packages/db/src/errors.ts:298](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L298)
 
 ## Extends

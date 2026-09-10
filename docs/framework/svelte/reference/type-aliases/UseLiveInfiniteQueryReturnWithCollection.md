@@ -3,6 +3,8 @@ id: UseLiveInfiniteQueryReturnWithCollection
 title: UseLiveInfiniteQueryReturnWithCollection
 ---
 
+# Type Alias: UseLiveInfiniteQueryReturnWithCollection\<TResult, TKey, TUtils\>
+
 ```ts
 type UseLiveInfiniteQueryReturnWithCollection<TResult, TKey, TUtils> = Omit<UseLiveQueryReturnWithCollection<TResult, TKey, TUtils, TResult[]>, "data"> & object;
 ```

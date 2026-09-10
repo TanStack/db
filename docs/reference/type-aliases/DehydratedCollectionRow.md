@@ -3,6 +3,8 @@ id: DehydratedCollectionRow
 title: DehydratedCollectionRow
 ---
 
+# Type Alias: DehydratedCollectionRow\<T, TKey\>
+
 ```ts
 type DehydratedCollectionRow<T, TKey> = object;
 ```

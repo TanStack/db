@@ -3,6 +3,8 @@ id: SyncConfig
 title: SyncConfig
 ---
 
+# Interface: SyncConfig\<T, TKey\>
+
 Defined in: [packages/db/src/types.ts:365](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L365)
 
 ## Type Parameters

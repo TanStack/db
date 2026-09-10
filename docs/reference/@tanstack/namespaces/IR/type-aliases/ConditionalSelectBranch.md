@@ -3,6 +3,8 @@ id: ConditionalSelectBranch
 title: ConditionalSelectBranch
 ---
 
+# Type Alias: ConditionalSelectBranch
+
 ```ts
 type ConditionalSelectBranch = object;
 ```

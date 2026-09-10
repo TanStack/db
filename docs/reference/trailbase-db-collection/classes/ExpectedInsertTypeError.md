@@ -3,6 +3,8 @@ id: ExpectedInsertTypeError
 title: ExpectedInsertTypeError
 ---
 
+# Class: ExpectedInsertTypeError
+
 Defined in: [packages/trailbase-db-collection/src/errors.ts:18](https://github.com/TanStack/db/blob/main/packages/trailbase-db-collection/src/errors.ts#L18)
 
 ## Extends

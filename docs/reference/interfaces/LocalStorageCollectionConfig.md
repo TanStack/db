@@ -3,6 +3,8 @@ id: LocalStorageCollectionConfig
 title: LocalStorageCollectionConfig
 ---
 
+# Interface: LocalStorageCollectionConfig\<T, TSchema, TKey\>
+
 Defined in: [packages/db/src/local-storage.ts:60](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L60)
 
 Configuration interface for localStorage collection options

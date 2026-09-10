@@ -3,6 +3,8 @@ id: ConditionalSelect
 title: ConditionalSelect
 ---
 
+# Class: ConditionalSelect
+
 Defined in: [packages/db/src/query/ir.ts:212](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L212)
 
 ## Extends

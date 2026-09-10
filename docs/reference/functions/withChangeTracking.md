@@ -3,6 +3,8 @@ id: withChangeTracking
 title: withChangeTracking
 ---
 
+# Function: withChangeTracking()
+
 ```ts
 function withChangeTracking<T>(target, callback): Record<string | symbol, unknown>;
 ```

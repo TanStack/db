@@ -3,6 +3,8 @@ id: ContextSchema
 title: ContextSchema
 ---
 
+# Type Alias: ContextSchema
+
 ```ts
 type ContextSchema = Record<string, unknown>;
 ```

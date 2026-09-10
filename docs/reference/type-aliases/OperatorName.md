@@ -3,6 +3,8 @@ id: OperatorName
 title: OperatorName
 ---
 
+# Type Alias: OperatorName
+
 ```ts
 type OperatorName = typeof operators[number];
 ```

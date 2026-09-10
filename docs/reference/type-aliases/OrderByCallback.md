@@ -3,6 +3,8 @@ id: OrderByCallback
 title: OrderByCallback
 ---
 
+# Type Alias: OrderByCallback()\<TContext\>
+
 ```ts
 type OrderByCallback<TContext> = (refs) => any;
 ```

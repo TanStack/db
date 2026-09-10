@@ -3,6 +3,8 @@ id: Collection
 title: Collection
 ---
 
+# Interface: Collection\<T, TKey, TUtils, TSchema, TInsertInput\>
+
 Defined in: [packages/db/src/collection/index.ts:57](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L57)
 
 Enhanced Collection interface that includes both data type T and utilities TUtils

@@ -3,6 +3,8 @@ id: "@tanstack/react-db"
 title: "@tanstack/react-db"
 ---
 
+# @tanstack/react-db
+
 ## Type Aliases
 
 - [ConditionalUseLiveQueryConfig](type-aliases/ConditionalUseLiveQueryConfig.md)

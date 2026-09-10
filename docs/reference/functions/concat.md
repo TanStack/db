@@ -3,6 +3,8 @@ id: concat
 title: concat
 ---
 
+# Function: concat()
+
 ## Call Signature
 
 ```ts

@@ -3,6 +3,8 @@ id: SyncAppliedReceipt
 title: SyncAppliedReceipt
 ---
 
+# Type Alias: SyncAppliedReceipt
+
 ```ts
 type SyncAppliedReceipt = true | Promise<void>;
 ```

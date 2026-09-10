@@ -3,6 +3,8 @@ id: GroupBy
 title: GroupBy
 ---
 
+# Type Alias: GroupBy
+
 ```ts
 type GroupBy = BasicExpression[];
 ```

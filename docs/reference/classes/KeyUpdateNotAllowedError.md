@@ -3,6 +3,8 @@ id: KeyUpdateNotAllowedError
 title: KeyUpdateNotAllowedError
 ---
 
+# Class: KeyUpdateNotAllowedError
+
 Defined in: [packages/db/src/errors.ts:243](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L243)
 
 ## Extends

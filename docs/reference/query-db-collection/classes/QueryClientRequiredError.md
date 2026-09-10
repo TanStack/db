@@ -3,6 +3,8 @@ id: QueryClientRequiredError
 title: QueryClientRequiredError
 ---
 
+# Class: QueryClientRequiredError
+
 Defined in: [packages/query-db-collection/src/errors.ts:25](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L25)
 
 ## Extends

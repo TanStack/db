@@ -3,6 +3,8 @@ id: InitialQueryBuilder
 title: InitialQueryBuilder
 ---
 
+# Type Alias: InitialQueryBuilder
+
 ```ts
 type InitialQueryBuilder = Pick<BaseQueryBuilder<Context>, "from" | "unionAll">;
 ```

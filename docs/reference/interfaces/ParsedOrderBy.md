@@ -3,6 +3,8 @@ id: ParsedOrderBy
 title: ParsedOrderBy
 ---
 
+# Interface: ParsedOrderBy
+
 Defined in: [packages/db/src/query/expression-helpers.ts:82](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L82)
 
 Result of parsing an ORDER BY expression

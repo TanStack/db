@@ -3,6 +3,8 @@ id: resolveLiveQueryWindowInput
 title: resolveLiveQueryWindowInput
 ---
 
+# Function: resolveLiveQueryWindowInput()
+
 ```ts
 function resolveLiveQueryWindowInput<TContext>(input): ResolvedLiveQueryWindowInput<TContext>;
 ```

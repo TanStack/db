@@ -3,6 +3,8 @@ id: parseLoadSubsetOptions
 title: parseLoadSubsetOptions
 ---
 
+# Function: parseLoadSubsetOptions()
+
 ```ts
 function parseLoadSubsetOptions(options): object;
 ```

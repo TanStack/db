@@ -3,6 +3,8 @@ id: Source
 title: Source
 ---
 
+# Type Alias: Source
+
 ```ts
 type Source = object;
 ```

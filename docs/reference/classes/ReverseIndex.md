@@ -3,6 +3,8 @@ id: ReverseIndex
 title: ReverseIndex
 ---
 
+# Class: ReverseIndex\<TKey\>
+
 Defined in: [packages/db/src/indexes/reverse-index.ts:6](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L6)
 
 ## Type Parameters

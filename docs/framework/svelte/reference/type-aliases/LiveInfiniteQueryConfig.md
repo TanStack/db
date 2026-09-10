@@ -3,6 +3,8 @@ id: LiveInfiniteQueryConfig
 title: LiveInfiniteQueryConfig
 ---
 
+# Type Alias: LiveInfiniteQueryConfig\<TRow\>
+
 ```ts
 type LiveInfiniteQueryConfig<TRow> = InfiniteQueryOptions & object;
 ```

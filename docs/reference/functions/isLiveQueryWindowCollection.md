@@ -3,6 +3,8 @@ id: isLiveQueryWindowCollection
 title: isLiveQueryWindowCollection
 ---
 
+# Function: isLiveQueryWindowCollection()
+
 ```ts
 function isLiveQueryWindowCollection(collection): collection is LiveQueryWindowCollection;
 ```

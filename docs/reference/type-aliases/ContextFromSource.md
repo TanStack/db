@@ -3,6 +3,8 @@ id: ContextFromSource
 title: ContextFromSource
 ---
 
+# Type Alias: ContextFromSource\<TSource\>
+
 ```ts
 type ContextFromSource<TSource> = object;
 ```

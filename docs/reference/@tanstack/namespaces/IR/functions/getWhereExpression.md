@@ -3,6 +3,8 @@ id: getWhereExpression
 title: getWhereExpression
 ---
 
+# Function: getWhereExpression()
+
 ```ts
 function getWhereExpression(where): BasicExpression<boolean>;
 ```

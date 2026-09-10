@@ -3,6 +3,8 @@ id: BaseStrategy
 title: BaseStrategy
 ---
 
+# Interface: BaseStrategy\<TName\>
+
 Defined in: [packages/db/src/strategies/types.ts:6](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L6)
 
 Base strategy interface that all strategy implementations must conform to

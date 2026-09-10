@@ -3,6 +3,8 @@ id: UnloadSubsetFn
 title: UnloadSubsetFn
 ---
 
+# Type Alias: UnloadSubsetFn()
+
 ```ts
 type UnloadSubsetFn = (options) => void;
 ```

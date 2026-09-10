@@ -3,6 +3,8 @@ id: ParseWhereOptions
 title: ParseWhereOptions
 ---
 
+# Interface: ParseWhereOptions\<T\>
+
 Defined in: [packages/db/src/query/expression-helpers.ts:53](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L53)
 
 Options for customizing how WHERE expressions are parsed

@@ -3,6 +3,8 @@ id: CollectionRequiresSyncConfigError
 title: CollectionRequiresSyncConfigError
 ---
 
+# Class: CollectionRequiresSyncConfigError
+
 Defined in: [packages/db/src/errors.ts:84](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L84)
 
 ## Extends

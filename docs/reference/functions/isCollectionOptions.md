@@ -3,6 +3,8 @@ id: isCollectionOptions
 title: isCollectionOptions
 ---
 
+# Function: isCollectionOptions()
+
 ```ts
 function isCollectionOptions(value): value is CollectionOptions<any, string | number, any, UtilsRecord>;
 ```

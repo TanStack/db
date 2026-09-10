@@ -3,6 +3,8 @@ id: TransactionNotPendingCommitError
 title: TransactionNotPendingCommitError
 ---
 
+# Class: TransactionNotPendingCommitError
+
 Defined in: [packages/db/src/errors.ts:336](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L336)
 
 ## Extends

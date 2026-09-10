@@ -3,6 +3,8 @@ id: LiveQuerySnapshot
 title: LiveQuerySnapshot
 ---
 
+# Interface: LiveQuerySnapshot\<T, TKey\>
+
 Defined in: [packages/db/src/live-query-observer.ts:19](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L19)
 
 The canonical, adapter-agnostic view of a live query at a point in time.

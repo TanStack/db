@@ -3,6 +3,8 @@ id: sum
 title: sum
 ---
 
+# Function: sum()
+
 ```ts
 function sum<T>(arg): AggregateReturnType<T>;
 ```

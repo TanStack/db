@@ -3,6 +3,8 @@ id: TransactionScope
 title: TransactionScope
 ---
 
+# Class: TransactionScope
+
 Defined in: [packages/db/src/transactions.ts:20](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L20)
 
 ## Constructors

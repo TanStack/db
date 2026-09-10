@@ -3,6 +3,8 @@ id: From
 title: From
 ---
 
+# Type Alias: From
+
 ```ts
 type From = 
   | CollectionRef

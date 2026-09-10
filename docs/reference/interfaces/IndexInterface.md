@@ -3,6 +3,8 @@ id: IndexInterface
 title: IndexInterface
 ---
 
+# Interface: IndexInterface\<TKey\>
+
 Defined in: [packages/db/src/indexes/base-index.ts:51](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L51)
 
 ## Type Parameters

@@ -3,6 +3,8 @@ id: gte
 title: gte
 ---
 
+# Function: gte()
+
 ## Call Signature
 
 ```ts

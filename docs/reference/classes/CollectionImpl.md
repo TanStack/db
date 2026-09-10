@@ -3,6 +3,8 @@ id: CollectionImpl
 title: CollectionImpl
 ---
 
+# Class: CollectionImpl\<TOutput, TKey, TUtils, TSchema, TInput\>
+
 Defined in: [packages/db/src/collection/index.ts:275](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L275)
 
 ## Extended by

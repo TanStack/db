@@ -3,6 +3,8 @@ id: UpdateMutationFnParams
 title: UpdateMutationFnParams
 ---
 
+# Type Alias: UpdateMutationFnParams\<T, TKey, TUtils\>
+
 ```ts
 type UpdateMutationFnParams<T, TKey, TUtils> = object;
 ```

@@ -3,6 +3,8 @@ id: isExpressionLike
 title: isExpressionLike
 ---
 
+# Function: isExpressionLike()
+
 ```ts
 function isExpressionLike(value): boolean;
 ```

@@ -3,6 +3,8 @@ id: LiveQueryStatusFlags
 title: LiveQueryStatusFlags
 ---
 
+# Interface: LiveQueryStatusFlags
+
 Defined in: [packages/db/src/live-query-adapter.ts:45](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L45)
 
 The derived boolean status flags every adapter exposes for a query.

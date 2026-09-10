@@ -3,6 +3,8 @@ id: TrailBaseCollectionConfig
 title: TrailBaseCollectionConfig
 ---
 
+# Interface: TrailBaseCollectionConfig\<TItem, TRecord, TKey\>
+
 Defined in: [packages/trailbase-db-collection/src/trailbase.ts:93](https://github.com/TanStack/db/blob/main/packages/trailbase-db-collection/src/trailbase.ts#L93)
 
 Configuration interface for Trailbase Collection

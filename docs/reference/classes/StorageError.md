@@ -3,6 +3,8 @@ id: StorageError
 title: StorageError
 ---
 
+# Class: StorageError
+
 Defined in: [packages/db/src/errors.ts:676](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L676)
 
 ## Extends

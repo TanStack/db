@@ -3,6 +3,8 @@ id: SyncConfigRes
 title: SyncConfigRes
 ---
 
+# Type Alias: SyncConfigRes
+
 ```ts
 type SyncConfigRes = object;
 ```

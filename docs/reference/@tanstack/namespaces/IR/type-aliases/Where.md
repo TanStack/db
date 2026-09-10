@@ -3,6 +3,8 @@ id: Where
 title: Where
 ---
 
+# Type Alias: Where
+
 ```ts
 type Where = 
   | BasicExpression<boolean>

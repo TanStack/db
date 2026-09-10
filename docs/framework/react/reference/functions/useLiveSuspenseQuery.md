@@ -3,6 +3,8 @@ id: useLiveSuspenseQuery
 title: useLiveSuspenseQuery
 ---
 
+# Function: useLiveSuspenseQuery()
+
 ## Call Signature
 
 ```ts

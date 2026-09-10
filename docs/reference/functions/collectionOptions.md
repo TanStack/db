@@ -3,6 +3,8 @@ id: collectionOptions
 title: collectionOptions
 ---
 
+# Function: collectionOptions()
+
 ## Call Signature
 
 ```ts

@@ -3,6 +3,8 @@ id: CleanupFn
 title: CleanupFn
 ---
 
+# Type Alias: CleanupFn()
+
 ```ts
 type CleanupFn = () => void;
 ```

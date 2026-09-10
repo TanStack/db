@@ -3,6 +3,8 @@ id: Join
 title: Join
 ---
 
+# Type Alias: Join
+
 ```ts
 type Join = JoinClause[];
 ```

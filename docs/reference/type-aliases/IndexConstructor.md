@@ -3,6 +3,8 @@ id: IndexConstructor
 title: IndexConstructor
 ---
 
+# Type Alias: IndexConstructor()\<TKey\>
+
 ```ts
 type IndexConstructor<TKey> = (id, expression, name?, options?) => BaseIndex<TKey>;
 ```

@@ -3,6 +3,8 @@ id: LoadSubsetOptions
 title: LoadSubsetOptions
 ---
 
+# Type Alias: LoadSubsetOptions
+
 ```ts
 type LoadSubsetOptions = object;
 ```

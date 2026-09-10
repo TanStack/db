@@ -3,6 +3,8 @@ id: ResultStream
 title: ResultStream
 ---
 
+# Type Alias: ResultStream
+
 ```ts
 type ResultStream = IStreamBuilder<[unknown, [any, string | undefined]]>;
 ```

@@ -3,6 +3,8 @@ id: GroupByError
 title: GroupByError
 ---
 
+# Class: GroupByError
+
 Defined in: [packages/db/src/errors.ts:640](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L640)
 
 ## Extends

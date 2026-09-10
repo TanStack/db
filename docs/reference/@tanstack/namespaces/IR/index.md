@@ -3,6 +3,8 @@ id: IR
 title: IR
 ---
 
+# IR
+
 ## Classes
 
 - [Aggregate](classes/Aggregate.md)

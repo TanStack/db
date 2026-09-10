@@ -3,6 +3,8 @@ id: SerializerConfig
 title: SerializerConfig
 ---
 
+# Type Alias: SerializerConfig\<TOutput, TSQLite\>
+
 ```ts
 type SerializerConfig<TOutput, TSQLite> = object;
 ```

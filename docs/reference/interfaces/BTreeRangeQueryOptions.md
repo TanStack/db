@@ -3,6 +3,8 @@ id: BTreeRangeQueryOptions
 title: BTreeRangeQueryOptions
 ---
 
+# Interface: BTreeRangeQueryOptions
+
 Defined in: [packages/db/src/indexes/btree-index.ts:25](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L25)
 
 Options for range queries

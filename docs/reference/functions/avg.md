@@ -3,6 +3,8 @@ id: avg
 title: avg
 ---
 
+# Function: avg()
+
 ```ts
 function avg<T>(arg): AggregateReturnType<T>;
 ```

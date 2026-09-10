@@ -3,6 +3,8 @@ id: InferCollectionType
 title: InferCollectionType
 ---
 
+# Type Alias: InferCollectionType\<T\>
+
 ```ts
 type InferCollectionType<T> = T extends CollectionImpl<infer TOutput, infer TKey, any, any, any> ? WithVirtualProps<TOutput, TKey> : T extends CollectionOptionsIdentity<infer TOutput, infer TKey, any, any, any> ? WithVirtualProps<TOutput, TKey> : never;
 ```

@@ -3,6 +3,8 @@ id: SyncNotInitializedError
 title: SyncNotInitializedError
 ---
 
+# Class: SyncNotInitializedError
+
 Defined in: [packages/query-db-collection/src/errors.ts:48](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L48)
 
 ## Extends

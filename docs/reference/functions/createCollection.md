@@ -3,6 +3,8 @@ id: createCollection
 title: createCollection
 ---
 
+# Function: createCollection()
+
 ## Call Signature
 
 ```ts

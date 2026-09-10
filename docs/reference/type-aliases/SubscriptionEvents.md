@@ -3,6 +3,8 @@ id: SubscriptionEvents
 title: SubscriptionEvents
 ---
 
+# Type Alias: SubscriptionEvents
+
 ```ts
 type SubscriptionEvents = object;
 ```

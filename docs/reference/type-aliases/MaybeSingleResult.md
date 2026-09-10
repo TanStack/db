@@ -3,6 +3,8 @@ id: MaybeSingleResult
 title: MaybeSingleResult
 ---
 
+# Type Alias: MaybeSingleResult
+
 ```ts
 type MaybeSingleResult = object;
 ```

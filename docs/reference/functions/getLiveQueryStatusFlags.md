@@ -3,6 +3,8 @@ id: getLiveQueryStatusFlags
 title: getLiveQueryStatusFlags
 ---
 
+# Function: getLiveQueryStatusFlags()
+
 ```ts
 function getLiveQueryStatusFlags(status): LiveQueryStatusFlags;
 ```

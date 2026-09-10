@@ -3,6 +3,8 @@ id: ConditionalUseLiveQueryConfig
 title: ConditionalUseLiveQueryConfig
 ---
 
+# Type Alias: ConditionalUseLiveQueryConfig\<TContext\>
+
 ```ts
 type ConditionalUseLiveQueryConfig<TContext> = UseLiveQueryConfigOptions<TContext> & object;
 ```

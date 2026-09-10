@@ -3,6 +3,8 @@ id: isChangeMessage
 title: isChangeMessage
 ---
 
+# Function: isChangeMessage()
+
 ```ts
 function isChangeMessage<T>(message): message is ChangeMessage<T>;
 ```

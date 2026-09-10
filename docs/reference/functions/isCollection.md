@@ -3,6 +3,8 @@ id: isCollection
 title: isCollection
 ---
 
+# Function: isCollection()
+
 ```ts
 function isCollection(value): value is Collection<any, any, any, StandardSchemaV1<unknown, unknown>, any>;
 ```

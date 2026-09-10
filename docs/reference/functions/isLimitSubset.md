@@ -3,6 +3,8 @@ id: isLimitSubset
 title: isLimitSubset
 ---
 
+# Function: isLimitSubset()
+
 ```ts
 function isLimitSubset(subset, superset): boolean;
 ```

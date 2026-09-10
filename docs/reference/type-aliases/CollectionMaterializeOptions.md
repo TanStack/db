@@ -3,6 +3,8 @@ id: CollectionMaterializeOptions
 title: CollectionMaterializeOptions
 ---
 
+# Type Alias: CollectionMaterializeOptions\<T\>
+
 ```ts
 type CollectionMaterializeOptions<T> = object;
 ```

@@ -3,6 +3,8 @@ id: Ref
 title: Ref
 ---
 
+# Type Alias: Ref\<T, Nullable\>
+
 ```ts
 type Ref<T, Nullable> = T extends unknown ? RefBranch<T, Nullable> : never;
 ```

@@ -3,6 +3,8 @@ id: upper
 title: upper
 ---
 
+# Function: upper()
+
 ```ts
 function upper<T>(arg): StringFunctionReturnType<T>;
 ```

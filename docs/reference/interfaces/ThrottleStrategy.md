@@ -3,6 +3,8 @@ id: ThrottleStrategy
 title: ThrottleStrategy
 ---
 
+# Interface: ThrottleStrategy
+
 Defined in: [packages/db/src/strategies/types.ts:86](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L86)
 
 Throttle strategy that spaces executions evenly over time

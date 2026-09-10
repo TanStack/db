@@ -3,6 +3,8 @@ id: ThrottleStrategyOptions
 title: ThrottleStrategyOptions
 ---
 
+# Interface: ThrottleStrategyOptions
+
 Defined in: [packages/db/src/strategies/types.ts:74](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L74)
 
 Options for throttle strategy

@@ -3,6 +3,8 @@ id: StrategyOptions
 title: StrategyOptions
 ---
 
+# Type Alias: StrategyOptions\<T\>
+
 ```ts
 type StrategyOptions<T> = T extends DebounceStrategy ? DebounceStrategyOptions : T extends QueueStrategy ? QueueStrategyOptions : T extends ThrottleStrategy ? ThrottleStrategyOptions : T extends BatchStrategy ? BatchStrategyOptions : never;
 ```

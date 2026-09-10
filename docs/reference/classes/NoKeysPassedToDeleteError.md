@@ -3,6 +3,8 @@ id: NoKeysPassedToDeleteError
 title: NoKeysPassedToDeleteError
 ---
 
+# Class: NoKeysPassedToDeleteError
+
 Defined in: [packages/db/src/errors.ts:251](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L251)
 
 ## Extends

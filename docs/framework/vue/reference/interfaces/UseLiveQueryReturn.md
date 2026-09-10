@@ -3,6 +3,8 @@ id: UseLiveQueryReturn
 title: UseLiveQueryReturn
 ---
 
+# Interface: UseLiveQueryReturn\<TContext\>
+
 Defined in: [useLiveQuery.ts:44](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L44)
 
 Return type for useLiveQuery hook

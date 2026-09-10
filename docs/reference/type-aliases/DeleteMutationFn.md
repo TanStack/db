@@ -3,6 +3,8 @@ id: DeleteMutationFn
 title: DeleteMutationFn
 ---
 
+# Type Alias: DeleteMutationFn()\<T, TKey, TUtils, TReturn\>
+
 ```ts
 type DeleteMutationFn<T, TKey, TUtils, TReturn> = (params) => Promise<TReturn>;
 ```

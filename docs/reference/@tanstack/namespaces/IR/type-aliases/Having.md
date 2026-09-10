@@ -3,6 +3,8 @@ id: Having
 title: Having
 ---
 
+# Type Alias: Having
+
 ```ts
 type Having = Where;
 ```

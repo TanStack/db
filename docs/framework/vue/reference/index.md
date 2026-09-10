@@ -3,6 +3,8 @@ id: "@tanstack/vue-db"
 title: "@tanstack/vue-db"
 ---
 
+# @tanstack/vue-db
+
 ## Interfaces
 
 - [UseLiveInfiniteQueryReturn](interfaces/UseLiveInfiniteQueryReturn.md)

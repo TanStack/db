@@ -3,6 +3,8 @@ id: SyncOperation
 title: SyncOperation
 ---
 
+# Type Alias: SyncOperation\<TRow, TKey, TInsertInput\>
+
 ```ts
 type SyncOperation<TRow, TKey, TInsertInput> = 
   | {

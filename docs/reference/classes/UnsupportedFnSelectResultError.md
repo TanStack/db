@@ -3,6 +3,8 @@ id: UnsupportedFnSelectResultError
 title: UnsupportedFnSelectResultError
 ---
 
+# Class: UnsupportedFnSelectResultError
+
 Defined in: [packages/db/src/errors.ts:484](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L484)
 
 ## Extends

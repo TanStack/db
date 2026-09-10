@@ -3,6 +3,8 @@ id: QueryFnRequiredError
 title: QueryFnRequiredError
 ---
 
+# Class: QueryFnRequiredError
+
 Defined in: [packages/query-db-collection/src/errors.ts:18](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L18)
 
 ## Extends

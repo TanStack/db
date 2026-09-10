@@ -3,6 +3,8 @@ id: QueryCollectionConfig
 title: QueryCollectionConfig
 ---
 
+# Interface: QueryCollectionConfig\<T, TQueryFn, TError, TQueryKey, TKey, TSchema, TQueryData\>
+
 Defined in: [packages/query-db-collection/src/query.ts:100](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L100)
 
 Configuration options for creating a Query Collection

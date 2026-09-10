@@ -3,6 +3,8 @@ id: findIndexForField
 title: findIndexForField
 ---
 
+# Function: findIndexForField()
+
 ```ts
 function findIndexForField<TKey>(
    collection, 

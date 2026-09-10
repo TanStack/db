@@ -3,6 +3,8 @@ id: JoinError
 title: JoinError
 ---
 
+# Class: JoinError
+
 Defined in: [packages/db/src/errors.ts:584](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L584)
 
 ## Extends

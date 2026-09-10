@@ -3,6 +3,8 @@ id: InputRow
 title: InputRow
 ---
 
+# Type Alias: InputRow
+
 ```ts
 type InputRow = [unknown, Record<string, unknown>];
 ```

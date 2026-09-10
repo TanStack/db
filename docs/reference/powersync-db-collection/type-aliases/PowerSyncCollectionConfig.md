@@ -3,6 +3,8 @@ id: PowerSyncCollectionConfig
 title: PowerSyncCollectionConfig
 ---
 
+# Type Alias: PowerSyncCollectionConfig\<TTable, TSchema\>
+
 ```ts
 type PowerSyncCollectionConfig<TTable, TSchema> = BasePowerSyncCollectionConfig<TTable, TSchema> & 
   | ConfigWithSQLiteTypes

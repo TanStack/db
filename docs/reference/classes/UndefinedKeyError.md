@@ -3,6 +3,8 @@ id: UndefinedKeyError
 title: UndefinedKeyError
 ---
 
+# Class: UndefinedKeyError
+
 Defined in: [packages/db/src/errors.ts:158](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L158)
 
 ## Extends

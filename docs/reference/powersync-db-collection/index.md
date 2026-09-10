@@ -3,6 +3,8 @@ id: "@tanstack/powersync-db-collection"
 title: "@tanstack/powersync-db-collection"
 ---
 
+# @tanstack/powersync-db-collection
+
 ## Classes
 
 - [PowerSyncTransactor](classes/PowerSyncTransactor.md)

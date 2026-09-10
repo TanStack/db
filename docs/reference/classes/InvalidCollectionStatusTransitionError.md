@@ -3,6 +3,8 @@ id: InvalidCollectionStatusTransitionError
 title: InvalidCollectionStatusTransitionError
 ---
 
+# Class: InvalidCollectionStatusTransitionError
+
 Defined in: [packages/db/src/errors.ts:118](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L118)
 
 ## Extends

@@ -3,6 +3,8 @@ id: SchemaMustBeSynchronousError
 title: SchemaMustBeSynchronousError
 ---
 
+# Class: SchemaMustBeSynchronousError
+
 Defined in: [packages/db/src/errors.ts:96](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L96)
 
 ## Extends

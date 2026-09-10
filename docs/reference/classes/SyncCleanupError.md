@@ -3,6 +3,8 @@ id: SyncCleanupError
 title: SyncCleanupError
 ---
 
+# Class: SyncCleanupError
+
 Defined in: [packages/db/src/errors.ts:722](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L722)
 
 ## Extends

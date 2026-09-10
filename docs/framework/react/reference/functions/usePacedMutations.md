@@ -3,6 +3,8 @@ id: usePacedMutations
 title: usePacedMutations
 ---
 
+# Function: usePacedMutations()
+
 ```ts
 function usePacedMutations<TVariables, T>(config): (variables) => Transaction<T>;
 ```

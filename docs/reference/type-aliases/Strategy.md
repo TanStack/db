@@ -3,6 +3,8 @@ id: Strategy
 title: Strategy
 ---
 
+# Type Alias: Strategy
+
 ```ts
 type Strategy = 
   | DebounceStrategy

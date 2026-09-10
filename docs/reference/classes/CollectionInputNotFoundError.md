@@ -3,6 +3,8 @@ id: CollectionInputNotFoundError
 title: CollectionInputNotFoundError
 ---
 
+# Class: CollectionInputNotFoundError
+
 Defined in: [packages/db/src/errors.ts:521](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L521)
 
 Error thrown when a collection input stream is not found during query compilation.

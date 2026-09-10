@@ -3,6 +3,8 @@ id: QueryCompilationError
 title: QueryCompilationError
 ---
 
+# Class: QueryCompilationError
+
 Defined in: [packages/db/src/errors.ts:450](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L450)
 
 ## Extends

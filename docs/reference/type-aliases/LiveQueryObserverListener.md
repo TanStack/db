@@ -3,6 +3,8 @@ id: LiveQueryObserverListener
 title: LiveQueryObserverListener
 ---
 
+# Type Alias: LiveQueryObserverListener()\<T, TKey\>
+
 ```ts
 type LiveQueryObserverListener<T, TKey> = (changes) => void;
 ```

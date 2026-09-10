@@ -3,6 +3,8 @@ id: throttleStrategy
 title: throttleStrategy
 ---
 
+# Function: throttleStrategy()
+
 ```ts
 function throttleStrategy(options): ThrottleStrategy;
 ```

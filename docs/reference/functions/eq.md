@@ -3,6 +3,8 @@ id: eq
 title: eq
 ---
 
+# Function: eq()
+
 ## Call Signature
 
 ```ts

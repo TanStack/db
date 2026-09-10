@@ -3,6 +3,8 @@ id: useOptionalDbClient
 title: useOptionalDbClient
 ---
 
+# Function: useOptionalDbClient()
+
 ```ts
 function useOptionalDbClient(): DbClient | undefined;
 ```

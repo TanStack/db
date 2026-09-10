@@ -3,6 +3,8 @@ id: SelectObject
 title: SelectObject
 ---
 
+# Type Alias: SelectObject\<T\>
+
 ```ts
 type SelectObject<T> = T;
 ```

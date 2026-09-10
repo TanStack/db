@@ -3,6 +3,8 @@ id: InsertMutationFnParams
 title: InsertMutationFnParams
 ---
 
+# Type Alias: InsertMutationFnParams\<T, TKey, TUtils\>
+
 ```ts
 type InsertMutationFnParams<T, TKey, TUtils> = object;
 ```

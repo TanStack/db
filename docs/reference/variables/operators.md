@@ -3,6 +3,8 @@ id: operators
 title: operators
 ---
 
+# Variable: operators
+
 ```ts
 const operators: readonly ["eq", "gt", "gte", "lt", "lte", "in", "like", "ilike", "and", "or", "not", "isNull", "isUndefined", "upper", "lower", "length", "concat", "add", "subtract", "multiply", "divide", "coalesce", "caseWhen", "count", "avg", "sum", "min", "max"];
 ```

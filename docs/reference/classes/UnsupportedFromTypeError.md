@@ -3,6 +3,8 @@ id: UnsupportedFromTypeError
 title: UnsupportedFromTypeError
 ---
 
+# Class: UnsupportedFromTypeError
+
 Defined in: [packages/db/src/errors.ts:553](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L553)
 
 ## Extends

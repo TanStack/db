@@ -3,6 +3,8 @@ id: queryOnce
 title: queryOnce
 ---
 
+# Function: queryOnce()
+
 ## Call Signature
 
 ```ts

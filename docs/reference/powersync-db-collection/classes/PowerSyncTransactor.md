@@ -3,6 +3,8 @@ id: PowerSyncTransactor
 title: PowerSyncTransactor
 ---
 
+# Class: PowerSyncTransactor
+
 Defined in: [PowerSyncTransactor.ts:54](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/PowerSyncTransactor.ts#L54)
 
 Applies mutations to the PowerSync database. This method is called automatically by the collection's

@@ -3,6 +3,8 @@ id: LiveQueryCollectionConfig
 title: LiveQueryCollectionConfig
 ---
 
+# Interface: LiveQueryCollectionConfig\<TContext, TResult\>
+
 Defined in: [packages/db/src/query/live/types.ts:65](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L65)
 
 Configuration interface for live query collection options

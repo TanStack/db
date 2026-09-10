@@ -3,6 +3,8 @@ id: NamespacedAndKeyedStream
 title: NamespacedAndKeyedStream
 ---
 
+# Type Alias: NamespacedAndKeyedStream
+
 ```ts
 type NamespacedAndKeyedStream = IStreamBuilder<KeyedNamespacedRow>;
 ```

@@ -3,6 +3,8 @@ id: useDbClient
 title: useDbClient
 ---
 
+# Function: useDbClient()
+
 ```ts
 function useDbClient(): DbClient;
 ```

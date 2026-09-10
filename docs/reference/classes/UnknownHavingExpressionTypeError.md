@@ -3,6 +3,8 @@ id: UnknownHavingExpressionTypeError
 title: UnknownHavingExpressionTypeError
 ---
 
+# Class: UnknownHavingExpressionTypeError
+
 Defined in: [packages/db/src/errors.ts:669](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L669)
 
 ## Extends

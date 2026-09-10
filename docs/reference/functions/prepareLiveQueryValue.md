@@ -3,6 +3,8 @@ id: prepareLiveQueryValue
 title: prepareLiveQueryValue
 ---
 
+# Function: prepareLiveQueryValue()
+
 ```ts
 function prepareLiveQueryValue(
    value, 

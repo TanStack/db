@@ -3,6 +3,8 @@ id: CollectionLike
 title: CollectionLike
 ---
 
+# Interface: CollectionLike\<T, TKey\>
+
 Defined in: [packages/db/src/types.ts:15](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L15)
 
 Interface for a collection-like object that provides the necessary methods

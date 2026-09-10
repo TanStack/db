@@ -3,6 +3,8 @@ id: DehydratedLiveQuery
 title: DehydratedLiveQuery
 ---
 
+# Type Alias: DehydratedLiveQuery
+
 ```ts
 type DehydratedLiveQuery = object;
 ```

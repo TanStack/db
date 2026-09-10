@@ -3,6 +3,8 @@ id: SQLiteCompiledQuery
 title: SQLiteCompiledQuery
 ---
 
+# Interface: SQLiteCompiledQuery
+
 Defined in: [sqlite-compiler.ts:6](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/sqlite-compiler.ts#L6)
 
 Result of compiling LoadSubsetOptions to SQLite

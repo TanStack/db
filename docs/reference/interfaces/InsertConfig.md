@@ -3,6 +3,8 @@ id: InsertConfig
 title: InsertConfig
 ---
 
+# Interface: InsertConfig
+
 Defined in: [packages/db/src/types.ts:508](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L508)
 
 ## Properties

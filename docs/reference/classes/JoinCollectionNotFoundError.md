@@ -3,6 +3,8 @@ id: JoinCollectionNotFoundError
 title: JoinCollectionNotFoundError
 ---
 
+# Class: JoinCollectionNotFoundError
+
 Defined in: [packages/db/src/errors.ts:577](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L577)
 
 ## Extends

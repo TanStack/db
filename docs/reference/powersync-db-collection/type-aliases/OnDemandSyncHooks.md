@@ -3,6 +3,8 @@ id: OnDemandSyncHooks
 title: OnDemandSyncHooks
 ---
 
+# Type Alias: OnDemandSyncHooks
+
 ```ts
 type OnDemandSyncHooks = object;
 ```

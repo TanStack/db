@@ -3,6 +3,8 @@ id: NonAggregateExpressionNotInGroupByError
 title: NonAggregateExpressionNotInGroupByError
 ---
 
+# Class: NonAggregateExpressionNotInGroupByError
+
 Defined in: [packages/db/src/errors.ts:647](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L647)
 
 ## Extends

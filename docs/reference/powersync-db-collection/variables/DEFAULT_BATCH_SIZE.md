@@ -3,6 +3,8 @@ id: DEFAULT_BATCH_SIZE
 title: DEFAULT_BATCH_SIZE
 ---
 
+# Variable: DEFAULT\_BATCH\_SIZE
+
 ```ts
 const DEFAULT_BATCH_SIZE: 1000 = 1000;
 ```

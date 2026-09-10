@@ -3,6 +3,8 @@ id: fetchNextLiveQueryWindowPage
 title: fetchNextLiveQueryWindowPage
 ---
 
+# Function: fetchNextLiveQueryWindowPage()
+
 ```ts
 function fetchNextLiveQueryWindowPage(controller): Promise<void>;
 ```

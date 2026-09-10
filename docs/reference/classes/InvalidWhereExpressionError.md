@@ -3,6 +3,8 @@ id: InvalidWhereExpressionError
 title: InvalidWhereExpressionError
 ---
 
+# Class: InvalidWhereExpressionError
+
 Defined in: [packages/db/src/errors.ts:436](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L436)
 
 ## Extends

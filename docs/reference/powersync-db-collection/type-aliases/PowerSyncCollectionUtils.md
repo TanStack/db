@@ -3,6 +3,8 @@ id: PowerSyncCollectionUtils
 title: PowerSyncCollectionUtils
 ---
 
+# Type Alias: PowerSyncCollectionUtils\<TTable\>
+
 ```ts
 type PowerSyncCollectionUtils<TTable> = object;
 ```

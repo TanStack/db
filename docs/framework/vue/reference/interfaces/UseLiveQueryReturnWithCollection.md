@@ -3,6 +3,8 @@ id: UseLiveQueryReturnWithCollection
 title: UseLiveQueryReturnWithCollection
 ---
 
+# Interface: UseLiveQueryReturnWithCollection\<T, TKey, TUtils\>
+
 Defined in: [useLiveQuery.ts:56](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L56)
 
 ## Type Parameters

@@ -3,6 +3,8 @@ id: QueueStrategyOptions
 title: QueueStrategyOptions
 ---
 
+# Interface: QueueStrategyOptions
+
 Defined in: [packages/db/src/strategies/types.ts:50](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L50)
 
 Options for queue strategy

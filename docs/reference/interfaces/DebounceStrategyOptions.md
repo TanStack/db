@@ -3,6 +3,8 @@ id: DebounceStrategyOptions
 title: DebounceStrategyOptions
 ---
 
+# Interface: DebounceStrategyOptions
+
 Defined in: [packages/db/src/strategies/types.ts:30](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L30)
 
 Options for debounce strategy

@@ -3,6 +3,8 @@ id: injectLiveQuery
 title: injectLiveQuery
 ---
 
+# Function: injectLiveQuery()
+
 ## Call Signature
 
 ```ts

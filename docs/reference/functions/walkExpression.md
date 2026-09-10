@@ -3,6 +3,8 @@ id: walkExpression
 title: walkExpression
 ---
 
+# Function: walkExpression()
+
 ```ts
 function walkExpression(expr, visitor): void;
 ```

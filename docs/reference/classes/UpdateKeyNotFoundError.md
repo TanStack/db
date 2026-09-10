@@ -3,6 +3,8 @@ id: UpdateKeyNotFoundError
 title: UpdateKeyNotFoundError
 ---
 
+# Class: UpdateKeyNotFoundError
+
 Defined in: [packages/db/src/errors.ts:235](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L235)
 
 ## Extends

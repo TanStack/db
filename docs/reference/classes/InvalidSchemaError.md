@@ -3,6 +3,8 @@ id: InvalidSchemaError
 title: InvalidSchemaError
 ---
 
+# Class: InvalidSchemaError
+
 Defined in: [packages/db/src/errors.ts:90](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L90)
 
 ## Extends

@@ -3,6 +3,8 @@ id: SerializationError
 title: SerializationError
 ---
 
+# Class: SerializationError
+
 Defined in: [packages/db/src/errors.ts:683](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L683)
 
 ## Extends

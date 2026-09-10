@@ -3,6 +3,8 @@ id: lt
 title: lt
 ---
 
+# Function: lt()
+
 ## Call Signature
 
 ```ts

@@ -3,6 +3,8 @@ id: SingleResult
 title: SingleResult
 ---
 
+# Type Alias: SingleResult
+
 ```ts
 type SingleResult = object;
 ```

@@ -3,6 +3,8 @@ id: InferPowerSyncOutputType
 title: InferPowerSyncOutputType
 ---
 
+# Type Alias: InferPowerSyncOutputType\<TTable, TSchema\>
+
 ```ts
 type InferPowerSyncOutputType<TTable, TSchema> = TSchema extends never ? ExtractedTable<TTable> : InferSchemaOutput<TSchema>;
 ```

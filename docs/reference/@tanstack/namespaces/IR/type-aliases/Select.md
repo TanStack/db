@@ -3,6 +3,8 @@ id: Select
 title: Select
 ---
 
+# Type Alias: Select
+
 ```ts
 type Select = object;
 ```

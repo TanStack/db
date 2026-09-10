@@ -3,6 +3,8 @@ id: SchemaFromSource
 title: SchemaFromSource
 ---
 
+# Type Alias: SchemaFromSource\<T\>
+
 ```ts
 type SchemaFromSource<T> = Prettify<{ [K in keyof T]: T[K] extends CollectionImpl<any, any, any, any, any> ? InferCollectionType<T[K]> : T[K] extends CollectionOptionsIdentity<any, any, any, any, any> ? InferCollectionType<T[K]> : T[K] extends QueryBuilder<infer TContext> ? GetRawResult<TContext> : never }>;
 ```

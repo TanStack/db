@@ -3,6 +3,8 @@ id: createEffect
 title: createEffect
 ---
 
+# Function: createEffect()
+
 ```ts
 function createEffect<TRow, TKey>(config): Effect;
 ```

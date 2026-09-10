@@ -3,6 +3,8 @@ id: HavingRequiresGroupByError
 title: HavingRequiresGroupByError
 ---
 
+# Class: HavingRequiresGroupByError
+
 Defined in: [packages/db/src/errors.ts:503](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L503)
 
 ## Extends

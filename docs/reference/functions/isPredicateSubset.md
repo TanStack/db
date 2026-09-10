@@ -3,6 +3,8 @@ id: isPredicateSubset
 title: isPredicateSubset
 ---
 
+# Function: isPredicateSubset()
+
 ```ts
 function isPredicateSubset(subset, superset): boolean;
 ```

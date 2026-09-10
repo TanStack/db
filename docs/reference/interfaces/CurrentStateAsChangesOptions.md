@@ -3,6 +3,8 @@ id: CurrentStateAsChangesOptions
 title: CurrentStateAsChangesOptions
 ---
 
+# Interface: CurrentStateAsChangesOptions
+
 Defined in: [packages/db/src/types.ts:952](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L952)
 
 Options for getting current state as changes

@@ -3,6 +3,8 @@ id: electricCollectionOptions
 title: electricCollectionOptions
 ---
 
+# Function: electricCollectionOptions()
+
 ## Call Signature
 
 ```ts

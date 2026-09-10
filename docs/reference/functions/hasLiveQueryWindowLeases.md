@@ -3,6 +3,8 @@ id: hasLiveQueryWindowLeases
 title: hasLiveQueryWindowLeases
 ---
 
+# Function: hasLiveQueryWindowLeases()
+
 ```ts
 function hasLiveQueryWindowLeases(target): boolean;
 ```

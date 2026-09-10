@@ -3,6 +3,8 @@ id: WithVirtualProps
 title: WithVirtualProps
 ---
 
+# Type Alias: WithVirtualProps\<T, TKey\>
+
 ```ts
 type WithVirtualProps<T, TKey> = T & VirtualRowProps<TKey>;
 ```

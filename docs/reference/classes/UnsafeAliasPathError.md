@@ -3,6 +3,8 @@ id: UnsafeAliasPathError
 title: UnsafeAliasPathError
 ---
 
+# Class: UnsafeAliasPathError
+
 Defined in: [packages/db/src/errors.ts:457](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L457)
 
 ## Extends

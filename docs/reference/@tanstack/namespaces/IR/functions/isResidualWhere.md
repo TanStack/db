@@ -3,6 +3,8 @@ id: isResidualWhere
 title: isResidualWhere
 ---
 
+# Function: isResidualWhere()
+
 ```ts
 function isResidualWhere(where): boolean;
 ```

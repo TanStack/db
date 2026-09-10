@@ -3,6 +3,8 @@ id: DuplicateKeyInBatchError
 title: DuplicateKeyInBatchError
 ---
 
+# Class: DuplicateKeyInBatchError
+
 Defined in: [packages/query-db-collection/src/errors.ts:71](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L71)
 
 ## Extends

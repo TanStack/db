@@ -3,6 +3,8 @@ id: WithoutVirtualProps
 title: WithoutVirtualProps
 ---
 
+# Type Alias: WithoutVirtualProps\<T\>
+
 ```ts
 type WithoutVirtualProps<T> = Omit<T, keyof VirtualRowProps>;
 ```

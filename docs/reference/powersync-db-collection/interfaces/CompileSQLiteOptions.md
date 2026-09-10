@@ -3,6 +3,8 @@ id: CompileSQLiteOptions
 title: CompileSQLiteOptions
 ---
 
+# Interface: CompileSQLiteOptions
+
 Defined in: [sqlite-compiler.ts:20](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/sqlite-compiler.ts#L20)
 
 Options for controlling how SQL is compiled.

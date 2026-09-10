@@ -3,6 +3,8 @@ id: followRef
 title: followRef
 ---
 
+# Function: followRef()
+
 ```ts
 function followRef(
    query, 

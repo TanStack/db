@@ -3,6 +3,8 @@ id: ChangeMessageOrDeleteKeyMessage
 title: ChangeMessageOrDeleteKeyMessage
 ---
 
+# Type Alias: ChangeMessageOrDeleteKeyMessage\<T, TKey\>
+
 ```ts
 type ChangeMessageOrDeleteKeyMessage<T, TKey> = 
   | Omit<ChangeMessage<T>, "key">

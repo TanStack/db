@@ -3,6 +3,8 @@ id: DbClientLiveQuery
 title: DbClientLiveQuery
 ---
 
+# Type Alias: DbClientLiveQuery
+
 ```ts
 type DbClientLiveQuery = object;
 ```

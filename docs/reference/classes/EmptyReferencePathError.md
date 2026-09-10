@@ -3,6 +3,8 @@ id: EmptyReferencePathError
 title: EmptyReferencePathError
 ---
 
+# Class: EmptyReferencePathError
+
 Defined in: [packages/db/src/errors.ts:565](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L565)
 
 ## Extends

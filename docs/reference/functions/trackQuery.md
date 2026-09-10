@@ -3,6 +3,8 @@ id: trackQuery
 title: trackQuery
 ---
 
+# Function: trackQuery()
+
 ```ts
 function trackQuery(
    collectionId, 
