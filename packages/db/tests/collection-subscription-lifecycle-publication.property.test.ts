@@ -466,9 +466,9 @@ const publicationCommandHistoryArbitrary: fc.Arbitrary<
 
 async function runPublicationHistory(
   history: ReadonlyArray<PublicationCommand>,
-  options: PublicationRunOptions = {},
+  runOptions: PublicationRunOptions = {},
 ): Promise<Array<PublicationObservation>> {
-  const check = options.continueAfterMismatch ? expect.soft : expect
+  const check = runOptions.continueAfterMismatch ? expect.soft : expect
   const observations: Array<PublicationObservation> = []
   const lifecycle = createLifecycleModel()
   const publication: PublicationModel = {
@@ -501,14 +501,14 @@ async function runPublicationHistory(
   const collection = createCollection<Row, RowKey>({
     id: `generated-lifecycle-publication`,
     getKey: ({ id }) => id,
-    syncMode: options.withoutLoader ? `eager` : `on-demand`,
+    syncMode: runOptions.withoutLoader ? `eager` : `on-demand`,
     sync: {
       sync: (operations) => {
         const ownSession = ++session
         operationsBySession.set(ownSession, operations)
         sourceRows.set(ownSession, new Map())
         operations.markReady()
-        if (options.withoutLoader) return
+        if (runOptions.withoutLoader) return
         return {
           loadSubset: (options) => {
             const demand = demandForWhere.get(options.where)
@@ -614,11 +614,11 @@ async function runPublicationHistory(
       expected: expectedBatches,
     })
     if (
-      options.mismatches &&
+      runOptions.mismatches &&
       JSON.stringify(normalizedObserved) !== JSON.stringify(expected)
     ) {
-      const historyName = options.historyName ?? JSON.stringify(history)
-      options.mismatches.push({
+      const historyName = runOptions.historyName ?? JSON.stringify(history)
+      runOptions.mismatches.push({
         history: historyName,
         commandIndex,
         command,
@@ -803,7 +803,7 @@ async function runPublicationHistory(
         command,
         effect,
         priorPublicationCount,
-        options.withoutLoader ?? false,
+        runOptions.withoutLoader ?? false,
       )
       // Public retention never rewrites the independently installed source.
       // The publication model stops tracking source commands after unsubscribe;

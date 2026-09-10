@@ -177,7 +177,7 @@ it.each([
       expect(preloadState).toBe(`pending`)
 
       const freshChild: Child = { id: `fresh-child`, group: `fresh` }
-      let freshHasSettled = false
+      const freshSettlement = { settled: false }
       const settleOld = async () => {
         if (oldOutcome === `resolve`) {
           pending[0]!.rows.resolve([])
@@ -190,7 +190,7 @@ it.each([
         expect(child.get(freshChild.id)).toBeUndefined()
         pending[1]!.rows.resolve([freshChild])
         await flushPromises()
-        freshHasSettled = true
+        freshSettlement.settled = true
       }
       const settlements =
         settlementOrder === `old-first`
@@ -198,8 +198,10 @@ it.each([
           : [settleFresh, settleOld]
       for (const settle of settlements) {
         await settle()
-        expect(live.status).toBe(freshHasSettled ? `ready` : `loading`)
-        expect(preloadState).toBe(freshHasSettled ? `resolved` : `pending`)
+        expect(live.status).toBe(freshSettlement.settled ? `ready` : `loading`)
+        expect(preloadState).toBe(
+          freshSettlement.settled ? `resolved` : `pending`,
+        )
         expect(live.utils.lastSubsetError).toBeUndefined()
       }
 

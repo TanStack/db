@@ -2765,6 +2765,7 @@ describe(`Virtual properties`, () => {
           })
         })
         syncFns.commit()
+        return Promise.resolve()
       },
     })
 

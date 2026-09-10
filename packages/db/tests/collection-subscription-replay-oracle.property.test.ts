@@ -1441,7 +1441,7 @@ async function runOptimisticReplayScenario(
   }
 }
 
-const { multiplier, ...replay } = readOracleRunConfig()
+const { multiplier, ...replayConfig } = readOracleRunConfig()
 const generatedRuns = 30 * multiplier
 
 describe(`CollectionSubscription replay oracle`, () => {
@@ -4472,7 +4472,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     [replayScenarioArbitrary],
     oracleRandomParameters(
       generatedRuns,
-      replay,
+      replayConfig,
       `subscription-replay.completion`,
     ),
   )(
@@ -4484,7 +4484,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     [sequentialReplayScenarioArbitrary],
     oracleRandomParameters(
       generatedRuns,
-      replay,
+      replayConfig,
       `subscription-replay.sequential`,
     ),
   )(
@@ -4504,7 +4504,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     [cleanupRestartScenarioArbitrary],
     oracleRandomParameters(
       generatedRuns,
-      replay,
+      replayConfig,
       `subscription-replay.restart`,
     ),
   )(
@@ -4521,7 +4521,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     [fc.scheduler()],
     oracleRandomParameters(
       generatedRuns,
-      replay,
+      replayConfig,
       `subscription-replay.same-tick`,
     ),
   )(
@@ -4539,7 +4539,11 @@ describe(`CollectionSubscription replay oracle`, () => {
 
   fcTest.prop(
     [sharedSubscriptionScenarioArbitrary],
-    oracleRandomParameters(generatedRuns, replay, `subscription-replay.shared`),
+    oracleRandomParameters(
+      generatedRuns,
+      replayConfig,
+      `subscription-replay.shared`,
+    ),
   )(
     `keeps independent transport and logical ownership aligned for a random or replayed seed`,
     runSharedSubscriptionScenario,
@@ -4557,7 +4561,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     [optimisticReplayScenarioArbitrary],
     oracleRandomParameters(
       generatedRuns,
-      replay,
+      replayConfig,
       `subscription-replay.optimistic`,
     ),
   )(

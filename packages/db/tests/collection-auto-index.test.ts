@@ -197,7 +197,7 @@ describe(`Collection Auto-Indexing`, () => {
 
     await collection.stateWhenReady()
 
-    expect(() => collection.createIndex((row) => row.age)).toThrow(
+    expect(() => collection.createIndex((item) => item.age)).toThrow(
       CollectionConfigurationError,
     )
   })
