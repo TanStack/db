@@ -52,14 +52,14 @@ type RuntimeOwner = {
 
 async function runHistory(
   history: ReadonlyArray<LifecycleCommand>,
-  options: {
+  runOptions: {
     acquisitionMode?: `async-pending` | `sync-success`
     cancellation?: `manual` | `reject`
     continueAfterMismatch?: boolean
   } = {},
 ): Promise<Set<string>> {
-  const acquisitionMode = options.acquisitionMode ?? `async-pending`
-  const check = options.continueAfterMismatch ? expect.soft : expect
+  const acquisitionMode = runOptions.acquisitionMode ?? `async-pending`
+  const check = runOptions.continueAfterMismatch ? expect.soft : expect
   const failures = new Map<number, Error>()
   const failureForAttempt = (attemptId: number): Error => {
     const existing = failures.get(attemptId)
@@ -68,7 +68,7 @@ async function runHistory(
     failures.set(attemptId, failure)
     return failure
   }
-  const cancellation = options.cancellation ?? `manual`
+  const cancellation = runOptions.cancellation ?? `manual`
   const model = createLifecycleModel(
     acquisitionMode,
     failureForAttempt,
@@ -280,10 +280,10 @@ async function runHistory(
         const result = subscription.requestSnapshot({
           where: where[command.demand],
           signal: runtimeOwner?.controller.signal,
-          onLoadSubsetResult: (result, requestOptions) => {
+          onLoadSubsetResult: (loadResult, requestOptions) => {
             const attemptId =
               attemptByOptions.get(requestOptions) ?? `unacquired`
-            const resultKind = result === true ? `true` : `promise`
+            const resultKind = loadResult === true ? `true` : `promise`
             observedResults.push({ attemptId, resultKind })
             observedTrace.push({ type: `result`, attemptId, resultKind })
           },
@@ -352,7 +352,7 @@ async function runHistory(
         }
         collection.startSyncImmediate()
         if (queuesReplay) check(subscription.status).toBe(`loadingSubset`)
-      } else if (command.type === `unsubscribe`) {
+      } else {
         for (const attempt of runtimeAttempts.values()) attempt.current = false
         subscription.unsubscribe()
         observedUnsubscribed = true
