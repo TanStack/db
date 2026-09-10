@@ -3,8 +3,6 @@ id: QueryCollectionMeta
 title: QueryCollectionMeta
 ---
 
-# Interface: QueryCollectionMeta
-
 Defined in: [packages/query-db-collection/src/global.ts:30](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/global.ts#L30)
 
 Base interface for Query Collection meta properties.

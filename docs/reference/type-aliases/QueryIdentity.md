@@ -3,8 +3,6 @@ id: QueryIdentity
 title: QueryIdentity
 ---
 
-# Type Alias: QueryIdentity
-
 ```ts
 type QueryIdentity = string & object;
 ```

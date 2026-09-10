@@ -3,8 +3,6 @@ id: localOnlyCollectionOptions
 title: localOnlyCollectionOptions
 ---
 
-# Function: localOnlyCollectionOptions()
-
 ## Call Signature
 
 ```ts

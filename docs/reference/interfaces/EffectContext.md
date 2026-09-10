@@ -3,8 +3,6 @@ id: EffectContext
 title: EffectContext
 ---
 
-# Interface: EffectContext
-
 Defined in: [packages/db/src/query/effect.ts:75](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L75)
 
 Context passed to effect handlers

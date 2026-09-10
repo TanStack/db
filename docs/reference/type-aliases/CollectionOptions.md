@@ -3,8 +3,6 @@ id: CollectionOptions
 title: CollectionOptions
 ---
 
-# Type Alias: CollectionOptions\<T, TKey, TSchema, TUtils\>
-
 ```ts
 type CollectionOptions<T, TKey, TSchema, TUtils> = CollectionOptionsIdentity<T, TKey, TSchema, TUtils, DbClient>;
 ```

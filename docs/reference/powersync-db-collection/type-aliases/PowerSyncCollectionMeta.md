@@ -3,8 +3,6 @@ id: PowerSyncCollectionMeta
 title: PowerSyncCollectionMeta
 ---
 
-# Type Alias: PowerSyncCollectionMeta\<TTable\>
-
 ```ts
 type PowerSyncCollectionMeta<TTable> = object;
 ```

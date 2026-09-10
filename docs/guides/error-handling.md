@@ -3,8 +3,6 @@ title: Error Handling
 id: error-handling
 ---
 
-# Error Handling
-
 TanStack DB provides comprehensive error handling capabilities to ensure robust data synchronization and state management. This guide covers the built-in error handling mechanisms and how to work with them effectively.
 
 ## Error Types

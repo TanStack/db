@@ -3,8 +3,6 @@ id: "@tanstack/db"
 title: "@tanstack/db"
 ---
 
-# @tanstack/db
-
 ## Namespaces
 
 - [IR](@tanstack/namespaces/IR/index.md)

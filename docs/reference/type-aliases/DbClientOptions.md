@@ -3,8 +3,6 @@ id: DbClientOptions
 title: DbClientOptions
 ---
 
-# Type Alias: DbClientOptions
-
 ```ts
 type DbClientOptions = Record<string, unknown>;
 ```

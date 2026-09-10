@@ -3,8 +3,6 @@ id: Transaction
 title: Transaction
 ---
 
-# Interface: Transaction\<T\>
-
 Defined in: [packages/db/src/transactions.ts:304](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L304)
 
 ## Type Parameters

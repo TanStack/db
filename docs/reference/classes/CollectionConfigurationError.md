@@ -3,8 +3,6 @@ id: CollectionConfigurationError
 title: CollectionConfigurationError
 ---
 
-# Class: CollectionConfigurationError
-
 Defined in: [packages/db/src/errors.ts:71](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L71)
 
 ## Extends

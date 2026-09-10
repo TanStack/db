@@ -3,8 +3,6 @@ id: InvalidJoinConditionSameSourceError
 title: InvalidJoinConditionSameSourceError
 ---
 
-# Class: InvalidJoinConditionSameSourceError
-
 Defined in: [packages/db/src/errors.ts:597](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L597)
 
 ## Extends

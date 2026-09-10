@@ -3,8 +3,6 @@ id: CollectionStateError
 title: CollectionStateError
 ---
 
-# Class: CollectionStateError
-
 Defined in: [packages/db/src/errors.ts:103](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L103)
 
 ## Extends

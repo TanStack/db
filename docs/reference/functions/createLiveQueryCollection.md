@@ -3,8 +3,6 @@ id: createLiveQueryCollection
 title: createLiveQueryCollection
 ---
 
-# Function: createLiveQueryCollection()
-
 ## Call Signature
 
 ```ts

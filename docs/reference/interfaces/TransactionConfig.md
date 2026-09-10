@@ -3,8 +3,6 @@ id: TransactionConfig
 title: TransactionConfig
 ---
 
-# Interface: TransactionConfig\<T\>
-
 Defined in: [packages/db/src/types.ts:174](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L174)
 
 ## Type Parameters

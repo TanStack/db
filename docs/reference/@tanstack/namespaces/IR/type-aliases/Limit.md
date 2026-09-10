@@ -3,8 +3,6 @@ id: Limit
 title: Limit
 ---
 
-# Type Alias: Limit
-
 ```ts
 type Limit = number;
 ```

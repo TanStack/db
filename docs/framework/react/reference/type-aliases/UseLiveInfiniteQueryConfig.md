@@ -3,8 +3,6 @@ id: UseLiveInfiniteQueryConfig
 title: UseLiveInfiniteQueryConfig
 ---
 
-# Type Alias: UseLiveInfiniteQueryConfig\<TContext\>
-
 ```ts
 type UseLiveInfiniteQueryConfig<TContext> = object;
 ```

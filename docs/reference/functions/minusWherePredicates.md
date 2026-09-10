@@ -3,8 +3,6 @@ id: minusWherePredicates
 title: minusWherePredicates
 ---
 
-# Function: minusWherePredicates()
-
 ```ts
 function minusWherePredicates(fromPredicate, subtractPredicate): 
   | BasicExpression<boolean>

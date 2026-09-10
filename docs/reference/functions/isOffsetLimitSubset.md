@@ -3,8 +3,6 @@ id: isOffsetLimitSubset
 title: isOffsetLimitSubset
 ---
 
-# Function: isOffsetLimitSubset()
-
 ```ts
 function isOffsetLimitSubset(subset, superset): boolean;
 ```

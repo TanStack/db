@@ -3,8 +3,6 @@ id: DbClientLiveQueryState
 title: DbClientLiveQueryState
 ---
 
-# Type Alias: DbClientLiveQueryState
-
 ```ts
 type DbClientLiveQueryState = "pending" | "success" | "error";
 ```

@@ -3,8 +3,6 @@ id: JoinOnCallback
 title: JoinOnCallback
 ---
 
-# Type Alias: JoinOnCallback()\<TContext\>
-
 ```ts
 type JoinOnCallback<TContext> = (refs) => any;
 ```

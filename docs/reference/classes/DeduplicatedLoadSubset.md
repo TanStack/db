@@ -3,8 +3,6 @@ id: DeduplicatedLoadSubset
 title: DeduplicatedLoadSubset
 ---
 
-# Class: DeduplicatedLoadSubset
-
 Defined in: [packages/db/src/query/subset-dedupe.ts:48](https://github.com/TanStack/db/blob/main/packages/db/src/query/subset-dedupe.ts#L48)
 
 Deduplicated wrapper for a loadSubset function.

@@ -3,8 +3,6 @@ id: BasicExpression
 title: BasicExpression
 ---
 
-# Type Alias: BasicExpression\<T\>
-
 ```ts
 type BasicExpression<T> = 
   | PropRef<T>

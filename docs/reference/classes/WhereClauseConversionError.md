@@ -3,8 +3,6 @@ id: WhereClauseConversionError
 title: WhereClauseConversionError
 ---
 
-# Class: WhereClauseConversionError
-
 Defined in: [packages/db/src/errors.ts:757](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L757)
 
 Internal error when the query optimizer fails to convert a WHERE clause to a collection filter.

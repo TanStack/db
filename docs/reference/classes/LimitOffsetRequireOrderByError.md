@@ -3,8 +3,6 @@ id: LimitOffsetRequireOrderByError
 title: LimitOffsetRequireOrderByError
 ---
 
-# Class: LimitOffsetRequireOrderByError
-
 Defined in: [packages/db/src/errors.ts:509](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L509)
 
 ## Extends

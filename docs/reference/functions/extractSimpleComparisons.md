@@ -3,8 +3,6 @@ id: extractSimpleComparisons
 title: extractSimpleComparisons
 ---
 
-# Function: extractSimpleComparisons()
-
 ```ts
 function extractSimpleComparisons(expr): SimpleComparison[];
 ```

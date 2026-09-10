@@ -3,8 +3,6 @@ id: "@tanstack/rxdb-db-collection"
 title: "@tanstack/rxdb-db-collection"
 ---
 
-# @tanstack/rxdb-db-collection
-
 ## Type Aliases
 
 - [RxDBCollectionConfig](type-aliases/RxDBCollectionConfig.md)

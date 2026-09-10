@@ -3,8 +3,6 @@ id: ResolvedLiveQueryWindowInput
 title: ResolvedLiveQueryWindowInput
 ---
 
-# Type Alias: ResolvedLiveQueryWindowInput\<TContext\>
-
 ```ts
 type ResolvedLiveQueryWindowInput<TContext> = 
   | {

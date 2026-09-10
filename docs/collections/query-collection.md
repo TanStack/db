@@ -2,8 +2,6 @@
 title: Query Collection
 ---
 
-# Query Collection
-
 Query collections provide seamless integration between TanStack DB and TanStack Query, enabling automatic synchronization between your local database and remote data sources.
 
 ## Overview

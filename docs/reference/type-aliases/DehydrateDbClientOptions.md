@@ -3,8 +3,6 @@ id: DehydrateDbClientOptions
 title: DehydrateDbClientOptions
 ---
 
-# Type Alias: DehydrateDbClientOptions
-
 ```ts
 type DehydrateDbClientOptions = object;
 ```

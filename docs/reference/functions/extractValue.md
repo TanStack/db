@@ -3,8 +3,6 @@ id: extractValue
 title: extractValue
 ---
 
-# Function: extractValue()
-
 ```ts
 function extractValue(expr): any;
 ```

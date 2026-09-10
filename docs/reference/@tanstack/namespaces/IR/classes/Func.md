@@ -3,8 +3,6 @@ id: Func
 title: Func
 ---
 
-# Class: Func\<T\>
-
 Defined in: [packages/db/src/query/ir.ts:159](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L159)
 
 ## Extends

@@ -3,8 +3,6 @@ id: BTreeIndex
 title: BTreeIndex
 ---
 
-# Class: BTreeIndex\<TKey\>
-
 Defined in: [packages/db/src/indexes/btree-index.ts:36](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L36)
 
 B+Tree index for sorted data with range queries

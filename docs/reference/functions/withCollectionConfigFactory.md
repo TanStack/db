@@ -3,8 +3,6 @@ id: withCollectionConfigFactory
 title: withCollectionConfigFactory
 ---
 
-# Function: withCollectionConfigFactory()
-
 ```ts
 function withCollectionConfigFactory<TConfig>(config, factory): CollectionConfigWithFactory<TConfig>;
 ```

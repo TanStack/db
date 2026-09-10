@@ -3,8 +3,6 @@ id: SourceClauseContext
 title: SourceClauseContext
 ---
 
-# Type Alias: SourceClauseContext
-
 ```ts
 type SourceClauseContext = "from clause" | "unionAll clause" | "join clause";
 ```

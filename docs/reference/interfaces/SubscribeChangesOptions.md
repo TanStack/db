@@ -3,8 +3,6 @@ id: SubscribeChangesOptions
 title: SubscribeChangesOptions
 ---
 
-# Interface: SubscribeChangesOptions\<T, TKey\>
-
 Defined in: [packages/db/src/types.ts:892](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L892)
 
 Options for subscribing to collection changes

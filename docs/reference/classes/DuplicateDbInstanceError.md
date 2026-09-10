@@ -3,8 +3,6 @@ id: DuplicateDbInstanceError
 title: DuplicateDbInstanceError
 ---
 
-# Class: DuplicateDbInstanceError
-
 Defined in: [packages/db/src/errors.ts:45](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L45)
 
 ## Extends

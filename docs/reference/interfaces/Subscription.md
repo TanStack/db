@@ -3,8 +3,6 @@ id: Subscription
 title: Subscription
 ---
 
-# Interface: Subscription
-
 Defined in: [packages/db/src/types.ts:269](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L269)
 
 Public interface for a collection subscription

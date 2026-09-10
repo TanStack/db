@@ -3,8 +3,6 @@ id: DeleteKeyNotFoundError
 title: DeleteKeyNotFoundError
 ---
 
-# Class: DeleteKeyNotFoundError
-
 Defined in: [packages/db/src/errors.ts:257](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L257)
 
 ## Extends

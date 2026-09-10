@@ -3,8 +3,6 @@ id: RangeQueryOptions
 title: RangeQueryOptions
 ---
 
-# Interface: RangeQueryOptions
-
 Defined in: [packages/db/src/indexes/basic-index.ts:18](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/basic-index.ts#L18)
 
 Options for range queries

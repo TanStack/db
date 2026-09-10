@@ -3,8 +3,6 @@ id: InvalidJoinConditionSourceMismatchError
 title: InvalidJoinConditionSourceMismatchError
 ---
 
-# Class: InvalidJoinConditionSourceMismatchError
-
 Defined in: [packages/db/src/errors.ts:605](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L605)
 
 ## Extends

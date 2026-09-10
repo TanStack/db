@@ -3,8 +3,6 @@ id: getQueryPatterns
 title: getQueryPatterns
 ---
 
-# Function: getQueryPatterns()
-
 ```ts
 function getQueryPatterns(): Map<string, {
   avgTimeMs: number;

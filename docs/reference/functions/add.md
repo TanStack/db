@@ -3,8 +3,6 @@ id: add
 title: add
 ---
 
-# Function: add()
-
 ```ts
 function add<T1, T2>(left, right): BinaryNumericReturnType;
 ```

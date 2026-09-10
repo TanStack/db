@@ -3,8 +3,6 @@ id: toArray
 title: toArray
 ---
 
-# Function: toArray()
-
 ```ts
 function toArray<TContext>(query): ToArrayWrapper<GetRawResult<TContext>>;
 ```

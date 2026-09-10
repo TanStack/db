@@ -3,8 +3,6 @@ id: SyncMetadataApi
 title: SyncMetadataApi
 ---
 
-# Interface: SyncMetadataApi\<TKey\>
-
 Defined in: [packages/db/src/types.ts:431](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L431)
 
 ## Type Parameters

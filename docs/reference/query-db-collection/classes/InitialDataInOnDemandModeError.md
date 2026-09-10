@@ -3,8 +3,6 @@ id: InitialDataInOnDemandModeError
 title: InitialDataInOnDemandModeError
 ---
 
-# Class: InitialDataInOnDemandModeError
-
 Defined in: [packages/query-db-collection/src/errors.ts:39](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L39)
 
 ## Extends

@@ -3,8 +3,6 @@ id: BasicIndexOptions
 title: BasicIndexOptions
 ---
 
-# Interface: BasicIndexOptions
-
 Defined in: [packages/db/src/indexes/basic-index.ts:28](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/basic-index.ts#L28)
 
 Options for Basic index

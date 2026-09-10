@@ -3,8 +3,6 @@ id: UnsupportedAggregateFunctionError
 title: UnsupportedAggregateFunctionError
 ---
 
-# Class: UnsupportedAggregateFunctionError
-
 Defined in: [packages/db/src/errors.ts:655](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L655)
 
 ## Extends

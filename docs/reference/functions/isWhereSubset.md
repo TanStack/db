@@ -3,8 +3,6 @@ id: isWhereSubset
 title: isWhereSubset
 ---
 
-# Function: isWhereSubset()
-
 ```ts
 function isWhereSubset(subset, superset): boolean;
 ```

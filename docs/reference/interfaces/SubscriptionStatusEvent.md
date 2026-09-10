@@ -3,8 +3,6 @@ id: SubscriptionStatusEvent
 title: SubscriptionStatusEvent
 ---
 
-# Interface: SubscriptionStatusEvent\<T\>
-
 Defined in: [packages/db/src/types.ts:231](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L231)
 
 Event emitted when subscription status changes to a specific status

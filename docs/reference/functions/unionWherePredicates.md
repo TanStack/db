@@ -3,8 +3,6 @@ id: unionWherePredicates
 title: unionWherePredicates
 ---
 
-# Function: unionWherePredicates()
-
 ```ts
 function unionWherePredicates(predicates): BasicExpression<boolean>;
 ```

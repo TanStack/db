@@ -3,8 +3,6 @@ id: InsertMutationFn
 title: InsertMutationFn
 ---
 
-# Type Alias: InsertMutationFn()\<T, TKey, TUtils, TReturn\>
-
 ```ts
 type InsertMutationFn<T, TKey, TUtils, TReturn> = (params) => Promise<TReturn>;
 ```

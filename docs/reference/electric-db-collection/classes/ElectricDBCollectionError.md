@@ -3,8 +3,6 @@ id: ElectricDBCollectionError
 title: ElectricDBCollectionError
 ---
 
-# Class: ElectricDBCollectionError
-
 Defined in: [packages/electric-db-collection/src/errors.ts:4](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/errors.ts#L4)
 
 ## Extends

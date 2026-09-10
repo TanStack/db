@@ -3,8 +3,6 @@ id: BaseCollectionConfig
 title: BaseCollectionConfig
 ---
 
-# Interface: BaseCollectionConfig\<T, TKey, TSchema, TUtils, TReturn\>
-
 Defined in: [packages/db/src/types.ts:591](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L591)
 
 ## Extended by

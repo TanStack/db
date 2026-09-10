@@ -3,8 +3,6 @@ id: createChangeProxy
 title: createChangeProxy
 ---
 
-# Function: createChangeProxy()
-
 ```ts
 function createChangeProxy<T>(target, parent?): object;
 ```

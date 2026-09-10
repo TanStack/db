@@ -3,8 +3,6 @@ id: TransactionAlreadyCompletedRollbackError
 title: TransactionAlreadyCompletedRollbackError
 ---
 
-# Class: TransactionAlreadyCompletedRollbackError
-
 Defined in: [packages/db/src/errors.ts:328](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L328)
 
 ## Extends

@@ -3,8 +3,6 @@ id: Value
 title: Value
 ---
 
-# Class: Value\<T\>
-
 Defined in: [packages/db/src/query/ir.ts:150](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L150)
 
 ## Extends

@@ -3,8 +3,6 @@ id: SyncTransactionAlreadyCommittedError
 title: SyncTransactionAlreadyCommittedError
 ---
 
-# Class: SyncTransactionAlreadyCommittedError
-
 Defined in: [packages/db/src/errors.ts:364](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L364)
 
 ## Extends

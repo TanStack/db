@@ -3,8 +3,6 @@ id: QueryBuilderError
 title: QueryBuilderError
 ---
 
-# Class: QueryBuilderError
-
 Defined in: [packages/db/src/errors.ts:373](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L373)
 
 ## Extends

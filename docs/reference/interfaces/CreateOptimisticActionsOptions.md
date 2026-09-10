@@ -3,8 +3,6 @@ id: CreateOptimisticActionsOptions
 title: CreateOptimisticActionsOptions
 ---
 
-# Interface: CreateOptimisticActionsOptions\<TVars, T\>
-
 Defined in: [packages/db/src/types.ts:187](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L187)
 
 Options for the createOptimisticAction helper

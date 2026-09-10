@@ -3,8 +3,6 @@ id: NoKeysPassedToUpdateError
 title: NoKeysPassedToUpdateError
 ---
 
-# Class: NoKeysPassedToUpdateError
-
 Defined in: [packages/db/src/errors.ts:229](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L229)
 
 ## Extends

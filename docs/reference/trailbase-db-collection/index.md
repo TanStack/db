@@ -3,8 +3,6 @@ id: "@tanstack/trailbase-db-collection"
 title: "@tanstack/trailbase-db-collection"
 ---
 
-# @tanstack/trailbase-db-collection
-
 ## Classes
 
 - [ExpectedDeleteTypeError](classes/ExpectedDeleteTypeError.md)

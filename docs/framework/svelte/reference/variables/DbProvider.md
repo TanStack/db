@@ -3,8 +3,6 @@ id: DbProvider
 title: DbProvider
 ---
 
-# Variable: DbProvider
-
 ```ts
 const DbProvider: LegacyComponentType;
 ```

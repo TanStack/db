@@ -3,8 +3,6 @@ id: AwaitTxIdFn
 title: AwaitTxIdFn
 ---
 
-# Type Alias: AwaitTxIdFn()
-
 ```ts
 type AwaitTxIdFn = (txId, timeout?) => Promise<boolean>;
 ```

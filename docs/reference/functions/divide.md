@@ -3,8 +3,6 @@ id: divide
 title: divide
 ---
 
-# Function: divide()
-
 ```ts
 function divide<T1, T2>(left, right): DivideReturnType;
 ```

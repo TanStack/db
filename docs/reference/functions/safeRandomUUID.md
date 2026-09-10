@@ -3,8 +3,6 @@ id: safeRandomUUID
 title: safeRandomUUID
 ---
 
-# Function: safeRandomUUID()
-
 ```ts
 function safeRandomUUID(): string;
 ```

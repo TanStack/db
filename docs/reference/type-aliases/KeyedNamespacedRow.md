@@ -3,8 +3,6 @@ id: KeyedNamespacedRow
 title: KeyedNamespacedRow
 ---
 
-# Type Alias: KeyedNamespacedRow
-
 ```ts
 type KeyedNamespacedRow = [unknown, NamespacedRow];
 ```

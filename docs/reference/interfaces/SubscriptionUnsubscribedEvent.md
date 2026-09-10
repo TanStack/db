@@ -3,8 +3,6 @@ id: SubscriptionUnsubscribedEvent
 title: SubscriptionUnsubscribedEvent
 ---
 
-# Interface: SubscriptionUnsubscribedEvent
-
 Defined in: [packages/db/src/types.ts:249](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L249)
 
 Event emitted when subscription is unsubscribed

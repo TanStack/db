@@ -3,8 +3,6 @@ id: getLiveQueryWindowInputKind
 title: getLiveQueryWindowInputKind
 ---
 
-# Function: getLiveQueryWindowInputKind()
-
 ```ts
 function getLiveQueryWindowInputKind(input): LiveQueryWindowInputKind;
 ```

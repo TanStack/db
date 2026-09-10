@@ -3,8 +3,6 @@ id: EnhancedPowerSyncCollectionConfig
 title: EnhancedPowerSyncCollectionConfig
 ---
 
-# Type Alias: EnhancedPowerSyncCollectionConfig\<TTable, OutputType, TSchema\>
-
 ```ts
 type EnhancedPowerSyncCollectionConfig<TTable, OutputType, TSchema> = CollectionConfig<OutputType, string, TSchema, PowerSyncCollectionUtils<TTable>> & object;
 ```

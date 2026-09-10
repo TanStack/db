@@ -3,8 +3,6 @@ id: DemandKey
 title: DemandKey
 ---
 
-# Type Alias: DemandKey
-
 ```ts
 type DemandKey = string & object;
 ```

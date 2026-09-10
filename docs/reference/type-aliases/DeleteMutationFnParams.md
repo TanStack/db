@@ -3,8 +3,6 @@ id: DeleteMutationFnParams
 title: DeleteMutationFnParams
 ---
 
-# Type Alias: DeleteMutationFnParams\<T, TKey, TUtils\>
-
 ```ts
 type DeleteMutationFnParams<T, TKey, TUtils> = object;
 ```

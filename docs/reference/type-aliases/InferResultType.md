@@ -3,8 +3,6 @@ id: InferResultType
 title: InferResultType
 ---
 
-# Type Alias: InferResultType\<TContext\>
-
 ```ts
 type InferResultType<TContext> = TContext extends SingleResult ? GetResult<TContext> | undefined : GetResult<TContext>[];
 ```

@@ -3,8 +3,6 @@ id: CannotCombineEmptyExpressionListError
 title: CannotCombineEmptyExpressionListError
 ---
 
-# Class: CannotCombineEmptyExpressionListError
-
 Defined in: [packages/db/src/errors.ts:748](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L748)
 
 ## Extends

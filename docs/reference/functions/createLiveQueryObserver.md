@@ -3,8 +3,6 @@ id: createLiveQueryObserver
 title: createLiveQueryObserver
 ---
 
-# Function: createLiveQueryObserver()
-
 ```ts
 function createLiveQueryObserver<T, TKey>(collection, options): LiveQueryObserver<T, TKey>;
 ```

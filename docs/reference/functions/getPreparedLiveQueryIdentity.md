@@ -3,8 +3,6 @@ id: getPreparedLiveQueryIdentity
 title: getPreparedLiveQueryIdentity
 ---
 
-# Function: getPreparedLiveQueryIdentity()
-
 ```ts
 function getPreparedLiveQueryIdentity(value): unknown;
 ```

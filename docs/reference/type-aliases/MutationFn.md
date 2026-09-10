@@ -3,8 +3,6 @@ id: MutationFn
 title: MutationFn
 ---
 
-# Type Alias: MutationFn()\<T\>
-
 ```ts
 type MutationFn<T> = (params) => Promise<any>;
 ```

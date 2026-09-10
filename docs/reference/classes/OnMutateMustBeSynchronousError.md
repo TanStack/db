@@ -3,8 +3,6 @@ id: OnMutateMustBeSynchronousError
 title: OnMutateMustBeSynchronousError
 ---
 
-# Class: OnMutateMustBeSynchronousError
-
 Defined in: [packages/db/src/errors.ts:311](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L311)
 
 ## Extends

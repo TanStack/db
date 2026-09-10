@@ -3,8 +3,6 @@ id: Txid
 title: Txid
 ---
 
-# Type Alias: Txid
-
 ```ts
 type Txid = number;
 ```

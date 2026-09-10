@@ -3,8 +3,6 @@ id: ChangesPayload
 title: ChangesPayload
 ---
 
-# Type Alias: ChangesPayload\<T, TKey\>
-
 ```ts
 type ChangesPayload<T, TKey> = ChangeMessage<WithVirtualProps<T, TKey>, TKey>[];
 ```

@@ -3,8 +3,6 @@ id: QueryCollectionUtils
 title: QueryCollectionUtils
 ---
 
-# Interface: QueryCollectionUtils\<TItem, TKey, TInsertInput, TError\>
-
 Defined in: [packages/query-db-collection/src/query.ts:260](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L260)
 
 Utility methods available on Query Collections for direct writes and manual operations.

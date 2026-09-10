@@ -3,8 +3,6 @@ id: DeleteOperationItemNotFoundError
 title: DeleteOperationItemNotFoundError
 ---
 
-# Class: DeleteOperationItemNotFoundError
-
 Defined in: [packages/query-db-collection/src/errors.ts:85](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L85)
 
 ## Extends

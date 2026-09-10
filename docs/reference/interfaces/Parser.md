@@ -3,8 +3,6 @@ id: Parser
 title: Parser
 ---
 
-# Interface: Parser
-
 Defined in: [packages/db/src/local-storage.ts:49](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L49)
 
 ## Properties

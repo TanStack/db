@@ -3,8 +3,6 @@ id: SyncTransactionAbortedError
 title: SyncTransactionAbortedError
 ---
 
-# Class: SyncTransactionAbortedError
-
 Defined in: [packages/db/src/errors.ts:733](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L733)
 
 A sync transaction was canceled before its writes became visible.

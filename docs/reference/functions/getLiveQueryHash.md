@@ -3,8 +3,6 @@ id: getLiveQueryHash
 title: getLiveQueryHash
 ---
 
-# Function: getLiveQueryHash()
-
 ```ts
 function getLiveQueryHash(preparedValue, queryKey?): string;
 ```

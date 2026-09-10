@@ -3,8 +3,6 @@ id: UnsupportedJoinTypeError
 title: UnsupportedJoinTypeError
 ---
 
-# Class: UnsupportedJoinTypeError
-
 Defined in: [packages/db/src/errors.ts:591](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L591)
 
 ## Extends

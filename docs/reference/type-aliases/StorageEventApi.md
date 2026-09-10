@@ -3,8 +3,6 @@ id: StorageEventApi
 title: StorageEventApi
 ---
 
-# Type Alias: StorageEventApi
-
 ```ts
 type StorageEventApi = object;
 ```

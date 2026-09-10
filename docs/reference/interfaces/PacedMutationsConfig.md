@@ -3,8 +3,6 @@ id: PacedMutationsConfig
 title: PacedMutationsConfig
 ---
 
-# Interface: PacedMutationsConfig\<TVariables, T\>
-
 Defined in: [packages/db/src/paced-mutations.ts:8](https://github.com/TanStack/db/blob/main/packages/db/src/paced-mutations.ts#L8)
 
 Configuration for creating a paced mutations manager

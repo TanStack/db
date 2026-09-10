@@ -3,8 +3,6 @@ id: useLiveInfiniteQuery
 title: useLiveInfiniteQuery
 ---
 
-# Function: useLiveInfiniteQuery()
-
 ## Call Signature
 
 ```ts

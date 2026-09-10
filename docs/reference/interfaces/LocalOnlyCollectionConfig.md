@@ -3,8 +3,6 @@ id: LocalOnlyCollectionConfig
 title: LocalOnlyCollectionConfig
 ---
 
-# Interface: LocalOnlyCollectionConfig\<T, TSchema, TKey\>
-
 Defined in: [packages/db/src/local-only.ts:24](https://github.com/TanStack/db/blob/main/packages/db/src/local-only.ts#L24)
 
 Configuration interface for Local-only collection options

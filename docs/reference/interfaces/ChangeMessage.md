@@ -3,8 +3,6 @@ id: ChangeMessage
 title: ChangeMessage
 ---
 
-# Interface: ChangeMessage\<T, TKey\>
-
 Defined in: [packages/db/src/types.ts:450](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L450)
 
 ## Type Parameters

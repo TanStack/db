@@ -3,8 +3,6 @@ id: CreateLiveQueryWindowControllerOptions
 title: CreateLiveQueryWindowControllerOptions
 ---
 
-# Interface: CreateLiveQueryWindowControllerOptions
-
 Defined in: [packages/db/src/live-query-window-controller.ts:501](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L501)
 
 **`Internal`**

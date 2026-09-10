@@ -3,8 +3,6 @@ id: compileSingleRowExpression
 title: compileSingleRowExpression
 ---
 
-# Function: compileSingleRowExpression()
-
 ```ts
 function compileSingleRowExpression(expr): CompiledSingleRowExpression;
 ```

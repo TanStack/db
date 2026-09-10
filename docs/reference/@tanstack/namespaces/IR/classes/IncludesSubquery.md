@@ -3,8 +3,6 @@ id: IncludesSubquery
 title: IncludesSubquery
 ---
 
-# Class: IncludesSubquery
-
 Defined in: [packages/db/src/query/ir.ts:184](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L184)
 
 ## Extends

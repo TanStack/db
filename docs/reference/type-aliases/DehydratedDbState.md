@@ -3,8 +3,6 @@ id: DehydratedDbState
 title: DehydratedDbState
 ---
 
-# Type Alias: DehydratedDbState
-
 ```ts
 type DehydratedDbState = object;
 ```

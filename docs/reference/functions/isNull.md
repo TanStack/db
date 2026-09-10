@@ -3,8 +3,6 @@ id: isNull
 title: isNull
 ---
 
-# Function: isNull()
-
 ```ts
 function isNull(value): BasicExpression<boolean>;
 ```

@@ -3,8 +3,6 @@ id: NonEmptyArray
 title: NonEmptyArray
 ---
 
-# Type Alias: NonEmptyArray\<T\>
-
 ```ts
 type NonEmptyArray<T> = [T, ...T[]];
 ```

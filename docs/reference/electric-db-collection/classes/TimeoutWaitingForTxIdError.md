@@ -3,8 +3,6 @@ id: TimeoutWaitingForTxIdError
 title: TimeoutWaitingForTxIdError
 ---
 
-# Class: TimeoutWaitingForTxIdError
-
 Defined in: [packages/electric-db-collection/src/errors.ts:18](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/errors.ts#L18)
 
 ## Extends

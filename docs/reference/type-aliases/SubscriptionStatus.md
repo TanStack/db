@@ -3,8 +3,6 @@ id: SubscriptionStatus
 title: SubscriptionStatus
 ---
 
-# Type Alias: SubscriptionStatus
-
 ```ts
 type SubscriptionStatus = "ready" | "loadingSubset";
 ```

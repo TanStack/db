@@ -3,8 +3,6 @@ id: TransactorOptions
 title: TransactorOptions
 ---
 
-# Type Alias: TransactorOptions
-
 ```ts
 type TransactorOptions = object;
 ```

@@ -3,8 +3,6 @@ id: UseLiveQueryReturnWithSingleResultCollection
 title: UseLiveQueryReturnWithSingleResultCollection
 ---
 
-# Interface: UseLiveQueryReturnWithSingleResultCollection\<T, TKey, TUtils\>
-
 Defined in: [useLiveQuery.ts:72](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L72)
 
 ## Type Parameters

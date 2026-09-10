@@ -3,8 +3,6 @@ id: OnlyOneSourceAllowedError
 title: OnlyOneSourceAllowedError
 ---
 
-# Class: OnlyOneSourceAllowedError
-
 Defined in: [packages/db/src/errors.ts:380](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L380)
 
 ## Extends

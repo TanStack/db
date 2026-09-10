@@ -3,8 +3,6 @@ id: "@tanstack/electric-db-collection"
 title: "@tanstack/electric-db-collection"
 ---
 
-# @tanstack/electric-db-collection
-
 ## Classes
 
 - [ElectricDBCollectionError](classes/ElectricDBCollectionError.md)

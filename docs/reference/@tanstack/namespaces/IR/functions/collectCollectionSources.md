@@ -3,8 +3,6 @@ id: collectCollectionSources
 title: collectCollectionSources
 ---
 
-# Function: collectCollectionSources()
-
 ```ts
 function collectCollectionSources(query): CollectionRef[];
 ```

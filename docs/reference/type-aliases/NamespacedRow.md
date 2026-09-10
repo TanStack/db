@@ -3,8 +3,6 @@ id: NamespacedRow
 title: NamespacedRow
 ---
 
-# Type Alias: NamespacedRow
-
 ```ts
 type NamespacedRow = Record<string, Record<string, unknown>>;
 ```

@@ -3,8 +3,6 @@ id: Row
 title: Row
 ---
 
-# Type Alias: Row\<TExtensions\>
-
 ```ts
 type Row<TExtensions> = Record<string, Value<TExtensions>>;
 ```

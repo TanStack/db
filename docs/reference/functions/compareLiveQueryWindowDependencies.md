@@ -3,8 +3,6 @@ id: compareLiveQueryWindowDependencies
 title: compareLiveQueryWindowDependencies
 ---
 
-# Function: compareLiveQueryWindowDependencies()
-
 ```ts
 function compareLiveQueryWindowDependencies(previous, current): object;
 ```

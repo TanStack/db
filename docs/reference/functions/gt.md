@@ -3,8 +3,6 @@ id: gt
 title: gt
 ---
 
-# Function: gt()
-
 ## Call Signature
 
 ```ts

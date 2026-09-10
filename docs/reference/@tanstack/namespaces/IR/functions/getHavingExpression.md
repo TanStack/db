@@ -3,8 +3,6 @@ id: getHavingExpression
 title: getHavingExpression
 ---
 
-# Function: getHavingExpression()
-
 ```ts
 function getHavingExpression(having): 
   | BasicExpression<any>

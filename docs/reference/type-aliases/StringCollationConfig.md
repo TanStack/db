@@ -3,8 +3,6 @@ id: StringCollationConfig
 title: StringCollationConfig
 ---
 
-# Type Alias: StringCollationConfig
-
 ```ts
 type StringCollationConfig = 
   | {

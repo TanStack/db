@@ -2,8 +2,6 @@
 title: RxDB Collection
 ---
 
-# RxDB Collection
-
 RxDB collections provide seamless integration between TanStack DB and [RxDB](https://rxdb.info), enabling automatic synchronization between your in-memory TanStack DB collections and RxDB's local-first database. Giving you offline-ready persistence, and powerful sync capabilities with a wide range of backends.
 
 

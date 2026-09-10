@@ -3,8 +3,6 @@ id: CollectionRequiresConfigError
 title: CollectionRequiresConfigError
 ---
 
-# Class: CollectionRequiresConfigError
-
 Defined in: [packages/db/src/errors.ts:78](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L78)
 
 ## Extends

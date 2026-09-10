@@ -3,8 +3,6 @@ id: IncludesMaterialization
 title: IncludesMaterialization
 ---
 
-# Type Alias: IncludesMaterialization
-
 ```ts
 type IncludesMaterialization = "collection" | "array" | "singleton" | "concat";
 ```

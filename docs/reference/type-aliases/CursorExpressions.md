@@ -3,8 +3,6 @@ id: CursorExpressions
 title: CursorExpressions
 ---
 
-# Type Alias: CursorExpressions
-
 ```ts
 type CursorExpressions = object;
 ```

@@ -3,8 +3,6 @@ id: SetWindowRequiresOrderByError
 title: SetWindowRequiresOrderByError
 ---
 
-# Class: SetWindowRequiresOrderByError
-
 Defined in: [packages/db/src/errors.ts:809](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L809)
 
 Error thrown when setWindow is called on a collection without an ORDER BY clause.

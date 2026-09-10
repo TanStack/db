@@ -3,8 +3,6 @@ id: ExtractContext
 title: ExtractContext
 ---
 
-# Type Alias: ExtractContext\<T\>
-
 ```ts
 type ExtractContext<T> = T extends BaseQueryBuilder<infer TContext> ? TContext : T extends QueryBuilder<infer TContext> ? TContext : never;
 ```

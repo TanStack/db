@@ -3,8 +3,6 @@ id: AggregateNotSupportedError
 title: AggregateNotSupportedError
 ---
 
-# Class: AggregateNotSupportedError
-
 Defined in: [packages/db/src/errors.ts:785](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L785)
 
 Error thrown when aggregate expressions are used outside of a GROUP BY context.

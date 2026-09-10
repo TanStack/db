@@ -3,8 +3,6 @@ id: ElectricCollectionConfig
 title: ElectricCollectionConfig
 ---
 
-# Interface: ElectricCollectionConfig\<T, TSchema\>
-
 Defined in: [packages/electric-db-collection/src/electric.ts:281](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L281)
 
 Configuration interface for Electric collection options

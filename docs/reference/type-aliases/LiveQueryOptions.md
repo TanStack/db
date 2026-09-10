@@ -3,8 +3,6 @@ id: LiveQueryOptions
 title: LiveQueryOptions
 ---
 
-# Type Alias: LiveQueryOptions
-
 ```ts
 type LiveQueryOptions = LiveQueryCollectionConfig<any> & object;
 ```

@@ -3,8 +3,6 @@ id: EffectQueryInput
 title: EffectQueryInput
 ---
 
-# Type Alias: EffectQueryInput\<TContext\>
-
 ```ts
 type EffectQueryInput<TContext> = 
   | (q) => QueryBuilder<TContext>

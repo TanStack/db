@@ -3,8 +3,6 @@ id: QueueStrategy
 title: QueueStrategy
 ---
 
-# Interface: QueueStrategy
-
 Defined in: [packages/db/src/strategies/types.ts:66](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L66)
 
 Queue strategy that processes all executions in order

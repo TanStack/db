@@ -3,8 +3,6 @@ id: ElectricCollectionUtils
 title: ElectricCollectionUtils
 ---
 
-# Interface: ElectricCollectionUtils\<T\>
-
 Defined in: [packages/electric-db-collection/src/electric.ts:722](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L722)
 
 Electric collection utilities type

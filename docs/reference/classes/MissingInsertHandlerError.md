@@ -3,8 +3,6 @@ id: MissingInsertHandlerError
 title: MissingInsertHandlerError
 ---
 
-# Class: MissingInsertHandlerError
-
 Defined in: [packages/db/src/errors.ts:273](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L273)
 
 ## Extends

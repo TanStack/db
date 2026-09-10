@@ -3,8 +3,6 @@ id: createArrayChangeProxy
 title: createArrayChangeProxy
 ---
 
-# Function: createArrayChangeProxy()
-
 ```ts
 function createArrayChangeProxy<T>(targets): object;
 ```

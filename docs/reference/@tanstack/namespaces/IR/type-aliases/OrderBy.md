@@ -3,8 +3,6 @@ id: OrderBy
 title: OrderBy
 ---
 
-# Type Alias: OrderBy
-
 ```ts
 type OrderBy = OrderByClause[];
 ```

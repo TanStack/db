@@ -3,8 +3,6 @@ id: UseLiveInfiniteQueryReturnWithCollection
 title: UseLiveInfiniteQueryReturnWithCollection
 ---
 
-# Interface: UseLiveInfiniteQueryReturnWithCollection\<TResult, TKey, TUtils\>
-
 Defined in: [useLiveInfiniteQuery.ts:78](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L78)
 
 ## Type Parameters

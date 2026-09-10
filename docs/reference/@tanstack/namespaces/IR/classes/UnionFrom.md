@@ -3,8 +3,6 @@ id: UnionFrom
 title: UnionFrom
 ---
 
-# Class: UnionFrom
-
 Defined in: [packages/db/src/query/ir.ts:113](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L113)
 
 ## Extends
