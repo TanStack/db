@@ -698,6 +698,9 @@ function createPowerSyncCollectionConfig<
             await Promise.all(appliedReceipts)
             if (isCurrent()) {
               reconciledTrackingRevision = revision
+              // Replacing the trigger alone is not recovery: its baseline
+              // writes must also be applied before the source is ready again.
+              if (collection.status === `error`) markReady()
             }
           }
         }

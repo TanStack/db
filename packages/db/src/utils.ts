@@ -39,9 +39,10 @@ function enumerableOwnKeys(value: object): Array<string | symbol> {
 }
 
 /**
- * Internal implementation with cycle detection to prevent infinite recursion
+ * Internal implementation with cycle detection to prevent infinite recursion.
+ * Internal callers can seed already-paired roots when comparing their children.
  */
-function deepEqualsInternal(
+export function deepEqualsInternal(
   a: any,
   b: any,
   visited: Map<object, object>,

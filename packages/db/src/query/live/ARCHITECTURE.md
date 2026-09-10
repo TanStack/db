@@ -810,6 +810,24 @@ cannot advance it merely by entering D2. This relies on the adapter fulfilling
 the exact ordered request, not just resolving after an arbitrary partial write.
 An empty range does not invent a boundary or prove source exhaustion.
 
+For no-index and multi-column prefix loading, an unrelated new key does not
+reacquire an already full window. An explicit window move, an underfilled
+window, or a settled prefix smaller than a window widened during that request
+still requires acquisition. A full local window alone does not prove that the
+provider fulfilled a concurrent window change.
+
+A successful larger prefix retires settled smaller prefix acquisitions from
+the same ordered source plan, after the replacement has applied. It does not
+retire cursor suffixes, ties, unfinished work, or another subscription's leases.
+Adapter eviction must still preserve rows owned by the replacement or peers.
+
+Automatic full-source repair after an established window fails can retry twice,
+after 250 ms and 500 ms. Every retry releases failed acquisitions before starting
+the replacement. It uses the same publication barrier; stale rows stay public
+and the last error stays observable if the budget is exhausted. Initial loads
+and explicit window failures do not auto-retry. Cleanup, truncate, and explicit
+retry supersede queued repair work. A successful repair resets the budget.
+
 An explicit window move counts current rows at or before that boundary in the
 requested prefix. It acquires only the missing portion, with both cursor and
 offset derived from that confirmed range, not from all observed rows. These

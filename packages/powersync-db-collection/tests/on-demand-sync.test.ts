@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { PowerSyncDatabase, Schema, Table, column } from '@powersync/node'
 import {
+  IR,
   and,
   createCollection,
   createLiveQueryCollection,
@@ -2212,6 +2213,12 @@ describe(`On-Demand Sync Mode`, () => {
   })
 
   describe(`Tracking lifecycle`, () => {
+    const categoryEquals = (category: string) =>
+      new IR.Func<boolean>(`eq`, [
+        new IR.PropRef([`category`]),
+        new IR.Value(category),
+      ])
+
     // The sync handler catches its own errors and surfaces them only through the
     // logger, so captured errors are how these tests assert it stayed healthy.
     function captureSyncErrors(db: PowerSyncDatabase) {
@@ -2309,13 +2316,13 @@ describe(`On-Demand Sync Mode`, () => {
 
       try {
         const provisional = loadSubset({
-          where: eq(`category`, `electronics`),
+          where: categoryEquals(`electronics`),
         })
         await vi.waitFor(() => expect(onLoadSubset).toHaveBeenCalledOnce())
         await expect(
-          loadSubset({ where: eq(`category`, `outdoors`) }),
+          loadSubset({ where: categoryEquals(`outdoors`) }),
         ).rejects.toBe(hookFailure)
-        await loadSubset({ where: eq(`category`, `clothing`) })
+        await loadSubset({ where: categoryEquals(`clothing`) })
 
         const when = createDiffTrigger.mock.calls.at(-1)?.[0].when
         expect(when?.INSERT).toContain(`clothing`)
@@ -2339,7 +2346,7 @@ describe(`On-Demand Sync Mode`, () => {
       })
       const controller = new AbortController()
       const request = {
-        where: eq(`category`, `electronics`),
+        where: categoryEquals(`electronics`),
         signal: controller.signal,
       }
 
@@ -2381,13 +2388,13 @@ describe(`On-Demand Sync Mode`, () => {
       let secondSettled = false
 
       const first = Promise.resolve(
-        loadSubset({ where: eq(`category`, `electronics`) }),
+        loadSubset({ where: categoryEquals(`electronics`) }),
       ).then(() => {
         firstSettled = true
       })
       await vi.waitFor(() => expect(locks).toHaveLength(1))
       const second = Promise.resolve(
-        loadSubset({ where: eq(`category`, `clothing`) }),
+        loadSubset({ where: categoryEquals(`clothing`) }),
       ).then(() => {
         secondSettled = true
       })
@@ -2439,7 +2446,7 @@ describe(`On-Demand Sync Mode`, () => {
         })
         const { sync, loadSubset } = startOnDemandSync(db, {}, { commit })
         const first = Promise.resolve(
-          loadSubset({ where: eq(`category`, `electronics`) }),
+          loadSubset({ where: categoryEquals(`electronics`) }),
         )
         let second: Promise<unknown> | undefined
         try {
@@ -2450,12 +2457,21 @@ describe(`On-Demand Sync Mode`, () => {
           applied.resolve()
           for (let i = 0; i < turn; i++) await Promise.resolve()
           second = Promise.resolve(
-            loadSubset({ where: eq(`category`, `clothing`) }),
+            loadSubset({ where: categoryEquals(`clothing`) }),
           )
           await second
           const when = createDiffTrigger.mock.calls.at(-1)?.[0].when
           expect(when?.INSERT).toContain(`electronics`)
           expect(when?.INSERT).toContain(`clothing`)
+          // Literal names in SQL are not proof of a working column filter.
+          // Execute the exact trigger clause against matching and excluded rows.
+          for (const category of [`electronics`, `clothing`, `outdoors`]) {
+            const row = await db.get<{ matches: number }>(
+              `SELECT CASE WHEN (${when!.INSERT}) THEN 1 ELSE 0 END AS matches FROM (SELECT ? AS data) AS NEW`,
+              [JSON.stringify({ category })],
+            )
+            expect(row.matches).toBe(category === `outdoors` ? 0 : 1)
+          }
           await first
         } finally {
           applied.resolve()
@@ -2481,13 +2497,13 @@ describe(`On-Demand Sync Mode`, () => {
         .mockResolvedValueOnce(currentDispose)
       const { sync, loadSubset } = startOnDemandSync(db)
       const first = Promise.resolve(
-        loadSubset({ where: eq(`category`, `electronics`) }),
+        loadSubset({ where: categoryEquals(`electronics`) }),
       )
 
       try {
         await triggerStarted.promise
         const second = Promise.resolve(
-          loadSubset({ where: eq(`category`, `clothing`) }),
+          loadSubset({ where: categoryEquals(`clothing`) }),
         )
         finishTrigger.resolve()
         await Promise.all([first, second])
@@ -2530,7 +2546,7 @@ describe(`On-Demand Sync Mode`, () => {
       )
       let settled = false
       const load = Promise.resolve(
-        loadSubset({ where: eq(`category`, `electronics`) }),
+        loadSubset({ where: categoryEquals(`electronics`) }),
       ).then(() => {
         settled = true
       })
@@ -2575,7 +2591,7 @@ describe(`On-Demand Sync Mode`, () => {
         .mockResolvedValue(vi.fn())
       const { sync, loadSubset } = startOnDemandSync(db)
 
-      const load = loadSubset({ where: eq(`category`, `electronics`) })
+      const load = loadSubset({ where: categoryEquals(`electronics`) })
       await lockQueued.promise
       sync.cleanup?.()
       await runLock()
@@ -2587,8 +2603,8 @@ describe(`On-Demand Sync Mode`, () => {
     it(`cleans each acquired subset at most once during reentrant cleanup`, async () => {
       const db = await createDatabase()
       vi.spyOn(db.triggers, `createDiffTrigger`).mockResolvedValue(vi.fn())
-      const first = { where: eq(`category`, `electronics`) }
-      const second = { where: eq(`category`, `clothing`) }
+      const first = { where: categoryEquals(`electronics`) }
+      const second = { where: categoryEquals(`clothing`) }
       const firstCleanup = vi.fn()
       const secondCleanup = vi.fn(() => started.unloadSubset(first))
       const onLoadSubset = vi.fn((options: LoadSubsetOptions) =>
@@ -2607,8 +2623,8 @@ describe(`On-Demand Sync Mode`, () => {
       const db = await createDatabase()
       vi.spyOn(db.triggers, `createDiffTrigger`).mockResolvedValue(vi.fn())
       const getAll = vi.spyOn(db, `getAll`).mockResolvedValue([])
-      const first = { where: eq(`category`, `electronics`) }
-      const second = { where: eq(`category`, `clothing`) }
+      const first = { where: categoryEquals(`electronics`) }
+      const second = { where: categoryEquals(`clothing`) }
       const onLoadSubset = vi.fn((options: LoadSubsetOptions) =>
         options === first ? () => started.unloadSubset(second) : undefined,
       )
@@ -2738,7 +2754,7 @@ describe(`On-Demand Sync Mode`, () => {
       const failure = new Error(`trigger installation failed`)
       try {
         await collection._sync.loadSubset({
-          where: eq(`category`, `electronics`),
+          where: categoryEquals(`electronics`),
         })
         expect(collection.status).toBe(`ready`)
         vi.spyOn(db.triggers, `createDiffTrigger`).mockRejectedValueOnce(
@@ -2746,12 +2762,55 @@ describe(`On-Demand Sync Mode`, () => {
         )
         await expect(
           Promise.resolve(
-            collection._sync.loadSubset({ where: eq(`category`, `clothing`) }),
+            collection._sync.loadSubset({ where: categoryEquals(`clothing`) }),
           ),
         ).rejects.toBe(failure)
         expect(collection.status).toBe(`error`)
       } finally {
         await collection.cleanup()
+      }
+    })
+
+    it(`does not silently stay errored after a release rebuild retries successfully`, async () => {
+      vi.useFakeTimers()
+      const db = await createDatabase()
+      await db.execute(
+        `INSERT INTO products (id, name, price, category) VALUES ('retained', 'Before', 10, 'clothing')`,
+      )
+      vi.spyOn(db.logger, `error`).mockImplementation(() => {})
+      const collection = createCollection(
+        powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.products,
+          syncMode: `on-demand`,
+        }),
+      )
+      const first = { where: categoryEquals(`electronics`) }
+      const second = { where: categoryEquals(`clothing`) }
+      try {
+        await collection._sync.loadSubset(first)
+        await collection._sync.loadSubset(second)
+        const trigger = vi
+          .spyOn(db.triggers, `createDiffTrigger`)
+          .mockRejectedValueOnce(new Error(`release rebuild failed`))
+        collection._sync.unloadSubset(first)
+        await vi.waitFor(() => expect(collection.status).toBe(`error`))
+        await vi.advanceTimersByTimeAsync(1_000)
+        await vi.waitFor(() =>
+          expect(trigger.mock.calls.length).toBeGreaterThan(1),
+        )
+        await vi.waitFor(() => expect(collection.status).toBe(`ready`))
+        expect(collection.get(`retained`)?.name).toBe(`Before`)
+        await db.execute(
+          `UPDATE products SET name = 'After' WHERE id = 'retained'`,
+        )
+        await vi.waitFor(() =>
+          expect(collection.get(`retained`)?.name).toBe(`After`),
+        )
+      } finally {
+        await collection.cleanup()
+        await vi.runOnlyPendingTimersAsync()
+        vi.useRealTimers()
       }
     })
 
@@ -2765,7 +2824,7 @@ describe(`On-Demand Sync Mode`, () => {
         .mockRejectedValueOnce(new Error(`transient eviction failure`))
         .mockResolvedValueOnce([])
       const { sync, loadSubset, unloadSubset } = startOnDemandSync(db)
-      const request = { where: eq(`category`, `electronics`) }
+      const request = { where: categoryEquals(`electronics`) }
 
       try {
         await loadSubset(request)
@@ -2793,8 +2852,8 @@ describe(`On-Demand Sync Mode`, () => {
             : Promise.resolve([]),
         )
       const { sync, loadSubset, unloadSubset } = startOnDemandSync(db)
-      const failing = { where: eq(`category`, `electronics`) }
-      const succeeding = { where: eq(`category`, `clothing`) }
+      const failing = { where: categoryEquals(`electronics`) }
+      const succeeding = { where: categoryEquals(`clothing`) }
 
       try {
         await Promise.all([loadSubset(failing), loadSubset(succeeding)])
@@ -2829,8 +2888,8 @@ describe(`On-Demand Sync Mode`, () => {
             : Promise.resolve([]),
         )
       const { sync, loadSubset, unloadSubset } = startOnDemandSync(db)
-      const first = { where: eq(`category`, `electronics`) }
-      const second = { where: eq(`category`, `clothing`) }
+      const first = { where: categoryEquals(`electronics`) }
+      const second = { where: categoryEquals(`clothing`) }
       try {
         await Promise.all([loadSubset(first), loadSubset(second)])
         unloadSubset(first)
@@ -2865,14 +2924,14 @@ describe(`On-Demand Sync Mode`, () => {
         {},
         { write },
       )
-      const departing = { where: eq(`category`, `electronics`) }
+      const departing = { where: categoryEquals(`electronics`) }
 
       try {
         await loadSubset(departing)
         unloadSubset(departing)
         await vi.waitFor(() => expect(getAll).toHaveBeenCalledOnce())
 
-        await loadSubset({ where: eq(`category`, `clothing`) })
+        await loadSubset({ where: categoryEquals(`clothing`) })
         firstEviction.resolve([{ id: `now-owned` }])
 
         await vi.waitFor(() => expect(getAll).toHaveBeenCalledTimes(2))

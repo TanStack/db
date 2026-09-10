@@ -1744,6 +1744,101 @@ describe(`persistedCollectionOptions`, () => {
     expect(collection.get(`2`)).toBeUndefined()
   })
 
+  it.each(
+    [false, true].flatMap((sharedSubscription) =>
+      [false, true].map((identical) => ({ sharedSubscription, identical })),
+    ),
+  )(
+    `keeps sibling requests owned after one release: %j`,
+    async ({ sharedSubscription, identical }) => {
+      const adapter = createRecordingAdapter([{ id: `1`, title: `Before` }])
+      const coordinator = createCoordinatorHarness()
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `sync-present`,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      collection.startSyncImmediate()
+      const subscription = collection.subscribeChanges(() => {})
+      const owner = sharedSubscription ? { subscription } : {}
+      const page: LoadSubsetOptions = {
+        ...owner,
+        ...(identical ? {} : { limit: 1 }),
+      }
+      const all: LoadSubsetOptions = { ...owner }
+      try {
+        await collection._sync.loadSubset(page)
+        await collection._sync.loadSubset(all)
+        collection._sync.unloadSubset(page)
+        coordinator.emit({
+          type: `tx:committed`,
+          term: 1,
+          seq: 1,
+          txId: `sibling-update`,
+          latestRowVersion: 1,
+          requiresFullReload: false,
+          changedRows: [{ key: `1`, value: { id: `1`, title: `After` } }],
+          deletedKeys: [],
+        })
+        await flushAsyncWork()
+        expect(stripVirtualProps(collection.get(`1`))).toEqual({
+          id: `1`,
+          title: `After`,
+        })
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it(`reports a non-abort upstream failure rather than treating hydration as remote success`, async () => {
+    const failure = new Error(`remote acquisition failed`)
+    const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `remote-acquisition-failure`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => Promise.reject(failure),
+            }
+          },
+        },
+        persistence: {
+          adapter: createRecordingAdapter([
+            { id: `cached`, title: `Last known row` },
+          ]),
+        },
+      }),
+    )
+    collection.startSyncImmediate()
+    try {
+      await expect(
+        Promise.resolve(collection._sync.loadSubset({})),
+      ).rejects.toBe(failure)
+      expect(stripVirtualProps(collection.get(`cached`))).toEqual({
+        id: `cached`,
+        title: `Last known row`,
+      })
+    } finally {
+      warn.mockRestore()
+      await collection.cleanup()
+    }
+  })
+
   it(`does not release or acquire an upstream lease cancelled during hydration`, async () => {
     const adapter = createRecordingAdapter()
     const hydrate = adapter.loadSubset
@@ -1861,7 +1956,7 @@ describe(`persistedCollectionOptions`, () => {
         const callsBeforeRetry = ensure.mock.calls.length
         await vi.advanceTimersByTimeAsync(200)
         if (action === `offline`) {
-          expect(result).toBe(`ready`)
+          expect(result).toBe(failure)
           expect(ensure.mock.calls.length).toBeGreaterThan(callsBeforeRetry)
         } else {
           if (action === `abort`) expect(result).toBe(failure)

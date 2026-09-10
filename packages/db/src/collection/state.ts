@@ -518,6 +518,15 @@ export class CollectionStateManager<
           if (!this.isThisCollection(mutation.collection)) {
             continue
           }
+          // A truncate/immediate sync can acknowledge an insert before its
+          // persistence callback settles. Do not resurrect that client row.
+          if (
+            isDirectTransaction &&
+            mutation.type === `insert` &&
+            this.syncedData.has(mutation.key)
+          ) {
+            continue
+          }
           this.pendingLocalOrigins.add(mutation.key)
           if (!mutation.optimistic) {
             continue

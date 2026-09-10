@@ -35,7 +35,10 @@ export class OrderedSourceLoader {
   private fullSource: `none` | `held` | `complete` | `failed` = `none`
   // Keep callbacks, not copied requests or rows. Successful full-source work
   // subsumes these logical owners; unfinished transports remain observed.
-  private settledFiniteAcquisitions = new Set<ReleaseLoadSubset>()
+  private settledFiniteAcquisitions = new Map<
+    ReleaseLoadSubset,
+    number | undefined
+  >()
   // The record's presence blocks automatic retry, including initial requests
   // that have no explicit window-operation generation.
   private failedRequest:
@@ -47,6 +50,8 @@ export class OrderedSourceLoader {
   private lastPage: { count: number; boundary: unknown } | undefined
   private lastPrefixCount: number | undefined
   private lastBoundary: unknown
+  private repairRetries = 0
+  private repairTimer: ReturnType<typeof setTimeout> | undefined
 
   constructor(
     private readonly info: OrderByOptimizationInfo,
@@ -56,6 +61,7 @@ export class OrderedSourceLoader {
       result: LoadSubsetRequestResult,
       holdPublication: boolean,
     ) => void = () => {},
+    private readonly canRetryRepair: () => boolean = () => false,
   ) {
     this.info.isRequesting = () => this.requesting
   }
@@ -111,24 +117,17 @@ export class OrderedSourceLoader {
       (this.failedRequest || this.failedAcquisitions.size > 0) &&
       windowOperationGeneration !== undefined
     ) {
+      this.cancelRepairRetry()
+      this.repairRetries = 0
       // Move ownership to the explicit replacement before releasing the old
       // lease. Adapter cleanup may reenter the loader.
       if (this.failedRequest) {
         this.failedRequest.windowOperationGeneration = windowOperationGeneration
       }
-      const failedAcquisitions = this.failedAcquisitions
-      this.failedAcquisitions = new Map()
-      if (failedAcquisitions.size > 0) {
-        this.requesting = true
-        try {
-          runAllCallbacks(failedAcquisitions.keys())
-        } finally {
-          this.requesting = false
-        }
-        // Adapter cleanup can synchronously tear down this loader.
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-        if (!this.active) return
-      }
+      this.releaseFailedAcquisitions()
+      // Adapter cleanup can synchronously tear down this loader.
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      if (!this.active) return
     }
     if (this.fullSource === `failed`) this.fullSource = `none`
     else if (this.fullSource !== `none`) return this.pending
@@ -137,10 +136,17 @@ export class OrderedSourceLoader {
       return this.pending
     }
     if (!this.info.index || this.info.orderBy.length !== 1) {
-      this.loadPrefix(
-        this.info.offset + this.info.limit,
-        windowOperationGeneration,
-      )
+      if (
+        windowOperationGeneration !== undefined ||
+        (this.info.dataNeeded?.() ?? 0) > 0 ||
+        (this.lastPrefixCount !== undefined &&
+          this.lastPrefixCount < this.info.offset + this.info.limit)
+      ) {
+        this.loadPrefix(
+          this.info.offset + this.info.limit,
+          windowOperationGeneration,
+        )
+      }
       return this.pending
     }
     if (!this.info.dataNeeded || this.pending) return this.pending
@@ -202,6 +208,8 @@ export class OrderedSourceLoader {
   }
 
   resetCursor(): void {
+    this.cancelRepairRetry()
+    this.repairRetries = 0
     this.generation++
     if (this.fullSource === `complete`) this.fullSource = `held`
     this.pending = undefined
@@ -226,16 +234,27 @@ export class OrderedSourceLoader {
     }
   }
 
-  private retireSettledFiniteAcquisitions(): void {
+  private retireSettledFiniteAcquisitions(prefix?: {
+    release: ReleaseLoadSubset
+    count: number
+  }): void {
     if (
-      this.fullSource !== `complete` ||
+      (this.fullSource !== `complete` && !prefix) ||
       this.subscription.hasPendingTruncateReplacement
     )
       return
     const generation = this.generation
     runAllCallbacks(
-      Array.from(this.settledFiniteAcquisitions, (release) => () => {
+      Array.from(this.settledFiniteAcquisitions, ([release, count]) => () => {
         if (!this.active || generation !== this.generation) return
+        if (
+          this.fullSource !== `complete` &&
+          (!prefix ||
+            release === prefix.release ||
+            count === undefined ||
+            count > prefix.count)
+        )
+          return
         this.settledFiniteAcquisitions.delete(release)
         release()
       }),
@@ -324,6 +343,11 @@ export class OrderedSourceLoader {
     options?: LoadSubsetOptions,
   ): Promise<void> {
     const isFullSource = kind === `full-source`
+    const retryRepair =
+      isFullSource &&
+      this.hasSettledSourceRequest &&
+      this.needsFullSourceRecovery &&
+      windowOperationGeneration === undefined
     const generation = this.generation
     const complete = (): void => {
       if (this.pending === tracked) this.pending = undefined
@@ -331,8 +355,16 @@ export class OrderedSourceLoader {
       if (!isFullSource) {
         // A replay can replace the physical lease while this older transport
         // finishes. Retire its logical owner only outside the replay barrier.
-        this.settledFiniteAcquisitions.add(releaseAcquisition)
+        const prefixCount =
+          options?.orderBy && !options.cursor ? options.limit : undefined
+        this.settledFiniteAcquisitions.set(releaseAcquisition, prefixCount)
         this.retireSettledFiniteAcquisitions()
+        if (generation === this.generation && prefixCount !== undefined) {
+          this.retireSettledFiniteAcquisitions({
+            release: releaseAcquisition,
+            count: prefixCount,
+          })
+        }
       }
       if (generation !== this.generation) return
       // A finite request may finish behind an authoritative repair. It cannot
@@ -357,6 +389,8 @@ export class OrderedSourceLoader {
         }
       }
       if (isFullSource) {
+        this.cancelRepairRetry()
+        this.repairRetries = 0
         this.needsFullSourceRecovery = false
         this.fullSource = `complete`
         this.retireSettledFiniteAcquisitions()
@@ -385,6 +419,7 @@ export class OrderedSourceLoader {
       if (isFullSource) this.fullSource = `failed`
       this.recordRequestFailure(windowOperationGeneration)
       this.failedAcquisitions.set(releaseAcquisition, kind)
+      if (retryRepair) this.scheduleRepairRetry()
       throw error
     }
     const tracked = request.then(complete, fail)
@@ -440,6 +475,64 @@ export class OrderedSourceLoader {
     this.needsFullSourceRecovery = true
   }
 
+  private cancelRepairRetry(): void {
+    clearTimeout(this.repairTimer)
+    this.repairTimer = undefined
+  }
+
+  private releaseFailedAcquisitions(): void {
+    const failed = this.failedAcquisitions
+    this.failedAcquisitions = new Map()
+    this.requesting = true
+    try {
+      runAllCallbacks(failed.keys())
+    } finally {
+      this.requesting = false
+    }
+  }
+
+  private scheduleRepairRetry(): void {
+    if (
+      !this.active ||
+      !this.canRetryRepair() ||
+      this.repairTimer !== undefined ||
+      this.repairRetries >= 2
+    )
+      return
+    const generation = this.generation
+    const failedRequest = this.failedRequest
+    this.repairTimer = setTimeout(
+      () => {
+        this.repairTimer = undefined
+        const retry = Promise.resolve().then(() => {
+          if (
+            !this.active ||
+            !this.canRetryRepair() ||
+            generation !== this.generation ||
+            this.failedRequest !== failedRequest ||
+            this.failedRequest?.windowOperationGeneration !== undefined
+          )
+            return
+          this.releaseFailedAcquisitions()
+          // Release may dispose or start a new replay; neither belongs to this retry.
+          if (
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- release callbacks can dispose the loader
+            !this.active ||
+            generation !== this.generation ||
+            this.subscription.hasPendingTruncateReplacement
+          )
+            return
+          this.failedRequest = undefined
+          this.fullSource = `none`
+          this.loadFullSource()
+        })
+        void retry.catch(() => {})
+        this.onResult(retry, true)
+      },
+      250 * 2 ** this.repairRetries++,
+    )
+  }
+
   private failRequest(
     observed:
       | {
@@ -464,6 +557,13 @@ export class OrderedSourceLoader {
       observed?.release({ error })
     } catch {
       // Cleanup is attempted once and must not replace the request failure.
+    }
+    if (
+      isFullSource &&
+      this.hasSettledSourceRequest &&
+      windowOperationGeneration === undefined
+    ) {
+      this.scheduleRepairRetry()
     }
     return error
   }
@@ -519,13 +619,21 @@ export class OrderedSourceLoader {
       // Keep refinement blocked until failure and release finish unwinding.
       this.requesting = true
       try {
-        throw this.failRequest(
+        const failure = this.failRequest(
           observed,
           normalizeError(error),
           isFullSource,
           windowOperationGeneration,
           observing,
         )
+        if (!observing && isFullSource && this.hasSettledSourceRequest) {
+          // A synchronous repair failure has no transport promise, but must
+          // still close publication before the triggering graph turn returns.
+          const rejected = Promise.reject(failure)
+          void rejected.catch(() => {})
+          this.onResult(rejected, true)
+        }
+        throw failure
       } finally {
         this.requesting = false
       }

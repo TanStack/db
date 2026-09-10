@@ -3,7 +3,7 @@
  * and provides a way to retrieve those changes.
  */
 
-import { deepEquals, isTemporal } from './utils'
+import { deepEquals, deepEqualsInternal, isTemporal } from './utils'
 
 // Resolve draft handles before calling native Map/Set membership methods.
 const draftCopies = new WeakMap<object, object>()
@@ -343,7 +343,10 @@ interface ChangeTracker<T extends object> {
 function deepClone<T extends unknown>(
   obj: T,
   visited = new WeakMap<object, unknown>(),
+  detach = false,
 ): T {
+  // A draft handle and its underlying copy must share one cycle identity.
+  obj = unwrapDraft(obj) as T
   // Handle null and undefined
   if (obj === null || obj === undefined) {
     return obj
@@ -360,18 +363,29 @@ function deepClone<T extends unknown>(
   }
 
   if (obj instanceof Date) {
-    return new Date(obj.getTime()) as unknown as T
+    const clone = new Date(obj.getTime())
+    visited.set(obj, clone)
+    return clone as T
   }
 
   if (obj instanceof RegExp) {
-    return new RegExp(obj.source, obj.flags) as unknown as T
+    const clone = new RegExp(obj.source, obj.flags)
+    clone.lastIndex = obj.lastIndex
+    visited.set(obj, clone)
+    return clone as T
+  }
+
+  if (obj instanceof URL) {
+    const clone = new URL(obj.href)
+    visited.set(obj, clone)
+    return clone as T
   }
 
   if (Array.isArray(obj)) {
     const arrayClone = [] as Array<unknown>
     visited.set(obj as object, arrayClone)
     obj.forEach((item, index) => {
-      arrayClone[index] = deepClone(item, visited)
+      arrayClone[index] = deepClone(item, visited, detach)
     })
     return arrayClone as unknown as T
   }
@@ -397,7 +411,7 @@ function deepClone<T extends unknown>(
     const clone = new Map() as Map<unknown, unknown>
     visited.set(obj as object, clone)
     obj.forEach((value, key) => {
-      clone.set(key, deepClone(value, visited))
+      clone.set(key, deepClone(value, visited, detach))
     })
     return clone as unknown as T
   }
@@ -406,7 +420,7 @@ function deepClone<T extends unknown>(
     const clone = new Set()
     visited.set(obj as object, clone)
     obj.forEach((value) => {
-      clone.add(deepClone(value, visited))
+      clone.add(deepClone(value, visited, detach))
     })
     return clone as unknown as T
   }
@@ -418,6 +432,13 @@ function deepClone<T extends unknown>(
     return obj
   }
 
+  // Arbitrary instances may carry private/native state we cannot reconstruct.
+  // Keep them by reference at publication, rather than silently flattening them.
+  if (detach) {
+    const prototype = Object.getPrototypeOf(obj)
+    if (prototype !== Object.prototype && prototype !== null) return obj
+  }
+
   const clone = {} as Record<string | symbol, unknown>
   visited.set(obj as object, clone)
 
@@ -426,6 +447,7 @@ function deepClone<T extends unknown>(
       clone[key] = deepClone(
         (obj as Record<string | symbol, unknown>)[key],
         visited,
+        detach,
       )
     }
   }
@@ -435,6 +457,7 @@ function deepClone<T extends unknown>(
     clone[sym] = deepClone(
       (obj as Record<string | symbol, unknown>)[sym],
       visited,
+      detach,
     )
   }
 
@@ -897,20 +920,23 @@ export function createChangeProxy<
       const mayHaveChangedAliases = Object.keys(changeTracker.assigned_).some(
         (key) => typeof changeTracker.copy_[key] === `object`,
       )
+      const pairedRoots = new Map<object, object>([
+        [changeTracker.copy_, changeTracker.originalObject],
+      ])
 
       // Iterate through keys in keyObj
       for (const key in changeTracker.copy_) {
         const value: unknown = changeTracker.copy_[key]
         const original: unknown = changeTracker.originalObject[key]
-        // Include sibling aliases changed through another route. An untouched
-        // link back to this row does not add a field to its sparse change set.
+        // Compare child contents, stopping only at paired root backedges. A
+        // child's own changes still count even when it also points to this row.
         if (
           (changeTracker.assigned_[key] === true ||
             (mayHaveChangedAliases &&
-              changeTracker.copy_[key] !== changeTracker.copy_ &&
-              !deepEquals(
+              !deepEqualsInternal(
                 value instanceof Set ? Array.from(value) : value,
                 original instanceof Set ? Array.from(original) : original,
+                pairedRoots,
               ))) &&
           key in changeTracker.copy_
         ) {
@@ -959,7 +985,7 @@ export function withChangeTracking<T extends object>(
 
   callback(proxy)
 
-  return deepClone(getChanges())
+  return deepClone(getChanges(), undefined, true)
 }
 
 /**
@@ -978,5 +1004,5 @@ export function withArrayChangeTracking<T extends object>(
 
   callback(proxies)
 
-  return deepClone(getChanges())
+  return deepClone(getChanges(), undefined, true)
 }

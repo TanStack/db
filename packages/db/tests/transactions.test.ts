@@ -2,14 +2,69 @@ import { describe, expect, it } from 'vitest'
 import { DbClient, collectionOptions } from '../src/client.js'
 import { createTransaction } from '../src/transactions'
 import { createCollection } from '../src/collection/index.js'
+import { createDeferred } from '../src/deferred.js'
 import {
   MissingMutationFunctionError,
   TransactionAlreadyCompletedRollbackError,
   TransactionNotPendingCommitError,
   TransactionNotPendingMutateError,
 } from '../src/errors'
+import { flushPromises } from './utils.js'
+import type { SyncConfig } from '../src/types.js'
 
 describe(`Transactions`, () => {
+  it(`settles persistence and reports a listener error while draining its parked echo`, async () => {
+    type Row = { id: number; value: string }
+    let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
+    const gate = createDeferred<void>()
+    const collection = createCollection<Row, number>({
+      getKey: (row) => row.id,
+      startSync: true,
+      sync: {
+        sync: (operations) => {
+          sync = operations
+          sync.markReady()
+        },
+      },
+    })
+    const tx = createTransaction({
+      autoCommit: false,
+      mutationFn: () => gate.promise,
+    })
+    const failure = new Error(`echo listener failed`)
+    const subscription = collection.subscribeChanges((batch) => {
+      if (batch.some((change) => change.value.value === `server`)) throw failure
+    })
+    let persisted = false
+    const receipt = tx.isPersisted.promise.then(
+      () => {
+        persisted = true
+      },
+      () => {},
+    )
+    try {
+      tx.mutate(() => collection.insert({ id: 1, value: `client` }))
+      const outcome = tx.commit().then(
+        () => ({ ok: true as const }),
+        (error: unknown) => ({ ok: false as const, error }),
+      )
+      sync.begin()
+      sync.write({ type: `insert`, value: { id: 1, value: `server` } })
+      const echo = sync.commit()
+      if (echo !== true) void echo.catch(() => {})
+      gate.resolve()
+      const result = await outcome
+      await flushPromises()
+      expect.soft(result).toEqual({ ok: false, error: failure })
+      expect.soft(tx.state).toBe(`completed`)
+      expect(persisted).toBe(true)
+      await receipt
+    } finally {
+      subscription.unsubscribe()
+      gate.resolve()
+      await collection.cleanup()
+    }
+  })
   it.each([
     {
       name: `Error`,

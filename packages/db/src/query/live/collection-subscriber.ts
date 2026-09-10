@@ -353,6 +353,9 @@ export class CollectionSubscriber<
         }
         onLoadSubsetResult(result)
       },
+      () =>
+        this.collectionConfigBuilder.liveQueryCollection?.status === `ready` &&
+        !this.collectionConfigBuilder.hasActiveWindowOperation(),
     )
     this.orderedLoader.start()
 
