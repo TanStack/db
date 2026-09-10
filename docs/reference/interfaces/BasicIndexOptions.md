@@ -5,7 +5,7 @@ title: BasicIndexOptions
 
 # Interface: BasicIndexOptions
 
-Defined in: [packages/db/src/indexes/basic-index.ts:28](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/basic-index.ts#L28)
+Defined in: [packages/db/src/indexes/basic-index.ts:30](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/basic-index.ts#L30)
 
 Options for Basic index
 
@@ -17,7 +17,7 @@ Options for Basic index
 optional compareFn: (a, b) => number;
 ```
 
-Defined in: [packages/db/src/indexes/basic-index.ts:29](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/basic-index.ts#L29)
+Defined in: [packages/db/src/indexes/basic-index.ts:31](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/basic-index.ts#L31)
 
 #### Parameters
 
@@ -41,4 +41,4 @@ Defined in: [packages/db/src/indexes/basic-index.ts:29](https://github.com/TanSt
 optional compareOptions: CompareOptions;
 ```
 
-Defined in: [packages/db/src/indexes/basic-index.ts:30](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/basic-index.ts#L30)
+Defined in: [packages/db/src/indexes/basic-index.ts:32](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/basic-index.ts#L32)

@@ -1,43 +1,37 @@
 ---
-id: QueryOptimizerError
-title: QueryOptimizerError
+id: LoadSubsetOperationAbortedError
+title: LoadSubsetOperationAbortedError
 ---
 
-# Class: QueryOptimizerError
+# Class: LoadSubsetOperationAbortedError
 
-Defined in: [packages/db/src/errors.ts:757](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L757)
+Defined in: [packages/db/src/errors.ts:749](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L749)
+
+A subset operation was canceled before its result became visible.
 
 ## Extends
 
-- [`TanStackDBError`](TanStackDBError.md)
-
-## Extended by
-
-- [`CannotCombineEmptyExpressionListError`](CannotCombineEmptyExpressionListError.md)
+- `Error`
 
 ## Constructors
 
 ### Constructor
 
 ```ts
-new QueryOptimizerError(message): QueryOptimizerError;
+new LoadSubsetOperationAbortedError(): LoadSubsetOperationAbortedError;
 ```
 
-Defined in: [packages/db/src/errors.ts:758](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L758)
-
-#### Parameters
-
-##### message
-
-`string`
+Defined in: [packages/db/src/errors.ts:750](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L750)
 
 #### Returns
 
-`QueryOptimizerError`
+`LoadSubsetOperationAbortedError`
 
 #### Overrides
 
-[`TanStackDBError`](TanStackDBError.md).[`constructor`](TanStackDBError.md#constructor)
+```ts
+Error.constructor
+```
 
 ## Properties
 
@@ -51,7 +45,9 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`TanStackDBError`](TanStackDBError.md).[`cause`](TanStackDBError.md#cause)
+```ts
+Error.cause
+```
 
 ***
 
@@ -65,7 +61,9 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`TanStackDBError`](TanStackDBError.md).[`message`](TanStackDBError.md#message)
+```ts
+Error.message
+```
 
 ***
 
@@ -79,7 +77,9 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`TanStackDBError`](TanStackDBError.md).[`name`](TanStackDBError.md#name)
+```ts
+Error.name
+```
 
 ***
 
@@ -93,7 +93,9 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`TanStackDBError`](TanStackDBError.md).[`stack`](TanStackDBError.md#stack)
+```ts
+Error.stack
+```
 
 ***
 
@@ -117,7 +119,9 @@ not capture any frames.
 
 #### Inherited from
 
-[`TanStackDBError`](TanStackDBError.md).[`stackTraceLimit`](TanStackDBError.md#stacktracelimit)
+```ts
+Error.stackTraceLimit
+```
 
 ## Methods
 
@@ -189,7 +193,9 @@ a();
 
 #### Inherited from
 
-[`TanStackDBError`](TanStackDBError.md).[`captureStackTrace`](TanStackDBError.md#capturestacktrace)
+```ts
+Error.captureStackTrace
+```
 
 ***
 
@@ -221,4 +227,6 @@ https://v8.dev/docs/stack-trace-api#customizing-stack-traces
 
 #### Inherited from
 
-[`TanStackDBError`](TanStackDBError.md).[`prepareStackTrace`](TanStackDBError.md#preparestacktrace)
+```ts
+Error.prepareStackTrace
+```

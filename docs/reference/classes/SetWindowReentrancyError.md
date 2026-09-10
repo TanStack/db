@@ -1,39 +1,31 @@
 ---
-id: QueryOptimizerError
-title: QueryOptimizerError
+id: SetWindowReentrancyError
+title: SetWindowReentrancyError
 ---
 
-# Class: QueryOptimizerError
+# Class: SetWindowReentrancyError
 
-Defined in: [packages/db/src/errors.ts:757](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L757)
+Defined in: [packages/db/src/errors.ts:796](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L796)
+
+Error thrown when setWindow is called from inside another setWindow call.
 
 ## Extends
 
 - [`TanStackDBError`](TanStackDBError.md)
-
-## Extended by
-
-- [`CannotCombineEmptyExpressionListError`](CannotCombineEmptyExpressionListError.md)
 
 ## Constructors
 
 ### Constructor
 
 ```ts
-new QueryOptimizerError(message): QueryOptimizerError;
+new SetWindowReentrancyError(): SetWindowReentrancyError;
 ```
 
-Defined in: [packages/db/src/errors.ts:758](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L758)
-
-#### Parameters
-
-##### message
-
-`string`
+Defined in: [packages/db/src/errors.ts:797](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L797)
 
 #### Returns
 
-`QueryOptimizerError`
+`SetWindowReentrancyError`
 
 #### Overrides
 

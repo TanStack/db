@@ -50,6 +50,7 @@ title: IR
 - [collectCollectionSources](functions/collectCollectionSources.md)
 - [createResidualWhere](functions/createResidualWhere.md)
 - [followRef](functions/followRef.md)
+- [getFromSources](functions/getFromSources.md)
 - [getHavingExpression](functions/getHavingExpression.md)
 - [getWhereExpression](functions/getWhereExpression.md)
 - [isExpressionLike](functions/isExpressionLike.md)
