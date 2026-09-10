@@ -1,5 +1,16 @@
 # shopping-list-react-native
 
+## 1.0.7
+
+### Patch Changes
+
+- Updated dependencies [[`cfb01ce`](https://github.com/TanStack/db/commit/cfb01cee34de7d0378e008dc8c01c1df5253c1e2)]:
+  - @tanstack/db@0.9.0
+  - @tanstack/electric-db-collection@0.4.8
+  - @tanstack/offline-transactions@1.0.54
+  - @tanstack/react-db@0.3.8
+  - @tanstack/react-native-db-sqlite-persistence@0.2.21
+
 ## 1.0.6
 
 ### Patch Changes
