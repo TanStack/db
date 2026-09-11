@@ -1058,7 +1058,14 @@ export class CollectionConfigBuilder<
         facadePublication.prepare()
         if (hasParentChanges) {
           begin()
-          changesToApply.forEach(this.applyChanges.bind(this, config))
+          let lookup: ((key: string | number) => boolean) | undefined
+          const hasSyncedKey = (key: string | number) => {
+            lookup ??= config.collection._state.createSyncedKeyLookup()
+            return lookup(key)
+          }
+          changesToApply.forEach(
+            this.applyChanges.bind(this, config, hasSyncedKey),
+          )
           if (hasOrderOnlyMove(changesToApply)) {
             markLayoutChange(config.collection)
           }
@@ -1097,6 +1104,7 @@ export class CollectionConfigBuilder<
 
   private applyChanges(
     config: SyncMethods<TResult>,
+    hasSyncedKey: (key: string | number) => boolean,
     changes: {
       deletes: number
       inserts: number
@@ -1126,9 +1134,9 @@ export class CollectionConfigBuilder<
     } else if (
       // Insert & update(s) (updates are a delete & insert)
       inserts > deletes ||
-      // Just update(s) but the item is already in the collection (so
-      // was inserted previously).
-      (inserts === deletes && collection.has(collection.getKeyFromItem(value)))
+      // A balanced delta updates an existing authoritative row, even if an
+      // optimistic delete hides it or its earlier insert is still queued.
+      (inserts === deletes && hasSyncedKey(collection.getKeyFromItem(value)))
     ) {
       write({
         value,

@@ -175,10 +175,6 @@ export class CollectionSyncManager<
               key = this.config.getKey(messageWithOptionalKey.value)
             }
 
-            if (this.state.pendingLocalChanges.has(key)) {
-              this.state.pendingLocalOrigins.add(key)
-            }
-
             let messageType = messageWithOptionalKey.type
 
             // Check if an item with this key already exists when inserting
