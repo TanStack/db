@@ -590,6 +590,53 @@ const mustRefetch: Message<OracleRow> = {
   headers: { control: `must-refetch` },
 }
 
+async function checkInitialMoveOut(
+  syncMode: ElectricSyncMode,
+  removals: number,
+  id: number,
+  updated: string,
+) {
+  const inserted = change(`insert`, id, `snapshot`)
+  const initial: Array<Message<OracleRow>> = [
+    { ...inserted, headers: { ...inserted.headers, tags: [`left`] } },
+    ...Array.from(
+      { length: removals },
+      () =>
+        ({
+          headers: {
+            event: `move-out`,
+            patterns: [{ pos: 0, value: `left` }],
+          },
+        }) as Message<OracleRow>,
+    ),
+    upToDate,
+  ]
+  // The contract is a tagged relation: removing its only tag removes the row.
+  // Completing that snapshot must not affect later, unrelated live updates.
+  const initialRows: TraceResult[`rows`] =
+    removals === 0 ? [[id, `snapshot`, `stable-${id}`]] : []
+  for (const partition of everyContiguousPartition(initial)) {
+    const result = await runTrace(
+      `initial-move-out-${syncMode}`,
+      syncMode,
+      partition,
+      [
+        [change(`insert`, id + 1, `live`), upToDate],
+        [change(`update`, id + 1, updated), upToDate],
+      ],
+    )
+    expect(result.snapshots).toEqual([
+      [...initialRows, [id + 1, `live`, `stable-${id + 1}`]].sort(
+        ([left], [right]) => String(left).localeCompare(String(right)),
+      ),
+      [...initialRows, [id + 1, updated, `stable-${id + 1}`]].sort(
+        ([left], [right]) => String(left).localeCompare(String(right)),
+      ),
+    ])
+    expect(result.status).toBe(`ready`)
+  }
+}
+
 type PartitionScenario = {
   name: string
   prefix: Array<Array<Message<OracleRow>>>
@@ -1269,6 +1316,32 @@ describe(`Electric adapter laws`, () => {
     mockStream.shapeHandle = `shape-current`
     mockStream.lastOffset = `20_0`
   })
+
+  it.each(
+    ([`eager`, `on-demand`, `progressive`] as const).flatMap((syncMode) =>
+      [0, 1, 2].map((removals) => ({ syncMode, removals })),
+    ),
+  )(
+    `preserves live updates after $removals initial tagged move-outs in $syncMode mode`,
+    ({ syncMode, removals }) =>
+      checkInitialMoveOut(syncMode, removals, 1, `updated`),
+  )
+
+  fcTest.prop(
+    [
+      fc.integer({ min: 1, max: 20 }),
+      fc.string({ maxLength: 8 }),
+      fc.integer({ min: 0, max: 2 }),
+    ],
+    { numRuns: 20 },
+  )(
+    `generated initial tagged move-outs preserve later live updates`,
+    async (id, updated, removals) => {
+      for (const syncMode of [`eager`, `on-demand`, `progressive`] as const) {
+        await checkInitialMoveOut(syncMode, removals, id, updated)
+      }
+    },
+  )
 
   fcTest.prop([fc.array(processCommandArb, { maxLength: 20 })], {
     numRuns: 20,

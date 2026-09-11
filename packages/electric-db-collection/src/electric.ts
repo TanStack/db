@@ -2210,7 +2210,9 @@ function createElectricSync<T extends Row<unknown>>(
                   bufferedMsg.headers.patterns,
                   begin,
                   write,
-                  transactionStarted,
+                  // The swap already opened a transaction, even though the
+                  // normal-stream transactionStarted flag is still false.
+                  true,
                   (rowId) => {
                     pendingPresence.set(rowId, false)
                     syncedKeys.delete(rowId)

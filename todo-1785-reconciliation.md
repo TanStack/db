@@ -259,3 +259,37 @@ Combined production diff versus the reviewed head: three fewer TypeScript lines
 Final core rerun: 4,865/4,865 runtime tests, 150 files, at the same local runtime
 (`/private/tmp/1785-second-core-final.log`). Total core/Electric/persistence:
 5,308 passing runtime tests. No test was skipped to clear a failure.
+
+## CI follow-up: buffered move-outs orphan the progressive swap
+
+- [x] Reproduce CI's two stale-title assertions with the full real Electric
+      E2E suite: 143 pass, two progressive Moves cases fail. Focused cases alone
+      pass because earlier tests supply the tagged stream history that reaches
+      the initial buffering path. Log: /private/tmp/pr-1785-e2e-full-baseline.log.
+- [x] Rule out mere replication delay: the tagged title remains stale under a
+      condition-based wait too. Discard the temporary wait and diagnostic edits;
+      retain both original E2E assertions and their timing.
+- [x] Oracle first: add a nine-cell mode × move-out-count matrix plus generated
+      IDs/values/counts. Test every callback partition before initial up-to-date,
+      followed by a new insert and partial update. Two progressive cells and the
+      property RED; seven controls GREEN. Seed -1632249566, path 0:1.
+      Log: /private/tmp/pr-1785-buffered-moveout-oracle-red.log.
+- [x] Fix the atomic swap's buffered move-out call to acknowledge its existing
+      transaction. The normal-stream flag is false there; passing it opened a
+      second transaction and stranded the original truncate. No new state or
+      weaker presence rule is needed.
+- [x] GREEN: all 145 service-backed Electric E2E tests, all 378 Electric runtime
+      tests, package type checks, and focused ESLint. Logs:
+      /private/tmp/pr-1785-e2e-full-green.log,
+      /private/tmp/pr-1785-electric-green.log,
+      /private/tmp/pr-1785-moveout-lint.log.
+
+Local E2E used CI's Node 22.13 and a current Electric canary in isolated containers
+on ports 55432/53000. The existing app containers were not modified. Node 24's
+fetch rejects jsdom AbortSignals before tests start; the initially cached Electric
+image also rejected offset=now. Neither setup failure is the PR correctness bug.
+
+Why earlier oracles missed it: post-ready move-outs and initial snapshot row
+operations were tested separately. Neither followed a buffered initial move-out
+with independent live work after the swap. The new property crosses that boundary
+and checks public rows, rather than reading transaction flags into its model.

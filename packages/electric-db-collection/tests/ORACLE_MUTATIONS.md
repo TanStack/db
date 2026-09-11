@@ -131,6 +131,26 @@ property pins reset/subset/reset alongside random histories. A commit control
 cannot precede a later reset within one callback, even if that callback already
 started with a reset. This mutation tests the oracle's domain, not a runtime bug.
 
+## 13. Progressive snapshot transaction ownership
+
+Pass `transactionStarted` instead of `true` when applying a buffered move-out
+during the initial progressive atomic swap. That normal-stream flag is false,
+but the swap has already called `begin()`. Opening another transaction strands
+the first truncate. Later presence checks then reject valid live updates.
+
+Killed by `preserves live updates after ... initial tagged move-outs` and
+`generated initial tagged move-outs preserve later live updates`. The matrix
+crosses all three modes with zero, one and repeated matching move-outs, then
+delivers a new insert and a partial update after the initial up-to-date. Every
+contiguous callback partition is tested. Expected rows follow tag membership
+and ordinary row updates, without consulting adapter transaction state.
+
+The bug was RED in two progressive fixed cases and the random property (seed
+`-1632249566`, path `0:1`); seven fixed controls passed. Previous tag tests began
+after readiness, while the initial-sync generators lacked tag move-outs followed
+by later live work. This was also reproduced by the full service-backed Electric
+E2E suite, not only a synthetic callback driver.
+
 Use this focused form while iterating:
 
 ```sh
