@@ -190,9 +190,13 @@ export function createLiveQueryCollection<
     // been validated by the public signatures, but the branch loses that precision.
     const options = liveQueryCollectionOptions(config as any)
 
-    // Merge custom utils if provided, preserving the getBuilder() method for dependency tracking
+    // Merge custom utils without evaluating internal getters such as
+    // lastSubsetError into stale data properties.
     if (config.utils) {
-      options.utils = { ...options.utils, ...config.utils }
+      Object.defineProperties(
+        options.utils,
+        Object.getOwnPropertyDescriptors(config.utils),
+      )
     }
 
     return bridgeToCreateCollection(options) as CollectionForContext<

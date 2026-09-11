@@ -1,3 +1,4 @@
+import { registerOpaqueHash } from '@tanstack/db-ivm'
 import { safeRandomUUID } from '../utils/uuid'
 import {
   CollectionConfigurationError,
@@ -13,6 +14,7 @@ import { CollectionSyncManager } from './sync'
 import { CollectionIndexesManager } from './indexes'
 import { CollectionMutationsManager } from './mutations'
 import { CollectionEventsManager } from './events.js'
+import type { PublicationDeferral } from './changes'
 import type { CollectionSubscription } from './subscription'
 import type {
   AllCollectionEvents,
@@ -42,6 +44,7 @@ import type {
 import type { SingleRowRefProxy } from '../query/builder/ref-proxy'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { WithVirtualProps } from '../virtual-props.js'
+import type { TransactionScope } from '../transactions.js'
 
 export type { CollectionIndexMetadata } from './events.js'
 
@@ -348,6 +351,9 @@ export class CollectionImpl<
       )
     }
 
+    // Collections are mutable handles, not structural rows. Downstream queries
+    // must not hash their internal state or follow its ownership cycles.
+    registerOpaqueHash(this)
     this._changes = new CollectionChangesManager()
     this._events = new CollectionEventsManager()
     this._indexes = new CollectionIndexesManager()
@@ -447,9 +453,19 @@ export class CollectionImpl<
     this._sync.markLayoutChange()
   }
 
+  /** Defer subscriber events until a coherent multi-Collection commit ends. */
+  public _deferPublication(): PublicationDeferral {
+    return this._changes.deferPublication()
+  }
+
   /**
    * Register a callback to be executed when the collection first becomes ready
    * Useful for preloading collections
+   * Every callback queued before the transition runs. Because ready state is
+   * established first, callbacks registered during or after delivery run
+   * immediately. If one throws, the collection remains ready. Direct sync
+   * startup rethrows the first failure; preload resolves from ready state.
+   * Cleanup discards pending callbacks without invoking them.
    * @param callback Function to call when the collection first becomes ready
    * @example
    * collection.onFirstReady(() => {
@@ -457,7 +473,7 @@ export class CollectionImpl<
    *   // Safe to access collection.state now
    * })
    */
-  public onFirstReady(callback: () => void): void {
+  public onFirstReady(callback: () => void): () => void {
     return this._lifecycle.onFirstReady(callback)
   }
 
@@ -488,9 +504,30 @@ export class CollectionImpl<
   /**
    * Start sync immediately - internal method for compiled queries
    * This bypasses lazy loading for special cases like live query results
+   * Throws during active cleanup; restart after cleanup completes instead.
    */
   public startSyncImmediate(): void {
     this._sync.startSync()
+  }
+
+  /** @internal */
+  public _setTransactionScope(transactionScope: TransactionScope): void {
+    this._mutations.setTransactionScope(transactionScope)
+  }
+
+  /** @internal */
+  public _hasHydratedKey(key: TKey): boolean {
+    return this._state.hydratedKeys.has(key)
+  }
+
+  /** @internal */
+  public _deferSyncStart(): boolean {
+    return this._sync.deferStart()
+  }
+
+  /** @internal */
+  public _resumeSyncStart(): void {
+    this._sync.resumeStart()
   }
 
   /**
@@ -1012,6 +1049,8 @@ export class CollectionImpl<
   /**
    * Clean up the collection by stopping sync and clearing data
    * This can be called manually or automatically by garbage collection
+   * Cleanup callbacks must not restart this collection or call its preload().
+   * Wait until cleanup completes before starting a new sync session.
    */
   public async cleanup(): Promise<void> {
     this._lifecycle.cleanup()

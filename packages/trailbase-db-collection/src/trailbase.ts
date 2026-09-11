@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-condition */
 import { Store } from '@tanstack/store'
+import { withCollectionConfigFactory } from '@tanstack/db'
 import {
   ExpectedDeleteTypeError,
   ExpectedInsertTypeError,
@@ -179,7 +180,18 @@ export function trailBaseCollectionOptions<
   type SyncParams = Parameters<SyncConfig<TItem, TKey>[`sync`]>[0]
   const sync = {
     sync: (params: SyncParams) => {
-      const { begin, write, commit, markReady } = params
+      const { begin, write, commit, markReady, markError, collection } = params
+      let cancelled = false
+      let periodicCleanupTask: ReturnType<typeof setInterval> | undefined
+
+      const cleanup = () => {
+        cancelled = true
+        cancelEventReader()
+        if (periodicCleanupTask !== undefined) {
+          clearInterval(periodicCleanupTask)
+          periodicCleanupTask = undefined
+        }
+      }
 
       // NOTE: We cache cursors from prior fetches. TanStack/db expects that
       // cursors can be derived from a key, which is not true for TB, since
@@ -188,6 +200,8 @@ export function trailBaseCollectionOptions<
 
       // Load (more) data.
       async function load(opts: LoadSubsetOptions) {
+        if (cancelled || opts.signal?.aborted) return
+
         const lastKey = opts.cursor?.lastKey
         let cursor: string | undefined =
           lastKey !== undefined ? cursors.get(lastKey) : undefined
@@ -204,18 +218,26 @@ export function trailBaseCollectionOptions<
         if (remaining <= 0) {
           return
         }
+        const appliedPages: Array<Promise<void>> = []
 
         while (true) {
           const limit = Math.min(remaining, 256)
-          const response = await config.recordApi.list({
-            pagination: {
-              limit,
-              offset,
-              cursor,
-            },
-            order,
-            filters,
-          })
+          let response
+          try {
+            response = await config.recordApi.list({
+              pagination: {
+                limit,
+                offset,
+                cursor,
+              },
+              order,
+              filters,
+            })
+          } catch (error) {
+            if (cancelled || opts.signal?.aborted) return
+            throw error
+          }
+          if (cancelled || opts.signal?.aborted) return
 
           const length = response.records.length
           if (length === 0) {
@@ -232,7 +254,11 @@ export function trailBaseCollectionOptions<
             })
           }
 
-          commit()
+          const applied = commit(opts.signal)
+          if (applied !== true) {
+            appliedPages.push(applied)
+          }
+          if (cancelled || opts.signal?.aborted) return
 
           remaining -= length
 
@@ -254,6 +280,8 @@ export function trailBaseCollectionOptions<
             cursor = response.cursor
           }
         }
+
+        await Promise.all(appliedPages)
       }
 
       // Afterwards subscribe.
@@ -281,7 +309,7 @@ export function trailBaseCollectionOptions<
           } else {
             console.error(`Error: ${event.Error}`)
           }
-          commit()
+          void commit()
 
           if (value) {
             seenIds.setState((curr: Map<string, number>) => {
@@ -294,32 +322,48 @@ export function trailBaseCollectionOptions<
       }
 
       async function start() {
-        const eventStream = await config.recordApi.subscribe(`*`)
-        const reader = (eventReader = eventStream.getReader())
-
-        // Start listening for subscriptions first. Otherwise, we'd risk a gap
-        // between the initial fetch and starting to listen.
-        listen(reader)
-
+        let reader: ReadableStreamDefaultReader<Event> | undefined
         try {
+          const eventStream = await config.recordApi.subscribe(`*`)
+          if (cancelled) {
+            await eventStream.cancel()
+            return
+          }
+          reader = eventReader = eventStream.getReader()
+
+          // Start listening for subscriptions first. Otherwise, we'd risk a gap
+          // between the initial fetch and starting to listen.
+          void listen(reader).catch((error: unknown) => {
+            if (!cancelled && collection.status === `loading`) {
+              markError(error)
+            } else if (!cancelled) {
+              console.error(`TrailBase subscription failed`, error)
+            }
+          })
+
           // Eager mode: perform initial fetch to populate everything
           if (internalSyncMode === `eager`) {
             // Load everything on initial load.
             await load({})
+            if (cancelled) return
             fullSyncCompleted = true
           }
-        } catch (e) {
+          if (!cancelled && collection.status === `loading`) {
+            markReady()
+          }
+        } catch (error) {
           cancelEventReader()
-          throw e
-        } finally {
-          // Mark ready both if everything went well or if there's an error to
-          // avoid blocking apps waiting for `.preload()` to finish.
-          markReady()
+          if (!cancelled && collection.status === `loading`) {
+            markError(error)
+          }
+          return
         }
 
         // Lastly, start a periodic cleanup task that will be removed when the
         // reader closes.
-        const periodicCleanupTask = setInterval(() => {
+        if (cancelled || !reader) return
+
+        periodicCleanupTask = setInterval(() => {
           seenIds.setState((curr) => {
             const now = Date.now()
             let anyExpired = false
@@ -337,17 +381,23 @@ export function trailBaseCollectionOptions<
           })
         }, 120 * 1000)
 
-        reader.closed.finally(() => clearInterval(periodicCleanupTask))
+        reader.closed.finally(() => {
+          if (periodicCleanupTask !== undefined) {
+            clearInterval(periodicCleanupTask)
+            periodicCleanupTask = undefined
+          }
+        })
       }
 
-      start()
+      void start()
 
       // Eager mode doesn't need subset loading
       if (internalSyncMode === `eager`) {
-        return
+        return { cleanup }
       }
 
       return {
+        cleanup,
         loadSubset: load,
         getSyncMetadata: () =>
           ({
@@ -363,7 +413,7 @@ export function trailBaseCollectionOptions<
       }) as const,
   }
 
-  return {
+  const options = {
     ...config,
     sync,
     getKey,
@@ -428,6 +478,11 @@ export function trailBaseCollectionOptions<
       cancel: cancelEventReader,
     },
   }
+
+  return withCollectionConfigFactory(
+    options,
+    () => trailBaseCollectionOptions(config) as typeof options,
+  )
 }
 
 function buildOrder(opts: LoadSubsetOptions): undefined | Array<string> {

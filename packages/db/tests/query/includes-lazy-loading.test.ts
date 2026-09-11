@@ -8,7 +8,11 @@ import {
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { extractSimpleComparisons } from '../../src/query/expression-helpers.js'
-import { flushPromises, stripVirtualProps } from '../utils.js'
+import {
+  flushPromises,
+  mockSyncCollectionOptions,
+  stripVirtualProps,
+} from '../utils.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 
 /**
@@ -125,6 +129,85 @@ describe(`includes lazy loading`, () => {
         value: expect.arrayContaining([1, 2, 3]),
       },
     ])
+  })
+
+  it(`targets the joined source in a lazy self-join`, async () => {
+    type SelfItem = {
+      id: number
+      peerId: number
+      rootId: number
+      label: string
+    }
+    const roots = createCollection(
+      mockSyncCollectionOptions<{ id: number }>({
+        id: `includes-lazy-self-join-roots`,
+        getKey: (root) => root.id,
+        initialData: [{ id: 1 }],
+      }),
+    )
+    const rows: Array<SelfItem> = [
+      { id: 1, peerId: 2, rootId: 999, label: `left` },
+      { id: 2, peerId: 0, rootId: 1, label: `right` },
+    ]
+    const installed = new Set<number>()
+    const items = createCollection<SelfItem>({
+      id: `includes-lazy-self-join-items`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => ({
+          loadSubset: (options) => {
+            const rootIds = new Set(
+              extractSimpleComparisons(options.where).flatMap((comparison) =>
+                comparison.field[0] === `rootId` &&
+                comparison.operator === `in` &&
+                Array.isArray(comparison.value)
+                  ? comparison.value
+                  : [],
+              ),
+            )
+            begin()
+            for (const row of rows) {
+              if (
+                installed.has(row.id) ||
+                (rootIds.size > 0 && !rootIds.has(row.rootId))
+              ) {
+                continue
+              }
+              installed.add(row.id)
+              write({ type: `insert`, value: row })
+            }
+            commit()
+            markReady()
+            return Promise.resolve()
+          },
+        }),
+      },
+    })
+
+    const live = createLiveQueryCollection((q) =>
+      q.from({ root: roots }).select(({ root }) => ({
+        id: root.id,
+        matches: toArray(
+          q
+            .from({ left: items })
+            .join({ right: items }, ({ left, right }) =>
+              eq(left.peerId, right.id),
+            )
+            .where(({ right }) => eq(right.rootId, root.id))
+            .select(({ left, right }) => ({
+              left: left.label,
+              right: right.label,
+            })),
+        ),
+      })),
+    )
+
+    await live.preload()
+    expect(stripVirtualProps(live.get(1))).toMatchObject({
+      id: 1,
+      matches: [{ left: `left`, right: `right` }],
+    })
   })
 
   it(`should produce correct query results with lazy-loaded includes`, async () => {
@@ -434,12 +517,12 @@ describe(`includes child where clauses in loadSubset`, () => {
    * through to the child collection's loadSubset/queryFn.
    */
 
-  type Root = {
+  type FilterRoot = {
     id: number
     name: string
   }
 
-  type Item = {
+  type FilterItem = {
     id: number
     rootId: number
     status: string
@@ -447,12 +530,12 @@ describe(`includes child where clauses in loadSubset`, () => {
     title: string
   }
 
-  const sampleRoots: Array<Root> = [
+  const filterRoots: Array<FilterRoot> = [
     { id: 1, name: `Root A` },
     { id: 2, name: `Root B` },
   ]
 
-  const sampleItems: Array<Item> = [
+  const filterItems: Array<FilterItem> = [
     { id: 10, rootId: 1, status: `active`, priority: 3, title: `A1 active` },
     {
       id: 11,
@@ -466,13 +549,13 @@ describe(`includes child where clauses in loadSubset`, () => {
   ]
 
   function createRootsCollection() {
-    return createCollection<Root>({
+    return createCollection<FilterRoot>({
       id: `child-where-roots`,
       getKey: (r) => r.id,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
           begin()
-          for (const root of sampleRoots) {
+          for (const root of filterRoots) {
             write({ type: `insert`, value: root })
           }
           commit()
@@ -485,14 +568,14 @@ describe(`includes child where clauses in loadSubset`, () => {
   function createItemsCollectionWithTracking() {
     const loadSubsetCalls: Array<LoadSubsetOptions> = []
 
-    const collection = createCollection<Item>({
+    const collection = createCollection<FilterItem>({
       id: `child-where-items`,
       getKey: (item) => item.id,
       syncMode: `on-demand`,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
           begin()
-          for (const item of sampleItems) {
+          for (const item of filterItems) {
             write({ type: `insert`, value: item })
           }
           commit()

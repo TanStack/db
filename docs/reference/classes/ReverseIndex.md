@@ -5,7 +5,7 @@ title: ReverseIndex
 
 # Class: ReverseIndex\<TKey\>
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:6](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L6)
+Defined in: [packages/db/src/indexes/reverse-index.ts:4](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L4)
 
 ## Type Parameters
 
@@ -15,7 +15,7 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:6](https://github.com/TanS
 
 ## Implements
 
-- [`IndexInterface`](../interfaces/IndexInterface.md)\<`TKey`\>
+- [`IndexReader`](../type-aliases/IndexReader.md)\<`TKey`\>
 
 ## Constructors
 
@@ -25,7 +25,7 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:6](https://github.com/TanS
 new ReverseIndex<TKey>(index): ReverseIndex<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:11](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L11)
+Defined in: [packages/db/src/indexes/reverse-index.ts:9](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L9)
 
 #### Parameters
 
@@ -39,26 +39,6 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:11](https://github.com/Tan
 
 ## Accessors
 
-### indexedKeysSet
-
-#### Get Signature
-
-```ts
-get indexedKeysSet(): Set<TKey>;
-```
-
-Defined in: [packages/db/src/indexes/reverse-index.ts:128](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L128)
-
-##### Returns
-
-`Set`\<`TKey`\>
-
-#### Implementation of
-
-[`IndexInterface`](../interfaces/IndexInterface.md).[`indexedKeysSet`](../interfaces/IndexInterface.md#indexedkeysset)
-
-***
-
 ### keyCount
 
 #### Get Signature
@@ -67,7 +47,7 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:128](https://github.com/Ta
 get keyCount(): number;
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:116](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L116)
+Defined in: [packages/db/src/indexes/reverse-index.ts:55](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L55)
 
 ##### Returns
 
@@ -75,47 +55,9 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:116](https://github.com/Ta
 
 #### Implementation of
 
-[`IndexInterface`](../interfaces/IndexInterface.md).[`keyCount`](../interfaces/IndexInterface.md#keycount)
-
-***
-
-### orderedEntriesArray
-
-#### Get Signature
-
 ```ts
-get orderedEntriesArray(): [any, Set<TKey>][];
+IndexReader.keyCount
 ```
-
-Defined in: [packages/db/src/indexes/reverse-index.ts:62](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L62)
-
-##### Returns
-
-\[`any`, `Set`\<`TKey`\>\][]
-
-#### Implementation of
-
-[`IndexInterface`](../interfaces/IndexInterface.md).[`orderedEntriesArray`](../interfaces/IndexInterface.md#orderedentriesarray)
-
-***
-
-### orderedEntriesArrayReversed
-
-#### Get Signature
-
-```ts
-get orderedEntriesArrayReversed(): [any, Set<TKey>][];
-```
-
-Defined in: [packages/db/src/indexes/reverse-index.ts:66](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L66)
-
-##### Returns
-
-\[`any`, `Set`\<`TKey`\>\][]
-
-#### Implementation of
-
-[`IndexInterface`](../interfaces/IndexInterface.md).[`orderedEntriesArrayReversed`](../interfaces/IndexInterface.md#orderedentriesarrayreversed)
 
 ***
 
@@ -127,7 +69,7 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:66](https://github.com/Tan
 get supportsRangeOptimization(): boolean;
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:76](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L76)
+Defined in: [packages/db/src/indexes/reverse-index.ts:47](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L47)
 
 Whether range lookups (gt/gte/lt/lte) on this index can be trusted to
 return every matching key. Range traversal relies on the index ordering, so
@@ -141,163 +83,39 @@ a full scan when this is `false`.
 
 #### Implementation of
 
-[`IndexInterface`](../interfaces/IndexInterface.md).[`supportsRangeOptimization`](../interfaces/IndexInterface.md#supportsrangeoptimization)
-
-***
-
-### valueMapData
-
-#### Get Signature
-
 ```ts
-get valueMapData(): Map<any, Set<TKey>>;
+IndexReader.supportsRangeOptimization
 ```
-
-Defined in: [packages/db/src/indexes/reverse-index.ts:132](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L132)
-
-##### Returns
-
-`Map`\<`any`, `Set`\<`TKey`\>\>
-
-#### Implementation of
-
-[`IndexInterface`](../interfaces/IndexInterface.md).[`valueMapData`](../interfaces/IndexInterface.md#valuemapdata)
 
 ## Methods
 
-### add()
+### canOptimizeRangeFor()
 
 ```ts
-add(key, item): void;
+canOptimizeRangeFor(value): boolean;
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:96](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L96)
+Defined in: [packages/db/src/indexes/reverse-index.ts:51](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L51)
 
-#### Parameters
-
-##### key
-
-`TKey`
-
-##### item
-
-`any`
-
-#### Returns
-
-`void`
-
-#### Implementation of
-
-[`IndexInterface`](../interfaces/IndexInterface.md).[`add`](../interfaces/IndexInterface.md#add)
-
-***
-
-### build()
-
-```ts
-build(entries): void;
-```
-
-Defined in: [packages/db/src/indexes/reverse-index.ts:108](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L108)
-
-#### Parameters
-
-##### entries
-
-`Iterable`\<\[`TKey`, `any`\]\>
-
-#### Returns
-
-`void`
-
-#### Implementation of
-
-[`IndexInterface`](../interfaces/IndexInterface.md).[`build`](../interfaces/IndexInterface.md#build)
-
-***
-
-### clear()
-
-```ts
-clear(): void;
-```
-
-Defined in: [packages/db/src/indexes/reverse-index.ts:112](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L112)
-
-#### Returns
-
-`void`
-
-#### Implementation of
-
-[`IndexInterface`](../interfaces/IndexInterface.md).[`clear`](../interfaces/IndexInterface.md#clear)
-
-***
-
-### equalityLookup()
-
-```ts
-equalityLookup(value): Set<TKey>;
-```
-
-Defined in: [packages/db/src/indexes/reverse-index.ts:120](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L120)
+Whether the live values in this index share the predicate operand's
+relational domain. Mixed domains can sort differently in the index and
+WHERE evaluator, which can make a range lookup omit matching rows.
 
 #### Parameters
 
 ##### value
 
-`any`
+`unknown`
 
 #### Returns
 
-`Set`\<`TKey`\>
+`boolean`
 
 #### Implementation of
-
-[`IndexInterface`](../interfaces/IndexInterface.md).[`equalityLookup`](../interfaces/IndexInterface.md#equalitylookup)
-
-***
-
-### getStats()
 
 ```ts
-getStats(): IndexStats;
+IndexReader.canOptimizeRangeFor
 ```
-
-Defined in: [packages/db/src/indexes/reverse-index.ts:92](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L92)
-
-#### Returns
-
-[`IndexStats`](../interfaces/IndexStats.md)
-
-#### Implementation of
-
-[`IndexInterface`](../interfaces/IndexInterface.md).[`getStats`](../interfaces/IndexInterface.md#getstats)
-
-***
-
-### inArrayLookup()
-
-```ts
-inArrayLookup(values): Set<TKey>;
-```
-
-Defined in: [packages/db/src/indexes/reverse-index.ts:124](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L124)
-
-#### Parameters
-
-##### values
-
-`any`[]
-
-#### Returns
-
-`Set`\<`TKey`\>
-
-#### Implementation of
-
-[`IndexInterface`](../interfaces/IndexInterface.md).[`inArrayLookup`](../interfaces/IndexInterface.md#inarraylookup)
 
 ***
 
@@ -307,7 +125,7 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:124](https://github.com/Ta
 lookup(operation, value): Set<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:17](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L17)
+Defined in: [packages/db/src/indexes/reverse-index.ts:15](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L15)
 
 #### Parameters
 
@@ -325,79 +143,9 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:17](https://github.com/Tan
 
 #### Implementation of
 
-[`IndexInterface`](../interfaces/IndexInterface.md).[`lookup`](../interfaces/IndexInterface.md#lookup)
-
-***
-
-### matchesCompareOptions()
-
 ```ts
-matchesCompareOptions(compareOptions): boolean;
+IndexReader.lookup
 ```
-
-Defined in: [packages/db/src/indexes/reverse-index.ts:84](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L84)
-
-#### Parameters
-
-##### compareOptions
-
-`CompareOptions`
-
-#### Returns
-
-`boolean`
-
-#### Implementation of
-
-[`IndexInterface`](../interfaces/IndexInterface.md).[`matchesCompareOptions`](../interfaces/IndexInterface.md#matchescompareoptions)
-
-***
-
-### matchesDirection()
-
-```ts
-matchesDirection(direction): boolean;
-```
-
-Defined in: [packages/db/src/indexes/reverse-index.ts:88](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L88)
-
-#### Parameters
-
-##### direction
-
-[`OrderByDirection`](../@tanstack/namespaces/IR/type-aliases/OrderByDirection.md)
-
-#### Returns
-
-`boolean`
-
-#### Implementation of
-
-[`IndexInterface`](../interfaces/IndexInterface.md).[`matchesDirection`](../interfaces/IndexInterface.md#matchesdirection)
-
-***
-
-### matchesField()
-
-```ts
-matchesField(fieldPath): boolean;
-```
-
-Defined in: [packages/db/src/indexes/reverse-index.ts:80](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L80)
-
-#### Parameters
-
-##### fieldPath
-
-`string`[]
-
-#### Returns
-
-`boolean`
-
-#### Implementation of
-
-[`IndexInterface`](../interfaces/IndexInterface.md).[`matchesField`](../interfaces/IndexInterface.md#matchesfield)
 
 ***
 
@@ -407,7 +155,7 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:80](https://github.com/Tan
 rangeQuery(options): Set<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:31](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L31)
+Defined in: [packages/db/src/indexes/reverse-index.ts:29](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L29)
 
 #### Parameters
 
@@ -421,59 +169,9 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:31](https://github.com/Tan
 
 #### Implementation of
 
-[`IndexInterface`](../interfaces/IndexInterface.md).[`rangeQuery`](../interfaces/IndexInterface.md#rangequery)
-
-***
-
-### rangeQueryReversed()
-
 ```ts
-rangeQueryReversed(options): Set<TKey>;
+IndexReader.rangeQuery
 ```
-
-Defined in: [packages/db/src/indexes/reverse-index.ts:35](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L35)
-
-#### Parameters
-
-##### options
-
-[`BTreeRangeQueryOptions`](../interfaces/BTreeRangeQueryOptions.md) = `{}`
-
-#### Returns
-
-`Set`\<`TKey`\>
-
-#### Implementation of
-
-[`IndexInterface`](../interfaces/IndexInterface.md).[`rangeQueryReversed`](../interfaces/IndexInterface.md#rangequeryreversed)
-
-***
-
-### remove()
-
-```ts
-remove(key, item): void;
-```
-
-Defined in: [packages/db/src/indexes/reverse-index.ts:100](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L100)
-
-#### Parameters
-
-##### key
-
-`TKey`
-
-##### item
-
-`any`
-
-#### Returns
-
-`void`
-
-#### Implementation of
-
-[`IndexInterface`](../interfaces/IndexInterface.md).[`remove`](../interfaces/IndexInterface.md#remove)
 
 ***
 
@@ -483,7 +181,7 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:100](https://github.com/Ta
 supports(operation): boolean;
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:72](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L72)
+Defined in: [packages/db/src/indexes/reverse-index.ts:43](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L43)
 
 #### Parameters
 
@@ -497,7 +195,9 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:72](https://github.com/Tan
 
 #### Implementation of
 
-[`IndexInterface`](../interfaces/IndexInterface.md).[`supports`](../interfaces/IndexInterface.md#supports)
+```ts
+IndexReader.supports
+```
 
 ***
 
@@ -510,7 +210,7 @@ take(
    filterFn?): TKey[];
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:39](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L39)
+Defined in: [packages/db/src/indexes/reverse-index.ts:33](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L33)
 
 #### Parameters
 
@@ -532,7 +232,9 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:39](https://github.com/Tan
 
 #### Implementation of
 
-[`IndexInterface`](../interfaces/IndexInterface.md).[`take`](../interfaces/IndexInterface.md#take)
+```ts
+IndexReader.take
+```
 
 ***
 
@@ -542,7 +244,7 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:39](https://github.com/Tan
 takeFromStart(n, filterFn?): TKey[];
 ```
 
-Defined in: [packages/db/src/indexes/reverse-index.ts:43](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L43)
+Defined in: [packages/db/src/indexes/reverse-index.ts:37](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L37)
 
 #### Parameters
 
@@ -560,102 +262,6 @@ Defined in: [packages/db/src/indexes/reverse-index.ts:43](https://github.com/Tan
 
 #### Implementation of
 
-[`IndexInterface`](../interfaces/IndexInterface.md).[`takeFromStart`](../interfaces/IndexInterface.md#takefromstart)
-
-***
-
-### takeReversed()
-
 ```ts
-takeReversed(
-   n, 
-   from, 
-   filterFn?): TKey[];
+IndexReader.takeFromStart
 ```
-
-Defined in: [packages/db/src/indexes/reverse-index.ts:47](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L47)
-
-#### Parameters
-
-##### n
-
-`number`
-
-##### from
-
-`any`
-
-##### filterFn?
-
-(`key`) => `boolean`
-
-#### Returns
-
-`TKey`[]
-
-#### Implementation of
-
-[`IndexInterface`](../interfaces/IndexInterface.md).[`takeReversed`](../interfaces/IndexInterface.md#takereversed)
-
-***
-
-### takeReversedFromEnd()
-
-```ts
-takeReversedFromEnd(n, filterFn?): TKey[];
-```
-
-Defined in: [packages/db/src/indexes/reverse-index.ts:55](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L55)
-
-#### Parameters
-
-##### n
-
-`number`
-
-##### filterFn?
-
-(`key`) => `boolean`
-
-#### Returns
-
-`TKey`[]
-
-#### Implementation of
-
-[`IndexInterface`](../interfaces/IndexInterface.md).[`takeReversedFromEnd`](../interfaces/IndexInterface.md#takereversedfromend)
-
-***
-
-### update()
-
-```ts
-update(
-   key, 
-   oldItem, 
-   newItem): void;
-```
-
-Defined in: [packages/db/src/indexes/reverse-index.ts:104](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/reverse-index.ts#L104)
-
-#### Parameters
-
-##### key
-
-`TKey`
-
-##### oldItem
-
-`any`
-
-##### newItem
-
-`any`
-
-#### Returns
-
-`void`
-
-#### Implementation of
-
-[`IndexInterface`](../interfaces/IndexInterface.md).[`update`](../interfaces/IndexInterface.md#update)

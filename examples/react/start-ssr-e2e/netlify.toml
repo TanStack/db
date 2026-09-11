@@ -1,0 +1,8 @@
+[build]
+command = "pnpm build"
+publish = "dist/client"
+functions = "netlify/functions"
+
+[functions]
+node_bundler = "esbuild"
+included_files = ["dist/server/**"]

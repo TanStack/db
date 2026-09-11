@@ -5,7 +5,7 @@ title: QueryOptimizerError
 
 # Class: QueryOptimizerError
 
-Defined in: [packages/db/src/errors.ts:723](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L723)
+Defined in: [packages/db/src/errors.ts:757](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L757)
 
 ## Extends
 
@@ -14,7 +14,6 @@ Defined in: [packages/db/src/errors.ts:723](https://github.com/TanStack/db/blob/
 ## Extended by
 
 - [`CannotCombineEmptyExpressionListError`](CannotCombineEmptyExpressionListError.md)
-- [`WhereClauseConversionError`](WhereClauseConversionError.md)
 
 ## Constructors
 
@@ -24,7 +23,7 @@ Defined in: [packages/db/src/errors.ts:723](https://github.com/TanStack/db/blob/
 new QueryOptimizerError(message): QueryOptimizerError;
 ```
 
-Defined in: [packages/db/src/errors.ts:724](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L724)
+Defined in: [packages/db/src/errors.ts:758](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L758)
 
 #### Parameters
 

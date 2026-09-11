@@ -744,6 +744,7 @@ describe(`Collection truncate operations`, () => {
       | undefined
     let loadSubsetResolver: (() => void) | undefined
     let loadSubsetCallCount = 0
+    let totalLoadSubsetCallCount = 0
 
     const collection = createCollection<{ id: number; value: string }, number>({
       id: `truncate-buffering-test`,
@@ -758,6 +759,8 @@ describe(`Collection truncate operations`, () => {
           return {
             loadSubset: (_options: LoadSubsetOptions) => {
               loadSubsetCallCount++
+              totalLoadSubsetCallCount++
+              const requestNumber = totalLoadSubsetCallCount
 
               // Return a promise that we control
               return new Promise<void>((resolve) => {
@@ -766,11 +769,17 @@ describe(`Collection truncate operations`, () => {
                   cfg.begin()
                   cfg.write({
                     type: `insert`,
-                    value: { id: 1, value: `refetched-1` },
+                    value: {
+                      id: 1,
+                      value: requestNumber === 1 ? `initial-1` : `refetched-1`,
+                    },
                   })
                   cfg.write({
                     type: `insert`,
-                    value: { id: 2, value: `refetched-2` },
+                    value: {
+                      id: 2,
+                      value: requestNumber === 1 ? `initial-2` : `refetched-2`,
+                    },
                   })
                   cfg.commit()
                   resolve()
@@ -804,8 +813,8 @@ describe(`Collection truncate operations`, () => {
 
     // Verify initial data arrived
     expect(stripChanges(changeEvents)).toEqual([
-      { type: `insert`, key: 1, value: { id: 1, value: `refetched-1` } },
-      { type: `insert`, key: 2, value: { id: 2, value: `refetched-2` } },
+      { type: `insert`, key: 1, value: { id: 1, value: `initial-1` } },
+      { type: `insert`, key: 2, value: { id: 2, value: `initial-2` } },
     ])
 
     // Clear events for next phase
@@ -831,15 +840,14 @@ describe(`Collection truncate operations`, () => {
     // Wait for buffered events to be flushed
     await vi.waitFor(() => expect(changeEvents.length).toBeGreaterThan(0))
 
-    // Verify we got all events in one batch (deletes + inserts)
-    // The subscription should have received:
-    // - Delete events for the old data (from truncate)
-    // - Insert events for the new data (from refetch)
+    // The raw truncate/refetch stream is reduced to one semantic replacement.
     const deletes = changeEvents.filter((e) => e.type === `delete`)
     const inserts = changeEvents.filter((e) => e.type === `insert`)
+    const updates = changeEvents.filter((e) => e.type === `update`)
 
-    expect(deletes.length).toBe(2) // Deleted the old items
-    expect(inserts.length).toBe(2) // Inserted the refetched items
+    expect(deletes).toHaveLength(0)
+    expect(inserts).toHaveLength(0)
+    expect(updates).toHaveLength(2)
 
     // Verify final state is correct
     expect(collection.state.size).toBe(2)
@@ -988,6 +996,7 @@ describe(`Collection truncate operations`, () => {
       | undefined
     let loadSubsetResolver: (() => void) | undefined
     let loadSubsetCallCount = 0
+    let totalLoadSubsetCallCount = 0
 
     const collection = createCollection<{ id: number; value: string }, number>({
       id: `truncate-loadedInitialState-test`,
@@ -1002,17 +1011,25 @@ describe(`Collection truncate operations`, () => {
           return {
             loadSubset: (_options: LoadSubsetOptions) => {
               loadSubsetCallCount++
+              totalLoadSubsetCallCount++
+              const requestNumber = totalLoadSubsetCallCount
 
               return new Promise<void>((resolve) => {
                 loadSubsetResolver = () => {
                   cfg.begin()
                   cfg.write({
                     type: `insert`,
-                    value: { id: 1, value: `item-1` },
+                    value: {
+                      id: 1,
+                      value: requestNumber === 1 ? `item-1` : `refetched-1`,
+                    },
                   })
                   cfg.write({
                     type: `insert`,
-                    value: { id: 2, value: `item-2` },
+                    value: {
+                      id: 2,
+                      value: requestNumber === 1 ? `item-2` : `refetched-2`,
+                    },
                   })
                   cfg.commit()
                   resolve()
@@ -1065,10 +1082,11 @@ describe(`Collection truncate operations`, () => {
     // Wait for events to be emitted
     await vi.waitFor(() => expect(changeEvents.length).toBeGreaterThan(0))
 
-    // The key assertion: we should have received delete events
-    // Without the fix, sentKeys would be empty and deletes would be filtered out
-    const deletes = changeEvents.filter((e) => e.type === `delete`)
-    expect(deletes.length).toBe(2) // Must have delete events!
+    // Even with loadedInitialState, the replacement must publish the exact
+    // semantic changes rather than filtering the truncate stream away.
+    expect(
+      changeEvents.filter((event) => event.type === `update`),
+    ).toHaveLength(2)
 
     subscription.unsubscribe()
   })
@@ -1083,6 +1101,7 @@ describe(`Collection truncate operations`, () => {
     let syncOps:
       | Parameters<SyncConfig<{ id: number; value: string }, number>[`sync`]>[0]
       | undefined
+    let loadSubsetCallCount = 0
 
     const collection = createCollection<{ id: number; value: string }, number>({
       id: `truncate-sync-loadSubset-test`,
@@ -1097,15 +1116,17 @@ describe(`Collection truncate operations`, () => {
           return {
             // loadSubset returns true (synchronous) - data already available
             loadSubset: (_options: LoadSubsetOptions) => {
+              loadSubsetCallCount++
+              const prefix = loadSubsetCallCount === 1 ? `sync` : `refetched`
               // Synchronously write data
               cfg.begin()
               cfg.write({
                 type: `insert`,
-                value: { id: 1, value: `sync-item-1` },
+                value: { id: 1, value: `${prefix}-item-1` },
               })
               cfg.write({
                 type: `insert`,
-                value: { id: 2, value: `sync-item-2` },
+                value: { id: 2, value: `${prefix}-item-2` },
               })
               cfg.commit()
               return true // Synchronous return
@@ -1139,28 +1160,24 @@ describe(`Collection truncate operations`, () => {
     // Wait for events to settle
     await vi.advanceTimersByTimeAsync(10)
 
-    // We should have received delete events even though loadSubset was sync
+    // The synchronous replay publishes one semantic replacement.
     const deletes = changeEvents.filter((e) => e.type === `delete`)
     const inserts = changeEvents.filter((e) => e.type === `insert`)
+    const updates = changeEvents.filter((e) => e.type === `update`)
 
-    expect(deletes.length).toBe(2) // Should have 2 deletes
-    expect(inserts.length).toBe(2) // Should have 2 inserts
-
-    // Verify correct ordering: deletes should come before inserts
-    // (truncate clears old data, then refetch adds new data)
-    const firstDeleteIdx = changeEvents.findIndex((e) => e.type === `delete`)
-    const firstInsertIdx = changeEvents.findIndex((e) => e.type === `insert`)
-    expect(firstDeleteIdx).toBeLessThan(firstInsertIdx)
+    expect(deletes).toHaveLength(0)
+    expect(inserts).toHaveLength(0)
+    expect(updates).toHaveLength(2)
 
     // Verify collection state is correct
     expect(collection.state.size).toBe(2)
     expect(getStateValue(collection, 1)).toEqual({
       id: 1,
-      value: `sync-item-1`,
+      value: `refetched-item-1`,
     })
     expect(getStateValue(collection, 2)).toEqual({
       id: 2,
-      value: `sync-item-2`,
+      value: `refetched-item-2`,
     })
 
     subscription.unsubscribe()

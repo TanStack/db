@@ -16,6 +16,7 @@ Defined in: [packages/db/src/errors.ts:450](https://github.com/TanStack/db/blob/
 - [`UnsafeAliasPathError`](UnsafeAliasPathError.md)
 - [`DistinctRequiresSelectError`](DistinctRequiresSelectError.md)
 - [`FnSelectWithGroupByError`](FnSelectWithGroupByError.md)
+- [`UnsupportedFnSelectResultError`](UnsupportedFnSelectResultError.md)
 - [`UnsupportedRootScalarSelectError`](UnsupportedRootScalarSelectError.md)
 - [`HavingRequiresGroupByError`](HavingRequiresGroupByError.md)
 - [`LimitOffsetRequireOrderByError`](LimitOffsetRequireOrderByError.md)
@@ -26,8 +27,6 @@ Defined in: [packages/db/src/errors.ts:450](https://github.com/TanStack/db/blob/
 - [`EmptyReferencePathError`](EmptyReferencePathError.md)
 - [`UnknownFunctionError`](UnknownFunctionError.md)
 - [`JoinCollectionNotFoundError`](JoinCollectionNotFoundError.md)
-- [`SubscriptionNotFoundError`](SubscriptionNotFoundError.md)
-- [`AggregateNotSupportedError`](AggregateNotSupportedError.md)
 - [`MissingAliasInputsError`](MissingAliasInputsError.md)
 - [`SetWindowRequiresOrderByError`](SetWindowRequiresOrderByError.md)
 

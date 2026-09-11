@@ -9,7 +9,7 @@ title: ContextFromUnionBranches
 type ContextFromUnionBranches<TBranches> = object;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:169](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L169)
+Defined in: [packages/db/src/query/builder/types.ts:183](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L183)
 
 ## Type Parameters
 
@@ -25,7 +25,7 @@ Defined in: [packages/db/src/query/builder/types.ts:169](https://github.com/TanS
 baseSchema: UnionBranchSchema<TBranches> & ContextSchema;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:172](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L172)
+Defined in: [packages/db/src/query/builder/types.ts:186](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L186)
 
 ***
 
@@ -35,7 +35,7 @@ Defined in: [packages/db/src/query/builder/types.ts:172](https://github.com/TanS
 fromSourceName: keyof UnionBranchSchema<TBranches> & string;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:175](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L175)
+Defined in: [packages/db/src/query/builder/types.ts:189](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L189)
 
 ***
 
@@ -45,7 +45,7 @@ Defined in: [packages/db/src/query/builder/types.ts:175](https://github.com/TanS
 hasJoins: false;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:176](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L176)
+Defined in: [packages/db/src/query/builder/types.ts:190](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L190)
 
 ***
 
@@ -55,7 +55,7 @@ Defined in: [packages/db/src/query/builder/types.ts:176](https://github.com/TanS
 hasResult: true;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:178](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L178)
+Defined in: [packages/db/src/query/builder/types.ts:192](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L192)
 
 ***
 
@@ -65,7 +65,7 @@ Defined in: [packages/db/src/query/builder/types.ts:178](https://github.com/TanS
 refsSchema: UnionBranchSchema<TBranches>;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:174](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L174)
+Defined in: [packages/db/src/query/builder/types.ts:188](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L188)
 
 ***
 
@@ -75,7 +75,7 @@ Defined in: [packages/db/src/query/builder/types.ts:174](https://github.com/TanS
 result: PrettifyIfPlainObject<UnionBranchResult<TBranches>>;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:177](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L177)
+Defined in: [packages/db/src/query/builder/types.ts:191](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L191)
 
 ***
 
@@ -85,4 +85,4 @@ Defined in: [packages/db/src/query/builder/types.ts:177](https://github.com/TanS
 schema: UnionBranchSchema<TBranches> & ContextSchema;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:173](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L173)
+Defined in: [packages/db/src/query/builder/types.ts:187](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L187)

@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import { CollectionImpl } from '../../../src/collection/index.js'
+import { DbClient, collectionOptions } from '../../../src/client.js'
 import {
   InvalidSourceError,
   InvalidSourceTypeError,
   QueryMustHaveFromClauseError,
 } from '../../../src/errors.js'
-import { Query, getQueryIR } from '../../../src/query/builder/index.js'
+import {
+  BaseQueryBuilder,
+  Query,
+  getQueryIR,
+} from '../../../src/query/builder/index.js'
+import { eq } from '../../../src/query/builder/functions.js'
 
 interface Employee {
   id: number
@@ -91,6 +97,70 @@ describe(`QueryBuilder.unionAll`, () => {
       throw new Error(`Expected unionAll`)
     }
     expect(builtQuery.from.queries).toHaveLength(2)
+  })
+
+  it(`preserves descriptor resolution after unioning sources`, () => {
+    const employeeDescriptor = collectionOptions(`union-employees`, () => ({
+      id: `union-employees`,
+      getKey: (item: Employee) => item.id,
+      sync: { sync: () => {} },
+    }))
+    const departmentDescriptor = collectionOptions(`union-departments`, () => ({
+      id: `union-departments`,
+      getKey: (item: Department) => item.id,
+      sync: { sync: () => {} },
+    }))
+    const client = new DbClient()
+    const builder = new BaseQueryBuilder({}, (options) =>
+      client.collection(options),
+    )
+
+    const query = builder
+      .unionAll({ employees: employeeDescriptor })
+      .join(
+        { departments: departmentDescriptor },
+        ({ employees, departments }) =>
+          eq(employees.department_id, departments.id),
+        `inner`,
+      )
+
+    expect(getQueryIR(query).join).toHaveLength(1)
+  })
+
+  it(`preserves descriptor resolution after unioning query branches`, () => {
+    const employeeDescriptor = collectionOptions(`branch-employees`, () => ({
+      id: `branch-employees`,
+      getKey: (item: Employee) => item.id,
+      sync: { sync: () => {} },
+    }))
+    const departmentDescriptor = collectionOptions(
+      `branch-departments`,
+      () => ({
+        id: `branch-departments`,
+        getKey: (item: Department) => item.id,
+        sync: { sync: () => {} },
+      }),
+    )
+    const client = new DbClient()
+    const builder = new BaseQueryBuilder({}, (options) =>
+      client.collection(options),
+    )
+    const employeeRows = builder
+      .from({ employees: employeeDescriptor })
+      .select(({ employees: employee }) => ({ id: employee.id }))
+    const departmentRows = builder
+      .from({ departments: departmentDescriptor })
+      .select(({ departments: department }) => ({ id: department.id }))
+
+    const query = builder
+      .unionAll(employeeRows, departmentRows)
+      .join(
+        { departments: departmentDescriptor },
+        ({ id, departments }) => eq(id, departments.id),
+        `inner`,
+      )
+
+    expect(getQueryIR(query).join).toHaveLength(1)
   })
 
   it(`throws helpful errors for invalid source inputs`, () => {

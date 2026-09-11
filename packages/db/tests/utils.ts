@@ -1,5 +1,9 @@
 import { expect } from 'vitest'
+import { createCollection } from '../src/collection/index.js'
 import { BTreeIndex } from '../src/indexes/btree-index'
+import { withCollectionConfigFactory } from '../src/client'
+import { denormalizeUndefined } from '../src/utils/comparison.js'
+import { CleanupQueue } from '../src/collection/cleanup-queue.js'
 import type {
   CollectionConfig,
   MutationFnParams,
@@ -13,6 +17,17 @@ export type OutputWithVirtual<
   T extends object,
   TKey extends string | number = string | number,
 > = WithVirtualProps<T, TKey>
+
+// Keep sync startup, writes, readiness, and load outcomes in the test itself.
+export function createOnDemandCollection<T extends { id: string | number }>(
+  config: Omit<CollectionConfig<T>, `getKey` | `syncMode`>,
+) {
+  return createCollection<T>({
+    ...config,
+    getKey: ({ id }) => id,
+    syncMode: `on-demand`,
+  })
+}
 
 export const stripVirtualProps = <T extends Record<string, any> | undefined>(
   value: T,
@@ -219,9 +234,21 @@ type MockSyncCollectionConfig<T extends object = Record<string, unknown>> = {
   defaultIndexType?: IndexConstructor
 }
 
+type MockSyncCollectionUtils<T extends object> = {
+  begin: () => void
+  write: Parameters<SyncConfig<T>[`sync`]>[0][`write`]
+  commit: () => void
+  resolveSync: () => void
+  rejectSync: (error: Error) => void
+}
+
 export function mockSyncCollectionOptions<
   T extends object = Record<string, unknown>,
->(config: MockSyncCollectionConfig<T>) {
+>(
+  config: MockSyncCollectionConfig<T>,
+): CollectionConfig<T, string | number, never> & {
+  utils: MockSyncCollectionUtils<T>
+} {
   let begin: () => void
   let write: Parameters<SyncConfig<T>[`sync`]>[0][`write`]
   let commit: () => void
@@ -306,7 +333,9 @@ export function mockSyncCollectionOptions<
       (config.autoIndex === `eager` ? BTreeIndex : undefined),
   }
 
-  return options
+  return withCollectionConfigFactory(options, () =>
+    mockSyncCollectionOptions(config),
+  )
 }
 
 type MockSyncCollectionConfigNoInitialState<T> = {
@@ -482,4 +511,87 @@ export function withExpectedRejection<T>(
         }
       })
   })
+}
+
+type IndexInternals<TKey> = { indexedKeys: Set<TKey> } & (
+  | { sortedValues: Array<unknown>; valueMap: Map<unknown, Set<TKey>> }
+  | {
+      valueMap: Map<unknown, { keys: Set<TKey> }>
+      orderedEntries: {
+        size: number
+        minKey: () => unknown
+        maxKey: () => unknown
+        forRange: (
+          low: unknown,
+          high: unknown,
+          includeHigh: boolean,
+          onFound: (key: unknown, bucket: { keys: Set<TKey> }) => void,
+        ) => void
+      }
+    }
+)
+
+function indexInternals<TKey>(index: object): [IndexInternals<TKey>, boolean] {
+  let reversed = false
+  let current = index as { originalIndex?: object }
+  while (current.originalIndex) {
+    reversed = !reversed
+    current = current.originalIndex as { originalIndex?: object }
+  }
+  return [current as IndexInternals<TKey>, reversed]
+}
+
+/** Test inspection of an index's tracked keys. */
+export function indexedKeysSet<TKey>(index: object): Set<TKey> {
+  return indexInternals<TKey>(index)[0].indexedKeys
+}
+
+/** Test inspection of an index's value buckets keyed by indexed value. */
+export function valueMapData<TKey>(index: object): Map<unknown, Set<TKey>> {
+  const [internals] = indexInternals<TKey>(index)
+  if (`sortedValues` in internals) return internals.valueMap
+  const result = new Map<unknown, Set<TKey>>()
+  for (const [key, bucket] of internals.valueMap) {
+    result.set(denormalizeUndefined(key), bucket.keys)
+  }
+  return result
+}
+
+/** Test inspection of an index's ordered [value, keys] entries. */
+export function orderedEntriesArray<TKey>(
+  index: object,
+): Array<[unknown, Set<TKey>]> {
+  const [internals, reversed] = indexInternals<TKey>(index)
+  let entries: Array<[unknown, Set<TKey>]>
+  if (`sortedValues` in internals) {
+    entries = internals.sortedValues.map((value) => [
+      value,
+      internals.valueMap.get(value) ?? new Set(),
+    ])
+  } else {
+    const tree = internals.orderedEntries
+    entries = []
+    if (tree.size > 0) {
+      tree.forRange(tree.minKey(), tree.maxKey(), true, (key, bucket) => {
+        entries.push([denormalizeUndefined(key), bucket.keys])
+      })
+    }
+  }
+  return reversed ? entries.reverse() : entries
+}
+
+export function orderedEntriesArrayReversed<TKey>(
+  index: object,
+): Array<[unknown, Set<TKey>]> {
+  return orderedEntriesArray<TKey>(index).reverse()
+}
+
+/** Reset the CleanupQueue singleton between tests. */
+export function resetCleanupQueue(): void {
+  const holder = CleanupQueue as unknown as {
+    instance: { timeoutId: ReturnType<typeof setTimeout> | null } | null
+  }
+  if (holder.instance?.timeoutId != null)
+    clearTimeout(holder.instance.timeoutId)
+  holder.instance = null
 }

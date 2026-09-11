@@ -1,9 +1,191 @@
 import { describe, expect, it } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
 import { deepEquals } from '../src/utils'
+import { normalizeError } from '../src/utils/error'
 import { isPromiseLike } from '../src/utils/type-guards'
+import {
+  oracleRandomParameters,
+  readOracleRunConfig,
+  validateOraclePropertyRegistry,
+} from './oracle-config'
+
+describe(`normalizeError`, () => {
+  it(`normalizes unstringifiable thrown values`, () => {
+    const revoked = Proxy.revocable({}, {})
+    revoked.revoke()
+    const thrownValues = [
+      Object.create(null),
+      {
+        [Symbol.toPrimitive]: () => {
+          throw new Error(`conversion failed`)
+        },
+      },
+      new Proxy(
+        {},
+        {
+          getPrototypeOf: () => {
+            throw new Error(`prototype lookup failed`)
+          },
+        },
+      ),
+      revoked.proxy,
+    ]
+
+    for (const thrownValue of thrownValues) {
+      expect(() => normalizeError(thrownValue)).not.toThrow()
+      expect(normalizeError(thrownValue)).toEqual(new Error(`Unknown error`))
+    }
+  })
+})
+
+describe(`oracle run configuration`, () => {
+  it(`reads the multiplier and replay coordinates from an explicit environment`, () => {
+    expect(
+      readOracleRunConfig({
+        TANSTACK_DB_ORACLE_RUNS_MULTIPLIER: `100`,
+        TANSTACK_DB_ORACLE_SEED: `-42`,
+        TANSTACK_DB_ORACLE_PATH: `1:0:2`,
+        TANSTACK_DB_ORACLE_PROPERTY: `includes.incremental-history`,
+      }),
+    ).toEqual({
+      multiplier: 100,
+      replaySeed: -42,
+      replayPath: `1:0:2`,
+      replayProperty: `includes.incremental-history`,
+    })
+  })
+
+  it(`uses one run multiplier and no replay coordinates by default`, () => {
+    expect(readOracleRunConfig({})).toEqual({
+      multiplier: 1,
+      replaySeed: undefined,
+      replayPath: undefined,
+      replayProperty: undefined,
+    })
+  })
+
+  it.each([
+    [{ TANSTACK_DB_ORACLE_RUNS_MULTIPLIER: `0` }, `positive integer`],
+    [{ TANSTACK_DB_ORACLE_RUNS_MULTIPLIER: `1.5` }, `positive integer`],
+    [{ TANSTACK_DB_ORACLE_RUNS_MULTIPLIER: ` ` }, `positive integer`],
+    [{ TANSTACK_DB_ORACLE_SEED: `1.5` }, `must be an integer`],
+    [{ TANSTACK_DB_ORACLE_SEED: ` ` }, `must be an integer`],
+    [{ TANSTACK_DB_ORACLE_PATH: `1:0` }, `requires TANSTACK_DB_ORACLE_SEED`],
+    [
+      { TANSTACK_DB_ORACLE_PROPERTY: `includes.incremental-history` },
+      `requires TANSTACK_DB_ORACLE_PATH`,
+    ],
+    [
+      {
+        TANSTACK_DB_ORACLE_SEED: `42`,
+        TANSTACK_DB_ORACLE_PATH: ` `,
+        TANSTACK_DB_ORACLE_PROPERTY: `includes.incremental-history`,
+      },
+      `must be non-empty`,
+    ],
+    [
+      {
+        TANSTACK_DB_ORACLE_SEED: `42`,
+        TANSTACK_DB_ORACLE_PATH: `1:-1`,
+        TANSTACK_DB_ORACLE_PROPERTY: `includes.incremental-history`,
+      },
+      `colon-separated nonnegative integers`,
+    ],
+    [
+      {
+        TANSTACK_DB_ORACLE_SEED: `42`,
+        TANSTACK_DB_ORACLE_PATH: `1:0`,
+      },
+      `requires TANSTACK_DB_ORACLE_PROPERTY`,
+    ],
+    [
+      {
+        TANSTACK_DB_ORACLE_SEED: `42`,
+        TANSTACK_DB_ORACLE_PATH: `1:0`,
+        TANSTACK_DB_ORACLE_PROPERTY: `includes.typo`,
+      },
+      `unknown oracle property`,
+    ],
+    [
+      {
+        TANSTACK_DB_ORACLE_SEED: `42`,
+        TANSTACK_DB_ORACLE_PROPERTY: `includes.incremental-history`,
+      },
+      `requires TANSTACK_DB_ORACLE_PATH`,
+    ],
+  ] satisfies ReadonlyArray<readonly [Record<string, string>, string]>)(
+    `rejects invalid environment values`,
+    (environment, message) => {
+      expect(() => readOracleRunConfig(environment)).toThrow(message)
+    },
+  )
+
+  it(`rejects duplicate registered property names`, () => {
+    expect(() =>
+      validateOraclePropertyRegistry([`one.property`, `one.property`]),
+    ).toThrow(`duplicate oracle property`)
+  })
+
+  it(`adds a shrink path only to its named property`, () => {
+    const ordinaryRun = {
+      replaySeed: undefined,
+      replayPath: undefined,
+      replayProperty: undefined,
+    }
+    const replayRun = {
+      replaySeed: -42,
+      replayPath: `1:0:2`,
+      replayProperty: `includes.incremental-history`,
+    }
+
+    expect(
+      oracleRandomParameters(40, ordinaryRun, `includes.incremental-history`),
+    ).toEqual({ numRuns: 40 })
+    expect(
+      oracleRandomParameters(40, replayRun, `includes.alpha-renaming`),
+    ).toEqual({
+      numRuns: 40,
+      seed: -42,
+    })
+    expect(
+      oracleRandomParameters(40, replayRun, `includes.incremental-history`),
+    ).toEqual({ numRuns: 40, seed: -42, path: `1:0:2` })
+  })
+})
 
 describe(`deepEquals`, () => {
+  it.each([`later`, Symbol(`later`)])(
+    `checks own-key visibility after a getter runs: %s`,
+    (key) => {
+      const right = { first: 1, [key]: undefined }
+      const left = {
+        get first() {
+          Object.defineProperty(right, key, { enumerable: false })
+          return 1
+        },
+        [key]: undefined,
+      }
+      expect(deepEquals(left, right)).toBe(false)
+    },
+  )
+
+  it.each(
+    [`field`, Symbol(`field`)].flatMap((key) =>
+      [false, true].map((inherited) => ({ key, inherited })),
+    ),
+  )(
+    `requires matching enumerable own keys: $key / inherited=$inherited`,
+    ({ key, inherited }) => {
+      const own = { [key]: 1 }
+      const other = { other: 1 }
+      if (inherited) Object.setPrototypeOf(other, { [key]: 1 })
+      else Object.defineProperty(other, key, { value: 1, enumerable: false })
+      expect(deepEquals(own, other)).toBe(false)
+      expect(deepEquals(other, own)).toBe(false)
+      expect(deepEquals(own, { [key]: 1 })).toBe(true)
+    },
+  )
+
   describe(`primitives`, () => {
     it(`should handle identical primitives`, () => {
       expect(deepEquals(1, 1)).toBe(true)
@@ -62,6 +244,16 @@ describe(`deepEquals`, () => {
       expect(deepEquals({ a: 1, b: 2 }, { a: 1, b: 3 })).toBe(false)
       expect(deepEquals({ a: 1, b: 2 }, { a: 1 })).toBe(false)
       expect(deepEquals({ a: { b: 1 } }, { a: { b: 2 } })).toBe(false)
+    })
+
+    it(`should compare enumerable symbol properties`, () => {
+      const key = Symbol(`key`)
+
+      expect(deepEquals({ [key]: 1 }, { [key]: 1 })).toBe(true)
+      expect(deepEquals({ [key]: 1 }, { [key]: 2 })).toBe(false)
+      expect(deepEquals({ [Symbol(`key`)]: 1 }, { [Symbol(`key`)]: 1 })).toBe(
+        false,
+      )
     })
 
     it(`should handle circular references in objects`, () => {

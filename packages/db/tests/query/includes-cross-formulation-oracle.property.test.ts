@@ -1,0 +1,1001 @@
+import { fc, test as fcTest } from '@fast-check/vitest'
+import { describe, expect, test } from 'vitest'
+import { Temporal } from 'temporal-polyfill'
+import { createCollection } from '../../src/collection/index.js'
+import { createFilterFunctionFromExpression } from '../../src/collection/change-events.js'
+import {
+  and,
+  count,
+  createLiveQueryCollection,
+  eq,
+  isNull,
+  lt,
+  not,
+  queryOnce,
+  toArray,
+} from '../../src/query/index.js'
+import { oraclePropertyOptions } from '../oracle-config.js'
+import { flushPromises, stripVirtualProps } from '../utils.js'
+import { createControlledCollection as createOracleControlledCollection } from './includes-oracle-helpers.js'
+import type { Collection } from '../../src/collection/index.js'
+import type { LoadSubsetOptions } from '../../src/types.js'
+import type { ControlledCollection } from './includes-oracle-helpers.js'
+
+type ParentRow = {
+  id: number
+  group: number
+  position: number
+}
+
+type ChildRow = {
+  id: number
+  parentGroup: number
+  score: number | null
+  position: number
+}
+
+type CrossFormulationAction =
+  | { type: `putParent`; row: ParentRow }
+  | { type: `deleteParent`; id: number }
+  | { type: `putChild`; row: ChildRow }
+  | { type: `deleteChild`; id: number }
+
+type CrossFormulationScenario = {
+  parents: Array<ParentRow>
+  children: Array<ChildRow>
+  pivot: number
+  actions: Array<CrossFormulationAction>
+}
+
+type NormalizedParent = ParentRow & {
+  children: Array<ChildRow>
+}
+
+type FlatRow = {
+  parentId: number
+  parentGroup: number
+  parentPosition: number
+  child: ChildRow | undefined
+}
+
+type ReferenceKey = { code: number }
+
+type ReferenceParent = {
+  id: number
+  group: ReferenceKey
+}
+
+type ReferenceChild = {
+  id: number
+  parentGroup: ReferenceKey
+}
+
+type ReferenceContextParent = {
+  id: number
+  group: number
+  expected: ReferenceKey
+}
+
+type ReferenceContextChild = {
+  id: number
+  group: number
+  token: ReferenceKey
+}
+
+function createControlledCollection<T extends { id: number }>(
+  name: string,
+  initialData: ReadonlyArray<T>,
+): ControlledCollection<T> {
+  return createOracleControlledCollection(name, initialData, {
+    autoIndex: `eager`,
+    rowUpdateMode: `full`,
+  })
+}
+
+function compareParents(left: ParentRow, right: ParentRow): number {
+  return left.position - right.position || left.id - right.id
+}
+
+function compareChildren(left: ChildRow, right: ChildRow): number {
+  return left.position - right.position || left.id - right.id
+}
+
+function normalizeChild(child: ChildRow): ChildRow {
+  return {
+    id: child.id,
+    parentGroup: child.parentGroup,
+    score: child.score,
+    position: child.position,
+  }
+}
+
+function normalizeNested(
+  rows: ReadonlyArray<NormalizedParent>,
+): Array<NormalizedParent> {
+  return rows
+    .map((parent) => ({
+      id: parent.id,
+      group: parent.group,
+      position: parent.position,
+      children: parent.children.map(normalizeChild).sort(compareChildren),
+    }))
+    .sort(compareParents)
+}
+
+function normalizeFlat(rows: ReadonlyArray<FlatRow>): Array<NormalizedParent> {
+  const parents = new Map<number, NormalizedParent>()
+  for (const row of rows) {
+    const parent = parents.get(row.parentId) ?? {
+      id: row.parentId,
+      group: row.parentGroup,
+      position: row.parentPosition,
+      children: [],
+    }
+    if (row.child) parent.children.push(normalizeChild(row.child))
+    parents.set(row.parentId, parent)
+  }
+  return normalizeNested([...parents.values()])
+}
+
+function recompute(
+  parents: Map<number, ParentRow>,
+  children: Map<number, ChildRow>,
+): Array<NormalizedParent> {
+  return normalizeNested(
+    [...parents.values()].map((parent) => ({
+      ...parent,
+      children: [...children.values()].filter(
+        (child) => child.parentGroup === parent.group,
+      ),
+    })),
+  )
+}
+
+function createNestedQuery(
+  parents: Collection<ParentRow>,
+  children: Collection<ChildRow>,
+) {
+  return createLiveQueryCollection({
+    getKey: (row) => row.id,
+    query: (q) =>
+      q
+        .from({ parent: parents })
+        .orderBy(({ parent }) => parent.position)
+        .orderBy(({ parent }) => parent.id)
+        .select(({ parent }) => ({
+          id: parent.id,
+          group: parent.group,
+          position: parent.position,
+          children: toArray(
+            q
+              .from({ child: children })
+              .where(({ child }) => eq(child.parentGroup, parent.group))
+              .orderBy(({ child }) => child.position)
+              .orderBy(({ child }) => child.id)
+              .select(({ child }) => ({
+                id: child.id,
+                parentGroup: child.parentGroup,
+                score: child.score,
+                position: child.position,
+              })),
+          ),
+        })),
+  })
+}
+
+function createWindowedNestedQuery(
+  parents: Collection<ParentRow>,
+  children: Collection<ChildRow>,
+  offset: number,
+  limit: number,
+) {
+  return createLiveQueryCollection({
+    getKey: (row) => row.id,
+    query: (q) =>
+      q
+        .from({ parent: parents })
+        .orderBy(({ parent }) => parent.position)
+        .orderBy(({ parent }) => parent.id)
+        .select(({ parent }) => ({
+          id: parent.id,
+          group: parent.group,
+          position: parent.position,
+          children: toArray(
+            q
+              .from({ child: children })
+              .where(({ child }) => eq(child.parentGroup, parent.group))
+              .orderBy(({ child }) => child.position)
+              .orderBy(({ child }) => child.id)
+              .offset(offset)
+              .limit(limit)
+              .select(({ child }) => ({
+                id: child.id,
+                parentGroup: child.parentGroup,
+                score: child.score,
+                position: child.position,
+              })),
+          ),
+        })),
+  })
+}
+
+function createFlatQuery(
+  parents: Collection<ParentRow>,
+  children: Collection<ChildRow>,
+) {
+  return createLiveQueryCollection({
+    getKey: (row) => `${row.parentId}:${row.child?.id ?? `empty`}`,
+    query: (q) =>
+      q
+        .from({ parent: parents })
+        .leftJoin({ child: children }, ({ parent, child }) =>
+          eq(parent.group, child.parentGroup),
+        )
+        .select(({ parent, child }) => ({
+          parentId: parent.id,
+          parentGroup: parent.group,
+          parentPosition: parent.position,
+          child,
+        })),
+  })
+}
+
+type ChildPartition = `all` | `predicate` | `complement` | `unknown`
+
+async function queryChildren(
+  children: Collection<ChildRow>,
+  parentGroup: number,
+  pivot: number,
+  partition: ChildPartition,
+): Promise<Array<ChildRow>> {
+  return queryOnce((q) => {
+    const correlated = q
+      .from({ child: children })
+      .where(({ child }) => eq(child.parentGroup, parentGroup))
+    const partitioned = (() => {
+      switch (partition) {
+        case `all`:
+          return correlated
+        case `predicate`:
+          return correlated.where(({ child }) => lt(child.score, pivot))
+        case `complement`:
+          return correlated.where(({ child }) => not(lt(child.score, pivot)))
+        case `unknown`:
+          return correlated.where(({ child }) => isNull(lt(child.score, pivot)))
+      }
+    })()
+
+    return partitioned
+      .orderBy(({ child }) => child.position)
+      .orderBy(({ child }) => child.id)
+      .select(({ child }) => ({
+        id: child.id,
+        parentGroup: child.parentGroup,
+        score: child.score,
+        position: child.position,
+      }))
+  })
+}
+
+async function queryPerParent(
+  parents: ReadonlyArray<ParentRow>,
+  children: Collection<ChildRow>,
+  pivot: number,
+  useTlp: boolean,
+): Promise<Array<NormalizedParent>> {
+  return normalizeNested(
+    await Promise.all(
+      parents.map(async (parent) => {
+        const childRows = useTlp
+          ? (
+              await Promise.all(
+                ([`predicate`, `complement`, `unknown`] as const).map(
+                  (partition) =>
+                    queryChildren(children, parent.group, pivot, partition),
+                ),
+              )
+            ).flat()
+          : await queryChildren(children, parent.group, pivot, `all`)
+
+        return { ...parent, children: childRows }
+      }),
+    ),
+  )
+}
+
+function applyAction(
+  action: CrossFormulationAction,
+  parentSource: ControlledCollection<ParentRow>,
+  childSource: ControlledCollection<ChildRow>,
+  parents: Map<number, ParentRow>,
+  children: Map<number, ChildRow>,
+): void {
+  switch (action.type) {
+    case `putParent`: {
+      const type = parents.has(action.row.id) ? `update` : `insert`
+      parents.set(action.row.id, { ...action.row })
+      parentSource.write(type, action.row)
+      return
+    }
+    case `deleteParent`: {
+      const previous = parents.get(action.id)
+      if (!previous) return
+      parents.delete(action.id)
+      parentSource.write(`delete`, previous)
+      return
+    }
+    case `putChild`: {
+      const type = children.has(action.row.id) ? `update` : `insert`
+      children.set(action.row.id, { ...action.row })
+      childSource.write(type, action.row)
+      return
+    }
+    case `deleteChild`: {
+      const previous = children.get(action.id)
+      if (!previous) return
+      children.delete(action.id)
+      childSource.write(`delete`, previous)
+    }
+  }
+}
+
+async function expectFormulationsEquivalent(
+  scenario: CrossFormulationScenario,
+): Promise<void> {
+  const parentSource = createControlledCollection(
+    `cross-form-parents`,
+    scenario.parents,
+  )
+  const childSource = createControlledCollection(
+    `cross-form-children`,
+    scenario.children,
+  )
+  const parents = new Map(scenario.parents.map((row) => [row.id, { ...row }]))
+  const children = new Map(scenario.children.map((row) => [row.id, { ...row }]))
+  const nested = createNestedQuery(
+    parentSource.collection,
+    childSource.collection,
+  )
+  const flat = createFlatQuery(parentSource.collection, childSource.collection)
+
+  const assertEquivalent = async () => {
+    const expected = recompute(parents, children)
+    const nestedResult = normalizeNested(nested.toArray)
+    const flatResult = normalizeFlat(flat.toArray)
+    const parentRows = [...parents.values()]
+    const standaloneResult = await queryPerParent(
+      parentRows,
+      childSource.collection,
+      scenario.pivot,
+      false,
+    )
+    const tlpResult = await queryPerParent(
+      parentRows,
+      childSource.collection,
+      scenario.pivot,
+      true,
+    )
+
+    expect({
+      nested: nestedResult,
+      flat: flatResult,
+      standalone: standaloneResult,
+      tlp: tlpResult,
+    }).toEqual({
+      nested: expected,
+      flat: expected,
+      standalone: expected,
+      tlp: expected,
+    })
+  }
+
+  try {
+    await Promise.all([nested.preload(), flat.preload()])
+    await assertEquivalent()
+    for (const action of scenario.actions) {
+      applyAction(action, parentSource, childSource, parents, children)
+      await flushPromises()
+      await assertEquivalent()
+    }
+  } finally {
+    await Promise.allSettled([
+      nested.cleanup(),
+      flat.cleanup(),
+      parentSource.collection.cleanup(),
+      childSource.collection.cleanup(),
+    ])
+  }
+}
+
+async function expectWindowedIncludeMatches(
+  scenario: CrossFormulationScenario,
+  offset: number,
+  limit: number,
+): Promise<void> {
+  const parentSource = createControlledCollection(
+    `windowed-cross-form-parents`,
+    scenario.parents,
+  )
+  const childSource = createControlledCollection(
+    `windowed-cross-form-children`,
+    scenario.children,
+  )
+  const parents = new Map(scenario.parents.map((row) => [row.id, { ...row }]))
+  const children = new Map(scenario.children.map((row) => [row.id, { ...row }]))
+  const nested = createWindowedNestedQuery(
+    parentSource.collection,
+    childSource.collection,
+    offset,
+    limit,
+  )
+
+  const assertEquivalent = () => {
+    const expected = normalizeNested(
+      [...parents.values()].map((parent) => ({
+        ...parent,
+        children: [...children.values()]
+          .filter((child) => child.parentGroup === parent.group)
+          .sort(compareChildren)
+          .slice(offset, offset + limit),
+      })),
+    )
+    expect(normalizeNested(nested.toArray)).toEqual(expected)
+  }
+
+  try {
+    await nested.preload()
+    assertEquivalent()
+    for (const action of scenario.actions) {
+      applyAction(action, parentSource, childSource, parents, children)
+      await flushPromises()
+      assertEquivalent()
+    }
+  } finally {
+    await Promise.allSettled([
+      nested.cleanup(),
+      parentSource.collection.cleanup(),
+      childSource.collection.cleanup(),
+    ])
+  }
+}
+
+const parentRowArbitrary = (id: number) =>
+  fc.record({
+    id: fc.constant(id),
+    group: fc.integer({ min: -1, max: 1 }),
+    position: fc.integer({ min: -2, max: 2 }),
+  })
+
+const childRowArbitrary = (id: number) =>
+  fc.record({
+    id: fc.constant(id),
+    parentGroup: fc.integer({ min: -1, max: 1 }),
+    score: fc.option(fc.integer({ min: -2, max: 2 }), { nil: null }),
+    position: fc.integer({ min: -2, max: 2 }),
+  })
+
+const actionArbitrary: fc.Arbitrary<CrossFormulationAction> = fc.oneof(
+  fc.record({
+    type: fc.constant(`putParent` as const),
+    row: fc.integer({ min: 0, max: 2 }).chain(parentRowArbitrary),
+  }),
+  fc.record({
+    type: fc.constant(`deleteParent` as const),
+    id: fc.integer({ min: 0, max: 2 }),
+  }),
+  fc.record({
+    type: fc.constant(`putChild` as const),
+    row: fc.integer({ min: 10, max: 14 }).chain(childRowArbitrary),
+  }),
+  fc.record({
+    type: fc.constant(`deleteChild` as const),
+    id: fc.integer({ min: 10, max: 14 }),
+  }),
+)
+
+const scenarioArbitrary: fc.Arbitrary<CrossFormulationScenario> = fc.record({
+  parents: fc.tuple(parentRowArbitrary(0), parentRowArbitrary(1)),
+  children: fc.tuple(
+    childRowArbitrary(10),
+    childRowArbitrary(11),
+    childRowArbitrary(12),
+  ),
+  pivot: fc.integer({ min: -2, max: 2 }),
+  actions: fc.array(actionArbitrary, { minLength: 1, maxLength: 5 }),
+})
+
+const windowedScenarioArbitrary = fc.record({
+  scenario: scenarioArbitrary,
+  offset: fc.integer({ min: 0, max: 2 }),
+  limit: fc.integer({ min: 0, max: 3 }),
+})
+
+describe(`includes cross-formulation oracle`, () => {
+  fcTest.prop(
+    [fc.integer()],
+    oraclePropertyOptions(4, `includes-cross-formulation.reference-context`),
+  )(
+    `parent-context routing preserves reference-sensitive predicate values across transitions`,
+    async (code) => {
+      const firstToken = { code }
+      const secondToken = { code }
+      const parentRows: Array<ReferenceContextParent> = [
+        { id: 1, group: 1, expected: firstToken },
+        { id: 2, group: 1, expected: secondToken },
+      ]
+      const childRows: Array<ReferenceContextChild> = [
+        { id: 10, group: 1, token: firstToken },
+        { id: 20, group: 1, token: secondToken },
+      ]
+      const parents = createControlledCollection(
+        `reference-context-parents`,
+        parentRows,
+      )
+      const fullyLoadedChildren = createControlledCollection(
+        `reference-context-full-children`,
+        childRows,
+      )
+      const loadedChildIds = new Set<number>()
+      const lazyChildren = createCollection<ReferenceContextChild>({
+        id: `reference-context-lazy-children`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => ({
+            loadSubset: (options: LoadSubsetOptions) => {
+              const matches = options.where
+                ? createFilterFunctionFromExpression<ReferenceContextChild>(
+                    options.where,
+                  )
+                : () => true
+              begin()
+              for (const row of childRows) {
+                if (!loadedChildIds.has(row.id) && matches(row)) {
+                  loadedChildIds.add(row.id)
+                  write({ type: `insert`, value: row })
+                }
+              }
+              commit()
+              markReady()
+              return Promise.resolve()
+            },
+          }),
+        },
+      })
+      const createReferenceContextQuery = (
+        children: Collection<ReferenceContextChild>,
+      ) =>
+        createLiveQueryCollection({
+          getKey: (row) => row.id,
+          query: (q) =>
+            q.from({ parent: parents.collection }).select(({ parent }) => ({
+              id: parent.id,
+              children: toArray(
+                q
+                  .from({ child: children })
+                  .where(({ child }) =>
+                    and(
+                      eq(child.group, parent.group),
+                      eq(child.token, parent.expected),
+                    ),
+                  )
+                  .select(({ child }) => child.id),
+              ),
+            })),
+        })
+      const fullyLoaded = createReferenceContextQuery(
+        fullyLoadedChildren.collection,
+      )
+      const lazy = createReferenceContextQuery(lazyChildren)
+
+      try {
+        await Promise.all([fullyLoaded.preload(), lazy.preload()])
+        expect(lazy.toArray.map(stripVirtualProps)).toEqual([
+          { id: 1, children: [10] },
+          { id: 2, children: [20] },
+        ])
+        expect(lazy.toArray.map(stripVirtualProps)).toEqual(
+          fullyLoaded.toArray.map(stripVirtualProps),
+        )
+
+        parents.write(`delete`, parentRows[0]!)
+        await flushPromises()
+        expect(lazy.toArray.map(stripVirtualProps)).toEqual([
+          { id: 2, children: [20] },
+        ])
+        expect(lazy.toArray.map(stripVirtualProps)).toEqual(
+          fullyLoaded.toArray.map(stripVirtualProps),
+        )
+
+        parents.write(`insert`, parentRows[0]!)
+        await flushPromises()
+        expect(lazy.toArray.map(stripVirtualProps)).toEqual([
+          { id: 1, children: [10] },
+          { id: 2, children: [20] },
+        ])
+      } finally {
+        await Promise.allSettled([
+          fullyLoaded.cleanup(),
+          lazy.cleanup(),
+          parents.collection.cleanup(),
+          fullyLoadedChildren.collection.cleanup(),
+          lazyChildren.cleanup(),
+        ])
+      }
+    },
+  )
+
+  test.each([
+    [`Date and number`, () => [new Date(0), 0] as const],
+    [
+      `Buffer and Uint8Array`,
+      () => [Buffer.from([1, 2, 3]), new Uint8Array([1, 2, 3])] as const,
+    ],
+    [
+      `equivalent Temporal values`,
+      () =>
+        [
+          Temporal.PlainDate.from(`2024-04-05`),
+          Temporal.PlainDate.from(`2024-04-05`),
+        ] as const,
+    ],
+  ])(
+    `grouped includes use query equality for %s routes`,
+    async (_name, createValues) => {
+      const [parentGroup, equivalentChildGroup] = createValues()
+      const parents = createControlledCollection(`equality-route-parents`, [
+        { id: 1, group: parentGroup as unknown },
+      ])
+      const children = createControlledCollection(`equality-route-children`, [
+        { id: 10, parentGroup: parentGroup as unknown },
+        { id: 11, parentGroup: equivalentChildGroup as unknown },
+      ])
+      const nested = createLiveQueryCollection({
+        query: (q) =>
+          q.from({ parent: parents.collection }).select(({ parent }) => ({
+            id: parent.id,
+            summaries: toArray(
+              q
+                .from({ child: children.collection })
+                .where(({ child }) => eq(child.parentGroup, parent.group))
+                .groupBy(({ child }) => child.parentGroup)
+                .select(({ child }) => ({ count: count(child.id) })),
+            ),
+          })),
+      })
+      const standalone = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ child: children.collection })
+            .where(({ child }) => eq(child.parentGroup, parentGroup))
+            .groupBy(({ child }) => child.parentGroup)
+            .select(({ child }) => ({ count: count(child.id) })),
+      })
+
+      try {
+        await Promise.all([nested.preload(), standalone.preload()])
+        const nestedCounts = nested
+          .get(1)
+          ?.summaries.map(({ count: childCount }) => ({ count: childCount }))
+        const standaloneCounts = standalone.toArray.map(
+          ({ count: childCount }) => ({ count: childCount }),
+        )
+        expect(nestedCounts).toEqual(standaloneCounts)
+        expect(nestedCounts).toEqual([{ count: 2 }])
+      } finally {
+        await Promise.allSettled([
+          nested.cleanup(),
+          standalone.cleanup(),
+          parents.collection.cleanup(),
+          children.collection.cleanup(),
+        ])
+      }
+    },
+  )
+
+  test.each([`__correlationKey`, `__tanstack_group_correlation_key`])(
+    `grouped includes preserve internal-looking aggregate alias %s`,
+    async (alias) => {
+      const parents = createControlledCollection(`aggregate-alias-parents`, [
+        { id: 1, group: 1 },
+      ])
+      const children = createControlledCollection(`aggregate-alias-children`, [
+        { id: 10, parentGroup: 1 },
+        { id: 11, parentGroup: 1 },
+      ])
+      const nested = createLiveQueryCollection({
+        query: (q) =>
+          q.from({ parent: parents.collection }).select(({ parent }) => ({
+            id: parent.id,
+            summaries: toArray(
+              q
+                .from({ child: children.collection })
+                .where(({ child }) => eq(child.parentGroup, parent.group))
+                .groupBy(({ child }) => child.parentGroup)
+                .select(({ child }) => ({ [alias]: count(child.id) })),
+            ),
+          })),
+      })
+
+      try {
+        await nested.preload()
+        expect(nested.get(1)?.summaries.map((row) => row[alias])).toEqual([2])
+      } finally {
+        await Promise.allSettled([
+          nested.cleanup(),
+          parents.collection.cleanup(),
+          children.collection.cleanup(),
+        ])
+      }
+    },
+  )
+
+  fcTest.prop(
+    [fc.integer()],
+    oraclePropertyOptions(4, `includes-cross-formulation.reference-key`),
+  )(
+    `lazy materialization matches fully loaded materialization for reference-sensitive correlation keys`,
+    async (code) => {
+      const firstKey = { code }
+      const secondKey = { code }
+      const parentRows: Array<ReferenceParent> = [
+        { id: 1, group: firstKey },
+        { id: 2, group: secondKey },
+      ]
+      const childRows: Array<ReferenceChild> = [
+        { id: 10, parentGroup: firstKey },
+        { id: 20, parentGroup: secondKey },
+      ]
+      const parents = createControlledCollection(
+        `reference-key-parents`,
+        parentRows,
+      )
+      const fullyLoadedChildren = createControlledCollection(
+        `reference-key-full-children`,
+        childRows,
+      )
+      const loadedChildIds = new Set<number>()
+      const lazyChildren = createCollection<ReferenceChild>({
+        id: `reference-key-lazy-children`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => ({
+            loadSubset: (options: LoadSubsetOptions) => {
+              const matches = options.where
+                ? createFilterFunctionFromExpression<ReferenceChild>(
+                    options.where,
+                  )
+                : () => true
+              begin()
+              for (const row of childRows) {
+                if (!loadedChildIds.has(row.id) && matches(row)) {
+                  loadedChildIds.add(row.id)
+                  write({ type: `insert`, value: row })
+                }
+              }
+              commit()
+              markReady()
+              return Promise.resolve()
+            },
+          }),
+        },
+      })
+
+      const createReferenceQuery = (children: Collection<ReferenceChild>) =>
+        createLiveQueryCollection({
+          getKey: (row) => row.id,
+          query: (q) =>
+            q.from({ parent: parents.collection }).select(({ parent }) => ({
+              id: parent.id,
+              children: toArray(
+                q
+                  .from({ child: children })
+                  .where(({ child }) => eq(child.parentGroup, parent.group))
+                  .select(({ child }) => child.id),
+              ),
+            })),
+        })
+
+      const createGroupedReferenceQuery = (
+        children: Collection<ReferenceChild>,
+      ) =>
+        createLiveQueryCollection({
+          getKey: (row) => row.id,
+          query: (q) =>
+            q.from({ parent: parents.collection }).select(({ parent }) => ({
+              id: parent.id,
+              summaries: toArray(
+                q
+                  .from({ child: children })
+                  .where(({ child }) => eq(child.parentGroup, parent.group))
+                  .groupBy(({ child }) => child.parentGroup)
+                  .select(({ child }) => ({ count: count(child.id) })),
+              ),
+            })),
+        })
+
+      const fullyLoaded = createReferenceQuery(fullyLoadedChildren.collection)
+      const lazy = createReferenceQuery(lazyChildren)
+      const fullyLoadedGrouped = createGroupedReferenceQuery(
+        fullyLoadedChildren.collection,
+      )
+      const lazyGrouped = createGroupedReferenceQuery(lazyChildren)
+      const groupedRows = (
+        query: typeof fullyLoadedGrouped,
+      ): Array<{ id: number; summaries: Array<{ count: number }> }> =>
+        query.toArray.map((row) => ({
+          id: row.id,
+          summaries: row.summaries.map(({ count: childCount }) => ({
+            count: childCount,
+          })),
+        }))
+
+      try {
+        await Promise.all([
+          fullyLoaded.preload(),
+          lazy.preload(),
+          fullyLoadedGrouped.preload(),
+          lazyGrouped.preload(),
+        ])
+        const fullyLoadedRows = fullyLoaded.toArray.map(stripVirtualProps)
+        const lazyRows = lazy.toArray.map(stripVirtualProps)
+        expect(lazyRows).toEqual(fullyLoadedRows)
+        expect(lazyRows).toEqual([
+          { id: 1, children: [10] },
+          { id: 2, children: [20] },
+        ])
+        expect(groupedRows(lazyGrouped)).toEqual(
+          groupedRows(fullyLoadedGrouped),
+        )
+        expect(groupedRows(lazyGrouped)).toEqual([
+          { id: 1, summaries: [{ count: 1 }] },
+          { id: 2, summaries: [{ count: 1 }] },
+        ])
+
+        parents.write(`delete`, parentRows[0]!)
+        await flushPromises()
+        expect(lazy.toArray.map(stripVirtualProps)).toEqual([
+          { id: 2, children: [20] },
+        ])
+        expect(lazy.toArray.map(stripVirtualProps)).toEqual(
+          fullyLoaded.toArray.map(stripVirtualProps),
+        )
+        expect(groupedRows(lazyGrouped)).toEqual([
+          { id: 2, summaries: [{ count: 1 }] },
+        ])
+        expect(groupedRows(lazyGrouped)).toEqual(
+          groupedRows(fullyLoadedGrouped),
+        )
+
+        parents.write(`insert`, parentRows[0]!)
+        await flushPromises()
+        expect(lazy.toArray.map(stripVirtualProps)).toEqual([
+          { id: 1, children: [10] },
+          { id: 2, children: [20] },
+        ])
+        expect(groupedRows(lazyGrouped)).toEqual([
+          { id: 1, summaries: [{ count: 1 }] },
+          { id: 2, summaries: [{ count: 1 }] },
+        ])
+      } finally {
+        await Promise.allSettled([
+          fullyLoaded.cleanup(),
+          lazy.cleanup(),
+          fullyLoadedGrouped.cleanup(),
+          lazyGrouped.cleanup(),
+          parents.collection.cleanup(),
+          fullyLoadedChildren.collection.cleanup(),
+          lazyChildren.cleanup(),
+        ])
+      }
+    },
+  )
+
+  fcTest.prop(
+    [fc.integer()],
+    oraclePropertyOptions(4, `includes-cross-formulation.symbol-group-route`),
+  )(
+    `grouped includes agree with standalone groups for symbol routes`,
+    async (code) => {
+      const firstGroup = Symbol(`first-${code}`)
+      const secondGroup = Symbol(`second-${code}`)
+      const parents = createControlledCollection(`symbol-route-parents`, [
+        { id: 1, group: firstGroup },
+        { id: 2, group: secondGroup },
+      ])
+      const children = createControlledCollection(`symbol-route-children`, [
+        { id: 10, parentGroup: firstGroup },
+        { id: 11, parentGroup: firstGroup },
+        { id: 20, parentGroup: secondGroup },
+      ])
+
+      const nested = createLiveQueryCollection({
+        getKey: (row) => row.id,
+        query: (q) =>
+          q.from({ parent: parents.collection }).select(({ parent }) => ({
+            id: parent.id,
+            summaries: toArray(
+              q
+                .from({ child: children.collection })
+                .where(({ child }) => eq(child.parentGroup, parent.group))
+                .groupBy(({ child }) => child.parentGroup)
+                .select(({ child }) => ({ count: count(child.id) })),
+            ),
+          })),
+      })
+      const standalone = [firstGroup, secondGroup].map((group) =>
+        createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ child: children.collection })
+              .where(({ child }) => eq(child.parentGroup, group))
+              .groupBy(({ child }) => child.parentGroup)
+              .select(({ child }) => ({ count: count(child.id) })),
+        }),
+      )
+
+      try {
+        await Promise.all([
+          nested.preload(),
+          ...standalone.map((query) => query.preload()),
+        ])
+        expect(
+          nested.toArray.map((row) => ({
+            id: row.id,
+            summaries: row.summaries.map(({ count: childCount }) => ({
+              count: childCount,
+            })),
+          })),
+        ).toEqual(
+          standalone.map((query, index) => ({
+            id: index + 1,
+            summaries: query.toArray.map(({ count: childCount }) => ({
+              count: childCount,
+            })),
+          })),
+        )
+      } finally {
+        await Promise.allSettled([
+          nested.cleanup(),
+          ...standalone.map((query) => query.cleanup()),
+          parents.collection.cleanup(),
+          children.collection.cleanup(),
+        ])
+      }
+    },
+  )
+
+  fcTest(`shared-route child deletion agrees across formulations`, () =>
+    expectFormulationsEquivalent({
+      parents: [
+        { id: 0, group: 0, position: 0 },
+        { id: 1, group: 0, position: 0 },
+      ],
+      children: [
+        { id: 10, parentGroup: 0, score: null, position: 0 },
+        { id: 11, parentGroup: 0, score: null, position: 0 },
+        { id: 12, parentGroup: 0, score: null, position: 0 },
+      ],
+      pivot: 0,
+      actions: [{ type: `deleteChild`, id: 10 }],
+    }),
+  )
+
+  fcTest.prop(
+    [scenarioArbitrary],
+    oraclePropertyOptions(8, `includes-cross-formulation.equivalence`),
+  )(
+    `agrees across nested includes, flat joins, per-parent queries, and TLP partitions`,
+    expectFormulationsEquivalent,
+  )
+
+  fcTest.prop(
+    [windowedScenarioArbitrary],
+    oraclePropertyOptions(12, `includes-cross-formulation.ordered-window`),
+  )(
+    `matches recomputation for ordered offset and limit child windows`,
+    ({ scenario, offset, limit }) =>
+      expectWindowedIncludeMatches(scenario, offset, limit),
+  )
+})

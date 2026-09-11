@@ -1,5 +1,27 @@
 # offline-transactions-react-native
 
+## 1.0.7
+
+### Patch Changes
+
+- Updated dependencies [[`cfb01ce`](https://github.com/TanStack/db/commit/cfb01cee34de7d0378e008dc8c01c1df5253c1e2)]:
+  - @tanstack/db@0.9.0
+  - @tanstack/query-db-collection@1.2.13
+  - @tanstack/offline-transactions@1.0.54
+  - @tanstack/react-db@0.3.8
+  - @tanstack/react-native-db-sqlite-persistence@0.2.21
+
+## 1.0.6
+
+### Patch Changes
+
+- Updated dependencies [[`4b9e8cd`](https://github.com/TanStack/db/commit/4b9e8cdf79551734cf526e6fa4bbdba42ec94575)]:
+  - @tanstack/db@0.8.0
+  - @tanstack/react-db@0.3.0
+  - @tanstack/query-db-collection@1.2.5
+  - @tanstack/offline-transactions@1.0.46
+  - @tanstack/react-native-db-sqlite-persistence@0.2.13
+
 ## 1.0.5
 
 ### Patch Changes

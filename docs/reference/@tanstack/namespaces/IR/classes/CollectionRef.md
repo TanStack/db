@@ -5,7 +5,7 @@ title: CollectionRef
 
 # Class: CollectionRef
 
-Defined in: [packages/db/src/query/ir.ts:85](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L85)
+Defined in: [packages/db/src/query/ir.ts:87](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L87)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: [packages/db/src/query/ir.ts:85](https://github.com/TanStack/db/blob
 new CollectionRef(collection, alias): CollectionRef;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:87](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L87)
+Defined in: [packages/db/src/query/ir.ts:91](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L91)
 
 #### Parameters
 
@@ -49,7 +49,7 @@ BaseExpression.constructor
 readonly __returnType: any;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:82](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L82)
+Defined in: [packages/db/src/query/ir.ts:84](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L84)
 
 **`Internal`**
 
@@ -69,7 +69,7 @@ BaseExpression.__returnType
 alias: string;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:89](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L89)
+Defined in: [packages/db/src/query/ir.ts:93](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L93)
 
 ***
 
@@ -79,7 +79,19 @@ Defined in: [packages/db/src/query/ir.ts:89](https://github.com/TanStack/db/blob
 collection: CollectionImpl;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:88](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L88)
+Defined in: [packages/db/src/query/ir.ts:92](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L92)
+
+***
+
+### sourceId
+
+```ts
+readonly sourceId: string;
+```
+
+Defined in: [packages/db/src/query/ir.ts:90](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L90)
+
+Opaque runtime identity; aliases are lexical names only.
 
 ***
 
@@ -89,7 +101,7 @@ Defined in: [packages/db/src/query/ir.ts:88](https://github.com/TanStack/db/blob
 type: "collectionRef";
 ```
 
-Defined in: [packages/db/src/query/ir.ts:86](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L86)
+Defined in: [packages/db/src/query/ir.ts:88](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L88)
 
 #### Overrides
 

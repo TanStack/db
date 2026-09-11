@@ -5,10 +5,19 @@ import {
   orderByWithFractionalIndex,
   output,
 } from '../../src/operators/index.js'
-import { orderByWithFractionalIndexBTree } from '../../src/operators/orderByBTree.js'
-import { loadBTree } from '../../src/operators/topKWithFractionalIndexBTree.js'
+import { orderByWithFractionalIndexBase } from '../../src/operators/orderBy.js'
+import {
+  loadBTree,
+  topKWithFractionalIndexBTree,
+} from '../../src/operators/topKWithFractionalIndexBTree.js'
 import { MessageTracker, compareFractionalIndex } from '../test-utils.js'
 import type { KeyValue } from '../../src/types.js'
+
+const orderByWithBTree: typeof orderByWithFractionalIndex = (
+  extract,
+  options,
+) =>
+  orderByWithFractionalIndexBase(topKWithFractionalIndexBTree, extract, options)
 
 const stripFractionalIndex = ([[key, [value, _index]], multiplicity]: any) => [
   key,
@@ -27,7 +36,7 @@ beforeAll(async () => {
 describe(`Operators`, () => {
   describe.each([
     [`with array`, { orderBy: orderByWithFractionalIndex }],
-    [`with B+ tree`, { orderBy: orderByWithFractionalIndexBTree }],
+    [`with B+ tree`, { orderBy: orderByWithBTree }],
   ])(`OrderByWithFractionalIndex operator %s`, (_, { orderBy }) => {
     test(`initial results with default comparator`, () => {
       const graph = new D2()

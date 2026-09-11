@@ -215,6 +215,152 @@ describe(`useLiveInfiniteQuery`, () => {
     expect(result.current.hasNextPage).toBe(true)
   })
 
+  it(`should derive query identity from structured captured values`, async () => {
+    const posts = createMockPosts(50)
+    const collection = createCollection(
+      mockSyncCollectionOptions<Post>({
+        autoIndex: `eager`,
+        id: `derived-identity-change-test`,
+        getKey: (post: Post) => post.id,
+        initialData: posts,
+      }),
+    )
+
+    const { result, rerender } = renderHook(
+      ({ category }: { category: string }) => {
+        return useLiveInfiniteQuery(
+          (q) =>
+            q
+              .from({ posts: collection })
+              .where(({ posts: p }) => eq(p.category, category))
+              .orderBy(({ posts: p }) => p.createdAt, `desc`),
+          {
+            pageSize: 5,
+            getNextPageParam: (lastPage) =>
+              lastPage.length === 5 ? lastPage.length : undefined,
+          },
+        )
+      },
+      { initialProps: { category: `tech` } },
+    )
+
+    await waitFor(() => {
+      expect(result.current.isReady).toBe(true)
+    })
+
+    await act(async () => {
+      await result.current.fetchNextPage()
+    })
+
+    await waitFor(() => {
+      expect(result.current.pages).toHaveLength(2)
+    })
+
+    act(() => {
+      rerender({ category: `life` })
+    })
+
+    await waitFor(() => {
+      expect(result.current.pages).toHaveLength(1)
+    })
+
+    result.current.pages[0]!.forEach((post) => {
+      expect(post.category).toBe(`life`)
+    })
+  })
+
+  it(`uses structural queryKey identity without rerunning a stable query`, async () => {
+    const source = createCollection(
+      mockSyncCollectionOptions<Post>({
+        autoIndex: `eager`,
+        id: `infinite-query-key-identity`,
+        getKey: (post) => post.id,
+        initialData: createMockPosts(20),
+      }),
+    )
+    let queryExecutions = 0
+
+    const { result, rerender } = renderHook(
+      ({ filter }: { filter: { category: string } }) =>
+        useLiveInfiniteQuery(
+          (q) => {
+            queryExecutions += 1
+            return q
+              .from({ post: source })
+              .where(({ post }) => eq(post.category, filter.category))
+              .orderBy(({ post }) => post.createdAt, `desc`)
+          },
+          {
+            pageSize: 2,
+            queryKey: [source.id, `category`, filter],
+          },
+        ),
+      { initialProps: { filter: { category: `tech` } } },
+    )
+
+    await waitFor(() => expect(result.current.isReady).toBe(true))
+    const firstCollection = result.current.collection
+    expect(queryExecutions).toBe(1)
+
+    rerender({ filter: { category: `tech` } })
+
+    expect(result.current.collection).toBe(firstCollection)
+    expect(queryExecutions).toBe(1)
+
+    rerender({ filter: { category: `life` } })
+
+    await waitFor(() => {
+      expect(result.current.collection).not.toBe(firstCollection)
+      expect(
+        result.current.data.every((post) => post.category === `life`),
+      ).toBe(true)
+    })
+    expect(queryExecutions).toBe(2)
+  })
+
+  it(`uses queryKey to make captured values in opaque queries reactive`, async () => {
+    const source = createCollection(
+      mockSyncCollectionOptions<Post>({
+        id: `infinite-opaque-query-key`,
+        getKey: (post) => post.id,
+        initialData: createMockPosts(20),
+      }),
+    )
+    const { result, rerender } = renderHook(
+      ({ category }: { category: string }) =>
+        useLiveInfiniteQuery(
+          (q) =>
+            q
+              .from({ post: source })
+              .fn.where(({ post }) => post.category === category)
+              .orderBy(({ post }) => post.createdAt, `desc`),
+          {
+            pageSize: 2,
+            queryKey: [source.id, `category-fn`, category],
+          },
+        ),
+      { initialProps: { category: `tech` } },
+    )
+
+    await waitFor(() => {
+      expect(result.current.data.length).toBeGreaterThan(0)
+      expect(
+        result.current.data.every((post) => post.category === `tech`),
+      ).toBe(true)
+    })
+    const firstCollection = result.current.collection
+
+    rerender({ category: `life` })
+
+    await waitFor(() => {
+      expect(result.current.collection).not.toBe(firstCollection)
+      expect(result.current.data.length).toBeGreaterThan(0)
+      expect(
+        result.current.data.every((post) => post.category === `life`),
+      ).toBe(true)
+    })
+  })
+
   it(`compares dependencies by identity instead of serialization`, async () => {
     const source = createCollection(
       mockSyncCollectionOptions<Post>({
@@ -257,6 +403,44 @@ describe(`useLiveInfiniteQuery`, () => {
         result.current.data.every((post) => post.category === `life`),
       ).toBe(true)
     })
+  })
+
+  it(`preserves loaded pages when dependencies are structurally unchanged`, async () => {
+    const source = createCollection(
+      mockSyncCollectionOptions<Post>({
+        id: `infinite-query-structurally-equal-deps`,
+        getKey: (post) => post.id,
+        initialData: createMockPosts(20),
+      }),
+    )
+    const { result, rerender } = renderHook(
+      ({ filter }: { filter: { category: string } }) =>
+        useLiveInfiniteQuery(
+          (q) =>
+            q
+              .from({ post: source })
+              .where(({ post }) => eq(post.category, filter.category))
+              .orderBy(({ post }) => post.createdAt, `desc`),
+          { pageSize: 2 },
+          [filter],
+        ),
+      { initialProps: { filter: { category: `tech` } } },
+    )
+
+    await waitFor(() => expect(result.current.isReady).toBe(true))
+    await act(async () => {
+      await result.current.fetchNextPage()
+    })
+    await waitFor(() => expect(result.current.pages).toHaveLength(2))
+    const firstCollection = result.current.collection
+
+    rerender({ filter: { category: `tech` } })
+
+    await waitFor(() => {
+      expect(result.current.collection).not.toBe(firstCollection)
+      expect(result.current.isReady).toBe(true)
+    })
+    expect(result.current.pages).toHaveLength(2)
   })
 
   it(`releases a replaced controller through the external-store unsubscribe`, async () => {

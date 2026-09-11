@@ -81,6 +81,23 @@ describe(`Alias validation in subqueries`, () => {
     }).toThrow(/Subquery uses alias "vote"/)
   })
 
+  test(`should throw DuplicateAliasInSubqueryError when an include reuses a parent alias`, () => {
+    expect(() => {
+      createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q.from({ lock: locksCollection }).select(({ lock: parentLock }) => ({
+            _id: parentLock._id,
+            votes: q
+              .from({ lock: votesCollection })
+              .where(({ lock: childLock }) =>
+                eq(childLock.lockId, parentLock._id),
+              ),
+          })),
+      })
+    }).toThrow(/Subquery uses alias "lock"/)
+  })
+
   test(`should allow subqueries when all collection aliases are unique`, () => {
     const query = createLiveQueryCollection({
       startSync: true,

@@ -126,6 +126,12 @@ export type MutationFnParams<T extends object = Record<string, unknown>> = {
   transaction: TransactionWithMutations<T>
 }
 
+/**
+ * Persists an optimistic transaction. Do not start or await collection or
+ * live-query preloads here. Sync commits queue behind this function, so waiting
+ * for preload work that needs one of those commits can deadlock the mutation.
+ * Use the collection adapter's mutation acknowledgement helper instead.
+ */
 export type MutationFn<T extends object = Record<string, unknown>> = (
   params: MutationFnParams<T>,
 ) => Promise<any>
@@ -229,6 +235,14 @@ export interface SubscriptionStatusEvent<T extends SubscriptionStatus> {
   status: T
 }
 
+/** Event emitted when a subset requested by this subscription fails to load. */
+export interface SubscriptionLoadSubsetErrorEvent {
+  type: `loadSubset:error`
+  subscription: Subscription
+  options: LoadSubsetOptions
+  error: unknown
+}
+
 /**
  * Event emitted when subscription is unsubscribed
  */
@@ -244,6 +258,7 @@ export type SubscriptionEvents = {
   'status:change': SubscriptionStatusChangeEvent
   'status:ready': SubscriptionStatusEvent<`ready`>
   'status:loadingSubset': SubscriptionStatusEvent<`loadingSubset`>
+  'loadSubset:error': SubscriptionLoadSubsetErrorEvent
   unsubscribed: SubscriptionUnsubscribedEvent
 }
 
@@ -254,6 +269,8 @@ export type SubscriptionEvents = {
 export interface Subscription extends EventEmitter<SubscriptionEvents> {
   /** Current status of the subscription */
   readonly status: SubscriptionStatus
+  /** Most recent subset-load failure observed by this subscription. */
+  readonly lastError: unknown | undefined
 }
 
 /**
@@ -266,9 +283,8 @@ export interface Subscription extends EventEmitter<SubscriptionEvents> {
 export type CursorExpressions = {
   /**
    * Expression for rows greater than (after) the cursor value.
-   * For multi-column orderBy, this is a composite cursor using OR of conditions.
-   * Example for [col1 ASC, col2 DESC] with values [v1, v2]:
-   *   or(gt(col1, v1), and(eq(col1, v1), lt(col2, v2)))
+   * Core emits cursors for a single order column. Multi-column queries use
+   * prefix-and-tie loading instead of constructing a composite cursor.
    */
   whereFrom: BasicExpression<boolean>
   /**
@@ -284,6 +300,15 @@ export type CursorExpressions = {
   lastKey?: string | number
 }
 
+/**
+ * Immutable request data. From submission onward, callers and adapters must
+ * not mutate these options, their expression trees, comparison options, or
+ * constant payloads (including Dates, byte arrays, and membership arrays).
+ * Create new request data to change a demand; core does not clone or freeze it.
+ * Use stable data properties, not stateful getters, for request data.
+ * Signal and subscription references stay fixed, but their lifecycle remains
+ * live: aborting the signal or releasing the subscription is supported.
+ */
 export type LoadSubsetOptions = {
   /** The where expression to filter the data (does NOT include cursor expressions) */
   where?: BasicExpression<boolean>
@@ -303,6 +328,14 @@ export type LoadSubsetOptions = {
    */
   offset?: number
   /**
+   * Aborted when this exact subset request is no longer current. Cancellation
+   * is cooperative: async adapters should stop before installing more
+   * request-scoped rows. If an in-flight baseline cannot be canceled, the
+   * returned load promise must settle after those writes become visible so
+   * core can keep overlapping replay private until then.
+   */
+  signal?: AbortSignal
+  /**
    * The subscription that triggered the load.
    * Advanced sync implementations can use this for:
    * - LRU caching keyed by subscription
@@ -313,8 +346,35 @@ export type LoadSubsetOptions = {
   subscription?: Subscription
 }
 
+/** @internal Result returned by the collection's normalized subset boundary. */
+export type LoadSubsetRequestResult = true | Promise<void>
+
+/**
+ * Loads one subset and transfers its ongoing resource ownership only after
+ * returning `true` or a promise. An implementation that throws synchronously
+ * must release any partially acquired resource before throwing. A successful
+ * implementation must await or return every applied receipt from the sync
+ * `commit()` calls that establish the loaded subset. A result describes only
+ * the exact `options` passed to this call.
+ */
 export type LoadSubsetFn = (options: LoadSubsetOptions) => true | Promise<void>
 
+/**
+ * Confirms whether a committed sync transaction is visible or is waiting for
+ * its turn in the collection's causal queue. A pending receipt rejects with an
+ * error named `AbortError` if cancellation wins before application. Once the
+ * writes are visible, later cancellation has no effect.
+ */
+export type SyncAppliedReceipt = true | Promise<void>
+
+/**
+ * Releases the exact acquisition created for `options`.
+ *
+ * Implementations must be idempotent and must not throw. An adapter owns any
+ * remote unsubscribe retry needed to make release reliable. Core attempts
+ * each acquisition's release once, reports failures, and continues retiring
+ * other acquisitions. It does not retry a failed subset release.
+ */
 export type UnloadSubsetFn = (options: LoadSubsetOptions) => void
 
 export type CleanupFn = () => void
@@ -337,8 +397,23 @@ export interface SyncConfig<
      */
     begin: (options?: { immediate?: boolean }) => void
     write: (message: ChangeMessageOrDeleteKeyMessage<T, TKey>) => void
-    commit: () => void
+    /**
+     * Commit the active sync transaction in FIFO order.
+     * Returns `true` when the writes and events are already visible. Otherwise
+     * returns a receipt that resolves after they become visible. If collection
+     * cleanup or an optional request abort abandons the transaction first, the
+     * receipt rejects with an error named `AbortError`.
+     * Pass a signal only for request-scoped work that must not publish after
+     * cancellation. Aborting after application has no effect.
+     */
+    commit: (signal?: AbortSignal) => SyncAppliedReceipt
+    /** Signal that a usable initial or recovered snapshot is available. */
     markReady: () => void
+    /**
+     * Signal that initial sync failed before producing a usable snapshot.
+     * When supplied, `error` is preserved as the rejection reason from `preload()`.
+     */
+    markError: (error?: unknown) => void
     truncate: () => void
     metadata?: SyncMetadataApi<TKey>
   }) => void | CleanupFn | SyncConfigRes
@@ -348,6 +423,22 @@ export interface SyncConfig<
    * @returns Record containing relation information
    */
   getSyncMetadata?: () => Record<string, unknown>
+
+  /**
+   * Export adapter-specific metadata that lets hydration/persistence resume sync.
+   * The payload shape is owned by the adapter.
+   */
+  exportSyncMeta?: () => unknown
+
+  /**
+   * Import adapter-specific metadata produced by exportSyncMeta.
+   */
+  importSyncMeta?: (meta: unknown) => void
+
+  /**
+   * Merge two adapter-specific metadata payloads during hydration.
+   */
+  mergeSyncMeta?: (current: unknown, incoming: unknown) => unknown
 
   /**
    * The row update mode used to sync to the collection.
@@ -502,7 +593,8 @@ export type DeleteMutationFn<
  * @example
  * // Status transitions
  * // idle → loading → ready (when markReady() is called)
- * // Any status can transition to → error or cleaned-up
+ * // Any active status can transition to → error or cleaned-up
+ * // error → ready after a successful sync recovery
  */
 export type CollectionStatus =
   /** Collection is created but sync hasn't started yet (when startSync config is false) */
@@ -863,7 +955,14 @@ export interface SubscribeChangesOptions<
    * Allows the caller to directly track the loading promise for isReady status.
    * @internal
    */
-  onLoadSubsetResult?: (result: Promise<void> | true) => void
+  onLoadSubsetResult?: (result: LoadSubsetRequestResult) => void
+  /** Receives subset-load failures scoped to this subscription. @internal */
+  onLoadSubsetError?: (event: SubscriptionLoadSubsetErrorEvent) => void
+  /** Lets a live-query graph retain its last publication during replay. @internal */
+  truncateReplayPublication?: {
+    readonly start: () => void
+    readonly succeed: () => void
+  }
 }
 
 export interface SubscribeChangesSnapshotOptions<

@@ -1,5 +1,90 @@
 # @tanstack/trailbase-db-collection
 
+## 0.1.107
+
+### Patch Changes
+
+- Updated dependencies [[`cfb01ce`](https://github.com/TanStack/db/commit/cfb01cee34de7d0378e008dc8c01c1df5253c1e2)]:
+  - @tanstack/db@0.9.0
+
+## 0.1.106
+
+### Patch Changes
+
+- Updated dependencies [[`bbc9edf`](https://github.com/TanStack/db/commit/bbc9edf28ef707c8fb3c451fe2c4724039a0037a)]:
+  - @tanstack/db@0.8.7
+
+## 0.1.105
+
+### Patch Changes
+
+- Updated dependencies [[`ae2fe74`](https://github.com/TanStack/db/commit/ae2fe74e4cb4e74500a90034e6db7987bbd90bd8)]:
+  - @tanstack/db@0.8.6
+
+## 0.1.104
+
+### Patch Changes
+
+- Settle subset loads only after their committed rows and events are visible. A ([#1769](https://github.com/TanStack/db/pull/1769))
+  commit receipt now rejects with `AbortError` when cancellation wins before
+  application and ignores later aborts. Preserve causal publication,
+  cancellation, persistence, and error handling across the affected sync
+  adapters.
+- Updated dependencies [[`d8defd2`](https://github.com/TanStack/db/commit/d8defd2a8eb96162cbd4e24970d519eac217bb95), [`9ad882f`](https://github.com/TanStack/db/commit/9ad882f71872aa2210b93ea93d084bd08bedb6a4), [`8c5838d`](https://github.com/TanStack/db/commit/8c5838ddd5f08b3c298d4458cae1ce599af80624)]:
+  - @tanstack/db@0.8.5
+
+## 0.1.103
+
+### Patch Changes
+
+- Report incremental subset-load failures through subscriptions, live-query utilities, and effects while keeping cached source rows available. Recover cleanly from failed or overlapping must-refetch replays, collection cleanup, effect teardown errors, and cooperative adapter cancellation. Electric's shared-stream snapshot path still depends on upstream request identity or cancellation support to prevent rows from an aborted request from arriving before the request Promise settles. ([#1756](https://github.com/TanStack/db/pull/1756))
+
+- Updated dependencies [[`3131de1`](https://github.com/TanStack/db/commit/3131de14507006f72631947a61e040b1523d417f), [`8f432ba`](https://github.com/TanStack/db/commit/8f432ba226df2a27d67498ddd1df8468f93ff776)]:
+  - @tanstack/db@0.8.4
+
+## 0.1.102
+
+### Patch Changes
+
+- Updated dependencies [[`99ba511`](https://github.com/TanStack/db/commit/99ba5113b21fd850a8f3e517e5d44ea42ac9f984), [`43cc741`](https://github.com/TanStack/db/commit/43cc741842ae3689128c308be19069b062642f12)]:
+  - @tanstack/db@0.8.3
+
+## 0.1.101
+
+### Patch Changes
+
+- Propagate initial query sync failures through dependent live queries and readiness promises, including recovery and late subscribers, while preserving a ready cached snapshot on later refetch failures. Let sync adapters pass the original failure to `markError(error)` so readiness promises reject with that cause. Isolate adapter callbacks by sync session, preserve synchronous startup errors, and prevent rejected deduplicated subset requests from creating detached promise rejections. ([#1751](https://github.com/TanStack/db/pull/1751))
+
+- Updated dependencies [[`c521b5d`](https://github.com/TanStack/db/commit/c521b5d6503d8fdf03574b9f9791143e59d34204)]:
+  - @tanstack/db@0.8.2
+
+## 0.1.100
+
+### Patch Changes
+
+- Updated dependencies [[`5d9335d`](https://github.com/TanStack/db/commit/5d9335d0d42c1cc1ec2b92be8ce40ae8abe42827), [`a20352a`](https://github.com/TanStack/db/commit/a20352a9a7b64c9708bef9a1dfb90c96426b6730)]:
+  - @tanstack/db@0.8.1
+
+## 0.1.99
+
+### Patch Changes
+
+- Add SSR through request-scoped `DbClient` instances, collection descriptors, ([#1564](https://github.com/TanStack/db/pull/1564))
+  explicit collection-row hydration, live-query result snapshots, adapter sync
+  metadata, and React and Svelte descriptor resolution.
+
+  React live queries now derive identity from structured query IR. Opaque queries
+  can provide `queryKey`; legacy dependency arrays and unkeyed opaque queries keep
+  working with development warnings until 1.0.
+
+  Add TanStack Router integration that streams live queries discovered during a
+  Suspense render as pending promises which resolve to ordered result snapshots.
+  The browser starts normal source sync and atomically replaces the snapshot when
+  its live result is ready.
+
+- Updated dependencies [[`4b9e8cd`](https://github.com/TanStack/db/commit/4b9e8cdf79551734cf526e6fa4bbdba42ec94575)]:
+  - @tanstack/db@0.8.0
+
 ## 0.1.98
 
 ### Patch Changes

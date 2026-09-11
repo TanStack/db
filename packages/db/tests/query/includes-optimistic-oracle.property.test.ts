@@ -1,20 +1,16 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
-import { createCollection } from '../../src/collection/index.js'
 import {
   createLiveQueryCollection,
   eq,
   toArray,
 } from '../../src/query/index.js'
-import {
-  flushPromises,
-  mockSyncCollectionOptions,
-  withExpectedRejection,
-} from '../utils.js'
-import { expectAssertionFailure } from '../expected-failure.js'
+import { flushPromises, withExpectedRejection } from '../utils.js'
 import { runTrace } from '../trace-runner.js'
-import type { AssertionDifference } from '../expected-failure.js'
+import { oraclePropertyOptions } from '../oracle-config.js'
+import { createControlledCollection as createOracleControlledCollection } from './includes-oracle-helpers.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
+import type { OracleSyncChange as SyncChange } from './includes-oracle-helpers.js'
 
 type RootRow = {
   id: number
@@ -25,11 +21,6 @@ type RootRow = {
 
 type ChildRow = RootRow & {
   parentGroup: number
-}
-
-type SyncChange<T> = {
-  type: `insert` | `update` | `delete`
-  value: T
 }
 
 type ChildLevel = 1 | 2 | 3
@@ -72,20 +63,6 @@ type OptimisticRelationshipStep =
 
 type OracleNode = RootRow & {
   children?: Array<OracleNode>
-}
-
-type RelationshipNode = Record<string, unknown> & {
-  id: number
-  children?: unknown
-}
-
-function isRelationshipNode(value: unknown): value is RelationshipNode {
-  return (
-    typeof value === `object` &&
-    value !== null &&
-    `id` in value &&
-    typeof value.id === `number`
-  )
 }
 
 type ControlledCollection<T extends { id: number }> = ReturnType<
@@ -164,37 +141,13 @@ type RouteValues = {
   authoritative: number
 }
 
-let nextHarnessId = 0
-
 function createControlledCollection<T extends { id: number }>(
   name: string,
   initialData: ReadonlyArray<T>,
 ) {
-  const options = mockSyncCollectionOptions<T>({
-    id: `${name}-${nextHarnessId++}`,
-    getKey: (row) => row.id,
-    initialData: initialData.map((row) => ({ ...row })),
+  return createOracleControlledCollection(name, initialData, {
+    rowUpdateMode: `full`,
   })
-  options.sync.rowUpdateMode = `full`
-  const collection = createCollection(options)
-
-  const writeBatch = (changes: ReadonlyArray<SyncChange<T>>) => {
-    options.utils.begin()
-    for (const change of changes) {
-      options.utils.write({
-        type: change.type,
-        value: { ...change.value },
-      })
-    }
-    options.utils.commit()
-  }
-
-  return {
-    collection,
-    writeBatch,
-    resolveSync: options.utils.resolveSync,
-    rejectSync: options.utils.rejectSync,
-  }
 }
 
 function createSources(
@@ -331,53 +284,6 @@ function stripVirtualProperties(value: unknown): unknown {
     Object.entries(value)
       .filter(([key]) => !key.startsWith(`$`))
       .map(([key, entry]) => [key, stripVirtualProperties(entry)]),
-  )
-}
-
-function replaceDirectChildren(
-  value: unknown,
-  parentId: number,
-  children: ReadonlyArray<OracleNode>,
-): unknown | undefined {
-  if (!Array.isArray(value)) return undefined
-
-  let replacements = 0
-  const visit = (entries: ReadonlyArray<unknown>): Array<unknown> =>
-    entries.map((entry) => {
-      if (!isRelationshipNode(entry)) return entry
-      if (entry.id === parentId) {
-        replacements += 1
-        return { ...entry, children }
-      }
-      if (!Array.isArray(entry.children)) return entry
-      return { ...entry, children: visit(entry.children) }
-    })
-
-  const replaced = visit(value)
-  return replacements === 1 ? replaced : undefined
-}
-
-function matchesExactly(actual: unknown, expected: unknown): boolean {
-  try {
-    expect(actual).toEqual(expected)
-    return true
-  } catch {
-    return false
-  }
-}
-
-function classifyRetainedDetachedGrandchild(
-  { actual, expected }: AssertionDifference,
-  retainedChildren: ReadonlyArray<OracleNode>,
-) {
-  const expectedWithOnlyKnownDefect = replaceDirectChildren(
-    expected,
-    11,
-    retainedChildren,
-  )
-  return (
-    expectedWithOnlyKnownDefect !== undefined &&
-    matchesExactly(actual, expectedWithOnlyKnownDefect)
   )
 }
 
@@ -556,18 +462,6 @@ function fixture(routes: RouteValues) {
   return { roots, levels }
 }
 
-function retainedDetachedChildren(routes: RouteValues): Array<OracleNode> {
-  return [
-    {
-      id: 21,
-      group: routes.original + 1000,
-      value: 210,
-      position: 0,
-      children: [],
-    },
-  ]
-}
-
 async function expectHistoryMatches(
   routes: RouteValues,
   steps: ReadonlyArray<OptimisticRelationshipStep>,
@@ -588,58 +482,6 @@ const routeValuesArbitrary: fc.Arbitrary<RouteValues> = fc.record({
 })
 
 describe(`optimistic relationship-transition oracle`, () => {
-  fcTest(`known-defect classifier rejects collateral corruption`, () => {
-    const routes: RouteValues = {
-      rootA: 10,
-      rootB: 100,
-      rootC: 200,
-      original: 300,
-      optimistic: 400,
-      authoritative: 500,
-    }
-    const expected = [
-      {
-        id: 1,
-        group: routes.rootA,
-        value: 10,
-        position: 0,
-        children: [
-          {
-            id: 11,
-            group: routes.optimistic,
-            value: 110,
-            position: 0,
-            children: [],
-          },
-        ],
-      },
-    ]
-    const actual = [
-      {
-        id: 1,
-        group: routes.rootA,
-        value: 999,
-        position: 0,
-        children: [
-          {
-            id: 11,
-            group: routes.optimistic,
-            value: 110,
-            position: 0,
-            children: retainedDetachedChildren(routes),
-          },
-        ],
-      },
-    ]
-
-    expect(
-      classifyRetainedDetachedGrandchild(
-        { actual, expected },
-        retainedDetachedChildren(routes),
-      ),
-    ).toBe(false)
-  })
-
   fcTest(
     `rejects optimistic handles the sync mock cannot settle independently`,
     () => {
@@ -657,34 +499,28 @@ describe(`optimistic relationship-transition oracle`, () => {
     },
   )
 
-  fcTest.prop([routeValuesArbitrary], { numRuns: 12 })(
-    `known defect: an optimistic rekey detaches its old descendants immediately`,
+  fcTest.prop(
+    [routeValuesArbitrary],
+    oraclePropertyOptions(12, `includes-optimistic.rekey-detach`),
+  )(
+    `an optimistic rekey detaches its old descendants immediately`,
     async (routes) => {
-      await expectAssertionFailure(
-        async () => {
-          await expectHistoryMatches(routes, [
-            {
-              type: `optimistic`,
-              handle: `rekey`,
-              level: 1,
-              id: 11,
-              patch: { group: routes.optimistic },
-            },
-          ])
-        },
+      await expectHistoryMatches(routes, [
         {
-          checkpoint: 1,
-          classify: (difference) =>
-            classifyRetainedDetachedGrandchild(
-              difference,
-              retainedDetachedChildren(routes),
-            ),
+          type: `optimistic`,
+          handle: `rekey`,
+          level: 1,
+          id: 11,
+          patch: { group: routes.optimistic },
         },
-      )()
+      ])
     },
   )
 
-  fcTest.prop([routeValuesArbitrary], { numRuns: 12 })(
+  fcTest.prop(
+    [routeValuesArbitrary],
+    oraclePropertyOptions(12, `includes-optimistic.rekey-rollback`),
+  )(
     `restores the authoritative relationship after an optimistic rekey rolls back`,
     async (routes) => {
       await expectHistoryMatches(routes, [
@@ -698,7 +534,10 @@ describe(`optimistic relationship-transition oracle`, () => {
     },
   )
 
-  fcTest.prop([routeValuesArbitrary], { numRuns: 12 })(
+  fcTest.prop(
+    [routeValuesArbitrary],
+    oraclePropertyOptions(12, `includes-optimistic.descendant-rollback`),
+  )(
     `rolls back a descendant update made while its ancestor is reparented`,
     async (routes) => {
       await expectHistoryMatches(routes, [
@@ -722,7 +561,10 @@ describe(`optimistic relationship-transition oracle`, () => {
     },
   )
 
-  fcTest.prop([routeValuesArbitrary], { numRuns: 12 })(
+  fcTest.prop(
+    [routeValuesArbitrary],
+    oraclePropertyOptions(12, `includes-optimistic.ancestor-rollback`),
+  )(
     `rolls back a reparented ancestor while its descendant update remains pending`,
     async (routes) => {
       await expectHistoryMatches(routes, [
@@ -746,7 +588,10 @@ describe(`optimistic relationship-transition oracle`, () => {
     },
   )
 
-  fcTest.prop([routeValuesArbitrary], { numRuns: 12 })(
+  fcTest.prop(
+    [routeValuesArbitrary],
+    oraclePropertyOptions(12, `includes-optimistic.confirm-same-route`),
+  )(
     `settles a confirmed optimistic reparent on the same authoritative route`,
     async (routes) => {
       await expectHistoryMatches(routes, [
@@ -784,7 +629,10 @@ describe(`optimistic relationship-transition oracle`, () => {
     },
   )
 
-  fcTest.prop([routeValuesArbitrary], { numRuns: 12 })(
+  fcTest.prop(
+    [routeValuesArbitrary],
+    oraclePropertyOptions(12, `includes-optimistic.confirm-different-route`),
+  )(
     `settles a confirmed optimistic reparent on a different authoritative route`,
     async (routes) => {
       await expectHistoryMatches(routes, [
@@ -824,100 +672,100 @@ describe(`optimistic relationship-transition oracle`, () => {
     },
   )
 
-  fcTest.prop([routeValuesArbitrary], { numRuns: 12 })(
-    `restores a rekey after a sibling enters its old route`,
-    async (routes) => {
-      await expectHistoryMatches(routes, [
-        {
-          type: `optimisticRollback`,
+  fcTest.prop(
+    [routeValuesArbitrary],
+    oraclePropertyOptions(12, `includes-optimistic.sibling-route-rollback`),
+  )(`restores a rekey after a sibling enters its old route`, async (routes) => {
+    await expectHistoryMatches(routes, [
+      {
+        type: `optimisticRollback`,
+        level: 1,
+        id: 11,
+        patch: { group: routes.optimistic },
+        beforeRollback: {
           level: 1,
-          id: 11,
-          patch: { group: routes.optimistic },
-          beforeRollback: {
-            level: 1,
-            changes: [
-              {
-                type: `insert`,
-                value: {
-                  id: 12,
-                  parentGroup: routes.rootA,
-                  group: routes.original,
-                  value: 120,
-                  position: 1,
-                },
+          changes: [
+            {
+              type: `insert`,
+              value: {
+                id: 12,
+                parentGroup: routes.rootA,
+                group: routes.original,
+                value: 120,
+                position: 1,
               },
-            ],
+            },
+          ],
+        },
+      },
+      {
+        type: `sync`,
+        level: 2,
+        changes: [
+          {
+            type: `update`,
+            value: {
+              id: 21,
+              parentGroup: routes.original,
+              group: routes.original + 1000,
+              value: 211,
+              position: 0,
+            },
           },
-        },
-        {
-          type: `sync`,
-          level: 2,
-          changes: [
-            {
-              type: `update`,
-              value: {
-                id: 21,
-                parentGroup: routes.original,
-                group: routes.original + 1000,
-                value: 211,
-                position: 0,
-              },
-            },
-          ],
-        },
-      ])
-    },
-  )
+        ],
+      },
+    ])
+  })
 
-  fcTest.prop([routeValuesArbitrary], { numRuns: 12 })(
-    `supports repeated rollback and confirmation histories`,
-    async (routes) => {
-      await expectHistoryMatches(routes, [
-        {
-          type: `optimistic`,
-          handle: `first`,
-          level: 1,
-          id: 11,
-          patch: { parentGroup: routes.rootB },
-        },
-        { type: `rollback`, handle: `first` },
-        {
-          type: `optimistic`,
-          handle: `second`,
-          level: 1,
-          id: 11,
-          patch: { parentGroup: routes.rootB },
-        },
-        {
-          type: `confirm`,
-          handle: `second`,
-          authoritative: firstChild(routes, {
-            parentGroup: routes.rootB,
-          }),
-        },
-        {
-          type: `optimisticRollback`,
-          level: 1,
-          id: 11,
-          patch: { group: routes.optimistic },
-        },
-        {
-          type: `sync`,
-          level: 2,
-          changes: [
-            {
-              type: `update`,
-              value: {
-                id: 21,
-                parentGroup: routes.original,
-                group: routes.original + 1000,
-                value: 212,
-                position: 0,
-              },
+  fcTest.prop(
+    [routeValuesArbitrary],
+    oraclePropertyOptions(12, `includes-optimistic.repeated-history`),
+  )(`supports repeated rollback and confirmation histories`, async (routes) => {
+    await expectHistoryMatches(routes, [
+      {
+        type: `optimistic`,
+        handle: `first`,
+        level: 1,
+        id: 11,
+        patch: { parentGroup: routes.rootB },
+      },
+      { type: `rollback`, handle: `first` },
+      {
+        type: `optimistic`,
+        handle: `second`,
+        level: 1,
+        id: 11,
+        patch: { parentGroup: routes.rootB },
+      },
+      {
+        type: `confirm`,
+        handle: `second`,
+        authoritative: firstChild(routes, {
+          parentGroup: routes.rootB,
+        }),
+      },
+      {
+        type: `optimisticRollback`,
+        level: 1,
+        id: 11,
+        patch: { group: routes.optimistic },
+      },
+      {
+        type: `sync`,
+        level: 2,
+        changes: [
+          {
+            type: `update`,
+            value: {
+              id: 21,
+              parentGroup: routes.original,
+              group: routes.original + 1000,
+              value: 212,
+              position: 0,
             },
-          ],
-        },
-      ])
-    },
-  )
+          },
+        ],
+      },
+    ])
+  })
 })

@@ -5,7 +5,7 @@ title: TrailBaseCollectionUtils
 
 # Interface: TrailBaseCollectionUtils
 
-Defined in: [packages/trailbase-db-collection/src/trailbase.ts:117](https://github.com/TanStack/db/blob/main/packages/trailbase-db-collection/src/trailbase.ts#L117)
+Defined in: [packages/trailbase-db-collection/src/trailbase.ts:118](https://github.com/TanStack/db/blob/main/packages/trailbase-db-collection/src/trailbase.ts#L118)
 
 ## Extends
 
@@ -25,7 +25,7 @@ Defined in: [packages/trailbase-db-collection/src/trailbase.ts:117](https://gith
 cancel: () => void;
 ```
 
-Defined in: [packages/trailbase-db-collection/src/trailbase.ts:118](https://github.com/TanStack/db/blob/main/packages/trailbase-db-collection/src/trailbase.ts#L118)
+Defined in: [packages/trailbase-db-collection/src/trailbase.ts:119](https://github.com/TanStack/db/blob/main/packages/trailbase-db-collection/src/trailbase.ts#L119)
 
 #### Returns
 

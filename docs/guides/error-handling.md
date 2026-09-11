@@ -91,7 +91,9 @@ const syncedCollection = createCollection(
 
 // Component can check error state
 function DataList() {
-  const { data } = useLiveQuery((q) => q.from({ item: syncedCollection }))
+  const { data } = useLiveQuery({
+    query: (q) => q.from({ item: syncedCollection }),
+  })
   const isError = syncedCollection.utils.isError
   const errorCount = syncedCollection.utils.errorCount
   
@@ -116,6 +118,64 @@ Error tracking methods:
 - **`isError`**: Returns a boolean indicating whether the collection is currently in an error state:
 - **`errorCount`**: Returns the number of consecutive sync failures. This counter is incremented only when queries fail completely (not per retry attempt) and is reset on successful queries:
 - **`clearError()`**: Clears the error state and triggers a refetch of the query. This method resets both `lastError` and `errorCount`:
+
+## Incremental Subset Load Errors
+
+An incremental `loadSubset` failure does not discard rows that are already
+available or put the shared source collection into `error`. The failure belongs
+to the subscription that requested that subset:
+
+```ts
+const subscription = todoCollection.subscribeChanges(handleChanges, {
+  includeInitialState: false,
+})
+
+subscription.on('loadSubset:error', ({ error, options }) => {
+  console.error('Subset failed', options, error)
+})
+
+subscription.requestSnapshot()
+
+// The most recent failure remains available for diagnostics.
+console.log(subscription.lastError)
+```
+
+For ordered live queries, `utils.setWindow()` rejects with the same error. The
+last failure is also available as `utils.lastSubsetError`, while the last
+successful snapshot remains readable:
+
+```ts
+try {
+  await liveTodos.utils.setWindow({ offset: 0, limit: 100 })
+} catch (error) {
+  console.error(liveTodos.utils.lastSubsetError)
+}
+```
+
+Effects report subset failures through `onSourceError` and dispose because
+their incremental result can no longer be kept complete.
+
+When a source change invalidates an ordered window, automatic full-source
+repair keeps the last complete snapshot visible. A failed repair exposes
+`utils.lastSubsetError` and retries at most twice, after 250 ms and 500 ms.
+Exhausting those retries does not put an already-ready query into a terminal
+error state or clear its rows. The app can show the error and explicitly retry
+with `setWindow()`. Cleanup or truncate cancels the old repair timer. Failed
+imperative window moves and initial loads do not use this background retry.
+
+For SQLite-persisted on-demand collections, a failed upstream `loadSubset`
+rejects even when hydration succeeded. Cached rows remain readable; their
+availability does not mean the remote request succeeded. Background coordinator
+retry, where supported, does not change the failed caller's outcome.
+
+When a must-refetch truncate cannot reload every active subset, a subscription
+keeps its last successful snapshot and reports the subset error. It discards
+the incomplete replay batch and keeps later source changes private because they
+cannot prove a complete replacement. The next truncate retries every active
+subset. Overlapping truncates form one atomic replay: all in-flight requests
+settle, the newest attempt decides the result, and subscribers receive the
+replacement only when that attempt succeeds. Cleanup rejects window moves that
+are waiting for replay with `AbortError`.
 
 ## Collection Status and Error States
 
@@ -276,6 +336,18 @@ try {
 }
 ```
 
+Explicit cancellation is different from a mutation failure. If you call
+`tx.rollback()` while `mutationFn` is pending, the rollback settles
+`tx.isPersisted.promise` as rejected. A later result or rejection from that
+mutation function is ignored: the outstanding `commit()` call resolves and
+`tx.error` is not populated by that late rejection. Observe `isPersisted.promise`
+when you need the transaction's outcome, including explicit cancellation.
+
+After the mutation function succeeds, a publication listener can still throw
+while the completed transaction updates its collections. In that case
+`commit()` rejects with the listener error, but `isPersisted.promise` resolves
+and the transaction remains completed. This is not a persistence failure.
+
 ## Collection Operation Errors
 
 ### Invalid Collection State
@@ -418,7 +490,7 @@ try {
 
 ### Query Collection Sync Errors
 
-Query collections handle sync errors gracefully and mark the collection as ready even on error to avoid blocking applications:
+Query collections distinguish an initial load failure from a later refetch failure:
 
 ```ts
 import { queryCollectionOptions } from "@tanstack/query-db-collection"
@@ -445,9 +517,11 @@ const todoCollection = createCollection(
 
 When sync errors occur:
 - Error is logged to console: `[QueryCollection] Error observing query...`
-- Collection is marked as ready to prevent blocking the application
-- Cached data remains available
+- An initial failure marks the collection as `error` because no usable snapshot exists
+- Readiness waits such as `preload()` and `toArrayWhenReady()` reject with the cause passed to `markError(error)` while the collection is in that initial error state
+- A later refetch failure keeps the collection `ready` and preserves its cached data
 - Error tracking counters are updated (`lastError`, `errorCount`)
+- A later successful refetch recovers an initial `error` collection to `ready`; a new readiness wait then resolves normally
 
 ### Sync Write Errors
 

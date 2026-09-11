@@ -74,6 +74,8 @@ export type Limit = number
 
 export type Offset = number
 
+let nextCollectionSourceId = 0
+
 /* Expressions */
 
 abstract class BaseExpression<T = any> {
@@ -84,11 +86,17 @@ abstract class BaseExpression<T = any> {
 
 export class CollectionRef extends BaseExpression {
   public type = `collectionRef` as const
+  /** Opaque runtime identity; aliases are lexical names only. */
+  public readonly sourceId!: string
   constructor(
     public collection: CollectionImpl,
     public alias: string,
   ) {
     super()
+    Object.defineProperty(this, `sourceId`, {
+      value: `source-${++nextCollectionSourceId}`,
+      enumerable: false,
+    })
   }
 }
 
@@ -181,7 +189,7 @@ export class IncludesSubquery extends BaseExpression {
     public childCorrelationField: PropRef, // Child-side ref (e.g., issue.projectId)
     public fieldName: string, // Result field name (e.g., "issues")
     public parentFilters?: Array<Where>, // WHERE clauses referencing parent aliases (applied post-join)
-    public parentProjection?: Array<PropRef>, // Parent field refs used by parentFilters
+    public parentProjection?: Array<PropRef>, // Parent field refs used anywhere in the child plan
     public materialization: IncludesMaterialization = `collection`,
     public scalarField?: string,
   ) {
@@ -254,6 +262,55 @@ export function isExpressionLike(value: any): boolean {
   return false
 }
 
+/** Returns each lexical Collection source in a query tree once. */
+export function collectCollectionSources(query: QueryIR): Array<CollectionRef> {
+  const sources: Array<CollectionRef> = []
+  const seen = new Set<string>()
+
+  const visitSource = (source: QueryIR[`from`]): void => {
+    if (source.type === `collectionRef`) {
+      if (!seen.has(source.sourceId)) {
+        seen.add(source.sourceId)
+        sources.push(source)
+      }
+    } else if (source.type === `queryRef`) {
+      visitQuery(source.query)
+    } else if (source.type === `unionFrom`) {
+      source.sources.forEach(visitSource)
+    } else {
+      source.queries.forEach(visitQuery)
+    }
+  }
+
+  const visitSelectValue = (value: any): void => {
+    if (value instanceof IncludesSubquery) {
+      visitQuery(value.query)
+    } else if (value instanceof ConditionalSelect) {
+      value.branches.forEach((branch) => visitSelectValue(branch.value))
+      if (value.defaultValue !== undefined) {
+        visitSelectValue(value.defaultValue)
+      }
+    } else if (
+      value !== null &&
+      typeof value === `object` &&
+      !Array.isArray(value) &&
+      !isExpressionLike(value) &&
+      value.__refProxy !== true
+    ) {
+      Object.values(value).forEach(visitSelectValue)
+    }
+  }
+
+  const visitQuery = (current: QueryIR): void => {
+    visitSource(current.from)
+    current.join?.forEach(({ from }) => visitSource(from))
+    if (current.select) Object.values(current.select).forEach(visitSelectValue)
+  }
+
+  visitQuery(query)
+  return sources
+}
+
 /**
  * Helper functions for working with Where clauses
  */
@@ -299,18 +356,21 @@ export function createResidualWhere(
   return { expression, residual: true }
 }
 
+/** Sources declared by a FROM clause. UnionAll branches own their sources. */
+export function getFromSources(from: From): Array<CollectionRef | QueryRef> {
+  if (from.type === `unionFrom`) return from.sources
+  if (from.type === `unionAll`) return []
+  return [from]
+}
+
 function getRefFromAlias(
   query: QueryIR,
   alias: string,
 ): CollectionRef | QueryRef | void {
-  if (query.from.type === `unionFrom`) {
-    for (const source of query.from.sources) {
-      if (source.alias === alias) {
-        return source
-      }
+  for (const source of getFromSources(query.from)) {
+    if (source.alias === alias) {
+      return source
     }
-  } else if (query.from.type !== `unionAll` && query.from.alias === alias) {
-    return query.from
   }
 
   for (const join of query.join || []) {
@@ -333,7 +393,12 @@ export function followRef(
   query: QueryIR,
   ref: PropRef<any>,
   collection: Collection,
-): { collection: Collection; path: Array<string>; alias?: string } | void {
+): {
+  collection: Collection
+  path: Array<string>
+  alias?: string
+  sourceId?: string
+} | void {
   if (ref.path.length === 0) {
     return
   }
@@ -372,7 +437,12 @@ export function followRef(
       // so the field must be on the collection itself.
       // Report the alias too: when the ref crossed a join, this is the source
       // that actually holds the field (which may differ from the from clause).
-      return { collection: aliasRef.collection, path: rest, alias }
+      return {
+        collection: aliasRef.collection,
+        path: rest,
+        alias,
+        sourceId: aliasRef.sourceId,
+      }
     }
   }
 }

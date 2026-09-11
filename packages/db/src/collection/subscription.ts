@@ -1,49 +1,68 @@
 import { ensureIndexForExpression } from '../indexes/auto-index.js'
-import { and, eq, gte, lt } from '../query/builder/functions.js'
+import { and, eq } from '../query/builder/functions.js'
 import { PropRef, Value } from '../query/ir.js'
 import { EventEmitter } from '../event-emitter.js'
 import { compileExpression } from '../query/compiler/evaluators.js'
-import { buildCursor } from '../utils/cursor.js'
+import { buildCursor, buildCursorCurrent } from '../utils/cursor.js'
+import { deepEquals } from '../utils.js'
+import { normalizeError } from '../utils/error.js'
+import { runAllCallbacks } from '../utils/callbacks.js'
+import { createDeferred } from '../deferred.js'
+import { LoadSubsetOperationAbortedError } from '../errors.js'
 import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
 } from './change-events.js'
 import type { BasicExpression, OrderBy } from '../query/ir.js'
-import type { IndexInterface } from '../indexes/base-index.js'
+import type { IndexReader } from '../indexes/base-index.js'
 import type {
   ChangeMessage,
   LoadSubsetOptions,
+  LoadSubsetRequestResult,
   Subscription,
   SubscriptionEvents,
+  SubscriptionLoadSubsetErrorEvent,
   SubscriptionStatus,
   SubscriptionUnsubscribedEvent,
 } from '../types.js'
 import type { CollectionImpl } from './index.js'
+import type { Deferred } from '../deferred.js'
 
 type RequestSnapshotOptions = {
   where?: BasicExpression<boolean>
+  signal?: AbortSignal
   optimizedOnly?: boolean
   trackLoadSubsetPromise?: boolean
   /** Optional orderBy to pass to loadSubset for backend optimization */
   orderBy?: OrderBy
   /** Optional limit to pass to loadSubset for backend optimization */
   limit?: number
-  /** Callback that receives the raw loadSubset result for external tracking */
-  onLoadSubsetResult?: (result: Promise<void> | true) => void
+  /** Callback that receives the normalized loadSubset result for internal tracking */
+  onLoadSubsetResult?: SubsetResultObserver
+  /** Called when the local snapshot must fall back from an index to a scan. */
+  onUnoptimized?: () => void
 }
 
 type RequestLimitedSnapshotOptions = {
   orderBy: OrderBy
   limit: number
-  /** All column values for cursor (first value used for local index, all values for sync layer) */
+  /** A single cursor value; composite cursor inputs are rejected. */
   minValues?: Array<unknown>
   /** Row offset for offset-based pagination (passed to sync layer) */
   offset?: number
   /** Whether to track the loadSubset promise on this subscription (default: true) */
   trackLoadSubsetPromise?: boolean
-  /** Callback that receives the raw loadSubset result for external tracking */
-  onLoadSubsetResult?: (result: Promise<void> | true) => void
+  /** Callback that receives the normalized loadSubset result for internal tracking */
+  onLoadSubsetResult?: SubsetResultObserver
 }
+
+export type ReleaseLoadSubset = (primaryFailure?: { error: unknown }) => void
+
+type SubsetResultObserver = (
+  result: LoadSubsetRequestResult,
+  options: LoadSubsetOptions,
+  release: ReleaseLoadSubset,
+) => void
 
 type CollectionSubscriptionOptions = {
   includeInitialState?: boolean
@@ -51,6 +70,64 @@ type CollectionSubscriptionOptions = {
   whereExpression?: BasicExpression<boolean>
   /** Callback to call when the subscription is unsubscribed */
   onUnsubscribe?: (event: SubscriptionUnsubscribedEvent) => void
+  /** Callback for subset-load failures scoped to this subscription. */
+  onLoadSubsetError?: (event: SubscriptionLoadSubsetErrorEvent) => void
+  truncateReplayPublication?: TruncateReplayPublicationControl
+}
+
+type TruncateReplayPublicationControl = Readonly<{
+  start: () => void
+  succeed: () => void
+}>
+
+type TruncatePublicationState = {
+  loadedInitialState: boolean
+  snapshotSent: boolean
+  limitedSnapshotRowCount: number
+  lastSentKey: string | number | undefined
+}
+
+type SubsetAcquisition = {
+  options: LoadSubsetOptions
+  loadSubsetSession: number
+  abortController?: AbortController
+  removeRequestAbortListener?: () => void
+  releaseAttempted?: true
+}
+
+type SubsetDemand = {
+  requestOptions: LoadSubsetOptions
+  acquisition: SubsetAcquisition
+  acquisitionState: `starting` | `active` | `detached`
+  initialResult?: Deferred<void>
+}
+
+type TruncateReplayAttempt = {
+  pendingCount: number
+  setupComplete: boolean
+}
+
+type TruncateReplaySession = {
+  loadSubsetSession: number
+  publicationState: TruncatePublicationState
+  /** Direct subscribers buffer the replacement here; delegated publication has no buffer. */
+  privateRows: Map<string | number, object> | undefined
+  pending: Set<{ demand: SubsetDemand; attempt: TruncateReplayAttempt }>
+  pendingSetups: number
+  currentAttempt: TruncateReplayAttempt
+  failures: Map<SubsetDemand, Error>
+  completion: Deferred<void>
+}
+
+function createReplayCompletion(): Deferred<void> {
+  const completion = createDeferred<void>()
+  void completion.promise.catch(() => {})
+  return completion
+}
+
+function cancelAcquisition(acquisition: SubsetAcquisition): void {
+  acquisition.abortController?.abort()
+  acquisition.removeRequestAbortListener?.()
 }
 
 export class CollectionSubscription
@@ -72,10 +149,17 @@ export class CollectionSubscription
    * Track all loadSubset calls made by this subscription so we can unload them on cleanup.
    * We store the exact LoadSubsetOptions we passed to loadSubset to ensure symmetric unload.
    */
-  private loadedSubsets: Array<LoadSubsetOptions> = []
+  private subsetDemands: Array<SubsetDemand> = []
+  private primaryFailureDeliveryDepth = 0
+  private readonly requestedSubsetWhere = new WeakMap<
+    LoadSubsetOptions,
+    BasicExpression<boolean>
+  >()
 
   // Keep track of the keys we've sent (needed for join and orderBy optimizations)
   private sentKeys = new Set<string | number>()
+  private publishedRows = new Map<string | number, object>()
+  private stalePublishedRows = new Map<string | number, object>()
 
   // Track the count of rows sent via requestLimitedSnapshot for offset-based pagination
   private limitedSnapshotRowCount = 0
@@ -85,24 +169,38 @@ export class CollectionSubscription
 
   private filteredCallback: (changes: Array<ChangeMessage<any, any>>) => boolean
 
-  private orderByIndex: IndexInterface<string | number> | undefined
+  private orderByIndex: IndexReader<string | number> | undefined
 
   // Status tracking
   private _status: SubscriptionStatus = `ready`
-  private pendingLoadSubsetPromises: Set<Promise<void>> = new Set()
+  private statusRevision = 0
+  private _lastError: unknown | undefined
+  private pendingLoadSubsetParticipants = new Set<{
+    demand: SubsetDemand
+    promise: Promise<unknown>
+  }>()
 
   // Cleanup function for truncate event listener
   private truncateCleanup: (() => void) | undefined
+  private collectionCleanup: (() => void) | undefined
+  private collectionRestartCleanup: (() => void) | undefined
 
-  // Truncate buffering state
-  // When a truncate occurs, we buffer changes until all loadSubset refetches complete
-  // This prevents a flash of missing content between deletes and new inserts
-  private isBufferingForTruncate = false
-  private truncateBuffer: Array<Array<ChangeMessage<any, any>>> = []
-  private pendingTruncateRefetches: Set<Promise<void>> = new Set()
+  // One replay session owns the publication baseline, overlapping attempts,
+  // and buffered changes until every attempt settles.
+  private truncateReplaySession: TruncateReplaySession | undefined
+  private readonly loadSubsetPromiseErrors = new WeakMap<
+    Promise<unknown>,
+    Error
+  >()
+  private truncateReplacementPending = false
+  private unsubscribed = false
 
   public get status(): SubscriptionStatus {
     return this._status
+  }
+
+  public get lastError(): unknown | undefined {
+    return this._lastError
   }
 
   constructor(
@@ -112,7 +210,10 @@ export class CollectionSubscription
   ) {
     super()
     if (options.onUnsubscribe) {
-      this.on(`unsubscribed`, (event) => options.onUnsubscribe!(event))
+      this.on(`unsubscribed`, options.onUnsubscribe)
+    }
+    if (options.onLoadSubsetError) {
+      this.on(`loadSubset:error`, options.onLoadSubsetError)
     }
 
     // Auto-index for where expressions if enabled
@@ -123,8 +224,9 @@ export class CollectionSubscription
     const callbackWithSentKeysTracking = (
       changes: Array<ChangeMessage<any, any>>,
     ) => {
-      callback(changes)
+      this.trackPublishedRows(changes)
       this.trackSentKeys(changes)
+      callback(changes)
     }
 
     this.callback = callbackWithSentKeysTracking
@@ -143,6 +245,96 @@ export class CollectionSubscription
     this.truncateCleanup = this.collection.on(`truncate`, () => {
       this.handleTruncate()
     })
+    this.collectionCleanup = this.collection.on(`status:cleaned-up`, () => {
+      this.handleCollectionCleanup()
+    })
+    this.collectionRestartCleanup = this.collection.on(
+      `status:change`,
+      ({ status }) => {
+        if (status !== `loading` && status !== `ready`) return
+        const loadSubsetSession = this.collection._sync.getLoadSubsetSession()
+        const replaySession = this.truncateReplaySession
+        if (
+          this.subsetDemands.some(
+            (demand) => demand.acquisitionState === `detached`,
+          )
+        ) {
+          this.setStatus(`loadingSubset`)
+        }
+        queueMicrotask(() => {
+          if (this.truncateReplaySession === replaySession) {
+            this.restartDetachedDemands(loadSubsetSession)
+          }
+        })
+      },
+    )
+  }
+
+  /** Detach logical demand from work owned by a discarded sync session. */
+  private handleCollectionCleanup(): void {
+    this.discardTruncateReplay()
+    this.stalePublishedRows = new Map(this.publishedRows)
+    this.pendingLoadSubsetParticipants.clear()
+
+    for (const demand of [...this.subsetDemands]) {
+      demand.initialResult?.reject(new LoadSubsetOperationAbortedError())
+      cancelAcquisition(demand.acquisition)
+      if (demand.acquisitionState === `starting`) {
+        const index = this.subsetDemands.indexOf(demand)
+        if (index !== -1) this.subsetDemands.splice(index, 1)
+      } else {
+        demand.acquisitionState = `detached`
+        demand.acquisition = {
+          options: demand.requestOptions,
+          loadSubsetSession: demand.acquisition.loadSubsetSession,
+        }
+      }
+    }
+    this.setReadyIfIdle()
+  }
+
+  /** Acquire detached demand after startup or initial-error recovery. */
+  private restartDetachedDemands(loadSubsetSession: number): void {
+    if (
+      this.unsubscribed ||
+      !this.isLoadSubsetSessionCurrent(loadSubsetSession)
+    ) {
+      return
+    }
+    if (
+      this.collection.status === `error` ||
+      this.collection._sync.syncLoadSubsetFn === null
+    ) {
+      this.setReadyIfIdle()
+      return
+    }
+    const demands = this.subsetDemands.filter(
+      (demand) =>
+        demand.acquisitionState === `detached` &&
+        !demand.requestOptions.signal?.aborted,
+    )
+    if (demands.length === 0) {
+      this.setReadyIfIdle()
+      return
+    }
+
+    const session = this.createTruncateReplaySession(loadSubsetSession, () => {
+      const currentRows = this.collection.currentStateAsChanges({
+        optimizedOnly: false,
+      })
+      return new Map(
+        // The API returns void for unavailable snapshots, not just undefined.
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        (currentRows ?? [])
+          .filter((change) => change.type !== `delete`)
+          .map((change) => [change.key, change.value]),
+      )
+    })
+    const attempt = session.currentAttempt
+    this.truncateReplaySession = session
+    this.setStatus(`loadingSubset`)
+    if (this.truncateReplaySession !== session) return
+    this.startTruncateReplayAttempt(session, attempt, demands)
   }
 
   /**
@@ -150,189 +342,776 @@ export class CollectionSubscription
    * This is called when the sync layer receives a must-refetch and clears all data.
    *
    * To prevent a flash of missing content, we buffer all changes (deletes from truncate
-   * and inserts from refetch) until all loadSubset promises resolve, then emit them together.
+   * and inserts from refetch) until all loadSubset calls succeed, then emit them together.
+   * A failed replay keeps the last published snapshot private until a later
+   * authoritative replay succeeds.
    */
   private handleTruncate() {
-    // Copy the loaded subsets before clearing (we'll re-request them)
-    const subsetsToReload = [...this.loadedSubsets]
-
-    // Only buffer if there's an actual loadSubset handler that can do async work.
-    // Without a loadSubset handler, there's nothing to re-request and no reason to buffer.
-    // This prevents unnecessary buffering in eager sync mode or when loadSubset isn't implemented.
+    // Without a loader, replay only reconciles rows retained across cleanup.
     const hasLoadSubsetHandler = this.collection._sync.syncLoadSubsetFn !== null
+    const demandsToReload = hasLoadSubsetHandler ? [...this.subsetDemands] : []
 
-    // If there are no subsets to reload OR no loadSubset handler, just reset state
-    if (subsetsToReload.length === 0 || !hasLoadSubsetHandler) {
-      this.snapshotSent = false
-      this.loadedInitialState = false
-      this.limitedSnapshotRowCount = 0
-      this.lastSentKey = undefined
-      this.loadedSubsets = []
+    // Retained rows still need the committed replacement even without demand.
+    if (demandsToReload.length === 0 && this.stalePublishedRows.size === 0) {
+      this.resetSnapshotTracking()
       return
     }
 
-    // Start buffering BEFORE we receive the delete events from the truncate commit
-    // This ensures we capture both the deletes and subsequent inserts
-    this.isBufferingForTruncate = true
-    this.truncateBuffer = []
-    this.pendingTruncateRefetches.clear()
+    let session = this.truncateReplaySession
+    if (session) {
+      if (!session.completion.isPending()) {
+        session.completion = createReplayCompletion()
+      }
+      // Setup itself holds publication: adapter/status callbacks may reenter
+      // before a request returns its promise and joins the pending set.
+      session.pendingSetups++
+      session.failures.clear()
+      session.currentAttempt = { pendingCount: 0, setupComplete: false }
+    } else {
+      // Every overlapping attempt shares one publication baseline and buffer.
+      session = this.createTruncateReplaySession(
+        this.collection._sync.getLoadSubsetSession(),
+        () => new Map(this.publishedRows),
+      )
+      this.truncateReplaySession = session
+    }
+    const attempt = session.currentAttempt
+    this.setStatus(`loadingSubset`)
 
-    // Reset snapshot/pagination tracking state
-    // Note: We don't need to populate sentKeys here because filterAndFlipChanges
-    // will skip the delete filter when isBufferingForTruncate is true
+    if (this.truncateReplaySession !== session) return
+
+    if (this.options.truncateReplayPublication) {
+      this.truncateReplacementPending = true
+      this.options.truncateReplayPublication.start()
+    }
+
+    // A newer replay replaces every prior acquisition for these demands. Abort
+    // the old work before it can install rows into the new generation.
+    for (const demand of demandsToReload) {
+      demand.acquisition.abortController?.abort()
+    }
+
+    // Reset snapshot/pagination tracking for the replacement snapshot. Rows
+    // retained from an earlier failed replay stay marked until this attempt
+    // either replaces them or proves they are absent.
+    this.resetSnapshotTracking()
+
+    // Defer the requests so the truncate commit's deletes enter the session
+    // buffer before a synchronous adapter can publish replacement rows.
+    queueMicrotask(() => {
+      if (this.truncateReplaySession !== session) return
+      if (!this.isLoadSubsetSessionCurrent(session.loadSubsetSession)) {
+        this.retireStaleTruncateReplay(session)
+        return
+      }
+      // A newer truncate that arrived before this attempt began source work
+      // already captured the active demands. Starting them now would place the
+      // obsolete acquisition outside the newer abort sweep.
+      this.startTruncateReplayAttempt(
+        session,
+        attempt,
+        session.currentAttempt === attempt ? demandsToReload : [],
+      )
+    })
+  }
+
+  /** Make tentative replay ownership visible before adapter code can reenter. */
+  private startTruncateReplayDemand(
+    session: TruncateReplaySession,
+    attempt: TruncateReplayAttempt,
+    demand: SubsetDemand,
+  ): void {
+    const isCurrentAttempt = () =>
+      this.truncateReplaySession === session &&
+      session.currentAttempt === attempt
+    const isCurrent = () =>
+      isCurrentAttempt() &&
+      this.isLoadSubsetSessionCurrent(session.loadSubsetSession) &&
+      this.isDemandActive(demand)
+    const fail = (error: unknown) => {
+      if (isCurrent()) session.failures.set(demand, normalizeError(error))
+    }
+    if (demand.initialResult) {
+      void session.completion.promise.then(
+        demand.initialResult.resolve,
+        demand.initialResult.reject,
+      )
+    }
+
+    // Sequential handoff: retire the old physical lease while retaining its
+    // logical demand. Callback reentry cannot release that lease twice.
+    const previous = demand.acquisition
+    const hadPreviousAcquisition = demand.acquisitionState === `active`
+    demand.acquisitionState = `detached`
+    if (hadPreviousAcquisition) {
+      try {
+        this.releaseAcquisition(previous)
+      } catch (error) {
+        fail(error)
+        return
+      }
+    }
+    if (!isCurrent() || demand.requestOptions.signal?.aborted) return
+
+    const next = this.createSubsetAcquisition(demand)
+    demand.acquisition = next
+    demand.acquisitionState = `starting`
+    let result: LoadSubsetRequestResult
+    try {
+      result = this.loadSubset(next.options, isCurrent)
+    } catch (error) {
+      if (demand.acquisition === next) demand.acquisitionState = `detached`
+      cancelAcquisition(next)
+      fail(error)
+      return
+    }
+
+    if (!isCurrent()) {
+      if (demand.acquisition === next) demand.acquisitionState = `detached`
+      try {
+        this.releaseAcquisition(next)
+      } catch (error) {
+        fail(error)
+      }
+      return
+    }
+
+    demand.acquisitionState = `active`
+    this.trackTruncateReplayParticipant(session, attempt, demand, result)
+    this.observeLoadSubsetResult(
+      result,
+      demand,
+      next.options,
+      true,
+      () => isCurrent() && !next.options.signal?.aborted,
+    )
+  }
+
+  private settleTruncateReplay(
+    session: TruncateReplaySession,
+    pending: { demand: SubsetDemand; attempt: TruncateReplayAttempt },
+  ): void {
+    try {
+      if (this.truncateReplaySession !== session) return
+      if (!this.isLoadSubsetSessionCurrent(session.loadSubsetSession)) {
+        this.retireStaleTruncateReplay(session)
+        return
+      }
+      if (session.pending.delete(pending)) pending.attempt.pendingCount--
+      this.checkTruncateReplayComplete(session)
+    } catch (error) {
+      // Replay settlement runs from a Promise callback, so throwing here would
+      // create an unobserved derived rejection. Surface subscriber errors like
+      // other async collection events instead.
+      queueMicrotask(() => {
+        throw error
+      })
+    }
+  }
+
+  /** Keep every acquisition begun during recovery inside its publication barrier. */
+  private trackTruncateReplayParticipant(
+    session: TruncateReplaySession,
+    attempt: TruncateReplayAttempt,
+    demand: SubsetDemand,
+    result: LoadSubsetRequestResult,
+  ): void {
+    if (
+      this.truncateReplaySession !== session ||
+      (session.currentAttempt !== attempt &&
+        attempt.setupComplete &&
+        attempt.pendingCount === 0) ||
+      !(result instanceof Promise)
+    ) {
+      return
+    }
+
+    // An older attempt can still accept returning startup work while setup or
+    // another participant retains it. Once drained, it cannot reopen. Shared
+    // promises still get one participant per logical acquisition.
+    const pending = { demand, attempt }
+    attempt.pendingCount++
+    session.pending.add(pending)
+    void result.then(
+      () => this.settleTruncateReplay(session, pending),
+      (error: unknown) => {
+        // A released demand no longer participates in this replacement. Its
+        // cooperative AbortError must not discard rows from active demands.
+        if (
+          this.truncateReplaySession === session &&
+          session.currentAttempt === attempt &&
+          this.isLoadSubsetSessionCurrent(session.loadSubsetSession) &&
+          this.subsetDemands.includes(demand)
+        ) {
+          const normalized = this.normalizeLoadSubsetPromiseError(result, error)
+          session.failures.set(demand, normalized)
+        }
+        this.settleTruncateReplay(session, pending)
+      },
+    )
+  }
+
+  /** Stop obsolete logical demand from pinning a replay barrier. */
+  private removeTruncateReplayParticipant(demand: SubsetDemand): void {
+    const session = this.truncateReplaySession
+    if (!session) return
+    session.failures.delete(demand)
+    for (const pending of session.pending) {
+      if (pending.demand === demand) {
+        session.pending.delete(pending)
+        pending.attempt.pendingCount--
+      }
+    }
+  }
+
+  /** Publish only after every overlapping replay attempt has settled. */
+  private checkTruncateReplayComplete(session: TruncateReplaySession): void {
+    if (this.truncateReplaySession !== session) return
+    if (session.pendingSetups > 0 || session.pending.size > 0) return
+
+    const activeFailure = [...session.failures].find(([demand]) =>
+      this.subsetDemands.includes(demand),
+    )
+    try {
+      if (activeFailure) {
+        this.abandonTruncateReplay(session, activeFailure[1])
+      } else {
+        this.flushTruncateReplay(session)
+      }
+    } finally {
+      this.setReadyIfIdle()
+    }
+  }
+
+  /**
+   * Keep an incomplete replay private. The source no longer proves a complete
+   * state, so only a later successful truncate replay may reopen publication.
+   */
+  private abandonTruncateReplay(
+    session: TruncateReplaySession,
+    failure: Error,
+  ): void {
+    if (this.truncateReplaySession !== session) return
+    session.completion.reject(failure)
+    // Delegated publication already delivered its rows. Only a private buffer
+    // returns the caller's pagination position to the public snapshot; the
+    // private rows and their sent-key tracking stay together for a retry.
+    if (!session.privateRows) return
+    const publicationState = session.publicationState
+    this.loadedInitialState = publicationState.loadedInitialState
+    this.snapshotSent = publicationState.snapshotSent
+    this.limitedSnapshotRowCount = publicationState.limitedSnapshotRowCount
+    this.lastSentKey = publicationState.lastSentKey
+  }
+
+  /** Publish the buffered replacement as one batch, or release the delegate. */
+  private flushTruncateReplay(session: TruncateReplaySession): void {
+    if (this.truncateReplaySession !== session) return
+    this.truncateReplaySession = undefined
+    this.truncateReplacementPending = false
+
+    // Retained rows the source never re-delivered leave the replacement.
+    const { privateRows } = session
+    for (const key of this.stalePublishedRows.keys()) privateRows?.delete(key)
+    this.stalePublishedRows.clear()
+    try {
+      if (privateRows) {
+        // Diff the retained public snapshot against the applied source replacement.
+        const replacement = this.createStateDiff(
+          this.publishedRows,
+          privateRows,
+        )
+        if (replacement.length > 0) this.filteredCallback(replacement)
+      }
+    } finally {
+      // Restore tracking even when a subscriber rejects the replacement.
+      this.restorePublishedSnapshotTracking()
+      session.completion.resolve()
+      this.options.truncateReplayPublication?.succeed()
+    }
+  }
+
+  private restorePublishedSnapshotTracking(): void {
+    this.sentKeys = new Set(this.publishedRows.keys())
+    if (!this.orderByIndex) return
+
+    this.limitedSnapshotRowCount = this.sentKeys.size
+    const orderedSentKeys = this.orderByIndex.takeFromStart(
+      this.sentKeys.size,
+      (key) => this.sentKeys.has(key),
+    )
+    this.lastSentKey = orderedSentKeys.at(-1)
+  }
+
+  /** Fold changes into the private replacement; false when they publish now. */
+  private bufferPrivately(
+    changes: ReadonlyArray<ChangeMessage<any, any>>,
+  ): boolean {
+    const privateRows = this.truncateReplaySession?.privateRows
+    if (!privateRows) return false
+    for (const change of changes) {
+      if (change.type === `delete`) privateRows.delete(change.key)
+      else privateRows.set(change.key, change.value)
+    }
+    return true
+  }
+
+  private createStateDiff(
+    baseline: ReadonlyMap<string | number, object>,
+    finalRows: ReadonlyMap<string | number, object>,
+  ): Array<ChangeMessage<any, any>> {
+    const replacement: Array<ChangeMessage<any, any>> = []
+    for (const [key, previousValue] of baseline) {
+      const value = finalRows.get(key)
+      if (value === undefined) {
+        replacement.push({
+          type: `delete`,
+          key,
+          value: previousValue,
+        })
+      } else if (!deepEquals(value, previousValue)) {
+        replacement.push({
+          type: `update`,
+          key,
+          value,
+          previousValue,
+        })
+      }
+    }
+    for (const [key, value] of finalRows) {
+      if (!baseline.has(key)) replacement.push({ type: `insert`, key, value })
+    }
+    return replacement
+  }
+
+  private get isBufferingForTruncate(): boolean {
+    return this.truncateReplaySession !== undefined
+  }
+
+  private setReadyIfIdle(): void {
+    const session = this.truncateReplaySession
+    const hasPendingReplayWork =
+      session && (session.pendingSetups > 0 || session.pending.size > 0)
+    if (
+      this.pendingLoadSubsetParticipants.size === 0 &&
+      !hasPendingReplayWork
+    ) {
+      this.setStatus(`ready`)
+    }
+  }
+
+  private isLoadSubsetSessionCurrent(session: number): boolean {
+    return session === this.collection._sync.getLoadSubsetSession()
+  }
+
+  private retireStaleTruncateReplay(session: TruncateReplaySession): void {
+    if (this.truncateReplaySession !== session) return
+    this.discardTruncateReplay()
+    this.stalePublishedRows.clear()
+  }
+
+  /** Drop the replay without publishing; an unfinished wait rejects as aborted. */
+  private discardTruncateReplay(): void {
+    const session = this.truncateReplaySession
+    if (session?.completion.isPending()) {
+      session.completion.reject(new LoadSubsetOperationAbortedError())
+    }
+    this.truncateReplaySession = undefined
+    this.truncateReplacementPending = false
+  }
+
+  private resetSnapshotTracking(): void {
     this.snapshotSent = false
     this.loadedInitialState = false
     this.limitedSnapshotRowCount = 0
     this.lastSentKey = undefined
-
-    // Clear the loadedSubsets array since we're re-requesting fresh
-    this.loadedSubsets = []
-
-    // Defer the loadSubset calls to a microtask so the truncate commit's delete events
-    // are buffered BEFORE the loadSubset calls potentially trigger nested commits.
-    // This ensures correct event ordering: deletes first, then inserts.
-    queueMicrotask(() => {
-      // Check if we were unsubscribed while waiting
-      if (!this.isBufferingForTruncate) {
-        return
-      }
-
-      // Re-request all previously loaded subsets and track their promises
-      for (const options of subsetsToReload) {
-        const syncResult = this.collection._sync.loadSubset(options)
-
-        // Track this loadSubset call so we can unload it later
-        this.loadedSubsets.push(options)
-        this.trackLoadSubsetPromise(syncResult)
-
-        // Track the promise for buffer flushing
-        if (syncResult instanceof Promise) {
-          this.pendingTruncateRefetches.add(syncResult)
-          syncResult
-            .catch(() => {
-              // Ignore errors - we still want to flush the buffer even if some requests fail
-            })
-            .finally(() => {
-              this.pendingTruncateRefetches.delete(syncResult)
-              this.checkTruncateRefetchComplete()
-            })
-        }
-      }
-
-      // If all loadSubset calls were synchronous (returned true), flush now
-      // At this point, delete events have already been buffered from the truncate commit
-      if (this.pendingTruncateRefetches.size === 0) {
-        this.flushTruncateBuffer()
-      }
-    })
   }
 
-  /**
-   * Check if all truncate refetch promises have completed and flush buffer if so
-   */
-  private checkTruncateRefetchComplete() {
-    if (
-      this.pendingTruncateRefetches.size === 0 &&
-      this.isBufferingForTruncate
-    ) {
-      this.flushTruncateBuffer()
+  /** One replay session; only direct subscribers buffer a private replacement. */
+  private createTruncateReplaySession(
+    loadSubsetSession: number,
+    privateRows: () => Map<string | number, object>,
+  ): TruncateReplaySession {
+    return {
+      loadSubsetSession,
+      publicationState: {
+        loadedInitialState: this.loadedInitialState,
+        snapshotSent: this.snapshotSent,
+        limitedSnapshotRowCount: this.limitedSnapshotRowCount,
+        lastSentKey: this.lastSentKey,
+      },
+      privateRows: this.options.truncateReplayPublication
+        ? undefined
+        : privateRows(),
+      pending: new Set(),
+      // Setup itself holds publication: adapter/status callbacks may reenter
+      // before a request returns its promise and joins the pending set.
+      pendingSetups: 1,
+      currentAttempt: { pendingCount: 0, setupComplete: false },
+      failures: new Map(),
+      completion: createReplayCompletion(),
     }
   }
 
-  /**
-   * Flush the truncate buffer, emitting all buffered changes to the callback
-   */
-  private flushTruncateBuffer() {
-    this.isBufferingForTruncate = false
-
-    // Flatten all buffered changes into a single array for atomic emission
-    // This ensures consumers see all truncate changes (deletes + inserts) in one callback
-    const merged = this.truncateBuffer.flat()
-    if (merged.length > 0) this.filteredCallback(merged)
-
-    this.truncateBuffer = []
+  /** Start one attempt's demands, then release the setup hold on publication. */
+  private startTruncateReplayAttempt(
+    session: TruncateReplaySession,
+    attempt: TruncateReplayAttempt,
+    demands: ReadonlyArray<SubsetDemand>,
+  ): void {
+    for (const demand of demands) {
+      if (!this.subsetDemands.includes(demand)) continue
+      this.startTruncateReplayDemand(session, attempt, demand)
+      if (
+        this.truncateReplaySession !== session ||
+        session.currentAttempt !== attempt
+      ) {
+        break
+      }
+    }
+    attempt.setupComplete = true
+    session.pendingSetups--
+    this.checkTruncateReplayComplete(session)
   }
 
-  setOrderByIndex(index: IndexInterface<any>) {
+  public get hasPendingTruncateReplacement(): boolean {
+    return this.truncateReplacementPending
+  }
+
+  public get pendingTruncateReplacement(): Promise<void> | undefined {
+    const completion = this.truncateReplaySession?.completion
+    return completion?.isPending() ? completion.promise : undefined
+  }
+
+  public get hasFailedTruncateReplacement(): boolean {
+    const completion = this.truncateReplaySession?.completion
+    return (
+      this.truncateReplacementPending &&
+      completion !== undefined &&
+      !completion.isPending()
+    )
+  }
+
+  setOrderByIndex(index: IndexReader<any>) {
     this.orderByIndex = index
-  }
-
-  /**
-   * Check if an orderBy index has been set for this subscription
-   */
-  hasOrderByIndex(): boolean {
-    return this.orderByIndex !== undefined
   }
 
   /**
    * Set subscription status and emit events if changed
    */
   private setStatus(newStatus: SubscriptionStatus) {
+    if (this.unsubscribed) return
     if (this._status === newStatus) {
       return // No change
     }
 
     const previousStatus = this._status
     this._status = newStatus
+    const revision = ++this.statusRevision
 
     // Emit status:change event
-    this.emitInner(`status:change`, {
-      type: `status:change`,
-      subscription: this,
-      previousStatus,
-      status: newStatus,
-    })
+    this.emitInnerWhile(
+      `status:change`,
+      {
+        type: `status:change`,
+        subscription: this,
+        previousStatus,
+        status: newStatus,
+      },
+      () => this.statusRevision === revision,
+    )
+
+    // A listener may synchronously start or release demand. Do not follow that
+    // newer transition with a stale specific event.
+    if (this.statusRevision !== revision) return
 
     // Emit specific status event
     const eventKey: `status:${SubscriptionStatus}` = `status:${newStatus}`
-    this.emitInner(eventKey, {
-      type: eventKey,
-      subscription: this,
-      previousStatus,
-      status: newStatus,
-    } as SubscriptionEvents[typeof eventKey])
+    this.emitInnerWhile(
+      eventKey,
+      {
+        type: eventKey,
+        subscription: this,
+        previousStatus,
+        status: newStatus,
+      } as SubscriptionEvents[typeof eventKey],
+      () => this.statusRevision === revision,
+    )
   }
 
-  /**
-   * Track a loadSubset promise and manage loading status
-   */
-  private trackLoadSubsetPromise(syncResult: Promise<void> | true) {
-    // Track the promise if it's actually a promise (async work)
-    if (syncResult instanceof Promise) {
-      this.pendingLoadSubsetPromises.add(syncResult)
-      this.setStatus(`loadingSubset`)
+  /** Observe an asynchronous subset load and restore status on settlement. */
+  private observeLoadSubsetResult(
+    syncResult: LoadSubsetRequestResult,
+    demand: SubsetDemand,
+    options: LoadSubsetOptions,
+    trackStatus: boolean,
+    shouldReportError: () => boolean = () => true,
+  ): void {
+    if (!(syncResult instanceof Promise)) return
 
-      const finish = () => {
-        this.pendingLoadSubsetPromises.delete(syncResult)
-        if (this.pendingLoadSubsetPromises.size === 0) {
-          this.setStatus(`ready`)
+    const loadSubsetSession = this.collection._sync.getLoadSubsetSession()
+    const participant = { demand, promise: syncResult }
+
+    if (trackStatus) {
+      this.pendingLoadSubsetParticipants.add(participant)
+      this.setStatus(`loadingSubset`)
+    }
+
+    const finish = () => {
+      if (trackStatus) {
+        this.pendingLoadSubsetParticipants.delete(participant)
+        if (this.isLoadSubsetSessionCurrent(loadSubsetSession)) {
+          this.setReadyIfIdle()
         }
       }
-      void syncResult.then(finish, finish)
+    }
+
+    void syncResult.then(finish, (error: unknown) => {
+      if (
+        this.isLoadSubsetSessionCurrent(loadSubsetSession) &&
+        shouldReportError()
+      ) {
+        this.recordLoadSubsetError(
+          options,
+          this.normalizeLoadSubsetPromiseError(syncResult, error),
+        )
+      }
+      finish()
+    })
+  }
+
+  /** Give every logical observer of one transport rejection the same Error. */
+  private normalizeLoadSubsetPromiseError(
+    promise: Promise<unknown>,
+    error: unknown,
+  ): Error {
+    const existing = this.loadSubsetPromiseErrors.get(promise)
+    if (existing) return existing
+    const normalized = normalizeError(error)
+    this.loadSubsetPromiseErrors.set(promise, normalized)
+    return normalized
+  }
+
+  private stopDemandStatusParticipants(demand: SubsetDemand): void {
+    for (const participant of this.pendingLoadSubsetParticipants) {
+      if (participant.demand === demand) {
+        this.pendingLoadSubsetParticipants.delete(participant)
+      }
+    }
+    this.setReadyIfIdle()
+  }
+
+  private loadSubset(
+    options: LoadSubsetOptions,
+    shouldReportError: () => boolean = () => true,
+  ): LoadSubsetRequestResult {
+    try {
+      return this.collection._sync.loadSubset(options)
+    } catch (error) {
+      const normalized = normalizeError(error)
+      if (shouldReportError()) this.recordLoadSubsetError(options, normalized)
+      throw normalized
     }
   }
 
-  hasLoadedInitialState() {
-    return this.loadedInitialState
+  /** Create a fresh, abortable adapter acquisition for a replay generation. */
+  private createSubsetAcquisition(
+    demand: SubsetDemand,
+  ): SubsetAcquisition & { abortController: AbortController } {
+    const abortController = new AbortController()
+    const requestSignal = demand.requestOptions.signal
+    let removeRequestAbortListener: (() => void) | undefined
+
+    if (requestSignal?.aborted) {
+      abortController.abort(requestSignal.reason)
+    } else if (requestSignal) {
+      const abort = () => abortController.abort(requestSignal.reason)
+      requestSignal.addEventListener(`abort`, abort, { once: true })
+      removeRequestAbortListener = () =>
+        requestSignal.removeEventListener(`abort`, abort)
+    }
+
+    return {
+      options: {
+        ...demand.requestOptions,
+        signal: abortController.signal,
+      },
+      loadSubsetSession: this.collection._sync.getLoadSubsetSession(),
+      abortController,
+      removeRequestAbortListener,
+    }
   }
 
-  hasSentAtLeastOneSnapshot() {
-    return this.snapshotSent
+  /** Retire an acquisition before user code; failed cleanup is not retryable. */
+  private releaseAcquisition(
+    acquisition: SubsetAcquisition,
+    reportReleaseError = this.primaryFailureDeliveryDepth === 0,
+  ): void {
+    if (acquisition.releaseAttempted) return
+    acquisition.releaseAttempted = true
+    try {
+      acquisition.abortController?.abort()
+      if (this.isLoadSubsetSessionCurrent(acquisition.loadSubsetSession)) {
+        this.collection._sync.unloadSubset(acquisition.options)
+      }
+    } catch (error) {
+      const normalized = reportReleaseError
+        ? this.recordLoadSubsetError(
+            acquisition.options,
+            normalizeError(error),
+            true,
+          )
+        : normalizeError(error)
+      throw normalized
+    } finally {
+      acquisition.removeRequestAbortListener?.()
+    }
+  }
+
+  /** Start and retain the first acquisition for one logical subset demand. */
+  private startSubsetDemand(requestOptions: LoadSubsetOptions): {
+    demand: SubsetDemand
+    result: LoadSubsetRequestResult
+    started: boolean
+  } {
+    const demand: SubsetDemand = {
+      requestOptions,
+      acquisition: {
+        options: requestOptions,
+        loadSubsetSession: this.collection._sync.getLoadSubsetSession(),
+      },
+      acquisitionState: `starting`,
+    }
+    if (
+      this.collection.status === `cleaned-up` ||
+      // Ready/error callbacks can run before sync returns its loader. Idle
+      // deferred starts still acquire through the sync manager's queue.
+      (this.collection.config.syncMode === `on-demand` &&
+        (this.collection.status === `error` ||
+          (this.collection.status !== `idle` &&
+            this.collection._sync.syncLoadSubsetFn === null)))
+    ) {
+      demand.acquisitionState = `detached`
+      this.subsetDemands.push(demand)
+      const initialResult = createDeferred<void>()
+      demand.initialResult = initialResult
+      const abort = () =>
+        initialResult.reject(new LoadSubsetOperationAbortedError())
+      requestOptions.signal?.addEventListener(`abort`, abort, { once: true })
+      const finish = () => {
+        requestOptions.signal?.removeEventListener(`abort`, abort)
+        demand.initialResult = undefined
+      }
+      void initialResult.promise.then(finish, finish)
+      return { demand, result: initialResult.promise, started: false }
+    }
+    const acquisition = this.createSubsetAcquisition(demand)
+    demand.acquisition = acquisition
+    const replaySession = this.truncateReplaySession
+    const replayAttempt = replaySession?.currentAttempt
+    const loadSubsetSession = this.collection._sync.getLoadSubsetSession()
+    // Reentrant release must see the exact acquisition before adapter work
+    // starts. A genuine load throw removes this tentative logical owner below.
+    this.subsetDemands.push(demand)
+    let result: LoadSubsetRequestResult
+    try {
+      result = this.loadSubset(
+        acquisition.options,
+        () =>
+          this.isLoadSubsetSessionCurrent(loadSubsetSession) &&
+          this.subsetDemands.includes(demand) &&
+          (replaySession === undefined ||
+            (this.truncateReplaySession === replaySession &&
+              replaySession.currentAttempt === replayAttempt)),
+      )
+    } catch (error) {
+      const demandIndex = this.subsetDemands.indexOf(demand)
+      if (demandIndex !== -1) {
+        if (
+          replaySession &&
+          replayAttempt &&
+          this.truncateReplaySession === replaySession &&
+          replaySession.currentAttempt === replayAttempt
+        ) {
+          replaySession.failures.set(demand, normalizeError(error))
+        }
+        this.subsetDemands.splice(demandIndex, 1)
+      }
+      cancelAcquisition(acquisition)
+      throw error
+    }
+
+    if (!this.isLoadSubsetSessionCurrent(loadSubsetSession)) {
+      const demandIndex = this.subsetDemands.indexOf(demand)
+      if (demandIndex !== -1) this.subsetDemands.splice(demandIndex, 1)
+      cancelAcquisition(acquisition)
+      return { demand, result, started: true }
+    }
+
+    demand.acquisitionState = `active`
+    if (!this.subsetDemands.includes(demand)) {
+      this.releaseAcquisition(acquisition)
+      return { demand, result, started: true }
+    }
+
+    if (replaySession && replayAttempt) {
+      this.trackTruncateReplayParticipant(
+        replaySession,
+        replayAttempt,
+        demand,
+        result,
+      )
+    }
+    return { demand, result, started: true }
+  }
+
+  /** Re-check ownership after adapter and event callbacks that may reenter. */
+  private isDemandActive(demand: SubsetDemand): boolean {
+    return !this.unsubscribed && this.subsetDemands.includes(demand)
+  }
+
+  private recordLoadSubsetError(
+    options: LoadSubsetOptions,
+    error: unknown,
+    reportAborted = false,
+  ): Error {
+    const normalized = normalizeError(error)
+    // Aborted subset requests are obsolete demand, not load failures. The
+    // request may reject after its route has already been released.
+    if (options.signal?.aborted && !reportAborted) return normalized
+
+    this._lastError = normalized
+    this.primaryFailureDeliveryDepth++
+    try {
+      this.emitInner(`loadSubset:error`, {
+        type: `loadSubset:error`,
+        subscription: this,
+        options,
+        error: normalized,
+      })
+    } finally {
+      this.primaryFailureDeliveryDepth--
+    }
+    return normalized
   }
 
   emitEvents(changes: Array<ChangeMessage<any, any>>): boolean {
+    if (this.unsubscribed) return false
     const newChanges = this.filterAndFlipChanges(changes)
 
-    if (this.isBufferingForTruncate) {
-      // Buffer the changes instead of emitting immediately
-      // This prevents a flash of missing content during truncate/refetch
-      if (newChanges.length > 0) {
-        this.truncateBuffer.push(newChanges)
-      }
-      return false
-    } else {
-      return this.filteredCallback(newChanges)
-    }
+    // Reconciliation can reduce a source delta to no visible change. Do not
+    // wake subscribers for an empty semantic batch.
+    if (changes.length > 0 && newChanges.length === 0) return false
+
+    // A direct subscriber sees the replacement as one batch, not a flash of
+    // missing content. Delegated publication keeps its private D2 contributions.
+    if (this.bufferPrivately(newChanges)) return false
+    return this.filteredCallback(newChanges)
+  }
+
+  /** Keep direct snapshot reads private while an authoritative replay is open. */
+  private publishSnapshot(changes: Array<ChangeMessage<any, any>>): void {
+    if (!this.bufferPrivately(changes)) this.callback(changes)
   }
 
   /**
@@ -340,9 +1119,11 @@ export class CollectionSubscription
    * Returns a boolean indicating if it succeeded.
    * It can only fail if there is no index to fulfill the request
    * and the optimizedOnly option is set to true,
-   * or, the entire state was already loaded.
+   * or, the entire state was already loaded or the request was cancelled.
    */
   requestSnapshot(opts?: RequestSnapshotOptions): boolean {
+    // Cancel before acquiring ownership or publishing a local snapshot.
+    if (this.unsubscribed || opts?.signal?.aborted) return false
     if (this.loadedInitialState) {
       // Subscription was deoptimized so we already sent the entire initial state
       return false
@@ -374,35 +1155,77 @@ export class CollectionSubscription
     // don't await it, we will load the data into the collection when it comes in
     const loadOptions: LoadSubsetOptions = {
       where: stateOpts.where,
+      signal: opts?.signal,
       subscription: this,
       // Include orderBy and limit if provided so sync layer can optimize the query
       orderBy: opts?.orderBy,
       limit: opts?.limit,
     }
-    const syncResult = this.collection._sync.loadSubset(loadOptions)
 
-    // Pass the raw loadSubset result to the caller for external tracking
-    opts?.onLoadSubsetResult?.(syncResult)
+    const {
+      demand,
+      result: syncResult,
+      started,
+    } = this.startSubsetDemand(loadOptions)
+    if (!this.isDemandActive(demand)) return false
+    if (opts?.where) this.requestedSubsetWhere.set(loadOptions, opts.where)
 
-    // Track this loadSubset call so we can unload it later
-    this.loadedSubsets.push(loadOptions)
+    // Report the result synchronously, including a wait for an unavailable loader.
+    opts?.onLoadSubsetResult?.(
+      syncResult,
+      demand.acquisition.options,
+      (primaryFailure) => this.releaseDemand(demand, primaryFailure),
+    )
+    if (!this.isDemandActive(demand)) return false
 
-    const trackLoadSubsetPromise = opts?.trackLoadSubsetPromise ?? true
-    if (trackLoadSubsetPromise) {
-      this.trackLoadSubsetPromise(syncResult)
+    if (started) {
+      this.observeLoadSubsetResult(
+        syncResult,
+        demand,
+        demand.acquisition.options,
+        opts?.trackLoadSubsetPromise ?? true,
+      )
     }
+    if (!this.isDemandActive(demand)) return false
 
     // Also load data immediately from the collection
-    const snapshot = this.collection.currentStateAsChanges(stateOpts)
+    let snapshot: Array<ChangeMessage<any, any>> | void
+    if (opts?.onUnoptimized) {
+      snapshot = this.collection.currentStateAsChanges({
+        ...stateOpts,
+        optimizedOnly: true,
+      })
+      if (snapshot === undefined) {
+        opts.onUnoptimized()
+        // The callback can unsubscribe; TypeScript retains the pre-call narrowing.
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        if (this.unsubscribed) return false
+        snapshot = this.collection.currentStateAsChanges({
+          ...stateOpts,
+          optimizedOnly: false,
+        })
+      }
+    } else {
+      snapshot = this.collection.currentStateAsChanges(stateOpts)
+    }
+    // Snapshot evaluation may call user code that tears down the subscription.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    if (this.unsubscribed) return false
 
     if (snapshot === undefined) {
       // Couldn't load from indexes
       return false
     }
 
-    // Only send changes that have not been sent yet
+    // Skip known rows, except retained rows from an abandoned replay: a new
+    // snapshot must reconcile those with the source, not suppress their update.
+    const knownRows =
+      this.truncateReplaySession?.privateRows ?? this.publishedRows
     const filteredSnapshot = snapshot.filter(
-      (change) => !this.sentKeys.has(change.key),
+      (change) =>
+        (!this.isBufferingForTruncate &&
+          this.stalePublishedRows.has(change.key)) ||
+        (!this.sentKeys.has(change.key) && !knownRows.has(change.key)),
     )
 
     // Add keys to sentKeys BEFORE calling callback to prevent race condition.
@@ -413,8 +1236,107 @@ export class CollectionSubscription
     }
 
     this.snapshotSent = true
-    this.callback(filteredSnapshot)
+    this.publishSnapshot(
+      this.isBufferingForTruncate
+        ? filteredSnapshot
+        : this.reconcileStalePublishedChanges(filteredSnapshot),
+    )
     return true
+  }
+
+  /** Release one exact subset request while keeping the subscription alive. */
+  releaseSnapshot(where: BasicExpression<boolean>): void {
+    const index = this.subsetDemands.findIndex(
+      (demand) =>
+        demand.requestOptions.where === where ||
+        this.requestedSubsetWhere.get(demand.requestOptions) === where,
+    )
+    if (index === -1) return
+
+    this.releaseDemandAt(index)
+  }
+
+  private releaseDemand(
+    demand: SubsetDemand,
+    primaryFailure?: { error: unknown },
+  ): void {
+    if (!primaryFailure) {
+      const index = this.subsetDemands.indexOf(demand)
+      if (index !== -1) this.releaseDemandAt(index)
+      return
+    }
+
+    try {
+      this.recordLoadSubsetError(
+        demand.acquisition.options,
+        primaryFailure.error,
+        true,
+      )
+    } finally {
+      // The failed request remains the public error, even if cleanup also fails.
+      const index = this.subsetDemands.indexOf(demand)
+      if (index !== -1) this.releaseDemandAt(index, false)
+    }
+  }
+
+  private releaseDemandAt(
+    index: number,
+    reportReleaseError = this.primaryFailureDeliveryDepth === 0,
+  ): void {
+    const demand = this.subsetDemands[index]
+    if (!demand) return
+    const replaySession = this.truncateReplaySession
+    const acquisition = demand.acquisition
+    this.subsetDemands.splice(index, 1)
+    demand.initialResult?.reject(new LoadSubsetOperationAbortedError())
+    const releaseCallbacks = [
+      () => this.removeTruncateReplayParticipant(demand),
+      ...(demand.acquisitionState === `active`
+        ? [
+            // Adapter release is a supported reentrancy boundary. A demand
+            // started from unload joins this replacement before completion.
+            () => this.releaseAcquisition(acquisition, reportReleaseError),
+          ]
+        : []),
+      () => this.retireEmptyReplay(),
+      () => {
+        if (replaySession) this.checkTruncateReplayComplete(replaySession)
+      },
+      // Ready follows replacement publication, never the delete half of it.
+      () => this.stopDemandStatusParticipants(demand),
+    ]
+    runAllCallbacks(releaseCallbacks)
+  }
+
+  /** A replay with no remaining logical demand cannot establish more rows. */
+  private retireEmptyReplay(): void {
+    if (this.subsetDemands.length !== 0 || !this.truncateReplaySession) {
+      return
+    }
+    this.discardTruncateReplay()
+    this.stalePublishedRows = new Map(this.publishedRows)
+    this.restorePublishedSnapshotTracking()
+    this.options.truncateReplayPublication?.succeed()
+  }
+
+  /** Read the applied rows in an ordered acquisition without starting demand. */
+  readOrderedSnapshot(
+    options: LoadSubsetOptions,
+  ): Array<ChangeMessage<Record<string, unknown>, string | number>> {
+    const predicates = [
+      this.options.whereExpression,
+      options.where,
+      options.cursor?.whereFrom,
+    ].filter((where) => where !== undefined)
+    const snapshot = this.collection.currentStateAsChanges({
+      orderBy: options.orderBy,
+      limit: options.limit,
+      where:
+        predicates.length > 0
+          ? predicates.reduce((left, right) => and(left, right))
+          : undefined,
+    })
+    return Array.isArray(snapshot) ? snapshot : []
   }
 
   /**
@@ -422,9 +1344,8 @@ export class CollectionSubscription
    * Requires a range index to be set with `setOrderByIndex` prior to calling this method.
    * It uses that range index to load the items in the order of the index.
    *
-   * For multi-column orderBy:
-   * - Uses first value from `minValues` for LOCAL index operations (wide bounds, ensures no missed rows)
-   * - Uses all `minValues` to build a precise composite cursor for SYNC layer loadSubset
+   * Cursor requests support one order term and one minValue. Multi-column
+   * queries use the ordered loader's prefix-and-tie fallback instead.
    *
    * Note 1: it may load more rows than the provided LIMIT because it loads all values equal to the first cursor value + limit values greater.
    *         This is needed to ensure that it does not accidentally skip duplicate values when the limit falls in the middle of some duplicated values.
@@ -438,6 +1359,7 @@ export class CollectionSubscription
     trackLoadSubsetPromise: shouldTrackLoadSubsetPromise = true,
     onLoadSubsetResult,
   }: RequestLimitedSnapshotOptions) {
+    if (this.unsubscribed) return
     if (!limit) throw new Error(`limit is required`)
 
     if (!this.orderByIndex) {
@@ -445,6 +1367,11 @@ export class CollectionSubscription
         `Ordered snapshot was requested but no index was found. You have to call setOrderByIndex before requesting an ordered snapshot.`,
       )
     }
+
+    // Validate cursor input before local delivery changes sent keys or calls user code.
+    const whereFromCursor = minValues
+      ? buildCursor(orderBy, minValues)
+      : undefined
 
     // Check if minValues has a first element (regardless of its value)
     // This distinguishes between "no min value provided" vs "min value is undefined"
@@ -482,9 +1409,6 @@ export class CollectionSubscription
     // so if minValue is 3 then the previous snapshot may not have included all 3s
     // e.g. if it was offset 0 and limit 3 it would only have loaded the first 3
     //      so we load all rows equal to minValue first, to be sure we don't skip any duplicate values
-    //
-    // For multi-column orderBy, we use the first column value for index operations (wide bounds)
-    // This may load some duplicates but ensures we never miss any rows.
     let keys: Array<string | number> = []
     if (hasMinValue) {
       // First, get all items with the same FIRST COLUMN value as minValue
@@ -528,8 +1452,6 @@ export class CollectionSubscription
         : null
 
     while (valuesNeeded() > 0 && !collectionExhausted()) {
-      const insertedKeys = new Set<string | number>() // Track keys we add to `changes` in this iteration
-
       for (const key of keys) {
         const value = this.collection.get(key)!
         changes.push({
@@ -540,7 +1462,6 @@ export class CollectionSubscription
         // Extract the indexed value (e.g., salary) from the row, not the full row
         // This is needed for index.take() to work correctly with the BTree comparator
         biggestObservedValue = valueExtractor ? valueExtractor(value) : value
-        insertedKeys.add(key) // Track this key
       }
 
       keys = index.take(valuesNeeded(), biggestObservedValue!, filterFn)
@@ -557,10 +1478,16 @@ export class CollectionSubscription
       this.sentKeys.add(change.key)
     }
 
-    this.callback(changes)
+    this.publishSnapshot(changes)
+    // A subscriber callback can synchronously tear down this subscription.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    if (this.unsubscribed) return
 
     // Update the row count and last key after sending (for next call's offset/cursor)
-    this.limitedSnapshotRowCount += changes.length
+    this.limitedSnapshotRowCount = Math.max(
+      this.limitedSnapshotRowCount,
+      currentOffset + changes.length,
+    )
     if (changes.length > 0) {
       this.lastSentKey = changes[changes.length - 1]!.key
     }
@@ -576,27 +1503,9 @@ export class CollectionSubscription
         }
       | undefined
 
-    if (minValues !== undefined && minValues.length > 0) {
-      const whereFromCursor = buildCursor(orderBy, minValues)
-
-      if (whereFromCursor) {
-        const { expression } = orderBy[0]!
-        const cursorMinValue = minValues[0]
-
-        // Build the whereCurrent expression for the first orderBy column
-        // For Date values, we need to handle precision differences between JS (ms) and backends (μs)
-        // A JS Date represents a 1ms range, so we query for all values within that range
-        let whereCurrentCursor: BasicExpression<boolean>
-        if (cursorMinValue instanceof Date) {
-          const cursorMinValuePlus1ms = new Date(cursorMinValue.getTime() + 1)
-          whereCurrentCursor = and(
-            gte(expression, new Value(cursorMinValue)),
-            lt(expression, new Value(cursorMinValuePlus1ms)),
-          )
-        } else {
-          whereCurrentCursor = eq(expression, new Value(cursorMinValue))
-        }
-
+    if (whereFromCursor && minValues) {
+      const whereCurrentCursor = buildCursorCurrent(orderBy, minValues)
+      if (whereCurrentCursor) {
         cursorExpressions = {
           whereFrom: whereFromCursor,
           whereCurrent: whereCurrentCursor,
@@ -617,16 +1526,30 @@ export class CollectionSubscription
       offset: offset ?? currentOffset, // Use provided offset, or auto-tracked offset
       subscription: this,
     }
-    const syncResult = this.collection._sync.loadSubset(loadOptions)
 
-    // Pass the raw loadSubset result to the caller for external tracking
-    onLoadSubsetResult?.(syncResult)
+    const {
+      demand,
+      result: syncResult,
+      started,
+    } = this.startSubsetDemand(loadOptions)
+    if (!this.isDemandActive(demand)) return
 
-    // Track this loadSubset call
-    this.loadedSubsets.push(loadOptions)
-    if (shouldTrackLoadSubsetPromise) {
-      this.trackLoadSubsetPromise(syncResult)
+    // Report the result synchronously, including a wait for an unavailable loader.
+    onLoadSubsetResult?.(
+      syncResult,
+      demand.acquisition.options,
+      (primaryFailure) => this.releaseDemand(demand, primaryFailure),
+    )
+    if (!this.isDemandActive(demand)) return
+    if (started) {
+      this.observeLoadSubsetResult(
+        syncResult,
+        demand,
+        demand.acquisition.options,
+        shouldTrackLoadSubsetPromise,
+      )
     }
+    if (!this.isDemandActive(demand)) return
   }
 
   // TODO: also add similar test but that checks that it can also load it from the collection's loadSubset function
@@ -639,6 +1562,8 @@ export class CollectionSubscription
    * Duplicate inserts are filtered out to prevent D2 multiplicity > 1.
    */
   private filterAndFlipChanges(changes: Array<ChangeMessage<any, any>>) {
+    changes = this.reconcileStalePublishedChanges(changes)
+
     if (this.loadedInitialState || this.skipFiltering) {
       // We loaded the entire initial state or filtering is explicitly skipped
       // so no need to filter or flip changes
@@ -661,14 +1586,16 @@ export class CollectionSubscription
       if (!keyInSentKeys) {
         if (change.type === `update`) {
           newChange = { ...change, type: `insert`, previousValue: undefined }
+          this.sentKeys.add(change.key)
         } else if (change.type === `delete`) {
           // Filter out deletes for keys that have not been sent,
           // UNLESS we're buffering for truncate (where all deletes should pass through)
           if (!skipDeleteFilter) {
             continue
           }
+        } else {
+          this.sentKeys.add(change.key)
         }
-        this.sentKeys.add(change.key)
       } else {
         // Key was already sent - handle based on change type
         if (change.type === `insert`) {
@@ -686,6 +1613,67 @@ export class CollectionSubscription
       newChanges.push(newChange)
     }
     return newChanges
+  }
+
+  /**
+   * After a failed replay, the source collection is empty but subscribers still
+   * hold the last good publication. Reconcile the first later source delta for
+   * each retained key against that publication instead of treating it as a
+   * duplicate insert.
+   */
+  private reconcileStalePublishedChanges(
+    changes: Array<ChangeMessage<any, any>>,
+  ): Array<ChangeMessage<any, any>> {
+    if (this.stalePublishedRows.size === 0) return changes
+
+    const reconciled: Array<ChangeMessage<any, any>> = []
+    for (const change of changes) {
+      const previous = this.stalePublishedRows.get(change.key)
+      if (previous === undefined) {
+        reconciled.push(change)
+        continue
+      }
+
+      this.stalePublishedRows.delete(change.key)
+      if (change.type === `delete`) {
+        reconciled.push({
+          ...change,
+          value: previous,
+          previousValue: undefined,
+        })
+      } else if (!deepEquals(previous, change.value)) {
+        reconciled.push({
+          ...change,
+          type: `update`,
+          previousValue: previous,
+        })
+      }
+    }
+    // Cleanup discards rows without publishing deletes. Eager sources publish
+    // their installed state; subset sources must first finish reacquisition.
+    if (
+      this.collection.config.syncMode !== `on-demand` &&
+      !this.isBufferingForTruncate
+    ) {
+      for (const [key, value] of this.stalePublishedRows) {
+        if (this.collection.has(key)) continue
+        this.stalePublishedRows.delete(key)
+        reconciled.push({ type: `delete`, key, value })
+      }
+    }
+    return reconciled
+  }
+
+  private trackPublishedRows(
+    changes: Array<ChangeMessage<any, string | number>>,
+  ): void {
+    for (const change of changes) {
+      if (change.type === `delete`) {
+        this.publishedRows.delete(change.key)
+      } else {
+        this.publishedRows.set(change.key, change.value)
+      }
+    }
   }
 
   private trackSentKeys(changes: Array<ChangeMessage<any, string | number>>) {
@@ -724,27 +1712,52 @@ export class CollectionSubscription
   }
 
   unsubscribe() {
-    // Clean up truncate event listener
-    this.truncateCleanup?.()
+    if (this.unsubscribed) return
+    this.unsubscribed = true
+    // Stop any status listener set already being iterated. Clearing the
+    // emitter's map cannot invalidate that captured Set by itself.
+    this.statusRevision++
+    const sourceListenerCleanups = [
+      this.truncateCleanup,
+      this.collectionCleanup,
+      this.collectionRestartCleanup,
+    ]
     this.truncateCleanup = undefined
+    this.collectionCleanup = undefined
+    this.collectionRestartCleanup = undefined
 
-    // Clean up truncate buffer state
-    this.isBufferingForTruncate = false
-    this.truncateBuffer = []
-    this.pendingTruncateRefetches.clear()
+    runAllCallbacks([
+      ...sourceListenerCleanups.map((cleanup) => () => cleanup?.()),
+      () => {
+        // Stop any buffered replay from publishing after unsubscription.
+        this.discardTruncateReplay()
+        this.stalePublishedRows.clear()
 
-    // Unload all subsets that this subscription loaded
-    // We pass the exact same LoadSubsetOptions we used for loadSubset
-    for (const options of this.loadedSubsets) {
-      this.collection._sync.unloadSubset(options)
-    }
-    this.loadedSubsets = []
-
-    this.emitInner(`unsubscribed`, {
-      type: `unsubscribed`,
-      subscription: this,
-    })
-    // Clear all event listeners to prevent memory leaks
-    this.clearListeners()
+        // Retire every owner before an unload can reenter teardown.
+        const acquisitions = this.subsetDemands
+          .filter((demand) => demand.acquisitionState === `active`)
+          .map((demand) => demand.acquisition)
+        for (const demand of this.subsetDemands) {
+          demand.initialResult?.reject(new LoadSubsetOperationAbortedError())
+          this.stopDemandStatusParticipants(demand)
+          if (demand.acquisitionState === `starting`) {
+            cancelAcquisition(demand.acquisition)
+          }
+        }
+        this.subsetDemands = []
+        runAllCallbacks(
+          acquisitions.map(
+            (acquisition) => () => this.releaseAcquisition(acquisition),
+          ),
+        )
+      },
+      () =>
+        this.emitInner(`unsubscribed`, {
+          type: `unsubscribed`,
+          subscription: this,
+        }),
+      // Clear all event listeners to prevent memory leaks
+      () => this.clearListeners(),
+    ])
   }
 }
