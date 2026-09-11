@@ -3,8 +3,6 @@ title: Mutations
 id: mutations
 ---
 
-# TanStack DB Mutations
-
 TanStack DB provides a powerful mutation system that enables optimistic updates with automatic state management. This system is built around a pattern of **optimistic mutation → backend persistence → sync back → confirmed state**. This creates a highly responsive user experience while maintaining data consistency and being easy to reason about.
 
 Local changes are applied immediately as optimistic state, then persisted to your backend, and finally the optimistic state is replaced by the confirmed server state once it syncs back.

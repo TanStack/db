@@ -2,8 +2,6 @@
 title: LocalOnly Collection
 ---
 
-# LocalOnly Collection
-
 LocalOnly collections are designed for in-memory client data or UI state that doesn't need to persist across browser sessions or sync across tabs.
 
 ## Overview

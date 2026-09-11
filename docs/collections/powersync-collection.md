@@ -2,8 +2,6 @@
 title: PowerSync Collection
 ---
 
-# PowerSync Collection
-
 PowerSync collections provide seamless integration between TanStack DB and [PowerSync](https://powersync.com), enabling automatic synchronization between your in-memory TanStack DB collections and PowerSync's SQLite database. This gives you offline-ready persistence, real-time sync capabilities, and powerful conflict resolution.
 
 ## Overview
