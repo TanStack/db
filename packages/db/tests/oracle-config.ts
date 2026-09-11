@@ -1,6 +1,7 @@
 type OracleEnvironment = Record<string, string | undefined>
 
 const staticOracleProperties = [
+  `trailbase.lifecycle`,
   `collection-sync.reentrant-drain`,
   `collection-state.retention`,
   `collection-publication.metadata-cancellation`,

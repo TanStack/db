@@ -2,22 +2,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { createCollection, createTransaction } from '@tanstack/db'
 import { trailBaseCollectionOptions } from '../src/trailbase'
 import { stripVirtualProps } from '../../db/tests/utils'
-import type {
-  CreateOperation,
-  DeleteOperation,
-  Event,
-  FilterOrComposite,
-  ListOperation,
-  ListOpts,
-  ListResponse,
-  Pagination,
-  ReadOperation,
-  ReadOpts,
-  RecordApi,
-  RecordId,
-  SubscribeOpts,
-  UpdateOperation,
-} from 'trailbase'
+import { MockRecordApi } from './mock-record-api'
+import type { Event, ListResponse } from 'trailbase'
 
 type Data = {
   id: number | null
@@ -32,79 +18,6 @@ const stripState = (state: Map<number | string | null, Data>) =>
       stripVirtualProps(value),
     ]),
   )
-
-class MockRecordApi<T> implements RecordApi<T> {
-  list = vi.fn(
-    (_opts?: {
-      pagination?: Pagination
-      order?: Array<string>
-      filters?: Array<FilterOrComposite>
-      count?: boolean
-      expand?: Array<string>
-    }): Promise<ListResponse<T>> => {
-      return Promise.resolve({ records: [] })
-    },
-  )
-  listOp = vi.fn((_opts?: ListOpts): ListOperation<T> => {
-    throw `listOp`
-  })
-  listGeoOp = vi.fn((_geometryColumn: string, _opts?: ListOpts) => {
-    throw `listGeoOp`
-  })
-
-  read = vi.fn(
-    (
-      _id: string | number,
-      _opt?: {
-        expand?: Array<string>
-      },
-    ): Promise<T> => {
-      throw `read`
-    },
-  )
-  readOp = vi.fn((_id: RecordId, _opt?: ReadOpts): ReadOperation<T> => {
-    throw `readOp`
-  })
-
-  create = vi.fn((_record: T): Promise<string | number> => {
-    throw `create`
-  })
-  createBulk = vi.fn((_records: Array<T>): Promise<Array<string | number>> => {
-    throw `createBulk`
-  })
-  createOp = vi.fn((_record: T): CreateOperation<T> => {
-    throw `createOp`
-  })
-
-  update = vi.fn((_id: string | number, _record: Partial<T>): Promise<void> => {
-    throw `update`
-  })
-  updateOp = vi.fn((_id: RecordId, _record: Partial<T>): UpdateOperation => {
-    throw `updateOp`
-  })
-
-  delete = vi.fn((_id: string | number): Promise<void> => {
-    throw `delete`
-  })
-  deleteOp = vi.fn((_id: RecordId): DeleteOperation => {
-    throw `deleteOp`
-  })
-
-  subscribe = vi.fn((_id: string | number): Promise<ReadableStream<Event>> => {
-    return Promise.resolve(
-      new ReadableStream({
-        start: (controller: ReadableStreamDefaultController<Event>) => {
-          controller.close()
-        },
-      }),
-    )
-  })
-  subscribeAll = vi.fn(
-    (_opts?: SubscribeOpts): Promise<ReadableStream<Event>> => {
-      throw `subscribeAll`
-    },
-  )
-}
 
 function setUp(recordApi: MockRecordApi<Data>) {
   // Get the options with utilities
@@ -138,7 +51,111 @@ async function expectWildcardFailureSettlesPreload(): Promise<void> {
 }
 
 describe(`TrailBase Integration`, () => {
-  it.each([`close`, `error`] as const)(
+  it.each(
+    ([`loading`, `ready`] as const).flatMap((phase) =>
+      ([`close`, `error`] as const).map((ending) => ({ phase, ending })),
+    ),
+  )(
+    `handles same-turn $ending and cleanup while $phase`,
+    async ({ phase, ending }) => {
+      const recordApi = new MockRecordApi<Data>()
+      const row: Data = { id: 1, updated: 0, data: `loaded` }
+      let resolveList!: (response: ListResponse<Data>) => void
+      recordApi.list.mockReturnValue(
+        new Promise((resolve) => {
+          resolveList = resolve
+        }),
+      )
+      let controller!: ReadableStreamDefaultController<Event>
+      const stream = new ReadableStream<Event>({
+        start(value) {
+          controller = value
+        },
+      })
+      recordApi.subscribe.mockResolvedValue(stream)
+      const errors: Array<unknown> = []
+      const recordUnhandled = (error: unknown) => errors.push(error)
+      process.on(`unhandledRejection`, recordUnhandled)
+      const collection = createCollection(setUp(recordApi))
+      const preload = collection.preload().then(
+        () => `ready`,
+        (error: unknown) => error,
+      )
+      try {
+        await vi.waitFor(() => expect(recordApi.list).toHaveBeenCalledOnce())
+        if (phase === `ready`) {
+          resolveList({ records: [row] })
+          expect(await preload).toBe(`ready`)
+          expect(collection.get(1)).toMatchObject(row)
+        }
+        if (ending === `error`) controller.error(new Error(`connection lost`))
+        else controller.close()
+        // No microtask between stream termination and cleanup.
+        await collection.cleanup()
+        resolveList({ records: [row] })
+        if (phase === `loading`)
+          expect(await preload).toMatchObject({ name: `AbortError` })
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        expect(errors).toEqual([])
+        expect(stream.locked).toBe(false)
+        expect(collection.status).toBe(`cleaned-up`)
+        expect(collection.size).toBe(0)
+        expect(recordApi.subscribe).toHaveBeenCalledOnce()
+        expect(recordApi.list).toHaveBeenCalledOnce()
+      } finally {
+        resolveList({ records: [] })
+        await collection.cleanup()
+        await preload
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        process.off(`unhandledRejection`, recordUnhandled)
+      }
+    },
+  )
+
+  it(`cancels an open stream when processing an event fails`, async () => {
+    const recordApi = new MockRecordApi<Data>()
+    let controller!: ReadableStreamDefaultController<Event>
+    const cancel = vi.fn()
+    const stream = new ReadableStream<Event>({
+      start(value) {
+        controller = value
+      },
+      cancel,
+    })
+    recordApi.subscribe.mockResolvedValue(stream)
+    const failure = new Error(`parse rejected row`)
+    const reported = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const collection = createCollection(
+      trailBaseCollectionOptions({
+        recordApi,
+        getKey: (row: Data) => row.id!,
+        parse: {
+          id: () => {
+            throw failure
+          },
+        },
+        serialize: {},
+      }),
+    )
+    try {
+      await collection.preload()
+      controller.enqueue({ Insert: { id: 1, updated: 0, data: `invalid` } })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(reported).toHaveBeenCalledExactlyOnceWith(
+        `TrailBase subscription failed`,
+        failure,
+      )
+      expect(cancel).toHaveBeenCalledOnce()
+      expect(stream.locked).toBe(false)
+      await collection.cleanup()
+      expect(cancel).toHaveBeenCalledOnce()
+    } finally {
+      await collection.cleanup()
+      reported.mockRestore()
+    }
+  })
+
+  it.each([`close`, `buffered-close`, `error`] as const)(
     `releases a settled stream without unhandled rejection after %s`,
     async (ending) => {
       const recordApi = new MockRecordApi<Data>()
@@ -164,6 +181,14 @@ describe(`TrailBase Integration`, () => {
         await collection.preload()
         const timer = intervals.mock.results.at(-1)?.value
         expect(timer).toBeDefined()
+        const expectedRows = new Map([[1, row]])
+        if (ending === `buffered-close`) {
+          for (const id of [2, 3]) {
+            const value: Data = { id, updated: 0, data: `buffered-${id}` }
+            expectedRows.set(id, value)
+            controller.enqueue({ Insert: value })
+          }
+        }
         if (ending === `error`) controller.error(failure)
         else controller.close()
         await new Promise((resolve) => setTimeout(resolve, 0))
@@ -172,7 +197,7 @@ describe(`TrailBase Integration`, () => {
         expect(clear).toHaveBeenCalledWith(timer)
         expect(stream.locked).toBe(false)
         expect(collection.status).toBe(`ready`)
-        expect(stripState(collection.state)).toEqual(new Map([[1, row]]))
+        expect(stripState(collection.state)).toEqual(expectedRows)
         expect(recordApi.subscribe).toHaveBeenCalledOnce()
         expect(recordApi.list).toHaveBeenCalledOnce()
         if (ending === `error`) {
