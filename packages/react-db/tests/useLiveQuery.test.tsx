@@ -13,6 +13,7 @@ import {
   gt,
   lte,
   sum,
+  toArray,
 } from '@tanstack/db'
 import { useEffect } from 'react'
 import { useLiveQuery } from '../src/useLiveQuery'
@@ -2786,6 +2787,94 @@ describe(`Query Collections`, () => {
       expect(parentRenderCount).toBe(settledParentRenders)
       expect(alphaRenderCount).toBe(settledAlphaRenders + 1)
       expect(betaRenderCount).toBe(settledBetaRenders)
+    })
+
+    it(`keeps nested array includes on the render after a parent update`, async () => {
+      type Document = {
+        id: string
+        name: string
+        schemaId: string
+      }
+      type Schema = {
+        id: string
+        name: string
+      }
+      type Field = {
+        id: string
+        schemaId: string
+        name: string
+      }
+
+      const documents = createCollection(
+        mockSyncCollectionOptions<Document>({
+          id: `includes-react-documents`,
+          getKey: (document) => document.id,
+          initialData: [{ id: `d1`, name: `Before`, schemaId: `s1` }],
+        }),
+      )
+      const schemas = createCollection(
+        mockSyncCollectionOptions<Schema>({
+          id: `includes-react-schemas`,
+          getKey: (schema) => schema.id,
+          initialData: [{ id: `s1`, name: `Schema` }],
+        }),
+      )
+      const fields = createCollection(
+        mockSyncCollectionOptions<Field>({
+          id: `includes-react-fields`,
+          getKey: (field) => field.id,
+          initialData: [{ id: `f1`, schemaId: `s1`, name: `Title` }],
+        }),
+      )
+
+      const { result } = renderHook(() =>
+        useLiveQuery((q) =>
+          q.from({ document: documents }).select(({ document }) => ({
+            id: document.id,
+            name: document.name,
+            schema: toArray(
+              q
+                .from({ schema: schemas })
+                .where(({ schema }) => eq(schema.id, document.schemaId))
+                .select(({ schema }) => ({
+                  id: schema.id,
+                  fields: toArray(
+                    q
+                      .from({ field: fields })
+                      .where(({ field }) => eq(field.schemaId, schema.id))
+                      .select(({ field }) => ({
+                        id: field.id,
+                        name: field.name,
+                      })),
+                  ),
+                })),
+            ),
+          })),
+        ),
+      )
+
+      await waitFor(() => {
+        expect(result.current.data[0]).toMatchObject({
+          name: `Before`,
+          schema: [{ id: `s1`, fields: [{ id: `f1`, name: `Title` }] }],
+        })
+      })
+
+      act(() => {
+        documents.utils.begin()
+        documents.utils.write({
+          type: `update`,
+          value: { id: `d1`, name: `After`, schemaId: `s1` },
+        })
+        documents.utils.commit()
+      })
+
+      await waitFor(() => {
+        expect(result.current.data[0]).toMatchObject({
+          name: `After`,
+          schema: [{ id: `s1`, fields: [{ id: `f1`, name: `Title` }] }],
+        })
+      })
     })
   })
 

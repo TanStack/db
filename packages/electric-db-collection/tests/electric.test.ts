@@ -377,6 +377,76 @@ describe(`Electric Integration`, () => {
     )
   })
 
+  it(`ignores an update for a key that has never been materialized`, () => {
+    subscriber([
+      {
+        key: `2`,
+        value: { id: 2, name: `Only changed columns` },
+        headers: { operation: `update` },
+      },
+      { headers: { control: `up-to-date` } },
+    ])
+
+    expect(collection.has(2)).toBe(false)
+  })
+
+  it(`accepts an update after an insert for the same key in one batch`, () => {
+    subscriber([
+      {
+        key: `2`,
+        value: { id: 2, name: `Initial value` },
+        headers: { operation: `insert` },
+      },
+      {
+        key: `2`,
+        value: { id: 2, name: `Updated value` },
+        headers: { operation: `update` },
+      },
+      { headers: { control: `up-to-date` } },
+    ])
+
+    expect(collection.get(2)?.name).toBe(`Updated value`)
+  })
+
+  it(`accepts a progressive update after its insert in an earlier callback`, () => {
+    let testSubscriber!: (messages: Array<Message<Row>>) => void
+    mockSubscribe.mockImplementation((callback) => {
+      testSubscriber = callback
+      return () => {}
+    })
+
+    const testCollection = createCollection(
+      electricCollectionOptions({
+        id: `progressive-split-insert-update-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        syncMode: `progressive`,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }),
+    )
+
+    testSubscriber([
+      {
+        key: `2`,
+        value: { id: 2, name: `Initial value` },
+        headers: { operation: `insert` },
+      },
+    ])
+    testSubscriber([
+      {
+        key: `2`,
+        value: { id: 2, name: `Updated value` },
+        headers: { operation: `update` },
+      },
+    ])
+    testSubscriber([{ headers: { control: `up-to-date` } }])
+
+    expect(testCollection.get(2)?.name).toBe(`Updated value`)
+  })
+
   it(`should handle delete operations`, () => {
     // Insert and commit
     subscriber([
@@ -561,6 +631,7 @@ describe(`Electric Integration`, () => {
         version: 1,
         resume: {
           kind: `resume`,
+          requiresTagState: false,
           offset: `42_0`,
           handle: `shape-handle`,
         },
@@ -3772,6 +3843,7 @@ describe(`Electric Integration`, () => {
             `electric:resume`,
             {
               kind: `resume`,
+              requiresTagState: false,
               offset: `10_0`,
               handle: `handle-1`,
               shapeId: `{"params":{"table":"test_table"},"url":"http://test-url"}`,
@@ -3822,6 +3894,7 @@ describe(`Electric Integration`, () => {
             `electric:resume`,
             {
               kind: `resume`,
+              requiresTagState: false,
               offset: `20_0`,
               handle: `persisted-newer`,
               shapeId: `{"params":{"table":"test_table"},"url":"http://test-url"}`,
@@ -3843,6 +3916,7 @@ describe(`Electric Integration`, () => {
         version: 1,
         resume: {
           kind: `resume`,
+          requiresTagState: false,
           offset: `10_0`,
           handle: `hydrated-older`,
           shapeId: `{"params":{"table":"test_table"},"url":"http://test-url"}`,
@@ -3868,7 +3942,7 @@ describe(`Electric Integration`, () => {
       })
     })
 
-    it(`should ignore reset resume metadata and fall back to default startup`, async () => {
+    it(`should replace reset resume state with a full snapshot`, async () => {
       vi.clearAllMocks()
 
       const { ShapeStream } = await import(`@electric-sql/client`)
@@ -3911,7 +3985,8 @@ describe(`Electric Integration`, () => {
 
       expect(ShapeStream).toHaveBeenCalledWith(
         expect.objectContaining({
-          offset: `now`,
+          offset: undefined,
+          log: undefined,
           handle: undefined,
         }),
       )
@@ -3956,7 +4031,8 @@ describe(`Electric Integration`, () => {
 
       expect(ShapeStream).toHaveBeenCalledWith(
         expect.objectContaining({
-          offset: `now`,
+          offset: undefined,
+          log: undefined,
           handle: undefined,
         }),
       )
@@ -3976,6 +4052,7 @@ describe(`Electric Integration`, () => {
           `electric:resume`,
           {
             kind: `resume`,
+            requiresTagState: false,
             offset: `10_0`,
             handle: `handle-1`,
             shapeId: `{"params":{"table":"test_table"},"url":"http://test-url"}`,
@@ -4062,6 +4139,7 @@ describe(`Electric Integration`, () => {
             `electric:resume`,
             {
               kind: `resume`,
+              requiresTagState: false,
               offset: `10_0`,
               handle: `persisted-handle`,
               shapeId: JSON.stringify({
@@ -4118,6 +4196,7 @@ describe(`Electric Integration`, () => {
             `electric:resume`,
             {
               kind: `resume`,
+              requiresTagState: false,
               offset: `10_0`,
               handle: `persisted-handle`,
               shapeId: JSON.stringify({
@@ -4174,6 +4253,7 @@ describe(`Electric Integration`, () => {
             `electric:resume`,
             {
               kind: `resume`,
+              requiresTagState: false,
               offset: 10,
               updatedAt: 1,
             },
@@ -4224,6 +4304,7 @@ describe(`Electric Integration`, () => {
             `electric:resume`,
             {
               kind: `resume`,
+              requiresTagState: false,
               offset: `10_0`,
               handle: `handle-1`,
               shapeId: `{"url":"http://other-url","params":{"table":"test_table"}}`,
@@ -4281,6 +4362,7 @@ describe(`Electric Integration`, () => {
             `electric:resume`,
             {
               kind: `resume`,
+              requiresTagState: false,
               offset: `10_0`,
               handle: `handle-1`,
               shapeId: `{"params":{"table":"test_table","where":"room=1"},"url":"http://test-url"}`,
@@ -4413,9 +4495,126 @@ describe(`Electric Integration`, () => {
       expect(metadataHarness.collectionMetadata.get(`electric:resume`)).toEqual(
         expect.objectContaining({
           kind: `resume`,
+          requiresTagState: false,
           offset: `10_0`,
           handle: `shape-1`,
         }),
+      )
+    })
+
+    it(`refuses an update for an unseen key and invalidates persisted resume state`, () => {
+      const metadataHarness = createInMemorySyncMetadataApi(
+        new Map([
+          [
+            `electric:resume`,
+            {
+              kind: `resume`,
+              requiresTagState: false,
+              offset: `10_0`,
+              handle: `shape-1`,
+              shapeId: `{"params":{"table":"test_table"},"url":"http://test-url"}`,
+              updatedAt: 1,
+            },
+          ],
+        ]),
+      )
+      mockStream.shapeHandle = `shape-1`
+      mockStream.lastOffset = `11_0`
+
+      const baseOptions = electricCollectionOptions<Row>({
+        id: `unseen-update-resume-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        getKey: (item) => item.id as number,
+        startSync: true,
+      })
+      const originalSync = baseOptions.sync
+      const testCollection = createCollection({
+        ...baseOptions,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+            originalSync.sync({ ...params, metadata: metadataHarness.api }),
+        },
+      })
+
+      subscriber([
+        {
+          key: `2`,
+          value: { id: 2, name: `Changed without immutable fields` },
+          headers: { operation: `update` },
+        },
+        { headers: { control: `up-to-date` } },
+      ])
+
+      expect(testCollection.has(2)).toBe(false)
+      expect(metadataHarness.collectionMetadata.get(`electric:resume`)).toEqual(
+        expect.objectContaining({ kind: `reset` }),
+      )
+      expect(testCollection.status).toBe(`error`)
+    })
+
+    it(`rejects a resumed batch that updates a key after deleting it`, () => {
+      const metadataHarness = createInMemorySyncMetadataApi(
+        new Map([
+          [
+            `electric:resume`,
+            {
+              kind: `resume`,
+              requiresTagState: false,
+              offset: `10_0`,
+              handle: `shape-1`,
+              shapeId: `{"params":{"table":"test_table"},"url":"http://test-url"}`,
+              updatedAt: 1,
+            },
+          ],
+        ]),
+      )
+      const baseOptions = electricCollectionOptions<Row>({
+        id: `delete-then-update-resume-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        getKey: (item) => item.id as number,
+        startSync: true,
+      })
+      const originalSync = baseOptions.sync
+      const testCollection = createCollection({
+        ...baseOptions,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+            originalSync.sync({ ...params, metadata: metadataHarness.api }),
+        },
+      })
+
+      subscriber([
+        {
+          key: `2`,
+          value: { id: 2, name: `Complete row` },
+          headers: { operation: `insert` },
+        },
+        { headers: { control: `up-to-date` } },
+      ])
+      expect(testCollection.has(2)).toBe(true)
+
+      subscriber([
+        {
+          key: `2`,
+          value: { id: 2 },
+          headers: { operation: `delete` },
+        },
+        {
+          key: `2`,
+          value: { id: 2, name: `Partial replacement` },
+          headers: { operation: `update` },
+        },
+      ])
+
+      expect(testCollection.get(2)?.name).toBe(`Complete row`)
+      expect(metadataHarness.collectionMetadata.get(`electric:resume`)).toEqual(
+        expect.objectContaining({ kind: `reset` }),
       )
     })
   })

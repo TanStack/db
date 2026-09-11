@@ -2,6 +2,9 @@ type OracleEnvironment = Record<string, string | undefined>
 
 const staticOracleProperties = [
   `trailbase.lifecycle`,
+  `electric.bound-descriptor-history`,
+  `electric.persisted-tag-history`,
+  `electric.match-reentry`,
   `collection-sync.reentrant-drain`,
   `collection-state.retention`,
   `collection-state.optimistic-history`,

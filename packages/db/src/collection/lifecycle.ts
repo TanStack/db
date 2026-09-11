@@ -49,15 +49,21 @@ export class CollectionLifecycleManager<
   public onFirstReadyCallbacks: Array<() => void> = []
   private idleCallbackId: number | null = null
   private syncError: unknown
+  private cleanupConfig: () => void
   private statusRevision = 0
   private cleaningUp = false
 
   /**
    * Creates a new CollectionLifecycleManager instance
    */
-  constructor(config: CollectionConfig<TOutput, TKey, TSchema>, id: string) {
+  constructor(
+    config: CollectionConfig<TOutput, TKey, TSchema>,
+    id: string,
+    cleanupConfig: () => void = () => {},
+  ) {
     this.config = config
     this.id = id
+    this.cleanupConfig = cleanupConfig
   }
 
   setDeps(deps: {
@@ -327,6 +333,7 @@ export class CollectionLifecycleManager<
       this.cleaningUp = true
       try {
         // Perform all cleanup operations except events
+        this.cleanupConfig()
         this.sync.cleanup()
         this.state.cleanup()
         this.changes.cleanup()
