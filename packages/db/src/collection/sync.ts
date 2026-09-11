@@ -359,6 +359,12 @@ export class CollectionSyncManager<
             `Either provide a loadSubset handler or use syncMode "eager".`,
         )
       }
+
+      // Every route into sync passes through here, so it is the one place
+      // that sees sync start ahead of the subscriber that would justify it.
+      // `addSubscriber` counts itself in before calling us, so a subscription
+      // starting sync leaves the timer alone.
+      this.lifecycle.startGCTimerIfUnsubscribed()
     } catch (error) {
       syncEntryActive = false
       if (isCurrentSync()) this.lifecycle.markError(error)

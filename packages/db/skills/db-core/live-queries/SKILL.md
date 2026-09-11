@@ -203,7 +203,11 @@ const activeUserPosts = createLiveQueryCollection((q) =>
 Create derived collections once at module scope and reuse them. Do not recreate on every render or navigation.
 
 Live query collections default to `gcTime: 5_000`. An explicit `gcTime: 0` is
-preserved and disables garbage collection for that derived collection.
+preserved and disables garbage collection for that derived collection --
+including the reclamation of a collection that started syncing and never gained
+a subscriber. Note this is the opposite of `gcTime: 0` in TanStack Query, where
+it collects as soon as the query goes inactive; use a small positive value if
+you want prompt collection here.
 
 ## Virtual Properties
 
