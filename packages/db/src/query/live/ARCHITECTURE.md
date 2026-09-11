@@ -1001,6 +1001,17 @@ has already done that work.
 The public Collection is an output, never scratch state. Placeholder rows,
 in-place include repair, and forced secondary events are forbidden.
 
+Classify root deltas against authoritative membership, including earlier queued
+sync writes, not the optimistic public view. An optimistic delete must not turn
+a balanced graph update into an authoritative delete. This does not bypass the
+normal sync queue or publish part of a graph-output transaction early.
+
+At the Collection boundary, each active optimistic update owns only its changed
+top-level fields. Compose those fields in transaction order over the current
+base and earlier optimistic work. Inserts retain their full validated rows,
+including schema defaults. Removing one update must not revive its fields from
+another update's whole-row snapshot.
+
 Installed state, synchronous reads, change-event payloads, and downstream
 queries must all observe the same fully materialized commit. The facade adapter
 may defer event delivery across its Collection transactions, but it must not

@@ -14,6 +14,7 @@ import type {
   ChangeMessage,
   CollectionConfig,
   OptimisticChangeMessage,
+  PendingMutation,
 } from '../types'
 import type { CollectionImpl } from './index.js'
 import type { CollectionLifecycleManager } from './lifecycle'
@@ -88,6 +89,11 @@ export class CollectionStateManager<
   // Optimistic state tracking - make public for testing
   public optimisticUpserts = new Map<TKey, TOutput>()
   public optimisticDeletes = new Set<TKey>()
+
+  private composedUpserts = new WeakMap<
+    object,
+    { base: TOutput; composed: TOutput }
+  >()
   public pendingOptimisticUpserts = new Map<TKey, TOutput>()
   public pendingOptimisticDeletes = new Set<TKey>()
   public pendingOptimisticDirectUpserts = new Set<TKey>()
@@ -644,7 +650,7 @@ export class CollectionStateManager<
             case `update`:
               this.optimisticUpserts.set(
                 mutation.key,
-                mutation.modified as TOutput,
+                this.resolveOptimisticUpsert(mutation),
               )
               this.optimisticDeletes.delete(mutation.key)
               break
@@ -817,6 +823,40 @@ export class CollectionStateManager<
         })
       }
     }
+  }
+
+  // Updates own only their changed top-level fields. Inserts keep the full
+  // validated row, including schema defaults absent from `changes`.
+  private resolveOptimisticUpsert(mutation: PendingMutation<TOutput>): TOutput {
+    if (mutation.type !== `update`) return mutation.modified
+
+    const key = mutation.key as TKey
+    const base = this.optimisticUpserts.get(key) ?? this.syncedData.get(key)
+    if (base === undefined) return mutation.modified
+
+    // Reuse an unchanged composition so unrelated transactions do not publish
+    // new row identities. A new changes object or base invalidates the cache.
+    const cached = this.composedUpserts.get(mutation.changes)
+    if (cached?.base === base) return cached.composed
+    const composed = { ...base, ...mutation.changes }
+    this.composedUpserts.set(mutation.changes, { base, composed })
+    return composed
+  }
+
+  /** Authoritative membership after committed sync writes, without optimistic edits. */
+  hasSyncedKey(key: TKey): boolean {
+    for (let i = this.pendingSyncedTransactions.length - 1; i >= 0; i--) {
+      const transaction = this.pendingSyncedTransactions[i]!
+      if (!transaction.committed) continue
+      for (let j = transaction.operations.length - 1; j >= 0; j--) {
+        const operation = transaction.operations[j]!
+        if (operation.key === key) {
+          return operation.type !== `delete`
+        }
+      }
+      if (transaction.truncate) return false
+    }
+    return this.syncedData.has(key)
   }
 
   /**
@@ -1261,7 +1301,7 @@ export class CollectionStateManager<
                 case `update`:
                   this.optimisticUpserts.set(
                     mutation.key,
-                    mutation.modified as TOutput,
+                    this.resolveOptimisticUpsert(mutation),
                   )
                   this.optimisticDeletes.delete(mutation.key)
                   break

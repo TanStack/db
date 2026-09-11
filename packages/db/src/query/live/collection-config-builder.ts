@@ -1126,9 +1126,10 @@ export class CollectionConfigBuilder<
     } else if (
       // Insert & update(s) (updates are a delete & insert)
       inserts > deletes ||
-      // Just update(s) but the item is already in the collection (so
-      // was inserted previously).
-      (inserts === deletes && collection.has(collection.getKeyFromItem(value)))
+      // A balanced delta updates an existing authoritative row, even if an
+      // optimistic delete hides it or its earlier insert is still queued.
+      (inserts === deletes &&
+        collection._state.hasSyncedKey(collection.getKeyFromItem(value)))
     ) {
       write({
         value,
