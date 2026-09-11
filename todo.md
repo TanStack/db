@@ -27,9 +27,12 @@ not a new InfiniteQueryObserver bridge or remote cursor registry.
       fixed-server-page drain example; explain ordering/filter translation,
       cancellation, exhaustion, unlimited loads, and opaque-cursor boundaries.
 - [x] Fix the React overview to stop recommending the ignored callback.
-- [x] Full React: 220 checks (runtime and type cases), Vue: 96, Svelte: 101.
-      Query DB full suite: 195 runtime cases plus its type pass. All GREEN.
-      Electric declarations built to satisfy existing cross-package Query DB types.
+- [x] Package Vitest gates (with each package's configured type checking):
+      React reports 220 passing checks; Vue 96; Svelte 101. Query DB's final
+      log reports 370 passes / 371 discovered checks, no failures or type errors.
+      These are Vitest runtime/type reports, not standalone `tsc` claims.
+      Electric declarations were built before the final Query DB gate, clearing
+      the earlier dependency blocker recorded in the historical handoff below.
 - [x] Focused lint: no errors or warnings. No core/adapter runtime edits.
 - [x] Prepare minor framework changesets and focused PR publication.
 
@@ -146,20 +149,24 @@ fixture's nextPage is endpoint-authoritative test data used only inside QueryFn.
 The intentionally broken capped-provider probe characterizes missing information;
 it must not become a green oracle accepting this provider as correct.
 
-## Verification handoff
+## Historical probe handoff — before the accepted migration (2026-09-10)
+
+The following records the initial investigation only. It was superseded by the
+accepted implementation and package gates above; it is not the PR's final state.
 
 From packages/react-db:
 `pnpm exec vitest run tests/server-pagination-probe.test.tsx --coverage.enabled=false --maxWorkers=2`
-passes all seven probes, no React type errors.
+passed all seven probes with no errors from Vitest's configured React type check.
 
 From packages/query-db-collection:
 `pnpm exec vitest run tests/server-pagination-boundary.test.ts --coverage.enabled=false --typecheck.enabled=false --maxWorkers=2`
-checks that explicit refetch removes a manually appended eager row despite
-staleTime Infinity. Runtime passes. The package-wide type pass is blocked by
+checked that explicit refetch removes a manually appended eager row despite
+staleTime Infinity. Runtime passed. At this early stage the Query DB type pass was blocked by
 unbuilt Electric declarations imported by existing cross-package E2E suites.
 A fixture inference error found by that pass was corrected with an explicit
 page-response type; no production code changed.
 
-Local builds of db-ivm and db completed. No runtime fix, public API migration,
-changeset, commit or PR was made. All probe files and this document are untracked
-for parent review; do not stage parent-owned rfc-next-work-plan.md.
+At that early handoff only db-ivm/db builds and local probes were complete.
+The accepted migration subsequently shipped in PR #1806 with tests, docs and
+minor framework changesets; these files and this document are now committed.
+The separate parent-owned rfc-next-work-plan.md remains untracked.
