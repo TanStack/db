@@ -86,6 +86,8 @@ export class TanStackDBAttachmentQueue extends AttachmentQueue {
     id,
     updateHook,
   }: SaveOptions): Promise<AttachmentQueueRow> {
+    await this.collection.preload()
+
     const resolvedId = id ?? (await this.generateAttachmentId())
     const filename = `${resolvedId}.${fileExtension}`
     const localUri = this.localStorage.getLocalUri(filename)
@@ -152,6 +154,8 @@ export class TanStackDBAttachmentQueue extends AttachmentQueue {
    * relational associations with the provided attachment ID should be cleaned up in this hook.
    */
   async delete({ id, updateHook }: DeleteOptions): Promise<void> {
+    await this.collection.preload()
+
     await this.withAttachmentContext(async (ctx) => {
       const tanStackDBTransaction = createTransaction({
         autoCommit: false,

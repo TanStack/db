@@ -211,6 +211,41 @@ describePowerSync(`PowerSync AttachmentQueue (TanStackDB)`, () => {
     )
   }
 
+  it(`preserves an existing file when the collection is still loading`, async () => {
+    const { db, createQueue, localStorage, remoteStorage } = await setup()
+    const original = await createQueue().save({
+      id: `existing`,
+      data: createMockJpegBuffer(),
+      fileExtension: `jpg`,
+    })
+    const freshCollection = createCollection(
+      powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.attachments,
+      }),
+    )
+    onTestFinished(() => freshCollection.cleanup())
+    const freshQueue = new TanStackDBAttachmentQueue({
+      db,
+      attachmentsCollection: freshCollection,
+      localStorage,
+      remoteStorage,
+      watchAttachments: () => {},
+    })
+    expect(freshCollection.isReady()).toBe(false)
+    await expect(
+      freshQueue.save({
+        id: original.id,
+        data: new Uint8Array(999).buffer,
+        fileExtension: `jpg`,
+      }),
+    ).rejects.toThrow(/already exists/)
+    expect(await localStorage.fileExists(original.local_uri!)).toBe(true)
+    expect((await localStorage.readFile(original.local_uri!)).byteLength).toBe(
+      original.size,
+    )
+  })
+
   describe(`save`, () => {
     it(`writes the local file and inserts a QUEUED_UPLOAD row into the collection`, async () => {
       const { createQueue, attachmentsCollection, localStorage } = await setup()
