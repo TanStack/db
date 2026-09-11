@@ -2393,9 +2393,8 @@ describe(`Electric adapter laws`, () => {
     )
     const pendingMatch = collection.utils.awaitMatch(() => false, 5000)
     const pendingTxid = collection.utils.awaitTxId(703, 5000)
-    const preload = expect(collection.preload()).rejects.toMatchObject({
-      name: `AbortError`,
-    })
+    // A pending preload owns retention; exercise unowned sync for automatic GC.
+    collection.startSyncImmediate()
     await vi.waitFor(
       () => expect(adapter.loadCollectionMetadata).toHaveBeenCalledOnce(),
       { interval: 1, timeout: 250 },
@@ -2431,7 +2430,6 @@ describe(`Electric adapter laws`, () => {
     )
     expect(mockSubscribe).not.toHaveBeenCalled()
     metadataGate.resolve()
-    await preload
   })
 
   it(`retires every pending waiter when its collection lifecycle is cleaned up`, async () => {

@@ -3,7 +3,9 @@ import { expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { DuplicateKeySyncError } from '../src/errors.js'
 import { createTransaction } from '../src/transactions.js'
-import { oraclePropertyOptions } from './oracle-config.js'
+import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
+import { runOptimisticHistory } from './optimistic-history-oracle.js'
+import type { OptimisticStep } from './optimistic-history-oracle.js'
 import type { Collection } from '../src/collection/index.js'
 import type { SyncConfig, TransactionState } from '../src/types.js'
 
@@ -731,5 +733,115 @@ fcTest.prop(
   `matches retained authoritative state without optimistic overlays after every committed sync history`,
   async (actions) => {
     await runRetentionHistory(actions)
+  },
+)
+
+const historyRow = fc.record({
+  id: fc.integer({ min: 1, max: 3 }),
+  a: fc.integer({ min: -2, max: 2 }),
+  b: fc.integer({ min: -2, max: 2 }),
+  c: fc.integer({ min: -2, max: 2 }),
+})
+const optimisticStep: fc.Arbitrary<OptimisticStep> = fc.oneof(
+  {
+    weight: 4,
+    arbitrary: fc.record({
+      type: fc.constant(`edit` as const),
+      key: fc.integer({ min: 1, max: 3 }),
+      fields: fc
+        .record(
+          {
+            a: fc.integer({ min: -2, max: 2 }),
+            b: fc.integer({ min: -2, max: 2 }),
+            c: fc.integer({ min: -2, max: 2 }),
+          },
+          { requiredKeys: [] },
+        )
+        .filter((fields) => Object.keys(fields).length > 0),
+      optimistic: fc.boolean(),
+    }),
+  },
+  {
+    weight: 4,
+    arbitrary: fc.record({
+      type: fc.constant(`settle` as const),
+      slot: fc.nat(5),
+      success: fc.boolean(),
+      cascade: fc.boolean(),
+    }),
+  },
+  {
+    weight: 3,
+    arbitrary: fc.record({
+      type: fc.constant(`sync` as const),
+      rows: fc.uniqueArray(historyRow, {
+        selector: (row) => row.id,
+        maxLength: 3,
+      }),
+      truncate: fc.boolean(),
+      immediate: fc.boolean(),
+      copies: fc.integer({ min: 1, max: 2 }),
+    }),
+  },
+)
+const optimisticHistory = fc.record({
+  initial: fc.uniqueArray(historyRow, {
+    selector: (row) => row.id,
+    maxLength: 3,
+  }),
+  steps: fc.array(optimisticStep, { minLength: 2, maxLength: 24 }),
+})
+
+// These are replay programs for the same model and driver as randomized runs,
+// not separate assertions that only know the reported final state.
+const insertionPrefix: Array<OptimisticStep> = [
+  { type: `edit`, key: 1, fields: { a: 1 }, optimistic: true },
+  { type: `edit`, key: 1, fields: { b: 2 }, optimistic: true },
+  { type: `settle`, slot: 1, success: true, cascade: false },
+]
+it.each([true, false])(
+  `replays insert dependency settlement, accepted=%s`,
+  async (success) => {
+    await runOptimisticHistory(
+      [],
+      [
+        ...insertionPrefix,
+        { type: `settle`, slot: 0, success, cascade: false },
+      ],
+    )
+  },
+)
+it.each([true, false])(
+  `preserves a whole-row mutation snapshot across sync, truncate=%s`,
+  async (truncate) => {
+    await runOptimisticHistory(
+      [{ id: 1, a: 0, b: 0, c: 0 }],
+      [
+        { type: `edit`, key: 1, fields: { a: 1 }, optimistic: true },
+        {
+          type: `sync`,
+          rows: [{ id: 1, a: 0, b: 2, c: 3 }],
+          immediate: !truncate,
+          truncate,
+          copies: 1,
+        },
+        { type: `settle`, slot: 0, success: true, cascade: false },
+      ],
+    )
+  },
+)
+fcTest.prop([optimisticHistory], { numRuns: oracleRuns(60), seed: 86103 })(
+  `matches optimistic ownership and publication histories with a fixed seed`,
+  async ({ initial, steps }) => {
+    await runOptimisticHistory(initial, steps)
+  },
+)
+fcTest.prop(
+  [optimisticHistory],
+  oraclePropertyOptions(100, `collection-state.optimistic-history`),
+)(
+  `matches optimistic ownership and publication histories with a random or replayed seed`,
+  async ({ initial, steps }) => {
+    await runOptimisticHistory(initial, steps)
   },
 )

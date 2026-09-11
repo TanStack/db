@@ -5052,40 +5052,55 @@ describe(`includes subqueries`, () => {
       resetCleanupQueue()
     })
 
-    it(`child collections should not be garbage collected when external subscribers unmount`, async () => {
+    it(`retains child facades while their root is subscribed and releases them after root GC`, async () => {
       const collection = buildIncludesQuery()
-      await collection.preload()
+      const rootSub = collection.subscribeChanges(() => {})
+      try {
+        await collection.preload()
 
-      // Verify child data exists
-      const alpha = collection.get(1) as any
-      expect(childItems(alpha.issues)).toEqual([
-        { id: 10, title: `Bug in Alpha` },
-        { id: 11, title: `Feature for Alpha` },
-      ])
+        // Verify child data exists
+        const alpha = collection.get(1)!
+        expect(childItems(alpha.issues)).toEqual([
+          { id: 10, title: `Bug in Alpha` },
+          { id: 11, title: `Feature for Alpha` },
+        ])
 
-      const beta = collection.get(2) as any
-      expect(childItems(beta.issues)).toEqual([
-        { id: 20, title: `Bug in Beta` },
-      ])
+        const beta = collection.get(2)!
+        expect(childItems(beta.issues)).toEqual([
+          { id: 20, title: `Bug in Beta` },
+        ])
 
-      // Simulate what useLiveQuery does in React: subscribe to child collection,
-      // then unsubscribe when the component unmounts (e.g., virtual table scroll)
-      const childSub = alpha.issues.subscribeChanges(() => {})
-      childSub.unsubscribe()
+        // Simulate what useLiveQuery does in React: subscribe to child collection,
+        // then unsubscribe when the component unmounts (e.g., virtual table scroll)
+        const childSub = alpha.issues.subscribeChanges(() => {})
+        childSub.unsubscribe()
 
-      // Advance well past the default gcTime (5 minutes = 300,000ms)
-      await vi.advanceTimersByTimeAsync(600_000)
+        // Advance well past the default gcTime (5 minutes = 300,000ms)
+        await vi.advanceTimersByTimeAsync(600_000)
 
-      // Child collection data should still be intact — the includes system
-      // owns these collections and manages their lifecycle via flushIncludesState.
-      // External GC must not destroy them.
-      expect(childItems(alpha.issues)).toEqual([
-        { id: 10, title: `Bug in Alpha` },
-        { id: 11, title: `Feature for Alpha` },
-      ])
-      expect(childItems(beta.issues)).toEqual([
-        { id: 20, title: `Bug in Beta` },
-      ])
+        // Parent routes own these facades even when no child consumer remains.
+        expect(collection.status).toBe(`ready`)
+        expect(childItems(alpha.issues)).toEqual([
+          { id: 10, title: `Bug in Alpha` },
+          { id: 11, title: `Feature for Alpha` },
+        ])
+        expect(childItems(beta.issues)).toEqual([
+          { id: 20, title: `Bug in Beta` },
+        ])
+
+        rootSub.unsubscribe()
+        await vi.advanceTimersByTimeAsync(5_001)
+
+        expect(collection.status).toBe(`cleaned-up`)
+        expect(childItems(alpha.issues)).toEqual([])
+        expect(childItems(beta.issues)).toEqual([])
+      } finally {
+        rootSub.unsubscribe()
+        await collection.cleanup()
+        await projects.cleanup()
+        await issues.cleanup()
+        await comments.cleanup()
+      }
     })
   })
 

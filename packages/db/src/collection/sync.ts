@@ -175,10 +175,6 @@ export class CollectionSyncManager<
               key = this.config.getKey(messageWithOptionalKey.value)
             }
 
-            if (this.state.pendingLocalChanges.has(key)) {
-              this.state.pendingLocalOrigins.add(key)
-            }
-
             let messageType = messageWithOptionalKey.type
 
             // Check if an item with this key already exists when inserting
@@ -359,6 +355,12 @@ export class CollectionSyncManager<
             `Either provide a loadSubset handler or use syncMode "eager".`,
         )
       }
+
+      // Every route into sync passes through here, so it is the one place
+      // that sees sync start ahead of the subscriber that would justify it.
+      // `addSubscriber` counts itself in before calling us, so a subscription
+      // starting sync leaves the timer alone.
+      this.lifecycle.startGCTimerIfUnsubscribed()
     } catch (error) {
       syncEntryActive = false
       if (isCurrentSync()) this.lifecycle.markError(error)
@@ -543,6 +545,11 @@ export class CollectionSyncManager<
     }
   }
 
+  /** Whether a caller is still waiting for the initial sync to finish. */
+  public get hasPendingPreload(): boolean {
+    return this.rejectPreload !== undefined
+  }
+
   /**
    * Preload the collection data by starting sync if not already started
    * Multiple concurrent calls will share the same promise
@@ -552,6 +559,12 @@ export class CollectionSyncManager<
       this.lifecycle.assertCanStartSync()
     } catch (error) {
       return Promise.reject(error)
+    }
+    // Warm preloads need the same handoff time as a load that just finished,
+    // including when the previous GC deadline already queued idle cleanup.
+    if (this.lifecycle.status === `ready`) {
+      this.lifecycle.cancelGCTimer()
+      this.lifecycle.startGCTimerIfUnsubscribed()
     }
     if (this.preloadPromise) {
       return this.preloadPromise
@@ -582,29 +595,33 @@ export class CollectionSyncManager<
       const syncStartState = { active: false, ready: false }
       let unsubscribeError = () => {}
       let unsubscribeReady = () => {}
+      const finishPreload = () => {
+        settled = true
+        unsubscribeError()
+        unsubscribeReady()
+        if (this.rejectPreload === rejectError) this.rejectPreload = undefined
+        this.lifecycle.startGCTimerIfUnsubscribed()
+      }
       const resolveReady = () => {
         if (syncStartState.active) {
           syncStartState.ready = true
           return
         }
         if (settled) return
-        settled = true
-        unsubscribeError()
-        unsubscribeReady()
-        if (this.rejectPreload === rejectError) this.rejectPreload = undefined
+        finishPreload()
         resolve()
       }
       const rejectError = (error: unknown) => {
         if (settled) return
-        settled = true
-        unsubscribeError()
-        unsubscribeReady()
-        if (this.rejectPreload === rejectError) this.rejectPreload = undefined
+        finishPreload()
         reject(error)
       }
 
       // Register callback BEFORE starting sync to avoid race condition
       this.rejectPreload = rejectError
+      // An awaited preload owns this sync run until it settles, including
+      // when GC has already queued the destructive idle callback.
+      this.lifecycle.cancelGCTimer()
       unsubscribeReady = this.lifecycle.onFirstReady(resolveReady)
       unsubscribeError = this.collection.on(`status:error`, () => {
         if (syncStartState.active) {

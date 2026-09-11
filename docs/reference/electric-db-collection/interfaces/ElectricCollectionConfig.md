@@ -5,7 +5,7 @@ title: ElectricCollectionConfig
 
 # Interface: ElectricCollectionConfig\<T, TSchema\>
 
-Defined in: [packages/electric-db-collection/src/electric.ts:281](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L281)
+Defined in: [packages/electric-db-collection/src/electric.ts:282](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L282)
 
 Configuration interface for Electric collection options
 
@@ -35,7 +35,7 @@ The schema type for validation
 optional [ELECTRIC_TEST_HOOKS]: ElectricTestHooks;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:304](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L304)
+Defined in: [packages/electric-db-collection/src/electric.ts:305](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L305)
 
 Internal test hooks (for testing only)
 Hidden via Symbol to prevent accidental usage in production
@@ -48,7 +48,7 @@ Hidden via Symbol to prevent accidental usage in production
 optional onDelete: (params) => Promise<MatchingStrategy>;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:421](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L421)
+Defined in: [packages/electric-db-collection/src/electric.ts:422](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L422)
 
 Optional asynchronous handler function called before a delete operation
 
@@ -100,7 +100,7 @@ onDelete: async ({ transaction, collection }) => {
 optional onInsert: (params) => Promise<MatchingStrategy>;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:352](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L352)
+Defined in: [packages/electric-db-collection/src/electric.ts:353](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L353)
 
 Optional asynchronous handler function called before an insert operation
 
@@ -174,7 +174,7 @@ onInsert: async ({ transaction, collection }) => {
 optional onUpdate: (params) => Promise<MatchingStrategy>;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:387](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L387)
+Defined in: [packages/electric-db-collection/src/electric.ts:388](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L388)
 
 Optional asynchronous handler function called before an update operation
 
@@ -227,7 +227,7 @@ onUpdate: async ({ transaction, collection }) => {
 shapeOptions: ShapeStreamOptions<GetExtensions<T>>;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:297](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L297)
+Defined in: [packages/electric-db-collection/src/electric.ts:298](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L298)
 
 Configuration options for the ElectricSQL ShapeStream
 
@@ -239,4 +239,4 @@ Configuration options for the ElectricSQL ShapeStream
 optional syncMode: ElectricSyncMode;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:298](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L298)
+Defined in: [packages/electric-db-collection/src/electric.ts:299](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L299)

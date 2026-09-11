@@ -5,7 +5,7 @@ title: SyncConfig
 
 # Interface: SyncConfig\<T, TKey\>
 
-Defined in: [packages/db/src/types.ts:365](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L365)
+Defined in: [packages/db/src/types.ts:387](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L387)
 
 ## Type Parameters
 
@@ -25,7 +25,7 @@ Defined in: [packages/db/src/types.ts:365](https://github.com/TanStack/db/blob/m
 optional exportSyncMeta: () => unknown;
 ```
 
-Defined in: [packages/db/src/types.ts:409](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L409)
+Defined in: [packages/db/src/types.ts:431](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L431)
 
 Export adapter-specific metadata that lets hydration/persistence resume sync.
 The payload shape is owned by the adapter.
@@ -42,7 +42,7 @@ The payload shape is owned by the adapter.
 optional getSyncMetadata: () => Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/types.ts:403](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L403)
+Defined in: [packages/db/src/types.ts:425](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L425)
 
 Get the sync metadata for insert operations
 
@@ -60,7 +60,7 @@ Record containing relation information
 optional importSyncMeta: (meta) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:414](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L414)
+Defined in: [packages/db/src/types.ts:436](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L436)
 
 Import adapter-specific metadata produced by exportSyncMeta.
 
@@ -82,7 +82,7 @@ Import adapter-specific metadata produced by exportSyncMeta.
 optional mergeSyncMeta: (current, incoming) => unknown;
 ```
 
-Defined in: [packages/db/src/types.ts:419](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L419)
+Defined in: [packages/db/src/types.ts:441](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L441)
 
 Merge two adapter-specific metadata payloads during hydration.
 
@@ -108,7 +108,7 @@ Merge two adapter-specific metadata payloads during hydration.
 optional rowUpdateMode: "full" | "partial";
 ```
 
-Defined in: [packages/db/src/types.ts:428](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L428)
+Defined in: [packages/db/src/types.ts:450](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L450)
 
 The row update mode used to sync to the collection.
 
@@ -132,7 +132,7 @@ sync: (params) =>
   | SyncConfigRes;
 ```
 
-Defined in: [packages/db/src/types.ts:369](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L369)
+Defined in: [packages/db/src/types.ts:391](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L391)
 
 #### Parameters
 

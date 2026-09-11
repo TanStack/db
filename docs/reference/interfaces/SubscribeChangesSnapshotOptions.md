@@ -5,7 +5,7 @@ title: SubscribeChangesSnapshotOptions
 
 # Interface: SubscribeChangesSnapshotOptions\<T, TKey\>
 
-Defined in: [packages/db/src/types.ts:941](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L941)
+Defined in: [packages/db/src/types.ts:968](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L968)
 
 ## Extends
 
@@ -29,7 +29,7 @@ Defined in: [packages/db/src/types.ts:941](https://github.com/TanStack/db/blob/m
 optional limit: number;
 ```
 
-Defined in: [packages/db/src/types.ts:946](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L946)
+Defined in: [packages/db/src/types.ts:973](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L973)
 
 **`Internal`**
 
@@ -47,7 +47,7 @@ Optional limit to include in loadSubset for query-specific cache keys.
 optional onLoadSubsetError: (event) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:938](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L938)
+Defined in: [packages/db/src/types.ts:960](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L960)
 
 **`Internal`**
 
@@ -77,7 +77,7 @@ Omit.onLoadSubsetError
 optional onLoadSubsetResult: (result) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:936](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L936)
+Defined in: [packages/db/src/types.ts:958](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L958)
 
 **`Internal`**
 
@@ -88,7 +88,7 @@ Allows the caller to directly track the loading promise for isReady status.
 
 ##### result
 
-`true` | `Promise`\<`void`\>
+[`LoadSubsetRequestResult`](../type-aliases/LoadSubsetRequestResult.md)
 
 #### Returns
 
@@ -108,7 +108,7 @@ Omit.onLoadSubsetResult
 optional onStatusChange: (event) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:920](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L920)
+Defined in: [packages/db/src/types.ts:942](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L942)
 
 **`Internal`**
 
@@ -139,7 +139,7 @@ Omit.onStatusChange
 optional orderBy: OrderBy;
 ```
 
-Defined in: [packages/db/src/types.ts:945](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L945)
+Defined in: [packages/db/src/types.ts:972](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L972)
 
 **`Internal`**
 
@@ -151,13 +151,53 @@ Optional orderBy to include in loadSubset for query-specific cache keys.
 
 ***
 
+### truncateReplayPublication?
+
+```ts
+optional truncateReplayPublication: object;
+```
+
+Defined in: [packages/db/src/types.ts:962](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L962)
+
+**`Internal`**
+
+Lets a live-query graph retain its last publication during replay.
+
+#### start()
+
+```ts
+readonly start: () => void;
+```
+
+##### Returns
+
+`void`
+
+#### succeed()
+
+```ts
+readonly succeed: () => void;
+```
+
+##### Returns
+
+`void`
+
+#### Inherited from
+
+```ts
+Omit.truncateReplayPublication
+```
+
+***
+
 ### where()?
 
 ```ts
 optional where: (row) => any;
 ```
 
-Defined in: [packages/db/src/types.ts:912](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L912)
+Defined in: [packages/db/src/types.ts:934](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L934)
 
 Callback function for filtering changes using a row proxy.
 The callback receives a proxy object that records property access,
@@ -197,7 +237,7 @@ Omit.where
 optional whereExpression: BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/types.ts:914](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L914)
+Defined in: [packages/db/src/types.ts:936](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L936)
 
 Pre-compiled expression for filtering changes
 

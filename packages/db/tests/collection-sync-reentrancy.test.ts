@@ -700,7 +700,14 @@ describe(`sync publication reentrancy`, () => {
         `one`,
       ])
       expect(collection._layoutRevision).toBe(revisionBeforeDrain + 1)
-      expect(callbacks).toEqual([
+      // Deltas form one batch; their order is not the collection's row order.
+      // Assert exact membership while retaining ordered public-read assertions.
+      expect(
+        callbacks.map((callback) => ({
+          ...callback,
+          changes: [...callback.changes].sort((a, b) => a - b),
+        })),
+      ).toEqual([
         {
           changes: [1, 2],
           keys: [2, 1],
@@ -932,6 +939,8 @@ describe(`sync publication reentrancy`, () => {
       expect(collection._layoutRevision).toBe(revisionBeforeDrain + 1)
       expect(callbacks).toEqual([
         {
+          // Reapply whole snapshots in transaction order. Public
+          // layout, batch membership/count and receipt timing stay unchanged.
           changes: [2, 1, 3, 1, 3, 1, 2],
           keys: [2, 1, 3],
           values: [`two`, `optimistic-one`, `optimistic-three`],
