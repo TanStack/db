@@ -6,6 +6,7 @@ import { QueryClient } from '@tanstack/query-core'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { queryCollectionOptions } from '../../query-db-collection/src/query'
 import { electricCollectionOptions } from '../src/electric'
+import { oraclePropertyOptions, oracleRuns } from '../../db/tests/oracle-config'
 import type { Collection, SyncMetadataApi } from '@tanstack/db'
 import type { ChangeMessage, Message, Offset, Row } from '@electric-sql/client'
 import type {
@@ -69,20 +70,22 @@ function everyContiguousPartition<T>(values: Array<T>): Array<Array<Array<T>>> {
   return partitions
 }
 
-function isLegalElectricPartition(
+function isSdkResetFramedPartition(
   batches: Array<Array<Message<OracleRow>>>,
 ): boolean {
-  return batches.every((batch) => {
-    // Every reset starts a new stream epoch, including a second reset in
-    // the same callback. No prior commit control may cross that boundary.
-    let hasCommit = false
-    return batch.every((message) => {
-      const control = (message.headers as Record<string, unknown>).control
-      if (control === `must-refetch` && hasCommit) return false
-      hasCommit ||= control === `up-to-date` || control === `subset-end`
-      return true
-    })
-  })
+  // Model the installed SDK's HTTP 409 reset path: it publishes a synthetic
+  // singleton reset, not the response body. See electric-sdk-framing.test.ts.
+  // Arbitrary data/reset coalescing is outside this verified protocol domain;
+  // this is not a claim that the SDK validates every other server response.
+  return batches.every(
+    (batch) =>
+      batch.length <= 1 ||
+      batch.every(
+        (message) =>
+          (message.headers as Record<string, unknown>).control !==
+          `must-refetch`,
+      ),
+  )
 }
 
 function createMetadata(seed: ReadonlyMap<string, unknown>): {
@@ -116,11 +119,14 @@ function createMetadata(seed: ReadonlyMap<string, unknown>): {
 }
 
 function resumeState(): ReadonlyMap<string, unknown> {
+  // This fixture represents an untagged source. Legacy/unknown membership is
+  // exercised separately by the cold-recovery history generator.
   return new Map([
     [
       `electric:resume`,
       {
         kind: `resume`,
+        requiresTagState: false,
         offset: `10_0`,
         handle: `shape-1`,
         shapeId,
@@ -966,6 +972,7 @@ async function runProcessGrammar(
           ? {
               resume: {
                 kind: `resume`,
+                requiresTagState: false,
                 offset: `10_0`,
                 handle: `shape-1`,
                 shapeId,
@@ -1441,7 +1448,7 @@ describe(`Electric adapter laws`, () => {
         [messages],
         messages.map((message) => [message]),
         partitions[partitionSeed % partitions.length]!,
-      ].filter(isLegalElectricPartition)
+      ].filter(isSdkResetFramedPartition)
 
       for (const [partitionId, partition] of selected.entries()) {
         const operational = expectedSnapshots(prefix, partition)
@@ -1498,6 +1505,33 @@ describe(`Electric adapter laws`, () => {
     expect(resetActual.snapshots).toEqual(atomicReset)
   })
 
+  it(`keeps SDK reset callbacks separate from every neighboring message kind`, () => {
+    const neighbors: Array<Message<OracleRow>> = [
+      change(`insert`, 1, `row`),
+      change(`update`, 1, `row`),
+      change(`delete`, 1, `row`),
+      { headers: { event: `move-out`, patterns: [{ pos: 0, value: `left` }] } },
+      upToDate,
+      subsetEnd,
+      mustRefetch,
+    ]
+    expect(isSdkResetFramedPartition([[mustRefetch]])).toBe(true)
+    for (const neighbor of neighbors) {
+      for (const messages of [
+        [neighbor, mustRefetch],
+        [mustRefetch, neighbor],
+      ]) {
+        expect(
+          isSdkResetFramedPartition([messages]),
+          JSON.stringify(messages),
+        ).toBe(false)
+        expect(
+          isSdkResetFramedPartition(messages.map((message) => [message])),
+        ).toBe(true)
+      }
+    }
+  })
+
   it(`distinguishes callback-atomic and subset publication semantics`, async () => {
     const callbackHistory = [
       [
@@ -1512,9 +1546,9 @@ describe(`Electric adapter laws`, () => {
     ]
     expect(callbackAtomic).toEqual([[1, `after-control`, `stable-1`]])
     expect(callbackAtomic).not.toEqual(freezeAtControl)
-    expect(isLegalElectricPartition([[upToDate, mustRefetch]])).toBe(false)
+    expect(isSdkResetFramedPartition([[upToDate, mustRefetch]])).toBe(false)
     expect(
-      isLegalElectricPartition([[mustRefetch, subsetEnd, mustRefetch]]),
+      isSdkResetFramedPartition([[mustRefetch, subsetEnd, mustRefetch]]),
     ).toBe(false)
 
     const readyPrefix = [[upToDate]]
@@ -1587,7 +1621,7 @@ describe(`Electric adapter laws`, () => {
     ],
     { numRuns: 10 },
   )(
-    `batch partition is invariant across Electric modes and phases`,
+    `synthetic batch partition is invariant across Electric modes and phases`,
     async (names) => {
       const [first, second, updated, reinserted] = names
       const readyPrefix = [
@@ -1697,6 +1731,8 @@ describe(`Electric adapter laws`, () => {
         },
       ]
 
+      // Keep these stronger adapter robustness checks, including mixed-reset
+      // callbacks, separate from the SDK-framed differential oracle above.
       for (const syncMode of [`eager`, `on-demand`, `progressive`] as const) {
         for (const scenario of scenarios) {
           const seed = scenario.resume ? resumeState() : new Map()
@@ -1802,7 +1838,7 @@ describe(`Electric adapter laws`, () => {
     async (tokens, partitionSeed) => {
       const messages = buildDifferentialHistory(tokens)
       const partitions = everyContiguousPartition(messages).filter(
-        isLegalElectricPartition,
+        isSdkResetFramedPartition,
       )
       const partition = partitions[partitionSeed % partitions.length]!
       const referenceSnapshots = recomputedSnapshots([], partition)
@@ -2123,6 +2159,7 @@ describe(`Electric adapter laws`, () => {
 
     const importedResume = {
       kind: `resume` as const,
+      requiresTagState: false,
       offset: `7_0` as const,
       handle: `shape-7`,
       shapeId,
@@ -2173,6 +2210,7 @@ describe(`Electric adapter laws`, () => {
     })
     const importedResume = {
       kind: `resume` as const,
+      requiresTagState: false,
       offset: `8_0` as const,
       handle: `shape-8`,
       shapeId,
@@ -2220,6 +2258,7 @@ describe(`Electric adapter laws`, () => {
     const collection = createCollection(options)
     const importedResume = {
       kind: `resume` as const,
+      requiresTagState: false,
       offset: `9_0` as const,
       handle: `shape-9`,
       shapeId,
@@ -2566,6 +2605,119 @@ describe(`Electric adapter laws`, () => {
     ).rejects.toThrow(/Timeout waiting for custom match function/)
     await trace.collection.cleanup()
   })
+
+  const reentryHistory = fc.record({
+    txid: fc.integer({ min: 1, max: 10000 }),
+    names: fc.array(fc.string({ maxLength: 8 }), {
+      minLength: 1,
+      maxLength: 5,
+    }),
+    trigger: fc.nat({ max: 4 }),
+  })
+
+  async function runReentryHistory(history: {
+    txid: number
+    names: Array<string>
+    trigger: number
+  }) {
+    // Same ownership law, with retirement either outside or inside a callback.
+    // Previously the grammar only retired a session between complete callbacks.
+    for (const insideCallback of [false, true]) {
+      const subscribers: Array<(messages: Array<Message<OracleRow>>) => void> =
+        []
+      mockSubscribe.mockImplementation((callback) => {
+        subscribers.push(callback)
+        return vi.fn()
+      })
+      const collection = createCollection(
+        electricCollectionOptions<OracleRow>({
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+          },
+          getKey: (row) => row.id,
+          startSync: true,
+        }),
+      )
+      const triggerId = (history.trigger % history.names.length) + 1
+      let retired = false
+      let cleanup: Promise<void> | undefined
+      let replacementVisits = 0
+      let replacementOutcome: Promise<unknown> | undefined
+      const restart = () => {
+        retired = true
+        cleanup = collection.cleanup()
+        collection.startSyncImmediate()
+        replacementOutcome = collection.utils
+          .awaitMatch(() => {
+            replacementVisits++
+            return false
+          })
+          .catch(() => undefined)
+      }
+      const waiting = collection.utils.awaitMatch((message) => {
+        if (
+          insideCallback &&
+          !retired &&
+          `value` in message &&
+          message.value.id === triggerId
+        )
+          restart()
+        return false
+      }, 20)
+      // Observe the old waiter before any callback can retire its session.
+      const oldOutcome = waiting.then(
+        () => `resolved`,
+        () => `rejected`,
+      )
+      try {
+        if (!insideCallback) restart()
+        const messages = history.names.map((name, index) =>
+          change(`insert`, index + 1, name),
+        )
+        const acknowledgement: Message<OracleRow> = {
+          headers: { control: `up-to-date`, txids: [history.txid] },
+        }
+        subscribers[0]!([...messages, acknowledgement])
+        await cleanup
+        expect(subscribers).toHaveLength(2)
+        expect(await oldOutcome).toBe(`rejected`)
+        expect(replacementVisits).toBe(0)
+        // The old callback's tail is not evidence from the replacement stream.
+        // This is the utility's own deadline, not a sleep used to infer readiness.
+        await expect(
+          collection.utils.awaitTxId(history.txid, 10),
+        ).rejects.toThrow(/Timeout/)
+        expect(collection.size).toBe(0)
+        subscribers[1]!([...messages, acknowledgement])
+        await expect(
+          collection.utils.awaitTxId(history.txid, 10),
+        ).resolves.toBe(true)
+        expect(
+          [...collection.values()].map((row) => ({
+            id: row.id,
+            name: row.name,
+          })),
+        ).toEqual(history.names.map((name, index) => ({ id: index + 1, name })))
+      } finally {
+        await collection.cleanup()
+        await oldOutcome
+        await replacementOutcome
+      }
+    }
+  }
+
+  fcTest.prop([reentryHistory], { seed: 42713, numRuns: oracleRuns(6) })(
+    `replacement sessions reject evidence from callback reentry histories (fixed)`,
+    runReentryHistory,
+  )
+  fcTest.prop(
+    [reentryHistory],
+    oraclePropertyOptions(10, `electric.match-reentry`),
+  )(
+    `replacement sessions reject evidence from callback reentry histories (random)`,
+    runReentryHistory,
+  )
 
   it(`does not let a committed message satisfy awaitMatch after restart`, async () => {
     const subscribers: Array<(messages: Array<Message<OracleRow>>) => void> = []
@@ -3246,6 +3398,7 @@ describe(`Electric adapter laws`, () => {
           `electric:resume`,
           {
             kind: `resume`,
+            requiresTagState: false,
             offset: 10,
             handle: `shape-1`,
             shapeId,
@@ -3267,6 +3420,7 @@ describe(`Electric adapter laws`, () => {
           `electric:resume`,
           {
             kind: `resume`,
+            requiresTagState: false,
             offset: `10_0`,
             handle: `shape-1`,
             shapeId: `different-shape`,
@@ -3336,6 +3490,7 @@ describe(`Electric adapter laws`, () => {
       version: 1,
       resume: {
         kind: `resume`,
+        requiresTagState: false,
         offset: `10_0`,
         handle: `stale-handle`,
         shapeId,
@@ -3399,6 +3554,7 @@ describe(`Electric adapter laws`, () => {
         version: 1,
         resume: {
           kind: `resume`,
+          requiresTagState: false,
           offset: `10_0`,
           handle: leftHandle,
           shapeId,
@@ -3413,6 +3569,7 @@ describe(`Electric adapter laws`, () => {
             ? { kind: `reset`, updatedAt: rightTimestamp }
             : {
                 kind: `resume`,
+                requiresTagState: false,
                 offset: `20_0`,
                 handle: rightHandle,
                 shapeId,
@@ -3426,6 +3583,7 @@ describe(`Electric adapter laws`, () => {
           ? { kind: `reset`, updatedAt: thirdTimestamp }
           : {
               kind: `resume`,
+              requiresTagState: false,
               offset: `30_0`,
               handle: thirdHandle,
               shapeId,

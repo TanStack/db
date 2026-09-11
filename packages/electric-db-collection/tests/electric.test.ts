@@ -631,6 +631,7 @@ describe(`Electric Integration`, () => {
         version: 1,
         resume: {
           kind: `resume`,
+          requiresTagState: false,
           offset: `42_0`,
           handle: `shape-handle`,
         },
@@ -3842,6 +3843,7 @@ describe(`Electric Integration`, () => {
             `electric:resume`,
             {
               kind: `resume`,
+              requiresTagState: false,
               offset: `10_0`,
               handle: `handle-1`,
               shapeId: `{"params":{"table":"test_table"},"url":"http://test-url"}`,
@@ -3892,6 +3894,7 @@ describe(`Electric Integration`, () => {
             `electric:resume`,
             {
               kind: `resume`,
+              requiresTagState: false,
               offset: `20_0`,
               handle: `persisted-newer`,
               shapeId: `{"params":{"table":"test_table"},"url":"http://test-url"}`,
@@ -3913,6 +3916,7 @@ describe(`Electric Integration`, () => {
         version: 1,
         resume: {
           kind: `resume`,
+          requiresTagState: false,
           offset: `10_0`,
           handle: `hydrated-older`,
           shapeId: `{"params":{"table":"test_table"},"url":"http://test-url"}`,
@@ -3938,7 +3942,7 @@ describe(`Electric Integration`, () => {
       })
     })
 
-    it(`should ignore reset resume metadata and fall back to default startup`, async () => {
+    it(`should replace reset resume state with a full snapshot`, async () => {
       vi.clearAllMocks()
 
       const { ShapeStream } = await import(`@electric-sql/client`)
@@ -3981,7 +3985,8 @@ describe(`Electric Integration`, () => {
 
       expect(ShapeStream).toHaveBeenCalledWith(
         expect.objectContaining({
-          offset: `now`,
+          offset: undefined,
+          log: undefined,
           handle: undefined,
         }),
       )
@@ -4026,7 +4031,8 @@ describe(`Electric Integration`, () => {
 
       expect(ShapeStream).toHaveBeenCalledWith(
         expect.objectContaining({
-          offset: `now`,
+          offset: undefined,
+          log: undefined,
           handle: undefined,
         }),
       )
@@ -4046,6 +4052,7 @@ describe(`Electric Integration`, () => {
           `electric:resume`,
           {
             kind: `resume`,
+            requiresTagState: false,
             offset: `10_0`,
             handle: `handle-1`,
             shapeId: `{"params":{"table":"test_table"},"url":"http://test-url"}`,
@@ -4132,6 +4139,7 @@ describe(`Electric Integration`, () => {
             `electric:resume`,
             {
               kind: `resume`,
+              requiresTagState: false,
               offset: `10_0`,
               handle: `persisted-handle`,
               shapeId: JSON.stringify({
@@ -4188,6 +4196,7 @@ describe(`Electric Integration`, () => {
             `electric:resume`,
             {
               kind: `resume`,
+              requiresTagState: false,
               offset: `10_0`,
               handle: `persisted-handle`,
               shapeId: JSON.stringify({
@@ -4244,6 +4253,7 @@ describe(`Electric Integration`, () => {
             `electric:resume`,
             {
               kind: `resume`,
+              requiresTagState: false,
               offset: 10,
               updatedAt: 1,
             },
@@ -4294,6 +4304,7 @@ describe(`Electric Integration`, () => {
             `electric:resume`,
             {
               kind: `resume`,
+              requiresTagState: false,
               offset: `10_0`,
               handle: `handle-1`,
               shapeId: `{"url":"http://other-url","params":{"table":"test_table"}}`,
@@ -4351,6 +4362,7 @@ describe(`Electric Integration`, () => {
             `electric:resume`,
             {
               kind: `resume`,
+              requiresTagState: false,
               offset: `10_0`,
               handle: `handle-1`,
               shapeId: `{"params":{"table":"test_table","where":"room=1"},"url":"http://test-url"}`,
@@ -4483,6 +4495,7 @@ describe(`Electric Integration`, () => {
       expect(metadataHarness.collectionMetadata.get(`electric:resume`)).toEqual(
         expect.objectContaining({
           kind: `resume`,
+          requiresTagState: false,
           offset: `10_0`,
           handle: `shape-1`,
         }),
@@ -4496,6 +4509,7 @@ describe(`Electric Integration`, () => {
             `electric:resume`,
             {
               kind: `resume`,
+              requiresTagState: false,
               offset: `10_0`,
               handle: `shape-1`,
               shapeId: `{"params":{"table":"test_table"},"url":"http://test-url"}`,
@@ -4548,6 +4562,7 @@ describe(`Electric Integration`, () => {
             `electric:resume`,
             {
               kind: `resume`,
+              requiresTagState: false,
               offset: `10_0`,
               handle: `shape-1`,
               shapeId: `{"params":{"table":"test_table"},"url":"http://test-url"}`,

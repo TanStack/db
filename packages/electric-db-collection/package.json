@@ -21,7 +21,7 @@
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
     "test": "vitest run",
-    "test:oracles": "vitest run tests/electric-oracle.property.test.ts tests/electric-recovery-oracle.test.ts tests/electric-descriptor-isolation.test.ts",
+    "test:oracles": "vitest run tests/electric-oracle.property.test.ts tests/electric-recovery-oracle.test.ts tests/electric-descriptor-isolation.test.ts tests/electric-sdk-framing.test.ts",
     "test:e2e": "vitest run --config vitest.e2e.config.ts"
   },
   "type": "module",

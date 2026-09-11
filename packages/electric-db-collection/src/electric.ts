@@ -110,6 +110,7 @@ type ElectricResumeState =
       handle: string
       shapeId: string
       updatedAt: number
+      requiresTagState?: boolean
     }
   | {
       kind: `reset`
@@ -185,6 +186,9 @@ function parseElectricResumeState(
       handle: record.handle,
       shapeId: record.shapeId,
       updatedAt: record.updatedAt,
+      ...(typeof record.requiresTagState === `boolean` && {
+        requiresTagState: record.requiresTagState,
+      }),
     }
   }
 
@@ -1021,6 +1025,7 @@ class ElectricLifecycle<T extends Row<unknown>> {
       }
     }
 
+    const epoch = this.epoch
     for (const [matchId, match] of this.pendingMatches) {
       if (match.matched) continue
       try {
@@ -1030,6 +1035,8 @@ class ElectricLifecycle<T extends Row<unknown>> {
         this.pendingMatches.delete(matchId)
         match.reject(error instanceof Error ? error : new Error(String(error)))
       }
+      // Reentry can register replacement-session waiters in this same Map.
+      if (!this.isActive(epoch)) return
     }
   }
 
@@ -1236,8 +1243,13 @@ export function electricCollectionOptions<T extends Row<unknown>>(
     const boundSync: SyncConfig<T> = {
       ...source,
       sync: (params) => {
-        collectionKey = params.collection
-        boundLifecycles.set(params.collection, lifecycle)
+        // A copied materialized config may delegate through an older binding.
+        // The outermost binding owns this collection; inner wrappers only run
+        // the source sync and must not retarget either owner's lifecycle.
+        if (!boundLifecycles.has(params.collection)) {
+          collectionKey = params.collection
+          boundLifecycles.set(params.collection, lifecycle)
+        }
         return source.sync(params)
       },
       exportSyncMeta: () => lifecycle.exportMeta(),
@@ -1592,6 +1604,7 @@ function createElectricSync<T extends Row<unknown>>(
     }
 
     return {
+      hasTags: () => tagLength !== undefined,
       processTagsForChangeMessage,
       clearTagTrackingState,
       clearTagsForRow,
@@ -1613,6 +1626,7 @@ function createElectricSync<T extends Row<unknown>>(
         : undefined,
     }),
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
+      const retainsTagState = collectionTags.has(params.collection)
       let tagState = collectionTags.get(params.collection)
       if (!tagState) {
         tagState = createTagState()
@@ -1694,12 +1708,21 @@ function createElectricSync<T extends Row<unknown>>(
           `Electric persistence cannot verify hydration for saved resume state. Update the persistence adapter alongside Electric to enable safe resume.`,
         )
       }
+      const needsFullSnapshot =
+        shapeOptions.offset === undefined &&
+        shapeOptions.handle === undefined &&
+        persistedResumeState !== undefined &&
+        (persistedResumeState.kind === `reset` ||
+          (!retainsTagState && persistedResumeState.requiresTagState !== false))
       const canUsePersistedResume =
         shapeOptions.offset === undefined &&
         shapeOptions.handle === undefined &&
         persistedResumeState?.kind === `resume` &&
         !hasIncompatiblePersistedResume &&
-        !hasUnverifiablePersistedResume
+        !hasUnverifiablePersistedResume &&
+        // Cached rows do not contain authoritative tag/active-condition state.
+        // Unknown (older) metadata is conservative; untagged shapes still resume.
+        !needsFullSnapshot
       const hasExplicitResumeOffset =
         shapeOptions.offset !== undefined && shapeOptions.offset !== `-1`
       if (!canUsePersistedResume && !hasExplicitResumeOffset) {
@@ -1712,10 +1735,10 @@ function createElectricSync<T extends Row<unknown>>(
         syncMode !== `on-demand` &&
         (canUsePersistedResume ||
           (hasExplicitResumeOffset && !receivesCompleteRows))
-      // A fresh eager snapshot replaces its hydrated cache; omitting the old
-      // offset alone would merge rows that no longer exist on the server.
+      // A fresh snapshot replaces its hydrated cache; omitting the old offset
+      // alone would merge rows that no longer exist on the server.
       let freshSnapshotPending =
-        syncMode === `eager` &&
+        (syncMode === `eager` || needsFullSnapshot) &&
         !canUsePersistedResume &&
         !hasExplicitResumeOffset &&
         whenHydrated !== undefined
@@ -1767,15 +1790,19 @@ function createElectricSync<T extends Row<unknown>>(
 
       const stream = new ShapeStream({
         ...shapeOptions,
-        // In on-demand mode, we only want to sync changes, so we set the log to `changes_only`
-        log: syncMode === `on-demand` ? `changes_only` : undefined,
+        // Recovery needs a complete snapshot even for on-demand shapes.
+        // Normal on-demand startup still subscribes to changes only.
+        log:
+          syncMode === `on-demand` && !needsFullSnapshot
+            ? `changes_only`
+            : undefined,
         // In on-demand mode, we only need the changes from the point of time the collection was created
         // so we default to `now` when there is no saved offset.
         offset:
           shapeOptions.offset ??
           (canUsePersistedResume
             ? (persistedResumeState.offset as Offset)
-            : syncMode === `on-demand`
+            : syncMode === `on-demand` && !needsFullSnapshot
               ? `now`
               : undefined),
         handle:
@@ -1853,6 +1880,7 @@ function createElectricSync<T extends Row<unknown>>(
           handle: shapeHandle,
           shapeId: shapeIdentity,
           updatedAt: Date.now(),
+          requiresTagState: tagState.hasTags(),
         }
         lifecycle.resumeState = resumeState
         metadata?.collection.set(`electric:resume`, resumeState)
@@ -1872,7 +1900,11 @@ function createElectricSync<T extends Row<unknown>>(
         }
       }
 
-      if (hasIncompatiblePersistedResume || hasUnverifiablePersistedResume) {
+      if (
+        hasIncompatiblePersistedResume ||
+        hasUnverifiablePersistedResume ||
+        (needsFullSnapshot && persistedResumeState.kind === `resume`)
+      ) {
         commitResetResumeMetadataImmediately()
       }
 
@@ -2028,6 +2060,9 @@ function createElectricSync<T extends Row<unknown>>(
 
         for (const message of messages) {
           lifecycle.observeMatchMessage(message)
+          // A match predicate can synchronously clean up and restart sync.
+          // Nothing after that boundary belongs to the replacement session.
+          if (!isActiveLifecycle()) return
 
           // Check for txids in the message and add them to our store
           // Skip during buffered initial sync in progressive mode (txids will be extracted during atomic swap)
@@ -2159,6 +2194,14 @@ function createElectricSync<T extends Row<unknown>>(
             bufferedMessages.length = 0 // Clear buffered messages
           }
         }
+
+        // A subset completion cannot publish a partial cold-recovery snapshot.
+        if (
+          needsFullSnapshot &&
+          isResettingSnapshot &&
+          commitPoint === `subset-end`
+        )
+          return
 
         if (commitPoint !== null) {
           let applied: SyncAppliedReceipt = true

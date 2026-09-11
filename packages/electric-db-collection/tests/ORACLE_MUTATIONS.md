@@ -121,15 +121,24 @@ Sharing the original factory-bound utilities instead of copying them is killed
 by `keeps insert acknowledgements on the owner of a reused persisted descriptor`:
 an actual insert must settle from its own stream even after a peer starts.
 
-## 12. Legal publication epochs
+## 12. SDK reset framing
 
-In `isLegalElectricPartition`, validate only the first reset in each callback.
+In `isSdkResetFramedPartition`, allow resets to share a callback with data, or
+validate only the first reset. Killed by
+`keeps SDK reset callbacks separate from every neighboring message kind`:
+seven message kinds cross both sides of the reset, with split controls.
+The previous predicate rejected only commit-before-reset; it incorrectly
+accepted data-before-reset and reset-before-data in the protocol model.
 
-Killed by the double-reset control in
-`distinguishes callback-atomic and subset publication semantics`. The differential
-property pins reset/subset/reset alongside random histories. A commit control
-cannot precede a later reset within one callback, even if that callback already
-started with a reset. This mutation tests the oracle's domain, not a runtime bug.
+`electric-sdk-framing.test.ts` independently uses the real SDK with controlled
+HTTP responses. Both normal and stale-row-bearing 409 bodies produce singleton
+reset callbacks, as the generated protocol histories now require. This pins the
+installed SDK's HTTP reset path, not an exhaustive specification of every possible
+server response or SSE path.
+
+The synthetic partition property remains as extra adapter robustness coverage;
+it deliberately tests more callback shapes than the SDK-framed differential
+properties. Those shapes are not evidence of a reachable protocol regression.
 
 ## 13. Progressive snapshot transaction ownership
 
@@ -156,6 +165,53 @@ Use this focused form while iterating:
 ```sh
 pnpm exec vitest run tests/electric-oracle.property.test.ts -t '<killing test>'
 ```
+
+## 14. Owner, durable membership, and callback boundaries
+
+The descriptor-isolation histories now derive descriptors from original options,
+once-spread options, and an existing collection's `config`. They vary startup,
+peer edits, and which peer is retired. Each owner's public rows and cleanup
+counts must remain independent. Nesting an already-bound sync fails this law:
+the original owner stays ready but stops receiving updates. The binding guard
+keeps ownership with the outermost wrapper while preserving source delegation;
+removing that guard makes the generated law fail again.
+
+The persisted-tag histories compare row/tag sets against real adapter execution
+across warm restart and cold recreation, each with resume and fresh-snapshot
+controls. Generated updates either preserve tags or replace membership; generated
+move-outs remove membership until rows disappear. The durable fixture copies
+values and applies row and collection metadata mutations, rather than preserving
+in-memory object references. Cold resume failed because cached values and an
+offset survived, but membership did not. Later untagged updates matter because
+their last-message headers cannot reconstruct earlier tag membership.
+
+The chosen recovery contract refetches a full snapshot when a cold start lacks
+required membership, including older unknown metadata. The generator crosses
+tagged/untagged histories, legacy/current metadata, all three sync modes, and
+interruption during replacement. It checks cached rows before the final commit,
+omitted rows afterward, subsequent move-outs, and public/durable agreement.
+Lazy modes make an actual subset acquisition to hydrate cached rows. Existing
+untagged resume fixtures explicitly declare that they do not need tag state;
+the legacy cells retain coverage for missing metadata. A subset-end during cold
+recovery must not publish the incomplete replacement.
+
+The callback-reentry histories retire a session either before a stale callback
+or inside an `awaitMatch` predicate at a generated row position. Only the
+replacement stream may acknowledge new-session waiters. Generated message tails
+must not cross that boundary. The law also registers a replacement waiter inside
+the restart callback: the old match iteration must not visit it. Epoch guards
+after user callbacks fence both the waiter loop and the remaining message batch.
+
+All three extensions have fixed-seed and random properties, with the shared
+oracle multiplier and seed/path replay controls. These are ordinary assertions,
+not expected-failure classifiers. At `049cc9a5d`, fixed seeds `42711`, `42712`,
+and `42713` reproduce the three failures respectively. Binding and reentry use
+epoch/ownership guards; persisted membership uses the approved refetch contract.
+
+The separate mixed `[insert, must-refetch, up-to-date]` report exposed the
+protocol-model gap corrected in section 12. It remains outside the verified
+generated domain. A production fix would still need evidence of a conforming
+server/SDK path that delivers that mixed callback.
 
 These mutants test the named laws. They do not claim exhaustive mutation
 coverage of the package.

@@ -351,6 +351,15 @@ Fresh eager snapshots wait for hydration, then replace the cached rows at the
 snapshot's commit boundary. Rows omitted from that snapshot do not survive in
 the collection or its persisted cache, even when the fresh snapshot is empty.
 
+Tag membership is kept in memory, not restored from cached row headers. A cold
+restart therefore fetches a full snapshot when the saved state needs tags, or
+comes from an older version that did not record whether tags were used. Untagged
+shapes can still resume from their saved offset. Cached rows remain visible until
+the replacement snapshot completes; a partial batch or subset completion cannot
+publish that replacement early. Interrupting recovery leaves a durable reset
+marker so the next start still refetches. This recovery also requests a full shape
+snapshot in on-demand mode, at the cost of fetching more than the active subsets.
+
 An eager or progressive resume cannot apply a partial update to an unknown row.
 The adapter rejects that batch, enters an error state, and records a reset so the
 next sync starts from a full snapshot. This does not silently retry the failed

@@ -63,6 +63,7 @@ function fixture(
       `electric:resume`,
       {
         kind: `resume`,
+        requiresTagState: false,
         offset: `10_0`,
         handle: `shape-old`,
         shapeId: `{"params":{"table":"test_table"},"url":"http://test-url"}`,
@@ -388,6 +389,7 @@ describe(`persisted Electric recovery laws`, () => {
         await vi.waitFor(() =>
           expect(f.metadata.get(`electric:resume`)).toMatchObject({
             kind: `resume`,
+            requiresTagState: false,
             offset: `20_0`,
           }),
         )

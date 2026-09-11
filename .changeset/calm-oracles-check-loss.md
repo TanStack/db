@@ -13,3 +13,5 @@ Replace stale cached rows atomically when an invalid resume falls back to a fres
 Accept partial updates to complete rows published independently by persistence, while preserving pending removal and reset boundaries. Avoid copying all applied keys at startup or each subset acquisition; presence checks overlay queued writes and buffered messages once per stream callback. Warn once when an older persistence adapter cannot verify hydration for safe resume.
 
 Keep buffered tag move-outs inside the progressive snapshot's existing transaction so later live updates are not discarded behind an orphaned truncate.
+
+Keep copied materialized configs and reentrant match callbacks scoped to their owning collection session. Cold tagged or legacy persisted state now recovers with a full snapshot behind cached rows, including in on-demand mode. Keep the reset marker through interrupted recovery and publish the replacement only after the full snapshot completes; known untagged and compatible warm resumes retain their saved offset.
