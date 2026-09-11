@@ -122,6 +122,8 @@ export class CollectionStateManager<
    * When sync confirms data for a key with pending local changes, it keeps 'local' origin.
    */
   public pendingLocalChanges = new Set<TKey>()
+  // Successful mutations retain attribution until sync applies. Active or
+  // failed mutations must not add to, or erase a sibling's entry in, this set.
   public pendingLocalOrigins = new Set<TKey>()
 
   private virtualPropsCache = new WeakMap<
@@ -521,7 +523,7 @@ export class CollectionStateManager<
     const previousDeletes = new Set(this.optimisticDeletes)
     const previousRowOrigins = this.rowOrigins
 
-    // Update pending optimistic state for completed/failed transactions
+    // Retain successful contributions; failed/active work is recomputed below.
     for (const transaction of this.transactions.values()) {
       const isDirectTransaction =
         transaction.metadata[DIRECT_TRANSACTION_METADATA_KEY] === true
@@ -586,20 +588,6 @@ export class CollectionStateManager<
                 this.pendingOptimisticDirectDeletes.delete(mutation.key)
               }
               break
-          }
-        }
-      } else if (transaction.state === `failed`) {
-        for (const mutation of transaction.mutations) {
-          if (!this.isThisCollection(mutation.collection)) {
-            continue
-          }
-          // Failed transactions never enter retained state. A same-key entry
-          // belongs to a successful sibling and must survive this rollback.
-          if (
-            !this.pendingOptimisticUpserts.has(mutation.key) &&
-            !this.pendingOptimisticDeletes.has(mutation.key)
-          ) {
-            this.pendingLocalOrigins.delete(mutation.key)
           }
         }
       }

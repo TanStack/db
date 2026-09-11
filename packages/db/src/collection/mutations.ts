@@ -174,11 +174,13 @@ export class CollectionMutationsManager<
     return `KEY::${this.id}/${key}`
   }
 
-  private markPendingLocalOrigins(
+  private markPendingLocalChanges(
     mutations: Array<PendingMutation<TOutput>>,
   ): void {
     for (const mutation of mutations) {
-      this.state.pendingLocalOrigins.add(mutation.key as TKey)
+      // The handler can sync synchronously before its transaction is registered.
+      // This is provisional; only completed mutations retain a local origin.
+      this.state.pendingLocalChanges.add(mutation.key as TKey)
     }
   }
 
@@ -267,7 +269,7 @@ export class CollectionMutationsManager<
 
       // Apply mutations to the new transaction
       directOpTransaction.applyMutations(mutations)
-      this.markPendingLocalOrigins(mutations)
+      this.markPendingLocalChanges(mutations)
       // Errors still reject tx.isPersisted.promise; this catch only prevents global unhandled rejections
       directOpTransaction.commit().catch(() => undefined)
 
@@ -464,7 +466,7 @@ export class CollectionMutationsManager<
 
     // Apply mutations to the new transaction
     directOpTransaction.applyMutations(mutations)
-    this.markPendingLocalOrigins(mutations)
+    this.markPendingLocalChanges(mutations)
     // Errors still hit tx.isPersisted.promise; avoid leaking an unhandled rejection from the fire-and-forget commit
     directOpTransaction.commit().catch(() => undefined)
 
@@ -568,7 +570,7 @@ export class CollectionMutationsManager<
 
     // Apply mutations to the new transaction
     directOpTransaction.applyMutations(mutations)
-    this.markPendingLocalOrigins(mutations)
+    this.markPendingLocalChanges(mutations)
     // Errors still reject tx.isPersisted.promise; silence the internal commit promise to prevent test noise
     directOpTransaction.commit().catch(() => undefined)
 

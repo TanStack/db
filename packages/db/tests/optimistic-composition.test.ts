@@ -66,6 +66,113 @@ const cases = orders.flatMap((order) =>
 
 describe(`optimistic field composition`, () => {
   it.each([false, true])(
+    `does not attribute a later remote write to a failed-only update, optimistic=%s`,
+    async (optimistic) => {
+      const done = createDeferred<void>()
+      const fixture = source(() => done.promise)
+      await fixture.collection.preload()
+      const tx = fixture.collection.update(1, { optimistic }, (row) => {
+        row.a = `failed`
+      })
+      const settled = tx.isPersisted.promise.catch(() => {})
+      try {
+        done.reject(new Error(`failed update`))
+        await settled
+        fixture.sync.begin()
+        fixture.sync.write({
+          type: `update`,
+          value: { ...initial, a: `remote` },
+        })
+        await fixture.sync.commit()
+        expect(fixture.collection.get(1)?.$origin).toBe(`remote`)
+      } finally {
+        done.resolve()
+        await fixture.collection.cleanup()
+      }
+    },
+  )
+
+  it.each([false, true])(
+    `attributes synchronous handler acknowledgement to its local update, optimistic=%s`,
+    async (optimistic) => {
+      const fixture = source(() => {
+        fixture.sync.begin()
+        fixture.sync.write({
+          type: `update`,
+          value: { ...initial, a: `accepted` },
+        })
+        void fixture.sync.commit()
+        return Promise.resolve()
+      })
+      await fixture.collection.preload()
+      try {
+        const tx = fixture.collection.update(1, { optimistic }, (row) => {
+          row.a = `accepted`
+        })
+        await tx.isPersisted.promise
+        expect(fixture.collection.get(1)?.$origin).toBe(`local`)
+        expect(stripVirtualProps(fixture.collection.get(1))).toEqual({
+          ...initial,
+          a: `accepted`,
+        })
+      } finally {
+        await fixture.collection.cleanup()
+      }
+    },
+  )
+
+  it.each([false, true])(
+    `keeps completed nonoptimistic origin across sibling rollback, completed first=%s`,
+    async (completedFirst) => {
+      const done = [createDeferred<void>(), createDeferred<void>()]
+      let calls = 0
+      const fixture = source(() => done[calls++]!.promise)
+      await fixture.collection.preload()
+      const first = fixture.collection.update(
+        1,
+        { optimistic: false },
+        (row) => {
+          row.a = `accepted`
+        },
+      )
+      const second = fixture.collection.update(1, (row) => {
+        row.b = `rejected`
+      })
+      const secondSettled = second.isPersisted.promise.catch(() => {})
+      try {
+        if (completedFirst) {
+          done[0]!.resolve()
+          await first.isPersisted.promise
+        }
+        done[1]!.reject(new Error(`sibling failure`))
+        await secondSettled
+        if (!completedFirst) {
+          done[0]!.resolve()
+          await first.isPersisted.promise
+        }
+        fixture.sync.begin()
+        fixture.sync.write({
+          type: `update`,
+          value: { ...initial, a: `accepted` },
+        })
+        await fixture.sync.commit()
+        expect(fixture.collection.get(1)?.$origin).toBe(`local`)
+        expect(stripVirtualProps(fixture.collection.get(1))).toEqual({
+          ...initial,
+          a: `accepted`,
+        })
+      } finally {
+        done.forEach((entry) => entry.resolve())
+        await Promise.allSettled([
+          first.isPersisted.promise,
+          second.isPersisted.promise,
+        ])
+        await fixture.collection.cleanup()
+      }
+    },
+  )
+
+  it.each([false, true])(
     `settles a rebased update with queued confirmation=%s`,
     async (confirm) => {
       const done = createDeferred<void>()
