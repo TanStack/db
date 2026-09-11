@@ -1005,12 +1005,18 @@ Classify root deltas against authoritative membership, including earlier queued
 sync writes, not the optimistic public view. An optimistic delete must not turn
 a balanced graph update into an authoritative delete. This does not bypass the
 normal sync queue or publish part of a graph-output transaction early.
+Build queued membership once per output flush, preserving committed last-write
+and truncate semantics, rather than scanning the queue again for each row.
 
-At the Collection boundary, each active optimistic update owns only its changed
+At the Collection boundary, each active or retained optimistic update owns only its changed
 top-level fields. Compose those fields in transaction order over the current
 base and earlier optimistic work. Inserts retain their full validated rows,
 including schema defaults. Removing one update must not revive its fields from
 another update's whole-row snapshot.
+Completed contributions remain beneath active transactions under the existing
+retention policy until sync retires them. A failed sibling cannot clear those
+contributions. Sync publication compares actual previous and next visible rows,
+not captured mutation snapshots that may predate a rebase.
 
 Installed state, synchronous reads, change-event payloads, and downstream
 queries must all observe the same fully materialized commit. The facade adapter

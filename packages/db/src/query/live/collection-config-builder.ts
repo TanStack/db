@@ -1058,7 +1058,10 @@ export class CollectionConfigBuilder<
         facadePublication.prepare()
         if (hasParentChanges) {
           begin()
-          changesToApply.forEach(this.applyChanges.bind(this, config))
+          const hasSyncedKey = config.collection._state.createSyncedKeyLookup()
+          changesToApply.forEach(
+            this.applyChanges.bind(this, config, hasSyncedKey),
+          )
           if (hasOrderOnlyMove(changesToApply)) {
             markLayoutChange(config.collection)
           }
@@ -1097,6 +1100,7 @@ export class CollectionConfigBuilder<
 
   private applyChanges(
     config: SyncMethods<TResult>,
+    hasSyncedKey: (key: string | number) => boolean,
     changes: {
       deletes: number
       inserts: number
@@ -1128,8 +1132,7 @@ export class CollectionConfigBuilder<
       inserts > deletes ||
       // A balanced delta updates an existing authoritative row, even if an
       // optimistic delete hides it or its earlier insert is still queued.
-      (inserts === deletes &&
-        collection._state.hasSyncedKey(collection.getKeyFromItem(value)))
+      (inserts === deletes && hasSyncedKey(collection.getKeyFromItem(value)))
     ) {
       write({
         value,

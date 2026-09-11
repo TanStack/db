@@ -52,6 +52,11 @@ interface PendingSyncedTransaction<
 
 type PendingMetadataWrite = { type: `set`; value: unknown } | { type: `delete` }
 
+type OptimisticUpsert<T extends object> = Pick<
+  PendingMutation<T>,
+  `key` | `type` | `modified` | `changes`
+>
+
 type InternalChangeMessage<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -94,7 +99,7 @@ export class CollectionStateManager<
     object,
     { base: TOutput; composed: TOutput }
   >()
-  public pendingOptimisticUpserts = new Map<TKey, TOutput>()
+  public pendingOptimisticUpserts = new Map<TKey, OptimisticUpsert<TOutput>>()
   public pendingOptimisticDeletes = new Set<TKey>()
   public pendingOptimisticDirectUpserts = new Set<TKey>()
   public pendingOptimisticDirectDeletes = new Set<TKey>()
@@ -540,11 +545,26 @@ export class CollectionStateManager<
           }
           switch (mutation.type) {
             case `insert`:
-            case `update`:
-              this.pendingOptimisticUpserts.set(
-                mutation.key,
-                mutation.modified as TOutput,
-              )
+            case `update`: {
+              // Retain only this completed mutation's contribution. Other
+              // active updates may roll back after this one has settled.
+              const previous = this.pendingOptimisticUpserts.get(mutation.key)
+              const changes =
+                mutation.type === `update`
+                  ? { ...previous?.changes, ...mutation.changes }
+                  : mutation.changes
+              this.pendingOptimisticUpserts.set(mutation.key, {
+                key: mutation.key,
+                type:
+                  mutation.type === `update`
+                    ? (previous?.type ?? `update`)
+                    : `insert`,
+                modified:
+                  mutation.type === `update` && previous?.type === `insert`
+                    ? { ...previous.modified, ...mutation.changes }
+                    : mutation.modified,
+                changes,
+              })
               this.pendingOptimisticDeletes.delete(mutation.key)
               if (isDirectTransaction) {
                 this.pendingOptimisticDirectUpserts.add(mutation.key)
@@ -554,6 +574,7 @@ export class CollectionStateManager<
                 this.pendingOptimisticDirectDeletes.delete(mutation.key)
               }
               break
+            }
             case `delete`:
               this.pendingOptimisticUpserts.delete(mutation.key)
               this.pendingOptimisticDeletes.add(mutation.key)
@@ -572,12 +593,13 @@ export class CollectionStateManager<
           if (!this.isThisCollection(mutation.collection)) {
             continue
           }
-          this.pendingLocalOrigins.delete(mutation.key)
-          if (mutation.optimistic) {
-            this.pendingOptimisticUpserts.delete(mutation.key)
-            this.pendingOptimisticDeletes.delete(mutation.key)
-            this.pendingOptimisticDirectUpserts.delete(mutation.key)
-            this.pendingOptimisticDirectDeletes.delete(mutation.key)
+          // Failed transactions never enter retained state. A same-key entry
+          // belongs to a successful sibling and must survive this rollback.
+          if (
+            !this.pendingOptimisticUpserts.has(mutation.key) &&
+            !this.pendingOptimisticDeletes.has(mutation.key)
+          ) {
+            this.pendingLocalOrigins.delete(mutation.key)
           }
         }
       }
@@ -601,7 +623,7 @@ export class CollectionStateManager<
         pendingSyncKeys.has(key) ||
         this.pendingOptimisticDirectUpserts.has(key)
       ) {
-        this.optimisticUpserts.set(key, value)
+        this.optimisticUpserts.set(key, this.resolveOptimisticUpsert(value))
       } else {
         staleOptimisticUpserts.push(key)
       }
@@ -827,7 +849,9 @@ export class CollectionStateManager<
 
   // Updates own only their changed top-level fields. Inserts keep the full
   // validated row, including schema defaults absent from `changes`.
-  private resolveOptimisticUpsert(mutation: PendingMutation<TOutput>): TOutput {
+  private resolveOptimisticUpsert(
+    mutation: OptimisticUpsert<TOutput>,
+  ): TOutput {
     if (mutation.type !== `update`) return mutation.modified
 
     const key = mutation.key as TKey
@@ -843,20 +867,23 @@ export class CollectionStateManager<
     return composed
   }
 
-  /** Authoritative membership after committed sync writes, without optimistic edits. */
-  hasSyncedKey(key: TKey): boolean {
-    for (let i = this.pendingSyncedTransactions.length - 1; i >= 0; i--) {
-      const transaction = this.pendingSyncedTransactions[i]!
+  /** Build once per output flush; queued membership excludes optimistic edits. */
+  createSyncedKeyLookup(): (key: TKey) => boolean {
+    if (this.pendingSyncedTransactions.length === 0)
+      return (key) => this.syncedData.has(key)
+    const queued = new Map<TKey, boolean>()
+    let truncated = false
+    for (const transaction of this.pendingSyncedTransactions) {
       if (!transaction.committed) continue
-      for (let j = transaction.operations.length - 1; j >= 0; j--) {
-        const operation = transaction.operations[j]!
-        if (operation.key === key) {
-          return operation.type !== `delete`
-        }
+      if (transaction.truncate) {
+        queued.clear()
+        truncated = true
       }
-      if (transaction.truncate) return false
+      for (const operation of transaction.operations) {
+        queued.set(operation.key as TKey, operation.type !== `delete`)
+      }
     }
-    return this.syncedData.has(key)
+    return (key) => queued.get(key) ?? (!truncated && this.syncedData.has(key))
   }
 
   /**
@@ -1369,35 +1396,11 @@ export class CollectionStateManager<
               )
             : undefined
 
-        // Check if this sync operation is redundant with a completed optimistic operation
-        const completedOp = completedOptimisticOps.get(key)
-        let isRedundantSync = false
-
-        if (completedOp) {
-          if (
-            completedOp.type === `delete` &&
-            previousVisibleValue !== undefined &&
-            newVisibleValue === undefined &&
-            deepEquals(completedOp.value, previousVisibleValue)
-          ) {
-            isRedundantSync = true
-          } else if (
-            newVisibleValue !== undefined &&
-            deepEquals(completedOp.value, newVisibleValue)
-          ) {
-            isRedundantSync = true
-          }
-        }
-
         const shouldEmitVirtualUpdate =
           virtualChanged &&
           previousVisibleValue !== undefined &&
           newVisibleValue !== undefined &&
           deepEquals(previousVisibleValue, newVisibleValue)
-
-        if (isRedundantSync && !shouldEmitVirtualUpdate) {
-          continue
-        }
 
         if (
           previousVisibleValue === undefined &&
