@@ -777,9 +777,11 @@ request. This example assumes a zero-based page API with a fixed size of 50.
 The endpoint must apply the supplied filters and sorts **before** pagination,
 keep a consistent ordered result while its pages are read, and return
 `nextPage: null` only when it has authoritatively exhausted that result.
-The example `api.listPosts` translates the full `where` expression (including
-cursor predicates) and `orderBy` options into the endpoint's syntax, and rejects
-unsupported expressions. See [QueryFn and Predicate Push-Down](#queryfn-and-predicate-push-down)
+This example uses offset-based pagination. `api.listPosts` translates the full
+`where` expression and `orderBy` options into the endpoint's syntax, and rejects
+unsupported expressions. The separate `cursor` hints are deliberately unused;
+cursor-based adapters must handle those hints alongside `where`, not treat them
+as already included in it. See [QueryFn and Predicate Push-Down](#queryfn-and-predicate-push-down)
 for translation helpers. Do not drop predicates or filter after paginating:
 either changes the requested window.
 

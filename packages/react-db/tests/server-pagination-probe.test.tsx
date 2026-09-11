@@ -71,6 +71,50 @@ describe(`server pagination contract probes`, () => {
     },
   )
 
+  it(`retains a tie group across backend and UI page boundaries`, async () => {
+    // Already sorted by rank, then id. IDs decrease between groups so an
+    // accidental id-first order cannot produce the expected result.
+    const sourceRows = [
+      ...Array.from({ length: 6 }, (_, index) => ({ id: index + 10, rank: 1 })),
+      ...Array.from({ length: 3 }, (_, index) => ({ id: index + 1, rank: 2 })),
+    ]
+    const fixture = createServerPaginationFixture({
+      rows: sourceRows,
+      syncMode: `on-demand`,
+      serverPageSize: 2,
+    })
+    const { result, unmount } = renderHook(() =>
+      useLiveInfiniteQuery(
+        (q) =>
+          q
+            .from({ row: fixture.collection })
+            .orderBy(({ row }) => row.rank)
+            .orderBy(({ row }) => row.id),
+        { pageSize: 3 },
+      ),
+    )
+    try {
+      await waitFor(() => expect(result.current.isReady).toBe(true))
+      for (const size of [3, 6, 9]) {
+        expect(result.current.data.map((row) => row.id)).toEqual(
+          sourceRows.slice(0, size).map((row) => row.id),
+        )
+        expect(result.current.hasNextPage).toBe(size < sourceRows.length)
+        if (size < sourceRows.length)
+          await act(() => result.current.fetchNextPage())
+      }
+      expect(new Set(fixture.serverPages)).toEqual(new Set([0, 1, 2, 3, 4]))
+      const requestCount = fixture.requests.length
+      await act(() => result.current.fetchNextPage())
+      expect(fixture.requests).toHaveLength(requestCount)
+    } finally {
+      unmount()
+      await result.current.collection?.cleanup()
+      await fixture.collection.cleanup()
+      fixture.client.clear()
+    }
+  })
+
   it(`eager page responses remain local data, not an infinite-query transport`, async () => {
     const fixture = createServerPaginationFixture({
       rows,

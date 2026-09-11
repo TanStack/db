@@ -7,7 +7,7 @@ import type { LoadSubsetOptions } from '@tanstack/db'
 export type ServerRow = { id: number; rank: number }
 
 // An ordinary QueryObserver, not InfiniteQueryObserver. This fixture models
-// numeric rows supplied in ascending id/rank order; it is not a general sorter.
+// numeric rows supplied in the query's requested order; it is not a general sorter.
 // The endpoint either fulfills the request or returns one nonconforming cap.
 export function createServerPaginationFixture(options: {
   syncMode: `eager` | `on-demand`
