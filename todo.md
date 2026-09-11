@@ -5,16 +5,16 @@ examining #1521; it does not implement that PR's polling policy.
 
 - [x] Reproduce with the actual Collection and TrailBase adapter.
 - [x] Add close/error matrix checking reported errors, unhandled rejections,
-  reader lock, cleanup timer, retained rows/status, and absence of extra loads.
+      reader lock, cleanup timer, retained rows/status, and absence of extra loads.
 - [x] RED: normal close passes; errored stream leaks an unhandled rejection and
-  keeps its reader locked. Later cleanup can reject again when canceling it.
-  /private/tmp/trailbase-stream-red.log.
+      keeps its reader locked. Later cleanup can reject again when canceling it.
+      /private/tmp/trailbase-stream-red.log.
 - [x] Fix: observe both settlements of reader.closed, clear interval, release
-  reader, and clear only the matching active-reader reference. The existing
-  listen catch remains the error reporter.
+      reader, and clear only the matching active-reader reference. The existing
+      listen catch remains the error reporter.
 - [x] GREEN: all12 package runtime tests pass; no type errors. ESLint no errors
-  and one pre-existing require-await warning. Prettier unchanged.
-  /private/tmp/trailbase-stream-green.log.
+      and one pre-existing require-await warning. Prettier unchanged.
+      /private/tmp/trailbase-stream-green.log.
 - [ ] Release note and PR after integration review. No implementation pushed.
 
 ## Why the tests missed it
@@ -118,7 +118,7 @@ lint errors (one pre-existing require-await warning). Logs:
       Log: /private/tmp/trailbase-oracle-first.log.
 - [x] Guard canceled startup before touching shared reader ownership. GREEN.
 - [x] Mutation assay: all five known stream fault variants rejected by this
-      oracle itself. Logs: /private/tmp/trailbase-oracle-assay-*.log.
+      oracle itself. Logs: /private/tmp/trailbase-oracle-assay-\*.log.
 - [x] 10× campaign: 800 generated histories plus 32 fixed cases pass, random
       seed 127535183. Log: /private/tmp/trailbase-oracle-stress.log.
 - [x] Document laws, exclusions, replay commands and mutation evidence in
