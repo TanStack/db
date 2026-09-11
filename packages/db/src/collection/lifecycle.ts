@@ -18,6 +18,17 @@ import type { CollectionChangesManager } from './changes'
 import type { CollectionSyncManager } from './sync'
 import type { CollectionStateManager } from './state'
 
+/**
+ * Floor applied to the GC delay of a collection that started syncing before
+ * anything subscribed. Adapters build their live query while rendering and
+ * subscribe when that render commits. This grace period reduces cleanup
+ * during that gap; a later subscriber can still restart sync. Adapters pass
+ * a near-zero `gcTime` to make teardown on unmount immediate. Does not apply
+ * to the timer armed when the last subscriber leaves, which still honours
+ * `gcTime` exactly.
+ */
+const UNSUBSCRIBED_GC_FLOOR_MS = 50
+
 export class CollectionLifecycleManager<
   TOutput extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -214,10 +225,28 @@ export class CollectionLifecycleManager<
   }
 
   /**
+   * Start the garbage collection timer for a collection with no subscribers
+   * Called when sync starts outside a subscription
+   */
+  public startGCTimerIfUnsubscribed(): void {
+    this.startGCTimer(UNSUBSCRIBED_GC_FLOOR_MS)
+  }
+
+  private canGarbageCollect(): boolean {
+    return (
+      !this.cleaningUp &&
+      this.changes.activeSubscribersCount === 0 &&
+      !this.sync.hasPendingPreload
+    )
+  }
+
+  /**
    * Start the garbage collection timer
    * Called when the collection becomes inactive (no subscribers)
    */
-  public startGCTimer(): void {
+  public startGCTimer(minDelay = 0): void {
+    if (!this.canGarbageCollect()) return
+
     const gcTime = this.config.gcTime ?? 300000 // 5 minutes default
 
     // If gcTime is 0, negative, or non-finite (Infinity, -Infinity, NaN), GC is disabled.
@@ -227,12 +256,16 @@ export class CollectionLifecycleManager<
       return
     }
 
-    CleanupQueue.getInstance().schedule(this, gcTime, () => {
-      if (this.changes.activeSubscribersCount === 0) {
-        // Schedule cleanup during idle time to avoid blocking the UI thread
-        this.scheduleIdleCleanup()
-      }
-    })
+    CleanupQueue.getInstance().schedule(
+      this,
+      Math.max(gcTime, minDelay),
+      () => {
+        if (this.canGarbageCollect()) {
+          // Schedule cleanup during idle time to avoid blocking the UI thread
+          this.scheduleIdleCleanup()
+        }
+      },
+    )
   }
 
   /**
@@ -263,7 +296,7 @@ export class CollectionLifecycleManager<
     this.idleCallbackId = safeRequestIdleCallback(
       (deadline) => {
         // Perform cleanup if we still have no subscribers
-        if (this.changes.activeSubscribersCount === 0) {
+        if (this.canGarbageCollect()) {
           const cleanupCompleted = this.performCleanup(deadline)
           // Only clear the callback ID if cleanup actually completed
           if (cleanupCompleted) {

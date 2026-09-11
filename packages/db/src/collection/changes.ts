@@ -48,7 +48,7 @@ export class CollectionChangesManager<
 
   /**
    * Monotonic revision of the collection's visible state, advanced once per
-   * committed batch of changes — including while nothing is subscribed.
+   * committed batch of changes and cleanup — including while nothing is subscribed.
    * Lets consumers (the live-query observer) cheaply detect "did the data
    * change" without subscribing, and stays untouched by subscription
    * bootstrap replays, which do not go through emitEvents.
@@ -379,6 +379,9 @@ export class CollectionChangesManager<
    * This can be called manually or automatically by garbage collection
    */
   public cleanup(): void {
+    // Cleanup clears visible state without publishing row changes. Detached
+    // consumers may miss every status transition before an empty restart.
+    this.stateRevision++
     this.batchedEvents = []
     this.shouldBatchEvents = false
     this.deferredPublications = []
