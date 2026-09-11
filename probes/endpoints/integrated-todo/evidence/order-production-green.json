@@ -1,0 +1,19 @@
+{
+  "url": "http://127.0.0.1:4192",
+  "checks": [
+    {
+      "name": "optimistic rows sort by creation time then ID despite insertion and key order",
+      "observed": [
+        "order-z",
+        "order-b",
+        "order-c",
+        "order-a"
+      ]
+    },
+    {
+      "name": "reloaded server rows retain creation-time order",
+      "expected": []
+    }
+  ],
+  "status": "PASS"
+}

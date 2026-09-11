@@ -1,0 +1,35 @@
+TAP version 13
+# Subtest: actual analyzer replacement, clear, unsupported and stale revisions stay distinct
+not ok 1 - actual analyzer replacement, clear, unsupported and stale revisions stay distinct
+  ---
+  duration_ms: 2063.495542
+  location: '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/phase2/delivery.test.mjs:12:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + 'violation'
+    - 'stale'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'stale'
+  actual: 'violation'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/phase2/delivery.test.mjs:26:10)
+    Test.runInAsyncScope (node:async_hooks:211:14)
+    Test.run (node:internal/test_runner/test:931:25)
+    Test.start (node:internal/test_runner/test:829:17)
+    startSubtestAfterBootstrap (node:internal/test_runner/harness:296:17)
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 0
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2129.429625

@@ -1,0 +1,37 @@
+[
+  {
+    "name": "retained-helper",
+    "buildExit": 1,
+    "leaked": false,
+    "safe": true,
+    "status": "pass"
+  },
+  {
+    "name": "side-effect-import",
+    "buildExit": 1,
+    "leaked": false,
+    "safe": true,
+    "status": "pass"
+  },
+  {
+    "name": "server-suffix",
+    "buildExit": 1,
+    "leaked": false,
+    "safe": true,
+    "status": "pass"
+  },
+  {
+    "name": "transitive-helper",
+    "buildExit": 1,
+    "leaked": false,
+    "safe": true,
+    "status": "pass"
+  },
+  {
+    "name": "transitive-side-effect",
+    "buildExit": 1,
+    "leaked": false,
+    "safe": true,
+    "status": "pass"
+  }
+]

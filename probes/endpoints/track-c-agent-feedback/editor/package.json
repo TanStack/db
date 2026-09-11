@@ -1,0 +1,1 @@
+{"name":"synthetic-endpoints-editor-probe","publisher":"local-probe","version":"0.1.0","engines":{"vscode":"^1.90.0"},"main":"./extension.cjs","activationEvents":["onStartupFinished"]}

@@ -1,0 +1,13 @@
+{
+  "url": "http://127.0.0.1:4192",
+  "status": "PASS",
+  "browser": "152.0.7977.83",
+  "formSubmitted": true,
+  "serverRow": {
+    "id": "97c72be7-6c9b-4b2f-9012-1defa98d66ae",
+    "text": "Put the kettle on · clean-component-production",
+    "completed": false,
+    "created_at": "2026-09-11T04:04:09.368Z",
+    "user_id": "alice"
+  }
+}

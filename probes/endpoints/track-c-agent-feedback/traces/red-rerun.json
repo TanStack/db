@@ -1,0 +1,584 @@
+[
+  {
+    "path": "CLI",
+    "mode": "initial",
+    "exit": 1,
+    "result": {
+      "producer": {
+        "name": "SYNTHETIC-endpoints-delivery-fixture",
+        "version": "0.1.0",
+        "analysis": "string fixture only; no database facts"
+      },
+      "source": {
+        "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/traces/todo.fixture.ts",
+        "revision": "9d87f46eb9ee5c5d970f0612c77b6028c9f657125f09251badaf71a63c7deb81",
+        "documentVersion": 1
+      },
+      "status": "fail",
+      "findings": [
+        {
+          "rule": "ENDPOINT_ORDER_NOT_TOTAL",
+          "status": "fail",
+          "severity": "error",
+          "marker": "TRACK_C_INITIAL_17",
+          "message": "Fixture order lacks id tie-breaker. Synthetic assumption: id is a non-null primary key.",
+          "range": {
+            "start": {
+              "line": 1,
+              "character": 14
+            },
+            "end": {
+              "line": 1,
+              "character": 27
+            }
+          },
+          "suggestedReplacement": "['createdAt', 'id']"
+        }
+      ],
+      "rerun": {
+        "command": "node",
+        "args": [
+          "cli.mjs",
+          "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/traces/todo.fixture.ts"
+        ],
+        "cwd": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback"
+      }
+    }
+  },
+  {
+    "path": "CLI",
+    "mode": "changed",
+    "exit": 1,
+    "result": {
+      "producer": {
+        "name": "SYNTHETIC-endpoints-delivery-fixture",
+        "version": "0.1.0",
+        "analysis": "string fixture only; no database facts"
+      },
+      "source": {
+        "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/traces/todo.fixture.ts",
+        "revision": "a977753b8a697cb1926ff6d74796985ad304099affa0e9777d8fac7e70b249ce",
+        "documentVersion": 2
+      },
+      "status": "fail",
+      "findings": [
+        {
+          "rule": "ENDPOINT_ORDER_NOT_TOTAL",
+          "status": "fail",
+          "severity": "error",
+          "marker": "TRACK_C_CHANGED_28",
+          "message": "Fixture order lacks id tie-breaker. Synthetic assumption: id is a non-null primary key.",
+          "range": {
+            "start": {
+              "line": 1,
+              "character": 14
+            },
+            "end": {
+              "line": 1,
+              "character": 22
+            }
+          },
+          "suggestedReplacement": "['createdAt', 'id']"
+        }
+      ],
+      "rerun": {
+        "command": "node",
+        "args": [
+          "cli.mjs",
+          "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/traces/todo.fixture.ts"
+        ],
+        "cwd": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback"
+      }
+    }
+  },
+  {
+    "path": "CLI",
+    "mode": "clear",
+    "exit": 0,
+    "result": {
+      "producer": {
+        "name": "SYNTHETIC-endpoints-delivery-fixture",
+        "version": "0.1.0",
+        "analysis": "string fixture only; no database facts"
+      },
+      "source": {
+        "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/traces/todo.fixture.ts",
+        "revision": "a933dc7bfc25d31406b094b580555edab773fe7a9a88e38f91be9229701a672b",
+        "documentVersion": 3
+      },
+      "status": "pass",
+      "findings": [],
+      "rerun": {
+        "command": "node",
+        "args": [
+          "cli.mjs",
+          "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/traces/todo.fixture.ts"
+        ],
+        "cwd": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback"
+      }
+    }
+  },
+  {
+    "path": "CLI",
+    "mode": "stale",
+    "exit": 3,
+    "result": {
+      "producer": {
+        "name": "SYNTHETIC-endpoints-delivery-fixture",
+        "version": "0.1.0",
+        "analysis": "string fixture only; no database facts"
+      },
+      "source": {
+        "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/traces/todo.fixture.ts",
+        "revision": "a933dc7bfc25d31406b094b580555edab773fe7a9a88e38f91be9229701a672b",
+        "documentVersion": 3
+      },
+      "status": "stale",
+      "findings": [],
+      "rerun": {
+        "command": "node",
+        "args": [
+          "cli.mjs",
+          "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/traces/todo.fixture.ts"
+        ],
+        "cwd": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback"
+      }
+    }
+  },
+  {
+    "path": "CLI",
+    "mode": "execution-error",
+    "exit": 2,
+    "result": {
+      "status": "error",
+      "message": "ENOENT: no such file or directory, open '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/missing'"
+    }
+  },
+  {
+    "path": "MCP-stdio-fixture-client",
+    "sent": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "initialize",
+      "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+          "name": "fixture-test",
+          "version": "0.1.0"
+        }
+      }
+    },
+    "received": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+          "tools": {}
+        },
+        "serverInfo": {
+          "name": "synthetic-endpoints",
+          "version": "0.1.0"
+        }
+      }
+    }
+  },
+  {
+    "path": "MCP-stdio-fixture-client",
+    "sent": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "method": "tools/list",
+      "params": {}
+    },
+    "received": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "tools": [
+          {
+            "name": "check_endpoint_fixture",
+            "description": "Check SYNTHETIC delivery fixture; no Drizzle analysis",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "file": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "integer"
+                },
+                "expectedRevision": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "file"
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "path": "MCP-stdio-fixture-client",
+    "sent": {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "method": "tools/call",
+      "params": {
+        "name": "check_endpoint_fixture",
+        "arguments": {
+          "file": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/traces/todo.fixture.ts",
+          "version": 1
+        }
+      }
+    },
+    "received": {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"producer\":{\"name\":\"SYNTHETIC-endpoints-delivery-fixture\",\"version\":\"0.1.0\",\"analysis\":\"string fixture only; no database facts\"},\"source\":{\"uri\":\"file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/traces/todo.fixture.ts\",\"revision\":\"9d87f46eb9ee5c5d970f0612c77b6028c9f657125f09251badaf71a63c7deb81\",\"documentVersion\":1},\"status\":\"fail\",\"findings\":[{\"rule\":\"ENDPOINT_ORDER_NOT_TOTAL\",\"status\":\"fail\",\"severity\":\"error\",\"marker\":\"TRACK_C_INITIAL_17\",\"message\":\"Fixture order lacks id tie-breaker. Synthetic assumption: id is a non-null primary key.\",\"range\":{\"start\":{\"line\":1,\"character\":14},\"end\":{\"line\":1,\"character\":27}},\"suggestedReplacement\":\"['createdAt', 'id']\"}],\"rerun\":{\"command\":\"node\",\"args\":[\"cli.mjs\",\"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/traces/todo.fixture.ts\"],\"cwd\":\"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback\"}}"
+          }
+        ],
+        "structuredContent": {
+          "producer": {
+            "name": "SYNTHETIC-endpoints-delivery-fixture",
+            "version": "0.1.0",
+            "analysis": "string fixture only; no database facts"
+          },
+          "source": {
+            "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/traces/todo.fixture.ts",
+            "revision": "9d87f46eb9ee5c5d970f0612c77b6028c9f657125f09251badaf71a63c7deb81",
+            "documentVersion": 1
+          },
+          "status": "fail",
+          "findings": [
+            {
+              "rule": "ENDPOINT_ORDER_NOT_TOTAL",
+              "status": "fail",
+              "severity": "error",
+              "marker": "TRACK_C_INITIAL_17",
+              "message": "Fixture order lacks id tie-breaker. Synthetic assumption: id is a non-null primary key.",
+              "range": {
+                "start": {
+                  "line": 1,
+                  "character": 14
+                },
+                "end": {
+                  "line": 1,
+                  "character": 27
+                }
+              },
+              "suggestedReplacement": "['createdAt', 'id']"
+            }
+          ],
+          "rerun": {
+            "command": "node",
+            "args": [
+              "cli.mjs",
+              "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/traces/todo.fixture.ts"
+            ],
+            "cwd": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback"
+          }
+        },
+        "isError": false
+      }
+    }
+  },
+  {
+    "path": "MCP-stdio-fixture-client",
+    "sent": {
+      "jsonrpc": "2.0",
+      "id": 4,
+      "method": "tools/call",
+      "params": {
+        "name": "check_endpoint_fixture",
+        "arguments": {
+          "file": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/traces/todo.fixture.ts",
+          "version": 2
+        }
+      }
+    },
+    "received": {
+      "jsonrpc": "2.0",
+      "id": 4,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"producer\":{\"name\":\"SYNTHETIC-endpoints-delivery-fixture\",\"version\":\"0.1.0\",\"analysis\":\"string fixture only; no database facts\"},\"source\":{\"uri\":\"file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/traces/todo.fixture.ts\",\"revision\":\"a977753b8a697cb1926ff6d74796985ad304099affa0e9777d8fac7e70b249ce\",\"documentVersion\":2},\"status\":\"fail\",\"findings\":[{\"rule\":\"ENDPOINT_ORDER_NOT_TOTAL\",\"status\":\"fail\",\"severity\":\"error\",\"marker\":\"TRACK_C_CHANGED_28\",\"message\":\"Fixture order lacks id tie-breaker. Synthetic assumption: id is a non-null primary key.\",\"range\":{\"start\":{\"line\":1,\"character\":14},\"end\":{\"line\":1,\"character\":22}},\"suggestedReplacement\":\"['createdAt', 'id']\"}],\"rerun\":{\"command\":\"node\",\"args\":[\"cli.mjs\",\"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/traces/todo.fixture.ts\"],\"cwd\":\"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback\"}}"
+          }
+        ],
+        "structuredContent": {
+          "producer": {
+            "name": "SYNTHETIC-endpoints-delivery-fixture",
+            "version": "0.1.0",
+            "analysis": "string fixture only; no database facts"
+          },
+          "source": {
+            "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/traces/todo.fixture.ts",
+            "revision": "a977753b8a697cb1926ff6d74796985ad304099affa0e9777d8fac7e70b249ce",
+            "documentVersion": 2
+          },
+          "status": "fail",
+          "findings": [
+            {
+              "rule": "ENDPOINT_ORDER_NOT_TOTAL",
+              "status": "fail",
+              "severity": "error",
+              "marker": "TRACK_C_CHANGED_28",
+              "message": "Fixture order lacks id tie-breaker. Synthetic assumption: id is a non-null primary key.",
+              "range": {
+                "start": {
+                  "line": 1,
+                  "character": 14
+                },
+                "end": {
+                  "line": 1,
+                  "character": 22
+                }
+              },
+              "suggestedReplacement": "['createdAt', 'id']"
+            }
+          ],
+          "rerun": {
+            "command": "node",
+            "args": [
+              "cli.mjs",
+              "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/traces/todo.fixture.ts"
+            ],
+            "cwd": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback"
+          }
+        },
+        "isError": false
+      }
+    }
+  },
+  {
+    "path": "MCP-stdio-fixture-client",
+    "sent": {
+      "jsonrpc": "2.0",
+      "id": 5,
+      "method": "tools/call",
+      "params": {
+        "name": "check_endpoint_fixture",
+        "arguments": {
+          "file": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/traces/todo.fixture.ts",
+          "version": 3
+        }
+      }
+    },
+    "received": {
+      "jsonrpc": "2.0",
+      "id": 5,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"producer\":{\"name\":\"SYNTHETIC-endpoints-delivery-fixture\",\"version\":\"0.1.0\",\"analysis\":\"string fixture only; no database facts\"},\"source\":{\"uri\":\"file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/traces/todo.fixture.ts\",\"revision\":\"a933dc7bfc25d31406b094b580555edab773fe7a9a88e38f91be9229701a672b\",\"documentVersion\":3},\"status\":\"pass\",\"findings\":[],\"rerun\":{\"command\":\"node\",\"args\":[\"cli.mjs\",\"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/traces/todo.fixture.ts\"],\"cwd\":\"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback\"}}"
+          }
+        ],
+        "structuredContent": {
+          "producer": {
+            "name": "SYNTHETIC-endpoints-delivery-fixture",
+            "version": "0.1.0",
+            "analysis": "string fixture only; no database facts"
+          },
+          "source": {
+            "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/traces/todo.fixture.ts",
+            "revision": "a933dc7bfc25d31406b094b580555edab773fe7a9a88e38f91be9229701a672b",
+            "documentVersion": 3
+          },
+          "status": "pass",
+          "findings": [],
+          "rerun": {
+            "command": "node",
+            "args": [
+              "cli.mjs",
+              "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/traces/todo.fixture.ts"
+            ],
+            "cwd": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback"
+          }
+        },
+        "isError": false
+      }
+    }
+  },
+  {
+    "path": "MCP-stdio-fixture-client",
+    "sent": {
+      "jsonrpc": "2.0",
+      "id": 6,
+      "method": "tools/call",
+      "params": {
+        "name": "check_endpoint_fixture",
+        "arguments": {
+          "file": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/traces/todo.fixture.ts",
+          "version": 3,
+          "expectedRevision": "9d87f46eb9ee5c5d970f0612c77b6028c9f657125f09251badaf71a63c7deb81"
+        }
+      }
+    },
+    "received": {
+      "jsonrpc": "2.0",
+      "id": 6,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"producer\":{\"name\":\"SYNTHETIC-endpoints-delivery-fixture\",\"version\":\"0.1.0\",\"analysis\":\"string fixture only; no database facts\"},\"source\":{\"uri\":\"file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/traces/todo.fixture.ts\",\"revision\":\"a933dc7bfc25d31406b094b580555edab773fe7a9a88e38f91be9229701a672b\",\"documentVersion\":3},\"status\":\"stale\",\"findings\":[],\"rerun\":{\"command\":\"node\",\"args\":[\"cli.mjs\",\"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/traces/todo.fixture.ts\"],\"cwd\":\"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback\"}}"
+          }
+        ],
+        "structuredContent": {
+          "producer": {
+            "name": "SYNTHETIC-endpoints-delivery-fixture",
+            "version": "0.1.0",
+            "analysis": "string fixture only; no database facts"
+          },
+          "source": {
+            "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/traces/todo.fixture.ts",
+            "revision": "a933dc7bfc25d31406b094b580555edab773fe7a9a88e38f91be9229701a672b",
+            "documentVersion": 3
+          },
+          "status": "stale",
+          "findings": [],
+          "rerun": {
+            "command": "node",
+            "args": [
+              "cli.mjs",
+              "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/traces/todo.fixture.ts"
+            ],
+            "cwd": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback"
+          }
+        },
+        "isError": false
+      }
+    }
+  },
+  {
+    "path": "MCP-stdio-fixture-client",
+    "sent": {
+      "jsonrpc": "2.0",
+      "id": 7,
+      "method": "tools/call",
+      "params": {
+        "name": "check_endpoint_fixture",
+        "arguments": {
+          "file": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/missing"
+        }
+      }
+    },
+    "received": {
+      "jsonrpc": "2.0",
+      "id": 7,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "ENOENT: no such file or directory, open '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/missing'"
+          }
+        ],
+        "isError": true
+      }
+    }
+  },
+  {
+    "path": "LSP-wire-fixture-client",
+    "mode": "initial",
+    "received": {
+      "jsonrpc": "2.0",
+      "method": "textDocument/publishDiagnostics",
+      "params": {
+        "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/traces/todo.fixture.ts",
+        "version": 1,
+        "diagnostics": [
+          {
+            "range": {
+              "start": {
+                "line": 1,
+                "character": 14
+              },
+              "end": {
+                "line": 1,
+                "character": 27
+              }
+            },
+            "severity": 1,
+            "code": "ENDPOINT_ORDER_NOT_TOTAL",
+            "source": "SYNTHETIC-endpoints",
+            "message": "TRACK_C_INITIAL_17: fixture order lacks id",
+            "data": {
+              "sourceRevision": "9d87f46eb9ee5c5d970f0612c77b6028c9f657125f09251badaf71a63c7deb81",
+              "synthetic": true
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "path": "LSP-wire-fixture-client",
+    "mode": "changed",
+    "received": {
+      "jsonrpc": "2.0",
+      "method": "textDocument/publishDiagnostics",
+      "params": {
+        "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/traces/todo.fixture.ts",
+        "version": 2,
+        "diagnostics": [
+          {
+            "range": {
+              "start": {
+                "line": 1,
+                "character": 14
+              },
+              "end": {
+                "line": 1,
+                "character": 22
+              }
+            },
+            "severity": 1,
+            "code": "ENDPOINT_ORDER_NOT_TOTAL",
+            "source": "SYNTHETIC-endpoints",
+            "message": "TRACK_C_CHANGED_28: fixture order lacks id",
+            "data": {
+              "sourceRevision": "a977753b8a697cb1926ff6d74796985ad304099affa0e9777d8fac7e70b249ce",
+              "synthetic": true
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "path": "LSP-wire-fixture-client",
+    "mode": "clear",
+    "received": {
+      "jsonrpc": "2.0",
+      "method": "textDocument/publishDiagnostics",
+      "params": {
+        "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/traces/todo.fixture.ts",
+        "version": 3,
+        "diagnostics": []
+      }
+    }
+  },
+  {
+    "path": "LSP-fixture-consumer-only",
+    "mode": "late-v1-after-clear-v3",
+    "accepted": false,
+    "displayed": []
+  },
+  {
+    "path": "CLI-exact-rerun",
+    "initialExit": 1,
+    "rerunExit": 2,
+    "stderr": "{\"status\":\"error\",\"message\":\"ENOENT: no such file or directory, open 'probes/endpoints/track-c-agent-feedback/root-receipt.fixture.ts'\"}\n"
+  }
+]

@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "endpoint": {
+      "command": "/usr/local/bin/node",
+      "args": [
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/phase2/mcp-real.mjs"
+      ],
+      "env": {
+        "ENDPOINTS_PROBE_MODE": "states"
+      }
+    }
+  }
+}

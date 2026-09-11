@@ -1,0 +1,176 @@
+{
+  "result": {
+    "exit": 1,
+    "json": {
+      "protocol": "endpoints-probe/v1",
+      "status": "violation",
+      "source": {
+        "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase2/fixture-run-NUFo2O/todo.sql",
+        "sha256": "ca5fe26bbebf2f3cea442d3f934cbfd15af9fd15bb870c07f2d4e1e9d7ccc899"
+      },
+      "diagnostics": [
+        {
+          "code": "ENDPOINT_ORDER_NOT_TOTAL",
+          "message": "created_at can tie; append the non-null unique id",
+          "range": {
+            "start": {
+              "line": 3,
+              "character": 9
+            },
+            "end": {
+              "line": 3,
+              "character": 23
+            }
+          },
+          "edit": {
+            "start": 91,
+            "end": 91,
+            "text": ", id asc",
+            "sourceHash": "ca5fe26bbebf2f3cea442d3f934cbfd15af9fd15bb870c07f2d4e1e9d7ccc899"
+          }
+        }
+      ],
+      "rerun": [
+        "/usr/local/bin/node",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase2/cli.mjs",
+        "check",
+        "--adapter",
+        "sql",
+        "--file",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase2/fixture-run-NUFo2O/todo.sql"
+      ],
+      "check": {
+        "status": "violation",
+        "code": "ENDPOINT_ORDER_NOT_TOTAL",
+        "reason": "created_at can tie; append the non-null unique id",
+        "evidence": {
+          "schemaIdentity": "disposable-public-todo",
+          "schemaFingerprint": "b489926566b7ad448726cd8fdff5c5fe1b03c297d81f7c3821ca9715f021589c",
+          "keyIndex": "CREATE UNIQUE INDEX todo_pkey ON public.todo USING btree (id)"
+        }
+      },
+      "assumptions": [
+        "Disposable local PostgreSQL schema; no deployment checked",
+        "Trusted fixture Drizzle bindings or plain SQL; one text parameter placeholder supplied by harness",
+        "SQL result key/order only; no auth, wire, UI or ID immutability claim"
+      ],
+      "versions": {
+        "node": "v22.13.1",
+        "database": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit"
+      }
+    }
+  },
+  "stale": {
+    "exit": 2,
+    "json": {
+      "status": "not checked",
+      "code": "STALE_DIAGNOSTIC",
+      "source": {
+        "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase2/fixture-run-NUFo2O/todo.sql",
+        "sha256": "37eede097c53cbd7c88850a881072e367e38537c9171afd35eb2523901d6271d"
+      }
+    }
+  },
+  "cleared": {
+    "exit": 0,
+    "json": {
+      "protocol": "endpoints-probe/v1",
+      "status": "supported",
+      "source": {
+        "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase2/fixture-run-NUFo2O/todo.sql",
+        "sha256": "5954abbcab6af3e96840109de686dff23b43a8f058642a2a8e38b601f39b5237"
+      },
+      "diagnostics": [],
+      "rerun": [
+        "/usr/local/bin/node",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase2/cli.mjs",
+        "check",
+        "--adapter",
+        "sql",
+        "--file",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase2/fixture-run-NUFo2O/todo.sql"
+      ],
+      "check": {
+        "status": "supported",
+        "code": "SQL_KEY_ORDER_SUPPORTED",
+        "key": "id",
+        "totalSqlOrder": true,
+        "evidence": {
+          "schemaIdentity": "disposable-public-todo",
+          "schemaFingerprint": "b489926566b7ad448726cd8fdff5c5fe1b03c297d81f7c3821ca9715f021589c",
+          "keyIndex": "CREATE UNIQUE INDEX todo_pkey ON public.todo USING btree (id)"
+        }
+      },
+      "assumptions": [
+        "Disposable local PostgreSQL schema; no deployment checked",
+        "Trusted fixture Drizzle bindings or plain SQL; one text parameter placeholder supplied by harness",
+        "SQL result key/order only; no auth, wire, UI or ID immutability claim"
+      ],
+      "versions": {
+        "node": "v22.13.1",
+        "database": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit"
+      }
+    }
+  },
+  "shifted": {
+    "exit": 1,
+    "json": {
+      "protocol": "endpoints-probe/v1",
+      "status": "violation",
+      "source": {
+        "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase2/fixture-run-NUFo2O/todo.sql",
+        "sha256": "b2454ba0c6cc343e93af8d4041db78ba8655a4f240ce948162c4f26909cf0d54"
+      },
+      "diagnostics": [
+        {
+          "code": "ENDPOINT_ORDER_NOT_TOTAL",
+          "message": "created_at can tie; append the non-null unique id",
+          "range": {
+            "start": {
+              "line": 5,
+              "character": 9
+            },
+            "end": {
+              "line": 5,
+              "character": 23
+            }
+          },
+          "edit": {
+            "start": 93,
+            "end": 93,
+            "text": ", id asc",
+            "sourceHash": "b2454ba0c6cc343e93af8d4041db78ba8655a4f240ce948162c4f26909cf0d54"
+          }
+        }
+      ],
+      "rerun": [
+        "/usr/local/bin/node",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase2/cli.mjs",
+        "check",
+        "--adapter",
+        "sql",
+        "--file",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase2/fixture-run-NUFo2O/todo.sql"
+      ],
+      "check": {
+        "status": "violation",
+        "code": "ENDPOINT_ORDER_NOT_TOTAL",
+        "reason": "created_at can tie; append the non-null unique id",
+        "evidence": {
+          "schemaIdentity": "disposable-public-todo",
+          "schemaFingerprint": "b489926566b7ad448726cd8fdff5c5fe1b03c297d81f7c3821ca9715f021589c",
+          "keyIndex": "CREATE UNIQUE INDEX todo_pkey ON public.todo USING btree (id)"
+        }
+      },
+      "assumptions": [
+        "Disposable local PostgreSQL schema; no deployment checked",
+        "Trusted fixture Drizzle bindings or plain SQL; one text parameter placeholder supplied by harness",
+        "SQL result key/order only; no auth, wire, UI or ID immutability claim"
+      ],
+      "versions": {
+        "node": "v22.13.1",
+        "database": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit"
+      }
+    }
+  }
+}

@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.tanstack/
+.vite/
+!evidence/*.log
+!evidence/phase-2/*.log

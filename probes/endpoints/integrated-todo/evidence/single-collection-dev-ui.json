@@ -1,0 +1,13 @@
+{
+  "url": "http://127.0.0.1:4191",
+  "status": "PASS",
+  "browser": "152.0.7977.83",
+  "formSubmitted": true,
+  "serverRow": {
+    "id": "892cb3e4-929c-40cf-9a75-5c47409fe3fc",
+    "text": "Put the kettle on · single-collection-dev",
+    "completed": false,
+    "created_at": "2026-09-11T03:23:09.430Z",
+    "user_id": "alice"
+  }
+}

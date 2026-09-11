@@ -1,0 +1,101 @@
+2:15:37 PM [vite] (client) Re-optimizing dependencies because vite config has changed
+
+  VITE v7.3.2  ready in 835 ms
+
+  ➜  Local:   http://127.0.0.1:4291/
+2:15:57 PM [vite] Internal server error: ENDPOINT_SERVER_IMPORT_IN_CLIENT /Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-b-compilation/phase3-validation/src/server-helper.ts: a server-only module remains reachable in the client after endpoint extraction
+  Plugin: endpoints-server-boundary
+      at LoadPluginContext._formatLog (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/vite@7.3.2_@types+node@25.2.2_jiti@2.6.1_lightningcss@1.30.2_sass@1.90.0_terser@5.44.0_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:29003:43)
+      at LoadPluginContext.error (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/vite@7.3.2_@types+node@25.2.2_jiti@2.6.1_lightningcss@1.30.2_sass@1.90.0_terser@5.44.0_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:29000:14)
+      at LoadPluginContext.load (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-b-compilation/node_modules/.vite-temp/vite.config.ts.timestamp-1789071337266-11e2e4a37ead7.mjs:65:14)
+      at EnvironmentPluginContainer.load (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/vite@7.3.2_@types+node@25.2.2_jiti@2.6.1_lightningcss@1.30.2_sass@1.90.0_terser@5.44.0_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:28763:56)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async loadAndTransform (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/vite@7.3.2_@types+node@25.2.2_jiti@2.6.1_lightningcss@1.30.2_sass@1.90.0_terser@5.44.0_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:22628:21)
+2:15:57 PM [vite] Internal server error: ENDPOINT_SERVER_IMPORT_IN_CLIENT /Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-b-compilation/phase3-validation/src/server-helper.ts: a server-only module remains reachable in the client after endpoint extraction
+  Plugin: endpoints-server-boundary
+      at LoadPluginContext._formatLog (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/vite@7.3.2_@types+node@25.2.2_jiti@2.6.1_lightningcss@1.30.2_sass@1.90.0_terser@5.44.0_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:29003:43)
+      at LoadPluginContext.error (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/vite@7.3.2_@types+node@25.2.2_jiti@2.6.1_lightningcss@1.30.2_sass@1.90.0_terser@5.44.0_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:29000:14)
+      at LoadPluginContext.load (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-b-compilation/node_modules/.vite-temp/vite.config.ts.timestamp-1789071337266-11e2e4a37ead7.mjs:65:14)
+      at EnvironmentPluginContainer.load (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/vite@7.3.2_@types+node@25.2.2_jiti@2.6.1_lightningcss@1.30.2_sass@1.90.0_terser@5.44.0_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:28763:56)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async loadAndTransform (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/vite@7.3.2_@types+node@25.2.2_jiti@2.6.1_lightningcss@1.30.2_sass@1.90.0_terser@5.44.0_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:22628:21)
+2:15:57 PM [vite] Internal server error: ENDPOINT_UNSUPPORTED_GRAMMAR endpoint raw/url imports expose authored server code
+  Plugin: endpoints-server-boundary
+      at LoadPluginContext._formatLog (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/vite@7.3.2_@types+node@25.2.2_jiti@2.6.1_lightningcss@1.30.2_sass@1.90.0_terser@5.44.0_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:29003:43)
+      at LoadPluginContext.error (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/vite@7.3.2_@types+node@25.2.2_jiti@2.6.1_lightningcss@1.30.2_sass@1.90.0_terser@5.44.0_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:29000:14)
+      at LoadPluginContext.load (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-b-compilation/node_modules/.vite-temp/vite.config.ts.timestamp-1789071337266-11e2e4a37ead7.mjs:61:93)
+      at EnvironmentPluginContainer.load (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/vite@7.3.2_@types+node@25.2.2_jiti@2.6.1_lightningcss@1.30.2_sass@1.90.0_terser@5.44.0_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:28763:56)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async loadAndTransform (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/vite@7.3.2_@types+node@25.2.2_jiti@2.6.1_lightningcss@1.30.2_sass@1.90.0_terser@5.44.0_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:22628:21)
+2:15:57 PM [vite] Internal server error: ENDPOINT_UNSUPPORTED_GRAMMAR endpoint raw/url imports expose authored server code
+  Plugin: endpoints-server-boundary
+      at LoadPluginContext._formatLog (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/vite@7.3.2_@types+node@25.2.2_jiti@2.6.1_lightningcss@1.30.2_sass@1.90.0_terser@5.44.0_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:29003:43)
+      at LoadPluginContext.error (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/vite@7.3.2_@types+node@25.2.2_jiti@2.6.1_lightningcss@1.30.2_sass@1.90.0_terser@5.44.0_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:29000:14)
+      at LoadPluginContext.load (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-b-compilation/node_modules/.vite-temp/vite.config.ts.timestamp-1789071337266-11e2e4a37ead7.mjs:61:93)
+      at EnvironmentPluginContainer.load (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/vite@7.3.2_@types+node@25.2.2_jiti@2.6.1_lightningcss@1.30.2_sass@1.90.0_terser@5.44.0_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:28763:56)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async loadAndTransform (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/vite@7.3.2_@types+node@25.2.2_jiti@2.6.1_lightningcss@1.30.2_sass@1.90.0_terser@5.44.0_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:22628:21)
+2:15:57 PM [vite] (client) hmr update /src/endpoint.tsx
+2:15:57 PM [vite] Internal server error: ENDPOINT_UNSUPPORTED_GRAMMAR use only input, handler and onMutate properties at 6:24
+      at unsupported (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-b-compilation/node_modules/.vite-temp/vite.config.ts.timestamp-1789071337266-11e2e4a37ead7.mjs:21:9)
+      at Object.transform (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-b-compilation/node_modules/.vite-temp/vite.config.ts.timestamp-1789071337266-11e2e4a37ead7.mjs:102:171)
+      at LoadPluginContext.load (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-b-compilation/node_modules/.vite-temp/vite.config.ts.timestamp-1789071337266-11e2e4a37ead7.mjs:63:60)
+      at EnvironmentPluginContainer.load (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/vite@7.3.2_@types+node@25.2.2_jiti@2.6.1_lightningcss@1.30.2_sass@1.90.0_terser@5.44.0_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:28763:56)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async loadAndTransform (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/vite@7.3.2_@types+node@25.2.2_jiti@2.6.1_lightningcss@1.30.2_sass@1.90.0_terser@5.44.0_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:22628:21)
+      at async viteTransformMiddleware (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/vite@7.3.2_@types+node@25.2.2_jiti@2.6.1_lightningcss@1.30.2_sass@1.90.0_terser@5.44.0_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:24546:20)
+2:15:57 PM [vite] (client) hmr update /src/endpoint.tsx
+2:15:57 PM [vite] Internal server error: Unexpected token (7:7)
+      at constructor (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:365:19)
+      at TypeScriptParserMixin.raise (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:6599:19)
+      at TypeScriptParserMixin.unexpected (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:6619:16)
+      at TypeScriptParserMixin.parseExprAtom (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:11442:22)
+      at TypeScriptParserMixin.parseExprAtom (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:4764:20)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:9837:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:10831:21)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:9786:20)
+      at /Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:10800:39
+      at TypeScriptParserMixin.allowInAnd (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:12426:12)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:10800:17)
+      at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:12493:17)
+      at TypeScriptParserMixin.parseObjectProperty (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:11950:83)
+      at TypeScriptParserMixin.parseObjPropValue (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:11978:100)
+      at TypeScriptParserMixin.parseObjPropValue (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:9744:18)
+      at TypeScriptParserMixin.parsePropertyDefinition (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:11915:17)
+      at TypeScriptParserMixin.parseObjectLike (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:11832:21)
+      at TypeScriptParserMixin.parseExprAtom (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:11339:23)
+      at TypeScriptParserMixin.parseExprAtom (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:4764:20)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:9837:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:10831:21)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:9786:20)
+      at /Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:10800:39
+      at TypeScriptParserMixin.allowInAnd (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:12426:12)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:10800:17)
+      at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:12493:17)
+      at TypeScriptParserMixin.parseExprListItem (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:12175:18)
+      at TypeScriptParserMixin.parseCallExpressionArguments (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:11252:22)
+      at TypeScriptParserMixin.parseCoverCallAndAsyncArrowHead (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:11186:29)
+      at TypeScriptParserMixin.parseSubscript (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:11120:19)
+      at TypeScriptParserMixin.parseSubscript (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:9272:18)
+      at TypeScriptParserMixin.parseSubscripts (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:11094:19)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:11085:17)
+      at TypeScriptParserMixin.parseUpdate (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:9837:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser/lib/index.js:10904:23)
+2:15:57 PM [vite] (client) hmr update /src/endpoint.tsx
+[vite] connected.
+Warning: A notFoundError was encountered on the route with ID "__root__", but a notFoundComponent option was not configured, nor was a router level defaultNotFoundComponent configured. Consider configuring at least one of these to avoid TanStack Router's overly generic defaultNotFoundComponent (<p>Not Found</p>)

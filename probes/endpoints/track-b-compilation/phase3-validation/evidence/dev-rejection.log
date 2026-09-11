@@ -1,0 +1,26 @@
+[
+  {
+    "path": "/src/server-helper.ts",
+    "status": 500,
+    "code": "ENDPOINT_SERVER_IMPORT_IN_CLIENT",
+    "sourceLeak": false
+  },
+  {
+    "path": "/src/server-helper.ts?raw",
+    "status": 500,
+    "code": "ENDPOINT_SERVER_IMPORT_IN_CLIENT",
+    "sourceLeak": false
+  },
+  {
+    "path": "/src/endpoint.tsx?raw",
+    "status": 500,
+    "code": "ENDPOINT_UNSUPPORTED_GRAMMAR",
+    "sourceLeak": false
+  },
+  {
+    "path": "/src/endpoint.tsx?url",
+    "status": 500,
+    "code": "ENDPOINT_UNSUPPORTED_GRAMMAR",
+    "sourceLeak": false
+  }
+]

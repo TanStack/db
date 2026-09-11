@@ -1,0 +1,108 @@
+
+  VITE v7.3.2  ready in 858 ms
+
+  ➜  Local:   http://127.0.0.1:4179/
+[vite] connected.
+Warning: A notFoundError was encountered on the route with ID "__root__", but a notFoundComponent option was not configured, nor was a router level defaultNotFoundComponent configured. Consider configuring at least one of these to avoid TanStack Router's overly generic defaultNotFoundComponent (<p>Not Found</p>)
+Warning: A notFoundError was encountered on the route with ID "__root__", but a notFoundComponent option was not configured, nor was a router level defaultNotFoundComponent configured. Consider configuring at least one of these to avoid TanStack Router's overly generic defaultNotFoundComponent (<p>Not Found</p>)
+Warning: A notFoundError was encountered on the route with ID "__root__", but a notFoundComponent option was not configured, nor was a router level defaultNotFoundComponent configured. Consider configuring at least one of these to avoid TanStack Router's overly generic defaultNotFoundComponent (<p>Not Found</p>)
+Warning: A notFoundError was encountered on the route with ID "__root__", but a notFoundComponent option was not configured, nor was a router level defaultNotFoundComponent configured. Consider configuring at least one of these to avoid TanStack Router's overly generic defaultNotFoundComponent (<p>Not Found</p>)
+Warning: A notFoundError was encountered on the route with ID "__root__", but a notFoundComponent option was not configured, nor was a router level defaultNotFoundComponent configured. Consider configuring at least one of these to avoid TanStack Router's overly generic defaultNotFoundComponent (<p>Not Found</p>)
+11:34:51 AM [vite] vite.config.ts changed, restarting server...
+11:34:51 AM [vite] (client) Re-optimizing dependencies because vite config has changed
+11:34:51 AM [vite] server restarted.
+[vite] connected.
+Warning: A notFoundError was encountered on the route with ID "__root__", but a notFoundComponent option was not configured, nor was a router level defaultNotFoundComponent configured. Consider configuring at least one of these to avoid TanStack Router's overly generic defaultNotFoundComponent (<p>Not Found</p>)
+Warning: A notFoundError was encountered on the route with ID "__root__", but a notFoundComponent option was not configured, nor was a router level defaultNotFoundComponent configured. Consider configuring at least one of these to avoid TanStack Router's overly generic defaultNotFoundComponent (<p>Not Found</p>)
+11:36:33 AM [vite] (client) hmr update /src/routes/index.tsx, /src/routes/index.tsx?tsr-split=component
+11:36:33 AM [vite] (ssr) page reload src/routes/index.tsx
+[vite] program reload
+Warning: A notFoundError was encountered on the route with ID "__root__", but a notFoundComponent option was not configured, nor was a router level defaultNotFoundComponent configured. Consider configuring at least one of these to avoid TanStack Router's overly generic defaultNotFoundComponent (<p>Not Found</p>)
+11:36:35 AM [vite] (client) hmr update /src/routes/index.tsx?tsr-split=component
+11:36:35 AM [vite] (ssr) page reload src/endpoint.ts
+[vite] program reload
+11:36:36 AM [vite] (ssr) page reload src/server-helper.ts
+[vite] program reload
+11:36:37 AM [vite] (client) hmr update /src/routes/index.tsx?tsr-split=component
+11:36:37 AM [vite] (ssr) page reload src/endpoint.ts
+[vite] program reload
+11:36:37 AM [vite] (client) hmr update /src/routes/index.tsx, /src/routes/index.tsx?tsr-split=component
+11:36:37 AM [vite] (ssr) page reload src/routes/index.tsx
+11:36:40 AM [vite] (client) hmr update /src/routes/index.tsx?tsr-split=component
+11:36:40 AM [vite] (ssr) page reload src/endpoint.ts
+[vite] program reload
+11:36:40 AM [vite] (client) hmr update /src/routes/index.tsx, /src/routes/index.tsx?tsr-split=component
+11:36:40 AM [vite] (ssr) page reload src/routes/index.tsx
+11:36:42 AM [vite] (client) hmr update /src/routes/index.tsx?tsr-split=component
+11:36:42 AM [vite] (ssr) page reload src/endpoint.ts
+11:36:42 AM [vite] (client) hmr update /src/routes/index.tsx, /src/routes/index.tsx?tsr-split=component
+11:36:42 AM [vite] (ssr) page reload src/routes/index.tsx
+11:36:44 AM [vite] (client) hmr update /src/routes/index.tsx?tsr-split=component
+11:36:44 AM [vite] (ssr) page reload src/endpoint.ts
+11:36:44 AM [vite] (client) hmr update /src/routes/index.tsx, /src/routes/index.tsx?tsr-split=component
+11:36:44 AM [vite] (ssr) page reload src/routes/index.tsx
+11:36:46 AM [vite] (client) page reload src/endpoint.ts
+11:36:46 AM [vite] (ssr) page reload src/endpoint.ts
+11:36:46 AM [vite] (client) page reload src/server-helper.ts
+11:36:46 AM [vite] (ssr) page reload src/server-helper.ts
+11:36:46 AM [vite] (client) hmr update /src/routes/index.tsx, /src/routes/index.tsx?tsr-split=component
+11:36:46 AM [vite] (ssr) page reload src/routes/index.tsx
+[vite] program reload
+Warning: A notFoundError was encountered on the route with ID "__root__", but a notFoundComponent option was not configured, nor was a router level defaultNotFoundComponent configured. Consider configuring at least one of these to avoid TanStack Router's overly generic defaultNotFoundComponent (<p>Not Found</p>)
+11:37:48 AM [vite] (client) hmr update /src/routes/index.tsx?tsr-split=component
+11:37:48 AM [vite] (ssr) page reload src/endpoint.ts
+[vite] program reload
+11:37:48 AM [vite] (client) page reload src/server-helper.ts
+11:37:48 AM [vite] (ssr) page reload src/server-helper.ts
+[vite] program reload
+11:37:49 AM [vite] (client) hmr update /src/routes/index.tsx?tsr-split=component
+11:37:49 AM [vite] (ssr) page reload src/endpoint.ts
+[vite] program reload
+11:37:49 AM [vite] (client) hmr update /src/routes/index.tsx, /src/routes/index.tsx?tsr-split=component
+11:37:49 AM [vite] (ssr) page reload src/routes/index.tsx
+
+Server Fn Error!
+
+TypeError: action is not a function
+    at eval (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@tanstack+start-server-core@1.159.4/node_modules/@tanstack/start-server-core/src/server-functions-handler.ts:147:22)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async eval (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@tanstack+start-server-core@1.159.4/node_modules/@tanstack/start-server-core/src/server-functions-handler.ts:70:17)
+    at async handleServerAction (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@tanstack+start-server-core@1.159.4/node_modules/@tanstack/start-server-core/src/server-functions-handler.ts:68:20)
+    at async next (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@tanstack+start-server-core@1.159.4/node_modules/@tanstack/start-server-core/src/createStartHandler.ts:279:16)
+    at async startRequestResolver (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@tanstack+start-server-core@1.159.4/node_modules/@tanstack/start-server-core/src/createStartHandler.ts:532:21)
+    at async Object.fetch (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@tanstack+react-start@1.159.5_react-dom@19.2.4_react@19.2.4__react@19.2.4_vite-plugin-s_b89613905dc740c3002c17de674e479a/node_modules/@tanstack/react-start/dist/plugin/default-entry/server.ts:16:14)
+    at async file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@tanstack+start-plugin-core@1.159.5_@tanstack+react-router@1.159.5_react-dom@19.2.4_rea_b5a8fa01e4b25c606ca8e80ffc117bc6/node_modules/@tanstack/start-plugin-core/dist/esm/dev-server-plugin/plugin.js:112:30
+
+11:37:52 AM [vite] (client) hmr update /src/routes/index.tsx?tsr-split=component
+11:37:52 AM [vite] (ssr) page reload src/endpoint.ts
+[vite] program reload
+11:37:52 AM [vite] (client) hmr update /src/routes/index.tsx, /src/routes/index.tsx?tsr-split=component
+11:37:52 AM [vite] (ssr) page reload src/routes/index.tsx
+11:37:54 AM [vite] (client) hmr update /src/routes/index.tsx?tsr-split=component
+11:37:54 AM [vite] (ssr) page reload src/endpoint.ts
+11:37:54 AM [vite] (client) hmr update /src/routes/index.tsx, /src/routes/index.tsx?tsr-split=component
+11:37:54 AM [vite] (ssr) page reload src/routes/index.tsx
+11:37:56 AM [vite] (client) hmr update /src/routes/index.tsx?tsr-split=component
+11:37:56 AM [vite] (ssr) page reload src/endpoint.ts
+11:37:56 AM [vite] (client) hmr update /src/routes/index.tsx, /src/routes/index.tsx?tsr-split=component
+11:37:56 AM [vite] (ssr) page reload src/routes/index.tsx
+
+Server Fn Error!
+
+TypeError: action is not a function
+    at eval (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@tanstack+start-server-core@1.159.4/node_modules/@tanstack/start-server-core/src/server-functions-handler.ts:147:22)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async eval (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@tanstack+start-server-core@1.159.4/node_modules/@tanstack/start-server-core/src/server-functions-handler.ts:70:17)
+    at async handleServerAction (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@tanstack+start-server-core@1.159.4/node_modules/@tanstack/start-server-core/src/server-functions-handler.ts:68:20)
+    at async next (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@tanstack+start-server-core@1.159.4/node_modules/@tanstack/start-server-core/src/createStartHandler.ts:279:16)
+    at async startRequestResolver (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@tanstack+start-server-core@1.159.4/node_modules/@tanstack/start-server-core/src/createStartHandler.ts:532:21)
+    at async Object.fetch (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@tanstack+react-start@1.159.5_react-dom@19.2.4_react@19.2.4__react@19.2.4_vite-plugin-s_b89613905dc740c3002c17de674e479a/node_modules/@tanstack/react-start/dist/plugin/default-entry/server.ts:16:14)
+    at async file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@tanstack+start-plugin-core@1.159.5_@tanstack+react-router@1.159.5_react-dom@19.2.4_rea_b5a8fa01e4b25c606ca8e80ffc117bc6/node_modules/@tanstack/start-plugin-core/dist/esm/dev-server-plugin/plugin.js:112:30
+
+11:38:06 AM [vite] (client) page reload src/endpoint.ts
+11:38:06 AM [vite] (ssr) page reload src/endpoint.ts
+[vite] program reload
+11:38:06 AM [vite] (client) page reload src/server-helper.ts
+11:38:06 AM [vite] (ssr) page reload src/server-helper.ts
+11:38:06 AM [vite] (client) hmr update /src/routes/index.tsx, /src/routes/index.tsx?tsr-split=component
+11:38:06 AM [vite] (ssr) page reload src/routes/index.tsx

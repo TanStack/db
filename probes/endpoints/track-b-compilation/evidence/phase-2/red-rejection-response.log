@@ -1,0 +1,18 @@
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: Rejection response leaked source for /src/server-helper.ts
+
+true !== false
+
+    at file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-b-compilation/tests/dev-rejection.mjs:8:9
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: true,
+  expected: false,
+  operator: 'strictEqual'
+}
+
+Node.js v24.5.0

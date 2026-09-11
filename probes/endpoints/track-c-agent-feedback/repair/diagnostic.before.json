@@ -1,0 +1,41 @@
+{
+  "producer": {
+    "name": "SYNTHETIC-endpoints-delivery-fixture",
+    "version": "0.1.0",
+    "analysis": "string fixture only; no database facts"
+  },
+  "source": {
+    "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/repair/todo.fixture.ts",
+    "revision": "9d87f46eb9ee5c5d970f0612c77b6028c9f657125f09251badaf71a63c7deb81",
+    "documentVersion": 1
+  },
+  "status": "fail",
+  "findings": [
+    {
+      "rule": "ENDPOINT_ORDER_NOT_TOTAL",
+      "status": "fail",
+      "severity": "error",
+      "marker": "TRACK_C_INITIAL_17",
+      "message": "Fixture order lacks id tie-breaker. Synthetic assumption: id is a non-null primary key.",
+      "range": {
+        "start": {
+          "line": 1,
+          "character": 14
+        },
+        "end": {
+          "line": 1,
+          "character": 27
+        }
+      },
+      "suggestedReplacement": "['createdAt', 'id']"
+    }
+  ],
+  "rerun": {
+    "command": "/usr/local/bin/node",
+    "args": [
+      "cli.mjs",
+      "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/repair/todo.fixture.ts"
+    ],
+    "cwd": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback"
+  }
+}

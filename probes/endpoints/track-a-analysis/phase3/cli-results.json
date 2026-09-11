@@ -1,0 +1,567 @@
+{
+  "label": "Synthetic snapshot contract test, not running app evidence",
+  "before": {
+    "exit": 1,
+    "result": {
+      "protocol": "endpoints-probe/v2",
+      "endpoint": "listTodos",
+      "status": "violation",
+      "source": {
+        "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli-run-t3yuBe/endpoint.tsx",
+        "sha256": "c37b2bdbd484f3d0d5b301d8fc845a1ebf18b6203618a4b5766cf3da25f91eb3"
+      },
+      "diagnostics": [
+        {
+          "code": "ENDPOINT_ORDER_NOT_TOTAL",
+          "message": "created_at can tie; append the non-null unique id",
+          "range": {
+            "start": {
+              "line": 13,
+              "character": 7
+            },
+            "end": {
+              "line": 13,
+              "character": 35
+            }
+          },
+          "edit": {
+            "start": 632,
+            "end": 632,
+            "text": ", asc(todo.id)",
+            "sourceHash": "c37b2bdbd484f3d0d5b301d8fc845a1ebf18b6203618a4b5766cf3da25f91eb3"
+          }
+        }
+      ],
+      "rerun": [
+        "/usr/local/bin/node",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli.mjs",
+        "check",
+        "--file",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli-run-t3yuBe/endpoint.tsx",
+        "--contract",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli-run-t3yuBe/contract.json",
+        "--snapshot",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli-run-t3yuBe/snapshot.json"
+      ],
+      "check": {
+        "status": "violation",
+        "code": "ENDPOINT_ORDER_NOT_TOTAL",
+        "reason": "created_at can tie; append the non-null unique id",
+        "evidence": {
+          "schemaIdentity": "test-only-disposable",
+          "schemaFingerprint": "b489926566b7ad448726cd8fdff5c5fe1b03c297d81f7c3821ca9715f021589c",
+          "keyIndex": "CREATE UNIQUE INDEX todo_pkey ON public.todo USING btree (id)"
+        }
+      },
+      "provenance": {
+        "instanceId": "test-only-no-app-instance",
+        "capturedAt": "2026-09-10T20:13:46.217Z",
+        "databaseVersion": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit",
+        "endpointSourceHash": "c37b2bdbd484f3d0d5b301d8fc845a1ebf18b6203618a4b5766cf3da25f91eb3",
+        "snapshotHash": "962ea011214ac6bd7bfd9a7563b01b3b094b10006b642c06333a86313fc4d404",
+        "dependencies": [
+          {
+            "role": "schema",
+            "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli-run-t3yuBe/schema.ts",
+            "sha256": "23f7ef592c03fdc961ba4d44bb6baf8acf9250ff5d4c517e5a5768a3968a8a2f"
+          }
+        ]
+      },
+      "runtimeComparison": {
+        "status": "matched",
+        "analyzed": {
+          "sql": "select \"id\", \"text\", \"completed\", \"created_at\" from \"todo\" where \"todo\".\"user_id\" = $1 order by \"todo\".\"created_at\" asc",
+          "params": [
+            "alice"
+          ],
+          "parameterTypes": [
+            "text"
+          ]
+        },
+        "observed": {
+          "sql": "select \"id\", \"text\", \"completed\", \"created_at\" from \"todo\" where \"todo\".\"user_id\" = $1 order by \"todo\".\"created_at\" asc",
+          "params": [
+            "alice"
+          ],
+          "parameterTypes": [
+            "text"
+          ]
+        }
+      },
+      "correspondence": {
+        "sourceHash": "c37b2bdbd484f3d0d5b301d8fc845a1ebf18b6203618a4b5766cf3da25f91eb3",
+        "handler": {
+          "range": [
+            346,
+            664
+          ],
+          "location": {
+            "line": 8,
+            "column": 3
+          }
+        },
+        "fields": [
+          {
+            "name": "id",
+            "range": [
+              455,
+              466
+            ],
+            "location": {
+              "line": 11,
+              "column": 17
+            }
+          },
+          {
+            "name": "text",
+            "range": [
+              468,
+              483
+            ],
+            "location": {
+              "line": 11,
+              "column": 30
+            }
+          },
+          {
+            "name": "completed",
+            "range": [
+              485,
+              510
+            ],
+            "location": {
+              "line": 11,
+              "column": 47
+            }
+          },
+          {
+            "name": "createdAt",
+            "range": [
+              512,
+              537
+            ],
+            "location": {
+              "line": 11,
+              "column": 74
+            }
+          }
+        ],
+        "predicate": {
+          "range": [
+            566,
+            597
+          ],
+          "location": {
+            "line": 13,
+            "column": 8
+          }
+        },
+        "response": {
+          "range": [
+            645,
+            660
+          ],
+          "location": {
+            "line": 15,
+            "column": 12
+          }
+        },
+        "method": "AST selected handler → bounded Drizzle lowering; source offset translation",
+        "unchecked": [
+          "sibling mutation/UI/module side effects",
+          "auth/input validation/serialization semantics"
+        ]
+      },
+      "assumptions": [
+        "Caller-captured local integrated Todo instance snapshot; not deployment attestation",
+        "Named handler only; sibling mutation/UI/module side effects are not analyzed",
+        "SQL result key/order only; no auth, wire or UI order proof"
+      ],
+      "nextStep": "Apply repair, wait for local rebuild, execute listTodos, recapture snapshot and rerun"
+    }
+  },
+  "stale": {
+    "exit": 2,
+    "result": {
+      "protocol": "endpoints-probe/v2",
+      "endpoint": "listTodos",
+      "status": "not checked",
+      "source": {
+        "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli-run-t3yuBe/endpoint.tsx",
+        "sha256": "8446b35b6d1b14f0faac9ade01b6b350bafd0aab6016e52df94d3ca6e1d6ab0b"
+      },
+      "diagnostics": [
+        {
+          "code": "STALE_RUNTIME_SOURCE",
+          "message": "current source differs from the running app compiler receipt; rebuild and capture a new snapshot",
+          "range": {
+            "start": {
+              "line": 0,
+              "character": 0
+            },
+            "end": {
+              "line": 25,
+              "character": 0
+            }
+          }
+        }
+      ],
+      "rerun": [
+        "/usr/local/bin/node",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli.mjs",
+        "check",
+        "--file",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli-run-t3yuBe/endpoint.tsx",
+        "--contract",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli-run-t3yuBe/contract.json",
+        "--snapshot",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli-run-t3yuBe/snapshot.json"
+      ],
+      "check": {
+        "status": "not checked",
+        "code": "STALE_RUNTIME_SOURCE",
+        "reason": "current source differs from the running app compiler receipt; rebuild and capture a new snapshot"
+      },
+      "provenance": null,
+      "runtimeComparison": {
+        "status": "not checked"
+      },
+      "correspondence": null,
+      "assumptions": [
+        "Caller-captured local integrated Todo instance snapshot; not deployment attestation",
+        "Named handler only; sibling mutation/UI/module side effects are not analyzed",
+        "SQL result key/order only; no auth, wire or UI order proof"
+      ],
+      "nextStep": null
+    }
+  },
+  "staleQuery": {
+    "exit": 2,
+    "result": {
+      "protocol": "endpoints-probe/v2",
+      "endpoint": "listTodos",
+      "status": "not checked",
+      "source": {
+        "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli-run-t3yuBe/endpoint.tsx",
+        "sha256": "8446b35b6d1b14f0faac9ade01b6b350bafd0aab6016e52df94d3ca6e1d6ab0b"
+      },
+      "diagnostics": [
+        {
+          "code": "RUNTIME_QUERY_MISMATCH",
+          "message": "analyzed SQL/parameters differ from the captured handler query; execute current listTodos and recapture evidence",
+          "range": {
+            "start": {
+              "line": 13,
+              "character": 7
+            },
+            "end": {
+              "line": 13,
+              "character": 49
+            }
+          }
+        }
+      ],
+      "rerun": [
+        "/usr/local/bin/node",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli.mjs",
+        "check",
+        "--file",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli-run-t3yuBe/endpoint.tsx",
+        "--contract",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli-run-t3yuBe/contract.json",
+        "--snapshot",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli-run-t3yuBe/snapshot.json"
+      ],
+      "check": {
+        "status": "not checked",
+        "code": "RUNTIME_QUERY_MISMATCH",
+        "reason": "analyzed SQL/parameters differ from the captured handler query; execute current listTodos and recapture evidence"
+      },
+      "provenance": {
+        "instanceId": "test-only-no-app-instance",
+        "capturedAt": "2026-09-10T20:13:46.217Z",
+        "databaseVersion": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit",
+        "endpointSourceHash": "8446b35b6d1b14f0faac9ade01b6b350bafd0aab6016e52df94d3ca6e1d6ab0b",
+        "snapshotHash": "c0aa994d8eb030951e15f6d34f1f319656a83255c2c3567f8d29899c92e0f32c",
+        "dependencies": [
+          {
+            "role": "schema",
+            "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli-run-t3yuBe/schema.ts",
+            "sha256": "23f7ef592c03fdc961ba4d44bb6baf8acf9250ff5d4c517e5a5768a3968a8a2f"
+          }
+        ]
+      },
+      "runtimeComparison": {
+        "status": "not checked",
+        "analyzed": {
+          "sql": "select \"id\", \"text\", \"completed\", \"created_at\" from \"todo\" where \"todo\".\"user_id\" = $1 order by \"todo\".\"created_at\" asc, \"todo\".\"id\" asc",
+          "params": [
+            "alice"
+          ],
+          "parameterTypes": [
+            "text"
+          ]
+        },
+        "observed": {
+          "sql": "select \"id\", \"text\", \"completed\", \"created_at\" from \"todo\" where \"todo\".\"user_id\" = $1 order by \"todo\".\"created_at\" asc",
+          "params": [
+            "alice"
+          ],
+          "parameterTypes": [
+            "text"
+          ]
+        }
+      },
+      "correspondence": {
+        "sourceHash": "8446b35b6d1b14f0faac9ade01b6b350bafd0aab6016e52df94d3ca6e1d6ab0b",
+        "handler": {
+          "range": [
+            346,
+            678
+          ],
+          "location": {
+            "line": 8,
+            "column": 3
+          }
+        },
+        "fields": [
+          {
+            "name": "id",
+            "range": [
+              455,
+              466
+            ],
+            "location": {
+              "line": 11,
+              "column": 17
+            }
+          },
+          {
+            "name": "text",
+            "range": [
+              468,
+              483
+            ],
+            "location": {
+              "line": 11,
+              "column": 30
+            }
+          },
+          {
+            "name": "completed",
+            "range": [
+              485,
+              510
+            ],
+            "location": {
+              "line": 11,
+              "column": 47
+            }
+          },
+          {
+            "name": "createdAt",
+            "range": [
+              512,
+              537
+            ],
+            "location": {
+              "line": 11,
+              "column": 74
+            }
+          }
+        ],
+        "predicate": {
+          "range": [
+            566,
+            597
+          ],
+          "location": {
+            "line": 13,
+            "column": 8
+          }
+        },
+        "response": {
+          "range": [
+            659,
+            674
+          ],
+          "location": {
+            "line": 15,
+            "column": 12
+          }
+        },
+        "method": "AST selected handler → bounded Drizzle lowering; source offset translation",
+        "unchecked": [
+          "sibling mutation/UI/module side effects",
+          "auth/input validation/serialization semantics"
+        ]
+      },
+      "assumptions": [
+        "Caller-captured local integrated Todo instance snapshot; not deployment attestation",
+        "Named handler only; sibling mutation/UI/module side effects are not analyzed",
+        "SQL result key/order only; no auth, wire or UI order proof"
+      ],
+      "nextStep": null
+    }
+  },
+  "after": {
+    "exit": 0,
+    "result": {
+      "protocol": "endpoints-probe/v2",
+      "endpoint": "listTodos",
+      "status": "supported",
+      "source": {
+        "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli-run-t3yuBe/endpoint.tsx",
+        "sha256": "8446b35b6d1b14f0faac9ade01b6b350bafd0aab6016e52df94d3ca6e1d6ab0b"
+      },
+      "diagnostics": [],
+      "rerun": [
+        "/usr/local/bin/node",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli.mjs",
+        "check",
+        "--file",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli-run-t3yuBe/endpoint.tsx",
+        "--contract",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli-run-t3yuBe/contract.json",
+        "--snapshot",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli-run-t3yuBe/snapshot.json"
+      ],
+      "check": {
+        "status": "supported",
+        "code": "SQL_KEY_ORDER_SUPPORTED",
+        "key": "id",
+        "totalSqlOrder": true,
+        "evidence": {
+          "schemaIdentity": "test-only-disposable",
+          "schemaFingerprint": "b489926566b7ad448726cd8fdff5c5fe1b03c297d81f7c3821ca9715f021589c",
+          "keyIndex": "CREATE UNIQUE INDEX todo_pkey ON public.todo USING btree (id)"
+        }
+      },
+      "provenance": {
+        "instanceId": "test-only-no-app-instance",
+        "capturedAt": "2026-09-10T20:13:46.217Z",
+        "databaseVersion": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit",
+        "endpointSourceHash": "8446b35b6d1b14f0faac9ade01b6b350bafd0aab6016e52df94d3ca6e1d6ab0b",
+        "snapshotHash": "eddd7a5d3da29cadae402a221e37dd2283c4048d28933b306bce1bd4cbc64d90",
+        "dependencies": [
+          {
+            "role": "schema",
+            "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli-run-t3yuBe/schema.ts",
+            "sha256": "23f7ef592c03fdc961ba4d44bb6baf8acf9250ff5d4c517e5a5768a3968a8a2f"
+          }
+        ]
+      },
+      "runtimeComparison": {
+        "status": "matched",
+        "analyzed": {
+          "sql": "select \"id\", \"text\", \"completed\", \"created_at\" from \"todo\" where \"todo\".\"user_id\" = $1 order by \"todo\".\"created_at\" asc, \"todo\".\"id\" asc",
+          "params": [
+            "alice"
+          ],
+          "parameterTypes": [
+            "text"
+          ]
+        },
+        "observed": {
+          "sql": "select \"id\", \"text\", \"completed\", \"created_at\" from \"todo\" where \"todo\".\"user_id\" = $1 order by \"todo\".\"created_at\" asc, \"todo\".\"id\" asc",
+          "params": [
+            "alice"
+          ],
+          "parameterTypes": [
+            "text"
+          ]
+        }
+      },
+      "correspondence": {
+        "sourceHash": "8446b35b6d1b14f0faac9ade01b6b350bafd0aab6016e52df94d3ca6e1d6ab0b",
+        "handler": {
+          "range": [
+            346,
+            678
+          ],
+          "location": {
+            "line": 8,
+            "column": 3
+          }
+        },
+        "fields": [
+          {
+            "name": "id",
+            "range": [
+              455,
+              466
+            ],
+            "location": {
+              "line": 11,
+              "column": 17
+            }
+          },
+          {
+            "name": "text",
+            "range": [
+              468,
+              483
+            ],
+            "location": {
+              "line": 11,
+              "column": 30
+            }
+          },
+          {
+            "name": "completed",
+            "range": [
+              485,
+              510
+            ],
+            "location": {
+              "line": 11,
+              "column": 47
+            }
+          },
+          {
+            "name": "createdAt",
+            "range": [
+              512,
+              537
+            ],
+            "location": {
+              "line": 11,
+              "column": 74
+            }
+          }
+        ],
+        "predicate": {
+          "range": [
+            566,
+            597
+          ],
+          "location": {
+            "line": 13,
+            "column": 8
+          }
+        },
+        "response": {
+          "range": [
+            659,
+            674
+          ],
+          "location": {
+            "line": 15,
+            "column": 12
+          }
+        },
+        "method": "AST selected handler → bounded Drizzle lowering; source offset translation",
+        "unchecked": [
+          "sibling mutation/UI/module side effects",
+          "auth/input validation/serialization semantics"
+        ]
+      },
+      "assumptions": [
+        "Caller-captured local integrated Todo instance snapshot; not deployment attestation",
+        "Named handler only; sibling mutation/UI/module side effects are not analyzed",
+        "SQL result key/order only; no auth, wire or UI order proof"
+      ],
+      "nextStep": null
+    }
+  }
+}

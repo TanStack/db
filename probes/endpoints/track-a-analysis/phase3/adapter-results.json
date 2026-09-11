@@ -1,0 +1,136 @@
+{
+  "node": "v22.13.1",
+  "results": [
+    {
+      "name": "inline query",
+      "adapted": {
+        "status": "adapted",
+        "endpoint": "listTodos",
+        "input": {
+          "sql": "select \"id\", \"text\", \"completed\", \"created_at\" from \"todo\" where \"todo\".\"user_id\" = $1 order by \"todo\".\"created_at\" asc",
+          "params": [
+            "fixture-user"
+          ],
+          "parameterTypes": [
+            "text"
+          ]
+        },
+        "diagnosticRange": [
+          605,
+          633
+        ],
+        "edit": {
+          "start": 632,
+          "end": 632,
+          "text": ", asc(todo.id)"
+        },
+        "correspondence": {
+          "sourceHash": "c37b2bdbd484f3d0d5b301d8fc845a1ebf18b6203618a4b5766cf3da25f91eb3",
+          "handler": {
+            "range": [
+              346,
+              664
+            ],
+            "location": {
+              "line": 8,
+              "column": 3
+            }
+          },
+          "fields": [
+            {
+              "name": "id",
+              "range": [
+                455,
+                466
+              ],
+              "location": {
+                "line": 11,
+                "column": 17
+              }
+            },
+            {
+              "name": "text",
+              "range": [
+                468,
+                483
+              ],
+              "location": {
+                "line": 11,
+                "column": 30
+              }
+            },
+            {
+              "name": "completed",
+              "range": [
+                485,
+                510
+              ],
+              "location": {
+                "line": 11,
+                "column": 47
+              }
+            },
+            {
+              "name": "createdAt",
+              "range": [
+                512,
+                537
+              ],
+              "location": {
+                "line": 11,
+                "column": 74
+              }
+            }
+          ],
+          "predicate": {
+            "range": [
+              566,
+              597
+            ],
+            "location": {
+              "line": 13,
+              "column": 8
+            }
+          },
+          "response": {
+            "range": [
+              645,
+              660
+            ],
+            "location": {
+              "line": 15,
+              "column": 12
+            }
+          },
+          "method": "AST selected handler → bounded Drizzle lowering; source offset translation",
+          "unchecked": [
+            "sibling mutation/UI/module side effects",
+            "auth/input validation/serialization semantics"
+          ]
+        }
+      },
+      "result": {
+        "status": "violation",
+        "code": "ENDPOINT_ORDER_NOT_TOTAL",
+        "reason": "created_at can tie; append the non-null unique id",
+        "evidence": {
+          "schemaIdentity": "disposable-public-todo",
+          "schemaFingerprint": "b489926566b7ad448726cd8fdff5c5fe1b03c297d81f7c3821ca9715f021589c",
+          "keyIndex": "CREATE UNIQUE INDEX todo_pkey ON public.todo USING btree (id)"
+        }
+      }
+    },
+    {
+      "name": "source mapped repair",
+      "range": [
+        605,
+        633
+      ],
+      "edit": {
+        "start": 632,
+        "end": 632,
+        "text": ", asc(todo.id)"
+      }
+    }
+  ]
+}

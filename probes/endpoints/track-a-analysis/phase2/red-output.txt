@@ -1,0 +1,191 @@
+TAP version 13
+# Subtest: changed deployed selected-column SQL type cannot inherit the key-only pass
+not ok 1 - changed deployed selected-column SQL type cannot inherit the key-only pass
+  ---
+  duration_ms: 24.792916
+  location: '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase2/checker.test.mjs:24:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + undefined
+    - 'SCHEMA_MISMATCH'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'SCHEMA_MISMATCH'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase2/checker.test.mjs:27:9)
+    Test.runInAsyncScope (node:async_hooks:211:14)
+    Test.run (node:internal/test_runner/test:931:25)
+    Test.start (node:internal/test_runner/test:829:17)
+    startSubtestAfterBootstrap (node:internal/test_runner/harness:296:17)
+  ...
+# Subtest: changed selected-column nullability cannot inherit the key-only pass
+not ok 2 - changed selected-column nullability cannot inherit the key-only pass
+  ---
+  duration_ms: 3.956083
+  location: '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase2/checker.test.mjs:30:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + undefined
+    - 'SCHEMA_MISMATCH'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'SCHEMA_MISMATCH'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase2/checker.test.mjs:32:9)
+    Test.runInAsyncScope (node:async_hooks:211:14)
+    Test.run (node:internal/test_runner/test:931:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:629:18)
+    Test.postRun (node:internal/test_runner/test:1042:19)
+    Test.run (node:internal/test_runner/test:970:12)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+# Subtest: raw and Drizzle SQL share semantic output and execute equal rows
+not ok 3 - raw and Drizzle SQL share semantic output and execute equal rows
+  ---
+  duration_ms: 3.862584
+  location: '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase2/checker.test.mjs:34:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + 'not checked'
+    - 'supported'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'supported'
+  actual: 'not checked'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase2/checker.test.mjs:36:9)
+    Test.runInAsyncScope (node:async_hooks:211:14)
+    Test.run (node:internal/test_runner/test:931:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:629:18)
+    Test.postRun (node:internal/test_runner/test:1042:19)
+    Test.run (node:internal/test_runner/test:970:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:629:7)
+  ...
+# Subtest: non-total raw and Drizzle SQL share order failure
+not ok 4 - non-total raw and Drizzle SQL share order failure
+  ---
+  duration_ms: 3.028208
+  location: '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase2/checker.test.mjs:42:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + 'SQL_ADAPTER_MISSING'
+    - 'ENDPOINT_ORDER_NOT_TOTAL'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'ENDPOINT_ORDER_NOT_TOTAL'
+  actual: 'SQL_ADAPTER_MISSING'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase2/checker.test.mjs:45:9)
+    Test.runInAsyncScope (node:async_hooks:211:14)
+    Test.run (node:internal/test_runner/test:931:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:629:18)
+    Test.postRun (node:internal/test_runner/test:1042:19)
+    Test.run (node:internal/test_runner/test:970:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:629:7)
+  ...
+# Subtest: SQL layer rejects relational and output-shape gaps independently of adapters
+not ok 5 - SQL layer rejects relational and output-shape gaps independently of adapters
+  ---
+  duration_ms: 0.217875
+  location: '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase2/checker.test.mjs:48:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + 'SQL_ADAPTER_MISSING'
+    - 'UNSUPPORTED_SQL'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'UNSUPPORTED_SQL'
+  actual: 'SQL_ADAPTER_MISSING'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase2/checker.test.mjs:56:95)
+    Test.runInAsyncScope (node:async_hooks:211:14)
+    Test.run (node:internal/test_runner/test:931:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:629:18)
+    Test.postRun (node:internal/test_runner/test:1042:19)
+    Test.run (node:internal/test_runner/test:970:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:629:7)
+  ...
+# Subtest: parameter type/count and missing schema identity fail explicitly
+not ok 6 - parameter type/count and missing schema identity fail explicitly
+  ---
+  duration_ms: 0.099125
+  location: '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase2/checker.test.mjs:58:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + 'SQL_ADAPTER_MISSING'
+    - 'PARAMETER_CONTEXT_MISMATCH'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'PARAMETER_CONTEXT_MISMATCH'
+  actual: 'SQL_ADAPTER_MISSING'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase2/checker.test.mjs:59:9)
+    Test.runInAsyncScope (node:async_hooks:211:14)
+    Test.run (node:internal/test_runner/test:931:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:629:18)
+    Test.postRun (node:internal/test_runner/test:1042:19)
+    Test.run (node:internal/test_runner/test:970:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:629:7)
+  ...
+# Subtest: actual PG selected-column type change invalidates both adapters
+not ok 7 - actual PG selected-column type change invalidates both adapters
+  ---
+  duration_ms: 7.712292
+  location: '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase2/checker.test.mjs:63:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + 'SQL_ADAPTER_MISSING'
+    - 'SCHEMA_MISMATCH'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'SCHEMA_MISMATCH'
+  actual: 'SQL_ADAPTER_MISSING'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase2/checker.test.mjs:66:9)
+    async Test.run (node:internal/test_runner/test:932:9)
+    async Test.processPendingSubtests (node:internal/test_runner/test:629:7)
+  ...
+1..7
+# tests 7
+# suites 0
+# pass 0
+# fail 7
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1082.867167

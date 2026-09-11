@@ -1,0 +1,12 @@
+{
+  "path": "/Applications/Cursor.app/Contents/Resources/app/out/vs/workbench/workbench.desktop.main.js",
+  "sha256": "c0491e828bb9e80683a47a5c04b913e35795129b4aa7282be229abb8e2da1781",
+  "version": "3.2.21",
+  "observedIdentifiers": [
+    "READ_LINTS",
+    "ReadLintsParams",
+    "ReadLintsResult",
+    "getLinterErrorsForFiles"
+  ],
+  "implementationObservation": "getLinterErrorsForFiles reads markerService for each resource, filters severity Error, maps message/source/range/workspace path. Presence of code is not observed agent receipt or proof that warnings/custom diagnostics enter context."
+}

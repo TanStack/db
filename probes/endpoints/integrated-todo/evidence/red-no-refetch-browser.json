@@ -1,0 +1,7 @@
+{
+  "url": "http://127.0.0.1:4191",
+  "browser": "152.0.7977.83",
+  "checks": [],
+  "status": "FAIL",
+  "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ 'resolved'\n- 'pending'\n"
+}

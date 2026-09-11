@@ -1,0 +1,359 @@
+{
+  "note": "Individual rows are recorded only after their assertions pass; use the test runner exit code and test-output.txt for whole-suite status.",
+  "tests": [
+    {
+      "name": "simple extraction",
+      "status": "pass",
+      "facts": {
+        "status": "checked",
+        "sourceHash": "79155d5bba7da342e54c8810bd05484496f31beb6f5e115063fc8fda764c9268",
+        "fields": [
+          {
+            "name": "id",
+            "range": [
+              326,
+              337
+            ],
+            "location": {
+              "line": 8,
+              "column": 17
+            }
+          },
+          {
+            "name": "text",
+            "range": [
+              339,
+              354
+            ],
+            "location": {
+              "line": 8,
+              "column": 30
+            }
+          },
+          {
+            "name": "completed",
+            "range": [
+              356,
+              381
+            ],
+            "location": {
+              "line": 8,
+              "column": 47
+            }
+          },
+          {
+            "name": "createdAt",
+            "range": [
+              383,
+              408
+            ],
+            "location": {
+              "line": 8,
+              "column": 74
+            }
+          }
+        ],
+        "where": {
+          "column": "userId",
+          "parameter": "user.id",
+          "range": [
+            437,
+            468
+          ],
+          "location": {
+            "line": 10,
+            "column": 8
+          }
+        },
+        "orders": [
+          "createdAt"
+        ],
+        "order": {
+          "range": [
+            476,
+            504
+          ],
+          "location": {
+            "line": 11,
+            "column": 8
+          },
+          "insertAt": 503
+        },
+        "response": {
+          "range": [
+            516,
+            531
+          ],
+          "location": {
+            "line": 12,
+            "column": 12
+          }
+        },
+        "assumptions": [
+          "fixture db/todo/query/requireUser bindings are trusted; auth semantics not checked",
+          "res.json serializes the untransformed row array; wire types not checked"
+        ]
+      },
+      "exported": {
+        "sql": "select \"id\", \"text\", \"completed\", \"created_at\" from \"todo\" where \"todo\".\"user_id\" = $1 order by \"todo\".\"created_at\" asc",
+        "params": [
+          "u"
+        ]
+      },
+      "rows": [
+        {
+          "id": "b",
+          "text": "B",
+          "completed": false,
+          "created_at": "2026-01-01T07:00:00.000Z"
+        },
+        {
+          "id": "a",
+          "text": "A",
+          "completed": false,
+          "created_at": "2026-01-01T07:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "name": "order repair",
+      "status": "pass",
+      "catalog": [
+        {
+          "table_name": "todo",
+          "column_name": "id",
+          "attnotnull": true,
+          "indisunique": true,
+          "indisvalid": true,
+          "indisready": true,
+          "indnkeyatts": 1,
+          "indnatts": 1,
+          "predicate": null,
+          "expressions": null,
+          "definition": "CREATE UNIQUE INDEX todo_pkey ON public.todo USING btree (id)"
+        }
+      ],
+      "before": {
+        "status": "violation",
+        "code": "ENDPOINT_ORDER_NOT_TOTAL",
+        "sourceHash": "79155d5bba7da342e54c8810bd05484496f31beb6f5e115063fc8fda764c9268",
+        "location": {
+          "line": 11,
+          "column": 8
+        },
+        "range": [
+          476,
+          504
+        ],
+        "evidence": "CREATE UNIQUE INDEX todo_pkey ON public.todo USING btree (id)",
+        "edit": {
+          "start": 503,
+          "end": 503,
+          "text": ", asc(todo.id)"
+        }
+      },
+      "after": {
+        "status": "supported",
+        "key": "id",
+        "totalSqlOrder": true,
+        "evidence": "CREATE UNIQUE INDEX todo_pkey ON public.todo USING btree (id)",
+        "visibleUiOrder": "not checked",
+        "stableAcrossUpdates": "not checked"
+      },
+      "exported": {
+        "sql": "select \"id\", \"text\", \"completed\", \"created_at\" from \"todo\" where \"todo\".\"user_id\" = $1 order by \"todo\".\"created_at\" asc, \"todo\".\"id\" asc",
+        "params": [
+          "u"
+        ]
+      }
+    },
+    {
+      "name": "join negative",
+      "status": "pass",
+      "extraction": {
+        "status": "not checked",
+        "reason": "unsupported query chain: innerJoin"
+      },
+      "rows": [
+        {
+          "id": "a"
+        },
+        {
+          "id": "a"
+        }
+      ]
+    },
+    {
+      "name": "nullable_key",
+      "status": "pass",
+      "catalog": [
+        {
+          "table_name": "nullable_key",
+          "column_name": "id",
+          "attnotnull": false,
+          "indisunique": true,
+          "indisvalid": true,
+          "indisready": true,
+          "indnkeyatts": 1,
+          "indnatts": 1,
+          "predicate": null,
+          "expressions": null,
+          "definition": "CREATE UNIQUE INDEX nullable_key_id_key ON public.nullable_key USING btree (id)"
+        }
+      ],
+      "result": {
+        "status": "not checked",
+        "reason": "nullable key"
+      },
+      "rows": [
+        {
+          "id": null
+        },
+        {
+          "id": null
+        }
+      ]
+    },
+    {
+      "name": "partial_key",
+      "status": "pass",
+      "catalog": [
+        {
+          "table_name": "partial_key",
+          "column_name": "id",
+          "attnotnull": true,
+          "indisunique": true,
+          "indisvalid": true,
+          "indisready": true,
+          "indnkeyatts": 1,
+          "indnatts": 1,
+          "predicate": "active",
+          "expressions": null,
+          "definition": "CREATE UNIQUE INDEX partial_id ON public.partial_key USING btree (id) WHERE active"
+        }
+      ],
+      "result": {
+        "status": "not checked",
+        "reason": "partial unique predicate not established"
+      },
+      "rows": [
+        {
+          "id": "a",
+          "active": false
+        },
+        {
+          "id": "a",
+          "active": false
+        }
+      ]
+    },
+    {
+      "name": "missing selected key",
+      "status": "pass",
+      "result": {
+        "status": "not checked",
+        "reason": "result does not select candidate key"
+      }
+    },
+    {
+      "name": "deployed schema mismatch",
+      "status": "pass",
+      "result": {
+        "status": "not checked",
+        "code": "SCHEMA_MISMATCH",
+        "reason": "no unconditional non-null single-column unique index"
+      }
+    },
+    {
+      "name": "unsupported query root",
+      "status": "pass",
+      "result": {
+        "status": "not checked",
+        "reason": "unsupported query root"
+      }
+    },
+    {
+      "name": "unsupported handler statements or control flow",
+      "status": "pass",
+      "result": {
+        "status": "not checked",
+        "reason": "unsupported handler statements or control flow"
+      }
+    },
+    {
+      "name": "response transform or non-direct return",
+      "status": "pass",
+      "result": {
+        "status": "not checked",
+        "reason": "response transform or non-direct return"
+      }
+    },
+    {
+      "name": "operator bindings not established",
+      "status": "pass",
+      "result": {
+        "status": "not checked",
+        "reason": "operator bindings not established"
+      }
+    },
+    {
+      "name": "fixture bindings not established",
+      "status": "pass",
+      "result": {
+        "status": "not checked",
+        "reason": "fixture bindings not established"
+      }
+    },
+    {
+      "name": "unsupported predicate",
+      "status": "pass",
+      "result": {
+        "status": "not checked",
+        "reason": "unsupported predicate"
+      }
+    },
+    {
+      "name": "unsupported ordering",
+      "status": "pass",
+      "result": {
+        "status": "not checked",
+        "reason": "unsupported ordering"
+      }
+    }
+  ],
+  "versions": {
+    "node": "v22.13.1",
+    "postgres": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit",
+    "drizzle-orm": "0.45.1",
+    "@electric-sql/pglite": "0.3.14",
+    "@babel/parser": "7.28.5",
+    "pgsql-ast-parser": "12.0.1"
+  },
+  "sourceSchema": [
+    {
+      "name": "id",
+      "primary": true,
+      "notNull": true
+    },
+    {
+      "name": "text",
+      "primary": false,
+      "notNull": true
+    },
+    {
+      "name": "completed",
+      "primary": false,
+      "notNull": true
+    },
+    {
+      "name": "created_at",
+      "primary": false,
+      "notNull": true
+    },
+    {
+      "name": "user_id",
+      "primary": false,
+      "notNull": true
+    }
+  ]
+}

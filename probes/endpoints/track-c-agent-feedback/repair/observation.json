@@ -1,0 +1,11 @@
+{
+  "provenance": "Coordinator reported fresh subagent result; prompt fork_turns none; exact prompt in prompt.txt",
+  "delivery": "explicit coordinator input plus agent-requested file read, not LSP or native MCP",
+  "originalHash": "9d87f46eb9ee5c5d970f0612c77b6028c9f657125f09251badaf71a63c7deb81",
+  "afterHash": "a933dc7bfc25d31406b094b580555edab773fe7a9a88e38f91be9229701a672b",
+  "edit": "['createdAt'] to ['createdAt', 'id']",
+  "rerunExit": 0,
+  "status": "pass",
+  "findings": [],
+  "limits": "synthetic; single prompted repair; no stale edit refusal test"
+}

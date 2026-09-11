@@ -1,0 +1,9 @@
+{
+  "status": "PASS",
+  "url": "http://127.0.0.1:4192",
+  "query": true,
+  "mutation": true,
+  "source": true,
+  "client": true,
+  "bareCollection": true
+}

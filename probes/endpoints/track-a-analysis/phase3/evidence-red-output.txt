@@ -1,0 +1,90 @@
+TAP version 13
+# Subtest: evidence uses supplied app snapshot rather than creating a second database
+not ok 1 - evidence uses supplied app snapshot rather than creating a second database
+  ---
+  duration_ms: 561.707667
+  location: '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/evidence.test.mjs:15:1'
+  failureType: 'testCodeFailure'
+  error: "Cannot read properties of undefined (reading 'instanceId')"
+  code: 'ERR_TEST_FAILURE'
+  name: 'TypeError'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/evidence.test.mjs:17:71)
+    async Test.run (node:internal/test_runner/test:932:9)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+# Subtest: changed current source rejects stale running-app source receipt
+not ok 2 - changed current source rejects stale running-app source receipt
+  ---
+  duration_ms: 468.827625
+  location: '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/evidence.test.mjs:19:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + undefined
+    - 'STALE_RUNTIME_SOURCE'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'STALE_RUNTIME_SOURCE'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/evidence.test.mjs:20:9)
+    async Test.run (node:internal/test_runner/test:932:9)
+    async Test.processPendingSubtests (node:internal/test_runner/test:629:7)
+  ...
+# Subtest: changed schema source rejects the stale declared dependency
+not ok 3 - changed schema source rejects the stale declared dependency
+  ---
+  duration_ms: 416.048333
+  location: '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/evidence.test.mjs:22:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + undefined
+    - 'STALE_DEPENDENCY'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'STALE_DEPENDENCY'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/evidence.test.mjs:23:9)
+    async Test.run (node:internal/test_runner/test:932:9)
+    async Test.processPendingSubtests (node:internal/test_runner/test:629:7)
+  ...
+# Subtest: expected schema mismatch and missing runtime provenance cannot pass
+not ok 4 - expected schema mismatch and missing runtime provenance cannot pass
+  ---
+  duration_ms: 396.669083
+  location: '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/evidence.test.mjs:25:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + undefined
+    - 'SCHEMA_CONTRACT_MISMATCH'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'SCHEMA_CONTRACT_MISMATCH'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/evidence.test.mjs:26:9)
+    async Test.run (node:internal/test_runner/test:932:9)
+    async Test.processPendingSubtests (node:internal/test_runner/test:629:7)
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 0
+# fail 4
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2731.077042

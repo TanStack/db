@@ -1,0 +1,30 @@
+TAP version 13
+# Subtest: CLI returns changed then cleared full report, stale and execution-error distinctions
+ok 1 - CLI returns changed then cleared full report, stale and execution-error distinctions
+  ---
+  duration_ms: 232.269334
+  ...
+# Subtest: MCP stdio initialize, discover, request changed/clear/stale and distinguish domain failure
+ok 2 - MCP stdio initialize, discover, request changed/clear/stale and distinguish domain failure
+  ---
+  duration_ms: 47.893
+  ...
+# Subtest: LSP wire publishes versioned replacement and clears; fixture consumer rejects stale publish
+ok 3 - LSP wire publishes versioned replacement and clears; fixture consumer rejects stale publish
+  ---
+  duration_ms: 44.604042
+  ...
+# Subtest: rerun from a caller outside the probe executes the returned command and cwd
+ok 4 - rerun from a caller outside the probe executes the returned command and cwd
+  ---
+  duration_ms: 90.916583
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 516.53725

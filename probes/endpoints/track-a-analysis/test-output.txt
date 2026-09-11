@@ -1,0 +1,50 @@
+TAP version 13
+# Subtest: direct handler facts trace to source and builder SQL
+ok 1 - direct handler facts trace to source and builder SQL
+  ---
+  duration_ms: 12.476
+  ...
+# Subtest: non-total order repairs authored location and becomes total
+ok 2 - non-total order repairs authored location and becomes total
+  ---
+  duration_ms: 30.665042
+  ...
+# Subtest: join can duplicate the returned primary key and is not checked
+ok 3 - join can duplicate the returned primary key and is not checked
+  ---
+  duration_ms: 2.715708
+  ...
+# Subtest: nullable unique and partial unique have counterexample rows
+ok 4 - nullable unique and partial unique have counterexample rows
+  ---
+  duration_ms: 5.865125
+  ...
+# Subtest: omitting the selected key cannot certify a keyed result
+ok 5 - omitting the selected key cannot certify a keyed result
+  ---
+  duration_ms: 3.570041
+  ...
+# Subtest: source primary key cannot mask deployed schema drift
+ok 6 - source primary key cannot mask deployed schema drift
+  ---
+  duration_ms: 5.773833
+  ...
+# Subtest: helpers branches transforms and shadowed operators remain explicit gaps
+ok 7 - helpers branches transforms and shadowed operators remain explicit gaps
+  ---
+  duration_ms: 6.10475
+  ...
+# Subtest: write machine-readable evidence
+ok 8 - write machine-readable evidence
+  ---
+  duration_ms: 5.421291
+  ...
+1..8
+# tests 8
+# suites 0
+# pass 8
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1097.472542

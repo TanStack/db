@@ -1,0 +1,288 @@
+[
+  {
+    "stage": "initial",
+    "report": {
+      "protocol": "endpoints-probe/v1",
+      "status": "violation",
+      "source": {
+        "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/phase2/fixtures/todo.test.ts",
+        "sha256": "79155d5bba7da342e54c8810bd05484496f31beb6f5e115063fc8fda764c9268"
+      },
+      "diagnostics": [
+        {
+          "code": "ENDPOINT_ORDER_NOT_TOTAL",
+          "message": "created_at can tie; append the non-null unique id",
+          "range": {
+            "start": {
+              "line": 10,
+              "character": 7
+            },
+            "end": {
+              "line": 10,
+              "character": 35
+            }
+          },
+          "edit": {
+            "start": 503,
+            "end": 503,
+            "text": ", asc(todo.id)",
+            "sourceHash": "79155d5bba7da342e54c8810bd05484496f31beb6f5e115063fc8fda764c9268"
+          }
+        }
+      ],
+      "rerun": [
+        "/usr/local/bin/node",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase2/cli.mjs",
+        "check",
+        "--adapter",
+        "drizzle",
+        "--file",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/phase2/fixtures/todo.test.ts"
+      ],
+      "check": {
+        "status": "violation",
+        "code": "ENDPOINT_ORDER_NOT_TOTAL",
+        "reason": "created_at can tie; append the non-null unique id",
+        "evidence": {
+          "schemaIdentity": "disposable-public-todo",
+          "schemaFingerprint": "b489926566b7ad448726cd8fdff5c5fe1b03c297d81f7c3821ca9715f021589c",
+          "keyIndex": "CREATE UNIQUE INDEX todo_pkey ON public.todo USING btree (id)"
+        }
+      },
+      "assumptions": [
+        "Disposable local PostgreSQL schema; no deployment checked",
+        "Trusted fixture Drizzle bindings or plain SQL; one text parameter placeholder supplied by harness",
+        "SQL result key/order only; no auth, wire, UI or ID immutability claim"
+      ],
+      "versions": {
+        "node": "v22.13.1",
+        "database": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit"
+      },
+      "delivery": {
+        "checkerExit": 1,
+        "adapter": "drizzle",
+        "producer": "Track A actual checker; disposable schema"
+      }
+    }
+  },
+  {
+    "stage": "changed",
+    "report": {
+      "protocol": "endpoints-probe/v1",
+      "status": "violation",
+      "source": {
+        "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/phase2/fixtures/todo.test.ts",
+        "sha256": "c2adbbbc0a026fa0affcacf98934963fe6479448d1e5737158d0a3de90100fe9"
+      },
+      "diagnostics": [
+        {
+          "code": "ENDPOINT_ORDER_NOT_TOTAL",
+          "message": "created_at can tie; append the non-null unique id",
+          "range": {
+            "start": {
+              "line": 12,
+              "character": 7
+            },
+            "end": {
+              "line": 12,
+              "character": 35
+            }
+          },
+          "edit": {
+            "start": 505,
+            "end": 505,
+            "text": ", asc(todo.id)",
+            "sourceHash": "c2adbbbc0a026fa0affcacf98934963fe6479448d1e5737158d0a3de90100fe9"
+          }
+        }
+      ],
+      "rerun": [
+        "/usr/local/bin/node",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase2/cli.mjs",
+        "check",
+        "--adapter",
+        "drizzle",
+        "--file",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/phase2/fixtures/todo.test.ts"
+      ],
+      "check": {
+        "status": "violation",
+        "code": "ENDPOINT_ORDER_NOT_TOTAL",
+        "reason": "created_at can tie; append the non-null unique id",
+        "evidence": {
+          "schemaIdentity": "disposable-public-todo",
+          "schemaFingerprint": "b489926566b7ad448726cd8fdff5c5fe1b03c297d81f7c3821ca9715f021589c",
+          "keyIndex": "CREATE UNIQUE INDEX todo_pkey ON public.todo USING btree (id)"
+        }
+      },
+      "assumptions": [
+        "Disposable local PostgreSQL schema; no deployment checked",
+        "Trusted fixture Drizzle bindings or plain SQL; one text parameter placeholder supplied by harness",
+        "SQL result key/order only; no auth, wire, UI or ID immutability claim"
+      ],
+      "versions": {
+        "node": "v22.13.1",
+        "database": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit"
+      },
+      "delivery": {
+        "checkerExit": 1,
+        "adapter": "drizzle",
+        "producer": "Track A actual checker; disposable schema"
+      }
+    }
+  },
+  {
+    "stage": "stale-request",
+    "report": {
+      "status": "stale",
+      "code": "SOURCE_REVISION_CHANGED",
+      "source": {
+        "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/phase2/fixtures/todo.test.ts",
+        "sha256": "c2adbbbc0a026fa0affcacf98934963fe6479448d1e5737158d0a3de90100fe9"
+      },
+      "expectedRevision": "79155d5bba7da342e54c8810bd05484496f31beb6f5e115063fc8fda764c9268",
+      "diagnostics": []
+    }
+  },
+  {
+    "stage": "stale-edit-refusal",
+    "report": {
+      "status": "not checked",
+      "code": "STALE_DIAGNOSTIC",
+      "source": {
+        "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/phase2/fixtures/todo.test.ts",
+        "sha256": "c2adbbbc0a026fa0affcacf98934963fe6479448d1e5737158d0a3de90100fe9"
+      }
+    }
+  },
+  {
+    "stage": "cleared-exact-rerun-from-root",
+    "report": {
+      "protocol": "endpoints-probe/v1",
+      "status": "supported",
+      "source": {
+        "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/phase2/fixtures/todo.test.ts",
+        "sha256": "93acef36a5fa5ddb402afad0b94b9c83709de2cb74441d89f29e0baf5d2e2e82"
+      },
+      "diagnostics": [],
+      "rerun": [
+        "/usr/local/bin/node",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase2/cli.mjs",
+        "check",
+        "--adapter",
+        "drizzle",
+        "--file",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/phase2/fixtures/todo.test.ts"
+      ],
+      "check": {
+        "status": "supported",
+        "code": "SQL_KEY_ORDER_SUPPORTED",
+        "key": "id",
+        "totalSqlOrder": true,
+        "evidence": {
+          "schemaIdentity": "disposable-public-todo",
+          "schemaFingerprint": "b489926566b7ad448726cd8fdff5c5fe1b03c297d81f7c3821ca9715f021589c",
+          "keyIndex": "CREATE UNIQUE INDEX todo_pkey ON public.todo USING btree (id)"
+        }
+      },
+      "assumptions": [
+        "Disposable local PostgreSQL schema; no deployment checked",
+        "Trusted fixture Drizzle bindings or plain SQL; one text parameter placeholder supplied by harness",
+        "SQL result key/order only; no auth, wire, UI or ID immutability claim"
+      ],
+      "versions": {
+        "node": "v22.13.1",
+        "database": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit"
+      }
+    }
+  },
+  {
+    "stage": "unsupported",
+    "report": {
+      "protocol": "endpoints-probe/v1",
+      "status": "not checked",
+      "source": {
+        "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/phase2/fixtures/todo.test.ts",
+        "sha256": "0a2206ae6179fe3f84fb5384c138de93cf70055edc1622232fc6b0a6b2d23502"
+      },
+      "diagnostics": [
+        {
+          "code": "SOURCE_NOT_CHECKED",
+          "message": "unsupported query chain: limit",
+          "range": {
+            "start": {
+              "line": 0,
+              "character": 0
+            },
+            "end": {
+              "line": 14,
+              "character": 0
+            }
+          }
+        }
+      ],
+      "rerun": [
+        "/usr/local/bin/node",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase2/cli.mjs",
+        "check",
+        "--adapter",
+        "drizzle",
+        "--file",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/phase2/fixtures/todo.test.ts"
+      ],
+      "check": {
+        "status": "not checked",
+        "code": "SOURCE_NOT_CHECKED",
+        "reason": "unsupported query chain: limit"
+      },
+      "assumptions": [
+        "Disposable local PostgreSQL schema; no deployment checked",
+        "Trusted fixture Drizzle bindings or plain SQL; one text parameter placeholder supplied by harness",
+        "SQL result key/order only; no auth, wire, UI or ID immutability claim"
+      ],
+      "versions": {
+        "node": "v22.13.1",
+        "database": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit"
+      },
+      "delivery": {
+        "checkerExit": 2,
+        "adapter": "drizzle",
+        "producer": "Track A actual checker; disposable schema"
+      }
+    }
+  },
+  {
+    "stage": "source-error",
+    "report": {
+      "status": "error",
+      "code": "SOURCE_UNAVAILABLE",
+      "source": {
+        "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/phase2/missing.ts"
+      },
+      "message": "ENOENT: no such file or directory, open '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/phase2/missing.ts'",
+      "diagnostics": []
+    }
+  },
+  {
+    "stage": "injected-read-boundary-race",
+    "report": {
+      "status": "stale",
+      "code": "SOURCE_REVISION_CHANGED_DURING_CHECK",
+      "source": {
+        "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/phase2/fixtures/todo.test.ts",
+        "sha256": "48a3017485a6ce2fbb3b649f1cace72eeb64adb48ad76e2241a7c49588e3196f"
+      },
+      "expectedRevision": "79155d5bba7da342e54c8810bd05484496f31beb6f5e115063fc8fda764c9268",
+      "diagnostics": [],
+      "rerun": [
+        "/usr/local/bin/node",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase2/cli.mjs",
+        "check",
+        "--adapter",
+        "drizzle",
+        "--file",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/phase2/fixtures/todo.test.ts"
+      ]
+    }
+  }
+]

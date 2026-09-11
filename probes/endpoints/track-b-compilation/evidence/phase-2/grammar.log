@@ -1,0 +1,42 @@
+[
+  {
+    "name": "alias",
+    "status": "pass"
+  },
+  {
+    "name": "wrong-import",
+    "status": "pass"
+  },
+  {
+    "name": "let-declaration",
+    "status": "pass"
+  },
+  {
+    "name": "spread",
+    "status": "pass"
+  },
+  {
+    "name": "nested-call",
+    "status": "pass"
+  },
+  {
+    "name": "generated-binding-collision",
+    "status": "pass"
+  },
+  {
+    "name": "binding-alias",
+    "status": "pass"
+  },
+  {
+    "name": "method-this",
+    "status": "pass"
+  },
+  {
+    "name": "duplicate-property",
+    "status": "pass"
+  },
+  {
+    "name": "supported baseline",
+    "status": "pass"
+  }
+]

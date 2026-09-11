@@ -1,0 +1,61 @@
+{
+  "format": "endpoints-analysis-contract/v1",
+  "endpoint": "listTodos",
+  "imports": {
+    "query": "./runtime",
+    "db": "./database.server",
+    "todo": "./database.server",
+    "requireUser": "./database.server",
+    "asc": "drizzle-orm",
+    "eq": "drizzle-orm",
+    "z": "zod"
+  },
+  "schema": {
+    "identity": "integrated-todo-local-disposable",
+    "columns": [
+      {
+        "name": "id",
+        "type": "text",
+        "notNull": true
+      },
+      {
+        "name": "text",
+        "type": "text",
+        "notNull": true
+      },
+      {
+        "name": "completed",
+        "type": "boolean",
+        "notNull": true
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp without time zone",
+        "notNull": true
+      },
+      {
+        "name": "user_id",
+        "type": "text",
+        "notNull": true
+      }
+    ]
+  },
+  "dependencies": [
+    {
+      "role": "schema",
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/database.server.ts",
+      "sha256": "cf3ebb0457706cddfee8919f7b26b9fc611ac4f5caa060ffda4b0f6fe7a9b9eb"
+    },
+    {
+      "role": "runtime",
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/runtime.ts",
+      "sha256": "9fd3b05746ea82d8202b8312628af07061762641a4740b27823a599e34984525"
+    },
+    {
+      "role": "compiler",
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/transform.mjs",
+      "sha256": "1a37bef295df877fa0ddb356e4e66c41ccaccd0978be96792d98e933eb45f239"
+    }
+  ],
+  "scope": "Reviewed five-column Todo fixture; hashes bind known files, not arbitrary schema/module semantic discovery"
+}

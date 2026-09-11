@@ -1,0 +1,31 @@
+{
+  "url": "http://127.0.0.1:4192",
+  "checks": [
+    {
+      "name": "bound ordered collection preserves server order for optimistic rows",
+      "observed": [
+        "order-z",
+        "order-b",
+        "order-c",
+        "order-a"
+      ]
+    },
+    {
+      "name": "optimistic rows sort by creation time then ID despite insertion and key order",
+      "observed": [
+        "order-z",
+        "order-b",
+        "order-c",
+        "order-a"
+      ]
+    },
+    {
+      "name": "reloaded server rows retain creation-time order",
+      "expected": [
+        "2097a16e-71ce-418f-98b1-d82a21654d8b",
+        "0c4455ec-3e7e-4b5f-bf03-71907bd923ad"
+      ]
+    }
+  ],
+  "status": "PASS"
+}

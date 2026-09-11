@@ -1,0 +1,15 @@
+vite v7.3.2 building client environment for production...
+transforming...
+✓ 154 modules transformed.
+✗ Build failed in 393ms
+error during build:
+[endpoints-server-boundary] Could not load /Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-b-compilation/phase3-validation/src/server-helper.ts (imported by src/shared.ts): [plugin endpoints-server-boundary] ENDPOINT_SERVER_IMPORT_IN_CLIENT /Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-b-compilation/phase3-validation/src/server-helper.ts: a server-only module remains reachable in the client after endpoint extraction
+    at getRollupError (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/rollup@4.52.5/node_modules/rollup/dist/es/shared/parseAst.js:401:41)
+    at error (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/rollup@4.52.5/node_modules/rollup/dist/es/shared/parseAst.js:397:42)
+    at Object.error (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/rollup@4.52.5/node_modules/rollup/dist/es/shared/node-entry.js:22104:20)
+    at Object.load (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-b-compilation/node_modules/.vite-temp/vite.config.ts.timestamp-1789071311404-197f7364ca4b5.mjs:65:14)
+    at Object.handler (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/vite@7.3.2_@types+node@25.2.2_jiti@2.6.1_lightningcss@1.30.2_sass@1.90.0_terser@5.44.0_tsx@4.21.0_yaml@2.8.1/node_modules/vite/dist/node/chunks/config.js:33722:13)
+    at file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/rollup@4.52.5/node_modules/rollup/dist/es/shared/node-entry.js:22426:40
+    at async PluginDriver.hookFirstAndGetPlugin (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/rollup@4.52.5/node_modules/rollup/dist/es/shared/node-entry.js:22308:28)
+    at async file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/rollup@4.52.5/node_modules/rollup/dist/es/shared/node-entry.js:21308:33
+    at async Queue.work (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/rollup@4.52.5/node_modules/rollup/dist/es/shared/node-entry.js:22536:32)

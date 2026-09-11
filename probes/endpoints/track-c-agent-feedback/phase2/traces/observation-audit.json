@@ -1,0 +1,196 @@
+{
+  "nativeLsp": [
+    {
+      "session": "claude-native-session.jsonl",
+      "wire": "claude-first-edit-lsp-wire.jsonl",
+      "result": "diagnostic receipt not observed",
+      "published": 1,
+      "toolNames": [
+        "Read",
+        "Edit"
+      ],
+      "clientCapabilities": {
+        "relatedInformation": true,
+        "tagSupport": {
+          "valueSet": [
+            1,
+            2
+          ]
+        },
+        "versionSupport": false,
+        "codeDescriptionSupport": true,
+        "dataSupport": false
+      },
+      "model": "claude-opus-5[1m]",
+      "final": "Edit applied: a blank line was appended to `todo.ts`.\n\nDiagnostic report: no diagnostics received. The Read and Edit tool results contained no automatically-supplied diagnostic messages, and no system reminder with diagnostics followed the edit.",
+      "costUSD": 0.077546,
+      "limits": "Wire publication observed; marker absent in visible model/tool transcript and model reports none. Stream output does not expose every hidden model-context detail. No product-wide absence claim; no idle-wakeup trial."
+    },
+    {
+      "session": "claude-delayed-session.jsonl",
+      "wire": "claude-delayed-lsp-wire.jsonl",
+      "result": "diagnostic receipt not observed",
+      "published": 3,
+      "toolNames": [
+        "Read",
+        "Edit",
+        "Read",
+        "Edit"
+      ],
+      "clientCapabilities": {
+        "relatedInformation": true,
+        "tagSupport": {
+          "valueSet": [
+            1,
+            2
+          ]
+        },
+        "versionSupport": false,
+        "codeDescriptionSupport": true,
+        "dataSupport": false
+      },
+      "model": "claude-opus-5[1m]",
+      "final": "Both edits are done: the comment was prepended and one blank line appended.\n\nDiagnostic report: no diagnostics received. Neither Read call nor either Edit call returned any diagnostic messages, and no system-supplied diagnostics appeared during this task — the Edit results contained only the success confirmations quoted above.",
+      "costUSD": 0.05620800000000001,
+      "limits": "Wire publication observed; marker absent in visible model/tool transcript and model reports none. Stream output does not expose every hidden model-context detail. No product-wide absence claim; no idle-wakeup trial."
+    },
+    {
+      "session": "claude-actual-lsp-session.jsonl",
+      "wire": "claude-actual-lsp-wire.jsonl",
+      "result": "diagnostic receipt not observed",
+      "published": 3,
+      "toolNames": [
+        "Read",
+        "Edit",
+        "Read",
+        "Edit"
+      ],
+      "clientCapabilities": {
+        "relatedInformation": true,
+        "tagSupport": {
+          "valueSet": [
+            1,
+            2
+          ]
+        },
+        "versionSupport": false,
+        "codeDescriptionSupport": true,
+        "dataSupport": false
+      },
+      "model": "claude-opus-5[1m]",
+      "final": "Both edits are complete: the `// diagnostic delivery probe` comment is prepended, and a trailing blank line is appended.\n\nDiagnostics report: **no diagnostics received.** Neither Edit call nor any system message returned diagnostic messages during this task.",
+      "costUSD": 0.051529000000000005,
+      "limits": "Wire publication observed; marker absent in visible model/tool transcript and model reports none. Stream output does not expose every hidden model-context detail. No product-wide absence claim; no idle-wakeup trial."
+    }
+  ],
+  "nativeMcp": [
+    {
+      "session": "claude-real-mcp-session.jsonl",
+      "wire": "mcp-real-wire.jsonl",
+      "result": "observed agent request and status comprehension",
+      "tools": [
+        "mcp__endpoint__check_endpoint",
+        "Read",
+        "Edit",
+        "mcp__endpoint__check_endpoint"
+      ],
+      "states": [
+        {
+          "status": "violation",
+          "source": {
+            "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/phase2/agent/todo.ts",
+            "sha256": "79155d5bba7da342e54c8810bd05484496f31beb6f5e115063fc8fda764c9268"
+          },
+          "diagnostics": [
+            {
+              "code": "ENDPOINT_ORDER_NOT_TOTAL",
+              "message": "created_at can tie; append the non-null unique id",
+              "range": {
+                "start": {
+                  "line": 10,
+                  "character": 7
+                },
+                "end": {
+                  "line": 10,
+                  "character": 35
+                }
+              },
+              "edit": {
+                "start": 503,
+                "end": 503,
+                "text": ", asc(todo.id)",
+                "sourceHash": "79155d5bba7da342e54c8810bd05484496f31beb6f5e115063fc8fda764c9268"
+              }
+            }
+          ],
+          "evidence": {
+            "schemaIdentity": "disposable-public-todo",
+            "schemaFingerprint": "b489926566b7ad448726cd8fdff5c5fe1b03c297d81f7c3821ca9715f021589c",
+            "keyIndex": "CREATE UNIQUE INDEX todo_pkey ON public.todo USING btree (id)"
+          }
+        },
+        {
+          "status": "supported",
+          "source": {
+            "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/phase2/agent/todo.ts",
+            "sha256": "d4d9c62e3f010df5c71afb37c28fa7a6de858188e626931b8f3c19c50fd2099a"
+          },
+          "diagnostics": [],
+          "evidence": {
+            "schemaIdentity": "disposable-public-todo",
+            "schemaFingerprint": "b489926566b7ad448726cd8fdff5c5fe1b03c297d81f7c3821ca9715f021589c",
+            "keyIndex": "CREATE UNIQUE INDEX todo_pkey ON public.todo USING btree (id)"
+          }
+        }
+      ],
+      "model": "claude-opus-5[1m]",
+      "final": "Fixed and re-verified.\n\n**Original rule:** `ENDPOINT_ORDER_NOT_TOTAL` — \"created_at can tie; append the non-null unique id\", at `todo.ts:11` (the `.orderBy` clause).\n\n**Source hash before:** `79155d5bba7da342e54c8810bd05484496f31beb6f5e115063fc8fda764c9268`\n**Source hash after:** `d4d9c62e3f010df5c71afb37c28fa7a6de858188e626931b8f3c19c50fd2099a`\n\n**Edit** (`todo.ts:11`, one line, matching the analyzer's suggested text):\n\n```diff\n-      .orderBy(asc(todo.createdAt))\n+      .orderBy(asc(todo.createdAt), asc(todo.id))\n```\n\n`asc` was already imported, and the selection, `from`, and `where` clauses are untouched, so the query intent is unchanged — the tiebreaker only makes the existing `createdAt` ordering deterministic.\n\n**Resulting status:** `supported` / `SQL_KEY_ORDER_SUPPORTED`, key `id`, `totalSqlOrder: true`, zero diagnostics, checker exit 0. Rerun command: `node .../track-a-analysis/phase2/cli.mjs check --adapter drizzle --file .../todo.ts`.\n\n**Evidence and its limits:** The verdict rests on schema identity `disposable-public-todo` (fingerprint `b489926566b7…`) and the key index `CREATE UNIQUE INDEX todo_pkey ON public.todo USING btree (id)`, checked against a disposable local PostgreSQL 17.5 instance. The analyzer's own stated assumptions bound the claim: no deployed database was inspected; the Drizzle fixture bindings are trusted as-is and the harness supplies one text parameter placeholder; and the result covers SQL result key/order only — it makes no claim about auth, wire format, UI behavior, or ID immutability. In particular, `requireUser`/the `userId` filter were not validated by this check.",
+      "costUSD": 0.121478
+    },
+    {
+      "session": "claude-mcp-states-session.jsonl",
+      "wire": "mcp-states-wire.jsonl",
+      "result": "observed agent request and status comprehension",
+      "tools": [
+        "mcp__endpoint__check_endpoint",
+        "mcp__endpoint__check_endpoint"
+      ],
+      "states": [
+        {
+          "status": "stale",
+          "source": {
+            "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/phase2/states/todo.ts",
+            "sha256": "0a2206ae6179fe3f84fb5384c138de93cf70055edc1622232fc6b0a6b2d23502"
+          },
+          "diagnostics": []
+        },
+        {
+          "status": "not checked",
+          "source": {
+            "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/phase2/states/todo.ts",
+            "sha256": "0a2206ae6179fe3f84fb5384c138de93cf70055edc1622232fc6b0a6b2d23502"
+          },
+          "diagnostics": [
+            {
+              "code": "SOURCE_NOT_CHECKED",
+              "message": "unsupported query chain: limit",
+              "range": {
+                "start": {
+                  "line": 0,
+                  "character": 0
+                },
+                "end": {
+                  "line": 14,
+                  "character": 0
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "model": "claude-opus-5[1m]",
+      "final": "## Call 1 — with `expectedRevision`\n\n- **Status:** `stale`\n- **Diagnostic code:** `SOURCE_REVISION_CHANGED`\n- **Source hash returned:** `0a2206ae6179fe3f84fb5384c138de93cf70055edc1622232fc6b0a6b2d23502`\n- **Expected (my supplied) revision:** `79155d5b…c9268` — did not match\n- **Rule established?** **No.** The analyzer refused the request as stale and never ran. The `diagnostics` array was empty, but that reflects a refusal-before-analysis, not a clean result.\n\n## Call 2 — without `expectedRevision`\n\n- **Status:** `not checked`\n- **Diagnostic code:** `SOURCE_NOT_CHECKED` — \"unsupported query chain: limit\", spanning lines 0–14\n- **Source hash:** `0a2206ae6179fe3f84fb5384c138de93cf70055edc1622232fc6b0a6b2d23502` (same file state as call 1 reported)\n- **Rule established?** **No.** The `check` block confirms `status: \"not checked\"`, `code: \"SOURCE_NOT_CHECKED\"`, and `checkerExit: 2`. The analyzer bailed out on an unsupported `limit` in the query chain rather than reaching a verdict.\n\n## Summary\n\nNeither call established the rule. The two failures are different in kind:\n\n1. The revision hash I passed is out of date — the file at `.../phase2/states/todo.ts` now hashes to `0a2206ae…3502`. That call was rejected before any analysis happened.\n2. Re-running against the current source got past the staleness guard but still produced no verdict: the analyzer does not support the `limit` construct in this query chain, so it declined to check rather than passing or failing it.\n\nSo the current source state is **unverified**, not verified-good. The blocker is the unsupported `limit` chain; the tool's suggested rerun command is recorded in the response, and the `assumptions` note that the check would only cover SQL result key/order against a disposable local PostgreSQL 17.5 schema — no auth, wire, UI, or ID-immutability claims — even if it had succeeded.\n\nI did not read or edit any files, per your instruction, so I can't tell you what the `limit` usage looks like or propose a rewrite. If you want that, let me know and I'll open `todo.ts`.",
+      "costUSD": 0.08286700000000001
+    }
+  ]
+}

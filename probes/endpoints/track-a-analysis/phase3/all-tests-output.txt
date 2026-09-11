@@ -1,0 +1,55 @@
+TAP version 13
+# Subtest: full module query input and siblings enter the same SQL checker
+ok 1 - full module query input and siblings enter the same SQL checker
+  ---
+  duration_ms: 26.94075
+  ...
+# Subtest: repair targets actual query order and preserves sibling mutation comments and JSX
+ok 2 - repair targets actual query order and preserves sibling mutation comments and JSX
+  ---
+  duration_ms: 7.274166
+  ...
+# Subtest: missing or changed import/schema contracts cannot support a query
+ok 3 - missing or changed import/schema contracts cannot support a query
+  ---
+  duration_ms: 2.318709
+  ...
+# Subtest: query spreads and transformed response stay outside supported grammar
+ok 4 - query spreads and transformed response stay outside supported grammar
+  ---
+  duration_ms: 2.175958
+  ...
+# Subtest: CLI repair requires new source receipt and matching query before clear
+ok 5 - CLI repair requires new source receipt and matching query before clear
+  ---
+  duration_ms: 1048.950291
+  ...
+# Subtest: evidence uses supplied app snapshot rather than creating a second database
+ok 6 - evidence uses supplied app snapshot rather than creating a second database
+  ---
+  duration_ms: 11.850791
+  ...
+# Subtest: changed current source rejects stale running-app source receipt
+ok 7 - changed current source rejects stale running-app source receipt
+  ---
+  duration_ms: 0.146208
+  ...
+# Subtest: changed schema source rejects the stale declared dependency
+ok 8 - changed schema source rejects the stale declared dependency
+  ---
+  duration_ms: 1.132041
+  ...
+# Subtest: expected schema mismatch and missing runtime provenance cannot pass
+ok 9 - expected schema mismatch and missing runtime provenance cannot pass
+  ---
+  duration_ms: 0.65825
+  ...
+1..9
+# tests 9
+# suites 0
+# pass 9
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2510.630458

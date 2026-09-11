@@ -1,0 +1,6 @@
+
+  VITE v7.3.2  ready in 1238 ms
+
+  ➜  Local:   http://127.0.0.1:4291/
+[vite] connected.
+Warning: A notFoundError was encountered on the route with ID "__root__", but a notFoundComponent option was not configured, nor was a router level defaultNotFoundComponent configured. Consider configuring at least one of these to avoid TanStack Router's overly generic defaultNotFoundComponent (<p>Not Found</p>)

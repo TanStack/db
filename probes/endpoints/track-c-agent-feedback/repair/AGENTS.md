@@ -1,0 +1,1 @@
+Work only on todo.fixture.ts in this directory. Make the smallest change that fixes the reported problem and preserves the file's intent. Check that the diagnostic still matches the source before editing. Run the diagnostic's rerun command after the change. Treat this as a synthetic delivery exercise; it does not prove query analysis. Report what you changed and the result.

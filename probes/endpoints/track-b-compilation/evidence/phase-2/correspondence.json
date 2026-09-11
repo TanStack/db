@@ -1,0 +1,87 @@
+[
+  {
+    "token": "z.object",
+    "generated": {
+      "line": 6,
+      "column": 74
+    },
+    "authored": {
+      "line": 6,
+      "column": 7
+    },
+    "actual": {
+      "source": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-b-compilation/src/endpoint.ts",
+      "line": 6,
+      "column": 7,
+      "name": null
+    }
+  },
+  {
+    "token": "req.body.text",
+    "generated": {
+      "line": 7,
+      "column": 31
+    },
+    "authored": {
+      "line": 9,
+      "column": 31
+    },
+    "actual": {
+      "source": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-b-compilation/src/endpoint.ts",
+      "line": 9,
+      "column": 31,
+      "name": null
+    }
+  },
+  {
+    "token": "SERVER_ONLY_SENTINEL",
+    "generated": {
+      "line": 7,
+      "column": 54
+    },
+    "authored": {
+      "line": 9,
+      "column": 54
+    },
+    "actual": {
+      "source": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-b-compilation/src/endpoint.ts",
+      "line": 9,
+      "column": 54,
+      "name": null
+    }
+  },
+  {
+    "token": "optimistic:",
+    "generated": {
+      "line": 9,
+      "column": 105
+    },
+    "authored": {
+      "line": 7,
+      "column": 27
+    },
+    "actual": {
+      "source": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-b-compilation/src/endpoint.ts",
+      "line": 7,
+      "column": 27,
+      "name": null
+    }
+  },
+  {
+    "token": "shared(input.text)",
+    "generated": {
+      "line": 9,
+      "column": 118
+    },
+    "authored": {
+      "line": 7,
+      "column": 40
+    },
+    "actual": {
+      "source": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-b-compilation/src/endpoint.ts",
+      "line": 7,
+      "column": 40,
+      "name": null
+    }
+  }
+]

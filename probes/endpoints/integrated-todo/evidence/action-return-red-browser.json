@@ -1,0 +1,7 @@
+{
+  "url": "http://127.0.0.1:4193",
+  "browser": "152.0.7977.83",
+  "checks": [],
+  "status": "FAIL",
+  "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  {\n+   hasPersistencePromise: false,\n+   hasThen: true,\n+   sameTransaction: false\n-   hasPersistencePromise: true,\n-   hasThen: false,\n-   sameTransaction: true\n  }\n"
+}

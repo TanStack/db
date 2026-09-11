@@ -1,0 +1,94 @@
+TAP version 13
+# Subtest: full module query input and siblings enter the same SQL checker
+not ok 1 - full module query input and siblings enter the same SQL checker
+  ---
+  duration_ms: 20.685375
+  location: '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/adapter.test.mjs:12:1'
+  failureType: 'testCodeFailure'
+  error: 'Unexpected token, expected "," (24:14)'
+  code: 'BABEL_PARSER_SYNTAX_ERROR'
+  name: 'SyntaxError'
+  stack: |-
+    constructor (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:367:19)
+    TypeScriptParserMixin.raise (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:6624:19)
+    TypeScriptParserMixin.unexpected (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:6644:16)
+    TypeScriptParserMixin.expect (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:6924:12)
+    TypeScriptParserMixin.tsParseDelimitedListWorker (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:7933:14)
+    TypeScriptParserMixin.tsParseDelimitedList (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:7910:25)
+    TypeScriptParserMixin.tsParseBracketedList (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:7950:25)
+    TypeScriptParserMixin.tsParseTypeParameters (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:8108:24)
+    /Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:9845:29
+    TypeScriptParserMixin.tryParse (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:6932:20)
+  ...
+# Subtest: repair targets actual query order and preserves sibling mutation comments and JSX
+not ok 2 - repair targets actual query order and preserves sibling mutation comments and JSX
+  ---
+  duration_ms: 1.696584
+  location: '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/adapter.test.mjs:20:1'
+  failureType: 'testCodeFailure'
+  error: 'Unexpected token, expected "," (24:14)'
+  code: 'BABEL_PARSER_SYNTAX_ERROR'
+  name: 'SyntaxError'
+  stack: |-
+    constructor (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:367:19)
+    TypeScriptParserMixin.raise (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:6624:19)
+    TypeScriptParserMixin.unexpected (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:6644:16)
+    TypeScriptParserMixin.expect (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:6924:12)
+    TypeScriptParserMixin.tsParseDelimitedListWorker (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:7933:14)
+    TypeScriptParserMixin.tsParseDelimitedList (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:7910:25)
+    TypeScriptParserMixin.tsParseBracketedList (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:7950:25)
+    TypeScriptParserMixin.tsParseTypeParameters (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:8108:24)
+    /Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:9845:29
+    TypeScriptParserMixin.tryParse (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:6932:20)
+  ...
+# Subtest: missing or changed import/schema contracts cannot support a query
+not ok 3 - missing or changed import/schema contracts cannot support a query
+  ---
+  duration_ms: 1.688
+  location: '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/adapter.test.mjs:33:1'
+  failureType: 'testCodeFailure'
+  error: 'Unexpected token, expected "," (24:14)'
+  code: 'BABEL_PARSER_SYNTAX_ERROR'
+  name: 'SyntaxError'
+  stack: |-
+    constructor (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:367:19)
+    TypeScriptParserMixin.raise (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:6624:19)
+    TypeScriptParserMixin.unexpected (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:6644:16)
+    TypeScriptParserMixin.expect (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:6924:12)
+    TypeScriptParserMixin.tsParseDelimitedListWorker (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:7933:14)
+    TypeScriptParserMixin.tsParseDelimitedList (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:7910:25)
+    TypeScriptParserMixin.tsParseBracketedList (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:7950:25)
+    TypeScriptParserMixin.tsParseTypeParameters (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:8108:24)
+    /Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:9845:29
+    TypeScriptParserMixin.tryParse (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:6932:20)
+  ...
+# Subtest: query spreads and transformed response stay outside supported grammar
+not ok 4 - query spreads and transformed response stay outside supported grammar
+  ---
+  duration_ms: 1.026709
+  location: '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/adapter.test.mjs:38:1'
+  failureType: 'testCodeFailure'
+  error: 'Unexpected token, expected "," (24:14)'
+  code: 'BABEL_PARSER_SYNTAX_ERROR'
+  name: 'SyntaxError'
+  stack: |-
+    constructor (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:367:19)
+    TypeScriptParserMixin.raise (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:6624:19)
+    TypeScriptParserMixin.unexpected (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:6644:16)
+    TypeScriptParserMixin.expect (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:6924:12)
+    TypeScriptParserMixin.tsParseDelimitedListWorker (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:7933:14)
+    TypeScriptParserMixin.tsParseDelimitedList (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:7910:25)
+    TypeScriptParserMixin.tsParseBracketedList (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:7950:25)
+    TypeScriptParserMixin.tsParseTypeParameters (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:8108:24)
+    /Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:9845:29
+    TypeScriptParserMixin.tryParse (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@babel/parser/lib/index.js:6932:20)
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 0
+# fail 4
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1127.431416

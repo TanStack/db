@@ -1,0 +1,8 @@
+{
+  "status": "applied",
+  "source": {
+    "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/endpoint.tsx",
+    "sha256": "98226fb0f995ff55785c1fff5a27052bd72f884fb172da73095d72baafa6742b"
+  },
+  "nextStep": "Rebuild app, execute listTodos, recapture snapshot, rerun checker"
+}

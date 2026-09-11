@@ -1,0 +1,83 @@
+{
+  "instanceId": "68c82415-83f2-4695-bcdd-7b4d8865ca33",
+  "endpointSourceHash": "dde5fa4355d745dc0363f1084f3899f2b313a1b9a759fd5f8558d8e5b3088390",
+  "capturedAt": "2026-09-10T21:20:49.041Z",
+  "databaseVersion": {
+    "version": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit"
+  },
+  "expectedSchema": [
+    {
+      "name": "id",
+      "type": "text",
+      "notNull": true
+    },
+    {
+      "name": "text",
+      "type": "text",
+      "notNull": true
+    },
+    {
+      "name": "completed",
+      "type": "boolean",
+      "notNull": true
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp without time zone",
+      "notNull": true
+    },
+    {
+      "name": "user_id",
+      "type": "text",
+      "notNull": true
+    }
+  ],
+  "schema": [
+    {
+      "name": "id",
+      "type": "text",
+      "notNull": true
+    },
+    {
+      "name": "text",
+      "type": "text",
+      "notNull": true
+    },
+    {
+      "name": "completed",
+      "type": "boolean",
+      "notNull": true
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp without time zone",
+      "notNull": true
+    },
+    {
+      "name": "user_id",
+      "type": "text",
+      "notNull": true
+    }
+  ],
+  "indexes": [
+    {
+      "table_name": "todo",
+      "column_name": "id",
+      "attnotnull": true,
+      "indisunique": true,
+      "indisvalid": true,
+      "indisready": true,
+      "indnkeyatts": 1,
+      "indnatts": 1,
+      "predicate": null,
+      "expressions": null,
+      "definition": "CREATE UNIQUE INDEX todo_pkey ON public.todo USING btree (id)"
+    }
+  ],
+  "query": {
+    "sql": "select \"id\", \"text\", \"completed\", \"created_at\" from \"todo\" where \"todo\".\"user_id\" = $1 order by \"todo\".\"created_at\" asc, \"todo\".\"id\" asc",
+    "params": [
+      "alice"
+    ]
+  }
+}

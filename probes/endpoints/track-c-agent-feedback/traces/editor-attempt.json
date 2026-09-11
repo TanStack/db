@@ -1,0 +1,20 @@
+{
+  "status": "not-tested",
+  "attempts": [
+    {
+      "mode": "sandbox",
+      "exit": 0,
+      "observation": "codesign task_name_for_pid error; no editor trace/profile"
+    },
+    {
+      "mode": "scoped host launch",
+      "exit": 0,
+      "observation": "isolated profile created, no editor diagnostic trace emitted"
+    },
+    {
+      "mode": "CUA getApp Visual Studio Code",
+      "observation": "Sky Computer Use service startup request failed"
+    }
+  ],
+  "limits": "No verified editor activation, diagnostic display, getDiagnostics receipt, custom product bridge, or model context; no host settings/hooks installed."
+}

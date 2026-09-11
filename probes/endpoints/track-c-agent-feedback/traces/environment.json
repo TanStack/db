@@ -1,0 +1,17 @@
+{
+  "date": "2026-09-10",
+  "baseRevision": "68366ecaeef6c12a13402b558bd4a68d7519442f",
+  "node": "22.13.1",
+  "codexCLI": "0.144.4",
+  "claudeCodeCLI": "2.1.265",
+  "vscode": "1.133.0",
+  "vscodeCommit": "a5b500951314efd502d07465bd138dfbd714a960",
+  "cursorDesktop": "3.2.21",
+  "ChatGPTAppBundle": "26.901.41123",
+  "copilotCLI": "not found on PATH",
+  "cursorCLI": "cursor-agent --version: 32c684dc5c8a0e364043db77d4e5b9a5dc1e2d3b",
+  "fixtureProducer": "0.1.0",
+  "MCPProtocolSubset": "2025-06-18",
+  "LSPProtocolSubset": "3.17",
+  "packageInstalls": "none"
+}

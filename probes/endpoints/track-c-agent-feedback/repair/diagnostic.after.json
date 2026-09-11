@@ -1,0 +1,22 @@
+{
+  "producer": {
+    "name": "SYNTHETIC-endpoints-delivery-fixture",
+    "version": "0.1.0",
+    "analysis": "string fixture only; no database facts"
+  },
+  "source": {
+    "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/repair/todo.fixture.ts",
+    "revision": "a933dc7bfc25d31406b094b580555edab773fe7a9a88e38f91be9229701a672b",
+    "documentVersion": 1
+  },
+  "status": "pass",
+  "findings": [],
+  "rerun": {
+    "command": "/usr/local/bin/node",
+    "args": [
+      "cli.mjs",
+      "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback/repair/todo.fixture.ts"
+    ],
+    "cwd": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-c-agent-feedback"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "browser": "152.0.7977.83",
+  "query": [
+    {
+      "text": "shared:list",
+      "server": "QUERY_SERVER_ONLY_SENTINEL:DATABASE_ONLY_SENTINEL:alice"
+    }
+  ],
+  "mutation": {
+    "text": "shared:test",
+    "server": "MUTATION_SERVER_ONLY_SENTINEL:DATABASE_ONLY_SENTINEL:AUTH_ONLY_SENTINEL:helper-v1:alice"
+  },
+  "optimistic": "optimistic:shared:test",
+  "requests": [
+    {
+      "status": 200,
+      "url": "http://127.0.0.1:4291/_serverFn/eyJmaWxlIjoiL0BpZC9zcmMvZW5kcG9pbnQudHN4P3Rzcy1zZXJ2ZXJmbi1zcGxpdCIsImV4cG9ydCI6Imxpc3RUb2Rvc1JwY19jcmVhdGVTZXJ2ZXJGbl9oYW5kbGVyIn0",
+      "method": "POST"
+    },
+    {
+      "status": 200,
+      "url": "http://127.0.0.1:4291/_serverFn/eyJmaWxlIjoiL0BpZC9zcmMvZW5kcG9pbnQudHN4P3Rzcy1zZXJ2ZXJmbi1zcGxpdCIsImV4cG9ydCI6ImFkZFRvZG9ScGNfY3JlYXRlU2VydmVyRm5faGFuZGxlciJ9",
+      "method": "POST"
+    }
+  ],
+  "errors": []
+}

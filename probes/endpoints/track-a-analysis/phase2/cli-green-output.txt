@@ -1,0 +1,30 @@
+TAP version 13
+# Subtest: drizzle real diagnostic applies and clears; stale source refuses
+ok 1 - drizzle real diagnostic applies and clears; stale source refuses
+  ---
+  duration_ms: 3069.892833
+  ...
+# Subtest: sql real diagnostic applies and clears; stale source refuses
+ok 2 - sql real diagnostic applies and clears; stale source refuses
+  ---
+  duration_ms: 4133.176542
+  ...
+# Subtest: unsupported source is not represented as cleared
+ok 3 - unsupported source is not represented as cleared
+  ---
+  duration_ms: 1926.360042
+  ...
+# Subtest: raw SQL comment order text cannot redirect the source edit
+ok 4 - raw SQL comment order text cannot redirect the source edit
+  ---
+  duration_ms: 3792.200709
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 12986.429459

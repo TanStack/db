@@ -1,0 +1,30 @@
+[
+  {
+    "name": "retained-helper",
+    "buildExit": 0,
+    "leaked": true,
+    "safe": false,
+    "status": "fail"
+  },
+  {
+    "name": "side-effect-import",
+    "buildExit": 0,
+    "leaked": true,
+    "safe": false,
+    "status": "fail"
+  }
+]
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: Every unsafe import must fail with ENDPOINT_SERVER_IMPORT_IN_CLIENT
+    at file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-b-compilation/tests/safety.mjs:21:52 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: false,
+  expected: true,
+  operator: '=='
+}
+
+Node.js v24.5.0

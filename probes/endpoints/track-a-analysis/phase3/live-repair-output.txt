@@ -1,0 +1,108 @@
+{
+  "url": "http://127.0.0.1:4191",
+  "source": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/endpoint.tsx",
+  "originalHash": "a315c86b2f55d546909b414e17ba9144c6a1aba1130a72039943653a11fc33a4",
+  "commands": [
+    [
+      "/usr/local/bin/node",
+      "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/make-contract.mjs",
+      "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo",
+      "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-contract.json"
+    ],
+    [
+      "/usr/local/bin/node",
+      "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli.mjs",
+      "check",
+      "--file",
+      "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/endpoint.tsx",
+      "--contract",
+      "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-contract.json",
+      "--snapshot",
+      "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-bad-snapshot.json"
+    ],
+    [
+      "/usr/local/bin/node",
+      "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli.mjs",
+      "apply",
+      "--file",
+      "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/endpoint.tsx",
+      "--diagnostic",
+      "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-diagnostic.json"
+    ],
+    [
+      "/usr/local/bin/node",
+      "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli.mjs",
+      "check",
+      "--file",
+      "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/endpoint.tsx",
+      "--contract",
+      "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-contract.json",
+      "--snapshot",
+      "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-bad-snapshot.json"
+    ],
+    [
+      "/usr/local/bin/node",
+      "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli.mjs",
+      "check",
+      "--file",
+      "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/endpoint.tsx",
+      "--contract",
+      "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-contract.json",
+      "--snapshot",
+      "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-fixed-snapshot.json"
+    ],
+    [
+      "/usr/local/bin/node",
+      "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli.mjs",
+      "check",
+      "--file",
+      "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/endpoint.tsx",
+      "--contract",
+      "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-contract.json",
+      "--snapshot",
+      "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-final-snapshot.json"
+    ]
+  ],
+  "steps": [
+    {
+      "name": "introduce missing tie-breaker",
+      "sourceHash": "211e9e86a54be47ade9ca4463915deb93554cb9cd095b1990cc6770d33690401"
+    },
+    {
+      "name": "actual bad handler SQL and schema yield source-located diagnostic",
+      "sourceHash": "211e9e86a54be47ade9ca4463915deb93554cb9cd095b1990cc6770d33690401",
+      "range": {
+        "start": {
+          "line": 12,
+          "character": 46
+        },
+        "end": {
+          "line": 12,
+          "character": 74
+        }
+      },
+      "instanceId": "67d7212d-3d4b-454b-bd74-05aa80f195f3"
+    },
+    {
+      "name": "guarded repair applied; old running snapshot refused",
+      "sourceHash": "98226fb0f995ff55785c1fff5a27052bd72f884fb172da73095d72baafa6742b",
+      "code": "STALE_RUNTIME_SOURCE"
+    },
+    {
+      "name": "new real handler query and snapshot clear diagnostic",
+      "sourceHash": "98226fb0f995ff55785c1fff5a27052bd72f884fb172da73095d72baafa6742b",
+      "instanceId": "29d365f0-8164-448a-a139-bb17d3b5b378"
+    },
+    {
+      "name": "original bytes restored and actual current app rechecked",
+      "sourceHash": "a315c86b2f55d546909b414e17ba9144c6a1aba1130a72039943653a11fc33a4",
+      "instanceId": "6ae26fa5-ee03-426c-a2a6-5a8bc51eadae"
+    }
+  ],
+  "assumptions": [
+    "Read-only browser list query and GET evidence; no mutation/control POST",
+    "Actual local app receipt only; no deployment claim"
+  ],
+  "browserVersion": "152.0.7977.83",
+  "status": "PASS"
+}

@@ -1,0 +1,1 @@
+{"endpoint-probe": {"command": "/usr/local/bin/node", "args": ["${CLAUDE_PLUGIN_ROOT}/server.mjs"], "extensionToLanguage": {".ts": "typescript"}}}

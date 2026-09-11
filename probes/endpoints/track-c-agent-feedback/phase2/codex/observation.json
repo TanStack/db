@@ -1,0 +1,13 @@
+{
+  "provenance": "Coordinator report of fresh actual_diagnostic_repair subagent, fork_turns none",
+  "delivery": "Agent requested actual analyzer CLI through shell tool; no finding supplied in prompt",
+  "originalHash": "79155d5bba7da342e54c8810bd05484496f31beb6f5e115063fc8fda764c9268",
+  "afterHash": "d4d9c62e3f010df5c71afb37c28fa7a6de858188e626931b8f3c19c50fd2099a",
+  "rule": "ENDPOINT_ORDER_NOT_TOTAL",
+  "edit": ", asc(todo.id)",
+  "rerunExit": 0,
+  "status": "supported",
+  "checkCode": "SQL_KEY_ORDER_SUPPORTED",
+  "diagnostics": [],
+  "limits": "Disposable PG schema, trusted fixture bindings, bounded SQL result key/order only"
+}

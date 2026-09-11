@@ -1,0 +1,52 @@
+{
+  "protocol": "endpoints-probe/v2",
+  "endpoint": "listTodos",
+  "status": "not checked",
+  "source": {
+    "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/endpoint.tsx",
+    "sha256": "98226fb0f995ff55785c1fff5a27052bd72f884fb172da73095d72baafa6742b"
+  },
+  "diagnostics": [
+    {
+      "code": "STALE_RUNTIME_SOURCE",
+      "message": "current source differs from the running app compiler receipt; rebuild and capture a new snapshot",
+      "range": {
+        "start": {
+          "line": 0,
+          "character": 0
+        },
+        "end": {
+          "line": 48,
+          "character": 0
+        }
+      }
+    }
+  ],
+  "rerun": [
+    "/usr/local/bin/node",
+    "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli.mjs",
+    "check",
+    "--file",
+    "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/endpoint.tsx",
+    "--contract",
+    "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-contract.json",
+    "--snapshot",
+    "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-bad-snapshot.json"
+  ],
+  "check": {
+    "status": "not checked",
+    "code": "STALE_RUNTIME_SOURCE",
+    "reason": "current source differs from the running app compiler receipt; rebuild and capture a new snapshot"
+  },
+  "provenance": null,
+  "runtimeComparison": {
+    "status": "not checked"
+  },
+  "correspondence": null,
+  "assumptions": [
+    "Caller-captured local integrated Todo instance snapshot; not deployment attestation",
+    "Named handler only; sibling mutation/UI/module side effects are not analyzed",
+    "SQL result key/order only; no auth, wire or UI order proof"
+  ],
+  "nextStep": null
+}

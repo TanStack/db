@@ -1,0 +1,186 @@
+{
+  "protocol": "endpoints-probe/v2",
+  "endpoint": "listTodos",
+  "status": "violation",
+  "source": {
+    "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/endpoint.tsx",
+    "sha256": "211e9e86a54be47ade9ca4463915deb93554cb9cd095b1990cc6770d33690401"
+  },
+  "diagnostics": [
+    {
+      "code": "ENDPOINT_ORDER_NOT_TOTAL",
+      "message": "created_at can tie; append the non-null unique id",
+      "range": {
+        "start": {
+          "line": 12,
+          "character": 46
+        },
+        "end": {
+          "line": 12,
+          "character": 74
+        }
+      },
+      "edit": {
+        "start": 627,
+        "end": 627,
+        "text": ", asc(todo.id)",
+        "sourceHash": "211e9e86a54be47ade9ca4463915deb93554cb9cd095b1990cc6770d33690401"
+      }
+    }
+  ],
+  "rerun": [
+    "/usr/local/bin/node",
+    "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli.mjs",
+    "check",
+    "--file",
+    "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/endpoint.tsx",
+    "--contract",
+    "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-contract.json",
+    "--snapshot",
+    "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-bad-snapshot.json"
+  ],
+  "check": {
+    "status": "violation",
+    "code": "ENDPOINT_ORDER_NOT_TOTAL",
+    "reason": "created_at can tie; append the non-null unique id",
+    "evidence": {
+      "schemaIdentity": "integrated-todo-local-disposable",
+      "schemaFingerprint": "b489926566b7ad448726cd8fdff5c5fe1b03c297d81f7c3821ca9715f021589c",
+      "keyIndex": "CREATE UNIQUE INDEX todo_pkey ON public.todo USING btree (id)"
+    }
+  },
+  "provenance": {
+    "instanceId": "67d7212d-3d4b-454b-bd74-05aa80f195f3",
+    "capturedAt": "2026-09-10T20:18:01.637Z",
+    "databaseVersion": {
+      "version": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit"
+    },
+    "endpointSourceHash": "211e9e86a54be47ade9ca4463915deb93554cb9cd095b1990cc6770d33690401",
+    "snapshotHash": "ec173f5932096382ce60684456f831242ef7ce2c168bdef967208799ffe83ea7",
+    "dependencies": [
+      {
+        "role": "schema",
+        "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/database.server.ts",
+        "sha256": "cf3ebb0457706cddfee8919f7b26b9fc611ac4f5caa060ffda4b0f6fe7a9b9eb"
+      },
+      {
+        "role": "runtime",
+        "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/runtime.ts",
+        "sha256": "9fd3b05746ea82d8202b8312628af07061762641a4740b27823a599e34984525"
+      },
+      {
+        "role": "compiler",
+        "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/transform.mjs",
+        "sha256": "1a37bef295df877fa0ddb356e4e66c41ccaccd0978be96792d98e933eb45f239"
+      }
+    ]
+  },
+  "runtimeComparison": {
+    "status": "matched",
+    "analyzed": {
+      "sql": "select \"id\", \"text\", \"completed\", \"created_at\" from \"todo\" where \"todo\".\"user_id\" = $1 order by \"todo\".\"created_at\" asc",
+      "params": [
+        "alice"
+      ],
+      "parameterTypes": [
+        "text"
+      ]
+    },
+    "observed": {
+      "sql": "select \"id\", \"text\", \"completed\", \"created_at\" from \"todo\" where \"todo\".\"user_id\" = $1 order by \"todo\".\"created_at\" asc",
+      "params": [
+        "alice"
+      ]
+    }
+  },
+  "correspondence": {
+    "sourceHash": "211e9e86a54be47ade9ca4463915deb93554cb9cd095b1990cc6770d33690401",
+    "handler": {
+      "range": [
+        385,
+        656
+      ],
+      "location": {
+        "line": 10,
+        "column": 2
+      }
+    },
+    "fields": [
+      {
+        "name": "id",
+        "range": [
+          476,
+          486
+        ],
+        "location": {
+          "line": 12,
+          "column": 32
+        }
+      },
+      {
+        "name": "text",
+        "range": [
+          487,
+          501
+        ],
+        "location": {
+          "line": 12,
+          "column": 43
+        }
+      },
+      {
+        "name": "completed",
+        "range": [
+          502,
+          526
+        ],
+        "location": {
+          "line": 12,
+          "column": 58
+        }
+      },
+      {
+        "name": "createdAt",
+        "range": [
+          527,
+          551
+        ],
+        "location": {
+          "line": 12,
+          "column": 83
+        }
+      }
+    ],
+    "predicate": {
+      "range": [
+        569,
+        599
+      ],
+      "location": {
+        "line": 13,
+        "column": 16
+      }
+    },
+    "response": {
+      "range": [
+        638,
+        653
+      ],
+      "location": {
+        "line": 14,
+        "column": 10
+      }
+    },
+    "method": "AST selected handler → bounded Drizzle lowering; source offset translation",
+    "unchecked": [
+      "sibling mutation/UI/module side effects",
+      "auth/input validation/serialization semantics"
+    ]
+  },
+  "assumptions": [
+    "Caller-captured local integrated Todo instance snapshot; not deployment attestation",
+    "Named handler only; sibling mutation/UI/module side effects are not analyzed",
+    "SQL result key/order only; no auth, wire or UI order proof"
+  ],
+  "nextStep": "Apply repair, wait for local rebuild, execute listTodos, recapture snapshot and rerun"
+}

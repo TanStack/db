@@ -1,0 +1,10 @@
+{
+  "partial": {
+    "state": "pending",
+    "retained": true,
+    "called": false,
+    "error": "Callback failed"
+  },
+  "status": "FAIL",
+  "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ 'pending'\n- 'failed'\n"
+}

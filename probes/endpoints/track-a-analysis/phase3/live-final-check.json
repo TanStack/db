@@ -1,0 +1,166 @@
+{
+  "protocol": "endpoints-probe/v2",
+  "endpoint": "listTodos",
+  "status": "supported",
+  "source": {
+    "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/endpoint.tsx",
+    "sha256": "a315c86b2f55d546909b414e17ba9144c6a1aba1130a72039943653a11fc33a4"
+  },
+  "diagnostics": [],
+  "rerun": [
+    "/usr/local/bin/node",
+    "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli.mjs",
+    "check",
+    "--file",
+    "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/endpoint.tsx",
+    "--contract",
+    "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-contract.json",
+    "--snapshot",
+    "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-final-snapshot.json"
+  ],
+  "check": {
+    "status": "supported",
+    "code": "SQL_KEY_ORDER_SUPPORTED",
+    "key": "id",
+    "totalSqlOrder": true,
+    "evidence": {
+      "schemaIdentity": "integrated-todo-local-disposable",
+      "schemaFingerprint": "b489926566b7ad448726cd8fdff5c5fe1b03c297d81f7c3821ca9715f021589c",
+      "keyIndex": "CREATE UNIQUE INDEX todo_pkey ON public.todo USING btree (id)"
+    }
+  },
+  "provenance": {
+    "instanceId": "6ae26fa5-ee03-426c-a2a6-5a8bc51eadae",
+    "capturedAt": "2026-09-10T20:18:03.671Z",
+    "databaseVersion": {
+      "version": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit"
+    },
+    "endpointSourceHash": "a315c86b2f55d546909b414e17ba9144c6a1aba1130a72039943653a11fc33a4",
+    "snapshotHash": "c639805fc5ef501b964f58325143a380be589a2ff2b01bcff058a3baaf88e06b",
+    "dependencies": [
+      {
+        "role": "schema",
+        "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/database.server.ts",
+        "sha256": "cf3ebb0457706cddfee8919f7b26b9fc611ac4f5caa060ffda4b0f6fe7a9b9eb"
+      },
+      {
+        "role": "runtime",
+        "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/runtime.ts",
+        "sha256": "9fd3b05746ea82d8202b8312628af07061762641a4740b27823a599e34984525"
+      },
+      {
+        "role": "compiler",
+        "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/transform.mjs",
+        "sha256": "1a37bef295df877fa0ddb356e4e66c41ccaccd0978be96792d98e933eb45f239"
+      }
+    ]
+  },
+  "runtimeComparison": {
+    "status": "matched",
+    "analyzed": {
+      "sql": "select \"id\", \"text\", \"completed\", \"created_at\" from \"todo\" where \"todo\".\"user_id\" = $1 order by \"todo\".\"created_at\" asc, \"todo\".\"id\" asc",
+      "params": [
+        "alice"
+      ],
+      "parameterTypes": [
+        "text"
+      ]
+    },
+    "observed": {
+      "sql": "select \"id\", \"text\", \"completed\", \"created_at\" from \"todo\" where \"todo\".\"user_id\" = $1 order by \"todo\".\"created_at\" asc, \"todo\".\"id\" asc",
+      "params": [
+        "alice"
+      ]
+    }
+  },
+  "correspondence": {
+    "sourceHash": "a315c86b2f55d546909b414e17ba9144c6a1aba1130a72039943653a11fc33a4",
+    "handler": {
+      "range": [
+        385,
+        669
+      ],
+      "location": {
+        "line": 10,
+        "column": 2
+      }
+    },
+    "fields": [
+      {
+        "name": "id",
+        "range": [
+          476,
+          486
+        ],
+        "location": {
+          "line": 12,
+          "column": 32
+        }
+      },
+      {
+        "name": "text",
+        "range": [
+          487,
+          501
+        ],
+        "location": {
+          "line": 12,
+          "column": 43
+        }
+      },
+      {
+        "name": "completed",
+        "range": [
+          502,
+          526
+        ],
+        "location": {
+          "line": 12,
+          "column": 58
+        }
+      },
+      {
+        "name": "createdAt",
+        "range": [
+          527,
+          551
+        ],
+        "location": {
+          "line": 12,
+          "column": 83
+        }
+      }
+    ],
+    "predicate": {
+      "range": [
+        569,
+        599
+      ],
+      "location": {
+        "line": 13,
+        "column": 16
+      }
+    },
+    "response": {
+      "range": [
+        651,
+        666
+      ],
+      "location": {
+        "line": 14,
+        "column": 10
+      }
+    },
+    "method": "AST selected handler → bounded Drizzle lowering; source offset translation",
+    "unchecked": [
+      "sibling mutation/UI/module side effects",
+      "auth/input validation/serialization semantics"
+    ]
+  },
+  "assumptions": [
+    "Caller-captured local integrated Todo instance snapshot; not deployment attestation",
+    "Named handler only; sibling mutation/UI/module side effects are not analyzed",
+    "SQL result key/order only; no auth, wire or UI order proof"
+  ],
+  "nextStep": null
+}

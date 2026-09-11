@@ -1,0 +1,1 @@
+{"node":"v24.5.0","execPath":"/opt/homebrew/Cellar/node/24.5.0/bin/node"}

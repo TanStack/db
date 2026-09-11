@@ -1,0 +1,26 @@
+[
+  {
+    "name": "extra-property",
+    "httpStatus": 500,
+    "sourceLeak": true
+  },
+  {
+    "name": "syntax-error",
+    "httpStatus": 500,
+    "sourceLeak": true
+  }
+]
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: Invalid endpoint errors must not echo server source
+    at file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-b-compilation/tests/dev-grammar-error.mjs:13:52 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: false,
+  expected: true,
+  operator: '=='
+}
+
+Node.js v24.5.0

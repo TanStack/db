@@ -1,0 +1,24 @@
+{
+  "empty": {
+    "focused": true,
+    "listToolsVisible": false,
+    "summaryVisible": false,
+    "clearVisible": false
+  },
+  "blankRejected": true,
+  "enterTrimsCreatesAndClears": true,
+  "focusAfterAdd": true,
+  "editing": {
+    "focused": true,
+    "checkboxVisible": false,
+    "deleteVisible": false,
+    "editingClass": true
+  },
+  "editTrimmed": true,
+  "editNotPersisted": true,
+  "counterStrong": 1,
+  "deleteVisibleWithoutHover": false,
+  "filterURL": "http://127.0.0.1:4191/#/completed",
+  "filterAfterReload": "Completed",
+  "hashRouteSelected": "Completed"
+}

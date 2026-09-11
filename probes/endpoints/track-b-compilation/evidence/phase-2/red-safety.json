@@ -1,0 +1,16 @@
+[
+  {
+    "name": "retained-helper",
+    "buildExit": 0,
+    "leaked": true,
+    "safe": false,
+    "status": "fail"
+  },
+  {
+    "name": "side-effect-import",
+    "buildExit": 0,
+    "leaked": true,
+    "safe": false,
+    "status": "fail"
+  }
+]

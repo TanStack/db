@@ -1,0 +1,12 @@
+[
+  {
+    "name": "extra-property",
+    "httpStatus": 500,
+    "sourceLeak": true
+  },
+  {
+    "name": "syntax-error",
+    "httpStatus": 500,
+    "sourceLeak": true
+  }
+]

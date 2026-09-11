@@ -1,0 +1,142 @@
+{
+  "url": "http://127.0.0.1:4193",
+  "browser": "152.0.7977.83",
+  "checks": [
+    {
+      "name": "action synchronously returns the actual Transaction, not a promise"
+    },
+    {
+      "name": "delayed write/refetch preserves optimistic transaction; correct target",
+      "optimistic": {
+        "state": "persisting",
+        "rows": [
+          {
+            "id": "07c9f105-1de8-407f-a33c-c02386d749dc",
+            "text": "Keep the useful things"
+          }
+        ],
+        "outcome": "pending"
+      },
+      "refetch": {
+        "state": "persisting",
+        "rows": [
+          {
+            "id": "07c9f105-1de8-407f-a33c-c02386d749dc",
+            "text": "Keep the useful things"
+          }
+        ],
+        "outcome": "pending"
+      },
+      "settled": {
+        "state": "completed",
+        "rows": [
+          {
+            "id": "07c9f105-1de8-407f-a33c-c02386d749dc",
+            "text": "Keep the useful things"
+          }
+        ],
+        "outcome": "resolved"
+      },
+      "sql": [
+        {
+          "sql": "select \"id\", \"text\", \"completed\", \"created_at\" from \"todo\" where \"todo\".\"user_id\" = $1 order by \"todo\".\"created_at\" asc, \"todo\".\"id\" asc",
+          "params": [
+            "alice"
+          ]
+        },
+        {
+          "sql": "select \"id\", \"text\", \"completed\", \"created_at\" from \"todo\" where \"todo\".\"user_id\" = $1 order by \"todo\".\"created_at\" asc, \"todo\".\"id\" asc",
+          "params": [
+            "bob"
+          ]
+        },
+        {
+          "sql": "insert into \"todo\" (\"id\", \"text\", \"completed\", \"created_at\", \"user_id\") values ($1, $2, $3, default, $4) returning \"id\", \"text\", \"completed\", \"created_at\"",
+          "params": [
+            "07c9f105-1de8-407f-a33c-c02386d749dc",
+            "Keep the useful things",
+            false,
+            "alice"
+          ]
+        },
+        {
+          "sql": "select \"id\", \"text\", \"completed\", \"created_at\" from \"todo\" where \"todo\".\"user_id\" = $1 order by \"todo\".\"created_at\" asc, \"todo\".\"id\" asc",
+          "params": [
+            "alice"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "server rejection rolls back actual DB transaction",
+      "state": {
+        "state": "failed",
+        "rows": [
+          {
+            "id": "07c9f105-1de8-407f-a33c-c02386d749dc",
+            "text": "Keep the useful things"
+          }
+        ],
+        "outcome": "Fixture write rejected"
+      }
+    },
+    {
+      "name": "post-write refetch failure rejects, rollback hides row until recovery, server write remains",
+      "failure": {
+        "state": "failed",
+        "rows": [
+          {
+            "id": "07c9f105-1de8-407f-a33c-c02386d749dc",
+            "text": "Keep the useful things"
+          }
+        ],
+        "outcome": "Fixture refetch unavailable"
+      },
+      "recovered": {
+        "state": "failed",
+        "rows": [
+          {
+            "id": "07c9f105-1de8-407f-a33c-c02386d749dc",
+            "text": "Keep the useful things"
+          },
+          {
+            "id": "97935f90-ad22-4a7c-95ee-75a9cfb3071a",
+            "text": "Committed, then read failed"
+          }
+        ],
+        "outcome": "Fixture refetch unavailable"
+      }
+    },
+    {
+      "name": "runtime schema rejects empty text and rolls back",
+      "state": {
+        "state": "failed",
+        "rows": [
+          {
+            "id": "07c9f105-1de8-407f-a33c-c02386d749dc",
+            "text": "Keep the useful things"
+          },
+          {
+            "id": "97935f90-ad22-4a7c-95ee-75a9cfb3071a",
+            "text": "Committed, then read failed"
+          }
+        ],
+        "outcome": "[\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"input\",\n      \"text\"\n    ],\n    \"message\": \"Too small: expected string to have >=1 characters\"\n  }\n]"
+      }
+    },
+    {
+      "name": "server persistence survives browser reload",
+      "rows": [
+        {
+          "id": "07c9f105-1de8-407f-a33c-c02386d749dc",
+          "text": "Keep the useful things"
+        },
+        {
+          "id": "97935f90-ad22-4a7c-95ee-75a9cfb3071a",
+          "text": "Committed, then read failed"
+        }
+      ]
+    }
+  ],
+  "status": "PASS"
+}

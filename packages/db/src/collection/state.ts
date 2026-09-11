@@ -1,3 +1,4 @@
+import { compareKeys } from '@tanstack/db-ivm'
 import { deepEquals } from '../utils'
 import { SortedMap } from '../SortedMap'
 import { enrichRowWithVirtualProps } from '../virtual-props.js'
@@ -414,6 +415,10 @@ export class CollectionStateManager<
    */
   public *keys(): IterableIterator<TKey> {
     const { syncedData, optimisticDeletes, optimisticUpserts } = this
+    if (this.config.compare && optimisticUpserts.size > 0) {
+      yield* this.orderedVisibleKeys(this.config.compare)
+      return
+    }
     // Yield keys from synced data, skipping any that are deleted.
     for (const key of syncedData.keys()) {
       if (!optimisticDeletes.has(key)) {
@@ -427,6 +432,44 @@ export class CollectionStateManager<
         // but it's safer to keep it.
         yield key
       }
+    }
+  }
+
+  private *orderedVisibleKeys(
+    compare: (left: TOutput, right: TOutput) => number,
+  ): IterableIterator<TKey> {
+    const compareEntries = (
+      [leftKey, left]: [TKey, TOutput],
+      [rightKey, right]: [TKey, TOutput],
+    ): number => {
+      const result = compare(left, right)
+      // Match SortedMap's key tie-break, including unordered comparator results.
+      return result < 0 ? -1 : result > 0 ? 1 : compareKeys(leftKey, rightKey)
+    }
+    const optimistic = [...this.optimisticUpserts].filter(
+      ([key]) => !this.optimisticDeletes.has(key),
+    )
+    optimistic.sort(compareEntries)
+    let next = 0
+    // Sort only the optimistic overlay, then merge with the sorted synced rows.
+    // Replaced rows must use their optimistic value and position.
+    for (const entry of this.syncedData) {
+      if (
+        this.optimisticDeletes.has(entry[0]) ||
+        this.optimisticUpserts.has(entry[0])
+      ) {
+        continue
+      }
+      while (
+        next < optimistic.length &&
+        compareEntries(optimistic[next]!, entry) < 0
+      ) {
+        yield optimistic[next++]![0]
+      }
+      yield entry[0]
+    }
+    while (next < optimistic.length) {
+      yield optimistic[next++]![0]
     }
   }
 

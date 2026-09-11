@@ -1,0 +1,16 @@
+@tanstack/react-start 1.159.5 /Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@tanstack+react-start@1.159.5_react-dom@19.2.4_react@19.2.4__react@19.2.4_vite-plugin-s_b89613905dc740c3002c17de674e479a/node_modules/@tanstack/react-start
+@tanstack/react-router 1.159.5 /Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@tanstack+react-router@1.159.5_react-dom@19.2.4_react@19.2.4__react@19.2.4/node_modules/@tanstack/react-router
+react 19.2.4 /Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/react@19.2.4/node_modules/react
+react-dom 19.2.4 /Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/react-dom@19.2.4_react@19.2.4/node_modules/react-dom
+zod 4.3.6 /Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/zod@4.3.6/node_modules/zod
+vite 7.3.2 /Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/vite@7.3.2_@types+node@25.2.2_jiti@2.6.1_lightningcss@1.30.2_sass@1.90.0_terser@5.44.0_tsx@4.21.0_yaml@2.8.1/node_modules/vite
+@vitejs/plugin-react 5.1.3 /Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@vitejs+plugin-react@5.1.3_vite@7.3.2_@types+node@25.2.2_jiti@2.6.1_lightningcss@1.30.2_2dffa3fe8551a2acca7af7e8cb72b5c7/node_modules/@vitejs/plugin-react
+typescript 5.9.3 /Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript
+@types/node 25.2.2 /Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@types+node@25.2.2/node_modules/@types/node
+@types/react 19.2.13 /Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@types+react@19.2.13/node_modules/@types/react
+@types/react-dom 19.2.3 /Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@types+react-dom@19.2.3_@types+react@19.2.13/node_modules/@types/react-dom
+playwright 1.60.0 /Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/playwright@1.60.0/node_modules/playwright
+@babel/parser 7.29.0 /Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser
+@babel/generator 7.29.1 /Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+generator@7.29.1/node_modules/@babel/generator
+magic-string 0.30.21 /Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/magic-string@0.30.21/node_modules/magic-string
+@jridgewell/trace-mapping 0.3.31 /Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@jridgewell+trace-mapping@0.3.31/node_modules/@jridgewell/trace-mapping

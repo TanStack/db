@@ -1,0 +1,137 @@
+{
+  "node": "v22.13.1",
+  "results": [
+    {
+      "name": "selected-column type drift",
+      "result": {
+        "status": "not checked",
+        "code": "SCHEMA_MISMATCH",
+        "reason": "observed column names, SQL types or nullability differ from expected fixture schema"
+      }
+    },
+    {
+      "name": "same SQL checker",
+      "result": {
+        "a": {
+          "status": "supported",
+          "code": "SQL_KEY_ORDER_SUPPORTED",
+          "key": "id",
+          "totalSqlOrder": true,
+          "evidence": {
+            "schemaIdentity": "disposable-public-todo",
+            "schemaFingerprint": "b489926566b7ad448726cd8fdff5c5fe1b03c297d81f7c3821ca9715f021589c",
+            "keyIndex": "CREATE UNIQUE INDEX todo_pkey ON public.todo USING btree (id)"
+          }
+        },
+        "b": {
+          "status": "supported",
+          "code": "SQL_KEY_ORDER_SUPPORTED",
+          "key": "id",
+          "totalSqlOrder": true,
+          "evidence": {
+            "schemaIdentity": "disposable-public-todo",
+            "schemaFingerprint": "b489926566b7ad448726cd8fdff5c5fe1b03c297d81f7c3821ca9715f021589c",
+            "keyIndex": "CREATE UNIQUE INDEX todo_pkey ON public.todo USING btree (id)"
+          }
+        },
+        "rows": [
+          {
+            "id": "a",
+            "text": "A",
+            "completed": false,
+            "created_at": "2026-01-01T07:00:00.000Z"
+          },
+          {
+            "id": "b",
+            "text": "B",
+            "completed": false,
+            "created_at": "2026-01-01T07:00:00.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "shared failure",
+      "result": {
+        "status": "violation",
+        "code": "ENDPOINT_ORDER_NOT_TOTAL",
+        "reason": "created_at can tie; append the non-null unique id",
+        "evidence": {
+          "schemaIdentity": "disposable-public-todo",
+          "schemaFingerprint": "b489926566b7ad448726cd8fdff5c5fe1b03c297d81f7c3821ca9715f021589c",
+          "keyIndex": "CREATE UNIQUE INDEX todo_pkey ON public.todo USING btree (id)"
+        }
+      }
+    },
+    {
+      "name": "UNSUPPORTED_SQL",
+      "result": {
+        "status": "not checked",
+        "code": "UNSUPPORTED_SQL",
+        "reason": "only unaliased single-table todo is supported"
+      }
+    },
+    {
+      "name": "UNSUPPORTED_SQL",
+      "result": {
+        "status": "not checked",
+        "code": "UNSUPPORTED_SQL",
+        "reason": "projection must contain unaliased plain known columns"
+      }
+    },
+    {
+      "name": "UNSUPPORTED_SQL",
+      "result": {
+        "status": "not checked",
+        "code": "UNSUPPORTED_SQL",
+        "reason": "only ascending id/created_at column order is checked"
+      }
+    },
+    {
+      "name": "UNSUPPORTED_SQL",
+      "result": {
+        "status": "not checked",
+        "code": "UNSUPPORTED_SQL",
+        "reason": "only user_id = $1 predicate is checked"
+      }
+    },
+    {
+      "name": "RESULT_KEY_MISSING",
+      "result": {
+        "status": "not checked",
+        "code": "RESULT_KEY_MISSING",
+        "reason": "id is not returned under its known name"
+      }
+    },
+    {
+      "name": "actual type drift",
+      "result": [
+        {
+          "name": "id",
+          "type": "text",
+          "notNull": true
+        },
+        {
+          "name": "text",
+          "type": "integer",
+          "notNull": true
+        },
+        {
+          "name": "completed",
+          "type": "boolean",
+          "notNull": true
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp without time zone",
+          "notNull": true
+        },
+        {
+          "name": "user_id",
+          "type": "text",
+          "notNull": true
+        }
+      ]
+    }
+  ]
+}

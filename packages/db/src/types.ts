@@ -681,7 +681,7 @@ export interface BaseCollectionConfig<
   defaultIndexType?: IndexConstructor<TKey>
   /**
    * Optional function to compare two items.
-   * This is used to order the items in the collection.
+   * This orders visible items, including optimistic inserts and updates.
    * @param x The first item to compare
    * @param y The second item to compare
    * @returns A number indicating the order of the items

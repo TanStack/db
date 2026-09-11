@@ -1,0 +1,25 @@
+{
+  "httpStatus": 200,
+  "codeLeaks": false,
+  "inlineMapLeaks": true,
+  "sourcesContent": [
+    454
+  ]
+}
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: Dev client source maps must not embed server bodies
+
+true !== false
+
+    at file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-b-compilation/tests/dev-delivery.mjs:11:45 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: true,
+  expected: false,
+  operator: 'strictEqual'
+}
+
+Node.js v24.5.0

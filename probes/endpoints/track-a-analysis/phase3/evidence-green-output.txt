@@ -1,0 +1,30 @@
+TAP version 13
+# Subtest: evidence uses supplied app snapshot rather than creating a second database
+ok 1 - evidence uses supplied app snapshot rather than creating a second database
+  ---
+  duration_ms: 11.069958
+  ...
+# Subtest: changed current source rejects stale running-app source receipt
+ok 2 - changed current source rejects stale running-app source receipt
+  ---
+  duration_ms: 0.109334
+  ...
+# Subtest: changed schema source rejects the stale declared dependency
+ok 3 - changed schema source rejects the stale declared dependency
+  ---
+  duration_ms: 0.894708
+  ...
+# Subtest: expected schema mismatch and missing runtime provenance cannot pass
+ok 4 - expected schema mismatch and missing runtime provenance cannot pass
+  ---
+  duration_ms: 0.732208
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 898.034166

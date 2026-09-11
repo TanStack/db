@@ -1,0 +1,106 @@
+{
+  "status": "adapted",
+  "endpoint": "listTodos",
+  "input": {
+    "sql": "select \"id\", \"text\", \"completed\", \"created_at\" from \"todo\" where \"todo\".\"user_id\" = $1 order by \"todo\".\"created_at\" asc, \"todo\".\"id\" asc",
+    "params": [
+      "alice"
+    ],
+    "parameterTypes": [
+      "text"
+    ]
+  },
+  "diagnosticRange": [
+    600,
+    641
+  ],
+  "edit": {
+    "start": 640,
+    "end": 640,
+    "text": ", asc(todo.id)"
+  },
+  "correspondence": {
+    "sourceHash": "a315c86b2f55d546909b414e17ba9144c6a1aba1130a72039943653a11fc33a4",
+    "handler": {
+      "range": [
+        385,
+        669
+      ],
+      "location": {
+        "line": 10,
+        "column": 2
+      }
+    },
+    "fields": [
+      {
+        "name": "id",
+        "range": [
+          476,
+          486
+        ],
+        "location": {
+          "line": 12,
+          "column": 32
+        }
+      },
+      {
+        "name": "text",
+        "range": [
+          487,
+          501
+        ],
+        "location": {
+          "line": 12,
+          "column": 43
+        }
+      },
+      {
+        "name": "completed",
+        "range": [
+          502,
+          526
+        ],
+        "location": {
+          "line": 12,
+          "column": 58
+        }
+      },
+      {
+        "name": "createdAt",
+        "range": [
+          527,
+          551
+        ],
+        "location": {
+          "line": 12,
+          "column": 83
+        }
+      }
+    ],
+    "predicate": {
+      "range": [
+        569,
+        599
+      ],
+      "location": {
+        "line": 13,
+        "column": 16
+      }
+    },
+    "response": {
+      "range": [
+        651,
+        666
+      ],
+      "location": {
+        "line": 14,
+        "column": 10
+      }
+    },
+    "method": "AST selected handler → bounded Drizzle lowering; source offset translation",
+    "unchecked": [
+      "sibling mutation/UI/module side effects",
+      "auth/input validation/serialization semantics"
+    ]
+  }
+}

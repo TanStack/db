@@ -1,0 +1,124 @@
+{
+  "node": "v24.5.0",
+  "revision": "68366ecaeef6c12a13402b558bd4a68d7519442f",
+  "packages": {
+    "@tanstack/react-start": {
+      "version": "1.159.5",
+      "path": "/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@tanstack+react-start@1.159.5_react-dom@19.2.4_react@19.2.4__react@19.2.4_vite-plugin-s_b89613905dc740c3002c17de674e479a/node_modules/@tanstack/react-start"
+    },
+    "@tanstack/react-router": {
+      "version": "1.159.5",
+      "path": "/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@tanstack+react-router@1.159.5_react-dom@19.2.4_react@19.2.4__react@19.2.4/node_modules/@tanstack/react-router"
+    },
+    "react": {
+      "version": "19.2.4",
+      "path": "/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/react@19.2.4/node_modules/react"
+    },
+    "react-dom": {
+      "version": "19.2.4",
+      "path": "/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/react-dom@19.2.4_react@19.2.4/node_modules/react-dom"
+    },
+    "zod": {
+      "version": "4.3.6",
+      "path": "/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/zod@4.3.6/node_modules/zod"
+    },
+    "@electric-sql/pglite": {
+      "version": "0.3.14",
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@electric-sql/pglite"
+    },
+    "drizzle-orm": {
+      "version": "0.45.1",
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/drizzle-orm"
+    },
+    "@tanstack/query-core": {
+      "version": "5.90.20",
+      "path": "/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core"
+    },
+    "@tanstack/pacer-lite": {
+      "version": "0.2.1",
+      "path": "/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@tanstack+pacer-lite@0.2.1/node_modules/@tanstack/pacer-lite"
+    },
+    "fractional-indexing": {
+      "version": "3.2.0",
+      "path": "/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fractional-indexing@3.2.0/node_modules/fractional-indexing"
+    },
+    "sorted-btree": {
+      "version": "1.8.1",
+      "path": "/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/sorted-btree@1.8.1/node_modules/sorted-btree"
+    },
+    "use-sync-external-store": {
+      "version": "1.6.0",
+      "path": "/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/use-sync-external-store@1.6.0_react@19.2.4/node_modules/use-sync-external-store"
+    },
+    "vite": {
+      "version": "7.3.2",
+      "path": "/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/vite@7.3.2_@types+node@25.2.2_jiti@2.6.1_lightningcss@1.30.2_sass@1.90.0_terser@5.44.0_tsx@4.21.0_yaml@2.8.1/node_modules/vite"
+    },
+    "@vitejs/plugin-react": {
+      "version": "5.1.3",
+      "path": "/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@vitejs+plugin-react@5.1.3_vite@7.3.2_@types+node@25.2.2_jiti@2.6.1_lightningcss@1.30.2_2dffa3fe8551a2acca7af7e8cb72b5c7/node_modules/@vitejs/plugin-react"
+    },
+    "typescript": {
+      "version": "5.9.3",
+      "path": "/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/typescript@5.9.3/node_modules/typescript"
+    },
+    "@types/node": {
+      "version": "25.2.2",
+      "path": "/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@types+node@25.2.2/node_modules/@types/node"
+    },
+    "@types/react": {
+      "version": "19.2.13",
+      "path": "/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@types+react@19.2.13/node_modules/@types/react"
+    },
+    "@types/react-dom": {
+      "version": "19.2.3",
+      "path": "/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@types+react-dom@19.2.3_@types+react@19.2.13/node_modules/@types/react-dom"
+    },
+    "playwright": {
+      "version": "1.60.0",
+      "path": "/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/playwright@1.60.0/node_modules/playwright"
+    },
+    "@babel/parser": {
+      "version": "7.29.0",
+      "path": "/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+parser@7.29.0/node_modules/@babel/parser"
+    },
+    "@babel/generator": {
+      "version": "7.29.1",
+      "path": "/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+generator@7.29.1/node_modules/@babel/generator"
+    },
+    "magic-string": {
+      "version": "0.30.21",
+      "path": "/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/magic-string@0.30.21/node_modules/magic-string"
+    },
+    "@jridgewell/trace-mapping": {
+      "version": "0.3.31",
+      "path": "/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@jridgewell+trace-mapping@0.3.31/node_modules/@jridgewell/trace-mapping"
+    }
+  },
+  "sourcePackages": {
+    "db": {
+      "version": "0.8.7",
+      "source": "packages/db/src/index.ts"
+    },
+    "db-ivm": {
+      "version": "0.1.19",
+      "source": "packages/db-ivm/src/index.ts"
+    },
+    "query-db-collection": {
+      "version": "1.2.12",
+      "source": "packages/query-db-collection/src/index.ts"
+    },
+    "react-db": {
+      "version": "0.3.7",
+      "source": "packages/react-db/src/index.ts"
+    }
+  },
+  "files": {
+    "transform.mjs": "1a37bef295df877fa0ddb356e4e66c41ccaccd0978be96792d98e933eb45f239",
+    "vite.config.ts": "2e8ac5317af47cb951483402f728178959f8125def519becd6f0f006d67a0b45",
+    "src/endpoint.tsx": "a315c86b2f55d546909b414e17ba9144c6a1aba1130a72039943653a11fc33a4",
+    "src/runtime.ts": "a2571f9729e28ab44c717eb01013a7ee9514f503d9dea151fc73fe774a066425",
+    "src/database.server.ts": "cf3ebb0457706cddfee8919f7b26b9fc611ac4f5caa060ffda4b0f6fe7a9b9eb",
+    "tests/browser.mjs": "49ef3871d830fe899864e50a09cef9e809c56ba7049c05bad34724a0bd9e73df"
+  }
+}

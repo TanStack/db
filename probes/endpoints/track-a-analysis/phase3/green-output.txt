@@ -1,0 +1,30 @@
+TAP version 13
+# Subtest: full module query input and siblings enter the same SQL checker
+ok 1 - full module query input and siblings enter the same SQL checker
+  ---
+  duration_ms: 33.784167
+  ...
+# Subtest: repair targets actual query order and preserves sibling mutation comments and JSX
+ok 2 - repair targets actual query order and preserves sibling mutation comments and JSX
+  ---
+  duration_ms: 6.913834
+  ...
+# Subtest: missing or changed import/schema contracts cannot support a query
+ok 3 - missing or changed import/schema contracts cannot support a query
+  ---
+  duration_ms: 1.807209
+  ...
+# Subtest: query spreads and transformed response stay outside supported grammar
+ok 4 - query spreads and transformed response stay outside supported grammar
+  ---
+  duration_ms: 2.099209
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 922.990875

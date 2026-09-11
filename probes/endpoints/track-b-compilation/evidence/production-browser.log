@@ -1,0 +1,19 @@
+{
+  "browser": "152.0.7977.83",
+  "optimistic": "optimistic:shared:test",
+  "result": {
+    "text": "shared:test",
+    "server": "SERVER_ONLY_SENTINEL:DATABASE_ONLY_SENTINEL:AUTH_ONLY_SENTINEL:helper-v1:handler-v1"
+  },
+  "request": {
+    "url": "http://127.0.0.1:4180/_serverFn/bd1759361a908bdb6e772bdb1210cc7edab30a75447fecb8d58f90104b88028e",
+    "status": 200,
+    "method": "POST"
+  },
+  "invalidInput": {
+    "httpStatus": 200,
+    "schemaError": true,
+    "handlerResult": false
+  },
+  "errors": []
+}

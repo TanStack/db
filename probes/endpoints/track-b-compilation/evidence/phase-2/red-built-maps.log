@@ -1,0 +1,59 @@
+{
+  "clientMaps": 2,
+  "clientLeaks": [
+    "dist/client/assets/index-B0FUfIIH.js.map"
+  ],
+  "correspondence": [
+    {
+      "path": "dist/server/assets/endpoint-BHJgtIao.js",
+      "token": "SERVER_ONLY_SENTINEL",
+      "expected": {
+        "line": 9,
+        "column": 54
+      },
+      "actual": {
+        "source": "../../../src/endpoint.ts?tss-serverfn-split",
+        "line": 9,
+        "column": 53,
+        "name": null
+      },
+      "scope": "exact authored line; bundler literal column may map to token start"
+    },
+    {
+      "path": "dist/client/assets/index-B0FUfIIH.js",
+      "token": "optimistic:",
+      "expected": {
+        "line": 7,
+        "column": 27
+      },
+      "actual": {
+        "source": "../../../src/endpoint.ts",
+        "line": 7,
+        "column": 26,
+        "name": null
+      },
+      "scope": "exact authored line; bundler literal column may map to token start"
+    }
+  ]
+}
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: Published client JS AND maps must exclude server implementation
++ actual - expected
+
++ [
++   'dist/client/assets/index-B0FUfIIH.js.map'
++ ]
+- []
+
+    at file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-b-compilation/tests/built-maps.mjs:27:8 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: [ 'dist/client/assets/index-B0FUfIIH.js.map' ],
+  expected: [],
+  operator: 'deepStrictEqual'
+}
+
+Node.js v24.5.0

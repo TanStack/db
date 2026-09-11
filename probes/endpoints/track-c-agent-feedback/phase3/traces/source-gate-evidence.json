@@ -1,0 +1,31 @@
+{
+  "provenance": "Installed binary embedded JS; byte offsets and aliases version-specific",
+  "spans": {
+    "bashConstant": {
+      "offset": 160081626,
+      "length": 14,
+      "text": "var ze=\"Bash\";"
+    },
+    "powershellConstant": {
+      "offset": 160083978,
+      "length": 20,
+      "text": "var Wt=\"PowerShell\";"
+    },
+    "toolNameMatcher": {
+      "offset": 160471268,
+      "length": 65,
+      "text": "function zt(e,o){return e.name===o||(e.aliases?.includes(o)??!1)}"
+    },
+    "attachmentGate": {
+      "offset": 167521592,
+      "length": 81,
+      "text": "async function Dbs(e){if(!e.options.tools.some((n)=>zt(n,ze)||zt(n,Wt)))return[];"
+    },
+    "emptyPublishHandler": {
+      "offset": 163947485,
+      "length": 109,
+      "text": "if(!U||F.length===0||U.diagnostics.length===0){t(`Skipping empty diagnostics from ${C} for ${N.uri}`);return}"
+    }
+  },
+  "imports": "Diagnostic collector module imports ze and Wt from /$bunfs/root/chunk-b6ptq2pa.js, and zt from /$bunfs/root/chunk-w28jf6t0.js. The source also contains matching Bash/PowerShell constant definitions. Native one-variable trial independently corroborates gate behavior."
+}

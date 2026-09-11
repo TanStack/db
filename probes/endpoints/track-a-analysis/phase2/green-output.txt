@@ -1,0 +1,45 @@
+TAP version 13
+# Subtest: changed deployed selected-column SQL type cannot inherit the key-only pass
+ok 1 - changed deployed selected-column SQL type cannot inherit the key-only pass
+  ---
+  duration_ms: 18.583375
+  ...
+# Subtest: changed selected-column nullability cannot inherit the key-only pass
+ok 2 - changed selected-column nullability cannot inherit the key-only pass
+  ---
+  duration_ms: 1.593417
+  ...
+# Subtest: raw and Drizzle SQL share semantic output and execute equal rows
+ok 3 - raw and Drizzle SQL share semantic output and execute equal rows
+  ---
+  duration_ms: 12.962416
+  ...
+# Subtest: non-total raw and Drizzle SQL share order failure
+ok 4 - non-total raw and Drizzle SQL share order failure
+  ---
+  duration_ms: 3.197041
+  ...
+# Subtest: SQL layer rejects relational and output-shape gaps independently of adapters
+ok 5 - SQL layer rejects relational and output-shape gaps independently of adapters
+  ---
+  duration_ms: 4.658625
+  ...
+# Subtest: parameter type/count and missing schema identity fail explicitly
+ok 6 - parameter type/count and missing schema identity fail explicitly
+  ---
+  duration_ms: 0.182583
+  ...
+# Subtest: actual PG selected-column type change invalidates both adapters
+ok 7 - actual PG selected-column type change invalidates both adapters
+  ---
+  duration_ms: 5.371541
+  ...
+1..7
+# tests 7
+# suites 0
+# pass 7
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1014.452667

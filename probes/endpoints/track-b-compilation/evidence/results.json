@@ -1,0 +1,150 @@
+[
+  {
+    "test": "source",
+    "sha256": "7aa3242ff20ae8b89cc0f4b38f2e0edf692354c175c642a9b8fc373efdb3c65d",
+    "declaration": "addTodo",
+    "generated": "addTodoRpc",
+    "location": "src/endpoint.ts:5-12",
+    "sourceMap": false
+  },
+  {
+    "test": "types",
+    "status": "pass"
+  },
+  {
+    "test": "dev baseline",
+    "status": "pass",
+    "result": {
+      "text": "shared:test",
+      "server": "SERVER_ONLY_SENTINEL:DATABASE_ONLY_SENTINEL:AUTH_ONLY_SENTINEL:helper-v1:handler-v1"
+    },
+    "request": {
+      "url": "http://127.0.0.1:4179/_serverFn/eyJmaWxlIjoiL0BpZC9zcmMvZW5kcG9pbnQudHM_dHNzLXNlcnZlcmZuLXNwbGl0IiwiZXhwb3J0IjoiYWRkVG9kb1JwY19jcmVhdGVTZXJ2ZXJGbl9oYW5kbGVyIn0",
+      "status": 200,
+      "method": "POST",
+      "body": "{\"t\":{\"t\":10,\"i\":0,\"p\":{\"k\":[\"data\"],\"v\":[{\"t\":10,\"i\":1,\"p\":{\"k\":[\"text\"],\"v\":[{\"t\":1,\"s\":\"test\"}]},\"o\":0}]},\"o\":0},\"f\":63,\"m\":[]}",
+      "headers": {
+        "sec-ch-ua-platform": "\"macOS\"",
+        "referer": "http://127.0.0.1:4179/",
+        "sec-ch-ua": "\"Chromium\";v=\"152\", \"Not?A_Brand\";v=\"24\", \"Google Chrome\";v=\"152\"",
+        "sec-ch-ua-mobile": "?0",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/152.0.0.0 Safari/537.36",
+        "accept": "application/x-tss-framed, application/x-ndjson, application/json",
+        "content-type": "application/json",
+        "x-tsr-serverfn": "true"
+      }
+    },
+    "optimistic": "optimistic:shared:test"
+  },
+  {
+    "test": "dev handler edit",
+    "status": "pass",
+    "result": {
+      "text": "shared:test",
+      "server": "SERVER_ONLY_SENTINEL:DATABASE_ONLY_SENTINEL:AUTH_ONLY_SENTINEL:helper-v1:handler-v2"
+    },
+    "request": {
+      "url": "http://127.0.0.1:4179/_serverFn/eyJmaWxlIjoiL0BpZC9zcmMvZW5kcG9pbnQudHM_dHNzLXNlcnZlcmZuLXNwbGl0IiwiZXhwb3J0IjoiYWRkVG9kb1JwY19jcmVhdGVTZXJ2ZXJGbl9oYW5kbGVyIn0",
+      "status": 200,
+      "method": "POST",
+      "body": "{\"t\":{\"t\":10,\"i\":0,\"p\":{\"k\":[\"data\"],\"v\":[{\"t\":10,\"i\":1,\"p\":{\"k\":[\"text\"],\"v\":[{\"t\":1,\"s\":\"test\"}]},\"o\":0}]},\"o\":0},\"f\":63,\"m\":[]}",
+      "headers": {
+        "sec-ch-ua-platform": "\"macOS\"",
+        "referer": "http://127.0.0.1:4179/",
+        "sec-ch-ua": "\"Chromium\";v=\"152\", \"Not?A_Brand\";v=\"24\", \"Google Chrome\";v=\"152\"",
+        "sec-ch-ua-mobile": "?0",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/152.0.0.0 Safari/537.36",
+        "accept": "application/x-tss-framed, application/x-ndjson, application/json",
+        "content-type": "application/json",
+        "x-tsr-serverfn": "true"
+      }
+    },
+    "optimistic": "optimistic:shared:test"
+  },
+  {
+    "test": "dev helper edit",
+    "status": "pass",
+    "result": {
+      "text": "shared:test",
+      "server": "SERVER_ONLY_SENTINEL:DATABASE_ONLY_SENTINEL:AUTH_ONLY_SENTINEL:helper-v2:handler-v2"
+    },
+    "request": {
+      "url": "http://127.0.0.1:4179/_serverFn/eyJmaWxlIjoiL0BpZC9zcmMvZW5kcG9pbnQudHM_dHNzLXNlcnZlcmZuLXNwbGl0IiwiZXhwb3J0IjoiYWRkVG9kb1JwY19jcmVhdGVTZXJ2ZXJGbl9oYW5kbGVyIn0",
+      "status": 200,
+      "method": "POST",
+      "body": "{\"t\":{\"t\":10,\"i\":0,\"p\":{\"k\":[\"data\"],\"v\":[{\"t\":10,\"i\":1,\"p\":{\"k\":[\"text\"],\"v\":[{\"t\":1,\"s\":\"test\"}]},\"o\":0}]},\"o\":0},\"f\":63,\"m\":[]}",
+      "headers": {
+        "sec-ch-ua-platform": "\"macOS\"",
+        "referer": "http://127.0.0.1:4179/",
+        "sec-ch-ua": "\"Chromium\";v=\"152\", \"Not?A_Brand\";v=\"24\", \"Google Chrome\";v=\"152\"",
+        "sec-ch-ua-mobile": "?0",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/152.0.0.0 Safari/537.36",
+        "accept": "application/x-tss-framed, application/x-ndjson, application/json",
+        "content-type": "application/json",
+        "x-tsr-serverfn": "true"
+      }
+    },
+    "optimistic": "optimistic:shared:test"
+  },
+  {
+    "test": "dev rename",
+    "status": "pass",
+    "result": {
+      "text": "shared:test",
+      "server": "SERVER_ONLY_SENTINEL:DATABASE_ONLY_SENTINEL:AUTH_ONLY_SENTINEL:helper-v2:handler-v2"
+    },
+    "request": {
+      "url": "http://127.0.0.1:4179/_serverFn/eyJmaWxlIjoiL0BpZC9zcmMvZW5kcG9pbnQudHM_dHNzLXNlcnZlcmZuLXNwbGl0IiwiZXhwb3J0IjoiY3JlYXRlVG9kb1JwY19jcmVhdGVTZXJ2ZXJGbl9oYW5kbGVyIn0",
+      "status": 200,
+      "method": "POST",
+      "body": "{\"t\":{\"t\":10,\"i\":0,\"p\":{\"k\":[\"data\"],\"v\":[{\"t\":10,\"i\":1,\"p\":{\"k\":[\"text\"],\"v\":[{\"t\":1,\"s\":\"test\"}]},\"o\":0}]},\"o\":0},\"f\":63,\"m\":[]}",
+      "headers": {
+        "sec-ch-ua-platform": "\"macOS\"",
+        "referer": "http://127.0.0.1:4179/",
+        "sec-ch-ua": "\"Chromium\";v=\"152\", \"Not?A_Brand\";v=\"24\", \"Google Chrome\";v=\"152\"",
+        "sec-ch-ua-mobile": "?0",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/152.0.0.0 Safari/537.36",
+        "accept": "application/x-tss-framed, application/x-ndjson, application/json",
+        "content-type": "application/json",
+        "x-tsr-serverfn": "true"
+      }
+    },
+    "optimistic": "optimistic:shared:test"
+  },
+  {
+    "test": "old RPC after rename",
+    "status": "pass",
+    "httpStatus": 500,
+    "body": "{\"t\":25,\"i\":0,\"s\":{\"message\":{\"t\":1,\"s\":\"action is not a function\"}},\"c\":\"$TSR/Error\"}"
+  },
+  {
+    "test": "clean modified build",
+    "status": "pass",
+    "clientSentinels": false,
+    "serverRequired": true,
+    "staleName": false
+  },
+  {
+    "test": "retained helper exclusion",
+    "status": "fail",
+    "expectedCounterexample": true,
+    "leaked": "DATABASE_ONLY_SENTINEL"
+  },
+  {
+    "test": "side-effect import exclusion",
+    "status": "fail",
+    "expectedCounterexample": true,
+    "leaked": "SIDE_EFFECT_ONLY_SENTINEL"
+  },
+  {
+    "test": "old RPC after delete",
+    "status": "pass",
+    "httpStatus": 500,
+    "body": "{\"t\":25,\"i\":0,\"s\":{\"message\":{\"t\":1,\"s\":\"action is not a function\"}},\"c\":\"$TSR/Error\"}"
+  },
+  {
+    "test": "delete declaration dev and clean build",
+    "status": "pass",
+    "staleServerImplementation": false
+  }
+]

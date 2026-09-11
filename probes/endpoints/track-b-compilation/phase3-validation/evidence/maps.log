@@ -1,0 +1,51 @@
+{
+  "clientMaps": 2,
+  "clientLeaks": [],
+  "correspondence": [
+    {
+      "path": "dist/server/assets/endpoint-BaCcRa66.js",
+      "token": "QUERY_SERVER_ONLY_SENTINEL",
+      "expected": {
+        "line": 8,
+        "column": 70
+      },
+      "actual": {
+        "source": "../../../src/endpoint.tsx?tss-serverfn-split",
+        "line": 8,
+        "column": 69,
+        "name": null
+      },
+      "scope": "exact authored line; bundler literal column may map to token start"
+    },
+    {
+      "path": "dist/server/assets/endpoint-BaCcRa66.js",
+      "token": "MUTATION_SERVER_ONLY_SENTINEL",
+      "expected": {
+        "line": 13,
+        "column": 76
+      },
+      "actual": {
+        "source": "../../../src/endpoint.tsx?tss-serverfn-split",
+        "line": 13,
+        "column": 75,
+        "name": null
+      },
+      "scope": "exact authored line; bundler literal column may map to token start"
+    },
+    {
+      "path": "dist/client/assets/index-D-Hoe1yz.js",
+      "token": "optimistic:",
+      "expected": {
+        "line": 12,
+        "column": 27
+      },
+      "actual": {
+        "source": "../../../src/endpoint.tsx",
+        "line": 12,
+        "column": 26,
+        "name": null
+      },
+      "scope": "exact authored line; bundler literal column may map to token start"
+    }
+  ]
+}
