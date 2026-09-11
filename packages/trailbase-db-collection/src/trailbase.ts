@@ -335,12 +335,13 @@ export function trailBaseCollectionOptions<
           // Start listening for subscriptions first. Otherwise, we'd risk a gap
           // between the initial fetch and starting to listen.
           void listen(subscribedReader)
-            .finally(async () => {
+            .finally(() => {
               // A closed stream can still have a final event being processed.
               // Release only after the listener has finished draining it.
               // A processing failure can leave the stream open; cancel it too.
               // Preserve the original failure if the stream already errored.
-              await subscribedReader.cancel().catch(() => undefined)
+              // Error settlement must not wait for transport cleanup.
+              void subscribedReader.cancel().catch(() => undefined)
               subscribedReader.releaseLock()
               if (eventReader === subscribedReader) eventReader = undefined
             })

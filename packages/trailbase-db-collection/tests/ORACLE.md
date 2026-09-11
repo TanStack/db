@@ -14,6 +14,9 @@ The same interpreter runs a fixed corpus and generated histories.
 - Graceful closure drains buffered events before releasing the reader.
 - Processing failures cancel an open source. Terminal paths release readers and
   timers without detached rejections, including same-turn cleanup.
+- A startup processing error rejects readiness before asynchronous cancellation
+  settles. Two fixed controls hold cancellation through later list completion,
+  then resolve or reject it; cleanup cannot turn failed startup into readiness.
 - Cleanup clears the collection. Late work from an old session cannot publish
   into, cancel, or report errors against a replacement session.
 
@@ -25,7 +28,9 @@ ordinary runs add 30 fixed-seed and 50 fresh-seed histories with shrinking.
 This is not a model of pagination, filtered subsets, optimistic mutation
 acknowledgements, service reconnects, or arbitrary event/list interleavings.
 The generated event phase starts after loading; existing loading-time unit
-matrices remain valuable. The on-demand driver calls the core subset boundary,
+matrices and the two held-cancellation startup controls remain valuable. Those
+controls were both RED when listener failure awaited cancellation, and GREEN
+when cancellation was observed separately. The on-demand driver calls the core subset boundary,
 not a live query. Service-backed E2E coverage remains separate.
 
 ## Run and replay

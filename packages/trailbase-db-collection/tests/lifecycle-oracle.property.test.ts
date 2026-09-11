@@ -69,7 +69,7 @@ const invalidValue = -10_000
 
 function source() {
   let controller!: ReadableStreamDefaultController<Event>
-  const cancel = vi.fn()
+  const cancel = vi.fn((): void | Promise<void> => {})
   const stream = new ReadableStream<Event>({
     start(value) {
       controller = value
@@ -358,6 +358,53 @@ const corpus: Array<{ name: string; sessions: Array<Session> }> = [
     sessions: [{ kind }, live(`close`)],
   })),
 ]
+it.each([`resolve`, `reject`] as const)(
+  `rejects startup before stream cancellation can %s`,
+  async (cancellation) => {
+    const active = source()
+    const cancelled = deferred<void>()
+    active.cancel.mockImplementation(() => cancelled.promise)
+    const api = new MockRecordApi<Row>()
+    api.subscribe.mockResolvedValue(active.stream)
+    api.list.mockImplementation(() => active.list.promise)
+    const collection = createCollection(
+      trailBaseCollectionOptions({
+        recordApi: api,
+        getKey: (row: Row) => row.id,
+        syncMode: `eager`,
+        parse: {
+          value: () => {
+            throw failure
+          },
+        },
+        serialize: {},
+      }),
+    )
+    const preload = observe(collection.preload())
+    try {
+      await turn()
+      expect(api.list).toHaveBeenCalledOnce()
+      active.controller.enqueue({ Insert: { id: 1, value: invalidValue } })
+      await turn()
+      expect(active.cancel).toHaveBeenCalledOnce()
+      // Cleanup I/O is still pending, but it cannot postpone the load error.
+      expect(preload.result).toBe(`rejected`)
+      expect(preload.error).toBe(failure)
+      expect(collection.status).toBe(`error`)
+      active.list.resolve({ records: [] })
+      await turn()
+      expect(preload.result).toBe(`rejected`)
+      expect(collection.status).toBe(`error`)
+    } finally {
+      if (cancellation === `resolve`) cancelled.resolve()
+      else cancelled.reject(new Error(`cancel failure`))
+      active.list.resolve({ records: [] })
+      await collection.cleanup()
+      await turn()
+    }
+  },
+)
+
 it.each(
   corpus.flatMap((entry) =>
     ([`eager`, `on-demand`] as const).map((mode) => ({ ...entry, mode })),
