@@ -1,4 +1,4 @@
-# Server pagination investigation
+# RFC 1657 follow-up: server pagination investigation
 
 Base: `origin/main` at `ad043b745` (verified after fetch on 2026-09-10).
 Worktree: `codex-rfc-server-pagination`.
