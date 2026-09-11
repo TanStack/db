@@ -1,4 +1,4 @@
-# TrailBase stream termination
+# RFC 1657 follow-up: TrailBase stream termination
 
 Base: origin/main ad043b745. This is the narrow error-handling bug found while
 examining #1521; it does not implement that PR's polling policy.
