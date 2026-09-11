@@ -624,6 +624,108 @@ describe(`Operators`, () => {
       expect(latestMessage.getInner()).toEqual(expectedResult)
     })
 
+    test(`min and max reduce keep 0, 0n, and empty string as extremes`, () => {
+      const minNum = min<number>()
+      const maxNum = max<number>()
+      const minStr = min<string>()
+      const minBig = min<bigint>()
+      const maxBig = max<bigint>()
+
+      expect(
+        minNum.reduce([
+          [5, 1],
+          [0, 1],
+        ]),
+      ).toBe(0)
+      expect(
+        minNum.reduce([
+          [0, 1],
+          [3, 1],
+        ]),
+      ).toBe(0)
+      expect(
+        maxNum.reduce([
+          [-2, 1],
+          [0, 1],
+          [-1, 1],
+        ]),
+      ).toBe(0)
+      expect(
+        maxNum.reduce([
+          [0, 1],
+          [-1, 1],
+        ]),
+      ).toBe(0)
+      expect(
+        minStr.reduce([
+          [`b`, 1],
+          [``, 1],
+        ]),
+      ).toBe(``)
+      expect(
+        minStr.reduce([
+          [``, 1],
+          [`a`, 1],
+        ]),
+      ).toBe(``)
+      expect(
+        minBig.reduce([
+          [5n, 1],
+          [0n, 1],
+        ]),
+      ).toBe(0n)
+      expect(
+        maxBig.reduce([
+          [-2n, 1],
+          [0n, 1],
+        ]),
+      ).toBe(0n)
+    })
+
+    test(`with min and max aggregates including a zero amount`, () => {
+      const graph = new D2()
+      const input = graph.newInput<{
+        category: string
+        amount: number
+      }>()
+      let latestMessage: any = null
+
+      input.pipe(
+        groupBy((data) => ({ category: data.category }), {
+          minimum: min((data) => data.amount),
+          maximum: max((data) => data.amount),
+        }),
+        output((message) => {
+          latestMessage = message
+        }),
+      )
+
+      graph.finalize()
+
+      input.sendData(
+        new MultiSet([
+          [{ category: `A`, amount: 10 }, 1],
+          [{ category: `A`, amount: 0 }, 1],
+          [{ category: `A`, amount: 7 }, 1],
+        ]),
+      )
+      graph.run()
+
+      expect(latestMessage.getInner()).toEqual([
+        [
+          [
+            serializeValue({ category: `A` }),
+            {
+              category: `A`,
+              minimum: 0,
+              maximum: 10,
+            },
+          ],
+          1,
+        ],
+      ])
+    })
+
     test(`with median and mode aggregates`, () => {
       const graph = new D2()
       const input = graph.newInput<{

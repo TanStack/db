@@ -237,7 +237,7 @@ export function min<T, V extends CanMinMax>(
     reduce: (values) => {
       let minValue: V | undefined
       for (const [value, _multiplicity] of values) {
-        if (!minValue || (value && value < minValue)) {
+        if (minValue === undefined || value < minValue) {
           minValue = value
         }
       }
@@ -267,7 +267,7 @@ export function max<T, V extends CanMinMax>(
     reduce: (values) => {
       let maxValue: V | undefined
       for (const [value, _multiplicity] of values) {
-        if (!maxValue || (value && value > maxValue)) {
+        if (maxValue === undefined || value > maxValue) {
           maxValue = value
         }
       }
