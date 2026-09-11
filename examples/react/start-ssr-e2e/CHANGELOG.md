@@ -1,5 +1,12 @@
 # @tanstack/db-example-react-start-ssr-e2e
 
+## 0.0.2
+
+### Patch Changes
+
+- Updated dependencies [[`6e60d30`](https://github.com/TanStack/db/commit/6e60d30a0e19642eeda72895722afdfca6cec749)]:
+  - @tanstack/react-db@0.4.0
+
 ## 0.0.1
 
 ### Patch Changes

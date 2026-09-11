@@ -1,5 +1,12 @@
 # @tanstack/electron-db-sqlite-persistence
 
+## 0.1.34
+
+### Patch Changes
+
+- Updated dependencies [[`a378bd3`](https://github.com/TanStack/db/commit/a378bd3a65f6b9ed0c9a85f793b7dc2e2a59a313), [`ad043b7`](https://github.com/TanStack/db/commit/ad043b7455a5bdc549c36833bc72ddbe9ce8afed)]:
+  - @tanstack/db-sqlite-persistence-core@0.2.22
+
 ## 0.1.33
 
 ### Patch Changes
