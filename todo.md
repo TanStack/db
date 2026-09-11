@@ -11,25 +11,25 @@ the existing on-demand server-pagination protocol. This is an API migration,
 not a new InfiniteQueryObserver bridge or remote cursor registry.
 
 - [x] Remove the callback from React, Vue, and Svelte config types. Keep generic
-  config wrappers source-compatible; unrelated return types stay unchanged.
+      config wrappers source-compatible; unrelated return types stay unchanged.
 - [x] RED first: all three hook guards failed against baseline with the query
-  callback reached before rejection. Logs: `/private/tmp/968-{react,vue,svelte}-red.log`.
+      callback reached before rejection. Logs: `/private/tmp/968-{react,vue,svelte}-red.log`.
 - [x] GREEN: reject the removed option before hook resources/query construction.
-  Type tests also assert the callback is not advertised.
+      Type tests also assert the callback is not advertised.
 - [x] Preserve existing successful hook tests without the ignored callback.
 - [x] Expand the actual Query DB/React boundary to 36 cells: server page sizes
-  1/2/3/5 × UI sizes 1/2/5 × row counts 0/1/8. Each checkpoint compares full
-  visible IDs and hasNextPage to an independent array slice.
+      1/2/3/5 × UI sizes 1/2/5 × row counts 0/1/8. Each checkpoint compares full
+      visible IDs and hasNextPage to an independent array slice.
 - [x] Keep eager transport, prefix retention, invalid capped-provider, page-label,
-  and explicit-refetch ownership controls. The capped provider violates the
-  request protocol; its characterization is not a successful pagination oracle.
+      and explicit-refetch ownership controls. The capped provider violates the
+      request protocol; its characterization is not a successful pagination oracle.
 - [x] Replace the misleading manual-append pagination example with an on-demand
-  fixed-server-page drain example; explain ordering/filter translation,
-  cancellation, exhaustion, unlimited loads, and opaque-cursor boundaries.
+      fixed-server-page drain example; explain ordering/filter translation,
+      cancellation, exhaustion, unlimited loads, and opaque-cursor boundaries.
 - [x] Fix the React overview to stop recommending the ignored callback.
 - [x] Full React: 220 checks (runtime and type cases), Vue: 96, Svelte: 101.
-  Query DB full suite: 195 runtime cases plus its type pass. All GREEN.
-  Electric declarations built to satisfy existing cross-package Query DB types.
+      Query DB full suite: 195 runtime cases plus its type pass. All GREEN.
+      Electric declarations built to satisfy existing cross-package Query DB types.
 - [x] Focused lint: no errors or warnings. No core/adapter runtime edits.
 - [x] Prepare minor framework changesets and focused PR publication.
 
