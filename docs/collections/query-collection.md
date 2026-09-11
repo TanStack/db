@@ -750,21 +750,98 @@ const todosCollection = createCollection(
 todosCollection.insert({ text: "Buy milk", completed: false })
 ```
 
-### Example: Large Dataset Pagination
+### Server pagination with live queries
+
+`useLiveInfiniteQuery` in React, Vue, and Svelte grows a local ordered query
+window. It does not run TanStack Query's `InfiniteQueryObserver`. Query
+Collections use `QueryObserver`, so `queryFn` receives
+`meta.loadSubsetOptions`, not `pageParam`.
+
+The previously ignored `getNextPageParam` option has been removed. Delete it
+from your hook config; passing it at runtime now throws a clear error.
+`initialPageParam` labels result pages only. It does not set a remote offset
+or server cursor.
+
+For server loading, use `syncMode: 'on-demand'` and make `queryFn` fulfill the
+requested filter, order, offset, and limit. Use a deterministic total order
+(for example, a timestamp followed by a unique ID). The loader may request a
+prefix, a suffix, a tie group, or the full filtered source. A request is not
+necessarily one UI page: the hook fetches an extra row to determine
+`hasNextPage`. Returning one capped endpoint page can incorrectly make the
+query appear exhausted even when the server has more rows.
+
+#### Endpoints with fixed-size pages
+
+If your endpoint uses page numbers, drain enough server pages to fulfill each
+request. This example assumes a zero-based page API with a fixed size of 50.
+The endpoint must apply the supplied filters and sorts **before** pagination,
+keep a consistent ordered result while its pages are read, and return
+`nextPage: null` only when it has authoritatively exhausted that result.
+This example uses offset-based pagination. `api.listPosts` translates the full
+`where` expression and `orderBy` options into the endpoint's syntax, and rejects
+unsupported expressions. The separate `cursor` hints are deliberately unused;
+cursor-based adapters must handle those hints alongside `where`, not treat them
+as already included in it. See [QueryFn and Predicate Push-Down](#queryfn-and-predicate-push-down)
+for translation helpers. Do not drop predicates or filter after paginating:
+either changes the requested window.
 
 ```typescript
-// Load additional pages without refetching existing data
-const loadMoreTodos = async (page) => {
-  const newTodos = await api.getTodos({ page, limit: 50 })
+import { createCollection } from '@tanstack/db'
+import { queryCollectionOptions } from '@tanstack/query-db-collection'
 
-  // Add new items without affecting existing ones
-  todosCollection.utils.writeBatch(() => {
-    newTodos.forEach((todo) => {
-      todosCollection.utils.writeInsert(todo)
-    })
-  })
-}
+type Post = { id: number; createdAt: number; title: string }
+const serverPageSize = 50
+
+const postsCollection = createCollection(
+  queryCollectionOptions({
+    queryKey: ['posts'],
+    queryClient,
+    syncMode: 'on-demand',
+    getKey: (post: Post) => post.id,
+    queryFn: async (ctx): Promise<Array<Post>> => {
+      const { where, orderBy, offset = 0, limit } = ctx.meta?.loadSubsetOptions ?? {}
+      const skip = offset % serverPageSize
+      let page: number | null = Math.floor(offset / serverPageSize)
+      const gathered: Array<Post> = []
+
+      while (page !== null && (limit === undefined || gathered.length < skip + limit)) {
+        ctx.signal.throwIfAborted()
+        const response: { rows: Array<Post>; nextPage: number | null } =
+          await api.listPosts({
+            page,
+            pageSize: serverPageSize,
+            where,
+            orderBy,
+            signal: ctx.signal,
+          })
+        gathered.push(...response.rows)
+        page = response.nextPage
+      }
+
+      return gathered.slice(skip, limit === undefined ? undefined : skip + limit)
+    },
+  }),
+)
+
+// React example; the collection protocol is the same for Vue and Svelte.
+const { data, fetchNextPage, hasNextPage } = useLiveInfiniteQuery(
+  (q) => q.from({ post: postsCollection })
+    .orderBy(({ post }) => post.createdAt)
+    .orderBy(({ post }) => post.id),
+  { pageSize: 20 },
+)
 ```
+
+Reject failed requests instead of returning partial rows as success. An
+unlimited request must drain until the endpoint reports exhaustion. If the
+endpoint uses opaque cursors instead of page numbers, keep that cursor handling
+inside `queryFn` or its adapter; honoring a new offset may require starting at
+the beginning again. The hook does not maintain remote cursor history.
+
+Manually appending rows with `writeUpsert` is a separate, lower-level loading
+strategy. It does not make an eager `queryFn` incremental: a later successful
+refetch still replaces its complete state and can remove appended rows.
+`staleTime: Infinity` does not prevent explicit refetch or invalidation.
 
 ## Important Behaviors
 

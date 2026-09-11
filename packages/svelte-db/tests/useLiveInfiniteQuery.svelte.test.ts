@@ -46,6 +46,20 @@ function usePostsCollectionInfiniteQuery(
 }
 
 describe(`useLiveInfiniteQuery`, () => {
+  it(`rejects a server-page callback before constructing a query`, () => {
+    const queryFn = vi.fn(() => {
+      throw new Error(`query must not be constructed`)
+    })
+    const config = { pageSize: 2, getNextPageParam: () => 1 }
+    const stop = $effect.root(() => {
+      expect(() => useLiveInfiniteQuery(queryFn, config)).toThrow(
+        `getNextPageParam is not supported`,
+      )
+      expect(queryFn).not.toHaveBeenCalled()
+    })
+    stop()
+  })
+
   let cleanup: (() => void) | undefined
 
   afterEach(() => {
@@ -71,7 +85,6 @@ describe(`useLiveInfiniteQuery`, () => {
     cleanup = $effect.root(() => {
       query = useLiveInfiniteQuery(() => livePosts, {
         pageSize: 3,
-        getNextPageParam: (lastPage) => lastPage[0]?.createdAt,
       })
     })
     flushSync()
