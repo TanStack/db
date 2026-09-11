@@ -428,7 +428,7 @@ export class CollectionImpl<
 
   /**
    * Monotonic revision of the collection's visible state; advances once per
-   * committed batch of changes, even while nothing is subscribed.
+   * committed batch of changes and cleanup, even while nothing is subscribed.
    * Internal — used by the live-query observer's snapshot cache.
    */
   public get _stateRevision(): number {
