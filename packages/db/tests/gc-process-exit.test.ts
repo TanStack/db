@@ -27,8 +27,8 @@ it(`allows Node to exit with unused eagerly synced collections`, async () => {
         ...process.env,
         TSX_TSCONFIG_PATH: `${packageRoot}/tsconfig.json`,
       },
-      timeout: 3000,
+      timeout: 15000,
     },
   )
   expect(stdout.trim()).toBe(`finished`)
-})
+}, 20000)

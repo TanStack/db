@@ -10,13 +10,13 @@ describe(`preload retention`, () => {
     vi.useRealTimers()
   })
 
-  function makeCollection(startSync = false) {
+  function makeCollection(startSync = false, gcTime = 10) {
     let ready!: () => void
     let fail!: (error: Error) => void
     const cleanup = vi.fn()
     const collection = createCollection<{ id: number }>({
       getKey: (row) => row.id,
-      gcTime: 10,
+      gcTime,
       startSync,
       sync: {
         sync: ({ begin, write, commit, markReady, markError }) => {
@@ -65,6 +65,52 @@ describe(`preload retention`, () => {
       expect(cleanup).toHaveBeenCalledOnce()
     },
   )
+
+  it.each([
+    { cached: false, gcTime: 10 },
+    { cached: true, gcTime: 10 },
+    { cached: false, gcTime: 100 },
+    { cached: true, gcTime: 100 },
+  ])(
+    `renews the full warm-preload grace interval (cached: $cached, gcTime: $gcTime)`,
+    async ({ cached, gcTime }) => {
+      const { collection, ready, cleanup } = makeCollection(true, gcTime)
+      ready()
+      const previousPreload = cached ? collection.preload() : undefined
+      await previousPreload
+      const graceTime = Math.max(50, gcTime)
+      await vi.advanceTimersByTimeAsync(graceTime - 1)
+
+      const preload = collection.preload()
+      if (cached) expect(preload).toBe(previousPreload)
+      expect(collection.preload()).toBe(preload)
+      await preload
+
+      await vi.advanceTimersByTimeAsync(graceTime - 1)
+      expect(collection.status).toBe(`ready`)
+      expect(collection.size).toBe(1)
+      expect(cleanup).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(2)
+      expect(collection.status).toBe(`cleaned-up`)
+      expect(cleanup).toHaveBeenCalledOnce()
+    },
+  )
+
+  it(`cancels queued idle cleanup when an already-ready collection is preloaded`, async () => {
+    const { collection, ready, cleanup } = makeCollection(true)
+    ready()
+    await Promise.resolve()
+    vi.advanceTimersByTime(50)
+
+    await collection.preload()
+
+    await vi.advanceTimersByTimeAsync(49)
+    expect(collection.status).toBe(`ready`)
+    expect(cleanup).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(2)
+    expect(collection.status).toBe(`cleaned-up`)
+    expect(cleanup).toHaveBeenCalledOnce()
+  })
 
   it(`retains a pending preload when the last subscriber leaves`, async () => {
     const { collection, ready } = makeCollection()

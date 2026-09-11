@@ -211,7 +211,8 @@ you want prompt collection here.
 
 Sync started without subscribers has a minimum 50ms GC grace period. Pending
 `preload()` calls retain the collection until they settle; the unused retention
-period then starts. Explicit `cleanup()` can still abort a pending preload.
+period then starts. Preloading an already-ready collection refreshes that
+period. Explicit `cleanup()` can still abort a pending preload.
 
 ## Virtual Properties
 

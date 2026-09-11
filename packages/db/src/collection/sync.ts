@@ -564,6 +564,12 @@ export class CollectionSyncManager<
     } catch (error) {
       return Promise.reject(error)
     }
+    // Warm preloads need the same handoff time as a load that just finished,
+    // including when the previous GC deadline already queued idle cleanup.
+    if (this.lifecycle.status === `ready`) {
+      this.lifecycle.cancelGCTimer()
+      this.lifecycle.startGCTimerIfUnsubscribed()
+    }
     if (this.preloadPromise) {
       return this.preloadPromise
     }
