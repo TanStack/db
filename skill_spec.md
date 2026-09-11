@@ -187,6 +187,7 @@ TanStack DB is a reactive client-side data store that provides normalized collec
 | `packages/svelte-db`            | framework-integration (Svelte)                                       |
 | `packages/solid-db`             | framework-integration (Solid)                                        |
 | `packages/angular-db`           | framework-integration (Angular)                                      |
+| `packages/octane-db`            | framework-integration (Octane)                                       |
 | `packages/offline-transactions` | offline                                                              |
 | Meta-framework                  | meta-framework (in `packages/db` or repo-level)                      |
 

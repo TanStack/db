@@ -41,6 +41,14 @@ npm install @tanstack/angular-db
 
 TanStack DB is compatible with Angular v16.0.0+
 
+## Octane
+
+```sh
+npm install @tanstack/octane-db octane @octanejs/vite-plugin
+```
+
+TanStack DB is compatible with Octane v0.1.0+. Configure the Octane compiler in your build tool — see [octanejs.dev](https://octanejs.dev/docs/build-tools).
+
 ## Vanilla JS
 
 ```sh

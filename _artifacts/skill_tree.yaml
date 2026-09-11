@@ -163,6 +163,29 @@ skills:
       - 'TanStack/db:packages/react-db/src/useLiveInfiniteQuery.ts'
       - 'TanStack/db:packages/react-db/src/usePacedMutations.ts'
 
+  - name: 'Octane DB'
+    slug: 'octane-db'
+    type: 'framework'
+    domain: 'framework-integration'
+    path: 'skills/octane-db/SKILL.md'
+    package: 'packages/octane-db'
+    description: >
+      Octane bindings for TanStack DB. useLiveQuery hook with dependency arrays
+      and 8 overloads (query function, config object, pre-created collection,
+      disabled state). useLiveSuspenseQuery for Octane Suspense with error
+      boundaries. useLiveInfiniteQuery for cursor-based pagination (pageSize,
+      fetchNextPage, hasNextPage). usePacedMutations for debounced mutations.
+      useLiveQueryEffect for row enter/exit/update side effects.
+      Return shape: data, state, collection, status, isLoading, isReady, isError.
+    requires:
+      - 'db-core'
+    sources:
+      - 'TanStack/db:docs/framework/octane/overview.md'
+      - 'TanStack/db:packages/octane-db/src/useLiveQuery.ts'
+      - 'TanStack/db:packages/octane-db/src/useLiveInfiniteQuery.ts'
+      - 'TanStack/db:packages/octane-db/src/usePacedMutations.ts'
+      - 'TanStack/db:packages/octane-db/src/useLiveQueryEffect.ts'
+
   - name: 'Vue DB'
     slug: 'vue-db'
     type: 'framework'
