@@ -9,14 +9,15 @@ title: LoadSubsetOptions
 type LoadSubsetOptions = object;
 ```
 
-Defined in: [packages/db/src/types.ts:304](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L304)
+Defined in: [packages/db/src/types.ts:312](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L312)
 
-Request data is immutable from submission onward. Callers and adapters must not
-mutate options, expression trees, comparison options, or constant payloads such
-as Dates, byte arrays, and membership arrays. Create new request data to change
-a demand. Core does not clone or freeze it. Use stable data properties, not
-stateful getters. Signal and subscription references stay fixed, but aborting
-the signal or releasing the subscription remains supported.
+Immutable request data. From submission onward, callers and adapters must
+not mutate these options, their expression trees, comparison options, or
+constant payloads (including Dates, byte arrays, and membership arrays).
+Create new request data to change a demand; core does not clone or freeze it.
+Use stable data properties, not stateful getters, for request data.
+Signal and subscription references stay fixed, but their lifecycle remains
+live: aborting the signal or releasing the subscription is supported.
 
 ## Properties
 
@@ -26,7 +27,7 @@ the signal or releasing the subscription remains supported.
 optional cursor: CursorExpressions;
 ```
 
-Defined in: [packages/db/src/types.ts:316](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L316)
+Defined in: [packages/db/src/types.ts:324](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L324)
 
 Cursor expressions for cursor-based pagination.
 These are separate from `where` - the sync layer should combine them if using cursor-based pagination.
@@ -40,7 +41,7 @@ Neither expression includes the main `where` clause.
 optional limit: number;
 ```
 
-Defined in: [packages/db/src/types.ts:310](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L310)
+Defined in: [packages/db/src/types.ts:318](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L318)
 
 The limit of the data to load
 
@@ -52,7 +53,7 @@ The limit of the data to load
 optional offset: number;
 ```
 
-Defined in: [packages/db/src/types.ts:321](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L321)
+Defined in: [packages/db/src/types.ts:329](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L329)
 
 Row offset for offset-based pagination.
 The sync layer can use this instead of `cursor` if it prefers offset-based pagination.
@@ -65,7 +66,7 @@ The sync layer can use this instead of `cursor` if it prefers offset-based pagin
 optional orderBy: OrderBy;
 ```
 
-Defined in: [packages/db/src/types.ts:308](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L308)
+Defined in: [packages/db/src/types.ts:316](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L316)
 
 The order by clause to sort the data
 
@@ -77,11 +78,13 @@ The order by clause to sort the data
 optional signal: AbortSignal;
 ```
 
-Defined in: [packages/db/src/types.ts:327](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L327)
+Defined in: [packages/db/src/types.ts:337](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L337)
 
 Aborted when this exact subset request is no longer current. Cancellation
-is cooperative: async sync adapters must check the signal immediately
-before installing a baseline or later request-scoped rows.
+is cooperative: async adapters should stop before installing more
+request-scoped rows. If an in-flight baseline cannot be canceled, the
+returned load promise must settle after those writes become visible so
+core can keep overlapping replay private until then.
 
 ***
 
@@ -91,7 +94,7 @@ before installing a baseline or later request-scoped rows.
 optional subscription: Subscription;
 ```
 
-Defined in: [packages/db/src/types.ts:336](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L336)
+Defined in: [packages/db/src/types.ts:346](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L346)
 
 The subscription that triggered the load.
 Advanced sync implementations can use this for:
@@ -111,6 +114,6 @@ Available when called from CollectionSubscription, may be undefined for direct c
 optional where: BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/types.ts:306](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L306)
+Defined in: [packages/db/src/types.ts:314](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L314)
 
 The where expression to filter the data (does NOT include cursor expressions)

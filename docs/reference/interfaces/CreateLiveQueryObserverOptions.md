@@ -5,7 +5,7 @@ title: CreateLiveQueryObserverOptions
 
 # Interface: CreateLiveQueryObserverOptions
 
-Defined in: [packages/db/src/live-query-observer.ts:845](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L845)
+Defined in: [packages/db/src/live-query-observer.ts:851](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L851)
 
 ## Properties
 
@@ -15,7 +15,7 @@ Defined in: [packages/db/src/live-query-observer.ts:845](https://github.com/TanS
 optional client: DbClient;
 ```
 
-Defined in: [packages/db/src/live-query-observer.ts:862](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L862)
+Defined in: [packages/db/src/live-query-observer.ts:868](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L868)
 
 DbClient cache that owns SSR snapshots for this query identity.
 
@@ -27,7 +27,7 @@ DbClient cache that owns SSR snapshots for this query identity.
 optional mode: "granular" | "wholesale";
 ```
 
-Defined in: [packages/db/src/live-query-observer.ts:860](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L860)
+Defined in: [packages/db/src/live-query-observer.ts:866](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L866)
 
 How subscribers consume the observer:
 
@@ -50,7 +50,7 @@ How subscribers consume the observer:
 optional onPreload: () => void;
 ```
 
-Defined in: [packages/db/src/live-query-observer.ts:866](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L866)
+Defined in: [packages/db/src/live-query-observer.ts:872](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L872)
 
 Resume framework-deferred query sources before a server preload.
 
@@ -66,6 +66,6 @@ Resume framework-deferred query sources before a server preload.
 optional queryHash: string;
 ```
 
-Defined in: [packages/db/src/live-query-observer.ts:864](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L864)
+Defined in: [packages/db/src/live-query-observer.ts:870](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L870)
 
 Stable live-query identity used for dehydration and hydration.

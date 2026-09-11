@@ -9,7 +9,7 @@ title: QueryIdentity
 type QueryIdentity = string & object;
 ```
 
-Defined in: [packages/db/src/query/ir-stable-identity.ts:44](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir-stable-identity.ts#L44)
+Defined in: [packages/db/src/query/ir-stable-identity.ts:45](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir-stable-identity.ts#L45)
 
 Semantic identity for a query plan, independent of its runtime owners.
 

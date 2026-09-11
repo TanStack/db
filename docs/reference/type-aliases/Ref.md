@@ -9,7 +9,7 @@ title: Ref
 type Ref<T, Nullable> = T extends unknown ? RefBranch<T, Nullable> : never;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:841](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L841)
+Defined in: [packages/db/src/query/builder/types.ts:836](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L836)
 
 Ref - The user-facing ref interface for the query builder
 

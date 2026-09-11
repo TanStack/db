@@ -9,7 +9,7 @@ title: getLoadSubsetDemandKey
 function getLoadSubsetDemandKey(options): DemandKey | undefined;
 ```
 
-Defined in: [packages/db/src/query/ir-stable-identity.ts:111](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir-stable-identity.ts#L111)
+Defined in: [packages/db/src/query/ir-stable-identity.ts:100](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir-stable-identity.ts#L100)
 
 Returns the exact semantic identity of a loadSubset request.
 
