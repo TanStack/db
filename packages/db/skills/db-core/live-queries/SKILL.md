@@ -209,6 +209,10 @@ a subscriber. Note this is the opposite of `gcTime: 0` in TanStack Query, where
 it collects as soon as the query goes inactive; use a small positive value if
 you want prompt collection here.
 
+Sync started without subscribers has a minimum 50ms GC grace period. Pending
+`preload()` calls retain the collection until they settle; the unused retention
+period then starts. Explicit `cleanup()` can still abort a pending preload.
+
 ## Virtual Properties
 
 Live query results include computed, read-only virtual properties on every row:

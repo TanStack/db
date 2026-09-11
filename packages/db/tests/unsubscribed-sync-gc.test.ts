@@ -1,128 +1,107 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryCollection } from '../src/query/live-query-collection.js'
-import { mockSyncCollectionOptions } from './utils.js'
-
-/**
- * Sync can start before any subscriber exists — `startSync: true`, `preload()`
- * and `startSyncImmediate()` all do it. These cover the guarantees around
- * reclaiming those collections, in particular the ones that keep a collection
- * whose subscriber is still on its way from being torn down underneath it.
- */
+import { mockSyncCollectionOptions, resetCleanupQueue } from './utils.js'
 
 type Person = { id: string; name: string }
 
-const makeSource = (id: string) =>
-  createCollection(
+const collections: Array<{ cleanup: () => Promise<void> }> = []
+
+const makeLiveQuery = (gcTime = 1, startSync = true) => {
+  const source = createCollection(
     mockSyncCollectionOptions<Person>({
-      id,
-      getKey: (p) => p.id,
-      initialData: [
-        { id: `1`, name: `Alice` },
-        { id: `2`, name: `Bob` },
-      ],
+      id: `unsubscribed-gc-source`,
+      getKey: (person) => person.id,
+      initialData: [{ id: `1`, name: `Alice` }],
     }),
   )
-
-const makeLiveQuery = (
-  source: ReturnType<typeof makeSource>,
-  id: string,
-  gcTime = 1,
-) =>
-  createLiveQueryCollection({
-    id,
-    startSync: true,
+  const live = createLiveQueryCollection({
+    startSync,
     gcTime,
-    query: (q) =>
-      q.from({ p: source }).select(({ p }) => ({ id: p.id, name: p.name })),
+    query: (q) => q.from({ person: source }),
   })
-
-const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
+  collections.push(source, live)
+  return { source, live }
+}
 
 describe(`collections that start syncing without a subscriber`, () => {
-  it(`survives longer than its gcTime, so a subscriber still on its way can attach`, async () => {
-    const source = makeSource(`grace-source`)
-    const live = makeLiveQuery(source, `grace-live`)
-
-    // `gcTime` is 1ms. Frameworks build the collection while rendering and
-    // subscribe when that render commits, so reclaiming it on `gcTime` alone
-    // would race the commit.
-    await wait(15)
-
-    expect(live.status).not.toBe(`cleaned-up`)
-    expect(source.subscriberCount).toBe(1)
+  beforeEach(() => {
+    vi.useFakeTimers()
+    resetCleanupQueue()
   })
 
-  it(`cancels the pending reclamation once a subscriber attaches`, async () => {
-    const source = makeSource(`cancel-source`)
-    const live = makeLiveQuery(source, `cancel-live`)
+  afterEach(async () => {
+    for (const collection of collections.reverse()) await collection.cleanup()
+    collections.length = 0
+    await Promise.resolve()
+    resetCleanupQueue()
+    vi.useRealTimers()
+  })
 
-    const subscription = live.subscribeChanges(() => {})
+  it(`keeps the initial grace period but uses gcTime after the last subscriber leaves`, async () => {
+    const { source, live } = makeLiveQuery()
 
-    await wait(100)
-
+    await vi.advanceTimersByTimeAsync(49)
     expect(live.status).toBe(`ready`)
-    expect(live.size).toBe(2)
     expect(source.subscriberCount).toBe(1)
 
+    const subscription = live.subscribeChanges(() => {})
+    await vi.advanceTimersByTimeAsync(100)
+    expect(live.status).toBe(`ready`)
+    expect(live.size).toBe(1)
+
     subscription.unsubscribe()
+    await vi.advanceTimersByTimeAsync(2)
+    expect(live.status).toBe(`cleaned-up`)
+    expect(source.subscriberCount).toBe(0)
   })
 
-  it(`still reclaims on gcTime when the last subscriber leaves`, async () => {
-    const source = makeSource(`unmount-source`)
-    const live = makeLiveQuery(source, `unmount-live`)
+  it(`honors a gcTime longer than the initial grace period`, async () => {
+    const { source, live } = makeLiveQuery(100)
 
-    const subscription = live.subscribeChanges(() => {})
-    subscription.unsubscribe()
-
-    // The grace period covers the gap before the first subscriber only. Once
-    // one has come and gone, teardown runs on `gcTime` — 1ms here, which is
-    // what adapters rely on to release a query as its component unmounts.
-    await wait(20)
-
+    await vi.advanceTimersByTimeAsync(99)
+    expect(live.status).toBe(`ready`)
+    await vi.advanceTimersByTimeAsync(2)
     expect(live.status).toBe(`cleaned-up`)
     expect(source.subscriberCount).toBe(0)
   })
 
   it(`restarts sync when a subscriber attaches after reclamation`, async () => {
-    const source = makeSource(`restart-source`)
-    const live = makeLiveQuery(source, `restart-live`)
+    const { source, live } = makeLiveQuery()
 
-    await wait(100)
+    await vi.advanceTimersByTimeAsync(51)
     expect(live.status).toBe(`cleaned-up`)
     expect(source.subscriberCount).toBe(0)
 
-    live.subscribeChanges(() => {})
-
-    expect(live.status).not.toBe(`cleaned-up`)
-    expect(live.size).toBe(2)
-    expect(source.subscriberCount).toBe(1)
-  })
-
-  it(`leaves collections alone when gcTime disables GC`, async () => {
-    const source = makeSource(`disabled-source`)
-    const live = makeLiveQuery(source, `disabled-live`, 0)
-
-    await wait(100)
-
+    const subscription = live.subscribeChanges(() => {})
     expect(live.status).toBe(`ready`)
+    expect(live.size).toBe(1)
     expect(source.subscriberCount).toBe(1)
+    subscription.unsubscribe()
   })
 
-  it(`reclaims a collection warmed by preload that nothing goes on to use`, async () => {
-    const source = makeSource(`preload-source`)
-    const live = createLiveQueryCollection({
-      id: `preload-live`,
-      gcTime: 1,
-      query: (q) => q.from({ p: source }).select(({ p }) => ({ id: p.id })),
-    })
+  it.each([0, -1, Infinity, -Infinity, NaN])(
+    `disables automatic GC for gcTime %s`,
+    async (gcTime) => {
+      const { source, live } = makeLiveQuery(gcTime)
 
-    await live.preload()
-    expect(source.subscriberCount).toBe(1)
+      await vi.advanceTimersByTimeAsync(300001)
+      expect(live.status).toBe(`ready`)
+      expect(source.subscriberCount).toBe(1)
+    },
+  )
 
-    await wait(100)
+  it.each([`preload`, `startSyncImmediate`] as const)(
+    `reclaims unused collections started by %s`,
+    async (method) => {
+      const { source, live } = makeLiveQuery(1, false)
+      expect(source.subscriberCount).toBe(0)
 
-    expect(live.status).toBe(`cleaned-up`)
-    expect(source.subscriberCount).toBe(0)
-  })
+      await live[method]()
+      expect(source.subscriberCount).toBe(1)
+      await vi.advanceTimersByTimeAsync(51)
+      expect(live.status).toBe(`cleaned-up`)
+      expect(source.subscriberCount).toBe(0)
+    },
+  )
 })

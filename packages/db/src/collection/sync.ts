@@ -549,6 +549,11 @@ export class CollectionSyncManager<
     }
   }
 
+  /** Whether a caller is still waiting for the initial sync to finish. */
+  public get hasPendingPreload(): boolean {
+    return this.rejectPreload !== undefined
+  }
+
   /**
    * Preload the collection data by starting sync if not already started
    * Multiple concurrent calls will share the same promise
@@ -588,29 +593,33 @@ export class CollectionSyncManager<
       const syncStartState = { active: false, ready: false }
       let unsubscribeError = () => {}
       let unsubscribeReady = () => {}
+      const finishPreload = () => {
+        settled = true
+        unsubscribeError()
+        unsubscribeReady()
+        if (this.rejectPreload === rejectError) this.rejectPreload = undefined
+        this.lifecycle.startGCTimerIfUnsubscribed()
+      }
       const resolveReady = () => {
         if (syncStartState.active) {
           syncStartState.ready = true
           return
         }
         if (settled) return
-        settled = true
-        unsubscribeError()
-        unsubscribeReady()
-        if (this.rejectPreload === rejectError) this.rejectPreload = undefined
+        finishPreload()
         resolve()
       }
       const rejectError = (error: unknown) => {
         if (settled) return
-        settled = true
-        unsubscribeError()
-        unsubscribeReady()
-        if (this.rejectPreload === rejectError) this.rejectPreload = undefined
+        finishPreload()
         reject(error)
       }
 
       // Register callback BEFORE starting sync to avoid race condition
       this.rejectPreload = rejectError
+      // An awaited preload owns this sync run until it settles, including
+      // when GC has already queued the destructive idle callback.
+      this.lifecycle.cancelGCTimer()
       unsubscribeReady = this.lifecycle.onFirstReady(resolveReady)
       unsubscribeError = this.collection.on(`status:error`, () => {
         if (syncStartState.active) {

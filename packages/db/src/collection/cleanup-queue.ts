@@ -75,6 +75,9 @@ export class CleanupQueue {
 
     const delay = Math.max(0, earliestTime - Date.now())
     this.timeoutId = setTimeout(() => this.process(), delay)
+    // Background collection GC must not keep an otherwise finished Node
+    // process alive. Browsers return a numeric timer handle.
+    if (typeof this.timeoutId === `object`) this.timeoutId.unref()
   }
 
   /**

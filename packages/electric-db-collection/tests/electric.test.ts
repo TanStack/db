@@ -2986,13 +2986,15 @@ describe(`Electric Integration`, () => {
 
     it(`cancels a pending refresh wait when the collection is cleaned up`, async () => {
       vi.useFakeTimers()
+      const schedule = vi.spyOn(globalThis, `setTimeout`)
+      const cancel = vi.spyOn(globalThis, `clearTimeout`)
       const refresh = createDeferred<void>()
+      mockStream.isUpToDate = true
+      mockForceDisconnectAndRefresh.mockReturnValueOnce(refresh.promise)
+      const testCollection = createOnDemandCollection(
+        `on-demand-refresh-cleanup-test`,
+      )
       try {
-        mockStream.isUpToDate = true
-        mockForceDisconnectAndRefresh.mockReturnValueOnce(refresh.promise)
-        const testCollection = createOnDemandCollection(
-          `on-demand-refresh-cleanup-test`,
-        )
         const load = Promise.resolve(
           testCollection._sync.loadSubset({ limit: 10 }),
         )
@@ -3000,14 +3002,18 @@ describe(`Electric Integration`, () => {
           () => undefined,
           (error: unknown) => error,
         )
+        const refreshTimerIndex = schedule.mock.calls.findIndex(
+          ([, delay]) => delay === 250,
+        )
+        expect(refreshTimerIndex).toBeGreaterThanOrEqual(0)
+        const refreshTimer = schedule.mock.results[refreshTimerIndex]!.value
 
         await Promise.resolve()
         await testCollection.cleanup()
-        await vi.advanceTimersByTimeAsync(0)
-
         await expect(loadError).resolves.toMatchObject({ name: `AbortError` })
         expect(mockRequestSnapshot).not.toHaveBeenCalled()
-        expect(vi.getTimerCount()).toBe(0)
+        // The shared collection GC timer may still exist; this wait must not.
+        expect(cancel).toHaveBeenCalledWith(refreshTimer)
 
         refresh.resolve()
         await refresh.promise
@@ -3015,7 +3021,9 @@ describe(`Electric Integration`, () => {
         expect(mockRequestSnapshot).not.toHaveBeenCalled()
       } finally {
         refresh.resolve()
-        await vi.runOnlyPendingTimersAsync()
+        await testCollection.cleanup()
+        schedule.mockRestore()
+        cancel.mockRestore()
         vi.useRealTimers()
       }
     })
@@ -3081,32 +3089,13 @@ describe(`Electric Integration`, () => {
 
     it(`should request the snapshot after the refresh timeout and ignore late fulfillment`, async () => {
       vi.useFakeTimers()
+      const refresh = createDeferred<void>()
+      mockStream.isUpToDate = true
+      mockForceDisconnectAndRefresh.mockReturnValueOnce(refresh.promise)
+      const testCollection = createOnDemandCollection(
+        `on-demand-refresh-timeout-fulfillment-test`,
+      )
       try {
-        let resolveRefresh: () => void = () => {}
-        const refresh = new Promise<void>((resolve) => {
-          resolveRefresh = resolve
-        })
-        mockStream.isUpToDate = true
-        mockForceDisconnectAndRefresh.mockReturnValueOnce(refresh)
-
-        const testCollection = createCollection(
-          electricCollectionOptions({
-            id: `on-demand-refresh-timeout-fulfillment-test`,
-            shapeOptions: {
-              url: `http://test-url`,
-              params: { table: `test_table` },
-            },
-            syncMode: `on-demand`,
-            getKey: (item: Row) => item.id as number,
-            startSync: true,
-          }),
-        )
-
-        // Other collections in this file keep the shared GC timer armed, so
-        // assert this load leaves no timer of its own rather than none at all.
-        await Promise.resolve() // the GC queue picks its timer in a microtask
-        const ambientTimers = vi.getTimerCount()
-
         let loadSettled = false
         const load = Promise.resolve(
           testCollection._sync.loadSubset({ limit: 10 }),
@@ -3122,47 +3111,32 @@ describe(`Electric Integration`, () => {
         await load
         expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
         expect(loadSettled).toBe(true)
-        await testCollection.cleanup()
-        expect(vi.getTimerCount()).toBe(ambientTimers)
 
-        resolveRefresh()
-        await refresh
+        refresh.resolve()
+        await refresh.promise
         await Promise.resolve()
         expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
-        expect(vi.getTimerCount()).toBe(ambientTimers)
       } finally {
+        refresh.resolve()
+        await testCollection.cleanup()
         vi.useRealTimers()
       }
     })
 
     it(`should handle late refresh rejection after requesting the snapshot`, async () => {
       vi.useFakeTimers()
+      let rejectRefresh: (error: Error) => void = () => {}
+      let resolveRefresh: () => void = () => {}
+      const refresh = new Promise<void>((resolve, reject) => {
+        resolveRefresh = resolve
+        rejectRefresh = reject
+      })
+      mockStream.isUpToDate = true
+      mockForceDisconnectAndRefresh.mockReturnValueOnce(refresh)
+      const testCollection = createOnDemandCollection(
+        `on-demand-refresh-timeout-rejection-test`,
+      )
       try {
-        let rejectRefresh: (error: Error) => void = () => {}
-        const refresh = new Promise<void>((_resolve, reject) => {
-          rejectRefresh = reject
-        })
-        mockStream.isUpToDate = true
-        mockForceDisconnectAndRefresh.mockReturnValueOnce(refresh)
-
-        const testCollection = createCollection(
-          electricCollectionOptions({
-            id: `on-demand-refresh-timeout-rejection-test`,
-            shapeOptions: {
-              url: `http://test-url`,
-              params: { table: `test_table` },
-            },
-            syncMode: `on-demand`,
-            getKey: (item: Row) => item.id as number,
-            startSync: true,
-          }),
-        )
-
-        // Other collections in this file keep the shared GC timer armed, so
-        // assert this load leaves no timer of its own rather than none at all.
-        await Promise.resolve() // the GC queue picks its timer in a microtask
-        const ambientTimers = vi.getTimerCount()
-
         const load = testCollection._sync.loadSubset({ limit: 10 })
         await vi.advanceTimersByTimeAsync(250)
         await load
@@ -3171,41 +3145,36 @@ describe(`Electric Integration`, () => {
         await expect(refresh).rejects.toThrow(`late refresh failure`)
         await Promise.resolve()
         expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
-        expect(vi.getTimerCount()).toBe(ambientTimers)
       } finally {
+        resolveRefresh()
+        await testCollection.cleanup()
         vi.useRealTimers()
       }
     })
 
     it(`should clear the refresh timeout when refresh settles early`, async () => {
       vi.useFakeTimers()
+      const schedule = vi.spyOn(globalThis, `setTimeout`)
+      const cancel = vi.spyOn(globalThis, `clearTimeout`)
+      mockStream.isUpToDate = true
+      mockForceDisconnectAndRefresh.mockResolvedValueOnce(undefined)
+      const testCollection = createOnDemandCollection(
+        `on-demand-refresh-clears-timeout-test`,
+      )
       try {
-        mockStream.isUpToDate = true
-        mockForceDisconnectAndRefresh.mockResolvedValueOnce(undefined)
-
-        const testCollection = createCollection(
-          electricCollectionOptions({
-            id: `on-demand-refresh-clears-timeout-test`,
-            shapeOptions: {
-              url: `http://test-url`,
-              params: { table: `test_table` },
-            },
-            syncMode: `on-demand`,
-            getKey: (item: Row) => item.id as number,
-            startSync: true,
-          }),
-        )
-
-        // Other collections in this file keep the shared GC timer armed, so
-        // assert this load leaves no timer of its own rather than none at all.
-        await Promise.resolve() // the GC queue picks its timer in a microtask
-        const ambientTimers = vi.getTimerCount()
-
         await testCollection._sync.loadSubset({ limit: 10 })
+        const refreshTimerIndex = schedule.mock.calls.findIndex(
+          ([, delay]) => delay === 250,
+        )
+        expect(refreshTimerIndex).toBeGreaterThanOrEqual(0)
+        const refreshTimer = schedule.mock.results[refreshTimerIndex]!.value
 
         expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
-        expect(vi.getTimerCount()).toBe(ambientTimers)
+        expect(cancel).toHaveBeenCalledWith(refreshTimer)
       } finally {
+        await testCollection.cleanup()
+        schedule.mockRestore()
+        cancel.mockRestore()
         vi.useRealTimers()
       }
     })
