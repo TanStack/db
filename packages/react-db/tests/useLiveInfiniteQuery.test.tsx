@@ -236,8 +236,6 @@ describe(`useLiveInfiniteQuery`, () => {
               .orderBy(({ posts: p }) => p.createdAt, `desc`),
           {
             pageSize: 5,
-            getNextPageParam: (lastPage) =>
-              lastPage.length === 5 ? lastPage.length : undefined,
           },
         )
       },
