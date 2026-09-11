@@ -362,7 +362,8 @@ const dependentBuilders = [] // Accurately describes dependents
 
 ### Always Add Tests for Bugs
 
-**Key Principle:** If you're fixing a bug, add a unit test that reproduces the bug before fixing it. This ensures:
+**Key Principle:** Reproduce a bug in a test before fixing it. Prefer extending
+an oracle as described below over adding an isolated unit test. This ensures:
 
 - The bug is actually fixed
 - The bug doesn't regress in the future
@@ -388,6 +389,20 @@ oracle should already have caught the bug, identify the false-green model,
 classifier, fixture, or assertion that let it pass. Use that analysis to suggest
 the smallest test or oracle improvement that would catch the same class of bug,
 not only the reported example.
+
+### Prefer Oracle Coverage Over Isolated Regressions
+
+An oracle that checks general laws across generated states and histories is a
+stronger form of coverage than a unit test for one specific example. Prefer
+extending an existing oracle when it can cover the behavior. Add the missing
+model rule, generator dimension, state transition, or observable assertion;
+adding more pinned examples alone does not generalize the oracle.
+
+Use a focused regression to isolate and shrink a failure, then keep it as a
+replay example for the broader oracle where possible. Verify that the expanded
+oracle fails without the fix and passes with it. Keep valuable unit tests, but
+do not treat them as a substitute for applicable oracle coverage. If an oracle
+is not practical for the behavior, explain why a focused test is sufficient.
 
 ### Name Tests After Behavior
 

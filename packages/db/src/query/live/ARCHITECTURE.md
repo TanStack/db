@@ -1005,18 +1005,27 @@ Classify root deltas against authoritative membership, including earlier queued
 sync writes, not the optimistic public view. An optimistic delete must not turn
 a balanced graph update into an authoritative delete. This does not bypass the
 normal sync queue or publish part of a graph-output transaction early.
-Build queued membership once per output flush, preserving committed last-write
-and truncate semantics, rather than scanning the queue again for each row.
+Build queued membership lazily on the first balanced delta in an output flush,
+preserving committed last-write and truncate semantics. Insert-only flushes do
+not scan the queue, and balanced rows share that flush's lookup.
 
-At the Collection boundary, each active or retained optimistic update owns only its changed
-top-level fields. Compose those fields in transaction order over the current
-base and earlier optimistic work. Inserts retain their full validated rows,
-including schema defaults. Removing one update must not revive its fields from
-another update's whole-row snapshot.
-Completed contributions remain beneath active transactions under the existing
-retention policy until sync retires them. A failed sibling cannot clear those
-contributions. Sync publication compares actual previous and next visible rows,
-not captured mutation snapshots that may predate a rebase.
+At the Collection boundary, optimistic mutations own whole validated row
+snapshots, including fields they did not change and insert schema defaults.
+Do not merge newer synced fields into those snapshots: that could publish a
+combination neither the mutation nor the server created. This applies to both
+ordinary sync and truncate. The mutation payload stays unchanged as well.
+Active snapshots are selected in transaction order. Completed snapshots remain
+beneath active transactions under the existing retention policy until sync
+retires them. A later snapshot may contain values seen from an earlier sibling;
+rolling back that sibling does not rewrite the later snapshot. Sync publication
+compares actual previous and next visible rows, not just mutation identities.
+An update made over an unconfirmed insert retains that exact insert dependency,
+not just its key. Insert success preserves the later completed snapshot; insert
+failure removes the already-retained dependent row. An independently submitted
+update accepted after that failure still retains its own snapshot. An
+acknowledged insert or a later same-key
+insertion is not the failed insertion. Truncate replay derives events and reads
+from the same snapshot overlay, without merging in its new authoritative fields.
 
 Installed state, synchronous reads, change-event payloads, and downstream
 queries must all observe the same fully materialized commit. The facade adapter

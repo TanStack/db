@@ -1058,7 +1058,11 @@ export class CollectionConfigBuilder<
         facadePublication.prepare()
         if (hasParentChanges) {
           begin()
-          const hasSyncedKey = config.collection._state.createSyncedKeyLookup()
+          let lookup: ((key: string | number) => boolean) | undefined
+          const hasSyncedKey = (key: string | number) => {
+            lookup ??= config.collection._state.createSyncedKeyLookup()
+            return lookup(key)
+          }
           changesToApply.forEach(
             this.applyChanges.bind(this, config, hasSyncedKey),
           )

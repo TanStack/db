@@ -1,9 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { fc, test as fcTest } from '@fast-check/vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import { createTransaction } from '../../src/transactions.js'
 import { stripVirtualProps } from '../utils.js'
+import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
 import type { SyncConfig } from '../../src/types.js'
 
 type Row = { id: number; value: number }
@@ -13,6 +15,88 @@ const cases = ([`pass-through`, `order`, `select`] as const).flatMap((shape) =>
       [1, 2].map((batches) => ({ shape, layered, outcome, batches })),
     ),
   ),
+)
+
+// The model owns source rows; production owns graph deltas and queued output.
+// Work is checked at each flush, not just for one final batch size.
+const flushHistory = fc.array(
+  fc.record({
+    inserts: fc.integer({ min: 1, max: 5 }),
+    update: fc.boolean(),
+  }),
+  { minLength: 1, maxLength: 12 },
+)
+async function runFlushHistory(
+  steps: Array<{ inserts: number; update: boolean }>,
+) {
+  let sync!: Parameters<SyncConfig<Row>[`sync`]>[0]
+  const expected = new Map([[1, { id: 1, value: 0 }]])
+  const source = createCollection<Row>({
+    getKey: (row) => row.id,
+    sync: {
+      sync: (actions) => {
+        sync = actions
+        actions.begin()
+        actions.write({ type: `insert`, value: expected.get(1)! })
+        actions.commit()
+        actions.markReady()
+      },
+    },
+  })
+  const derived = createLiveQueryCollection({
+    query: (q) => q.from({ row: source }),
+  })
+  const done = createDeferred<void>()
+  const tx = createTransaction({ mutationFn: () => done.promise })
+  const settled = tx.isPersisted.promise.catch((error: unknown) => error)
+  const lookup = vi.spyOn(derived._state, `createSyncedKeyLookup`)
+  try {
+    await derived.preload()
+    tx.mutate(() => derived.delete(1))
+    for (const [index, step] of steps.entries()) {
+      lookup.mockClear()
+      sync.begin()
+      if (step.update) {
+        const row = { id: 1, value: index + 1 }
+        expected.set(1, row)
+        sync.write({ type: `update`, value: row })
+      }
+      for (let offset = 0; offset < step.inserts; offset++) {
+        const row = { id: expected.size + 1, value: index }
+        expected.set(row.id, row)
+        sync.write({ type: `insert`, value: row })
+      }
+      expect(sync.commit()).toBe(true)
+      expect(lookup, `flush ${index}`).toHaveBeenCalledTimes(
+        step.update ? 1 : 0,
+      )
+      expect(derived._state.pendingSyncedTransactions).toHaveLength(index + 1)
+      expect([...derived.values()]).toEqual([])
+    }
+    done.resolve()
+    await settled
+    expect([...derived.values()].map((row) => stripVirtualProps(row))).toEqual([
+      ...expected.values(),
+    ])
+  } finally {
+    done.resolve()
+    await settled
+    lookup.mockRestore()
+    await derived.cleanup()
+    await source.cleanup()
+  }
+}
+
+fcTest.prop([flushHistory], { numRuns: oracleRuns(40), seed: 41703 })(
+  `shares membership work only for balanced deltas across fixed queue histories`,
+  runFlushHistory,
+)
+fcTest.prop(
+  [flushHistory],
+  oraclePropertyOptions(60, `derived-publication.membership-work`),
+)(
+  `shares membership work only for balanced deltas across random queue histories`,
+  runFlushHistory,
 )
 
 describe(`derived updates beneath optimistic deletes`, () => {

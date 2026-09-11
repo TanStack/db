@@ -64,7 +64,7 @@ const cases = orders.flatMap((order) =>
   ),
 )
 
-describe(`optimistic field composition`, () => {
+describe(`optimistic snapshot ownership`, () => {
   it.each([false, true])(
     `does not attribute a later remote write to a failed-only update, optimistic=%s`,
     async (optimistic) => {
@@ -173,7 +173,7 @@ describe(`optimistic field composition`, () => {
   )
 
   it.each([false, true])(
-    `settles a rebased update with queued confirmation=%s`,
+    `keeps its captured snapshot until queued confirmation=%s`,
     async (confirm) => {
       const done = createDeferred<void>()
       const fixture = source(() => done.promise)
@@ -201,7 +201,7 @@ describe(`optimistic field composition`, () => {
         fixture.sync.begin({ immediate: true })
         fixture.sync.write({ type: `update`, value: { ...initial, b: `b1` } })
         expect(fixture.sync.commit()).toBe(true)
-        check({ ...initial, a: `a1`, b: `b1` })
+        check({ ...initial, a: `a1` })
         let applied: true | Promise<void> = true
         if (confirm) {
           fixture.sync.begin()
@@ -212,7 +212,7 @@ describe(`optimistic field composition`, () => {
         done.resolve()
         await tx.isPersisted.promise
         await applied
-        check({ ...initial, a: `a1`, b: confirm ? `b0` : `b1` })
+        check({ ...initial, a: `a1` })
       } finally {
         done.resolve()
         subscription.unsubscribe()
@@ -223,7 +223,7 @@ describe(`optimistic field composition`, () => {
   )
 
   it.each(orders)(
-    `retains disjoint direct fields across settlement order %j`,
+    `selects whole direct snapshots across settlement order %j`,
     async (...order) => {
       const done = [
         createDeferred<void>(),
@@ -250,10 +250,15 @@ describe(`optimistic field composition`, () => {
             Object.assign(row, patch)
           }),
         )
-        const expected = { ...initial, a: `a1`, b: `b2`, c: `c3` }
+        const snapshots = patches.map((_, index) =>
+          Object.assign({}, initial, ...patches.slice(0, index + 1)),
+        )
+        const active = new Set([0, 1, 2])
         for (const index of order) {
           done[index]!.resolve()
           await transactions[index]!.isPersisted.promise
+          active.delete(index)
+          const expected = snapshots[active.size ? Math.max(...active) : index]
           expect(stripVirtualProps(fixture.collection.get(1))).toEqual(expected)
           expect(replica.get(1)).toEqual(expected)
           expect(stripVirtualProps(downstream.get(1))).toEqual(expected)
@@ -268,7 +273,7 @@ describe(`optimistic field composition`, () => {
   )
 
   it.each([`before`, `after`] as const)(
-    `retains only a direct survivor's fields when it completes %s sibling rollback`,
+    `retains a direct survivor's captured snapshot when it completes %s sibling rollback`,
     async (completion) => {
       const done = [createDeferred<void>(), createDeferred<void>()]
       let calls = 0
@@ -301,15 +306,15 @@ describe(`optimistic field composition`, () => {
         if (completion === `before`) {
           done[1]!.resolve()
           await second.isPersisted.promise
-          check({ ...initial, a: `a1`, b: `b2` })
+          check({ ...initial, a: `a1` })
         }
         done[0]!.reject(new Error(`first update failed`))
         await firstSettled
-        check({ ...initial, b: `b2` })
+        check({ ...initial, a: `a1`, b: `b2` })
         if (completion === `after`) {
           done[1]!.resolve()
           await second.isPersisted.promise
-          check({ ...initial, b: `b2` })
+          check({ ...initial, a: `a1`, b: `b2` })
         }
         fixture.sync.begin()
         fixture.sync.write({ type: `update`, value: { ...initial, b: `b2` } })
@@ -337,15 +342,21 @@ describe(`optimistic field composition`, () => {
         fields === `disjoint`
           ? [{ a: `a1` }, { b: `b2` }, { c: `c3` }]
           : [{ a: `a1` }, { a: `a2`, b: `b2` }, { c: `c3` }]
+      const snapshots: Array<Row | undefined> = [
+        undefined,
+        undefined,
+        undefined,
+      ]
       const expected = (excluded = -1) =>
-        Object.assign(
-          {},
+        snapshots.reduce<Row>(
+          (last, row, index) =>
+            row !== undefined && index !== excluded ? row : last,
           initial,
-          ...patches.filter((_, index) => index !== excluded),
         )
       try {
         await fixture.collection.preload()
         for (const index of order) {
+          snapshots[index] = { ...expected(), ...patches[index] }
           pending[index]!.tx.mutate(() =>
             fixture.collection.update(1, (row) => {
               Object.assign(row, patches[index])
@@ -373,7 +384,7 @@ describe(`optimistic field composition`, () => {
   )
 
   it.each([`pending`, `persisting`] as const)(
-    `preserves untouched synced fields during $phase work`,
+    `does not merge new synced fields into a $phase mutation snapshot`,
     async (phase) => {
       const fixture = source()
       const entry = pendingTransaction()
@@ -395,7 +406,6 @@ describe(`optimistic field composition`, () => {
         expect(stripVirtualProps(fixture.collection.get(1))).toEqual({
           ...initial,
           a: `local`,
-          b: `remote`,
         })
       } finally {
         entry.tx.rollback()
@@ -427,7 +437,6 @@ describe(`optimistic field composition`, () => {
       expect(stripVirtualProps(fixture.collection.get(1))).toEqual({
         ...initial,
         a: `local`,
-        b: `settled`,
       })
     } finally {
       entry.tx.rollback()
