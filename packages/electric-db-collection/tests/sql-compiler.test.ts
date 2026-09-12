@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { compileSQL } from '../src/sql-compiler'
+import { compileRefPath, compileSQL } from '../src/sql-compiler'
 import type { IR } from '@tanstack/db'
 
 // Helper to create a value expression
@@ -469,6 +469,78 @@ describe(`sql-compiler`, () => {
         )
         // snake_case input remains snake_case
         expect(result.where).toBe(`"user_id" = $1`)
+      })
+
+      it(`encodeColumnName applies only to the root column for nested refs`, () => {
+        const result = compileSQL(
+          {
+            where: func(`eq`, [ref(`metaData`, `nestedKey`), val(`x`)]),
+          },
+          { encodeColumnName: camelToSnake },
+        )
+        expect(result.where).toBe(`"meta_data"->>'nestedKey' = $1`)
+        expect(result.params).toEqual({ '1': `x` })
+      })
+    })
+
+    describe(`nested JSON/jsonb ref paths`, () => {
+      it(`compileRefPath: single segment matches plain column quoting`, () => {
+        expect(compileRefPath([`name`])).toBe(`"name"`)
+      })
+
+      it(`compileRefPath: two segments use final ->>`, () => {
+        expect(compileRefPath([`doc`, `title`])).toBe(`"doc"->>'title'`)
+      })
+
+      it(`compileRefPath: three segments chain -> then ->>`, () => {
+        expect(compileRefPath([`a`, `b`, `c`])).toBe(`"a"->'b'->>'c'`)
+      })
+
+      it(`compileRefPath: apostrophe in key is escaped`, () => {
+        expect(compileRefPath([`col`, `O'Brien`])).toBe(`"col"->>'O''Brien'`)
+      })
+
+      it(`compileRefPath: numeric string key for arrays`, () => {
+        expect(compileRefPath([`items`, `0`, `id`])).toBe(`"items"->'0'->>'id'`)
+      })
+
+      it(`WHERE eq with nested ref adds no extra params`, () => {
+        const result = compileSQL({
+          where: func(`eq`, [ref(`payload`, `status`), val(`active`)]),
+        })
+        expect(result.where).toBe(`"payload"->>'status' = $1`)
+        expect(result.params).toEqual({ '1': `active` })
+      })
+
+      it(`ORDER BY with nested ref`, () => {
+        const result = compileSQL({
+          orderBy: [
+            {
+              expression: ref(`payload`, `sortKey`),
+              compareOptions: { direction: `asc`, nulls: `first` },
+            },
+          ],
+        })
+        expect(result.orderBy).toBe(`"payload"->>'sortKey' NULLS FIRST`)
+        expect(result.params).toEqual({})
+      })
+
+      it(`NOT isNull with nested ref`, () => {
+        const result = compileSQL({
+          where: func(`not`, [func(`isNull`, [ref(`data`, `email`)])]),
+        })
+        expect(result.where).toBe(`"data"->>'email' IS NOT NULL`)
+      })
+
+      it(`nested ref as leaf inside AND preserves compileFunction behavior`, () => {
+        const result = compileSQL({
+          where: func(`and`, [
+            func(`eq`, [ref(`id`), val(`1`)]),
+            func(`gt`, [ref(`meta`, `score`), val(10)]),
+          ]),
+        })
+        expect(result.where).toBe(`"id" = $1 AND "meta"->>'score' > $2`)
+        expect(result.params).toEqual({ '1': `1`, '2': `10` })
       })
     })
   })
