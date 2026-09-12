@@ -398,12 +398,13 @@ describe(`bounded cold comment request observations`, () => {
         primaryFailure = { error }
       }
       const results = await Promise.allSettled(
-        [live, posts.collection, comments.collection].map(
-          async (collection) => collection.cleanup(),
+        [live, posts.collection, comments.collection].map(async (collection) =>
+          collection.cleanup(),
         ),
       )
-      const failures = results.flatMap((result): Array<unknown> =>
-        result.status === `rejected` ? [result.reason as unknown] : [],
+      const failures = results.flatMap(
+        (result): Array<unknown> =>
+          result.status === `rejected` ? [result.reason as unknown] : [],
       )
       if (failures.length > 0) {
         if (!primaryFailure && failures.length === 1) throw failures[0]
@@ -1181,13 +1182,17 @@ async function expectScheduledDemandCompletionsStayGenerationSafe(
       await flushPromises()
       // Copy this completion's public value; later completions must not erase it.
       observations.push({
-        completed: scheduler.report()
+        completed: scheduler
+          .report()
           .filter(({ status }) => status === `resolved`)
           .map(({ label }) => label),
         ready: live.isReady(),
         rows: live.toArray.map(({ id, comments: rows }) => ({
           id,
-          comments: rows.map(({ id: childId, body }) => ({ id: childId, body })),
+          comments: rows.map(({ id: childId, body }) => ({
+            id: childId,
+            body,
+          })),
         })),
       })
     })
@@ -1438,10 +1443,12 @@ async function expectRejectedDemandEntersError(): Promise<void> {
     expect(loadCount).toBe(2)
     expect(live.isReady()).toBe(true)
     writeAfterRestart()
-    expect(live.toArray.map(({ id, comments: rows }) => ({
-      id,
-      comments: rows.map(({ id: childId, body }) => ({ id: childId, body })),
-    }))).toEqual([{ id: 1, comments: [{ id: 100, body: `after restart` }] }])
+    expect(
+      live.toArray.map(({ id, comments: rows }) => ({
+        id,
+        comments: rows.map(({ id: childId, body }) => ({ id: childId, body })),
+      })),
+    ).toEqual([{ id: 1, comments: [{ id: 100, body: `after restart` }] }])
   } finally {
     await live.cleanup()
     await preload.preloadOutcome
@@ -2067,7 +2074,9 @@ describe(`includes temporal oracle`, () => {
   it.each([{ order: [1, 2] }, { order: [2, 1] }])(
     `observes every completion in fixed scheduler order $order`,
     ({ order }) =>
-      expectScheduledDemandCompletionsStayGenerationSafe(fc.schedulerFor(order)),
+      expectScheduledDemandCompletionsStayGenerationSafe(
+        fc.schedulerFor(order),
+      ),
   )
 
   it(

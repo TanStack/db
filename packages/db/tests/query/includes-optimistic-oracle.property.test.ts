@@ -580,161 +580,180 @@ const routeValuesArbitrary: fc.Arbitrary<RouteValues> = fc.record({
 
 describe(`optimistic relationship-transition oracle`, () => {
   for (const pending of [false, true]) {
-    fcTest(`observes queued sibling delivery with pending=${pending}`, async () => {
-      const routes: RouteValues = {
-        rootA: 10,
-        rootB: 100,
-        rootC: 200,
-        original: 300,
-        optimistic: 400,
-        authoritative: 500,
-      }
-      const { roots, levels } = fixture(routes)
-      const sibling: ChildRow = {
-        id: 12,
-        parentGroup: 10,
-        group: 300,
-        value: 120,
-        position: 1,
-      }
-      const changes: Array<SyncChange<ChildRow>> = [
-        { type: `insert`, value: sibling },
-      ]
-      const driver = createDriver(roots, levels)
-      const events: Array<{ type: string; row: ChildRow }> = []
-      let unsubscribe: (() => void) | undefined
-      let siblingCuts = 0
-      let runtime: PendingRuntimeMutation | undefined
-      const descendants = [
-        {
-          id: 21,
-          group: 1300,
-          value: 210,
-          position: 0,
-          children: [{ id: 31, group: 2300, value: 310, position: 0 }],
-        },
-      ]
-      const published = (optimistic: boolean) => [
-        {
-          id: 1,
-          group: 10,
-          value: 10,
-          position: 0,
-          children: optimistic
-            ? [{ id: 11, group: 400, value: 110, position: 0, children: [] }]
-            : [
-                {
-                  id: 11, group: 300, value: 110, position: 0,
-                  children: descendants,
-                },
-                {
-                  id: 12, group: 300, value: 120, position: 1,
-                  children: descendants,
-                },
-              ],
-        },
-        { id: 2, group: 100, value: 20, position: 1, children: [] },
-        { id: 3, group: 200, value: 30, position: 2, children: [] },
-      ]
-      await runTrace({
-        steps: [
-          pending
-            ? {
-                type: `optimisticRollback`,
-                level: 1,
-                id: 11,
-                patch: { group: 400 },
-                beforeRollback: { level: 1, changes },
-              }
-            : { type: `sync`, level: 1, changes },
+    fcTest(
+      `observes queued sibling delivery with pending=${pending}`,
+      async () => {
+        const routes: RouteValues = {
+          rootA: 10,
+          rootB: 100,
+          rootC: 200,
+          original: 300,
+          optimistic: 400,
+          authoritative: 500,
+        }
+        const { roots, levels } = fixture(routes)
+        const sibling: ChildRow = {
+          id: 12,
+          parentGroup: 10,
+          group: 300,
+          value: 120,
+          position: 1,
+        }
+        const changes: Array<SyncChange<ChildRow>> = [
+          { type: `insert`, value: sibling },
+        ]
+        const driver = createDriver(roots, levels)
+        const events: Array<{ type: string; row: ChildRow }> = []
+        let unsubscribe: (() => void) | undefined
+        let siblingCuts = 0
+        let runtime: PendingRuntimeMutation | undefined
+        const descendants = [
           {
-            type: `sync`,
-            level: 2,
-            changes: [
-              { type: `update`, value: { ...levels[1][0]!, value: 211 } },
-            ],
+            id: 21,
+            group: 1300,
+            value: 210,
+            position: 0,
+            children: [{ id: 31, group: 2300, value: 310, position: 0 }],
           },
-        ] satisfies Array<OptimisticRelationshipStep>,
-        driver: {
-          ...driver,
-          setup: async () => {
-            const context = await driver.setup()
-            const source = context.sources.levels[0]
-            const subscription = source.collection.subscribeChanges(
-              (batch) => {
-                events.push(...batch.map(({ type, value }) => ({
-                  type,
-                  row: { ...value },
-                })))
-              },
-              { includeInitialState: false },
-            )
-            unsubscribe = () => subscription.unsubscribe()
-            const writeBatch = source.writeBatch
-            source.writeBatch = (batch) => {
-              const eventStart = events.length
-              runtime = [...context.runtimePending][0]
-              writeBatch(batch)
-              siblingCuts += 1
-              const actual = {
-                present: source.collection.has(12),
-                row: source.collection.get(12),
-                events: events.slice(eventStart),
-                rows: stripVirtualProperties(context.live.toArray),
+        ]
+        const published = (optimistic: boolean) => [
+          {
+            id: 1,
+            group: 10,
+            value: 10,
+            position: 0,
+            children: optimistic
+              ? [{ id: 11, group: 400, value: 110, position: 0, children: [] }]
+              : [
+                  {
+                    id: 11,
+                    group: 300,
+                    value: 110,
+                    position: 0,
+                    children: descendants,
+                  },
+                  {
+                    id: 12,
+                    group: 300,
+                    value: 120,
+                    position: 1,
+                    children: descendants,
+                  },
+                ],
+          },
+          { id: 2, group: 100, value: 20, position: 1, children: [] },
+          { id: 3, group: 200, value: 30, position: 2, children: [] },
+        ]
+        await runTrace({
+          steps: [
+            pending
+              ? {
+                  type: `optimisticRollback`,
+                  level: 1,
+                  id: 11,
+                  patch: { group: 400 },
+                  beforeRollback: { level: 1, changes },
+                }
+              : { type: `sync`, level: 1, changes },
+            {
+              type: `sync`,
+              level: 2,
+              changes: [
+                { type: `update`, value: { ...levels[1][0]!, value: 211 } },
+              ],
+            },
+          ] satisfies Array<OptimisticRelationshipStep>,
+          driver: {
+            ...driver,
+            setup: async () => {
+              const context = await driver.setup()
+              const source = context.sources.levels[0]
+              const subscription = source.collection.subscribeChanges(
+                (batch) => {
+                  events.push(
+                    ...batch.map(({ type, value }) => ({
+                      type,
+                      row: { ...value },
+                    })),
+                  )
+                },
+                { includeInitialState: false },
+              )
+              unsubscribe = () => subscription.unsubscribe()
+              const writeBatch = source.writeBatch
+              source.writeBatch = (batch) => {
+                const eventStart = events.length
+                runtime = [...context.runtimePending][0]
+                writeBatch(batch)
+                siblingCuts += 1
+                const actual = {
+                  present: source.collection.has(12),
+                  row: source.collection.get(12),
+                  events: events.slice(eventStart),
+                  rows: stripVirtualProperties(context.live.toArray),
+                }
+                expect(actual.present).toBe(!pending)
+                if (pending) expect(actual.row).toBeUndefined()
+                else expect(actual.row).toMatchObject(sibling)
+                expect(actual.rows).toEqual(published(pending))
+                if (pending) {
+                  expect(actual.events).toEqual([])
+                  expect(runtime?.transaction.state).toBe(`persisting`)
+                  expect(runtime?.settled).toBe(false)
+                } else {
+                  expect(runtime).toBeUndefined()
+                  expect(actual.events).toContainEqual({
+                    type: `insert`,
+                    row: expect.objectContaining(sibling),
+                  })
+                }
               }
-              expect(actual.present).toBe(!pending)
-              if (pending) expect(actual.row).toBeUndefined()
-              else expect(actual.row).toMatchObject(sibling)
-              expect(actual.rows).toEqual(published(pending))
-              if (pending) {
-                expect(actual.events).toEqual([])
-                expect(runtime?.transaction.state).toBe(`persisting`)
-                expect(runtime?.settled).toBe(false)
-              } else {
-                expect(runtime).toBeUndefined()
-                expect(actual.events).toContainEqual({
-                  type: `insert`, row: expect.objectContaining(sibling),
+              return context
+            },
+            apply: async (step, context, checkpoint) => {
+              await driver.apply(step, context, checkpoint)
+              if (step.level === 1) {
+                if (pending) {
+                  await runtime!.receipt
+                  expect(runtime!.settled).toBe(true)
+                  expect(runtime!.transaction.state).toBe(`failed`)
+                }
+                expect(
+                  context.sources.levels[0].collection.get(12),
+                ).toMatchObject(sibling)
+                expect(events).toContainEqual({
+                  type: `insert`,
+                  row: expect.objectContaining(sibling),
                 })
+                expect(stripVirtualProperties(context.live.toArray)).toEqual(
+                  published(false),
+                )
               }
-            }
-            return context
-          },
-          apply: async (step, context, checkpoint) => {
-            await driver.apply(step, context, checkpoint)
-            if (step.level === 1) {
-              if (pending) {
-                await runtime!.receipt
-                expect(runtime!.settled).toBe(true)
-                expect(runtime!.transaction.state).toBe(`failed`)
-              }
-              expect(context.sources.levels[0].collection.get(12)).toMatchObject(
-                sibling,
+            },
+            cleanup: async (context) => {
+              const results = await Promise.allSettled([
+                Promise.resolve().then(() => unsubscribe?.()),
+                Promise.resolve().then(() => driver.cleanup(context)),
+              ])
+              const errors = results.flatMap(
+                (result): Array<unknown> =>
+                  result.status === `rejected`
+                    ? [result.reason as unknown]
+                    : [],
               )
-              expect(events).toContainEqual({
-                type: `insert`, row: expect.objectContaining(sibling),
-              })
-              expect(stripVirtualProperties(context.live.toArray)).toEqual(
-                published(false),
-              )
-            }
+              if (errors.length === 1) throw errors[0]
+              if (errors.length > 1)
+                throw new AggregateError(
+                  errors,
+                  `Sibling observation cleanup failed`,
+                )
+            },
           },
-          cleanup: async (context) => {
-            const results = await Promise.allSettled([
-              Promise.resolve().then(() => unsubscribe?.()),
-              Promise.resolve().then(() => driver.cleanup(context)),
-            ])
-            const errors = results.flatMap((result): Array<unknown> =>
-              result.status === `rejected` ? [result.reason as unknown] : [],
-            )
-            if (errors.length === 1) throw errors[0]
-            if (errors.length > 1)
-              throw new AggregateError(errors, `Sibling observation cleanup failed`)
-          },
-        },
-        projection,
-      })
-      expect(siblingCuts).toBe(1)
-    })
+          projection,
+        })
+        expect(siblingCuts).toBe(1)
+      },
+    )
   }
 
   for (const compound of [false, true]) {
@@ -845,44 +864,47 @@ describe(`optimistic relationship-transition oracle`, () => {
     }
   }
 
-  fcTest(`checks the optimistic overlay before yielding from apply`, async () => {
-    const routes: RouteValues = {
-      rootA: 10,
-      rootB: 100,
-      rootC: 200,
-      original: 300,
-      optimistic: 400,
-      authoritative: 500,
-    }
-    const { roots, levels } = fixture(routes)
-    const driver = createDriver(roots, levels)
-    await runTrace({
-      steps: [
-        {
-          type: `optimistic` as const,
-          handle: `immediate`,
-          level: 1 as const,
-          id: 11,
-          patch: { parentGroup: routes.rootB },
+  fcTest(
+    `checks the optimistic overlay before yielding from apply`,
+    async () => {
+      const routes: RouteValues = {
+        rootA: 10,
+        rootB: 100,
+        rootC: 200,
+        original: 300,
+        optimistic: 400,
+        authoritative: 500,
+      }
+      const { roots, levels } = fixture(routes)
+      const driver = createDriver(roots, levels)
+      await runTrace({
+        steps: [
+          {
+            type: `optimistic` as const,
+            handle: `immediate`,
+            level: 1 as const,
+            id: 11,
+            patch: { parentGroup: routes.rootB },
+          },
+        ],
+        driver: {
+          ...driver,
+          apply: (step, context, checkpoint) => {
+            let checkpoints = 0
+            const applied = driver.apply(step, context, () => {
+              checkpoints += 1
+              return checkpoint()
+            })
+            const checkpointsBeforeYield = checkpoints
+            return Promise.resolve(applied).then(() => {
+              expect(checkpointsBeforeYield).toBe(1)
+            })
+          },
         },
-      ],
-      driver: {
-        ...driver,
-        apply: (step, context, checkpoint) => {
-          let checkpoints = 0
-          const applied = driver.apply(step, context, () => {
-            checkpoints += 1
-            return checkpoint()
-          })
-          const checkpointsBeforeYield = checkpoints
-          return Promise.resolve(applied).then(() => {
-            expect(checkpointsBeforeYield).toBe(1)
-          })
-        },
-      },
-      projection,
-    })
-  })
+        projection,
+      })
+    },
+  )
 
   fcTest(
     `rejects optimistic handles the sync mock cannot settle independently`,

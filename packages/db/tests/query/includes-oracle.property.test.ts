@@ -847,7 +847,11 @@ async function applyAction(
           draft.value = next.value
         },
       )
-      const entry = trackPendingWork(pending, transaction, sources.roots.resolveSync)
+      const entry = trackPendingWork(
+        pending,
+        transaction,
+        sources.roots.resolveSync,
+      )
       roots.set(action.id, next)
       assertMatches()
 
@@ -3702,103 +3706,110 @@ const {
 })
 
 describe(`includes recompute oracle`, () => {
-  fcTest(`distinguishes optimistic syntax from delivered rollback and no-op cuts`, async () => {
-    const driver = createStructuralTraceDriver(1)
-    const row = { id: 1, parentGroup: 1, group: 1, value: 1, position: 0 }
-    const history: Array<HistoryAction> = [
-      { ...row, type: `put`, level: 0 },
-      { ...row, type: `put`, level: 1 },
-      { ...row, type: `optimisticRollback`, level: 0, id: 999 },
-      { ...row, type: `optimisticRollback`, level: 0 },
-      { ...row, type: `optimisticRollback`, level: 0, group: 2 },
-      { ...row, type: `optimisticRollback`, level: 0 },
-    ]
-    expect(classifyScenarioSyntax({ depth: 1, history })).toEqual([
-      `depth=1`,
-      `syntactic-route-changes=many`,
-      `has-optimistic-syntax=true`,
-      `has-delete-syntax=false`,
-    ])
-    const observations: Array<{
-      cuts: Array<{ group: number | undefined; childIds: Array<number> }>
-      settledGroup: number | undefined
-      settledChildIds: Array<number>
-      absentRoot: boolean
-    }> = []
-    await runTrace({
-      steps: history,
-      driver: {
-        ...driver,
-        apply: async (action, context, checkpoint) => {
-          const observe = () => ({
-            group: context.sources.roots.collection.get(1)?.group,
-            childIds: [...context.incremental.values()][0]?.children.map(
-              (child) => child.id,
-            ) ?? [],
-          })
-          const cuts: Array<ReturnType<typeof observe>> = []
-          await driver.apply(action, context, () => {
-            checkpoint()
-            cuts.push(observe())
-          })
-          const settled = observe()
-          observations.push({
-            cuts,
-            settledGroup: settled.group,
-            settledChildIds: settled.childIds,
-            absentRoot: !context.sources.roots.collection.has(999),
-          })
+  fcTest(
+    `distinguishes optimistic syntax from delivered rollback and no-op cuts`,
+    async () => {
+      const driver = createStructuralTraceDriver(1)
+      const row = { id: 1, parentGroup: 1, group: 1, value: 1, position: 0 }
+      const history: Array<HistoryAction> = [
+        { ...row, type: `put`, level: 0 },
+        { ...row, type: `put`, level: 1 },
+        { ...row, type: `optimisticRollback`, level: 0, id: 999 },
+        { ...row, type: `optimisticRollback`, level: 0 },
+        { ...row, type: `optimisticRollback`, level: 0, group: 2 },
+        { ...row, type: `optimisticRollback`, level: 0 },
+      ]
+      expect(classifyScenarioSyntax({ depth: 1, history })).toEqual([
+        `depth=1`,
+        `syntactic-route-changes=many`,
+        `has-optimistic-syntax=true`,
+        `has-delete-syntax=false`,
+      ])
+      const observations: Array<{
+        cuts: Array<{ group: number | undefined; childIds: Array<number> }>
+        settledGroup: number | undefined
+        settledChildIds: Array<number>
+        absentRoot: boolean
+      }> = []
+      await runTrace({
+        steps: history,
+        driver: {
+          ...driver,
+          apply: async (action, context, checkpoint) => {
+            const observe = () => ({
+              group: context.sources.roots.collection.get(1)?.group,
+              childIds:
+                [...context.incremental.values()][0]?.children.map(
+                  (child) => child.id,
+                ) ?? [],
+            })
+            const cuts: Array<ReturnType<typeof observe>> = []
+            await driver.apply(action, context, () => {
+              checkpoint()
+              cuts.push(observe())
+            })
+            const settled = observe()
+            observations.push({
+              cuts,
+              settledGroup: settled.group,
+              settledChildIds: settled.childIds,
+              absentRoot: !context.sources.roots.collection.has(999),
+            })
+          },
         },
-      },
-      projection: structuralProjection,
-    })
-    const restored = {
-      settledGroup: 1,
-      settledChildIds: [1],
-      absentRoot: true,
-    }
-    expect(observations.slice(2)).toEqual([
-      { ...restored, cuts: [] },
-      { ...restored, cuts: [] },
-      {
-        ...restored,
-        cuts: [
-          { group: 2, childIds: [] },
-          { group: 1, childIds: [1] },
-        ],
-      },
-      { ...restored, cuts: [] },
-    ])
-  })
+        projection: structuralProjection,
+      })
+      const restored = {
+        settledGroup: 1,
+        settledChildIds: [1],
+        absentRoot: true,
+      }
+      expect(observations.slice(2)).toEqual([
+        { ...restored, cuts: [] },
+        { ...restored, cuts: [] },
+        {
+          ...restored,
+          cuts: [
+            { group: 2, childIds: [] },
+            { group: 1, childIds: [1] },
+          ],
+        },
+        { ...restored, cuts: [] },
+      ])
+    },
+  )
 
-  fcTest(`checks ordinary root and child changes before yielding from apply`, async () => {
-    const driver = createStructuralTraceDriver(1)
-    const row = { id: 1, parentGroup: 1, group: 1, value: 1, position: 0 }
-    const history: Array<HistoryAction> = [
-      { ...row, type: `put`, level: 0 },
-      { ...row, type: `put`, level: 1 },
-      { ...row, type: `delete`, level: 1 },
-      { ...row, type: `delete`, level: 0 },
-    ]
-    const beforeAwait: Array<number> = []
-    await runTrace({
-      steps: history,
-      driver: {
-        ...driver,
-        apply: (action, context, checkpoint) => {
-          let checkpoints = 0
-          const result = driver.apply(action, context, () => {
-            checkpoints++
-            return checkpoint()
-          })
-          beforeAwait.push(checkpoints)
-          return result
+  fcTest(
+    `checks ordinary root and child changes before yielding from apply`,
+    async () => {
+      const driver = createStructuralTraceDriver(1)
+      const row = { id: 1, parentGroup: 1, group: 1, value: 1, position: 0 }
+      const history: Array<HistoryAction> = [
+        { ...row, type: `put`, level: 0 },
+        { ...row, type: `put`, level: 1 },
+        { ...row, type: `delete`, level: 1 },
+        { ...row, type: `delete`, level: 0 },
+      ]
+      const beforeAwait: Array<number> = []
+      await runTrace({
+        steps: history,
+        driver: {
+          ...driver,
+          apply: (action, context, checkpoint) => {
+            let checkpoints = 0
+            const result = driver.apply(action, context, () => {
+              checkpoints++
+              return checkpoint()
+            })
+            beforeAwait.push(checkpoints)
+            return result
+          },
         },
-      },
-      projection: structuralProjection,
-    })
-    expect(beforeAwait).toEqual([1, 1, 1, 1])
-  })
+        projection: structuralProjection,
+      })
+      expect(beforeAwait).toEqual([1, 1, 1, 1])
+    },
+  )
 
   for (const level of [0, 1] as const) {
     for (const cleanupFails of [false, true]) {
@@ -4519,7 +4530,10 @@ describe(`includes recompute oracle`, () => {
     }
   }
 
-  for (const [depth, targetLevel] of [[3, 1], [4, 2]] as const) {
+  for (const [depth, targetLevel] of [
+    [3, 1],
+    [4, 2],
+  ] as const) {
     for (const sourceBranch of [0, 1] as const) {
       for (const [firstTransition, secondTransition] of [
         [`rekey`, `rekey`],

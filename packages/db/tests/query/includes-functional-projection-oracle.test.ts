@@ -884,7 +884,8 @@ describe(`functional projection output compatibility`, () => {
               const view = readsInclude
                 ? readChildren(row.children, form)
                 : undefined
-              if (view) observed.push({ ...view, rows: selectedRows(view.rows) })
+              if (view)
+                observed.push({ ...view, rows: selectedRows(view.rows) })
               return {
                 id: operator === `distinct` ? 0 : row.id,
                 score: view
@@ -1364,8 +1365,9 @@ describe(`functional include projection boundary grammar`, () => {
     expect(new Set(cells.map((cell) => JSON.stringify(cell))).size).toBe(54)
     expect(orderedPairCells).toHaveLength(27)
     expect(
-      new Set([...cells, ...orderedPairCells].map((cell) => JSON.stringify(cell)))
-        .size,
+      new Set(
+        [...cells, ...orderedPairCells].map((cell) => JSON.stringify(cell)),
+      ).size,
     ).toBe(81)
   })
 
@@ -1379,9 +1381,7 @@ describe(`functional include projection boundary grammar`, () => {
         { id: 2 },
       ])
       const initialChildren: Array<Child> = [
-        ...(initial !== `empty`
-          ? [{ id: 10, parentGroup: 1, value: 3 }]
-          : []),
+        ...(initial !== `empty` ? [{ id: 10, parentGroup: 1, value: 3 }] : []),
         { id: 20, parentGroup: 2, value: 5 },
         ...(initial === `ordered-pair`
           ? [
