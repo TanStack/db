@@ -113,6 +113,41 @@ Transactions are processed one at a time in the order they were created:
 - **Dependency safety**: Avoids conflicts between transactions that may reference each other
 - **Predictable behavior**: Transactions complete in the exact order they were created
 
+### Post-commit Confirmation
+
+Some sync engines do not echo a committed write back immediately. Waiting for
+that echo inside a `mutationFn` keeps optimistic state visible, but also blocks
+the serial outbox. Use `confirmWrite` to move that wait off the drain path:
+
+```typescript
+const electricById = new Map([[todoCollection.id, todoCollection]])
+
+const offline = startOfflineExecutor({
+  collections: { todos: todoCollection },
+  mutationFns: {
+    syncTodos: async ({ transaction, idempotencyKey }) => {
+      // Return the server result needed by confirmWrite.
+      return api.saveBatch(transaction.mutations, { idempotencyKey })
+    },
+  },
+  confirmWrite: async ({ mutations, result }) => {
+    const { txid } = result as { txid: number }
+    const collectionIds = new Set(mutations.map((m) => m.collection.id))
+
+    await Promise.all(
+      [...collectionIds].map((id) =>
+        electricById.get(id)?.utils.awaitTxId(txid),
+      ),
+    )
+  },
+})
+```
+
+The hook runs for leader, non-leader, and online-only writes. While it is
+pending, the affected optimistic rows remain visible; its completion never
+blocks the next outbox write. Set `maxConfirmationHolds: 0` to run the hook
+without retaining overlays.
+
 ## API Reference
 
 ### startOfflineExecutor(config)
@@ -129,6 +164,8 @@ interface OfflineConfig {
   beforeRetry?: (transactions: OfflineTransaction[]) => OfflineTransaction[]
   onUnknownMutationFn?: (name: string, tx: OfflineTransaction) => void
   onLeadershipChange?: (isLeader: boolean) => void
+  confirmWrite?: (context: ConfirmWriteContext) => void | Promise<void>
+  maxConfirmationHolds?: number
   onlineDetector?: OnlineDetector
 }
 ```
@@ -145,6 +182,7 @@ interface OfflineConfig {
 - `waitForTransactionCompletion(id)` - Wait for a specific transaction to complete
 - `removeFromOutbox(id)` - Manually remove transaction from outbox
 - `peekOutbox()` - View all pending transactions
+- `getActiveConfirmationHoldCount()` - Count post-commit optimistic holds
 - `dispose()` - Clean up resources
 
 ### Error Handling

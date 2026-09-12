@@ -5,6 +5,7 @@ export { OfflineExecutor, startOfflineExecutor } from './OfflineExecutor'
 export type {
   OfflineTransaction,
   OfflineConfig,
+  ConfirmWriteContext,
   OfflineMode,
   StorageAdapter,
   StorageDiagnostic,
