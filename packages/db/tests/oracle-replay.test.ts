@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
+import { setImmediate } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import fc from 'fast-check'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -50,6 +51,10 @@ function runReplay(
 }
 
 describe(`guarded oracle replay`, () => {
+  // spawnSync blocks the worker. Let progress replies arrive between complete
+  // replays instead of starving Vitest's RPC channel across the whole suite.
+  afterEach(() => setImmediate())
+
   it.each([
     [
       `sorted-map.key`,
