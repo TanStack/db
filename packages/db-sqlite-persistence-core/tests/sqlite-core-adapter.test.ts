@@ -7,6 +7,7 @@ import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
 import { IR } from '@tanstack/db'
 import { SQLiteCorePersistenceAdapter, createPersistedTableName } from '../src'
+import { harnessScope } from './contracts/harness-scope'
 import type {
   PersistenceAdapter,
   SQLiteDriver,
@@ -210,26 +211,6 @@ function createHarness(
   }
 }
 
-const activeCleanupFns: Array<() => void | Promise<void>> = []
-
-afterEach(async () => {
-  while (activeCleanupFns.length > 0) {
-    const cleanupFn = activeCleanupFns.pop()
-    await Promise.resolve(cleanupFn?.())
-  }
-})
-
-function registerHarness(
-  options?: Omit<
-    ConstructorParameters<typeof SQLiteCorePersistenceAdapter>[0],
-    `driver`
-  >,
-): AdapterHarness {
-  const harness = createHarness(options)
-  activeCleanupFns.push(harness.cleanup)
-  return harness
-}
-
 export type SQLiteCoreAdapterHarnessFactory = (
   options?: Omit<
     ConstructorParameters<typeof SQLiteCorePersistenceAdapter>[0],
@@ -239,11 +220,13 @@ export type SQLiteCoreAdapterHarnessFactory = (
 
 export function runSQLiteCoreAdapterContractSuite(
   suiteName: string = `SQLiteCorePersistenceAdapter`,
-  harnessFactory: SQLiteCoreAdapterHarnessFactory = registerHarness,
+  harnessFactory: SQLiteCoreAdapterHarnessFactory = createHarness,
 ): void {
-  const registerContractHarness = harnessFactory
+  const scope = harnessScope(harnessFactory)
+  const registerContractHarness = scope.create
 
   describe(suiteName, () => {
+    afterEach(scope.cleanup)
     it(`applies transactions idempotently with row versions and tombstones`, async () => {
       const { adapter, driver } = registerContractHarness()
       const collectionId = `todos`

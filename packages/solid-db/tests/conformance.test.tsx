@@ -7,8 +7,9 @@
  * signal read inside the query fn (no deps array). Collection/config inputs are
  * passed as accessors, per Solid's arity-based input detection.
  *
- * `knownGaps` is populated empirically from the run below.
+ * All registered laws must pass; the driver has no whole-test waivers.
  */
+import { describe, expect, it } from 'vitest'
 import {
   coalesce,
   count,
@@ -19,13 +20,15 @@ import {
   gt,
   sum,
 } from '@tanstack/db'
-import { createRoot, createSignal } from 'solid-js'
+import { createRoot, createSignal, onCleanup } from 'solid-js'
 import {
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
 } from '../../db/tests/utils'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { runSuite } from '../../db/tests/conformance/suite'
+import { expectResultSurface } from '../../db/tests/conformance/result-laws'
+import { withScopeSetup } from '../../db/tests/conformance/scope-setup'
 import type {
   ConformanceResult,
   ControllableHandle,
@@ -99,22 +102,26 @@ function makePrecreated(build: QueryBuild, opts?: { startSync?: boolean }) {
 }
 
 function makeErrorSource() {
+  const expectedError = new Error(`conformance: sync failure`)
+  let startup: { returned: true } | { returned: false; error: unknown } = {
+    returned: true,
+  }
   const collection = createCollection<{ id: string }>({
     id: `conformance-solid-err-${sourceSeq++}`,
     getKey: (r) => r.id,
     startSync: false,
     sync: {
       sync: () => {
-        throw new Error(`conformance: sync failure`)
+        throw expectedError
       },
     },
   })
   try {
     collection.startSyncImmediate()
-  } catch {
-    // expected: engine catches the sync error and sets status to `error`
+  } catch (error) {
+    startup = { returned: false, error }
   }
-  return { collection }
+  return { collection, expectedError, startup }
 }
 
 async function settle() {
@@ -128,15 +135,15 @@ function makeHandle(
   return {
     current(): ConformanceResult {
       const result = getResult()
-      return {
+      return expectResultSurface({
         data: result?.data,
         state: result?.state,
-        status: result?.status ?? `idle`,
-        isReady: Boolean(result?.isReady),
-        isError: Boolean(result?.isError),
+        status: result?.status,
+        isReady: result?.isReady,
+        isError: result?.isError,
         // solid-db exposes no `isEnabled`; derive it from status (status-derived).
         isEnabled: result?.status !== `disabled`,
-      }
+      })
     },
     flush: settle,
     async apply(fn: () => void) {
@@ -152,10 +159,14 @@ function makeHandle(
 function inRoot(fn: () => any): { getResult: () => any; dispose: () => void } {
   let result: any
   let dispose!: () => void
-  createRoot((d) => {
-    dispose = d
-    result = fn()
-  })
+  withScopeSetup(
+    () =>
+      createRoot((d) => {
+        dispose = d
+        result = fn()
+      }),
+    () => dispose(),
+  )
   return { getResult: () => result, dispose }
 }
 
@@ -205,6 +216,7 @@ function mountControllable<P>(
 
 const solidDriver: LiveQueryDriver = {
   name: `solid`,
+  disabledRepresentation: `empty-reactive`,
   ops: { eq, gt, count, sum, coalesce, createOptimisticAction },
   makeSource,
   makeDeferredSource,
@@ -224,4 +236,83 @@ const solidDriver: LiveQueryDriver = {
   features: { serverSnapshot: false, suspense: true },
 }
 
+describe(`owned native scope setup`, () => {
+  it(`keeps a successful scope alive until explicit disposal`, () => {
+    let calls = 0
+    const handle = inRoot(() => {
+      onCleanup(() => {
+        calls++
+      })
+      return 7
+    })
+    expect(calls).toBe(0)
+    handle.dispose()
+    expect(calls).toBe(1)
+  })
+
+  it.each([false, true])(
+    `disposes failed setup and retains errors, cleanupFails=%s`,
+    (cleanupFails) => {
+      const primary = new Error(`scope setup failure`)
+      const secondary = new Error(`scope cleanup failure`)
+      let calls = 0
+      let caught: unknown
+      try {
+        inRoot(() => {
+          onCleanup(() => {
+            calls++
+            if (cleanupFails) throw secondary
+          })
+          throw primary
+        })
+      } catch (error) {
+        caught = error
+      }
+      expect(calls).toBe(1)
+      if (cleanupFails) {
+        expect(caught).toBeInstanceOf(AggregateError)
+        expect((caught as AggregateError).errors).toEqual([primary, secondary])
+        expect((caught as AggregateError).cause).toBe(primary)
+      } else expect(caught).toBe(primary)
+    },
+  )
+})
+
 runSuite(solidDriver)
+it(`preserves raw result types through the actual driver reader`, () => {
+  const raw: Record<string, unknown> = {
+    data: [{ id: `a`, value: undefined }],
+    state: new Map(),
+    status: `disabled`,
+    isReady: false,
+    isError: false,
+    isEnabled: false,
+  }
+  const handle = makeHandle(
+    () => raw,
+    () => {},
+  )
+  try {
+    const healthy = handle.current()
+    expect(healthy.data).toBe(raw.data)
+    expect(healthy.state).toBe(raw.state)
+    expect(healthy.isReady).toBe(false)
+    expect(healthy.isError).toBe(false)
+    expect(healthy.isEnabled).toBe(false)
+    for (const key of [`status`, `isReady`, `isError`]) {
+      const original = raw[key]
+      delete raw[key]
+      expect(() => handle.current()).toThrowError(new RegExp(`raw ${key}`))
+      for (const invalid of key === `status`
+        ? [undefined, 0]
+        : [undefined, 0, ``]) {
+        raw[key] = invalid
+        expect(() => handle.current()).toThrowError(new RegExp(`raw ${key}`))
+      }
+      raw[key] = original
+      expect(handle.current()[key as keyof ConformanceResult]).toBe(original)
+    }
+  } finally {
+    handle.unmount()
+  }
+})

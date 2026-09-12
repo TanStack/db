@@ -209,6 +209,8 @@ export class OfflineExecutor {
     if (this.leaderElection) {
       this.unsubscribeLeadership = this.leaderElection.onLeadershipChange(
         (isLeader) => {
+          // A custom elector may repeat the initial result while replay is active.
+          if (isLeader === this.isLeaderState) return
           this.isLeaderState = isLeader
 
           if (this.config.onLeadershipChange) {

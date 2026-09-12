@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { IR, createCollection, createTransaction } from '@tanstack/db'
@@ -143,17 +144,25 @@ function createPersistedAdapter(
 ): PersistenceAdapter {
   return {
     loadSubset: () =>
-      loadGate.then(() => Array.from(rows, ([key, value]) => ({ key, value }))),
+      loadGate.then(() =>
+        Array.from(rows, ([key, value]) => ({
+          key,
+          value: structuredClone(value),
+        })),
+      ),
     loadCollectionMetadata: () =>
       Promise.resolve(
-        Array.from(collectionMetadata, ([key, value]) => ({ key, value })),
+        Array.from(collectionMetadata, ([key, value]) => ({
+          key,
+          value: structuredClone(value),
+        })),
       ),
     applyCommittedTx: (_collectionId: string, tx: PersistedTx) => {
       for (const mutation of tx.collectionMetadataMutations ?? []) {
         if (mutation.type === `delete`) {
           collectionMetadata.delete(mutation.key)
         } else {
-          collectionMetadata.set(mutation.key, mutation.value)
+          collectionMetadata.set(mutation.key, structuredClone(mutation.value))
         }
       }
       if (tx.truncate) rows.clear()
@@ -163,10 +172,10 @@ function createPersistedAdapter(
         } else if (mutation.type === `update`) {
           rows.set(mutation.key, {
             ...rows.get(mutation.key),
-            ...mutation.value,
+            ...structuredClone(mutation.value),
           } as OracleRow)
         } else {
-          rows.set(mutation.key, mutation.value as OracleRow)
+          rows.set(mutation.key, structuredClone(mutation.value) as OracleRow)
         }
       }
       return Promise.resolve()
@@ -377,6 +386,38 @@ function observableResume(value: unknown): unknown {
   }
 }
 
+type Publication = { cut: string; rows: TraceResult[`rows`] }
+
+function observePublications(
+  collection: Collection<OracleRow, string | number>,
+) {
+  const entries: Array<Publication> = []
+  const record = (cut: string) => {
+    entries.push({ cut, rows: structuredClone(rowsFromCollection(collection)) })
+  }
+  const subscription = collection.subscribeChanges(() => record(`event`), {
+    includeInitialState: false,
+  })
+  return { entries, record, stop: () => subscription.unsubscribe() }
+}
+
+function expectWholePublications(
+  entries: Array<Publication>,
+  allowed: Array<TraceResult[`rows`]>,
+) {
+  let position = 0
+  for (const entry of entries) {
+    while (
+      position < allowed.length &&
+      !isDeepStrictEqual(entry.rows, allowed[position])
+    )
+      position++
+    expect(position, JSON.stringify({ entry, allowed, entries })).toBeLessThan(
+      allowed.length,
+    )
+  }
+}
+
 async function runTrace(
   id: string,
   syncMode: ElectricSyncMode,
@@ -411,6 +452,7 @@ async function runPersistedTrace(
   id: string,
   syncMode: ElectricSyncMode,
   batches: Array<Array<Message<OracleRow>>>,
+  authoredSnapshots?: TraceResult[`snapshots`],
 ): Promise<PersistedTraceResult> {
   let subscriber!: (messages: Array<Message<OracleRow>>) => void
   mockSubscribe.mockImplementationOnce((callback) => {
@@ -449,57 +491,84 @@ async function runPersistedTrace(
     }),
   )
   collection.startSyncImmediate()
-  await vi.waitFor(() => expect(subscriber).toBeTypeOf(`function`), {
-    interval: 1,
-    timeout: 250,
-  })
+  const publications = observePublications(collection)
+  try {
+    publications.record(`before empty-cache startup`)
+    await vi.waitFor(() => expect(subscriber).toBeTypeOf(`function`), {
+      interval: 1,
+      timeout: 250,
+    })
+    publications.record(`stream subscribed`)
+    expectWholePublications(publications.entries, [[]])
 
-  const snapshots: Array<Array<[string | number, string, string]>> = []
-  const history: Array<Array<Message<OracleRow>>> = []
-  for (const batch of batches) {
-    subscriber(batch)
-    history.push(batch)
-    const expected = recomputeCommittedRows(history)
+    const snapshots: Array<Array<[string | number, string, string]>> = []
+    const history: Array<Array<Message<OracleRow>>> = []
+    for (const batch of batches) {
+      const cut = publications.entries.length
+      const before = rowsFromCollection(collection)
+      publications.record(`before delivery ${history.length}`)
+      history.push(structuredClone(batch))
+      const expected =
+        authoredSnapshots?.[history.length - 1] ??
+        recomputeCommittedRows(history)
+      subscriber(structuredClone(batch))
+      publications.record(`after delivery ${history.length - 1}`)
+      await vi.waitFor(
+        () =>
+          expect(
+            rowsFromCollection(collection),
+            `${syncMode}: ${JSON.stringify(history)}`,
+          ).toEqual(expected),
+        { interval: 1, timeout: 250 },
+      )
+      publications.record(`settled ${history.length - 1}`)
+      expectWholePublications(publications.entries.slice(cut), [
+        before,
+        expected,
+      ])
+      snapshots.push(rowsFromCollection(collection))
+    }
+    const durabilityCut = publications.entries.length
+    await vi.waitFor(() => expect(collection.status).toBe(`ready`), {
+      interval: 1,
+      timeout: 250,
+    })
+    const exported = collection.config.sync.exportSyncMeta?.() as
+      | { resume?: unknown }
+      | undefined
     await vi.waitFor(
-      () =>
-        expect(
+      () => {
+        expect(persistenceCommits).toBeGreaterThan(0)
+        expect(rowsFromMap(persistedRows)).toEqual(
           rowsFromCollection(collection),
-          `${syncMode}: ${JSON.stringify(history)}`,
-        ).toEqual(expected),
+        )
+      },
       { interval: 1, timeout: 250 },
     )
-    snapshots.push(rowsFromCollection(collection))
+    publications.record(`durability settled`)
+    expectWholePublications(publications.entries.slice(durabilityCut), [
+      snapshots.at(-1) ?? [],
+    ])
+    const result = {
+      rows: rowsFromCollection(collection),
+      snapshots,
+      status: collection.status,
+      resume: observableResume(exported?.resume),
+      durableRows: rowsFromMap(persistedRows),
+      durableResume: observableResume(persistedMetadata.get(`electric:resume`)),
+      persistenceCommits,
+    }
+    return result
+  } finally {
+    publications.stop()
+    await collection.cleanup()
   }
-  await vi.waitFor(() => expect(collection.status).toBe(`ready`), {
-    interval: 1,
-    timeout: 250,
-  })
-  const exported = collection.config.sync.exportSyncMeta?.() as
-    | { resume?: unknown }
-    | undefined
-  await vi.waitFor(
-    () => {
-      expect(persistenceCommits).toBeGreaterThan(0)
-      expect(rowsFromMap(persistedRows)).toEqual(rowsFromCollection(collection))
-    },
-    { interval: 1, timeout: 250 },
-  )
-  const result = {
-    rows: rowsFromCollection(collection),
-    snapshots,
-    status: collection.status,
-    resume: observableResume(exported?.resume),
-    durableRows: rowsFromMap(persistedRows),
-    durableResume: observableResume(persistedMetadata.get(`electric:resume`)),
-    persistenceCommits,
-  }
-  await collection.cleanup()
-  return result
 }
 
 async function runQueryTrace(
   id: string,
   batches: Array<Array<Message<OracleRow>>>,
+  authoredSnapshots?: TraceResult[`snapshots`],
 ): Promise<TraceResult> {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -522,50 +591,70 @@ async function runQueryTrace(
       startSync: true,
     }),
   )
-  await collection.preload()
+  const publications = observePublications(collection)
+  try {
+    publications.record(`before empty Query preload`)
+    await collection.preload()
+    publications.record(`empty Query ready`)
+    expectWholePublications(publications.entries, [[]])
 
-  const snapshots: TraceResult[`snapshots`] = []
-  const history: Array<Array<Message<OracleRow>>> = []
-  for (const batch of batches) {
-    history.push(batch)
-    const commits = batch.some((message) => {
-      const control = (message.headers as Record<string, unknown>).control
-      return control === `up-to-date` || control === `subset-end`
-    })
-    if (commits) {
-      queryRows = recomputeCommittedRows(history).map(
-        ([rowId, name, stable]) => ({
+    const snapshots: TraceResult[`snapshots`] = []
+    const history: Array<Array<Message<OracleRow>>> = []
+    for (const batch of batches) {
+      const cut = publications.entries.length
+      const before = rowsFromCollection(collection)
+      publications.record(`before query snapshot ${history.length}`)
+      history.push(batch)
+      const commits = batch.some((message) => {
+        const control = (message.headers as Record<string, unknown>).control
+        return control === `up-to-date` || control === `subset-end`
+      })
+      if (commits) {
+        // Without explicit authored snapshots this is a model-fed Query
+        // projection control, not an independent Electric protocol authority.
+        queryRows = (
+          authoredSnapshots?.[history.length - 1] ??
+          recomputeCommittedRows(history)
+        ).map(([rowId, name, stable]) => ({
           id: Number(rowId),
           name,
           stable,
-        }),
-      )
-      queryClient.setQueryData(queryKey, queryRows)
-      await vi.waitFor(
-        () => {
-          expect(rowsFromCollection(collection)).toEqual(
-            queryRows.map((row): [number, string, string] => [
-              row.id,
-              row.name,
-              row.stable,
-            ]),
-          )
-        },
-        { interval: 1, timeout: 250 },
-      )
+        }))
+        queryClient.setQueryData(queryKey, queryRows)
+        publications.record(`after query delivery ${history.length - 1}`)
+        await vi.waitFor(
+          () => {
+            expect(rowsFromCollection(collection)).toEqual(
+              queryRows.map((row): [number, string, string] => [
+                row.id,
+                row.name,
+                row.stable,
+              ]),
+            )
+          },
+          { interval: 1, timeout: 250 },
+        )
+      }
+      publications.record(`settled query snapshot ${history.length - 1}`)
+      expectWholePublications(publications.entries.slice(cut), [
+        before,
+        queryRows.map((row) => [row.id, row.name, row.stable]),
+      ])
+      snapshots.push(rowsFromCollection(collection))
     }
-    snapshots.push(rowsFromCollection(collection))
-  }
 
-  const result: TraceResult = {
-    rows: rowsFromCollection(collection),
-    snapshots,
-    status: collection.status,
-    resume: undefined,
+    const result: TraceResult = {
+      rows: rowsFromCollection(collection),
+      snapshots,
+      status: collection.status,
+      resume: undefined,
+    }
+    return result
+  } finally {
+    publications.stop()
+    await collection.cleanup()
+    queryClient.clear()
   }
-  await collection.cleanup()
-  queryClient.clear()
-  return result
 }
 
 function change(
@@ -677,12 +766,14 @@ type ProcessCommand =
     }
   | { kind: `reset`; slot: ProcessSlot }
   | { kind: `snapshot`; slot: ProcessSlot; id: number; name: string }
+  | { kind: `retired-callback`; slot: ProcessSlot; id: number; name: string }
   | { kind: `cleanup`; slot: ProcessSlot }
   | { kind: `restart`; slot: ProcessSlot }
 
 type ProcessRuntime = {
   collection: Collection<OracleRow, string | number>
   subscriber?: (messages: Array<Message<OracleRow>>) => void
+  retiredSubscriber?: (messages: Array<Message<OracleRow>>) => void
   reference: ReferenceState
   seenTxids: Set<number>
   resumeAvailable: boolean
@@ -691,7 +782,59 @@ type ProcessRuntime = {
   terminalError: boolean
   active: boolean
   retired: boolean
-  preloadPromises: Array<Promise<unknown>>
+  preloads: Array<ObservedPreload>
+}
+
+type PreloadOutcome =
+  | { status: `fulfilled` }
+  | { status: `rejected`; reason: unknown }
+
+function observePreload(promise: Promise<void>) {
+  const observed: {
+    expectedRejection?: `cleanup` | `invalid-resume`
+    settled: boolean
+    outcome: Promise<PreloadOutcome>
+  } = {
+    settled: false,
+    // Both handlers are installed at creation, before a driver command can
+    // invalidate or retire the collection. Keep the original rejection object.
+    outcome: promise.then(
+      () => {
+        observed.settled = true
+        return { status: `fulfilled` }
+      },
+      (reason: unknown) => {
+        observed.settled = true
+        return { status: `rejected`, reason }
+      },
+    ),
+  }
+  return observed
+}
+
+type ObservedPreload = ReturnType<typeof observePreload>
+
+function expectPreloadOutcome(
+  observed: ObservedPreload,
+  outcome: PreloadOutcome,
+) {
+  if (observed.expectedRejection === undefined) {
+    if (outcome.status === `rejected`) throw outcome.reason
+    return
+  }
+  expect(outcome.status).toBe(`rejected`)
+  if (outcome.status === `rejected`) {
+    expect(outcome.reason).toMatchObject(
+      observed.expectedRejection === `cleanup`
+        ? {
+            name: `AbortError`,
+            message: `Collection preload was abandoned during cleanup`,
+          }
+        : {
+            message: `Electric resume state referenced an unseen row; a full snapshot is required`,
+          },
+    )
+  }
 }
 
 const processCommandArb: fc.Arbitrary<ProcessCommand> = fc.oneof(
@@ -727,6 +870,12 @@ const processCommandArb: fc.Arbitrary<ProcessCommand> = fc.oneof(
   }),
   fc.record({
     kind: fc.constant(`snapshot` as const),
+    slot: fc.constantFrom<ProcessSlot>(`a`, `b`),
+    id: fc.integer({ min: 1, max: 3 }),
+    name: fc.string({ maxLength: 8 }),
+  }),
+  fc.record({
+    kind: fc.constant(`retired-callback` as const),
     slot: fc.constantFrom<ProcessSlot>(`a`, `b`),
     id: fc.integer({ min: 1, max: 3 }),
     name: fc.string({ maxLength: 8 }),
@@ -880,20 +1029,41 @@ function buildDifferentialHistory(
 async function runProcessGrammar(
   idPrefix: string,
   generated: Array<ProcessCommand>,
-): Promise<void> {
+) {
   const subscribers: Array<(messages: Array<Message<OracleRow>>) => void> = []
   const runtimes = new Map<ProcessSlot, ProcessRuntime>()
-  const allPreloads: Array<Promise<unknown>> = []
+  const allPreloads: Array<ObservedPreload> = []
+  const reached: Array<{ command: ProcessCommand; result: string }> = []
+  const callbackVisits = new Map<
+    NonNullable<ProcessRuntime[`subscriber`]>,
+    number
+  >()
+  const expectPendingRejection = (
+    runtime: ProcessRuntime,
+    reason: NonNullable<ObservedPreload[`expectedRejection`]>,
+  ) => {
+    for (const preload of runtime.preloads) {
+      if (!preload.settled) preload.expectedRejection = reason
+    }
+  }
   let generation = 0
   mockSubscribe.mockReset()
   mockSubscribe.mockImplementation((callback) => {
-    subscribers.push(callback)
+    const observed: NonNullable<ProcessRuntime[`subscriber`]> = (messages) => {
+      callbackVisits.set(observed, callbackVisits.get(observed)! + 1)
+      callback(messages)
+    }
+    callbackVisits.set(observed, 0)
+    subscribers.push(observed)
     return vi.fn()
   })
 
   const createRuntime = async (slot: ProcessSlot) => {
     const previous = runtimes.get(slot)
-    if (previous) await previous.collection.cleanup()
+    if (previous) {
+      expectPendingRejection(previous, `cleanup`)
+      await previous.collection.cleanup()
+    }
     generation++
     const collection = createCollection(
       electricCollectionOptions<OracleRow>({
@@ -916,7 +1086,7 @@ async function runProcessGrammar(
       terminalError: false,
       active: false,
       retired: false,
-      preloadPromises: [],
+      preloads: [],
     })
   }
 
@@ -924,9 +1094,9 @@ async function runProcessGrammar(
     if (runtime.active) return
     const subscriberIndex = subscribers.length
     if (preload) {
-      const promise = runtime.collection.preload()
-      runtime.preloadPromises.push(promise)
-      allPreloads.push(promise)
+      const observed = observePreload(runtime.collection.preload())
+      runtime.preloads.push(observed)
+      allPreloads.push(observed)
     } else {
       runtime.collection.startSyncImmediate()
     }
@@ -958,13 +1128,13 @@ async function runProcessGrammar(
   const execute = async (command: ProcessCommand) => {
     if (command.kind === `create`) {
       await createRuntime(command.slot)
-      return
+      return `created`
     }
     const runtime = runtimes.get(command.slot)
-    if (!runtime) return
+    if (!runtime) return `skipped: no collection`
 
     if (command.kind === `import`) {
-      if (runtime.active) return
+      if (runtime.active) return `skipped: already active`
       runtime.collection.config.sync.importSyncMeta?.({
         version: 1,
         seenTxids: [command.txid],
@@ -994,18 +1164,23 @@ async function runProcessGrammar(
           other.collection.utils.awaitTxId(command.txid, 2),
         ).rejects.toThrow()
       }
-      return
+      return `imported`
     }
 
     if (command.kind === `preload`) {
+      if (runtime.active) return `skipped: already active`
       startRuntime(runtime, true)
-      return
+      return `preloaded`
     }
     if (command.kind === `restart`) {
+      if (runtime.active) return `skipped: already active`
       startRuntime(runtime, false)
-      return
+      return `restarted`
     }
     if (command.kind === `cleanup`) {
+      expectPendingRejection(runtime, `cleanup`)
+      runtime.retiredSubscriber =
+        runtime.subscriber ?? runtime.retiredSubscriber
       await runtime.collection.cleanup()
       runtime.active = false
       runtime.retired = true
@@ -1018,15 +1193,39 @@ async function runProcessGrammar(
       runtime.requiresCompleteResume = false
       runtime.resettingSnapshot = false
       runtime.terminalError = false
-      return
+      return `cleaned up`
     }
-    if (!runtime.active || !runtime.subscriber || runtime.terminalError) return
+    if (command.kind === `retired-callback`) {
+      if (!runtime.retiredSubscriber) return `skipped: no retired callback`
+      const observeOwners = () =>
+        Array.from(runtimes, ([slot, owner]) => ({
+          slot,
+          rows: rowsFromCollection(owner.collection),
+          status: owner.collection.status,
+          metadata: structuredClone(
+            owner.collection.config.sync.exportSyncMeta?.(),
+          ),
+        }))
+      const before = observeOwners()
+      const beforeVisits = callbackVisits.get(runtime.retiredSubscriber)!
+      runtime.retiredSubscriber([
+        change(`insert`, command.id, command.name),
+        { headers: { control: `up-to-date`, txids: [1001] } },
+      ])
+      expect(callbackVisits.get(runtime.retiredSubscriber)).toBe(
+        beforeVisits + 1,
+      )
+      expect(observeOwners()).toEqual(before)
+      return `delivered: retired callback`
+    }
+    if (!runtime.active || !runtime.subscriber) return `skipped: inactive`
+    if (runtime.terminalError) return `skipped: terminal error`
 
     if (command.kind === `reset`) {
       runtime.subscriber([mustRefetch])
       applyReferenceBatch(runtime.reference, [mustRefetch])
       runtime.resettingSnapshot = true
-      return
+      return `delivered: reset`
     }
 
     if (command.kind === `snapshot`) {
@@ -1035,7 +1234,7 @@ async function runProcessGrammar(
       applyReferenceBatch(runtime.reference, messages)
       runtime.resettingSnapshot = false
       runtime.resumeAvailable = true
-      return
+      return `delivered: snapshot`
     }
 
     const evidenceChange = change(command.operation, command.id, command.name)
@@ -1060,11 +1259,13 @@ async function runProcessGrammar(
     const txidOutcome = observesTxid
       ? runtime.collection.utils.awaitTxId(command.txid, 100)
       : undefined
+    if (invalidResume) expectPendingRejection(runtime, `invalid-resume`)
     runtime.subscriber(messages)
     if (invalidResume) {
       runtime.terminalError = true
       runtime.resumeAvailable = false
-      return
+      runtime.retiredSubscriber = runtime.subscriber
+      return `delivered: invalid resume`
     }
     applyReferenceBatch(runtime.reference, messages)
     runtime.resettingSnapshot = false
@@ -1073,6 +1274,7 @@ async function runProcessGrammar(
       await expect(txidOutcome).resolves.toBe(true)
       runtime.seenTxids.add(command.txid)
     }
+    return `delivered: batch`
   }
 
   const requiredPrefix: Array<ProcessCommand> = [
@@ -1104,6 +1306,7 @@ async function runProcessGrammar(
   const requiredSuffix: Array<ProcessCommand> = [
     { kind: `cleanup`, slot: `a` },
     { kind: `restart`, slot: `a` },
+    { kind: `retired-callback`, slot: `a`, id: 3, name: `retired-a` },
     {
       kind: `batch`,
       slot: `a`,
@@ -1114,6 +1317,7 @@ async function runProcessGrammar(
     },
     { kind: `cleanup`, slot: `b` },
     { kind: `restart`, slot: `b` },
+    { kind: `retired-callback`, slot: `b`, id: 3, name: `retired-b` },
     {
       kind: `batch`,
       slot: `b`,
@@ -1130,16 +1334,32 @@ async function runProcessGrammar(
       ...generated,
       ...requiredSuffix,
     ]) {
-      await execute(command)
+      const entry = { command, result: `entered` }
+      reached.push(entry)
+      entry.result = await execute(command)
       assertAllSlots()
     }
+  } catch (error) {
+    throw new Error(`Process grammar ${idPrefix}: ${JSON.stringify(reached)}`, {
+      cause: error,
+    })
   } finally {
+    for (const runtime of runtimes.values())
+      expectPendingRejection(runtime, `cleanup`)
     await Promise.all(
       Array.from(runtimes.values(), ({ collection }) => collection.cleanup()),
     )
-    await Promise.allSettled(allPreloads)
+    await Promise.all(allPreloads.map(({ outcome }) => outcome))
     mockSubscribe.mockReset()
   }
+  const preloads = await Promise.all(
+    allPreloads.map(async (observed) => {
+      const outcome = await observed.outcome
+      expectPreloadOutcome(observed, outcome)
+      return outcome
+    }),
+  )
+  return { reached, preloads }
 }
 
 async function runSchedulerPermutation(
@@ -1360,8 +1580,8 @@ describe(`Electric adapter laws`, () => {
     },
   )
 
-  it(`stops lifecycle replay after an invalid resumed update`, async () => {
-    await runProcessGrammar(`process-grammar-terminal-error`, [
+  it(`delivers retired callbacks without advancing a failed lifecycle`, async () => {
+    const result = await runProcessGrammar(`process-grammar-terminal-error`, [
       {
         kind: `batch`,
         slot: `a`,
@@ -1371,7 +1591,85 @@ describe(`Electric adapter laws`, () => {
         txid: 55,
       },
       { kind: `snapshot`, slot: `a`, id: 1, name: `stale callback` },
+      {
+        kind: `retired-callback`,
+        slot: `a`,
+        id: 1,
+        name: `actually delivered`,
+      },
     ])
+    expect(
+      result.reached
+        .filter(({ command }) => command.kind === `retired-callback`)
+        .map(({ result: reached }) => reached),
+    ).toEqual([
+      `delivered: retired callback`,
+      `delivered: retired callback`,
+      `delivered: retired callback`,
+    ])
+    expect(
+      result.reached.find(
+        ({ command }) =>
+          command.kind === `snapshot` && command.name === `stale callback`,
+      )?.result,
+    ).toBe(`skipped: terminal error`)
+  })
+
+  it.each([`invalid-resume`, `cleanup`] as const)(
+    `records an initial preload's %s rejection before continuing the grammar`,
+    async (failure) => {
+      const result = await runProcessGrammar(`preload-${failure}`, [
+        { kind: `create`, slot: `a` },
+        { kind: `import`, slot: `a`, txid: 4, resume: true },
+        { kind: `preload`, slot: `a` },
+        ...(failure === `cleanup`
+          ? [{ kind: `cleanup` as const, slot: `a` as const }]
+          : [
+              {
+                kind: `batch` as const,
+                slot: `a` as const,
+                operation: `update` as const,
+                id: 3,
+                name: `unseen`,
+                txid: 56,
+              },
+            ]),
+        { kind: `retired-callback`, slot: `a`, id: 3, name: `after rejection` },
+      ])
+      expect(result.preloads.map(({ status }) => status)).toEqual([
+        `fulfilled`,
+        `fulfilled`,
+        `rejected`,
+      ])
+      const rejected = result.preloads[2]!
+      if (rejected.status === `rejected`) {
+        expect(rejected.reason).toMatchObject(
+          failure === `cleanup`
+            ? { name: `AbortError` }
+            : {
+                message: `Electric resume state referenced an unseen row; a full snapshot is required`,
+              },
+        )
+      }
+      expect(
+        result.reached.find(
+          ({ command }) =>
+            command.kind === `retired-callback` &&
+            command.name === `after rejection`,
+        )?.result,
+      ).toBe(`delivered: retired callback`)
+    },
+  )
+
+  it(`preserves unexpected preload failures instead of treating observation as success`, async () => {
+    const failure = new Error(`test-owned preload failure`)
+    const observed = observePreload(Promise.reject(failure))
+    const outcome = await observed.outcome
+    expect(outcome).toEqual({ status: `rejected`, reason: failure })
+    if (outcome.status === `rejected`) expect(outcome.reason).toBe(failure)
+    expect(() => expectPreloadOutcome(observed, outcome)).toThrow(failure)
+    const success = observePreload(Promise.resolve())
+    expectPreloadOutcome(success, await success.outcome)
   })
 
   it.each([`reset`, `delete`, `move-out`] as const)(
@@ -1834,7 +2132,7 @@ describe(`Electric adapter laws`, () => {
       ],
     },
   )(
-    `denotational reference, Electric, persisted Electric, and query adapters converge across controls and publication epochs`,
+    `Electric drivers converge with the denotational reference and model-fed Query projection across publication epochs`,
     async (tokens, partitionSeed) => {
       const messages = buildDifferentialHistory(tokens)
       const partitions = everyContiguousPartition(messages).filter(
@@ -1875,6 +2173,177 @@ describe(`Electric adapter laws`, () => {
     },
     30_000,
   )
+
+  it(`retains a wrong intermediate publication even when the final read repairs it`, async () => {
+    const trace = createOracleCollection(
+      `publication-recorder-control`,
+      `eager`,
+      createMetadata(new Map()).api,
+    )
+    trace.subscriber([change(`insert`, 1, `old`), upToDate])
+    const observed = observePublications(trace.collection)
+    try {
+      observed.record(`before`)
+      trace.subscriber([change(`update`, 1, `wrong`), upToDate])
+      trace.subscriber([change(`update`, 1, `correct`), upToDate])
+      observed.record(`final`)
+      expect(rowsFromCollection(trace.collection)).toEqual([
+        [1, `correct`, `stable-1`],
+      ])
+      expect(observed.entries[0]!.rows).toEqual([[1, `old`, `stable-1`]])
+      expect(
+        observed.entries.some(
+          ({ cut, rows }) => cut === `event` && rows[0]?.[1] === `wrong`,
+        ),
+      ).toBe(true)
+      expect(() =>
+        expectWholePublications(observed.entries, [
+          [[1, `old`, `stable-1`]],
+          [[1, `correct`, `stable-1`]],
+        ]),
+      ).toThrow()
+      expectWholePublications(observed.entries, [
+        [[1, `old`, `stable-1`]],
+        [[1, `wrong`, `stable-1`]],
+        [[1, `correct`, `stable-1`]],
+      ])
+    } finally {
+      observed.stop()
+      await trace.collection.cleanup()
+    }
+  })
+
+  it(`checks an authored HTTP transcript and separate complete Query snapshots`, async () => {
+    const { ShapeStream: RealShapeStream } = await vi.importActual<{
+      ShapeStream: typeof ShapeStream
+    }>(`@electric-sql/client`)
+    const ready: Message<OracleRow> = {
+      headers: { control: `up-to-date`, global_last_seen_lsn: `2` },
+    }
+    const authored: Array<Array<Message<OracleRow>>> = [
+      [
+        change(`insert`, 1, `old`),
+        { headers: { control: `up-to-date`, global_last_seen_lsn: `1` } },
+      ],
+      [mustRefetch],
+      [
+        change(`insert`, 2, `replacement`),
+        subsetEnd,
+        change(`insert`, 3, `after-control`),
+        ready,
+      ],
+    ]
+    // These complete snapshots are authored directly, not computed by either
+    // reference reducer or from any adapter result. A post-control row belongs
+    // to the same delivered callback's atomic publication.
+    const complete: TraceResult[`snapshots`] = [
+      [[1, `old`, `stable-1`]],
+      [[1, `old`, `stable-1`]],
+      [
+        [2, `replacement`, `stable-2`],
+        [3, `after-control`, `stable-3`],
+      ],
+    ]
+    const controller = new AbortController()
+    const headers = {
+      'electric-handle': `authored-old`,
+      'electric-offset': `1_0`,
+      // Without this completion header the SDK can prefetch the next chunk;
+      // a positional mock-response queue would not describe the live request.
+      'electric-up-to-date': `true`,
+      'electric-schema': JSON.stringify({
+        id: { type: `int4` },
+        name: { type: `text` },
+        stable: { type: `text` },
+      }),
+    }
+    const wire = (messages: Array<Message<OracleRow>>) =>
+      JSON.stringify(
+        messages.map((message) =>
+          `value` in message
+            ? {
+                ...message,
+                value: { ...message.value, id: String(message.value.id) },
+              }
+            : message,
+        ),
+      )
+    const responses = [
+      new Response(wire(authored[0]!), { headers }),
+      new Response(wire(authored[1]!), {
+        status: 409,
+        headers: { 'electric-handle': `authored-new` },
+      }),
+      new Response(wire(authored[2]!), {
+        headers: {
+          ...headers,
+          'electric-handle': `authored-new`,
+          'electric-offset': `2_0`,
+          'electric-cursor': `1`,
+        },
+      }),
+    ]
+    const received: Array<Array<Message<OracleRow>>> = []
+    const stream = new RealShapeStream<OracleRow>({
+      url: `http://test-url/v1/authored-publication-transcript`,
+      params: { table: `rows` },
+      signal: controller.signal,
+      fetchClient: () => {
+        const response = responses.shift()
+        if (response) return Promise.resolve(response)
+        return new Promise<Response>((_resolve, reject) => {
+          if (controller.signal.aborted) reject(controller.signal.reason)
+          else
+            controller.signal.addEventListener(
+              `abort`,
+              () => reject(controller.signal.reason),
+              { once: true },
+            )
+        })
+      },
+    })
+    const unsubscribe = stream.subscribe((messages) => {
+      received.push(structuredClone(messages))
+    })
+    try {
+      await vi.waitFor(() =>
+        expect(
+          received,
+          JSON.stringify({ received, remainingResponses: responses.length }),
+        ).toHaveLength(3),
+      )
+      expect(received).toEqual(authored)
+      expect(isSdkResetFramedPartition(received)).toBe(true)
+      // This validates this installed SDK's controlled-HTTP antecedent only.
+      // It is not proof that all servers or SSE streams emit this transcript.
+      for (const mode of [`eager`, `on-demand`, `progressive`] as const) {
+        const direct = await runTrace(
+          `authored-direct-${mode}`,
+          mode,
+          [],
+          structuredClone(received),
+        )
+        const persisted = await runPersistedTrace(
+          `authored-persisted-${mode}`,
+          mode,
+          structuredClone(received),
+          complete,
+        )
+        expect(direct.snapshots).toEqual(complete)
+        expect(persisted.snapshots).toEqual(complete)
+        expect(persisted.durableRows).toEqual(complete[2])
+      }
+      const query = await runQueryTrace(
+        `authored-query`,
+        structuredClone(received),
+        complete,
+      )
+      expect(query.snapshots).toEqual(complete)
+    } finally {
+      unsubscribe()
+      controller.abort()
+    }
+  })
 
   fcTest.prop(
     [
@@ -3608,6 +4077,179 @@ describe(`Electric adapter laws`, () => {
       }
     },
   )
+
+  fcTest.prop(
+    [
+      fc.array(fc.integer({ min: 1, max: 8 }), { minLength: 1, maxLength: 12 }),
+      fc.array(fc.integer({ min: 1, max: 8 }), { minLength: 1, maxLength: 12 }),
+    ],
+    {
+      numRuns: 30,
+      examples: [
+        [
+          [1, 2, 1],
+          [2, 3, 2],
+        ],
+        [[8], [1]],
+      ],
+    },
+  )(
+    `metadata merge preserves complete selected state and nonempty transaction evidence`,
+    (leftTxids, rightTxids) => {
+      const merge = electricCollectionOptions<OracleRow>({
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        getKey: (row) => row.id,
+      }).sync.mergeSyncMeta!
+      // Membership over an independent finite universe, not the merger's
+      // concatenate/Set implementation. Duplicates cannot invent evidence.
+      const union = Array.from({ length: 8 }, (_, index) => index + 1).filter(
+        (txid) => leftTxids.includes(txid) || rightTxids.includes(txid),
+      )
+      for (const tagRequirement of [undefined, false, true]) {
+        const resume = {
+          kind: `resume`,
+          offset: `10_0`,
+          handle: `shape-1`,
+          shapeId,
+          updatedAt: 10,
+          ...(tagRequirement === undefined
+            ? {}
+            : { requiresTagState: tagRequirement }),
+        }
+        const reset = { kind: `reset`, updatedAt: 10 }
+        const newer = {
+          ...resume,
+          offset: `30_0`,
+          handle: `shape-new`,
+          shapeId: `other-shape`,
+          updatedAt: 11,
+        }
+        const cases = [
+          {
+            name: `identical complete state`,
+            left: resume,
+            right: { ...resume },
+            expected: resume,
+          },
+          {
+            name: `newer complete state`,
+            left: resume,
+            right: newer,
+            expected: newer,
+          },
+          {
+            name: `newer reset`,
+            left: resume,
+            right: { kind: `reset`, updatedAt: 11 },
+            expected: { kind: `reset`, updatedAt: 11 },
+          },
+          {
+            name: `newer resume after reset`,
+            left: reset,
+            right: newer,
+            expected: newer,
+          },
+          {
+            name: `equal reset`,
+            left: reset,
+            right: { ...reset },
+            expected: reset,
+          },
+          {
+            name: `equal timestamp reset conflict`,
+            left: resume,
+            right: reset,
+            expected: reset,
+          },
+          {
+            name: `equal timestamp offset conflict`,
+            left: resume,
+            right: { ...resume, offset: `20_0` },
+            expected: reset,
+          },
+          {
+            name: `equal timestamp handle conflict`,
+            left: resume,
+            right: { ...resume, handle: `different` },
+            expected: reset,
+          },
+          {
+            name: `equal timestamp shape conflict`,
+            left: resume,
+            right: { ...resume, shapeId: `other-shape` },
+            expected: reset,
+          },
+          {
+            name: `only one resume`,
+            left: undefined,
+            right: resume,
+            expected: resume,
+          },
+          {
+            name: `no resume`,
+            left: undefined,
+            right: undefined,
+            expected: undefined,
+          },
+        ]
+        // Raw adapter-owned metadata policy: timestamp selection and conflict
+        // reset, not a server causal-order claim. Equal-time differing tag
+        // requirements are deliberately absent: their compatibility is open.
+        for (const scenario of cases) {
+          const left = {
+            version: 1,
+            seenTxids: leftTxids,
+            ...(scenario.left ? { resume: scenario.left } : {}),
+          }
+          const right = {
+            version: 1,
+            seenTxids: rightTxids,
+            ...(scenario.right ? { resume: scenario.right } : {}),
+          }
+          const expected = {
+            version: 1,
+            seenTxids: union,
+            ...(scenario.expected ? { resume: scenario.expected } : {}),
+          }
+          const before = structuredClone([left, right])
+          expect(merge(left, right), scenario.name).toEqual(expected)
+          expect(merge(right, left), scenario.name).toEqual(expected)
+          expect([left, right]).toEqual(before)
+        }
+      }
+    },
+  )
+
+  it(`retains the selected tag requirement when timestamps establish an order`, () => {
+    const merge = electricCollectionOptions<OracleRow>({
+      shapeOptions: { url: `http://test-url`, params: { table: `test_table` } },
+      getKey: (row) => row.id,
+    }).sync.mergeSyncMeta!
+    for (const olderTag of [undefined, false, true]) {
+      for (const newerTag of [undefined, false, true]) {
+        const state = (updatedAt: number, tag: boolean | undefined) => ({
+          version: 1,
+          seenTxids: [updatedAt],
+          resume: {
+            kind: `resume`,
+            offset: `10_0`,
+            handle: `shape-1`,
+            shapeId,
+            updatedAt,
+            ...(tag === undefined ? {} : { requiresTagState: tag }),
+          },
+        })
+        const older = state(1, olderTag)
+        const newer = state(2, newerTag)
+        const expected = { ...newer, seenTxids: [1, 2] }
+        expect(merge(older, newer)).toEqual(expected)
+        expect(merge(newer, older)).toEqual(expected)
+      }
+    }
+  })
 
   it(`rejects an unseen partial update from an explicit eager resume`, async () => {
     const metadata = createMetadata(resumeState())

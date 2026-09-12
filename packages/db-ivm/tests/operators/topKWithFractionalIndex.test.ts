@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest'
+import fc from 'fast-check'
 import { D2 } from '../../src/d2.js'
 import { MultiSet } from '../../src/multiset.js'
 import { topKWithFractionalIndex } from '../../src/operators/topKWithFractionalIndex.js'
@@ -12,6 +13,7 @@ import {
   assertOnlyKeysAffected,
   compareFractionalIndex,
 } from '../test-utils.js'
+import { TopKMessageTracker, TopKRelation } from './topk-relation-oracle.js'
 
 // Helper function to check if indices are in lexicographic order
 function checkLexicographicOrder(results: Array<any>) {
@@ -71,6 +73,105 @@ beforeAll(async () => {
   await loadBTree()
 })
 
+describe.each([
+  { name: `array`, topK: topKWithFractionalIndex },
+  { name: `BTree`, topK: topKWithFractionalIndexBTree },
+])('Generated fractional $name windows', ({ topK }) => {
+  it.each([409031, undefined])(
+    `matches a signed cumulative relation through keyed histories (seed %s)`,
+    (seed) => {
+      fc.assert(
+        fc.property(
+          fc.record({
+            limit: fc.integer({ min: 0, max: 6 }),
+            offset: fc.integer({ min: 0, max: 3 }),
+            steps: fc.array(
+              fc.record({
+                key: fc.integer({ min: 1, max: 8 }),
+                value: fc.constantFrom(`a`, `b`, `c`, `d`),
+                remove: fc.boolean(),
+              }),
+              { minLength: 1, maxLength: 30 },
+            ),
+          }),
+          ({ limit, offset, steps }) => {
+            type Row = { id: number; value: string }
+            const graph = new D2()
+            const input = graph.newInput<[number, Row]>()
+            const relation = new TopKRelation<number, string>()
+            const source = new Map<number, Row>()
+            input.pipe(
+              topK((a, b) => a.value.localeCompare(b.value), {
+                limit,
+                offset,
+              }),
+              output((message) => relation.add(message.getInner())),
+            )
+            graph.finalize()
+            const initial = [1, 2, 3].map((key) => ({
+              key,
+              value: `b`,
+              remove: false,
+            }))
+            for (const step of [...initial, ...steps]) {
+              const changes: Array<[[number, Row], number]> = []
+              const old = source.get(step.key)
+              if (old) changes.push([[step.key, { ...old }], -1])
+              source.delete(step.key)
+              if (!step.remove) {
+                const row = { id: step.key, value: step.value }
+                source.set(step.key, row)
+                changes.push([[step.key, { ...row }], 1])
+              }
+              input.sendData(new MultiSet(changes))
+              graph.run()
+              const expected = [...source.values()]
+                .sort((a, b) => a.value.localeCompare(b.value) || a.id - b.id)
+                .slice(offset, offset + limit)
+                .map((row): [number, number, string] => [
+                  row.id,
+                  row.id,
+                  row.value,
+                ])
+              relation.expectRows(expected)
+            }
+          },
+        ),
+        {
+          seed,
+          numRuns: 100,
+          examples: [
+            [
+              {
+                offset: 1,
+                limit: 1,
+                steps: [
+                  { key: 2, value: `b`, remove: true },
+                  { key: 1, value: `a`, remove: false },
+                ],
+              },
+            ],
+            ...[0, 1, 3].flatMap((offset) =>
+              [0, 1].map((limit) => [
+                {
+                  offset,
+                  limit,
+                  steps: [
+                    { key: 4, value: `a`, remove: false },
+                    { key: 2, value: `c`, remove: false },
+                    { key: 1, value: `b`, remove: true },
+                    { key: 1, value: `d`, remove: false },
+                  ],
+                },
+              ]),
+            ),
+          ],
+        },
+      )
+    },
+  )
+})
+
 describe(`Operators`, () => {
   describe.each([
     [`with array`, { topK: topKWithFractionalIndex }],
@@ -79,9 +180,7 @@ describe(`Operators`, () => {
     it(`should assign fractional indices to sorted elements`, () => {
       const graph = new D2()
       const input = graph.newInput<[number, { id: number; value: string }]>()
-      const tracker = new MessageTracker<
-        [number, [{ id: number; value: string }, string]]
-      >()
+      const tracker = new TopKMessageTracker<number, string>()
 
       input.pipe(
         topK((a, b) => a.value.localeCompare(b.value)),
@@ -120,6 +219,13 @@ describe(`Operators`, () => {
       tracker.reset()
 
       // Now let's move 'c' to the beginning by changing its value
+      tracker.relation.expectRows([
+        [1, 1, `a`],
+        [2, 2, `b`],
+        [3, 3, `c`],
+        [4, 4, `d`],
+        [5, 5, `e`],
+      ])
       input.sendData(
         new MultiSet([
           [[3, { id: 3, value: `c` }], -1], // Remove the old value
@@ -131,6 +237,13 @@ describe(`Operators`, () => {
       // Check the incremental changes
       const updateResult = tracker.getResult()
       // Should have reasonable incremental changes (not recomputing everything)
+      tracker.relation.expectRows([
+        [1, 1, `a`],
+        [3, 3, `a-`],
+        [2, 2, `b`],
+        [4, 4, `d`],
+        [5, 5, `e`],
+      ])
       expect(updateResult.messageCount).toBeLessThanOrEqual(4) // Should be incremental
       expect(updateResult.messageCount).toBeGreaterThan(0) // Should have some changes
 
@@ -154,9 +267,7 @@ describe(`Operators`, () => {
     it(`should support duplicate ordering keys`, () => {
       const graph = new D2()
       const input = graph.newInput<[number, { id: number; value: string }]>()
-      const tracker = new MessageTracker<
-        [number, [{ id: number; value: string }, string]]
-      >()
+      const tracker = new TopKMessageTracker<number, string>()
 
       input.pipe(
         topK((a, b) => a.value.localeCompare(b.value)),
@@ -191,12 +302,27 @@ describe(`Operators`, () => {
       tracker.reset()
 
       // Now let's add a new element with a value that is already in there
+      tracker.relation.expectRows([
+        [1, 1, `a`],
+        [2, 2, `b`],
+        [3, 3, `c`],
+        [4, 4, `d`],
+        [5, 5, `e`],
+      ])
       input.sendData(new MultiSet([[[6, { id: 6, value: `c` }], 1]]))
       graph.run()
 
       // Check the incremental changes
       const updateResult = tracker.getResult()
       // Should have efficient incremental update
+      tracker.relation.expectRows([
+        [1, 1, `a`],
+        [2, 2, `b`],
+        [3, 3, `c`],
+        [6, 6, `c`],
+        [4, 4, `d`],
+        [5, 5, `e`],
+      ])
       expect(updateResult.messageCount).toBeLessThanOrEqual(2) // Should be incremental (1 addition)
       expect(updateResult.messageCount).toBeGreaterThan(0) // Should have changes
 
@@ -262,9 +388,7 @@ describe(`Operators`, () => {
     it(`should handle limit and offset correctly`, () => {
       const graph = new D2()
       const input = graph.newInput<[number, { id: number; value: string }]>()
-      const tracker = new MessageTracker<
-        [number, [{ id: number; value: string }, string]]
-      >()
+      const tracker = new TopKMessageTracker<number, string>()
 
       input.pipe(
         topK((a, b) => a.value.localeCompare(b.value), {
@@ -310,6 +434,11 @@ describe(`Operators`, () => {
       tracker.reset()
 
       // Test a few incremental updates to verify limit/offset behavior
+      tracker.relation.expectRows([
+        [2, 2, `b`],
+        [3, 3, `c`],
+        [4, 4, `d`],
+      ])
 
       // Add element that should be included (between c and d)
       input.sendData(
@@ -331,14 +460,17 @@ describe(`Operators`, () => {
       // 4 is affected because it is pushed out of the topK
       // by 6 which enters the topK
       assertOnlyKeysAffected(`topK limit+offset`, updateResult.messages, [4, 6])
+      tracker.relation.expectRows([
+        [2, 2, `b`],
+        [3, 3, `c`],
+        [6, 6, `c+`],
+      ])
     })
 
     it(`should handle elements moving positions correctly`, () => {
       const graph = new D2()
       const input = graph.newInput<[number, { id: number; value: string }]>()
-      const tracker = new MessageTracker<
-        [number, [{ id: number; value: string }, string]]
-      >()
+      const tracker = new TopKMessageTracker<number, string>()
 
       input.pipe(
         topK((a, b) => a.value.localeCompare(b.value)),
@@ -380,6 +512,13 @@ describe(`Operators`, () => {
       tracker.reset()
 
       // Now let's swap 'b' and 'd' by changing their values
+      tracker.relation.expectRows([
+        [1, 1, `a`],
+        [2, 2, `b`],
+        [3, 3, `c`],
+        [4, 4, `d`],
+        [5, 5, `e`],
+      ])
       input.sendData(
         new MultiSet([
           [[2, { id: 2, value: `b` }], -1], // Remove old 'b'
@@ -402,17 +541,21 @@ describe(`Operators`, () => {
         [2, 4],
       )
 
-      // For position swaps, we mainly care that the operation is incremental
-      // The exact final state depends on the implementation details of fractional indexing
+      // Tokens may vary; complete row contents and their order may not.
+      tracker.relation.expectRows([
+        [1, 1, `a`],
+        [4, 4, `b+`],
+        [3, 3, `c`],
+        [2, 2, `d+`],
+        [5, 5, `e`],
+      ])
       expect(updateResult.sortedResults.length).toBeGreaterThan(0) // Should have some final results
     })
 
     it(`should maintain lexicographic order through multiple updates`, () => {
       const graph = new D2()
       const input = graph.newInput<[number, { id: number; value: string }]>()
-      const tracker = new MessageTracker<
-        [number, [{ id: number; value: string }, string]]
-      >()
+      const tracker = new TopKMessageTracker<number, string>()
 
       input.pipe(
         topK((a, b) => a.value.localeCompare(b.value)),
@@ -442,6 +585,13 @@ describe(`Operators`, () => {
       tracker.reset()
 
       // Update 1: Insert elements between existing ones - b, d, f, h
+      tracker.relation.expectRows([
+        [1, 1, `a`],
+        [3, 3, `c`],
+        [5, 5, `e`],
+        [7, 7, `g`],
+        [9, 9, `i`],
+      ])
       input.sendData(
         new MultiSet([
           [[2, { id: 2, value: `b` }], 1],
@@ -453,6 +603,17 @@ describe(`Operators`, () => {
       graph.run()
 
       const update1Result = tracker.getResult()
+      tracker.relation.expectRows([
+        [1, 1, `a`],
+        [2, 2, `b`],
+        [3, 3, `c`],
+        [4, 4, `d`],
+        [5, 5, `e`],
+        [6, 6, `f`],
+        [7, 7, `g`],
+        [8, 8, `h`],
+        [9, 9, `i`],
+      ])
       // Should have efficient incremental update
       expect(update1Result.messageCount).toBeLessThanOrEqual(6) // Should be incremental
       expect(update1Result.messageCount).toBeGreaterThan(0) // Should have changes
@@ -471,6 +632,17 @@ describe(`Operators`, () => {
       graph.run()
 
       const update2Result = tracker.getResult()
+      tracker.relation.expectRows([
+        [1, 1, `a`],
+        [7, 7, `a-`],
+        [2, 2, `b`],
+        [4, 4, `d`],
+        [5, 5, `e`],
+        [6, 6, `f`],
+        [8, 8, `h`],
+        [9, 9, `i`],
+        [3, 3, `j`],
+      ])
       // Should have efficient incremental update for value changes
       expect(update2Result.messageCount).toBeLessThanOrEqual(6) // Should be incremental
       expect(update2Result.messageCount).toBeGreaterThan(0) // Should have changes
@@ -486,9 +658,7 @@ describe(`Operators`, () => {
     it(`should maintain correct order when cycling through multiple changes`, () => {
       const graph = new D2()
       const input = graph.newInput<[number, { id: number; value: string }]>()
-      const tracker = new MessageTracker<
-        [number, [{ id: number; value: string }, string]]
-      >()
+      const tracker = new TopKMessageTracker<number, string>()
 
       input.pipe(
         topK((a, b) => a.value.localeCompare(b.value)),
@@ -530,6 +700,13 @@ describe(`Operators`, () => {
       tracker.reset()
 
       // Cycle 1: Move 'a' to position after 'b' by changing it to 'bb'
+      tracker.relation.expectRows([
+        [1, 1, `a`],
+        [2, 2, `b`],
+        [3, 3, `c`],
+        [4, 4, `d`],
+        [5, 5, `e`],
+      ])
       input.sendData(
         new MultiSet([
           [[1, { id: 1, value: `a` }], -1], // Remove old 'a'
@@ -539,6 +716,13 @@ describe(`Operators`, () => {
       graph.run()
 
       const cycle1Result = tracker.getResult()
+      tracker.relation.expectRows([
+        [2, 2, `b`],
+        [1, 1, `bb`],
+        [3, 3, `c`],
+        [4, 4, `d`],
+        [5, 5, `e`],
+      ])
       // Should have efficient incremental update
       expect(cycle1Result.messageCount).toBeLessThanOrEqual(4) // Should be incremental
       expect(cycle1Result.messageCount).toBeGreaterThan(0) // Should have changes
@@ -555,6 +739,13 @@ describe(`Operators`, () => {
       graph.run()
 
       const cycle2Result = tracker.getResult()
+      tracker.relation.expectRows([
+        [2, 2, `b`],
+        [3, 3, `c`],
+        [4, 4, `d`],
+        [1, 1, `dd`],
+        [5, 5, `e`],
+      ])
       // Should have efficient incremental update for the repositioning
       expect(cycle2Result.messageCount).toBeLessThanOrEqual(4) // Should be incremental
       expect(cycle2Result.messageCount).toBeGreaterThan(0) // Should have changes
@@ -571,11 +762,13 @@ describe(`Operators`, () => {
       const graph = new D2()
       const input = graph.newInput<[number, { id: number; value: string }]>()
       const allMessages: Array<any> = []
+      const relation = new TopKRelation<number, string>()
 
       input.pipe(
         topK((a, b) => a.value.localeCompare(b.value)),
         output((message) => {
           allMessages.push(message)
+          relation.add(message.getInner())
         }),
       )
 
@@ -615,6 +808,14 @@ describe(`Operators`, () => {
 
       // Check the changes
       const changes = allMessages[1].getInner()
+      expect(allMessages).toHaveLength(2)
+      relation.expectRows([
+        [1, 1, `a`],
+        [2, 2, `b`],
+        [3, 3, `c`],
+        [4, 4, `d`],
+        [5, 5, `e`],
+      ])
 
       // We should only emit as many changes as we received (1 addition)
       expect(changes.length).toBe(1)
@@ -655,11 +856,13 @@ describe(`Operators`, () => {
       const graph = new D2()
       const input = graph.newInput<[number, { id: number; value: string }]>()
       const allMessages: Array<any> = []
+      const relation = new TopKRelation<number, string>()
 
       input.pipe(
         topK((a, b) => a.value.localeCompare(b.value)),
         output((message) => {
           allMessages.push(message)
+          relation.add(message.getInner())
         }),
       )
 
@@ -700,6 +903,15 @@ describe(`Operators`, () => {
 
       // Check the changes
       const changes = allMessages[1].getInner()
+      expect(allMessages).toHaveLength(2)
+      relation.expectRows([
+        [1, 1, `a`],
+        [2, 2, `b`],
+        [3, 3, `c`],
+        [4, 4, `d`],
+        [5, 5, `e`],
+        [6, 6, `f`],
+      ])
 
       // We should only emit as many changes as we received (1 addition)
       expect(changes.length).toBe(2)

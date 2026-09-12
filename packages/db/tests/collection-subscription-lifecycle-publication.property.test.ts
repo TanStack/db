@@ -103,6 +103,35 @@ type PublicationRunOptions = {
   continueAfterMismatch?: boolean
   historyName?: string
   mismatches?: Array<PublicationMismatch>
+  terminal?: {
+    order: `oldest-first` | `newest-first`
+    outcome: `resolve` | `reject`
+    expectedPending: number
+    reached: Array<number>
+  }
+}
+
+type TerminalPublicationSnapshot = {
+  batches: Array<Array<PublicationChange>>
+  visible: Array<Row>
+  statusEvents: Array<{ previousStatus: string; status: string }>
+  errors: Array<unknown>
+  status: string
+  subscriberCount: number
+  attempts: number
+  unloads: Array<number>
+  sessions: number
+}
+
+function assertTerminalPublication(
+  actual: TerminalPublicationSnapshot,
+  retired: TerminalPublicationSnapshot,
+): void {
+  expect(actual).toEqual(retired)
+  expect(actual.subscriberCount).toBe(0)
+  actual.errors.forEach((error, index) =>
+    expect(error).toBe(retired.errors[index]),
+  )
 }
 
 function recordSourceWrite(publication: PublicationModel, row: Row): void {
@@ -492,6 +521,11 @@ async function runPublicationHistory(
   const owners: Array<RuntimeOwner> = []
   const sourceRows = new Map<number, Map<RowKey, Row>>()
   const operationsBySession = new Map<number, SyncOperations>()
+  const outcomes = new Map<
+    number,
+    { state: `resolved` } | { state: `rejected`; error: unknown }
+  >()
+  const outcomeObservers = new Map<number, Promise<void>>()
   let nextAttemptId = 0
   let nextOwnerId = 0
   let session = -1
@@ -523,6 +557,19 @@ async function runPublicationHistory(
             const id = nextAttemptId++
             const deferred = createDeferred<void>()
             void deferred.promise.catch(() => undefined)
+            if (runOptions.terminal) {
+              outcomeObservers.set(
+                id,
+                deferred.promise.then(
+                  () => {
+                    outcomes.set(id, { state: `resolved` })
+                  },
+                  (error: unknown) => {
+                    outcomes.set(id, { state: `rejected`, error })
+                  },
+                ),
+              )
+            }
             attempts.set(id, {
               id,
               ownerId: owner.id,
@@ -552,6 +599,8 @@ async function runPublicationHistory(
 
   const visible = new Map<RowKey, Row>()
   const observedBatches: Array<Array<PublicationChange>> = []
+  const statusEvents: TerminalPublicationSnapshot[`statusEvents`] = []
+  const errorEvents: Array<unknown> = []
   const subscription = collection.subscribeChanges(
     (changes) => {
       const batch = changes.map((change): PublicationChange => {
@@ -577,6 +626,23 @@ async function runPublicationHistory(
     },
     { includeInitialState: false },
   )
+  if (runOptions.terminal) {
+    subscription.on(`status:change`, ({ previousStatus, status }) => {
+      statusEvents.push({ previousStatus, status })
+    })
+    subscription.on(`loadSubset:error`, ({ error }) => errorEvents.push(error))
+  }
+  const captureTerminal = (): TerminalPublicationSnapshot => ({
+    batches: clonePublicationBatches(observedBatches),
+    visible: [...visible.values()].map(cloneRow),
+    statusEvents: statusEvents.map((event) => ({ ...event })),
+    errors: [...errorEvents],
+    status: subscription.status,
+    subscriberCount: collection.subscriberCount,
+    attempts: attempts.size,
+    unloads: [...unloads],
+    sessions: operationsBySession.size,
+  })
 
   const writeAttempt = async (attempt: RuntimeAttempt): Promise<void> => {
     // Cancellation fences request-scoped writes at the adapter boundary.
@@ -643,6 +709,7 @@ async function runPublicationHistory(
     return command.age === `oldest` ? candidates[0] : candidates.at(-1)
   }
 
+  const failures: Array<unknown> = []
   try {
     for (const [index, command] of history.entries()) {
       const priorPublicationCount = lifecycle.publications
@@ -849,12 +916,63 @@ async function runPublicationHistory(
         collectionStatus: collection.status,
       })
     }
+    if (runOptions.terminal) {
+      const terminal = runOptions.terminal
+      const pending = [...attempts.values()].filter(({ settled }) => !settled)
+      expect(pending).toHaveLength(terminal.expectedPending)
+      expect(pending.length).toBeGreaterThan(0)
+      if (terminal.order === `newest-first`) pending.reverse()
+      subscription.unsubscribe()
+      unsubscribed = true
+      const retired = captureTerminal()
+      expect(retired.subscriberCount).toBe(0)
+      for (const attempt of pending) {
+        expect(outcomes.has(attempt.id)).toBe(false)
+        const failure = new Error(`retired publication transport ${attempt.id}`)
+        attempt.settled = true
+        if (terminal.outcome === `resolve`) {
+          await writeAttempt(attempt)
+          attempt.deferred.resolve()
+        } else {
+          attempt.deferred.reject(failure)
+        }
+        await outcomeObservers.get(attempt.id)
+        await flushPromises()
+        terminal.reached.push(attempt.id)
+        const outcome = outcomes.get(attempt.id)
+        if (terminal.outcome === `resolve`)
+          expect(outcome).toEqual({ state: `resolved` })
+        else {
+          expect(outcome?.state).toBe(`rejected`)
+          if (outcome?.state === `rejected`) expect(outcome.error).toBe(failure)
+        }
+        assertTerminalPublication(captureTerminal(), retired)
+      }
+      expect(terminal.reached).toEqual(pending.map(({ id }) => id))
+    }
+  } catch (error) {
+    failures.push(error)
   } finally {
     for (const attempt of attempts.values()) attempt.deferred.resolve()
-    await flushPromises()
-    subscription.unsubscribe()
-    await collection.cleanup()
+    try {
+      await flushPromises()
+    } catch (error) {
+      failures.push(error)
+    }
+    try {
+      subscription.unsubscribe()
+    } catch (error) {
+      failures.push(error)
+    }
+    try {
+      await collection.cleanup()
+    } catch (error) {
+      failures.push(error)
+    }
   }
+  if (failures.length === 1) throw failures[0]
+  if (failures.length > 1)
+    throw new AggregateError(failures, `Publication history and cleanup failed`)
   return observations
 }
 
@@ -1116,6 +1234,89 @@ function expectNoPublicationMismatches(
 }
 
 describe(`CollectionSubscription lifecycle publication oracle`, () => {
+  it.each(
+    ([`initial`, `replay`, `restart`] as const).flatMap((phase) =>
+      [1, 2].flatMap((demandCount) =>
+        ([`resolve`, `reject`] as const).flatMap((outcome) =>
+          ([`oldest-first`, `newest-first`] as const).map((order) => ({
+            phase,
+            demandCount,
+            outcome,
+            order,
+          })),
+        ),
+      ),
+    ),
+  )(
+    `observes retired transports without subscriber activity: %j`,
+    async ({ phase, demandCount, outcome, order }) => {
+      const history: Array<PublicationCommand> = [
+        { type: `source`, key: `c`, action: `upsert`, value: 42 },
+        { type: `request`, demand: `a` },
+        ...(demandCount === 2
+          ? [{ type: `request` as const, demand: `b` as const }]
+          : []),
+        ...(phase === `replay`
+          ? [{ type: `truncate` as const }]
+          : phase === `restart`
+            ? [{ type: `cleanup` as const }, { type: `restart` as const }]
+            : []),
+      ]
+      const reached: Array<number> = []
+      await runPublicationHistory(history, {
+        terminal: {
+          order,
+          outcome,
+          expectedPending: demandCount * (phase === `initial` ? 1 : 2),
+          reached,
+        },
+      })
+      expect(new Set(reached).size).toBe(
+        demandCount * (phase === `initial` ? 1 : 2),
+      )
+    },
+  )
+
+  it.each([`row`, `status`, `error`, `acquisition`] as const)(
+    `rejects a terminal %s observation with an unchanged-retired neighbor`,
+    (fault) => {
+      const retired: TerminalPublicationSnapshot = {
+        batches: [],
+        visible: [{ id: `c`, value: 42 }],
+        statusEvents: [],
+        errors: [],
+        status: `ready`,
+        subscriberCount: 0,
+        attempts: 2,
+        unloads: [0, 1],
+        sessions: 1,
+      }
+      const actual: TerminalPublicationSnapshot = {
+        ...retired,
+        batches: [],
+        visible: retired.visible.map(cloneRow),
+        statusEvents: [],
+        errors: [],
+        unloads: [...retired.unloads],
+      }
+      assertTerminalPublication(actual, retired)
+      if (fault === `row`)
+        actual.batches.push([
+          { type: `insert`, key: `a`, value: { id: `a`, value: 9 } },
+        ])
+      if (fault === `status`)
+        actual.statusEvents.push({
+          previousStatus: `ready`,
+          status: `loadingSubset`,
+        })
+      if (fault === `error`) actual.errors.push(new Error(`late transport`))
+      if (fault === `acquisition`) actual.attempts++
+      expect(() => assertTerminalPublication(actual, retired)).toThrowError(
+        /expected/,
+      )
+    },
+  )
+
   it.each(
     ([undefined, false] as const).flatMap((includeInitialState) =>
       ([`update`, `delete`, `truncate`] as const).map((operation) => ({

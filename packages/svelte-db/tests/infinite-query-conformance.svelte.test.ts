@@ -6,9 +6,11 @@ import {
   gt,
 } from '@tanstack/db'
 import { flushSync } from 'svelte'
+import { describe, expect, it } from 'vitest'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import { runInfiniteQuerySuite } from '../../db/tests/conformance/infinite-suite'
 import { makeInfiniteOnDemandSource } from '../../db/tests/conformance/infinite-on-demand'
+import { withScopeSetup } from '../../db/tests/conformance/scope-setup'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery.svelte.js'
 import type {
   InfiniteQueryConfig,
@@ -21,6 +23,11 @@ import type {
 } from '../../db/tests/conformance/contract'
 
 let sourceSequence = 0
+
+// Setup must return ownership or release it if the first flush fails.
+function finishSetup(dispose: () => void, initialize: () => void = flushSync) {
+  withScopeSetup(initialize, dispose)
+}
 
 function makeSource<T extends { id: string }>(
   initialData: ReadonlyArray<T>,
@@ -91,7 +98,7 @@ function mount(build: QueryBuild, config: InfiniteQueryConfig = {}) {
   const dispose = $effect.root(() => {
     result = useLiveInfiniteQuery(build as any, config as any)
   })
-  flushSync()
+  finishSetup(dispose)
   return makeHandle(() => result, dispose)
 }
 
@@ -114,7 +121,7 @@ function mountControllable<P>(
       param = next
     }
   })
-  flushSync()
+  finishSetup(dispose)
   const handle = makeHandle(() => result, dispose)
   return { ...handle, setParamSync: setParam }
 }
@@ -124,7 +131,7 @@ function mountCollection(collection: any, config: InfiniteQueryConfig = {}) {
   const dispose = $effect.root(() => {
     result = useLiveInfiniteQuery(collection, config as any)
   })
-  flushSync()
+  finishSetup(dispose)
   return makeHandle(() => result, dispose)
 }
 
@@ -141,7 +148,7 @@ function mountCollectionControllable(
       collection = next
     }
   })
-  flushSync()
+  finishSetup(dispose)
   const handle = makeHandle(() => result, dispose)
   return { ...handle, replaceCollectionSync: replaceCollection }
 }
@@ -156,10 +163,12 @@ function mountConfigControllable(
     const config = $state({ ...initial })
     result = useLiveInfiniteQuery(build as any, config as any)
     setConfig = (next) => {
+      delete config.pageSize
+      delete config.initialPageParam
       Object.assign(config, next)
     }
   })
-  flushSync()
+  finishSetup(dispose)
   const handle = makeHandle(() => result, dispose)
   return { ...handle, setConfigSync: setConfig }
 }
@@ -182,7 +191,7 @@ function mountInputControllable(
       kind = next
     }
   })
-  flushSync()
+  finishSetup(dispose)
   const handle = makeHandle(() => result, dispose)
   return { ...handle, setInputKindSync: setInputKind }
 }
@@ -204,3 +213,61 @@ const svelteInfiniteDriver: InfiniteQueryDriver = {
 }
 
 runInfiniteQuerySuite(svelteInfiniteDriver)
+
+describe(`infinite driver post-root ownership`, () => {
+  it(`retains successful root until its owner disposes`, () => {
+    let calls = 0
+    const dispose = $effect.root(() => {
+      $effect(() => () => {
+        calls++
+      })
+    })
+    finishSetup(dispose)
+    expect(calls).toBe(0)
+    dispose()
+    expect(calls).toBe(1)
+  })
+  it.each([false, true])(
+    `cleans failed setup flush, cleanupFails=%s`,
+    (cleanupFails) => {
+      const primary = new Error(`flush`)
+      const secondary = new Error(`cleanup`)
+      let calls = 0
+      const dispose = $effect.root(() => {
+        $effect(() => () => {
+          calls++
+          if (cleanupFails) throw secondary
+        })
+      })
+      flushSync()
+      let caught: unknown
+      try {
+        finishSetup(dispose, () =>
+          flushSync(() => {
+            throw primary
+          }),
+        )
+      } catch (error) {
+        caught = error
+      }
+      try {
+        expect(calls).toBe(1)
+        if (cleanupFails) {
+          expect(caught).toBeInstanceOf(AggregateError)
+          expect((caught as AggregateError).errors).toEqual([
+            primary,
+            secondary,
+          ])
+          expect((caught as AggregateError).cause).toBe(primary)
+        } else expect(caught).toBe(primary)
+      } finally {
+        // The initial red candidate still owns this root.
+        if (calls === 0) {
+          try {
+            dispose()
+          } catch {}
+        }
+      }
+    },
+  )
+})

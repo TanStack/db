@@ -10,7 +10,10 @@ import {
   createElectronSQLitePersistence,
   exposeElectronSQLitePersistence,
 } from '../src'
-import { generateSeedData } from '../../db-collection-e2e/src/fixtures/seed-data'
+import {
+  captureSeedData,
+  generateSeedData,
+} from '../../db-collection-e2e/src/fixtures/seed-data'
 import { runPersistedCollectionConformanceSuite } from '../../db-sqlite-persistence-core/tests/contracts/persisted-collection-conformance-contract'
 import {
   createElectronRuntimeBridgeInvoke,
@@ -217,6 +220,11 @@ beforeAll(async () => {
   const suiteId = Date.now().toString(36)
   const invokeHarness = createInvokeHarness(dbPath)
   const seedData = generateSeedData()
+  const fixture = captureSeedData(seedData, {
+    registration:
+      'packages/electron-db-sqlite-persistence/tests/electron-persisted-collection.e2e.test.ts',
+    provider: 'Electron invoke test harness',
+  })
 
   const eagerUsers = createPersistedCollection<User>(
     invokeHarness.invoke,
@@ -261,6 +269,7 @@ beforeAll(async () => {
   await onDemandComments.seedPersisted(seedData.comments)
 
   config = {
+    fixture,
     collections: {
       eager: {
         users: eagerUsers.collection,
@@ -294,6 +303,11 @@ beforeAll(async () => {
         insertRowIntoCollections(
           [eagerPosts.collection, onDemandPosts.collection],
           post,
+        ),
+      deletePost: async (id) =>
+        deleteRowAcrossCollections(
+          [eagerPosts.collection, onDemandPosts.collection],
+          id,
         ),
     },
     setup: async () => {},

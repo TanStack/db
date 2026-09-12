@@ -1,6 +1,9 @@
+import { oracleReplayReporter } from './oracle-replay-witness.js'
+
 type OracleEnvironment = Record<string, string | undefined>
 
 const staticOracleProperties = [
+  `oracle-replay.calibration`,
   `trailbase.lifecycle`,
   `electric.bound-descriptor-history`,
   `electric.persisted-tag-history`,
@@ -8,6 +11,8 @@ const staticOracleProperties = [
   `collection-sync.reentrant-drain`,
   `collection-state.retention`,
   `collection-state.optimistic-history`,
+  `collection-state.mixed-transaction`,
+  `query-identity.compiled-output`,
   `derived-publication.membership-work`,
   `collection-publication.metadata-cancellation`,
   `collection-publication.metadata-only`,
@@ -95,6 +100,10 @@ const staticOracleProperties = [
   `subscription-lifecycle.async-history`,
   `subscription-lifecycle.async-restart`,
   `subscription-lifecycle.async-statistics`,
+  `sorted-map.key`,
+  `cleanup-queue.history`,
+  `sorted-map.ascending`,
+  `sorted-map.descending`,
 ] as const
 
 const publicationProperties = [
@@ -128,7 +137,7 @@ export function validateOraclePropertyRegistry(
   return registry
 }
 
-const registeredOracleProperties = validateOraclePropertyRegistry([
+export const registeredOracleProperties = validateOraclePropertyRegistry([
   ...staticOracleProperties,
   ...publicationProperties,
   ...refinementProperties,
@@ -221,7 +230,9 @@ export function oracleRandomParameters(
   numRuns: number,
   replay: OracleReplayConfig | number | undefined,
   property?: string,
-): { numRuns: number; seed?: number; path?: string } {
+): { numRuns: number; seed?: number; path?: string } & ReturnType<
+  typeof oracleReplayReporter
+> {
   if (property !== undefined) assertRegisteredOracleProperty(property)
   const { replaySeed, replayPath, replayProperty } =
     typeof replay === `object`
@@ -238,7 +249,10 @@ export function oracleRandomParameters(
     ...(property !== undefined &&
     replayPath !== undefined &&
     replayProperty === property
-      ? { path: replayPath }
+      ? {
+          path: replayPath,
+          ...oracleReplayReporter(property, replaySeed, replayPath),
+        }
       : {}),
   }
 }
@@ -254,10 +268,6 @@ export function oracleRuns(baseRuns: number): number {
 export function oraclePropertyOptions(
   baseRuns: number,
   property?: string,
-): {
-  numRuns: number
-  seed?: number
-  path?: string
-} {
+): ReturnType<typeof oracleRandomParameters> {
   return oracleRandomParameters(oracleRuns(baseRuns), replay, property)
 }

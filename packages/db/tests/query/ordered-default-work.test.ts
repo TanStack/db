@@ -8,6 +8,24 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
 
 type Row = { id: number; rank: number }
 
+// Observe both sides of the documented 250 ms / 500 ms retry boundaries.
+// A total count at 1,000 ms cannot distinguish an early or late second retry.
+async function expectRepairSchedule(
+  retryLimit: number,
+  observe: (retries: number) => void,
+) {
+  for (const [delay, retries] of [
+    [249, 0],
+    [1, 1],
+    [499, 1],
+    [1, 2],
+    [250, 2],
+  ] as const) {
+    await vi.advanceTimersByTimeAsync(delay)
+    observe(Math.min(retries, retryLimit))
+  }
+}
+
 async function setup(
   indexed: boolean,
   multi: boolean,
@@ -201,11 +219,16 @@ describe(`Ordered source work across default and indexed plans`, () => {
         expect(h.live.status).toBe(`ready`)
         expect(h.live.toArray.map((row) => row.id)).toEqual([1, 2])
         if (outcome === `cleanup`) await h.live.cleanup()
-        await vi.advanceTimersByTimeAsync(249)
-        expect(h.calls).toHaveLength(afterFailure)
-        await vi.advanceTimersByTimeAsync(751)
-        expect(h.calls.length - afterFailure).toBe(
+        await expectRepairSchedule(
           outcome === `cleanup` ? 0 : outcome === `success` ? 1 : 2,
+          (retries) => {
+            expect(h.calls).toHaveLength(afterFailure + retries)
+            if (outcome === `cleanup`) return
+            expect(h.live.status).toBe(`ready`)
+            expect(h.live.toArray.map((row) => row.id)).toEqual(
+              outcome === `success` && retries > 0 ? [2, 3] : [1, 2],
+            )
+          },
         )
         if (outcome === `cleanup`) return
         expect(h.live.status).toBe(`ready`)
@@ -224,6 +247,33 @@ describe(`Ordered source work across default and indexed plans`, () => {
         expect(h.live.toArray.map((row) => row.id)).toEqual([50, 2])
       } finally {
         await h.cleanup()
+        vi.useRealTimers()
+      }
+    },
+  )
+
+  it.each([400, 600])(
+    `detects an incorrect second retry delay of %i ms`,
+    async (secondDelay) => {
+      vi.useFakeTimers({ toFake: [`setTimeout`, `clearTimeout`] })
+      try {
+        const check = async (delay: number) => {
+          let retries = 0
+          setTimeout(() => {
+            retries++
+            setTimeout(() => retries++, delay)
+          }, 250)
+          await expectRepairSchedule(2, (expected) => {
+            expect(retries).toBe(expected)
+          })
+        }
+        // A test-owned schedule fault must fail the same observer used above.
+        await expect(check(secondDelay)).rejects.toMatchObject({
+          name: `AssertionError`,
+        })
+        vi.clearAllTimers()
+        await check(500)
+      } finally {
         vi.useRealTimers()
       }
     },

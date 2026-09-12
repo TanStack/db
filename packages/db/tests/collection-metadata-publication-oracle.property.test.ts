@@ -22,6 +22,16 @@ type MetadataEntryState = { present: false } | { present: true; value: unknown }
 
 type MetadataWrite = { key: number } & MetadataOperation
 
+type MetadataDriver = (value: unknown) => unknown
+const unchangedMetadata: MetadataDriver = (value) => value
+
+// This grammar contains structured values only. Clone the whole scenario, not
+// each write: aliases within one world stay intact, but cannot rewrite the
+// other world's authority or the original replay input.
+function metadataWorlds<T>(scenario: T): { model: T; driver: T } {
+  return { model: structuredClone(scenario), driver: structuredClone(scenario) }
+}
+
 type PublicationRound = {
   key: number
   delta: number
@@ -212,14 +222,18 @@ function observableMetadata(
   model: ReadonlyMap<number, unknown>,
   keys: Iterable<number>,
 ): Map<number, unknown> {
+  // The public API exposes get, not has. Stored undefined and absence are
+  // intentionally indistinguishable here; this is a value observation.
   return new Map([...keys].map((key) => [key, model.get(key)]))
 }
 
 async function applyRound(
   harness: PublicationHarness,
   round: PublicationRound,
+  expectedRound: PublicationRound,
   model: Map<number, PublicationRow>,
   metadataModel: Map<number, unknown>,
+  writeMetadata: MetadataDriver,
 ): Promise<void> {
   const previous = model.get(round.key)!
   const next = { ...previous, position: previous.position + round.delta }
@@ -231,13 +245,13 @@ async function applyRound(
   const transaction = createTransaction({
     mutationFn: async () => {
       sync.begin({ immediate: true })
-      sync.write({ type: `update`, value: next })
+      sync.write({ type: `update`, value: { ...next } })
       sync.commit()
 
       sync.begin()
       for (const write of round.metadata) {
         if (write.type === `set`) {
-          sync.metadata!.row.set(write.key, write.value)
+          sync.metadata!.row.set(write.key, writeMetadata(write.value))
         } else {
           sync.metadata!.row.delete(write.key)
         }
@@ -265,7 +279,7 @@ async function applyRound(
 
   model.set(round.key, next)
   if (round.outcome === `commit`) {
-    for (const write of round.metadata) {
+    for (const write of expectedRound.metadata) {
       if (write.type === `set`) {
         metadataModel.set(write.key, write.value)
       } else {
@@ -324,15 +338,24 @@ async function applyRound(
 
 async function runPublicationHistory(
   rounds: ReadonlyArray<PublicationRound>,
+  writeMetadata: MetadataDriver = unchangedMetadata,
 ): Promise<void> {
+  const worlds = metadataWorlds(rounds)
   const harness = await createPublicationHarness()
   const model = new Map(
     [0, 1, 2].map((id) => [id, { id, position: id }] as const),
   )
   const metadataModel = new Map<number, unknown>()
   try {
-    for (const round of rounds) {
-      await applyRound(harness, round, model, metadataModel)
+    for (const [index, round] of worlds.driver.entries()) {
+      await applyRound(
+        harness,
+        round,
+        worlds.model[index]!,
+        model,
+        metadataModel,
+        writeMetadata,
+      )
     }
   } finally {
     harness.unsubscribe()
@@ -347,16 +370,24 @@ async function expectMetadataCancellationOwnership(
   retainedOperation: MetadataOperation,
   canceledFirst: boolean,
   initialMetadataState: ReadonlyArray<MetadataEntryState>,
+  writeMetadata: MetadataDriver = unchangedMetadata,
 ): Promise<void> {
+  const worlds = metadataWorlds({
+    canceledOperation,
+    retainedOperation,
+    initialMetadataState,
+  })
   const harness = await createPublicationHarness()
   const initialMetadata = new Map<number, unknown>()
-  for (const [key, state] of initialMetadataState.entries()) {
+  for (const [key, state] of worlds.model.initialMetadataState.entries()) {
     if (state.present) initialMetadata.set(key, state.value)
   }
   const initialSync = harness.getSync()
   initialSync.begin()
-  for (const [key, value] of initialMetadata) {
-    initialSync.metadata!.row.set(key, value)
+  for (const [key, state] of worlds.driver.initialMetadataState.entries()) {
+    if (state.present) {
+      initialSync.metadata!.row.set(key, writeMetadata(state.value))
+    }
   }
   initialSync.commit()
   await Promise.resolve()
@@ -379,7 +410,7 @@ async function expectMetadataCancellationOwnership(
     sync.begin()
     for (const key of keys) {
       if (operation.type === `set`) {
-        sync.metadata!.row.set(key, operation.value)
+        sync.metadata!.row.set(key, writeMetadata(operation.value))
       } else {
         sync.metadata!.row.delete(key)
       }
@@ -394,17 +425,25 @@ async function expectMetadataCancellationOwnership(
 
   const canceledController = new AbortController()
   const first = canceledFirst
-    ? stageMetadata(canceledKeys, canceledOperation, canceledController.signal)
-    : stageMetadata(retainedKeys, retainedOperation)
+    ? stageMetadata(
+        canceledKeys,
+        worlds.driver.canceledOperation,
+        canceledController.signal,
+      )
+    : stageMetadata(retainedKeys, worlds.driver.retainedOperation)
   const second = canceledFirst
-    ? stageMetadata(retainedKeys, retainedOperation)
-    : stageMetadata(canceledKeys, canceledOperation, canceledController.signal)
+    ? stageMetadata(retainedKeys, worlds.driver.retainedOperation)
+    : stageMetadata(
+        canceledKeys,
+        worlds.driver.canceledOperation,
+        canceledController.signal,
+      )
   const canceled = canceledFirst ? first : second
   const retained = canceledFirst ? second : first
   const expectedMetadata = new Map(initialMetadata)
   for (const key of retainedKeys) {
-    if (retainedOperation.type === `set`) {
-      expectedMetadata.set(key, retainedOperation.value)
+    if (worlds.model.retainedOperation.type === `set`) {
+      expectedMetadata.set(key, worlds.model.retainedOperation.value)
     } else {
       expectedMetadata.delete(key)
     }
@@ -444,6 +483,121 @@ async function expectMetadataCancellationOwnership(
     await Promise.all([harness.liveRows.cleanup(), harness.rows.cleanup()])
   }
 }
+
+it(`keeps metadata aliases within each independent input world`, () => {
+  const value = { nested: 1 }
+  const input = {
+    first: value,
+    second: value,
+    absentValue: undefined,
+    nan: NaN,
+  }
+  const worlds = metadataWorlds(input)
+  for (const world of [worlds.model, worlds.driver]) {
+    expect(world.first).toBe(world.second)
+    expect(world.first).not.toBe(value)
+    expect(world).toEqual(input)
+  }
+  expect(worlds.model.first).not.toBe(worlds.driver.first)
+  worlds.driver.first.nested = 2
+  expect(worlds.model.first.nested).toBe(1)
+  expect(value.nested).toBe(1)
+})
+
+const mutateDriverMetadata: MetadataDriver = (value) => {
+  if (typeof value === `object` && value !== null && `nested` in value) {
+    value.nested = `corrupted by driver`
+  }
+  return value
+}
+
+it(`detects driver mutation of committed metadata without rewriting its authority`, async () => {
+  const rounds: Array<PublicationRound> = [
+    {
+      key: 1,
+      delta: 1,
+      metadata: [{ key: 1, type: `set`, value: { nested: 1 } }],
+      outcome: `commit`,
+    },
+  ]
+  const original = structuredClone(rounds)
+  await expect(
+    runPublicationHistory(rounds, mutateDriverMetadata),
+  ).rejects.toMatchObject({ name: `AssertionError` })
+  expect(rounds).toEqual(original)
+  await runPublicationHistory(rounds)
+  await runPublicationHistory(
+    rounds.map((round) => ({ ...round, outcome: `abort` })),
+    mutateDriverMetadata,
+  )
+})
+
+it.each(
+  ([`initial`, `retained`] as const).flatMap((placement) =>
+    [true, false].map((canceledFirst) => ({ placement, canceledFirst })),
+  ),
+)(
+  `detects $placement metadata mutation with canceledFirst=$canceledFirst`,
+  async ({ placement, canceledFirst }) => {
+    const initial: Array<MetadataEntryState> =
+      placement === `initial`
+        ? [
+            { present: true, value: { nested: 1 } },
+            { present: false },
+            { present: false },
+          ]
+        : [{ present: false }, { present: false }, { present: false }]
+    const retained: MetadataOperation = {
+      type: `set`,
+      value: placement === `retained` ? { nested: 2 } : false,
+    }
+    const original = structuredClone({ initial, retained })
+    const run = (driver: MetadataDriver) =>
+      expectMetadataCancellationOwnership(
+        [1],
+        [2],
+        { type: `delete` },
+        retained,
+        canceledFirst,
+        initial,
+        driver,
+      )
+    await expect(run(mutateDriverMetadata)).rejects.toMatchObject({
+      name: `AssertionError`,
+    })
+    expect({ initial, retained }).toEqual(original)
+    await run(unchangedMetadata)
+  },
+)
+
+it(`shrinks and replays a driver-only metadata corruption`, async () => {
+  const roundsFor = (nested: number): Array<PublicationRound> => [
+    {
+      key: 1,
+      delta: 1,
+      metadata: [{ key: 1, type: `set`, value: { nested } }],
+      outcome: `commit`,
+    },
+  ]
+  const property = fc.asyncProperty(fc.integer(), (nested) =>
+    runPublicationHistory(roundsFor(nested), mutateDriverMetadata),
+  )
+  const failure = await fc.check(property, { seed: 505101, numRuns: 10 })
+  expect(failure.failed).toBe(true)
+  expect(failure.errorInstance).toMatchObject({ name: `AssertionError` })
+  if (failure.counterexample === null) {
+    throw new Error(`Missing metadata corruption replay`)
+  }
+  const replay = await fc.check(property, {
+    seed: failure.seed,
+    path: failure.counterexamplePath,
+    endOnFailure: true,
+  })
+  expect(replay.failed).toBe(true)
+  expect(replay.counterexample).toEqual(failure.counterexample)
+  expect(replay.errorInstance).toMatchObject({ name: `AssertionError` })
+  await runPublicationHistory(roundsFor(failure.counterexample[0]))
+})
 
 it(`publishes one event per key when metadata-only sync retires optimistic work`, async () => {
   await runPublicationHistory([

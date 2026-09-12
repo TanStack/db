@@ -1,5 +1,6 @@
+import { setImmediate as yieldToRunner } from 'node:timers/promises'
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import {
   createLiveQueryCollection,
@@ -298,6 +299,7 @@ function createPublicationDriver(
         const nextChild = { ...child, value: action.childValue }
         context.sources.children.write(`update`, nextChild)
         context.model.children.set(nextChild.id, { ...nextChild })
+        checkpoint()
         return
       }
 
@@ -307,6 +309,7 @@ function createPublicationDriver(
         const nextChild = { ...currentChild, value: action.value }
         context.sources.children.write(`update`, nextChild)
         context.model.children.set(nextChild.id, { ...nextChild })
+        checkpoint()
         return
       }
 
@@ -328,6 +331,7 @@ function createPublicationDriver(
           { type: `insert`, value: { ...next } },
         ])
         context.model.parents.set(next.id, { ...next })
+        checkpoint()
         return
       }
 
@@ -371,6 +375,7 @@ function createPublicationDriver(
 
       context.sources.parents.write(`update`, next)
       context.model.parents.set(next.id, { ...next })
+      checkpoint()
     },
     cleanup: async ({ queries, sources }) => {
       await queries.q2.cleanup()
@@ -402,6 +407,10 @@ const q2Shapes = [`passThrough`, `where`, `orderBy`, `select`] as const
 const q1Shapes = [`direct`, `joined`] as const
 
 describe(`layered-query publication oracle`, () => {
+  // Completed-promise histories can starve worker RPC replies at high run counts.
+  // Yield between whole tests, never inside a publication trace or checkpoint.
+  afterEach(() => yieldToRunner())
+
   const changedValueArbitrary = fc.oneof(
     fc.integer({ min: -100, max: -1 }),
     fc.integer({ min: 1, max: 100 }),
@@ -413,6 +422,76 @@ describe(`layered-query publication oracle`, () => {
 
   for (const q1Shape of q1Shapes) {
     for (const q2Shape of q2Shapes) {
+      it(`observes every plain write before yielding through ${q1Shape}/${q2Shape}`, async () => {
+        const actions: Array<PublicationAction> = [
+          { type: `parentScalar`, value: 7 },
+          { type: `childScalar`, value: 8 },
+          { type: `parentRoute`, group: 20 },
+          { type: `atomicReplace`, group: 30, value: 9 },
+          { type: `parentThenChild`, parentValue: 10, childValue: 11 },
+        ]
+        const driver = createPublicationDriver(q1Shape, q2Shape)
+        await runTrace({
+          steps: actions,
+          driver: {
+            ...driver,
+            apply: (action, context, checkpoint) => {
+              let reached = 0
+              const result = driver.apply(action, context, () => {
+                reached++
+                return checkpoint()
+              })
+              // Capture before awaiting the async action's returned Promise.
+              const synchronousCount = reached
+              return Promise.resolve(result).then(() => {
+                expect(synchronousCount).toBe(
+                  action.type === `parentThenChild` ? 2 : 1,
+                )
+              })
+            },
+          },
+          projection: publicationProjection,
+        })
+      })
+
+      it(`rejects a transient layered tear through ${q1Shape}/${q2Shape}`, async () => {
+        const run = (observeInsideAction: boolean) => {
+          let transient = false
+          const driver = createPublicationDriver(q1Shape, q2Shape)
+          return runTrace({
+            steps: [{ type: `parentScalar` as const, value: 7 }],
+            driver: {
+              ...driver,
+              apply: (action, context, checkpoint) => {
+                transient = true
+                queueMicrotask(() => {
+                  transient = false
+                })
+                return driver.apply(
+                  action,
+                  context,
+                  observeInsideAction ? checkpoint : () => undefined,
+                )
+              },
+            },
+            projection: {
+              ...publicationProjection,
+              observe: (context) => {
+                const observed = publicationProjection.observe(context)
+                if (transient) observed.q2[0]!.item.value = -999
+                return observed
+              },
+            },
+          })
+        }
+        // The old settled-only observation misses this test-owned fault.
+        await expect(run(false)).resolves.toBeUndefined()
+        await expect(run(true)).rejects.toMatchObject({
+          name: `TraceAssertionError`,
+          checkpoint: 1,
+        })
+      })
+
       fcTest.prop(
         [changedValueArbitrary],
         oraclePropertyOptions(

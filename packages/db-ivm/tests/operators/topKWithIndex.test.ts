@@ -3,11 +3,8 @@ import { D2 } from '../../src/d2.js'
 import { MultiSet } from '../../src/multiset.js'
 import { output } from '../../src/operators/index.js'
 import { topKWithIndex } from '../../src/operators/topK.js'
-import {
-  MessageTracker,
-  assertOnlyKeysAffected,
-  assertResults,
-} from '../test-utils.js'
+import { assertOnlyKeysAffected, assertResults } from '../test-utils.js'
+import { TopKMessageTracker } from './topk-relation-oracle.js'
 
 describe(`Operators`, () => {
   describe(`TopKWithIndex operation`, () => {
@@ -167,9 +164,7 @@ describe(`Operators`, () => {
           },
         ]
       >()
-      const tracker = new MessageTracker<
-        [null, [{ id: number; value: string }, number]]
-      >()
+      const tracker = new TopKMessageTracker<null, number>()
 
       input.pipe(
         topKWithIndex((a, b) => a.value.localeCompare(b.value), { limit: 3 }),
@@ -215,8 +210,8 @@ describe(`Operators`, () => {
       // and that only the affected key (null) produces output
       const updateResult = tracker.getResult()
 
-      // Verify we got a reasonable number of messages (not the entire dataset)
-      expect(updateResult.messageCount).toBeLessThanOrEqual(8) // Should be incremental, not full recompute
+      // This is an output-transfer cap, not a measurement of internal recomputation.
+      expect(updateResult.messageCount).toBeLessThanOrEqual(8)
       expect(updateResult.messageCount).toBeGreaterThan(0) // Should have some changes
 
       // The materialized result should have some entries (items with positive multiplicity)
@@ -224,6 +219,14 @@ describe(`Operators`, () => {
 
       // Check that the messages only affect the null key (verify incremental processing)
       assertOnlyKeysAffected(`topK remove row`, updateResult.messages, [null])
+      tracker.relation.expectRows(
+        [
+          [null, 1, `a`],
+          [null, 3, `c`],
+          [null, 4, `d`],
+        ],
+        0,
+      )
     })
 
     test(`incremental update - adding rows that push existing rows out of limit window`, () => {

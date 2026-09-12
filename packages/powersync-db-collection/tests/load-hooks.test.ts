@@ -66,14 +66,15 @@ describe(`Sync Streams`, () => {
       }),
     )
 
-    await collection.stateWhenReady()
-
-    expect(onLoadMock).toHaveBeenCalledOnce()
-    expect(onUnloadMock).not.toHaveBeenCalled()
-
-    collection.cleanup()
-
-    expect(onUnloadMock).toHaveBeenCalledOnce()
+    try {
+      await collection.stateWhenReady()
+      expect(onLoadMock).toHaveBeenCalledOnce()
+      expect(onUnloadMock).not.toHaveBeenCalled()
+      await collection.cleanup()
+      expect(onUnloadMock).toHaveBeenCalledOnce()
+    } finally {
+      await collection.cleanup()
+    }
   })
 
   it(`eager mode: reports an initial load failure`, async () => {
@@ -86,10 +87,12 @@ describe(`Sync Streams`, () => {
         onLoad: () => Promise.reject(initialError),
       }),
     )
-    onTestFinished(() => collection.cleanup())
-
-    await expect(collection.preload()).rejects.toBe(initialError)
-    expect(collection.status).toBe(`error`)
+    try {
+      await expect(collection.preload()).rejects.toBe(initialError)
+      expect(collection.status).toBe(`error`)
+    } finally {
+      await collection.cleanup()
+    }
   })
 
   it(`eager mode: releases a load hook that resolves after cleanup`, async () => {
@@ -112,12 +115,27 @@ describe(`Sync Streams`, () => {
       }),
     )
 
-    await loadStarted.promise
-    collection.cleanup()
-    releaseLoad.resolve()
-
-    await vi.waitFor(() => expect(cleanupLoad).toHaveBeenCalledOnce())
-    expect(createDiffTrigger).not.toHaveBeenCalled()
+    const outcome = collection.preload().then(
+      () => ({ status: `fulfilled` as const }),
+      (error: unknown) => ({ status: `rejected` as const, error }),
+    )
+    try {
+      await loadStarted.promise
+      await collection.cleanup()
+      expect(await outcome).toMatchObject({
+        status: `rejected`,
+        error: { name: `AbortError` },
+      })
+      releaseLoad.resolve()
+      await vi.waitFor(() => expect(cleanupLoad).toHaveBeenCalledOnce())
+      expect(createDiffTrigger).not.toHaveBeenCalled()
+    } finally {
+      releaseLoad.resolve()
+      await collection.cleanup()
+      await outcome
+      await vi.waitFor(() => expect(cleanupLoad).toHaveBeenCalledOnce())
+      createDiffTrigger.mockRestore()
+    }
   })
 
   it(`on-demand mode: should call onLoadSubset/onUnloadSubset for each live query`, async () => {
@@ -146,103 +164,132 @@ describe(`Sync Streams`, () => {
         },
       }),
     )
-    onTestFinished(() => collection.cleanup())
+    const cleanups: Array<() => Promise<void>> = []
+    try {
+      await collection.stateWhenReady()
 
-    await collection.stateWhenReady()
+      // LQ1: electronics
+      const electronicsQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ product: collection })
+            .where(({ product }) => eq(product.category, `electronics`))
+            .select(({ product }) => ({
+              id: product.id,
+              name: product.name,
+              price: product.price,
+              category: product.category,
+            })),
+      })
+      cleanups.push(() => electronicsQuery.cleanup())
 
-    // LQ1: electronics
-    const electronicsQuery = createLiveQueryCollection({
-      query: (q) =>
-        q
-          .from({ product: collection })
-          .where(({ product }) => eq(product.category, `electronics`))
-          .select(({ product }) => ({
-            id: product.id,
-            name: product.name,
-            price: product.price,
-            category: product.category,
-          })),
-    })
+      await electronicsQuery.preload()
 
-    await electronicsQuery.preload()
+      await vi.waitFor(
+        () => {
+          expect(electronicsQuery.size).toBe(3)
+        },
+        { timeout: 2000 },
+      )
 
-    await vi.waitFor(
-      () => {
-        expect(electronicsQuery.size).toBe(3)
-      },
-      { timeout: 2000 },
-    )
+      expect(onLoadSubsetMock).toHaveBeenCalledTimes(1)
+      expect(onUnloadSubsetMock).not.toHaveBeenCalled()
+      expect(
+        electronicsQuery.toArray
+          .map(({ name, price, category }) => ({ name, price, category }))
+          .sort((a, b) => a.name!.localeCompare(b.name!)),
+      ).toEqual([
+        { name: `Product A`, price: 50, category: `electronics` },
+        { name: `Product B`, price: 150, category: `electronics` },
+        { name: `Product D`, price: 200, category: `electronics` },
+      ])
 
-    expect(onLoadSubsetMock).toHaveBeenCalledTimes(1)
-    expect(onUnloadSubsetMock).not.toHaveBeenCalled()
+      // LQ2: clothing
+      const clothingQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ product: collection })
+            .where(({ product }) => eq(product.category, `clothing`))
+            .select(({ product }) => ({
+              id: product.id,
+              name: product.name,
+              price: product.price,
+              category: product.category,
+            })),
+      })
+      cleanups.push(() => clothingQuery.cleanup())
 
-    // LQ2: clothing
-    const clothingQuery = createLiveQueryCollection({
-      query: (q) =>
-        q
-          .from({ product: collection })
-          .where(({ product }) => eq(product.category, `clothing`))
-          .select(({ product }) => ({
-            id: product.id,
-            name: product.name,
-            price: product.price,
-            category: product.category,
-          })),
-    })
+      await clothingQuery.preload()
 
-    await clothingQuery.preload()
+      await vi.waitFor(
+        () => {
+          expect(clothingQuery.size).toBe(2)
+        },
+        { timeout: 2000 },
+      )
 
-    await vi.waitFor(
-      () => {
-        expect(clothingQuery.size).toBe(2)
-      },
-      { timeout: 2000 },
-    )
+      expect(onLoadSubsetMock).toHaveBeenCalledTimes(2)
+      expect(onUnloadSubsetMock).not.toHaveBeenCalled()
+      expect(
+        clothingQuery.toArray
+          .map(({ name, price, category }) => ({ name, price, category }))
+          .sort((a, b) => a.name!.localeCompare(b.name!)),
+      ).toEqual([
+        { name: `Product C`, price: 25, category: `clothing` },
+        { name: `Product E`, price: 75, category: `clothing` },
+      ])
 
-    expect(onLoadSubsetMock).toHaveBeenCalledTimes(2)
-    expect(onUnloadSubsetMock).not.toHaveBeenCalled()
+      // Cleanup LQ1 — should trigger first unload
+      await electronicsQuery.cleanup()
 
-    // Cleanup LQ1 — should trigger first unload
-    electronicsQuery.cleanup()
+      await vi.waitFor(
+        () => {
+          expect(onUnloadSubsetMock).toHaveBeenCalledTimes(1)
+          expect(unloadedRequests).toEqual([1])
+        },
+        { timeout: 2000 },
+      )
 
-    await vi.waitFor(
-      () => {
-        expect(onUnloadSubsetMock).toHaveBeenCalledTimes(1)
-        expect(unloadedRequests).toEqual([1])
-      },
-      { timeout: 2000 },
-    )
+      // Cleanup LQ2 — should trigger second unload
+      await clothingQuery.cleanup()
 
-    // Cleanup LQ2 — should trigger second unload
-    clothingQuery.cleanup()
-
-    await vi.waitFor(
-      () => {
-        expect(onUnloadSubsetMock).toHaveBeenCalledTimes(2)
-        expect(unloadedRequests).toEqual([1, 2])
-      },
-      { timeout: 2000 },
-    )
+      await vi.waitFor(
+        () => {
+          expect(onUnloadSubsetMock).toHaveBeenCalledTimes(2)
+          expect(unloadedRequests).toEqual([1, 2])
+        },
+        { timeout: 2000 },
+      )
+    } finally {
+      for (const cleanup of cleanups.reverse()) await cleanup()
+      await collection.cleanup()
+    }
   })
 
   it(`disposes a subset hook that resolves after collection cleanup`, async () => {
     const db = await createDatabase()
     await createTestProducts(db)
-    let resolveHook!: (cleanup: () => void) => void
-    const hook = new Promise<() => void>((resolve) => {
-      resolveHook = resolve
-    })
+    const hook = pDefer<() => void>()
+    const hookEntered = pDefer<void>()
     const cleanupHook = vi.fn()
+    const createDiffTrigger = vi.spyOn(db.triggers, `createDiffTrigger`)
 
     const collection = createCollection(
       powerSyncCollectionOptions({
         database: db,
         table: APP_SCHEMA.props.products,
         syncMode: `on-demand`,
-        onLoadSubset: () => hook,
+        onLoadSubset: () => {
+          hookEntered.resolve()
+          return hook.promise
+        },
       }),
     )
-    await collection.stateWhenReady()
+    await collection.stateWhenReady().catch(async (error: unknown) => {
+      await collection.cleanup()
+      createDiffTrigger.mockRestore()
+      throw error
+    })
     const query = createLiveQueryCollection({
       query: (q) =>
         q
@@ -255,15 +302,61 @@ describe(`Sync Streams`, () => {
             category: product.category,
           })),
     })
-    const preload = query.preload()
-    void preload.catch(() => {})
-
-    await vi.waitFor(() => expect(resolveHook).toBeTypeOf(`function`))
-    const collectionCleanup = collection.cleanup()
-    resolveHook(cleanupHook)
-    await collectionCleanup
-
-    await vi.waitFor(() => expect(cleanupHook).toHaveBeenCalledOnce())
-    await query.cleanup()
+    const publications: Array<unknown> = []
+    const subscription = query.subscribeChanges((changes) => {
+      publications.push(
+        changes.map(({ type, key, value }) => ({
+          type,
+          key,
+          value: { ...value },
+        })),
+      )
+    })
+    const preload = query.preload().then(
+      () => ({ status: `fulfilled` as const }),
+      (error: unknown) => ({ status: `rejected` as const, error }),
+    )
+    const reports = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const unexpected: Array<unknown> = []
+    const recordUnhandled = (error: unknown) => unexpected.push(error)
+    process.on(`unhandledRejection`, recordUnhandled)
+    const message =
+      `Source collection '${collection.id}' was manually cleaned up while live query '${query.id}' depends on it. ` +
+      `Live queries prevent automatic GC, so this was likely a manual cleanup() call.`
+    try {
+      await hookEntered.promise
+      expect(cleanupHook).not.toHaveBeenCalled()
+      expect(createDiffTrigger).not.toHaveBeenCalled()
+      expect(query.status).toBe(`loading`)
+      await collection.cleanup()
+      const expected = { status: `rejected`, error: new Error(message) }
+      expect(await preload).toEqual(expected)
+      hook.resolve(cleanupHook)
+      await vi.waitFor(() => expect(cleanupHook).toHaveBeenCalledOnce())
+      expect(createDiffTrigger).not.toHaveBeenCalled()
+      expect(collection.status).toBe(`cleaned-up`)
+      expect(query.status).toBe(`error`)
+      expect(query.toArray).toEqual([])
+      expect(collection.size).toBe(0)
+      expect(publications.flat()).toEqual([])
+      expect(await preload).toEqual(expected)
+      expect(reports.mock.calls).toEqual([[`[Live Query Error] ${message}`]])
+    } finally {
+      try {
+        hook.resolve(cleanupHook)
+        subscription.unsubscribe()
+        await query.cleanup()
+        await collection.cleanup()
+        await preload
+        await vi.waitFor(() => expect(cleanupHook).toHaveBeenCalledOnce())
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        expect(reports.mock.calls).toEqual([[`[Live Query Error] ${message}`]])
+        expect(unexpected).toEqual([])
+      } finally {
+        process.off(`unhandledRejection`, recordUnhandled)
+        reports.mockRestore()
+        createDiffTrigger.mockRestore()
+      }
+    }
   })
 })

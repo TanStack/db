@@ -11,11 +11,8 @@
  * same module realm as the adapter's hook, avoiding the dual-package
  * `instanceof CollectionImpl` mismatch. Scenarios never import `@tanstack/db`.
  *
- * Expected-fail policy: `knownGaps` lists scenario KEYS this adapter does not
- * yet satisfy. Populate it EMPIRICALLY — port a behavior, run it, and only add
- * the key if it actually fails. The behavior matrix tells you where to look;
- * the test run tells you what's broken. When a gap closes, `it.fails` errors
- * ("expected to fail but passed") prompting you to delete the key.
+ * All current scenarios must pass. A future known bug needs an independently
+ * approved exact failure signature; a whole-test waiver could hide another bug.
  */
 import type { Collection } from '@tanstack/db'
 
@@ -75,7 +72,8 @@ export interface ConformanceResult {
   /** Array for list queries; a single row (or undefined) for `findOne`. */
   data: any
   /**
-   * The keyed result map (`undefined` when disabled). Exposed so scenarios can
+   * The keyed result map (disabled representation is declared by each driver).
+   * Exposed so scenarios can
    * assert the granular map stays in sync with `data` — e.g. that stale keys
    * from a previous collection don't linger after a recompile.
    */
@@ -115,6 +113,8 @@ export interface ControllableHandle<P> extends LiveQueryHandle {
 /** What each adapter package implements and hands to `runSuite`. */
 export interface LiveQueryDriver {
   name: string
+  /** Public disabled data/state policy, not inferred from observed output. */
+  disabledRepresentation: `absent` | `empty-reactive`
   /** Operators from the adapter's `@tanstack/db` realm. */
   ops: DbOps
   /** Create a realm-correct source collection + mutators, keyed by `id`. */
@@ -132,7 +132,11 @@ export interface LiveQueryDriver {
     opts?: { startSync?: boolean },
   ) => { collection: Collection<any, any, any> }
   /** Create a source whose sync fails, driving it into `error` status. */
-  makeErrorSource: () => { collection: Collection<any, any, any> }
+  makeErrorSource: () => {
+    collection: Collection<any, any, any>
+    expectedError: Error
+    startup: { returned: true } | { returned: false; error: unknown }
+  }
   /** Mount a live query from a query-builder callback. */
   mount: (build: QueryBuild) => LiveQueryHandle
   /**
@@ -149,8 +153,8 @@ export interface LiveQueryDriver {
   mountConfig: (build: QueryBuild) => LiveQueryHandle
   /** Mount an explicitly-disabled query (adapter's own null/undefined form). */
   mountDisabled: () => LiveQueryHandle
-  /** Scenario keys this adapter is empirically known NOT to satisfy yet. */
-  knownGaps?: ReadonlyArray<string>
+  /** No active waivers. Kept empty in drivers to make this boundary explicit. */
+  knownGaps?: ReadonlyArray<never>
   /**
    * How the adapter surfaces a query error (see the `error-status` scenario):
    * - `flag` (default): a readable `isError`/`status === 'error'` on the result.

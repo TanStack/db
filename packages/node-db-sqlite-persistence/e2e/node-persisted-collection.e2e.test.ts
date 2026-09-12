@@ -5,7 +5,10 @@ import { afterAll, afterEach, beforeAll } from 'vitest'
 import { BTreeIndex, createCollection } from '@tanstack/db'
 import BetterSqlite3 from 'better-sqlite3'
 import { createNodeSQLitePersistence, persistedCollectionOptions } from '../src'
-import { generateSeedData } from '../../db-collection-e2e/src/fixtures/seed-data'
+import {
+  captureSeedData,
+  generateSeedData,
+} from '../../db-collection-e2e/src/fixtures/seed-data'
 import { runPersistedCollectionConformanceSuite } from '../../db-sqlite-persistence-core/tests/contracts/persisted-collection-conformance-contract'
 import type { Collection } from '@tanstack/db'
 import type {
@@ -136,6 +139,11 @@ beforeAll(async () => {
   const suiteId = Date.now().toString(36)
   const database = new BetterSqlite3(dbPath)
   const seedData = generateSeedData()
+  const fixture = captureSeedData(seedData, {
+    registration:
+      'packages/node-db-sqlite-persistence/e2e/node-persisted-collection.e2e.test.ts',
+    provider: 'BetterSqlite3',
+  })
 
   const eagerUsers = createPersistedCollection<User>(
     database,
@@ -183,6 +191,7 @@ beforeAll(async () => {
   await onDemandComments.seedPersisted(seedData.comments)
 
   config = {
+    fixture,
     collections: {
       eager: {
         users: eagerUsers.collection,
@@ -216,6 +225,11 @@ beforeAll(async () => {
         insertRowIntoCollections(
           [eagerPosts.collection, onDemandPosts.collection],
           post,
+        ),
+      deletePost: async (id) =>
+        deleteRowAcrossCollections(
+          [eagerPosts.collection, onDemandPosts.collection],
+          id,
         ),
     },
     setup: async () => {},

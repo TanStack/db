@@ -9,6 +9,7 @@ import { BasicIndex, createCollection } from '@tanstack/db'
 import { ELECTRIC_TEST_HOOKS, electricCollectionOptions } from '../src/electric'
 import { makePgClient } from '../../db-collection-e2e/support/global-setup'
 import {
+  captureSeedData,
   createCollationTestSuite,
   createDeduplicationTestSuite,
   createJoinsTestSuite,
@@ -50,6 +51,10 @@ describe(`Electric Collection E2E Tests`, () => {
     const baseUrl = inject(`baseUrl`)
     const testSchema = inject(`testSchema`)
     const seedData = generateSeedData()
+    const fixture = captureSeedData(seedData, {
+      registration: 'packages/electric-db-collection/e2e/electric.e2e.test.ts',
+      provider: 'Electric SDK with SQL test service',
+    })
 
     // Create unique table names (quoted for Electric)
     const testId = Date.now().toString(16)
@@ -421,6 +426,7 @@ describe(`Electric Collection E2E Tests`, () => {
     // Individual progressive tests will handle preload and release as needed
 
     config = {
+      fixture,
       collections: {
         eager: {
           users: eagerUsers as any,
@@ -528,6 +534,9 @@ describe(`Electric Collection E2E Tests`, () => {
               post.deletedAt || null,
             ],
           )
+        },
+        deletePost: async (id) => {
+          await dbClient.query(`DELETE FROM ${postsTable} WHERE id = $1`, [id])
         },
       },
       setup: async () => {},

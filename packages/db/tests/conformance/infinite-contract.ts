@@ -1,10 +1,12 @@
 /**
  * Cross-adapter contract for `useLiveInfiniteQuery`.
  *
- * Drivers keep framework scheduling and package-realm details out of the shared
- * scenarios. Unlike the ordinary live-query contract, controllable handles can
- * mutate inputs without settling so the suite can exercise imperative calls in
- * the invalidation-to-subscription interval.
+ * Drivers preserve native framework scheduling and package-realm details.
+ * Controllable handles allow setter-to-fetch calls without an explicit driver
+ * flush; this does not prove one shared invalidation-to-subscription interval.
+ * Current React act and Vue synchronous effects attach during the setter.
+ * Svelte's public fetch can start before its queued effect attaches, then waits
+ * internally. Preserve those distinct measured cuts, not a universal timing law.
  */
 import type { Collection } from '@tanstack/db'
 import type { QueryBuild, SourceHandle } from './contract'
@@ -37,12 +39,12 @@ export interface InfiniteQueryHandle {
 export interface InfiniteQueryControllableHandle<
   P,
 > extends InfiniteQueryHandle {
-  /** Change a query dependency without waiting for the framework to settle. */
+  /** Change a query dependency without an explicit driver flush. */
   setParamSync: (param: P) => void
 }
 
 export interface InfiniteQueryCollectionHandle extends InfiniteQueryHandle {
-  /** Replace the input collection without waiting for the framework to settle. */
+  /** Replace the input collection without an explicit driver flush. */
   replaceCollectionSync: (collection: Collection<any, any, any>) => void
 }
 
@@ -97,5 +99,6 @@ export interface InfiniteQueryDriver {
     build: QueryBuild,
     config?: InfiniteQueryConfig,
   ) => InfiniteQueryInputHandle
-  knownGaps?: ReadonlyArray<string>
+  /** Whole-test waivers are not supported; future gaps need exact signatures. */
+  knownGaps?: ReadonlyArray<never>
 }

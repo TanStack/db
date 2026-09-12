@@ -59,6 +59,297 @@ describe(`On-Demand Sync Mode`, () => {
     `)
   }
 
+  it(`preserves complete public rows across overlapping demand ownership and release`, async () => {
+    type Demand = `electronics` | `clothing` | `expensive`
+    type Row = {
+      id: string
+      name?: string | null
+      price?: number | null
+      category?: string | null
+    }
+    type Observation = {
+      source: Array<Row>
+      sessions: Array<{ demand: Demand; rows: Array<Row> }>
+    }
+    const project = (row: Row): Row => ({
+      id: row.id,
+      name: row.name,
+      price: row.price,
+      category: row.category,
+    })
+    const ordered = (rows: Iterable<Row>) =>
+      Array.from(rows, project).sort((left, right) =>
+        left.id < right.id ? -1 : left.id > right.id ? 1 : 0,
+      )
+    // Literal scalar authority. No query IR, SQL compiler, or driver result
+    // determines model membership or values.
+    const seed: Array<Row> = [
+      { id: `e-low`, name: `Radio`, price: 50, category: `electronics` },
+      { id: `e-high`, name: `Screen`, price: 150, category: `electronics` },
+      { id: `c-low`, name: `Socks`, price: 25, category: `clothing` },
+      { id: `c-high`, name: `Coat`, price: 175, category: `clothing` },
+      { id: `outside`, name: `Book`, price: 90, category: `books` },
+    ]
+    const world = new Map(seed.map((row) => [row.id, project(row)]))
+    const active = new Set<Demand>()
+    const matches = (demand: Demand, row: Row) =>
+      demand === `expensive`
+        ? typeof row.price === `number` && row.price > 100
+        : row.category === demand
+    const expected = (): Observation => ({
+      source: ordered(
+        [...world.values()].filter((row) =>
+          [...active].some((demand) => matches(demand, row)),
+        ),
+      ),
+      sessions: [...active].map((demand) => ({
+        demand,
+        rows: ordered(
+          [...world.values()].filter((row) => matches(demand, row)),
+        ),
+      })),
+    })
+    const check = (actual: Observation, wanted: Observation) => {
+      expect(actual).toEqual(wanted)
+    }
+
+    const db = await createDatabase()
+    const reports: Array<Array<unknown>> = []
+    const rejections: Array<unknown> = []
+    const recordRejection = (error: unknown) => {
+      rejections.push(error)
+    }
+    process.on(`unhandledRejection`, recordRejection)
+    const errors = vi
+      .spyOn(db.logger, `error`)
+      .mockImplementation((...args) => {
+        reports.push(args)
+      })
+    const triggerRecords: Array<{ calls: number; settled: boolean }> = []
+    const realCreateTrigger = db.triggers.createDiffTrigger.bind(db.triggers)
+    const triggers = vi
+      .spyOn(db.triggers, `createDiffTrigger`)
+      .mockImplementation(async (options) => {
+        const dispose = await realCreateTrigger(options)
+        const record = { calls: 0, settled: false }
+        triggerRecords.push(record)
+        return async (disposeOptions) => {
+          record.calls++
+          await dispose(disposeOptions)
+          record.settled = true
+        }
+      })
+    const collection = createCollection(
+      powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+      }),
+    )
+    const createSession = (demand: Demand) =>
+      createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ product: collection })
+            .where(({ product }) =>
+              demand === `expensive`
+                ? gt(product.price, 100)
+                : eq(product.category, demand),
+            )
+            .select(({ product }) => ({
+              id: product.id,
+              name: product.name,
+              price: product.price,
+              category: product.category,
+            })),
+      })
+    const sessions = new Map<Demand, ReturnType<typeof createSession>>()
+    const allSessions: Array<ReturnType<typeof createSession>> = []
+    const observations: Array<{
+      cut: string
+      actual: Observation
+      wanted: Observation
+    }> = []
+    const callbacks: Array<{
+      owner: string
+      rows: Array<Row>
+      changes: Array<{
+        type: string
+        key: string | number
+        value: Row
+        previousValue?: Row
+      }>
+    }> = []
+    const sourceSubscription = collection.subscribeChanges((changes) => {
+      callbacks.push({
+        owner: `source`,
+        rows: ordered(collection.toArray),
+        changes: changes.map((change) => ({
+          type: change.type,
+          key: change.key,
+          value: project(change.value),
+          previousValue: change.previousValue
+            ? project(change.previousValue)
+            : undefined,
+        })),
+      })
+    })
+    const subscriptions = [sourceSubscription]
+    const capture = (): Observation => ({
+      source: ordered(collection.toArray),
+      sessions: [...sessions].map(([demand, session]) => ({
+        demand,
+        rows: ordered(session.toArray),
+      })),
+    })
+    const cut = async (name: string) => {
+      const wanted = expected()
+      await vi.waitFor(() => check(capture(), wanted))
+      const actual = capture()
+      observations.push({ cut: name, actual, wanted })
+      expect(reports).toEqual([])
+      expect(rejections).toEqual([])
+      return { actual, wanted }
+    }
+    const load = async (demand: Demand) => {
+      const session = createSession(demand)
+      allSessions.push(session)
+      sessions.set(demand, session)
+      subscriptions.push(
+        session.subscribeChanges((changes) => {
+          callbacks.push({
+            owner: demand,
+            rows: ordered(session.toArray),
+            changes: changes.map((change) => ({
+              type: change.type,
+              key: change.key,
+              value: project(change.value),
+              previousValue: change.previousValue
+                ? project(change.previousValue)
+                : undefined,
+            })),
+          })
+        }),
+      )
+      await session.preload()
+      active.add(demand)
+      return cut(`load ${demand}`)
+    }
+    const release = async (demand: Demand) => {
+      await sessions.get(demand)!.cleanup()
+      sessions.delete(demand)
+      active.delete(demand)
+      return cut(`release ${demand}`)
+    }
+    const update = async (row: Row) => {
+      await db.execute(
+        `UPDATE products SET name = ?, price = ?, category = ? WHERE id = ?`,
+        [row.name, row.price, row.category, row.id],
+      )
+      world.set(row.id, project(row))
+      return cut(`update ${row.id}`)
+    }
+    const trackedTableName = collection.utils.getMeta().trackedTableName
+    const expectTrackingGone = async () => {
+      await vi.waitFor(async () => {
+        const found = await db.writeLock((context) =>
+          context.get<{ count: number }>(
+            `SELECT count(*) AS count FROM sqlite_temp_master WHERE type = 'table' AND name = ?`,
+            [trackedTableName],
+          ),
+        )
+        expect(found.count).toBe(0)
+        expect(
+          triggerRecords.every(
+            (record) => record.calls === 1 && record.settled,
+          ),
+        ).toBe(true)
+      })
+    }
+
+    try {
+      for (const row of seed) {
+        await db.execute(
+          `INSERT INTO products (id, name, price, category) VALUES (?, ?, ?, ?)`,
+          [row.id, row.name, row.price, row.category],
+        )
+      }
+      await collection.stateWhenReady()
+      await cut(`initially unloaded`)
+      const first = await load(`electronics`)
+      await load(`clothing`)
+      await load(`expensive`)
+      await update({
+        id: `e-high`,
+        name: `Wide screen`,
+        price: 160,
+        category: `electronics`,
+      })
+      const released = await release(`electronics`)
+      // Later native updates prove the surviving shared owners remain live.
+      await update({
+        id: `e-high`,
+        name: `Bright screen`,
+        price: 180,
+        category: `electronics`,
+      })
+      await update({
+        id: `c-high`,
+        name: `Warm coat`,
+        price: 190,
+        category: `clothing`,
+      })
+      await release(`clothing`)
+      await release(`expensive`)
+      await expectTrackingGone()
+      expect(
+        ordered(
+          await db.getAll<Row>(
+            `SELECT id, name, price, category FROM products`,
+          ),
+        ),
+      ).toEqual(ordered(world.values()))
+      await load(`electronics`)
+      await release(`electronics`)
+      await expectTrackingGone()
+
+      // Faults start from real detached observations, not manufactured output
+      // from another oracle. Equal size cannot hide identity or value loss.
+      const wrongKey = structuredClone(first.actual)
+      wrongKey.sessions[0]!.rows[0]!.id = `wrong-key`
+      expect(() => check(wrongKey, first.wanted)).toThrow()
+      const wrongValue = structuredClone(first.actual)
+      wrongValue.sessions[0]!.rows[0]!.name = `wrong-value`
+      expect(() => check(wrongValue, first.wanted)).toThrow()
+      const retainedReleasedRow = structuredClone(released.actual)
+      retainedReleasedRow.source.push(project(seed[0]!))
+      retainedReleasedRow.source = ordered(retainedReleasedRow.source)
+      expect(() => check(retainedReleasedRow, released.wanted)).toThrow()
+      for (const observation of observations)
+        check(observation.actual, observation.wanted)
+      // Callbacks are retained in full for diagnosis. This law checks settled
+      // cuts; it does not impose atomic multi-row publication on the SDK.
+      expect(callbacks.some((callback) => callback.changes.length > 0)).toBe(
+        true,
+      )
+      expect(triggerRecords.length).toBeGreaterThan(0)
+    } finally {
+      try {
+        for (const session of allSessions) await session.cleanup()
+        for (const subscription of subscriptions) subscription.unsubscribe()
+        await collection.cleanup()
+        await expectTrackingGone()
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        expect(reports).toEqual([])
+        expect(rejections).toEqual([])
+      } finally {
+        triggers.mockRestore()
+        errors.mockRestore()
+        process.off(`unhandledRejection`, recordRejection)
+      }
+    }
+  })
+
   it(`should not load any data initially in on-demand mode`, async () => {
     const db = await createDatabase()
     await createTestProducts(db)

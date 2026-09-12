@@ -84,12 +84,22 @@ type LevelRows = readonly [
   ReadonlyArray<ChildRow>,
 ]
 
-type SettlingTransaction = {
-  isPersisted: { promise: Promise<unknown> }
+type SettlingTransaction = ReturnType<
+  ControlledCollection<ChildRow>[`collection`][`update`]
+>
+
+type PendingRuntimeMutation = {
+  transaction: SettlingTransaction
+  level: ChildLevel
+  syncReleaseAttempted: boolean
+  syncReleased: boolean
+  settled: boolean
+  receipt: Promise<void>
 }
 
 type PendingOptimisticChange = {
   transaction: SettlingTransaction
+  runtime: PendingRuntimeMutation
   level: ChildLevel
   id: number
   row: ChildRow
@@ -101,6 +111,42 @@ type OptimisticContext = {
   roots: Map<number, RootRow>
   levels: Array<Map<number, ChildRow>>
   pending: Map<string, PendingOptimisticChange>
+  runtimePending: Set<PendingRuntimeMutation>
+}
+
+function trackRuntimeMutation(
+  context: OptimisticContext,
+  level: ChildLevel,
+  transaction: SettlingTransaction,
+): PendingRuntimeMutation {
+  const entry: PendingRuntimeMutation = {
+    transaction,
+    level,
+    syncReleaseAttempted: false,
+    syncReleased: false,
+    settled: false,
+    receipt: Promise.resolve(),
+  }
+  context.runtimePending.add(entry)
+  const settled = () => {
+    entry.settled = true
+    if (entry.syncReleased) context.runtimePending.delete(entry)
+  }
+  // Both outcomes are handled before a checkpoint or sibling source write.
+  entry.receipt = transaction.isPersisted.promise.then(settled, settled)
+  return entry
+}
+
+function releaseRuntimeMutation(
+  context: OptimisticContext,
+  entry: PendingRuntimeMutation,
+  release: () => void,
+): void {
+  // Do not retry an uncertain release that throws after consuming its gate.
+  entry.syncReleaseAttempted = true
+  release()
+  entry.syncReleased = true
+  if (entry.settled) context.runtimePending.delete(entry)
 }
 
 function assertCanStartOptimisticChange(
@@ -300,11 +346,15 @@ function updateModel(
 async function rollback(
   source: ControlledCollection<ChildRow>,
   transaction: SettlingTransaction,
+  context: OptimisticContext,
+  runtime: PendingRuntimeMutation,
 ) {
   const message = `optimistic relationship oracle rollback`
   const persisted = transaction.isPersisted.promise.catch(() => undefined)
   await withExpectedRejection(message, async () => {
-    source.rejectSync(new Error(message))
+    releaseRuntimeMutation(context, runtime, () =>
+      source.rejectSync(new Error(message)),
+    )
     await persisted
     await flushPromises()
   })
@@ -323,6 +373,7 @@ function createDriver(
         roots: cloneMap(roots),
         levels: levelRows.map(cloneMap),
         pending: new Map(),
+        runtimePending: new Set(),
       }
     },
     start: ({ live }) => live.preload(),
@@ -333,6 +384,7 @@ function createDriver(
         const transaction = source.collection.update(step.id, (draft) => {
           Object.assign(draft, step.patch)
         })
+        const runtime = trackRuntimeMutation(context, step.level, transaction)
         if (step.beforeRollback) {
           const beforeRollbackSource = childSource(
             context.sources,
@@ -346,7 +398,9 @@ function createDriver(
         }
         // This compound action checks the settled state. The immediate state is
         // checked separately so its known mismatch cannot abort the rollback.
-        await rollback(source, transaction)
+        // Its normal same-source sibling commit is queued during persistence;
+        // invoking writeBatch does not establish sibling delivery at this cut.
+        await rollback(source, transaction, context, runtime)
         return
       }
 
@@ -358,12 +412,15 @@ function createDriver(
         const transaction = source.collection.update(step.id, (draft) => {
           Object.assign(draft, step.patch)
         })
+        const runtime = trackRuntimeMutation(context, step.level, transaction)
         context.pending.set(step.handle, {
           transaction,
+          runtime,
           level: step.level,
           id: step.id,
           row: applyPatch(current, step.patch),
         })
+        checkpoint()
         return
       }
 
@@ -380,7 +437,7 @@ function createDriver(
 
       if (step.type === `rollback`) {
         context.pending.delete(step.handle)
-        await rollback(source, pending.transaction)
+        await rollback(source, pending.transaction, context, pending.runtime)
         return
       }
 
@@ -391,20 +448,60 @@ function createDriver(
       })
       // Sync delivery must not displace the pending optimistic projection.
       checkpoint()
-      source.resolveSync()
+      releaseRuntimeMutation(context, pending.runtime, source.resolveSync)
       await pending.transaction.isPersisted.promise
       context.pending.delete(step.handle)
     },
-    cleanup: async ({ live, sources, pending }) => {
-      for (const [handle, change] of pending) {
-        pending.delete(handle)
-        await rollback(childSource(sources, change.level), change.transaction)
+    cleanup: async (context) => {
+      const { live, sources, pending, runtimePending } = context
+      const entries = [...runtimePending]
+      const errors: Array<unknown> = []
+      const attempt = (work: () => void) => {
+        try {
+          work()
+        } catch (error) {
+          errors.push(error)
+        }
       }
-      await live.cleanup()
-      await Promise.all([
-        sources.roots.collection.cleanup(),
-        ...sources.levels.map(({ collection }) => collection.cleanup()),
-      ])
+      for (const entry of entries) {
+        if (
+          entry.transaction.state === `pending` ||
+          entry.transaction.state === `persisting`
+        )
+          attempt(() => {
+            entry.transaction.rollback()
+          })
+        if (!entry.syncReleaseAttempted)
+          attempt(() =>
+            releaseRuntimeMutation(
+              context,
+              entry,
+              childSource(sources, entry.level).resolveSync,
+            ),
+          )
+      }
+      // Failed rollback/release can leave a receipt pending. Dispose resources
+      // even then; receipt rejection handlers are already attached.
+      if (errors.length === 0)
+        await Promise.all(entries.map(({ receipt }) => receipt))
+      pending.clear()
+      const results = await Promise.allSettled(
+        [
+          live,
+          sources.roots.collection,
+          ...sources.levels.map((source) => source.collection),
+        ].map(async (collection) => {
+          await collection.cleanup()
+        }),
+      )
+      for (const result of results)
+        if (result.status === `rejected`) errors.push(result.reason as unknown)
+      if (errors.length === 1) throw errors[0]
+      if (errors.length > 1)
+        throw new AggregateError(
+          errors,
+          `Optimistic relationship cleanup failed`,
+        )
     },
   }
 }
@@ -482,6 +579,311 @@ const routeValuesArbitrary: fc.Arbitrary<RouteValues> = fc.record({
 })
 
 describe(`optimistic relationship-transition oracle`, () => {
+  for (const pending of [false, true]) {
+    fcTest(`observes queued sibling delivery with pending=${pending}`, async () => {
+      const routes: RouteValues = {
+        rootA: 10,
+        rootB: 100,
+        rootC: 200,
+        original: 300,
+        optimistic: 400,
+        authoritative: 500,
+      }
+      const { roots, levels } = fixture(routes)
+      const sibling: ChildRow = {
+        id: 12,
+        parentGroup: 10,
+        group: 300,
+        value: 120,
+        position: 1,
+      }
+      const changes: Array<SyncChange<ChildRow>> = [
+        { type: `insert`, value: sibling },
+      ]
+      const driver = createDriver(roots, levels)
+      const events: Array<{ type: string; row: ChildRow }> = []
+      let unsubscribe: (() => void) | undefined
+      let siblingCuts = 0
+      let runtime: PendingRuntimeMutation | undefined
+      const descendants = [
+        {
+          id: 21,
+          group: 1300,
+          value: 210,
+          position: 0,
+          children: [{ id: 31, group: 2300, value: 310, position: 0 }],
+        },
+      ]
+      const published = (optimistic: boolean) => [
+        {
+          id: 1,
+          group: 10,
+          value: 10,
+          position: 0,
+          children: optimistic
+            ? [{ id: 11, group: 400, value: 110, position: 0, children: [] }]
+            : [
+                {
+                  id: 11, group: 300, value: 110, position: 0,
+                  children: descendants,
+                },
+                {
+                  id: 12, group: 300, value: 120, position: 1,
+                  children: descendants,
+                },
+              ],
+        },
+        { id: 2, group: 100, value: 20, position: 1, children: [] },
+        { id: 3, group: 200, value: 30, position: 2, children: [] },
+      ]
+      await runTrace({
+        steps: [
+          pending
+            ? {
+                type: `optimisticRollback`,
+                level: 1,
+                id: 11,
+                patch: { group: 400 },
+                beforeRollback: { level: 1, changes },
+              }
+            : { type: `sync`, level: 1, changes },
+          {
+            type: `sync`,
+            level: 2,
+            changes: [
+              { type: `update`, value: { ...levels[1][0]!, value: 211 } },
+            ],
+          },
+        ] satisfies Array<OptimisticRelationshipStep>,
+        driver: {
+          ...driver,
+          setup: async () => {
+            const context = await driver.setup()
+            const source = context.sources.levels[0]
+            const subscription = source.collection.subscribeChanges(
+              (batch) => {
+                events.push(...batch.map(({ type, value }) => ({
+                  type,
+                  row: { ...value },
+                })))
+              },
+              { includeInitialState: false },
+            )
+            unsubscribe = () => subscription.unsubscribe()
+            const writeBatch = source.writeBatch
+            source.writeBatch = (batch) => {
+              const eventStart = events.length
+              runtime = [...context.runtimePending][0]
+              writeBatch(batch)
+              siblingCuts += 1
+              const actual = {
+                present: source.collection.has(12),
+                row: source.collection.get(12),
+                events: events.slice(eventStart),
+                rows: stripVirtualProperties(context.live.toArray),
+              }
+              expect(actual.present).toBe(!pending)
+              if (pending) expect(actual.row).toBeUndefined()
+              else expect(actual.row).toMatchObject(sibling)
+              expect(actual.rows).toEqual(published(pending))
+              if (pending) {
+                expect(actual.events).toEqual([])
+                expect(runtime?.transaction.state).toBe(`persisting`)
+                expect(runtime?.settled).toBe(false)
+              } else {
+                expect(runtime).toBeUndefined()
+                expect(actual.events).toContainEqual({
+                  type: `insert`, row: expect.objectContaining(sibling),
+                })
+              }
+            }
+            return context
+          },
+          apply: async (step, context, checkpoint) => {
+            await driver.apply(step, context, checkpoint)
+            if (step.level === 1) {
+              if (pending) {
+                await runtime!.receipt
+                expect(runtime!.settled).toBe(true)
+                expect(runtime!.transaction.state).toBe(`failed`)
+              }
+              expect(context.sources.levels[0].collection.get(12)).toMatchObject(
+                sibling,
+              )
+              expect(events).toContainEqual({
+                type: `insert`, row: expect.objectContaining(sibling),
+              })
+              expect(stripVirtualProperties(context.live.toArray)).toEqual(
+                published(false),
+              )
+            }
+          },
+          cleanup: async (context) => {
+            const results = await Promise.allSettled([
+              Promise.resolve().then(() => unsubscribe?.()),
+              Promise.resolve().then(() => driver.cleanup(context)),
+            ])
+            const errors = results.flatMap((result): Array<unknown> =>
+              result.status === `rejected` ? [result.reason as unknown] : [],
+            )
+            if (errors.length === 1) throw errors[0]
+            if (errors.length > 1)
+              throw new AggregateError(errors, `Sibling observation cleanup failed`)
+          },
+        },
+        projection,
+      })
+      expect(siblingCuts).toBe(1)
+    })
+  }
+
+  for (const compound of [false, true]) {
+    for (const cleanupFails of [false, true]) {
+      fcTest(
+        `cleans failed optimistic work (compound=${compound}, cleanup failure=${cleanupFails})`,
+        async () => {
+          const routes: RouteValues = {
+            rootA: 10,
+            rootB: 100,
+            rootC: 200,
+            original: 300,
+            optimistic: 400,
+            authoritative: 500,
+          }
+          const { roots, levels } = fixture(routes)
+          const driver = createDriver(roots, levels)
+          const failure = new Error(`optimistic action failed`)
+          const cleanupFailure = new Error(`live cleanup failed after disposal`)
+          let context: OptimisticContext | undefined
+          let failedTransaction: SettlingTransaction | undefined
+          const fail = (current: OptimisticContext): never => {
+            const runtime = [...current.runtimePending][0]
+            expect(runtime).toBeDefined()
+            failedTransaction = runtime!.transaction
+            throw failure
+          }
+          const step: OptimisticRelationshipStep = compound
+            ? {
+                type: `optimisticRollback`,
+                level: 1,
+                id: 11,
+                patch: { group: routes.optimistic },
+                beforeRollback: {
+                  level: 1,
+                  changes: [
+                    {
+                      type: `insert`,
+                      value: {
+                        id: 12,
+                        parentGroup: routes.rootA,
+                        group: routes.original,
+                        value: 120,
+                        position: 1,
+                      },
+                    },
+                  ],
+                },
+              }
+            : {
+                type: `optimistic`,
+                handle: `failed`,
+                level: 1,
+                id: 11,
+                patch: { parentGroup: routes.rootB },
+              }
+          await expect(
+            runTrace({
+              steps: [step],
+              driver: {
+                ...driver,
+                setup: async () => {
+                  const current = await driver.setup()
+                  context = current
+                  if (compound) {
+                    const source = current.sources.levels[0]
+                    const writeBatch = source.writeBatch
+                    source.writeBatch = (changes) => {
+                      writeBatch(changes)
+                      fail(current)
+                    }
+                  }
+                  if (cleanupFails) {
+                    const cleanup = current.live.cleanup.bind(current.live)
+                    current.live.cleanup = async () => {
+                      await cleanup()
+                      throw cleanupFailure
+                    }
+                  }
+                  return current
+                },
+              },
+              projection: {
+                ...projection,
+                assertEqual: (actual, expected) => {
+                  projection.assertEqual(actual, expected)
+                  if (!compound && context!.pending.size > 0) fail(context!)
+                  return undefined
+                },
+              },
+            }),
+          ).rejects.toBe(failure)
+          expect(
+            (failure as Error & { suppressed?: Array<unknown> }).suppressed,
+          ).toEqual(cleanupFails ? [cleanupFailure] : undefined)
+          if (!context) throw new Error(`Expected initialized trace context`)
+          expect(failedTransaction?.state).toBe(`failed`)
+          expect(context.pending.size).toBe(0)
+          expect(context.runtimePending.size).toBe(0)
+          for (const collection of [
+            context.live,
+            context.sources.roots.collection,
+            ...context.sources.levels.map((source) => source.collection),
+          ])
+            expect(collection.status).toBe(`cleaned-up`)
+        },
+      )
+    }
+  }
+
+  fcTest(`checks the optimistic overlay before yielding from apply`, async () => {
+    const routes: RouteValues = {
+      rootA: 10,
+      rootB: 100,
+      rootC: 200,
+      original: 300,
+      optimistic: 400,
+      authoritative: 500,
+    }
+    const { roots, levels } = fixture(routes)
+    const driver = createDriver(roots, levels)
+    await runTrace({
+      steps: [
+        {
+          type: `optimistic` as const,
+          handle: `immediate`,
+          level: 1 as const,
+          id: 11,
+          patch: { parentGroup: routes.rootB },
+        },
+      ],
+      driver: {
+        ...driver,
+        apply: (step, context, checkpoint) => {
+          let checkpoints = 0
+          const applied = driver.apply(step, context, () => {
+            checkpoints += 1
+            return checkpoint()
+          })
+          const checkpointsBeforeYield = checkpoints
+          return Promise.resolve(applied).then(() => {
+            expect(checkpointsBeforeYield).toBe(1)
+          })
+        },
+      },
+      projection,
+    })
+  })
+
   fcTest(
     `rejects optimistic handles the sync mock cannot settle independently`,
     () => {

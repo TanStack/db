@@ -58,8 +58,13 @@ export class OfflineTransaction {
         )
 
         try {
-          await this.persistTransaction(offlineTransaction)
-          // Now block and wait for the executor to complete the real mutation
+          // Persistence also drives the shared queue. This transaction can finish
+          // before that queue drains; observe both promises from the outset.
+          await Promise.race([
+            this.persistTransaction(offlineTransaction),
+            completionPromise,
+          ])
+          // A queue pause (offline or retry) is not transaction completion.
           await completionPromise
         } catch (error) {
           const normalizedError =

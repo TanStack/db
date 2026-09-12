@@ -5,10 +5,19 @@ import {
   createLiveQueryCollection,
   gt,
 } from '@tanstack/db'
-import { effectScope, nextTick, reactive, ref, shallowRef } from 'vue'
+import {
+  effectScope,
+  nextTick,
+  onScopeDispose,
+  reactive,
+  ref,
+  shallowRef,
+} from 'vue'
+import { describe, expect, it } from 'vitest'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import { runInfiniteQuerySuite } from '../../db/tests/conformance/infinite-suite'
 import { makeInfiniteOnDemandSource } from '../../db/tests/conformance/infinite-on-demand'
+import { withScopeSetup } from '../../db/tests/conformance/scope-setup'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import type {
   InfiniteQueryConfig,
@@ -60,9 +69,13 @@ async function settle(): Promise<void> {
 function runInScope<R>(fn: () => R) {
   const scope = effectScope()
   let result!: R
-  scope.run(() => {
-    result = fn()
-  })
+  withScopeSetup(
+    () =>
+      scope.run(() => {
+        result = fn()
+      }),
+    () => scope.stop(),
+  )
   return { result, scope }
 }
 
@@ -158,6 +171,8 @@ function mountConfigControllable(
   return {
     ...handle,
     setConfigSync(next: InfiniteQueryConfig) {
+      delete config.pageSize
+      delete config.initialPageParam
       Object.assign(config, next)
     },
   }
@@ -202,3 +217,43 @@ const vueInfiniteDriver: InfiniteQueryDriver = {
 }
 
 runInfiniteQuerySuite(vueInfiniteDriver)
+
+describe(`infinite driver scope ownership`, () => {
+  it(`retains successful scope until its owner disposes`, () => {
+    let calls = 0
+    const { scope } = runInScope(() =>
+      onScopeDispose(() => {
+        calls++
+      }),
+    )
+    expect(calls).toBe(0)
+    scope.stop()
+    expect(calls).toBe(1)
+  })
+  it.each([false, true])(
+    `cleans failed setup, cleanupFails=%s`,
+    (cleanupFails) => {
+      const primary = new Error(`setup`)
+      const secondary = new Error(`cleanup`)
+      let calls = 0
+      let caught: unknown
+      try {
+        runInScope(() => {
+          onScopeDispose(() => {
+            calls++
+            if (cleanupFails) throw secondary
+          })
+          throw primary
+        })
+      } catch (error) {
+        caught = error
+      }
+      expect(calls).toBe(1)
+      if (cleanupFails) {
+        expect(caught).toBeInstanceOf(AggregateError)
+        expect((caught as AggregateError).errors).toEqual([primary, secondary])
+        expect((caught as AggregateError).cause).toBe(primary)
+      } else expect(caught).toBe(primary)
+    },
+  )
+})
