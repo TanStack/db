@@ -267,7 +267,7 @@ it.each([20260914, undefined])(
       fc.asyncProperty(
         fc.array(
           fc.record({
-              kind: fc.constantFrom<Edit[`kind`]>(`insert`, `update`, `delete`),
+            kind: fc.constantFrom<Edit[`kind`]>(`insert`, `update`, `delete`),
             slot: fc.integer({ min: 0, max: 1 }),
             before: tree(2),
             after: tree(2),

@@ -52,6 +52,21 @@ function runReplay(
 describe(`guarded oracle replay`, () => {
   it.each([
     [
+      `sorted-map.key`,
+      `tests/SortedMap.test.ts`,
+      `SortedMap key history.*seed undefined`,
+    ],
+    [
+      `sorted-map.ascending`,
+      `tests/SortedMap.test.ts`,
+      `SortedMap ascending history.*seed undefined`,
+    ],
+    [
+      `sorted-map.descending`,
+      `tests/SortedMap.test.ts`,
+      `SortedMap descending history.*seed undefined`,
+    ],
+    [
       `collection-state.mixed-transaction`,
       `tests/optimistic-transaction-oracle.property.test.ts`,
       `varies full payloads, seed=undefined`,

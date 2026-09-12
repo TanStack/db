@@ -40,9 +40,9 @@ describe.each([`key`, `ascending`, `descending`] as const)(
     }[order]
     it.each([20260912, undefined])(
       `agrees with full recomputation (seed %s)`,
-      (seed) => {
-        fc.assert(
-          fc.property(
+      async (seed) => {
+        await fc.assert(
+          fc.asyncProperty(
             fc.array(
               fc.record({
                 kind: fc.constantFrom(`set`, `set`, `delete`, `clear`),
@@ -75,6 +75,7 @@ describe.each([`key`, `ascending`, `descending`] as const)(
                 }
                 expectMap(actual, model, order)
               }
+              return Promise.resolve()
             },
           ),
           {
