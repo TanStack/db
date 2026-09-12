@@ -533,15 +533,31 @@ async function runPersistedTrace(
       interval: 1,
       timeout: 250,
     })
-    const exported = collection.config.sync.exportSyncMeta?.() as
-      | { resume?: unknown }
-      | undefined
-    await vi.waitFor(
+    const expectedRows =
+      authoredSnapshots?.at(-1) ?? recomputeCommittedRows(history)
+    const result = await vi.waitFor(
       () => {
+        const rows = rowsFromCollection(collection)
+        const durableRows = rowsFromMap(persistedRows)
         expect(persistenceCommits).toBeGreaterThan(0)
-        expect(rowsFromMap(persistedRows)).toEqual(
-          rowsFromCollection(collection),
-        )
+        // Two lagging outputs can agree. Require the authored final state and
+        // capture the checked cut here, before awaiting permits another write.
+        expect(rows).toEqual(expectedRows)
+        expect(durableRows).toEqual(expectedRows)
+        const exported = collection.config.sync.exportSyncMeta?.() as
+          | { resume?: unknown }
+          | undefined
+        return {
+          rows,
+          snapshots,
+          status: collection.status,
+          resume: observableResume(exported?.resume),
+          durableRows,
+          durableResume: observableResume(
+            persistedMetadata.get(`electric:resume`),
+          ),
+          persistenceCommits,
+        }
       },
       { interval: 1, timeout: 250 },
     )
@@ -549,15 +565,6 @@ async function runPersistedTrace(
     expectWholePublications(publications.entries.slice(durabilityCut), [
       snapshots.at(-1) ?? [],
     ])
-    const result = {
-      rows: rowsFromCollection(collection),
-      snapshots,
-      status: collection.status,
-      resume: observableResume(exported?.resume),
-      durableRows: rowsFromMap(persistedRows),
-      durableResume: observableResume(persistedMetadata.get(`electric:resume`)),
-      persistenceCommits,
-    }
     return result
   } finally {
     publications.stop()
@@ -2121,6 +2128,14 @@ describe(`Electric adapter laws`, () => {
     {
       numRuns: 20,
       examples: [
+        [
+          [
+            { operation: `insert`, id: 2, name: `` },
+            { operation: `commit` },
+            { operation: `delete`, id: 2, name: `` },
+          ],
+          2032071466,
+        ],
         [
           [
             { operation: `reset` },
