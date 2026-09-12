@@ -22,8 +22,16 @@ import {
   generateSeedData,
 } from '../../db-collection-e2e/src/index'
 import { waitFor } from '../../db-collection-e2e/src/utils/helpers'
-import type { E2ETestConfig } from '../../db-collection-e2e/src/types'
+import type {
+  Comment,
+  E2ETestConfig,
+  Post,
+  User,
+} from '../../db-collection-e2e/src/types'
 import type { Client } from 'pg'
+
+// Map the shared interfaces to the SDK's record-shaped row constraint.
+type ElectricRow<T> = { [Key in keyof T]: T[Key] }
 
 // The shared fixture declares Date fields; Electric leaves timestamps as strings
 // unless a parser is supplied. Match pg's local-time TIMESTAMP interpretation.
@@ -168,7 +176,7 @@ describe(`Electric Collection E2E Tests`, () => {
     // before we start the tests otherwise the tests are faster than the replication slot
     // and won't see any data.
     const tempUsersCollection = createCollection(
-      electricCollectionOptions({
+      electricCollectionOptions<ElectricRow<User>>({
         id: `temp-verify-users-${testId}`,
         shapeOptions: {
           url: `${baseUrl}/v1/shape`,
@@ -178,13 +186,13 @@ describe(`Electric Collection E2E Tests`, () => {
           },
         },
         syncMode: `eager`,
-        getKey: (item: any) => item.id,
+        getKey: (item) => item.id,
         startSync: true,
       }),
     )
 
     const tempPostsCollection = createCollection(
-      electricCollectionOptions({
+      electricCollectionOptions<ElectricRow<Post>>({
         id: `temp-verify-posts-${testId}`,
         shapeOptions: {
           url: `${baseUrl}/v1/shape`,
@@ -194,13 +202,13 @@ describe(`Electric Collection E2E Tests`, () => {
           },
         },
         syncMode: `eager`,
-        getKey: (item: any) => item.id,
+        getKey: (item) => item.id,
         startSync: true,
       }),
     )
 
     const tempCommentsCollection = createCollection(
-      electricCollectionOptions({
+      electricCollectionOptions<ElectricRow<Comment>>({
         id: `temp-verify-comments-${testId}`,
         shapeOptions: {
           url: `${baseUrl}/v1/shape`,
@@ -210,7 +218,7 @@ describe(`Electric Collection E2E Tests`, () => {
           },
         },
         syncMode: `eager`,
-        getKey: (item: any) => item.id,
+        getKey: (item) => item.id,
         startSync: true,
       }),
     )
@@ -248,7 +256,7 @@ describe(`Electric Collection E2E Tests`, () => {
 
     // Create REAL Electric collections
     const eagerUsers = createCollection(
-      electricCollectionOptions({
+      electricCollectionOptions<ElectricRow<User>>({
         id: `electric-e2e-users-eager-${testId}`,
         shapeOptions: {
           url: `${baseUrl}/v1/shape`,
@@ -258,13 +266,13 @@ describe(`Electric Collection E2E Tests`, () => {
           },
         },
         syncMode: `eager`,
-        getKey: (item: any) => item.id,
+        getKey: (item) => item.id,
         startSync: true,
       }),
     )
 
     const eagerPosts = createCollection(
-      electricCollectionOptions({
+      electricCollectionOptions<ElectricRow<Post>>({
         id: `electric-e2e-posts-eager-${testId}`,
         shapeOptions: {
           url: `${baseUrl}/v1/shape`,
@@ -274,13 +282,13 @@ describe(`Electric Collection E2E Tests`, () => {
           },
         },
         syncMode: `eager`,
-        getKey: (item: any) => item.id,
+        getKey: (item) => item.id,
         startSync: true,
       }),
     )
 
     const eagerComments = createCollection(
-      electricCollectionOptions({
+      electricCollectionOptions<ElectricRow<Comment>>({
         id: `electric-e2e-comments-eager-${testId}`,
         shapeOptions: {
           url: `${baseUrl}/v1/shape`,
@@ -290,13 +298,13 @@ describe(`Electric Collection E2E Tests`, () => {
           },
         },
         syncMode: `eager`,
-        getKey: (item: any) => item.id,
+        getKey: (item) => item.id,
         startSync: true,
       }),
     )
 
     const onDemandUsers = createCollection(
-      electricCollectionOptions({
+      electricCollectionOptions<ElectricRow<User>>({
         id: `electric-e2e-users-ondemand-${testId}`,
         shapeOptions: {
           url: `${baseUrl}/v1/shape`,
@@ -306,7 +314,7 @@ describe(`Electric Collection E2E Tests`, () => {
           },
         },
         syncMode: `on-demand`,
-        getKey: (item: any) => item.id,
+        getKey: (item) => item.id,
         startSync: true,
         autoIndex: `eager`,
         defaultIndexType: BasicIndex,
@@ -314,7 +322,7 @@ describe(`Electric Collection E2E Tests`, () => {
     )
 
     const onDemandPosts = createCollection(
-      electricCollectionOptions({
+      electricCollectionOptions<ElectricRow<Post>>({
         id: `electric-e2e-posts-ondemand-${testId}`,
         shapeOptions: {
           url: `${baseUrl}/v1/shape`,
@@ -324,7 +332,7 @@ describe(`Electric Collection E2E Tests`, () => {
           },
         },
         syncMode: `on-demand`,
-        getKey: (item: any) => item.id,
+        getKey: (item) => item.id,
         startSync: true,
         autoIndex: `eager`,
         defaultIndexType: BasicIndex,
@@ -332,7 +340,7 @@ describe(`Electric Collection E2E Tests`, () => {
     )
 
     const onDemandComments = createCollection(
-      electricCollectionOptions({
+      electricCollectionOptions<ElectricRow<Comment>>({
         id: `electric-e2e-comments-ondemand-${testId}`,
         shapeOptions: {
           url: `${baseUrl}/v1/shape`,
@@ -342,7 +350,7 @@ describe(`Electric Collection E2E Tests`, () => {
           },
         },
         syncMode: `on-demand`,
-        getKey: (item: any) => item.id,
+        getKey: (item) => item.id,
         startSync: true,
       }),
     )
@@ -373,7 +381,7 @@ describe(`Electric Collection E2E Tests`, () => {
     }
 
     const progressiveUsers = createCollection(
-      electricCollectionOptions({
+      electricCollectionOptions<ElectricRow<User>>({
         id: `electric-e2e-users-progressive-${testId}`,
         shapeOptions: {
           url: `${baseUrl}/v1/shape`,
@@ -383,7 +391,7 @@ describe(`Electric Collection E2E Tests`, () => {
           },
         },
         syncMode: `progressive`,
-        getKey: (item: any) => item.id,
+        getKey: (item) => item.id,
         startSync: false, // Don't start immediately - tests will start when ready
         [ELECTRIC_TEST_HOOKS]: {
           beforeMarkingReady: () => usersUpToDateControl.createPromise(),
@@ -392,7 +400,7 @@ describe(`Electric Collection E2E Tests`, () => {
     )
 
     const progressivePosts = createCollection(
-      electricCollectionOptions({
+      electricCollectionOptions<ElectricRow<Post>>({
         id: `electric-e2e-posts-progressive-${testId}`,
         shapeOptions: {
           url: `${baseUrl}/v1/shape`,
@@ -402,7 +410,7 @@ describe(`Electric Collection E2E Tests`, () => {
           },
         },
         syncMode: `progressive`,
-        getKey: (item: any) => item.id,
+        getKey: (item) => item.id,
         startSync: false, // Don't start immediately - tests will start when ready
         [ELECTRIC_TEST_HOOKS]: {
           beforeMarkingReady: () => postsUpToDateControl.createPromise(),
@@ -411,7 +419,7 @@ describe(`Electric Collection E2E Tests`, () => {
     )
 
     const progressiveComments = createCollection(
-      electricCollectionOptions({
+      electricCollectionOptions<ElectricRow<Comment>>({
         id: `electric-e2e-comments-progressive-${testId}`,
         shapeOptions: {
           url: `${baseUrl}/v1/shape`,
@@ -421,7 +429,7 @@ describe(`Electric Collection E2E Tests`, () => {
           },
         },
         syncMode: `progressive`,
-        getKey: (item: any) => item.id,
+        getKey: (item) => item.id,
         startSync: false, // Don't start immediately - tests will start when ready
         [ELECTRIC_TEST_HOOKS]: {
           beforeMarkingReady: () => commentsUpToDateControl.createPromise(),
