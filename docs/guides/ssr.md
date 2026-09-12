@@ -3,8 +3,6 @@ title: SSR and Hydration
 id: ssr
 ---
 
-# SSR and Hydration
-
 TanStack DB SSR transports the smallest useful snapshot for the work the server
 performed:
 

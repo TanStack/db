@@ -2,8 +2,6 @@
 title: Electric Collection
 ---
 
-# Electric Collection
-
 Electric collections provide seamless integration between TanStack DB and ElectricSQL, enabling real-time data synchronization with your Postgres database through Electric's sync engine.
 
 ## Overview
