@@ -29,7 +29,12 @@ type SyncMode = 'eager' | 'on-demand' | 'progressive'
 
 type MoveCollection = Pick<
   Collection<Post, string>,
-  'entries' | 'cleanup' | 'subscribeChanges'
+  | 'entries'
+  | 'cleanup'
+  | 'subscribeChanges'
+  | 'preload'
+  | 'status'
+  | 'startSyncImmediate'
 >
 type CapturedPost = { key: string; value: Post }
 
@@ -57,6 +62,7 @@ function assertOwnedPosts(actual: Array<CapturedPost>, expected: Array<Post>) {
 
 interface MoveHistory {
   own: <T extends MoveCollection>(collection: T) => T
+  ready: (collection: MoveCollection, syncMode: SyncMode) => Promise<void>
   insertUser: (row: User) => Promise<void>
   insertPost: (row: Post) => Promise<void>
   setActive: (id: string, active: boolean) => void
@@ -119,7 +125,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
 
     // Helper to wait for collection to be ready
     async function waitForReady(
-      collection: Collection<any, any, any, any, any>,
+      collection: MoveCollection,
       syncMode: SyncMode,
     ) {
       if (syncMode === 'progressive') {
@@ -193,6 +199,20 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
           own(collection) {
             resources.push(() => collection.cleanup())
             return collection
+          },
+          async ready(collection, syncMode) {
+            if (syncMode === 'on-demand') {
+              // preload starts sync, but only a subscriber acquires existing rows.
+              // Keep that demand alive through the history, then release it.
+              const subscription = collection.subscribeChanges(() => {}, {
+                includeInitialState: true,
+              })
+              resources.push(() => {
+                subscription.unsubscribe()
+                return Promise.resolve()
+              })
+            }
+            await waitForReady(collection, syncMode)
           },
           async insertUser(row) {
             // Own the exact key before a provider can partially write and fail.
@@ -418,7 +438,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
             )
 
             // Wait for collection to sync
-            await waitForReady(collection, syncMode)
+            await history.ready(collection, syncMode)
 
             // Wait for both posts to appear (users are active, so posts match the subquery)
             await waitForItem(collection, postId1)
@@ -447,7 +467,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
             const collection = history.own(
               createPostsByActiveUsersCollection(syncMode),
             )
-            await waitForReady(collection, syncMode)
+            await history.ready(collection, syncMode)
 
             if (!config.mutations) {
               throw new Error(`Mutations not configured`)
@@ -504,7 +524,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
             const collection = history.own(
               createPostsByActiveUsersCollection(syncMode),
             )
-            await waitForReady(collection, syncMode)
+            await history.ready(collection, syncMode)
 
             if (!config.mutations) {
               throw new Error(`Mutations not configured`)
@@ -560,7 +580,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
             const collection = history.own(
               createPostsByActiveUsersCollection(syncMode),
             )
-            await waitForReady(collection, syncMode)
+            await history.ready(collection, syncMode)
 
             if (!config.mutations) {
               throw new Error(`Mutations not configured`)
@@ -620,7 +640,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
             const collection = history.own(
               createPostsByActiveUsersCollection(syncMode),
             )
-            await waitForReady(collection, syncMode)
+            await history.ready(collection, syncMode)
 
             if (!config.mutations) {
               throw new Error(`Mutations not configured`)
@@ -680,7 +700,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
             const collection = history.own(
               createPostsByActiveUsersCollection(syncMode),
             )
-            await waitForReady(collection, syncMode)
+            await history.ready(collection, syncMode)
 
             if (!config.mutations) {
               throw new Error(`Mutations not configured`)
@@ -742,7 +762,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
             const collection1 = history.own(
               createPostsByActiveUsersCollection(syncMode),
             )
-            await waitForReady(collection1, syncMode)
+            await history.ready(collection1, syncMode)
 
             // Insert user with isActive = true
             const userId = randomUUID()
@@ -792,7 +812,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
             const collection2 = history.own(
               createPostsByActiveUsersCollection(syncMode),
             )
-            await waitForReady(collection2, syncMode)
+            await history.ready(collection2, syncMode)
 
             // Wait a bit to ensure snapshot is complete
             await new Promise((resolve) => setTimeout(resolve, 1000))
@@ -808,7 +828,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
             const collection = history.own(
               createPostsByActiveUsersCollection(syncMode),
             )
-            await waitForReady(collection, syncMode)
+            await history.ready(collection, syncMode)
             const archiveCallbacks = history.observe(collection)
 
             if (!config.mutations) {
