@@ -96,47 +96,54 @@ function expectTree(
 }
 
 describe(`BTree Map oracle`, () => {
-  it(`matches a Map oracle under random insert/delete/overwrite with small nodes`, () => {
-    let seed = 12345
-    const rnd = () =>
-      (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff
-    for (let round = 0; round < 40; round++) {
-      const nodeSize = 4 + Math.floor(rnd() * 5)
-      const tree = new BTree<number, Payload>((a, b) => a - b, nodeSize)
-      const oracle = new Map<number, Stored>()
-      const history: Array<Action> = []
-      try {
-        expectTree(tree, oracle, 0)
-        for (let step = 0; step < 3000; step++) {
-          const key = Math.floor(rnd() * 200)
-          const op = rnd()
-          const action: Action =
-            op < 0.5
-              ? { type: `put`, key, v: step }
-              : {
-                  type: op < 0.85 ? `delete` : op < 0.9 ? `clear` : `read`,
-                  key,
-                }
-          history.push(action)
-          applyAction(tree, oracle, action)
-          if (step % 97 === 0) expectTree(tree, oracle, Math.floor(rnd() * 200))
+  // The 120,000-operation corpus takes about nine seconds with CI coverage.
+  // Keep every operation and assertion; this is not a five-second perf budget.
+  it(
+    `matches a Map oracle under random insert/delete/overwrite with small nodes`,
+    { timeout: 30_000 },
+    () => {
+      let seed = 12345
+      const rnd = () =>
+        (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff
+      for (let round = 0; round < 40; round++) {
+        const nodeSize = 4 + Math.floor(rnd() * 5)
+        const tree = new BTree<number, Payload>((a, b) => a - b, nodeSize)
+        const oracle = new Map<number, Stored>()
+        const history: Array<Action> = []
+        try {
+          expectTree(tree, oracle, 0)
+          for (let step = 0; step < 3000; step++) {
+            const key = Math.floor(rnd() * 200)
+            const op = rnd()
+            const action: Action =
+              op < 0.5
+                ? { type: `put`, key, v: step }
+                : {
+                    type: op < 0.85 ? `delete` : op < 0.9 ? `clear` : `read`,
+                    key,
+                  }
+            history.push(action)
+            applyAction(tree, oracle, action)
+            if (step % 97 === 0)
+              expectTree(tree, oracle, Math.floor(rnd() * 200))
+          }
+          expectTree(tree, oracle, 100)
+        } catch (cause) {
+          throw new Error(
+            JSON.stringify({
+              law: `BT-map`,
+              initialSeed: 12345,
+              seed,
+              round,
+              nodeSize,
+              history,
+            }),
+            { cause },
+          )
         }
-        expectTree(tree, oracle, 100)
-      } catch (cause) {
-        throw new Error(
-          JSON.stringify({
-            law: `BT-map`,
-            initialSeed: 12345,
-            seed,
-            round,
-            nodeSize,
-            history,
-          }),
-          { cause },
-        )
       }
-    }
-  })
+    },
+  )
 
   fcTest.prop([
     fc.integer({ min: 4, max: 8 }),

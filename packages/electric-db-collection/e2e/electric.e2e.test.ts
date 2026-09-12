@@ -25,6 +25,12 @@ import { waitFor } from '../../db-collection-e2e/src/utils/helpers'
 import type { E2ETestConfig } from '../../db-collection-e2e/src/types'
 import type { Client } from 'pg'
 
+// The shared fixture declares Date fields; Electric leaves timestamps as strings
+// unless a parser is supplied. Match pg's local-time TIMESTAMP interpretation.
+const parser = {
+  timestamp: (value: string) => new Date(value.replace(` `, `T`)),
+}
+
 declare module 'vitest' {
   export interface ProvidedContext {
     baseUrl: string
@@ -166,6 +172,7 @@ describe(`Electric Collection E2E Tests`, () => {
         id: `temp-verify-users-${testId}`,
         shapeOptions: {
           url: `${baseUrl}/v1/shape`,
+          parser,
           params: {
             table: `${testSchema}.${usersTable}`,
           },
@@ -181,6 +188,7 @@ describe(`Electric Collection E2E Tests`, () => {
         id: `temp-verify-posts-${testId}`,
         shapeOptions: {
           url: `${baseUrl}/v1/shape`,
+          parser,
           params: {
             table: `${testSchema}.${postsTable}`,
           },
@@ -196,6 +204,7 @@ describe(`Electric Collection E2E Tests`, () => {
         id: `temp-verify-comments-${testId}`,
         shapeOptions: {
           url: `${baseUrl}/v1/shape`,
+          parser,
           params: {
             table: `${testSchema}.${commentsTable}`,
           },
@@ -243,6 +252,7 @@ describe(`Electric Collection E2E Tests`, () => {
         id: `electric-e2e-users-eager-${testId}`,
         shapeOptions: {
           url: `${baseUrl}/v1/shape`,
+          parser,
           params: {
             table: `${testSchema}.${usersTable}`,
           },
@@ -258,6 +268,7 @@ describe(`Electric Collection E2E Tests`, () => {
         id: `electric-e2e-posts-eager-${testId}`,
         shapeOptions: {
           url: `${baseUrl}/v1/shape`,
+          parser,
           params: {
             table: `${testSchema}.${postsTable}`,
           },
@@ -273,6 +284,7 @@ describe(`Electric Collection E2E Tests`, () => {
         id: `electric-e2e-comments-eager-${testId}`,
         shapeOptions: {
           url: `${baseUrl}/v1/shape`,
+          parser,
           params: {
             table: `${testSchema}.${commentsTable}`,
           },
@@ -288,6 +300,7 @@ describe(`Electric Collection E2E Tests`, () => {
         id: `electric-e2e-users-ondemand-${testId}`,
         shapeOptions: {
           url: `${baseUrl}/v1/shape`,
+          parser,
           params: {
             table: `${testSchema}.${usersTable}`,
           },
@@ -305,6 +318,7 @@ describe(`Electric Collection E2E Tests`, () => {
         id: `electric-e2e-posts-ondemand-${testId}`,
         shapeOptions: {
           url: `${baseUrl}/v1/shape`,
+          parser,
           params: {
             table: `${testSchema}.${postsTable}`,
           },
@@ -322,6 +336,7 @@ describe(`Electric Collection E2E Tests`, () => {
         id: `electric-e2e-comments-ondemand-${testId}`,
         shapeOptions: {
           url: `${baseUrl}/v1/shape`,
+          parser,
           params: {
             table: `${testSchema}.${commentsTable}`,
           },
@@ -362,6 +377,7 @@ describe(`Electric Collection E2E Tests`, () => {
         id: `electric-e2e-users-progressive-${testId}`,
         shapeOptions: {
           url: `${baseUrl}/v1/shape`,
+          parser,
           params: {
             table: `${testSchema}.${usersTable}`,
           },
@@ -380,6 +396,7 @@ describe(`Electric Collection E2E Tests`, () => {
         id: `electric-e2e-posts-progressive-${testId}`,
         shapeOptions: {
           url: `${baseUrl}/v1/shape`,
+          parser,
           params: {
             table: `${testSchema}.${postsTable}`,
           },
@@ -398,6 +415,7 @@ describe(`Electric Collection E2E Tests`, () => {
         id: `electric-e2e-comments-progressive-${testId}`,
         shapeOptions: {
           url: `${baseUrl}/v1/shape`,
+          parser,
           params: {
             table: `${testSchema}.${commentsTable}`,
           },
