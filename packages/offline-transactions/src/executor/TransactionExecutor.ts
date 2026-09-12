@@ -7,6 +7,7 @@ import type { OutboxManager } from '../outbox/OutboxManager'
 import type {
   OfflineConfig,
   OfflineTransaction,
+  RetryPolicy,
   TransactionSignaler,
 } from '../types'
 
@@ -16,7 +17,7 @@ export class TransactionExecutor {
   private scheduler: KeyScheduler
   private outbox: OutboxManager
   private config: OfflineConfig
-  private retryPolicy: DefaultRetryPolicy
+  private retryPolicy: RetryPolicy
   private isExecuting = false
   private executionPromise: Promise<void> | null = null
   private offlineExecutor: TransactionSignaler
@@ -31,10 +32,9 @@ export class TransactionExecutor {
     this.scheduler = scheduler
     this.outbox = outbox
     this.config = config
-    this.retryPolicy = new DefaultRetryPolicy(
-      Number.POSITIVE_INFINITY,
-      config.jitter ?? true,
-    )
+    this.retryPolicy =
+      config.retryPolicy ??
+      new DefaultRetryPolicy(Number.POSITIVE_INFINITY, config.jitter ?? true)
     this.offlineExecutor = offlineExecutor
   }
 
