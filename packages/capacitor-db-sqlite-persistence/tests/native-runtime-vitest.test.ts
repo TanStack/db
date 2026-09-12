@@ -406,26 +406,32 @@ describe.each(runtimes)('%s native test runner', (_name, runtime) => {
     )
   })
 
-  it('registers the actual shared113 declarations against an independent literal manifest without database hooks', async () => {
-    vi.resetModules()
-    vi.doMock('vitest', () => runtime)
-    const { runPersistedCollectionConformanceSuite } =
-      await import('../../db-sqlite-persistence-core/tests/contracts/persisted-collection-conformance-contract')
-    const getConfig = vi.fn(() => {
-      throw new Error(
-        'Database access is forbidden in registration-only control',
+  // Cold-loading all shared suites can exceed the default budget under CI
+  // instrumentation. This checks registration, not database response time.
+  it(
+    'registers the actual shared113 declarations against an independent literal manifest without database hooks',
+    { timeout: 30_000 },
+    async () => {
+      vi.resetModules()
+      vi.doMock('vitest', () => runtime)
+      const { runPersistedCollectionConformanceSuite } =
+        await import('../../db-sqlite-persistence-core/tests/contracts/persisted-collection-conformance-contract')
+      const getConfig = vi.fn(() => {
+        throw new Error(
+          'Database access is forbidden in registration-only control',
+        )
+      })
+      runPersistedCollectionConformanceSuite(
+        'isolated persisted conformance',
+        getConfig,
       )
-    })
-    runPersistedCollectionConformanceSuite(
-      'isolated persisted conformance',
-      getConfig,
-    )
-    expect(persistedConformanceLaws).toHaveLength(113)
-    expect(new Set(persistedConformanceLaws).size).toBe(113)
-    expect(runtime.getRegisteredTestCount()).toBe(113)
-    expect(runtime.getRegisteredTestNames()).toStrictEqual(
-      getPersistedConformanceTestNames('isolated persisted conformance'),
-    )
-    expect(getConfig).not.toHaveBeenCalled()
-  })
+      expect(persistedConformanceLaws).toHaveLength(113)
+      expect(new Set(persistedConformanceLaws).size).toBe(113)
+      expect(runtime.getRegisteredTestCount()).toBe(113)
+      expect(runtime.getRegisteredTestNames()).toStrictEqual(
+        getPersistedConformanceTestNames('isolated persisted conformance'),
+      )
+      expect(getConfig).not.toHaveBeenCalled()
+    },
+  )
 })
