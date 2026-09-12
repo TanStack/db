@@ -26,6 +26,13 @@ type TreeCounts = {
 
 type ChildLevel = Exclude<keyof TreeCounts, 'roots'>
 
+type TreeEntry = {
+  level: keyof TreeCounts
+  parentId: string | null
+  id: string
+  value: string
+}
+
 type NodeRow = {
   id: string
   value: string
@@ -38,6 +45,7 @@ type NodeCollection = Pick<
 >
 
 type NestedTreeShape = {
+  entries: Array<TreeEntry>
   reachableTreeRows: number
   sourceRowsDeliveredAtPreload: TreeCounts
   sourceRowsDeliveredAfterTraversal: TreeCounts
@@ -130,7 +138,16 @@ function requireChildren(row: NodeRow, level: string): NodeCollection {
   return row.children
 }
 
-function observeReachableTreeShape(roots: NodeCollection) {
+function observeReachableTreeShape(
+  roots: NodeCollection,
+  rootRows: ReadonlyArray<NodeRow>,
+) {
+  const entries: Array<TreeEntry> = rootRows.map(({ id, value }) => ({
+    level: `roots`,
+    parentId: null,
+    id,
+    value,
+  }))
   const reachableChildCollections = { branches: 0, twigs: 0, leaves: 0 }
   const reachableChildRows = { branches: 0, twigs: 0, leaves: 0 }
   let reachableTreeRows = roots.size
@@ -138,8 +155,12 @@ function observeReachableTreeShape(roots: NodeCollection) {
   const countChildren = (
     collection: NodeCollection,
     level: ChildLevel,
+    parentId: string,
   ): void => {
     const children = collection.toArray
+    for (const { id, value } of children) {
+      entries.push({ level, parentId, id, value })
+    }
     reachableChildCollections[level]++
     reachableChildRows[level] += children.length
     reachableTreeRows += children.length
@@ -149,15 +170,47 @@ function observeReachableTreeShape(roots: NodeCollection) {
     if (nextLevel === undefined) return
 
     for (const child of children) {
-      countChildren(requireChildren(child, level), nextLevel)
+      countChildren(requireChildren(child, level), nextLevel, child.id)
     }
   }
 
-  for (const root of roots.toArray) {
-    countChildren(requireChildren(root, `root`), `branches`)
+  for (const root of rootRows) {
+    countChildren(requireChildren(root, `root`), `branches`, root.id)
   }
 
-  return { reachableTreeRows, reachableChildCollections, reachableChildRows }
+  return {
+    entries,
+    reachableTreeRows,
+    reachableChildCollections,
+    reachableChildRows,
+  }
+}
+
+function expectedTreeEntries(rootCount: number): Array<TreeEntry> {
+  // Source foreign keys are the authority, not the nested query's routes.
+  // Build a separate world so source writes cannot alter the expected values.
+  const rows = createNestedTreeRows(rootCount)
+  return [
+    ...rows.roots.map((row) => ({
+      ...row,
+      level: `roots` as const,
+      parentId: null,
+    })),
+    ...rows.branches.map((row) => ({ ...row, level: `branches` as const })),
+    ...rows.twigs.map((row) => ({ ...row, level: `twigs` as const })),
+    ...rows.leaves.map((row) => ({ ...row, level: `leaves` as const })),
+  ]
+}
+
+function expectTreeEntries(entries: Array<TreeEntry>, rootCount: number): void {
+  // No orderBy is requested. Sort for comparison, retaining duplicate entries.
+  const canonical = (rows: Array<TreeEntry>) =>
+    rows
+      .map(({ level, parentId, id, value }) =>
+        JSON.stringify([level, parentId, id, value]),
+      )
+      .sort()
+  expect(canonical(entries)).toEqual(canonical(expectedTreeEntries(rootCount)))
 }
 
 function snapshotSourceRowsDelivered(
@@ -192,6 +245,9 @@ function rethrowFirstCleanupError(
 
 async function observeNestedTreeShape(
   rootCount: number,
+  transformRootRows: (
+    rows: ReadonlyArray<NodeRow>,
+  ) => ReadonlyArray<NodeRow> = (rows) => rows,
 ): Promise<NestedTreeShape> {
   const rows = createNestedTreeRows(rootCount)
   const queryClient = new QueryClient({
@@ -216,7 +272,7 @@ async function observeNestedTreeShape(
     // This matches the nested result shape in #1634. Each children property
     // remains a live Collection. The public result API exposes the reachable
     // tree, not internal allocation counts, so this oracle constrains reachable
-    // cardinality and source delivery rather than claiming to count allocations.
+    // cardinality, edges, values and source delivery, not allocations.
     const roots: NodeCollection = createLiveQueryCollection({
       startSync: true,
       query: (q) =>
@@ -251,16 +307,16 @@ async function observeNestedTreeShape(
 
     const sourceRowsDeliveredAtPreload =
       snapshotSourceRowsDelivered(sourceCounters)
-    const { reachableTreeRows, reachableChildCollections, reachableChildRows } =
-      observeReachableTreeShape(roots)
+    const shape = observeReachableTreeShape(
+      roots,
+      transformRootRows(roots.toArray),
+    )
 
     return {
-      reachableTreeRows,
+      ...shape,
       sourceRowsDeliveredAtPreload,
       sourceRowsDeliveredAfterTraversal:
         snapshotSourceRowsDelivered(sourceCounters),
-      reachableChildCollections,
-      reachableChildRows,
     }
   } finally {
     let cleanupRejected = false
@@ -291,7 +347,7 @@ async function observeNestedTreeShape(
   }
 }
 
-function expectNestedTreeShape(
+function expectNestedTreeWork(
   observation: NestedTreeShape,
   rootCount: number,
 ): void {
@@ -315,7 +371,17 @@ function expectNestedTreeShape(
   })
 }
 
+function expectNestedTreeShape(
+  observation: NestedTreeShape,
+  rootCount: number,
+): void {
+  expectNestedTreeWork(observation, rootCount)
+  expectTreeEntries(observation.entries, rootCount)
+}
+
 describe(`nested includes reachable-shape oracle`, () => {
+  // Fixed structural campaign; shared random/seed/multiplier options do not
+  // apply to this property. The empty and reported-size witnesses stay explicit.
   fcTest.prop([fc.integer({ min: 0, max: 20 })], {
     numRuns: 6,
     seed: 1634,
@@ -342,4 +408,25 @@ describe(`nested includes reachable-shape oracle`, () => {
       observation.sourceRowsDeliveredAtPreload,
     )
   })
+
+  it.each([`subtree swap`, `value corruption`] as const)(
+    `rejects %s even when reachable cardinality and source work agree`,
+    async (fault) => {
+      expectNestedTreeShape(await observeNestedTreeShape(2), 2)
+      const observation = await observeNestedTreeShape(2, (roots) => {
+        expect(roots).toHaveLength(2)
+        const [first, second] = roots as [NodeRow, NodeRow]
+        // Corrupt copied public rows before capture, not expected records or
+        // production state. Both branches still use real child Collections.
+        return fault === `subtree swap`
+          ? [
+              { ...first, children: second.children },
+              { ...second, children: first.children },
+            ]
+          : [{ ...first, value: `wrong root value` }, second]
+      })
+      expectNestedTreeWork(observation, 2)
+      expect(() => expectTreeEntries(observation.entries, 2)).toThrow()
+    },
+  )
 })

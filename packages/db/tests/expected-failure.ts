@@ -31,31 +31,42 @@ function assertionDifference(error: unknown): AssertionDifference {
   }
 }
 
+function expectNoCleanupFailures(error: unknown): void {
+  if (error instanceof Error && `suppressed` in error) {
+    expect(error.suppressed).toEqual([])
+  }
+}
+
 export function expectAssertionFailure<TArgs extends Array<unknown>>(
   assertion: (...args: TArgs) => Promise<void>,
   expected: ExpectedAssertionFailure,
 ): (...args: TArgs) => Promise<void> {
   return async (...args) => {
-    if (`checkpoint` in expected) {
-      let error: unknown
-      try {
-        await assertion(...args)
-      } catch (caught) {
-        error = caught
-      }
+    let error: unknown
+    try {
+      await assertion(...args)
+    } catch (caught) {
+      error = caught
+    }
 
+    // A known semantic mismatch does not excuse a second cleanup failure.
+    expectNoCleanupFailures(error)
+    if (`checkpoint` in expected) {
       expect(error).toMatchObject({
         name: `TraceAssertionError`,
         checkpoint: expected.checkpoint,
         cause: { name: `AssertionError` },
       })
+      // runTrace wraps the assertion; its original cleanup evidence stays on
+      // that cause rather than being copied into the wrapper.
+      if (error instanceof Error) expectNoCleanupFailures(error.cause)
       if (expected.classify) {
         expect(expected.classify(assertionDifference(error))).toBe(true)
       }
       return
     }
 
-    await expect(assertion(...args)).rejects.toMatchObject({
+    expect(error).toMatchObject({
       name: `AssertionError`,
       message:
         typeof expected.message === `string`

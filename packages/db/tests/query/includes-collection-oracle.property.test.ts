@@ -19,7 +19,6 @@ import { oraclePropertyOptions } from '../oracle-config.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
 import { createControlledCollection as createOracleControlledCollection } from './includes-oracle-helpers.js'
 import type { Collection } from '../../src/collection/index.js'
-import type { ChangeMessage } from '../../src/types.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
 import type { ControlledCollection } from './includes-oracle-helpers.js'
 
@@ -124,6 +123,48 @@ function createCollectionQuery(
 type IncludedChildCollection = ReturnType<
   typeof createCollectionQuery
 >[`toArray`][number][`children`]
+
+type DeleteIdentityObservation = {
+  type: string
+  key: unknown
+  id: number
+  matchesPublishedFacade: boolean
+}
+
+function assertDeleteIdentityEvents(
+  events: ReadonlyArray<DeleteIdentityObservation>,
+  deleted: boolean,
+): void {
+  expect(events).toEqual(
+    deleted
+      ? [
+          {
+            type: `delete`,
+            key: 1,
+            id: 1,
+            matchesPublishedFacade: true,
+          },
+        ]
+      : [],
+  )
+}
+
+function assertRetiredFacade(observation: {
+  status: string | undefined
+  rows: Array<ChildRow> | undefined
+}): void {
+  expect(observation).toEqual({ status: `ready`, rows: [] })
+}
+
+type FacadeRootSnapshot = {
+  group: number | undefined
+  usesOldFacade: boolean
+  rows: Array<string | number>
+}
+
+function assertFacadeRootSnapshots(snapshots: Array<FacadeRootSnapshot>): void {
+  expect(snapshots).toEqual([{ group: 2, usesOldFacade: false, rows: [20] }])
+}
 
 function projectLive(
   live: ReturnType<typeof createCollectionQuery>,
@@ -248,6 +289,144 @@ function createCollectionDriver(
   }
 }
 
+type OptimisticAction =
+  | { type: `insert`; row: ChildRow; settlement: `confirm` | `rollback` }
+  | { type: `delete`; id: number; settlement: `confirm` | `rollback` }
+
+type PendingOptimisticMutation = {
+  transaction: ReturnType<Collection<ChildRow>[`insert`]>
+  syncReleased: boolean
+  receipt: Promise<void>
+}
+
+function createOptimisticCollectionDriver(
+  group: number,
+  initialChildren: ReadonlyArray<ChildRow> = [],
+) {
+  const pending = new Set<PendingOptimisticMutation>()
+  const track = (transaction: PendingOptimisticMutation[`transaction`]) => {
+    const entry: PendingOptimisticMutation = {
+      transaction,
+      syncReleased: false,
+      receipt: Promise.resolve(),
+    }
+    pending.add(entry)
+    // Observe both outcomes before the first fallible optimistic checkpoint.
+    entry.receipt = transaction.isPersisted.promise.then(
+      () => {
+        pending.delete(entry)
+      },
+      () => {
+        pending.delete(entry)
+      },
+    )
+    return entry
+  }
+  const base = createCollectionDriver([{ id: 1, group }], initialChildren)
+  const driver: TraceDriver<OptimisticAction, CollectionContext> = {
+    ...base,
+    async apply(action, context, checkpoint) {
+      context.publications = []
+      if (action.type === `insert`) {
+        const transaction = context.children.collection.insert({
+          ...action.row,
+        })
+        const pendingMutation = track(transaction)
+        context.model.children.set(action.row.id, { ...action.row })
+        checkpoint()
+        context.publications = []
+        if (action.settlement === `confirm`) {
+          context.children.write(`insert`, action.row)
+          pendingMutation.syncReleased = true
+          context.children.resolveSync()
+          await transaction.isPersisted.promise
+        } else {
+          context.model.children.delete(action.row.id)
+          const message = `rollback insert`
+          const persisted = transaction.isPersisted.promise.catch(
+            () => undefined,
+          )
+          await withExpectedRejection(message, async () => {
+            pendingMutation.syncReleased = true
+            context.children.rejectSync(new Error(message))
+            await persisted
+            await flushPromises()
+          })
+        }
+        return
+      }
+
+      const previous = context.model.children.get(action.id)
+      if (!previous) throw new Error(`Missing optimistic delete row`)
+      const transaction = context.children.collection.delete(action.id)
+      const pendingMutation = track(transaction)
+      context.model.children.delete(action.id)
+      checkpoint()
+      context.publications = []
+      if (action.settlement === `confirm`) {
+        context.children.write(`delete`, previous)
+        pendingMutation.syncReleased = true
+        context.children.resolveSync()
+        await transaction.isPersisted.promise
+      } else {
+        context.model.children.set(action.id, previous)
+        const message = `rollback delete`
+        const persisted = transaction.isPersisted.promise.catch(() => undefined)
+        await withExpectedRejection(message, async () => {
+          pendingMutation.syncReleased = true
+          context.children.rejectSync(new Error(message))
+          await persisted
+          await flushPromises()
+        })
+      }
+    },
+    async cleanup(context) {
+      const errors: Array<unknown> = []
+      const receipts = [...pending].map((entry) => entry.receipt)
+      const attempt = (work: () => void) => {
+        try {
+          work()
+        } catch (error) {
+          errors.push(error)
+        }
+      }
+      for (const entry of pending) {
+        if (
+          entry.transaction.state !== `completed` &&
+          entry.transaction.state !== `failed`
+        )
+          attempt(() => {
+            entry.transaction.rollback()
+          })
+        if (!entry.syncReleased)
+          attempt(() => {
+            entry.syncReleased = true
+            context.children.resolveSync()
+          })
+      }
+      // A failed rollback/release may leave a receipt unresolved. Keep that failure
+      // and still dispose every resource instead of hanging before disposal.
+      if (errors.length === 0) await Promise.all(receipts)
+      attempt(() => context.subscription?.unsubscribe())
+      const results = await Promise.allSettled(
+        [
+          () => context.live.cleanup(),
+          () => context.parents.collection.cleanup(),
+          () => context.children.collection.cleanup(),
+        ].map(async (cleanup) => {
+          await cleanup()
+        }),
+      )
+      for (const result of results)
+        if (result.status === `rejected`) errors.push(result.reason as unknown)
+      if (errors.length === 1) throw errors[0]
+      if (errors.length > 1)
+        throw new AggregateError(errors, `Optimistic oracle cleanup failed`)
+    },
+  }
+  return { driver, pending }
+}
+
 const collectionProjection: TraceProjection<
   CollectionContext,
   CollectionObservation
@@ -333,6 +512,84 @@ const exhaustiveActions: ReadonlyArray<CollectionAction> = [
 ]
 
 describe(`Collection-valued includes oracle`, () => {
+  for (const kind of [`insert`, `delete`] as const) {
+    for (const failRollback of [false, true]) {
+      fcTest(
+        `settles ${kind} after a checkpoint failure (rollback throws=${failRollback})`,
+        async () => {
+          const row = { id: 10, parentGroup: 1, value: 1 }
+          const { driver, pending } = createOptimisticCollectionDriver(
+            1,
+            kind === `delete` ? [row] : [],
+          )
+          const primary: Error & { suppressed?: Array<unknown> } = new Error(
+            `checkpoint failed`,
+          )
+          const cleanupError = new Error(`rollback observer failed`)
+          let transaction: PendingOptimisticMutation[`transaction`] | undefined
+          let context: CollectionContext | undefined
+          let rollbackCalls = 0
+          const cleanupCalls: Array<string> = []
+          const failureDriver: typeof driver = {
+            ...driver,
+            async setup() {
+              context = await driver.setup()
+              for (const [name, collection] of [
+                [`live`, context.live],
+                [`parents`, context.parents.collection],
+                [`children`, context.children.collection],
+              ] as const) {
+                const original = collection.cleanup.bind(collection)
+                collection.cleanup = async () => {
+                  cleanupCalls.push(name)
+                  await original()
+                }
+              }
+              return context
+            },
+          }
+          const projection: typeof collectionProjection = {
+            ...collectionProjection,
+            assertEqual(observed, expected) {
+              collectionProjection.assertEqual(observed, expected)
+              const entry = [...pending][0]
+              if (entry) {
+                transaction = entry.transaction
+                expect(transaction.state).toBe(`persisting`)
+                const rollback = transaction.rollback.bind(transaction)
+                transaction.rollback = ((options) => {
+                  rollbackCalls++
+                  const result = rollback(options)
+                  if (failRollback) throw cleanupError
+                  return result
+                }) as typeof transaction.rollback
+                throw primary
+              }
+              return undefined
+            },
+          }
+          const action: OptimisticAction =
+            kind === `insert`
+              ? { type: `insert`, row, settlement: `confirm` }
+              : { type: `delete`, id: row.id, settlement: `confirm` }
+          await expect(
+            runTrace({ steps: [action], driver: failureDriver, projection }),
+          ).rejects.toBe(primary)
+          expect(rollbackCalls).toBe(1)
+          expect(transaction?.state).toBe(`failed`)
+          expect(pending.size).toBe(0)
+          expect(cleanupCalls).toEqual([`live`, `parents`, `children`])
+          expect(context?.live.status).toBe(`cleaned-up`)
+          expect(context?.parents.collection.status).toBe(`cleaned-up`)
+          expect(context?.children.collection.status).toBe(`cleaned-up`)
+          expect(primary.suppressed).toEqual(
+            failRollback ? [cleanupError] : undefined,
+          )
+        },
+      )
+    }
+  }
+
   fcTest.prop(
     [collectionScenarioArbitrary],
     oraclePropertyOptions(30, `includes-collection.relationship-history`),
@@ -412,6 +669,10 @@ describe(`Collection-valued includes oracle`, () => {
 
   fcTest(`retiring a route leaves a held facade empty and ready`, async () => {
     let retiredFacade: IncludedChildCollection | undefined
+    const heldSnapshots: Array<{
+      status: string | undefined
+      rows: Array<ChildRow> | undefined
+    }> = []
     const driver = createCollectionDriver(
       [{ id: 1, group: 1 }],
       [{ id: 10, parentGroup: 1, value: 1 }],
@@ -420,21 +681,41 @@ describe(`Collection-valued includes oracle`, () => {
       ...driver,
       apply(action, context, checkpoint) {
         retiredFacade ??= context.live.get(1)?.children
+        expect(retiredFacade).toBeDefined()
+        checkpoint()
         return driver.apply(action, context, checkpoint)
       },
     }
     const projection: TraceProjection<
       CollectionContext,
-      { rows: Array<ProjectedParent>; retiredStatus: string | undefined }
+      {
+        rows: Array<ProjectedParent>
+        held: { status: string | undefined; rows: Array<ChildRow> | undefined }
+      }
     > = {
-      observe: (context) => ({
-        rows: projectLive(context.live),
-        retiredStatus: retiredFacade?.status,
-      }),
+      observe: (context) => {
+        const held = {
+          status: retiredFacade?.status,
+          rows: retiredFacade?.toArray.map(({ id, parentGroup, value }) => ({
+            id,
+            parentGroup,
+            value,
+          })),
+        }
+        heldSnapshots.push(held)
+        return { rows: projectLive(context.live), held }
+      },
       recompute: (context) => ({
         rows: recompute(context),
-        retiredStatus:
-          context.model.parents.size === 0 ? `ready` : retiredFacade?.status,
+        held: retiredFacade
+          ? {
+              status: `ready`,
+              rows:
+                context.model.parents.size === 0
+                  ? []
+                  : [{ id: 10, parentGroup: 1, value: 1 }],
+            }
+          : { status: undefined, rows: undefined },
       }),
       assertEqual(observed, expected) {
         expect(observed).toEqual(expected)
@@ -448,13 +729,21 @@ describe(`Collection-valued includes oracle`, () => {
       projection,
     })
 
+    expect(heldSnapshots).toHaveLength(3)
+    expect(heldSnapshots[1]).toEqual({
+      status: `ready`,
+      rows: [{ id: 10, parentGroup: 1, value: 1 }],
+    })
+    assertRetiredFacade(heldSnapshots[2]!)
     expect(retiredFacade?.toArray).toEqual([])
     await expect(retiredFacade?.preload()).resolves.toBeUndefined()
   })
 
   fcTest(`a delete event preserves the published facade identity`, async () => {
     let publishedFacade: IncludedChildCollection | undefined
-    let previousFacadeMatched = true
+    const events: Array<DeleteIdentityObservation> = []
+    const eventSnapshots: Array<Array<DeleteIdentityObservation>> = []
+    let identitySubscription: { unsubscribe: () => void } | undefined
     const driver = createCollectionDriver(
       [{ id: 1, group: 1 }],
       [{ id: 10, parentGroup: 1, value: 1 }],
@@ -464,27 +753,43 @@ describe(`Collection-valued includes oracle`, () => {
       async start(context) {
         await driver.start?.(context)
         publishedFacade = context.live.get(1)?.children
-        context.subscription = context.live.subscribeChanges(
-          (changes: Array<ChangeMessage<any, any>>) => {
+        expect(publishedFacade).toBeDefined()
+        identitySubscription = context.live.subscribeChanges(
+          (changes) => {
             for (const change of changes) {
-              if (change.type === `delete`) {
-                previousFacadeMatched =
-                  change.value.children === publishedFacade
-              }
+              events.push({
+                type: change.type,
+                key: change.key,
+                id: change.value.id,
+                matchesPublishedFacade:
+                  change.value.children === publishedFacade,
+              })
             }
           },
           { includeInitialState: false },
         )
       },
+      async cleanup(context) {
+        try {
+          identitySubscription?.unsubscribe()
+        } finally {
+          await driver.cleanup(context)
+        }
+      },
     }
     const projection: TraceProjection<
       CollectionContext,
-      { previousFacadeMatched: boolean }
+      Array<DeleteIdentityObservation>,
+      boolean
     > = {
-      observe: () => ({ previousFacadeMatched }),
-      recompute: () => ({ previousFacadeMatched: true }),
+      observe: () => {
+        const snapshot = events.map((event) => ({ ...event }))
+        eventSnapshots.push(snapshot)
+        return snapshot
+      },
+      recompute: (context) => !context.model.parents.has(1),
       assertEqual(observed, expected) {
-        expect(observed).toEqual(expected)
+        assertDeleteIdentityEvents(observed, expected)
         return undefined
       },
     }
@@ -494,7 +799,59 @@ describe(`Collection-valued includes oracle`, () => {
       driver: eventDriver,
       projection,
     })
+    expect(eventSnapshots).toHaveLength(2)
+    assertDeleteIdentityEvents(eventSnapshots[0]!, false)
+    assertDeleteIdentityEvents(eventSnapshots[1]!, true)
   })
+
+  fcTest(
+    `delete identity observations reject missing and overwritten failures`,
+    () => {
+      const valid: DeleteIdentityObservation = {
+        type: `delete`,
+        key: 1,
+        id: 1,
+        matchesPublishedFacade: true,
+      }
+      assertDeleteIdentityEvents([], false)
+      assertDeleteIdentityEvents([valid], true)
+      for (const invalid of [
+        [],
+        [valid, valid],
+        [{ ...valid, matchesPublishedFacade: false }, valid],
+        [{ ...valid, type: `update` }],
+        [{ ...valid, key: `1` }],
+      ])
+        expect(() => assertDeleteIdentityEvents(invalid, true)).toThrow()
+    },
+  )
+
+  fcTest(`retirement observations reject rows retained until cleanup`, () => {
+    assertRetiredFacade({ status: `ready`, rows: [] })
+    expect(() =>
+      assertRetiredFacade({
+        status: `ready`,
+        rows: [{ id: 10, parentGroup: 1, value: 1 }],
+      }),
+    ).toThrow()
+    expect(() =>
+      assertRetiredFacade({ status: `cleaned-up`, rows: [] }),
+    ).toThrow()
+  })
+
+  fcTest(
+    `facade callback observations reject unexpected raw public keys`,
+    () => {
+      assertFacadeRootSnapshots([
+        { group: 2, usesOldFacade: false, rows: [20] },
+      ])
+      expect(() =>
+        assertFacadeRootSnapshots([
+          { group: 2, usesOldFacade: false, rows: [20, `unexpected`] },
+        ]),
+      ).toThrow()
+    },
+  )
 
   fcTest(`facade public keys survive row cloning`, async () => {
     const driver = createCollectionDriver(
@@ -1085,22 +1442,14 @@ describe(`Collection-valued includes oracle`, () => {
     const context = await driver.setup()
     await driver.start?.(context)
     const oldFacade = context.live.get(1)!.children
-    const callbackSnapshots: Array<{
-      group: number | undefined
-      usesOldFacade: boolean
-      rows: Array<number>
-    }> = []
+    const callbackSnapshots: Array<FacadeRootSnapshot> = []
     const subscription = oldFacade.subscribeChanges(
       () => {
         const current = context.live.get(1)
         callbackSnapshots.push({
           group: current?.group,
           usesOldFacade: current?.children === oldFacade,
-          rows: current
-            ? [...current.children.keys()].filter(
-                (key): key is number => typeof key === `number`,
-              )
-            : [],
+          rows: current ? [...current.children.keys()] : [],
         })
       },
       { includeInitialState: false },
@@ -1108,9 +1457,7 @@ describe(`Collection-valued includes oracle`, () => {
 
     try {
       context.parents.write(`update`, { id: 1, group: 2 })
-      expect(callbackSnapshots).toEqual([
-        { group: 2, usesOldFacade: false, rows: [20] },
-      ])
+      assertFacadeRootSnapshots(callbackSnapshots)
     } finally {
       subscription.unsubscribe()
       await driver.cleanup(context)
@@ -1206,6 +1553,42 @@ describe(`Collection-valued includes oracle`, () => {
         expect(context.live.get(2)!.children).toBe(sharedFacade)
         expect([...sharedFacade.keys()]).toEqual([10])
         expect(sharedFacade.status).toBe(`ready`)
+
+        context.parents.write(`delete`, { id: 2, group: 1 })
+        expect(context.live.toArray).toEqual([])
+        expect(sharedFacade.toArray).toEqual([])
+        expect(sharedFacade.status).toBe(`ready`)
+
+        context.children.write(`insert`, { id: 20, parentGroup: 1, value: 2 })
+        expect(context.live.toArray).toEqual([])
+        expect(sharedFacade.toArray).toEqual([])
+        expect(sharedFacade.status).toBe(`ready`)
+
+        context.parents.write(`insert`, { id: 1, group: 1 })
+        const reactivated = context.live.get(1)!.children
+        expect(reactivated).not.toBe(sharedFacade)
+        const assertCurrent = (value: number) => {
+          const rows = [
+            { id: 10, parentGroup: 1, value: 1 },
+            { id: 20, parentGroup: 1, value },
+          ]
+          expect(projectLive(context.live)).toEqual([
+            {
+              id: 1,
+              group: 1,
+              childrenReady: true,
+              children: rows,
+              arrayChildren: rows,
+              materializedChildren: rows,
+            },
+          ])
+          expect(context.live.get(1)!.children).toBe(reactivated)
+          expect(sharedFacade.toArray).toEqual([])
+          expect(sharedFacade.status).toBe(`ready`)
+        }
+        assertCurrent(2)
+        context.children.write(`update`, { id: 20, parentGroup: 1, value: 3 })
+        assertCurrent(3)
       } finally {
         await driver.cleanup(context)
       }
@@ -1933,64 +2316,7 @@ describe(`Collection-valued includes oracle`, () => {
   )(
     `matches recomputation through optimistic child insert and delete confirmation and rollback`,
     async ({ group, insertedId, confirmedId, value }) => {
-      type OptimisticAction =
-        | { type: `insert`; row: ChildRow; settlement: `confirm` | `rollback` }
-        | { type: `delete`; id: number; settlement: `confirm` | `rollback` }
-      const base = createCollectionDriver([{ id: 1, group }], [])
-      const driver: TraceDriver<OptimisticAction, CollectionContext> = {
-        ...base,
-        async apply(action, context, checkpoint) {
-          context.publications = []
-          if (action.type === `insert`) {
-            const transaction = context.children.collection.insert({
-              ...action.row,
-            })
-            context.model.children.set(action.row.id, { ...action.row })
-            checkpoint()
-            context.publications = []
-            if (action.settlement === `confirm`) {
-              context.children.write(`insert`, action.row)
-              context.children.resolveSync()
-              await transaction.isPersisted.promise
-            } else {
-              context.model.children.delete(action.row.id)
-              const message = `rollback insert`
-              const persisted = transaction.isPersisted.promise.catch(
-                () => undefined,
-              )
-              await withExpectedRejection(message, async () => {
-                context.children.rejectSync(new Error(message))
-                await persisted
-                await flushPromises()
-              })
-            }
-            return
-          }
-
-          const previous = context.model.children.get(action.id)
-          if (!previous) throw new Error(`Missing optimistic delete row`)
-          const transaction = context.children.collection.delete(action.id)
-          context.model.children.delete(action.id)
-          checkpoint()
-          context.publications = []
-          if (action.settlement === `confirm`) {
-            context.children.write(`delete`, previous)
-            context.children.resolveSync()
-            await transaction.isPersisted.promise
-          } else {
-            context.model.children.set(action.id, previous)
-            const message = `rollback delete`
-            const persisted = transaction.isPersisted.promise.catch(
-              () => undefined,
-            )
-            await withExpectedRejection(message, async () => {
-              context.children.rejectSync(new Error(message))
-              await persisted
-              await flushPromises()
-            })
-          }
-        },
-      }
+      const { driver } = createOptimisticCollectionDriver(group)
       const rolledBack = {
         id: insertedId,
         parentGroup: group,

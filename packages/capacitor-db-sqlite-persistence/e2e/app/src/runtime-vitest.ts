@@ -19,7 +19,9 @@ type SuiteNode = {
 
 type TestResult = {
   name: string
-  status: `passed` | `failed` | `skipped`
+  kind: `test` | `hook`
+  status: `passed` | `failed` | `skipped` | `unexecuted`
+  executed: boolean
   error?: string
 }
 
@@ -29,6 +31,38 @@ export type RegisteredTestRunResult = {
   skipped: number
   total: number
   results: Array<TestResult>
+  complete: boolean
+  expected: number
+  registered: number
+  executed: number
+  unexecuted: number
+  expectedNames: Array<string>
+  registeredNames: Array<string>
+  executedNames: Array<string>
+  skippedNames: Array<string>
+  unexecutedNames: Array<string>
+  missingNames: Array<string>
+  unexpectedNames: Array<string>
+  duplicateNames: Array<string>
+  manifestErrors: Array<string>
+}
+
+type NativeMatchers = {
+  toBe: (expected: unknown) => void
+  toEqual: (expected: unknown) => void
+  toStrictEqual: (expected: unknown) => void
+  toThrow: () => void
+  toBeGreaterThan: (expected: number) => void
+  toBeGreaterThanOrEqual: (expected: number) => void
+  toBeLessThan: (expected: number) => void
+  toBeLessThanOrEqual: (expected: number) => void
+  toBeTruthy: () => void
+  toBeDefined: () => void
+  toBeNull: () => void
+  toContain: (expected: unknown) => void
+  toHaveProperty: (propertyKey: string) => void
+  toHaveLength: (expected: number) => void
+  not: NativeMatchers
 }
 
 function createSuite(name: string, skipped = false): SuiteNode {
@@ -73,10 +107,7 @@ function pushSuite(
   const suite = createSuite(name, skipped)
   currentSuite().suites.push(suite)
 
-  if (skipped) {
-    return
-  }
-
+  // Collect skipped declarations too; their test bodies and hooks never run.
   suiteStack.push(suite)
   try {
     callback()
@@ -175,6 +206,49 @@ function deepEqual(left: unknown, right: unknown): boolean {
   return false
 }
 
+// The shared native fixture uses primitives, Dates, arrays and plain metadata.
+// Keep own-key/hole/kind distinctions; do not silently treat other objects as {}.
+function strictEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true
+  if (left instanceof Date || right instanceof Date) {
+    return (
+      left instanceof Date &&
+      right instanceof Date &&
+      Object.is(left.getTime(), right.getTime())
+    )
+  }
+  if (!isObjectLike(left) || !isObjectLike(right)) return false
+  if (Array.isArray(left) !== Array.isArray(right)) return false
+  if (Object.getPrototypeOf(left) !== Object.getPrototypeOf(right)) return false
+  if (
+    Array.isArray(left) &&
+    Array.isArray(right) &&
+    left.length !== right.length
+  )
+    return false
+  const prototype = Object.getPrototypeOf(left)
+  if (
+    prototype !== Object.prototype &&
+    prototype !== null &&
+    prototype !== Array.prototype
+  )
+    throw new Error('Unsupported object kind in native strict matcher')
+  const keys = (value: object) =>
+    Reflect.ownKeys(value).filter((key) =>
+      Object.prototype.propertyIsEnumerable.call(value, key),
+    )
+  const leftKeys = keys(left)
+  const rightKeys = keys(right)
+  return (
+    leftKeys.length === rightKeys.length &&
+    leftKeys.every(
+      (key) =>
+        Object.prototype.propertyIsEnumerable.call(right, key) &&
+        strictEqual(Reflect.get(left, key), Reflect.get(right, key)),
+    )
+  )
+}
+
 function failExpectation(message: string | undefined, fallback: string): never {
   throw new Error(message ?? fallback)
 }
@@ -183,7 +257,7 @@ function createMatchers(
   actual: unknown,
   message?: string,
   negate = false,
-): Record<string, unknown> {
+): NativeMatchers {
   const assert = (condition: boolean, failureMessage: string): void => {
     const shouldFail = negate ? condition : !condition
     if (shouldFail) {
@@ -203,6 +277,35 @@ function createMatchers(
         deepEqual(actual, expected),
         `Expected ${formatValue(actual)} ${negate ? `not ` : ``}to equal ${formatValue(expected)}`,
       )
+    },
+    toStrictEqual(expected: unknown) {
+      assert(
+        strictEqual(actual, expected),
+        `Expected ${formatValue(actual)} ${negate ? `not ` : ``}to strictly equal ${formatValue(expected)}`,
+      )
+    },
+    toThrow(...args: Array<unknown>) {
+      if (args.length > 0)
+        throw new Error('Native toThrow supports no-argument assertions only')
+      if (typeof actual !== 'function')
+        throw new Error('toThrow requires a synchronous function')
+      let threw = false
+      let result: unknown
+      try {
+        result = actual()
+      } catch {
+        threw = true
+      }
+      if (
+        !threw &&
+        result !== null &&
+        (typeof result === 'object' || typeof result === 'function') &&
+        typeof Reflect.get(result, 'then') === 'function'
+      ) {
+        void Promise.resolve(result).catch(() => {})
+        throw new Error('Native toThrow does not support async functions')
+      }
+      assert(threw, `Expected function ${negate ? `not ` : ``}to throw`)
     },
     toBeGreaterThan(expected: number) {
       assert(
@@ -280,7 +383,7 @@ function createMatchers(
         `Expected ${formatValue(actual)} ${negate ? `not ` : ``}to have length ${String(expected)}`,
       )
     },
-  } as Record<string, unknown>
+  } satisfies Omit<NativeMatchers, 'not'>
 
   return new Proxy(matchers, {
     get(target, propertyKey, receiver) {
@@ -290,14 +393,67 @@ function createMatchers(
 
       return Reflect.get(target, propertyKey, receiver)
     },
-  })
+  }) as NativeMatchers
 }
 
-export function expect(
-  actual: unknown,
-  message?: string,
-): Record<string, unknown> {
+export function expect(actual: unknown, message?: string): NativeMatchers {
   return createMatchers(actual, message)
+}
+
+export const vi = {
+  async waitFor<T>(
+    callback: () => T,
+    options: { timeout?: number; interval?: number } = {},
+  ): Promise<T> {
+    if (
+      typeof callback !== 'function' ||
+      !isObjectLike(options) ||
+      Array.isArray(options)
+    )
+      throw new Error(
+        'Native waitFor requires a callback and an options object',
+      )
+    if (
+      Object.keys(options).some(
+        (key) => key !== 'timeout' && key !== 'interval',
+      )
+    )
+      throw new Error('Unsupported native waitFor option')
+    const timeout = options.timeout ?? 1000
+    const interval = options.interval ?? 50
+    if (
+      !Number.isFinite(timeout) ||
+      timeout < 0 ||
+      !Number.isFinite(interval) ||
+      interval <= 0
+    )
+      throw new Error('Invalid native waitFor timeout or interval')
+    const started = Date.now()
+    for (;;) {
+      let result: T
+      try {
+        result = callback()
+      } catch (error) {
+        const remaining = timeout - (Date.now() - started)
+        if (remaining <= 0) throw error
+        await new Promise<void>((resolve) =>
+          setTimeout(resolve, Math.min(interval, remaining)),
+        )
+        continue
+      }
+      if (
+        result !== null &&
+        (typeof result === 'object' || typeof result === 'function') &&
+        typeof Reflect.get(result, 'then') === 'function'
+      ) {
+        void Promise.resolve(result).catch(() => {})
+        throw new Error(
+          'Native waitFor supports synchronous assertion callbacks only',
+        )
+      }
+      return result
+    }
+  },
 }
 
 type Describe = ((name: string, callback: AsyncCallback) => void) & {
@@ -382,164 +538,277 @@ export function resetRegisteredTests(): void {
   suiteStack = [rootSuite]
 }
 
-function countTests(suite: SuiteNode): number {
-  return (
-    suite.tests.length +
-    suite.suites.reduce(
-      (count, childSuite) => count + countTests(childSuite),
-      0,
-    )
-  )
+function collectTests(
+  suite: SuiteNode,
+  ancestors: Array<SuiteNode> = [],
+  inheritedSkip = false,
+): Array<{ name: string; skipped: boolean }> {
+  const path = [...ancestors, suite]
+  const skipped = inheritedSkip || suite.skipped
+  return [
+    ...suite.tests.map((testNode) => ({
+      name: formatSuitePath(path, testNode.name),
+      skipped: skipped || testNode.skipped,
+    })),
+    ...suite.suites.flatMap((child) => collectTests(child, path, skipped)),
+  ]
+}
+
+export function getRegisteredTestNames(): Array<string> {
+  return collectTests(rootSuite).map((testNode) => testNode.name)
 }
 
 export function getRegisteredTestCount(): number {
-  return countTests(rootSuite)
+  return getRegisteredTestNames().length
+}
+
+function recordUnexecuted(
+  suite: SuiteNode,
+  ancestors: Array<SuiteNode>,
+  results: Array<TestResult>,
+): void {
+  for (const testNode of collectTests(suite, ancestors)) {
+    results.push({
+      name: testNode.name,
+      kind: 'test',
+      status: testNode.skipped ? 'skipped' : 'unexecuted',
+      executed: false,
+    })
+  }
 }
 
 async function runHookList(
   hooks: ReadonlyArray<AsyncCallback>,
   label: string,
   results: Array<TestResult>,
+  stopOnFailure: boolean,
 ): Promise<boolean> {
-  for (const hook of hooks) {
+  let succeeded = true
+  for (const [index, hook] of hooks.entries()) {
     try {
       await hook()
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      succeeded = false
       results.push({
-        name: label,
-        status: `failed`,
-        error: message,
+        name: `${label} [${index + 1}]`,
+        kind: 'hook',
+        status: 'failed',
+        executed: false,
+        error: error instanceof Error ? error.message : String(error),
       })
-      return false
+      if (stopOnFailure) break
     }
   }
+  return succeeded
+}
 
-  return true
+type RunOptions = {
+  expectedTestNames: ReadonlyArray<string>
+  onTestStart?: (context: {
+    name: string
+    index: number
+    total: number
+  }) => void
 }
 
 async function runSuite(
   suite: SuiteNode,
   ancestors: Array<SuiteNode>,
   results: Array<TestResult>,
-  state: {
-    index: number
-    total: number
-  },
-  options: {
-    onTestStart?: (context: {
-      name: string
-      index: number
-      total: number
-    }) => void
-  },
+  state: { index: number; total: number },
+  options: RunOptions,
 ): Promise<void> {
   if (suite.skipped) {
+    recordUnexecuted(suite, ancestors, results)
     return
   }
-
-  const suitePath = [...ancestors, suite]
-  const beforeAllSucceeded = await runHookList(
+  const path = [...ancestors, suite]
+  const started = await runHookList(
     suite.beforeAllHooks,
-    `${formatSuitePath(suitePath)} beforeAll`,
+    `${formatSuitePath(path)} beforeAll`,
     results,
+    true,
   )
-
-  if (beforeAllSucceeded) {
+  if (!started) {
+    recordUnexecuted(suite, ancestors, results)
+  } else {
     for (const testNode of suite.tests) {
-      const testName = formatSuitePath(suitePath, testNode.name)
+      const name = formatSuitePath(path, testNode.name)
       state.index++
-
       if (testNode.skipped) {
-        results.push({
-          name: testName,
-          status: `skipped`,
-        })
+        results.push({ name, kind: 'test', status: 'skipped', executed: false })
         continue
       }
-
-      options.onTestStart?.({
-        name: testName,
-        index: state.index,
-        total: state.total,
-      })
-
+      let ready = true
       try {
-        for (const entry of suitePath) {
-          for (const hook of entry.beforeEachHooks) {
-            await hook()
+        try {
+          options.onTestStart?.({
+            name,
+            index: state.index,
+            total: state.total,
+          })
+        } catch (error) {
+          ready = false
+          results.push({
+            name: `${name} onTestStart`,
+            kind: 'hook',
+            status: 'failed',
+            executed: false,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        }
+        if (ready) {
+          for (const entry of path) {
+            ready = await runHookList(
+              entry.beforeEachHooks,
+              `${name} beforeEach (${formatSuitePath(path.slice(0, path.indexOf(entry) + 1))})`,
+              results,
+              true,
+            )
+            if (!ready) break
           }
         }
-
-        await testNode.fn()
-        results.push({
-          name: testName,
-          status: `passed`,
-        })
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        results.push({
-          name: testName,
-          status: `failed`,
-          error: message,
-        })
-      } finally {
-        for (const entry of [...suitePath].reverse()) {
-          for (const hook of entry.afterEachHooks) {
-            try {
-              await hook()
-            } catch (error) {
-              const message =
-                error instanceof Error ? error.message : String(error)
-              results.push({
-                name: `${testName} afterEach`,
-                status: `failed`,
-                error: message,
-              })
-            }
+        if (!ready) {
+          results.push({
+            name,
+            kind: 'test',
+            status: 'unexecuted',
+            executed: false,
+          })
+        } else {
+          try {
+            await testNode.fn()
+            results.push({
+              name,
+              kind: 'test',
+              status: 'passed',
+              executed: true,
+            })
+          } catch (error) {
+            results.push({
+              name,
+              kind: 'test',
+              status: 'failed',
+              executed: true,
+              error: error instanceof Error ? error.message : String(error),
+            })
           }
+        }
+      } finally {
+        for (const entry of [...path].reverse()) {
+          await runHookList(
+            entry.afterEachHooks,
+            `${name} afterEach (${formatSuitePath(path.slice(0, path.indexOf(entry) + 1))})`,
+            results,
+            false,
+          )
         }
       }
     }
-
-    for (const childSuite of suite.suites) {
-      await runSuite(childSuite, suitePath, results, state, options)
-    }
+    for (const child of suite.suites)
+      await runSuite(child, path, results, state, options)
   }
-
   await runHookList(
     suite.afterAllHooks,
-    `${formatSuitePath(suitePath)} afterAll`,
+    `${formatSuitePath(path)} afterAll`,
     results,
+    false,
   )
 }
 
-export async function runRegisteredTests(
-  options: {
-    onTestStart?: (context: {
-      name: string
-      index: number
-      total: number
-    }) => void
-  } = {},
-): Promise<RegisteredTestRunResult> {
-  const results: Array<TestResult> = []
-  const state = {
-    index: 0,
-    total: getRegisteredTestCount(),
+function duplicates(names: ReadonlyArray<string>): Array<string> {
+  const seen = new Set<string>()
+  const repeated = new Set<string>()
+  for (const name of names) {
+    if (seen.has(name)) repeated.add(name)
+    seen.add(name)
   }
+  return [...repeated]
+}
 
-  await runSuite(rootSuite, [], results, state, options)
-
-  const passed = results.filter((result) => result.status === `passed`).length
-  const failed = results.filter((result) => result.status === `failed`).length
-  const skipped = results.filter((result) => result.status === `skipped`).length
-
-  return {
-    passed,
-    failed,
-    skipped,
-    total: results.length,
+export async function runRegisteredTests(
+  options: RunOptions,
+): Promise<RegisteredTestRunResult> {
+  const expectedNames = [...options.expectedTestNames]
+  const initialNames = getRegisteredTestNames()
+  const results: Array<TestResult> = []
+  await runSuite(
+    rootSuite,
+    [],
     results,
+    { index: 0, total: initialNames.length },
+    options,
+  )
+  const registeredNames = getRegisteredTestNames()
+  const tests = results.filter((result) => result.kind === 'test')
+  const executedNames = tests
+    .filter((result) => result.executed)
+    .map((result) => result.name)
+  const skippedNames = tests
+    .filter((result) => result.status === 'skipped')
+    .map((result) => result.name)
+  const unexecutedNames = tests
+    .filter((result) => result.status === 'unexecuted')
+    .map((result) => result.name)
+  const expectedSet = new Set(expectedNames)
+  const registeredSet = new Set(registeredNames)
+  const executedSet = new Set(executedNames)
+  const missingNames = expectedNames.filter((name) => !registeredSet.has(name))
+  const unexpectedNames = registeredNames.filter(
+    (name) => !expectedSet.has(name),
+  )
+  const duplicateNames = duplicates(registeredNames)
+  const manifestErrors: Array<string> = []
+  if (expectedNames.length === 0)
+    manifestErrors.push('Expected law manifest is empty')
+  if (
+    expectedNames.some(
+      (name) => typeof name !== 'string' || name.trim().length === 0,
+    )
+  )
+    manifestErrors.push('Expected law manifest has an invalid name')
+  if (duplicates(expectedNames).length > 0)
+    manifestErrors.push('Expected law manifest has duplicate names')
+  if (missingNames.length > 0)
+    manifestErrors.push('Required laws are not registered')
+  if (unexpectedNames.length > 0)
+    manifestErrors.push('Unexpected laws are registered')
+  if (duplicateNames.length > 0)
+    manifestErrors.push('Law registration has duplicate names')
+  if (
+    expectedNames.some((name) => !executedSet.has(name)) ||
+    executedNames.length !== expectedNames.length ||
+    duplicates(executedNames).length > 0
+  )
+    manifestErrors.push(
+      'Required law bodies were not each executed exactly once',
+    )
+  if (skippedNames.length > 0 || unexecutedNames.length > 0)
+    manifestErrors.push('Registered laws were skipped or unexecuted')
+  if (
+    initialNames.length !== registeredNames.length ||
+    initialNames.some((name, index) => name !== registeredNames[index])
+  )
+    manifestErrors.push('Law registration changed during execution')
+  return {
+    passed: tests.filter((result) => result.status === 'passed').length,
+    failed: results.filter((result) => result.status === 'failed').length,
+    skipped: skippedNames.length,
+    total: registeredNames.length,
+    results,
+    complete: manifestErrors.length === 0,
+    expected: expectedNames.length,
+    registered: registeredNames.length,
+    executed: executedNames.length,
+    unexecuted: unexecutedNames.length,
+    expectedNames,
+    registeredNames,
+    executedNames,
+    skippedNames,
+    unexecutedNames,
+    missingNames,
+    unexpectedNames,
+    duplicateNames,
+    manifestErrors,
   }
 }

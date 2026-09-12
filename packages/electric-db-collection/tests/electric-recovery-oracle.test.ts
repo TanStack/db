@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '@tanstack/db'
@@ -15,6 +16,24 @@ import type { ElectricCollectionUtils, ElectricSyncMode } from '../src/electric'
 
 type Item = Row & { id: number; name: string; stable: string }
 type Subscriber = (messages: Array<Message<Item>>) => void
+type Exposure = { cut: string; rows: Array<Item> }
+
+function expectWholeRecoveryTrace(
+  entries: Array<Exposure>,
+  allowed: Array<Array<Item>>,
+) {
+  let position = 0
+  for (const entry of entries) {
+    while (
+      position < allowed.length &&
+      !isDeepStrictEqual(entry.rows, allowed[position])
+    )
+      position++
+    expect(position, JSON.stringify({ entry, allowed, entries })).toBeLessThan(
+      allowed.length,
+    )
+  }
+}
 const subscribers: Array<Subscriber> = []
 const mockSubscribe = vi.fn((callback: Subscriber) => {
   subscribers.push(callback)
@@ -82,11 +101,16 @@ function fixture(
       return hydrationGate.then(() => snapshot)
     },
     loadCollectionMetadata: () =>
-      Promise.resolve(Array.from(metadata, ([key, value]) => ({ key, value }))),
+      Promise.resolve(
+        Array.from(metadata, ([key, value]) => ({
+          key,
+          value: structuredClone(value),
+        })),
+      ),
     applyCommittedTx: (_collectionId, tx) => {
       for (const mutation of tx.collectionMetadataMutations ?? []) {
         if (mutation.type === `delete`) metadata.delete(mutation.key)
-        else metadata.set(mutation.key, mutation.value)
+        else metadata.set(mutation.key, structuredClone(mutation.value))
       }
       if (tx.truncate) rows.clear()
       for (const mutation of tx.mutations) {
@@ -94,11 +118,11 @@ function fixture(
         else {
           rows.set(mutation.key, {
             ...rows.get(mutation.key),
-            ...mutation.value,
+            ...structuredClone(mutation.value),
           } as Item)
         }
       }
-      commits.push(tx)
+      commits.push(structuredClone(tx))
       return Promise.resolve()
     },
     ensureIndex: () => Promise.resolve(),
@@ -129,7 +153,22 @@ function fixture(
       name,
       stable,
     })).sort((a, b) => a.id - b.id)
-  const durableRows = () => [...rows.values()].sort((a, b) => a.id - b.id)
+  const durableRows = () =>
+    structuredClone([...rows.values()].sort((a, b) => a.id - b.id))
+  const exposures: Array<Exposure> = []
+  const record = (cut: string) => {
+    exposures.push({ cut, rows: structuredClone(publicRows()) })
+  }
+  let stopObserving = () => {}
+  const start = () => {
+    stopObserving()
+    collection.startSyncImmediate()
+    const subscription = collection.subscribeChanges(() => record(`event`), {
+      includeInitialState: false,
+    })
+    stopObserving = () => subscription.unsubscribe()
+    record(`started`)
+  }
   return {
     collection,
     rows,
@@ -137,6 +176,10 @@ function fixture(
     commits,
     publicRows,
     durableRows,
+    exposures,
+    record,
+    start,
+    stopObserving: () => stopObserving(),
     pauseHydration: (gate: Promise<void>) => {
       hydrationGate = gate
     },
@@ -157,6 +200,41 @@ describe(`persisted Electric recovery laws`, () => {
   beforeEach(() => {
     subscribers.length = 0
     vi.clearAllMocks()
+  })
+
+  it(`keeps repaired intermediate publications in the persisted recovery record`, async () => {
+    const f = fixture(`eager`)
+    try {
+      f.start()
+      await vi.waitFor(() => expect(f.publicRows()).toEqual([oldRow]))
+      await vi.waitFor(() => expect(subscribers).toHaveLength(1))
+      const cut = f.exposures.length
+      f.record(`before`)
+      subscribers[0]!([change(`update`, { id: 1, name: `wrong` }), upToDate])
+      subscribers[0]!([change(`update`, { id: 1, name: `correct` }), upToDate])
+      f.record(`repaired`)
+      const correct = [{ ...oldRow, name: `correct` }]
+      expect(f.publicRows()).toEqual(correct)
+      const entries = f.exposures.slice(cut)
+      expect(entries[0]!.rows).toEqual([oldRow])
+      expect(
+        entries.some(
+          ({ cut: kind, rows }) =>
+            kind === `event` && rows[0]?.name === `wrong`,
+        ),
+      ).toBe(true)
+      expect(() =>
+        expectWholeRecoveryTrace(entries, [[oldRow], correct]),
+      ).toThrow()
+      expectWholeRecoveryTrace(entries, [
+        [oldRow],
+        [{ ...oldRow, name: `wrong` }],
+        correct,
+      ])
+    } finally {
+      f.stopObserving()
+      await f.collection.cleanup()
+    }
   })
 
   function externalPublisher() {
@@ -223,24 +301,40 @@ describe(`persisted Electric recovery laws`, () => {
       const peer = externalPublisher()
       const f = fixture(syncMode, peer.coordinator)
       try {
-        f.collection.startSyncImmediate()
+        f.start()
         await vi.waitFor(() => expect(subscribers).toHaveLength(1))
         if (syncMode === `on-demand`) await f.collection._sync.loadSubset({})
         await vi.waitFor(() => expect(f.publicRows()).toEqual([oldRow]))
         subscribers[0]!([upToDate])
-        f.rows.set(freshRow.id, freshRow)
+        const cut = f.exposures.length
+        f.record(`before peer`)
+        f.rows.set(freshRow.id, structuredClone(freshRow))
         peer.publish(freshRow, false, fullReload, f.metadata)
+        f.record(`after peer delivery`)
         await vi.waitFor(() =>
           expect(f.publicRows()).toEqual([oldRow, freshRow]),
         )
+        f.record(`peer settled`)
+        expectWholeRecoveryTrace(f.exposures.slice(cut), [
+          [oldRow],
+          [oldRow, freshRow],
+        ])
+        const streamCut = f.exposures.length
+        f.record(`before stream delta`)
         subscribers[0]!([
           change(`update`, { id: freshRow.id, name: `changed` }),
           upToDate,
         ])
         const expected = [oldRow, { ...freshRow, name: `changed` }]
+        f.record(`after stream delta`)
         expect(f.publicRows()).toEqual(expected)
         await vi.waitFor(() => expect(f.durableRows()).toEqual(expected))
+        expectWholeRecoveryTrace(f.exposures.slice(streamCut), [
+          [oldRow, freshRow],
+          expected,
+        ])
       } finally {
+        f.stopObserving()
         await f.collection.cleanup()
       }
     },
@@ -275,17 +369,20 @@ describe(`persisted Electric recovery laws`, () => {
       subscribers.length = 0
       const peer = externalPublisher()
       const f = fixture(`on-demand`, peer.coordinator)
-      const expected = new Map([[oldRow.id, oldRow]])
+      const expected = new Map([[oldRow.id, structuredClone(oldRow)]])
       const expectedRows = () =>
-        [...expected.values()].sort((a, b) => a.id - b.id)
+        structuredClone([...expected.values()].sort((a, b) => a.id - b.id))
       try {
-        f.collection.startSyncImmediate()
+        f.start()
         await vi.waitFor(() => expect(subscribers).toHaveLength(1), {
           interval: 1,
         })
         await f.collection._sync.loadSubset({})
         subscribers[0]!([upToDate])
         for (const command of commands) {
+          const before = expectedRows()
+          const cut = f.exposures.length
+          f.record(`before peer ${JSON.stringify(command)}`)
           const row = {
             id: command.id,
             name: command.name,
@@ -295,8 +392,8 @@ describe(`persisted Electric recovery laws`, () => {
             f.rows.delete(row.id)
             expected.delete(row.id)
           } else {
-            f.rows.set(row.id, row)
-            expected.set(row.id, row)
+            f.rows.set(row.id, structuredClone(row))
+            expected.set(row.id, structuredClone(row))
           }
           const revision = peer.publish(
             row,
@@ -304,6 +401,7 @@ describe(`persisted Electric recovery laws`, () => {
             command.fullReload,
             f.metadata,
           )
+          f.record(`after peer revision ${revision}`)
           // An unchanged row set is not proof that the peer publication ran.
           // Its metadata marker commits with the rows, including empty deletes.
           await vi.waitFor(
@@ -316,18 +414,29 @@ describe(`persisted Electric recovery laws`, () => {
             { interval: 1 },
           )
           expect(f.publicRows()).toEqual(expectedRows())
+          f.record(`peer revision ${revision} settled`)
+          const afterPeer = expectedRows()
+          expectWholeRecoveryTrace(f.exposures.slice(cut), [before, afterPeer])
+          const streamCut = f.exposures.length
+          f.record(`before stream revision ${revision}`)
           subscribers[0]!([
             change(`update`, { id: row.id, name: `stream` }),
             upToDate,
           ])
           if (!command.deleted) expected.set(row.id, { ...row, name: `stream` })
+          f.record(`after stream revision ${revision}`)
           expect(f.publicRows()).toEqual(expectedRows())
           await vi.waitFor(
             () => expect(f.durableRows()).toEqual(expectedRows()),
             { interval: 1 },
           )
+          expectWholeRecoveryTrace(f.exposures.slice(streamCut), [
+            afterPeer,
+            expectedRows(),
+          ])
         }
       } finally {
+        f.stopObserving()
         await f.collection.cleanup()
       }
     },
@@ -339,18 +448,21 @@ describe(`persisted Electric recovery laws`, () => {
       const f = fixture(syncMode)
       const gate = deferred()
       try {
-        f.collection.startSyncImmediate()
+        f.start()
         await vi.waitFor(() => expect(f.publicRows()).toEqual([oldRow]))
         await vi.waitFor(() => expect(subscribers).toHaveLength(1))
         expect(vi.mocked(ShapeStream).mock.calls[0]?.[0]).toMatchObject({
           offset: `10_0`,
           handle: `shape-old`,
         })
+        const invalidCut = f.exposures.length
+        f.record(`before invalid resume`)
         subscribers[0]!([
           change(`delete`, { id: 1 }),
           change(`update`, { id: 2, name: `partial` }),
           upToDate,
         ])
+        f.record(`after invalid resume`)
         await vi.waitFor(() => expect(f.collection.status).toBe(`error`))
         await vi.waitFor(() =>
           expect(f.metadata.get(`electric:resume`)).toMatchObject({
@@ -359,10 +471,13 @@ describe(`persisted Electric recovery laws`, () => {
         )
         expect(f.publicRows()).toEqual([oldRow])
         expect(f.durableRows()).toEqual([oldRow])
+        expectWholeRecoveryTrace(f.exposures.slice(invalidCut), [[oldRow]])
 
+        f.stopObserving()
         await f.collection.cleanup()
         f.pauseHydration(gate.promise)
-        f.collection.startSyncImmediate()
+        const recoveryCut = f.exposures.length
+        f.start()
         await vi.waitFor(() => expect(subscribers).toHaveLength(2))
         expect(vi.mocked(ShapeStream).mock.calls[1]?.[0]).toMatchObject({
           offset: undefined,
@@ -373,18 +488,37 @@ describe(`persisted Electric recovery laws`, () => {
           syncMode === `progressive`
             ? Promise.resolve(f.collection._sync.loadSubset({ limit: 10 }))
             : undefined
+        const hydrationOutcome = hydrationDone?.then(
+          () => undefined,
+          (error: unknown) => ({ error }),
+        )
+        const awaitHydration = async () => {
+          const outcome = await hydrationOutcome
+          if (outcome) throw outcome.error
+        }
         if (hydration === `before`) {
           gate.resolve()
-          await hydrationDone
+          await awaitHydration()
           await vi.waitFor(() => expect(f.publicRows()).toEqual([oldRow]))
         }
+        f.record(`before replacement data`)
+        const partialCut = f.exposures.length
         const expected = empty ? [] : [freshRow]
-        subscribers[1]!([
-          ...expected.map((row) => change(`insert`, row)),
-          upToDate,
+        subscribers[1]!(
+          expected.map((row) => change(`insert`, structuredClone(row))),
+        )
+        f.record(`after replacement data`)
+        subscribers[1]!([{ headers: { control: `subset-end` } }])
+        f.record(`after subset completion`)
+        expectWholeRecoveryTrace(f.exposures.slice(partialCut), [
+          hydration === `before` ? [oldRow] : [],
         ])
+        subscribers[1]!([upToDate])
+        f.record(`after replacement commit`)
+        // Preserve the original hydration-after-commit cells: the final
+        // control is delivered before releasing the paused hydration gate.
         gate.resolve()
-        await hydrationDone
+        await awaitHydration()
         await vi.waitFor(() => expect(f.collection.status).toBe(`ready`))
         await vi.waitFor(() =>
           expect(f.metadata.get(`electric:resume`)).toMatchObject({
@@ -397,8 +531,15 @@ describe(`persisted Electric recovery laws`, () => {
         // plus a fresh offset is not proof that the old materialization left.
         expect.soft(f.publicRows()).toEqual(expected)
         expect.soft(f.durableRows()).toEqual(expected)
+        f.record(`replacement ready`)
+        expectWholeRecoveryTrace(f.exposures.slice(recoveryCut), [
+          [],
+          [oldRow],
+          expected,
+        ])
       } finally {
         gate.resolve()
+        f.stopObserving()
         await f.collection.cleanup()
       }
     },
@@ -409,7 +550,7 @@ describe(`persisted Electric recovery laws`, () => {
     async (syncMode) => {
       const f = fixture(syncMode)
       try {
-        f.collection.startSyncImmediate()
+        f.start()
         await vi.waitFor(() => expect(f.publicRows()).toEqual([oldRow]))
         await vi.waitFor(() => expect(subscribers).toHaveLength(1))
         subscribers[0]!([
@@ -422,6 +563,7 @@ describe(`persisted Electric recovery laws`, () => {
         await vi.waitFor(() => expect(f.durableRows()).toEqual(expected))
         expect(f.commits.every((tx) => !tx.truncate)).toBe(true)
       } finally {
+        f.stopObserving()
         await f.collection.cleanup()
       }
     },

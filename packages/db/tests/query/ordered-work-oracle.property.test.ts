@@ -5,6 +5,7 @@ import { createDeferred } from '../../src/deferred.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createEffect } from '../../src/query/effect.js'
 import { getLoadSubsetDemandKey } from '../../src/query/ir-stable-identity.js'
+import { Func, PropRef, Value } from '../../src/query/ir.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import { eq, gte } from '../../src/query/builder/functions.js'
 import {
@@ -13,6 +14,7 @@ import {
 } from '../oracle-config.js'
 import { evaluateReferenceExpression } from '../reference-expression.js'
 import { flushPromises } from '../utils.js'
+import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import type { InitialQueryBuilder } from '../../src/query/builder/index.js'
 import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
 
@@ -36,6 +38,7 @@ type Scenario = {
 type RequestObservation = {
   kind: `page` | `boundary`
   key: string | undefined
+  fingerprint: string
   hasCursor: boolean
   limit: number | undefined
   offset: number | undefined
@@ -104,6 +107,114 @@ function rowsForScenario(scenario: Scenario): Array<Row> {
 
 let harnessId = 0
 
+// A finite request recorder, not another production identity implementation.
+// Preserve fields and primitive kinds; reject opaque values rather than merging
+// them into an empty object. Signals/subscriptions are ownership, not demand.
+function requestFingerprint(options: LoadSubsetOptions): string {
+  const semantic = new Set([`where`, `orderBy`, `limit`, `offset`, `cursor`])
+  for (const key of Reflect.ownKeys(options)) {
+    if (
+      !semantic.has(String(key)) &&
+      key !== `signal` &&
+      key !== `subscription`
+    )
+      throw new Error(`Unsupported request field ${String(key)}`)
+  }
+  const encode = (value: unknown): unknown => {
+    if (value === undefined) return [`undefined`]
+    if (value === null) return [`null`]
+    if (typeof value === `number`) {
+      if (!Number.isFinite(value)) throw new Error(`Nonfinite request value`)
+      return [`number`, Object.is(value, -0) ? `-0` : value]
+    }
+    if (typeof value === `boolean` || typeof value === `string`)
+      return [typeof value, value]
+    if (Array.isArray(value)) return [`array`, value.map(encode)]
+    if (typeof value !== `object`) throw new Error(`Opaque request value`)
+    const prototype = Object.getPrototypeOf(value)
+    if (
+      prototype !== Object.prototype &&
+      prototype !== null &&
+      !(value instanceof Func) &&
+      !(value instanceof PropRef) &&
+      !(value instanceof Value)
+    )
+      throw new Error(`Opaque request object`)
+    if (Reflect.ownKeys(value).some((key) => typeof key !== `string`))
+      throw new Error(`Symbol request field`)
+    // Absent optional compare fields and explicit undefined mean the same option.
+    return [
+      `object`,
+      Object.entries(value)
+        .filter(([, field]) => field !== undefined)
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([key, field]) => [key, encode(field)]),
+    ]
+  }
+  return JSON.stringify(
+    encode(
+      Object.fromEntries(
+        [...semantic].map((key) => [
+          key,
+          options[key as keyof LoadSubsetOptions],
+        ]),
+      ),
+    ),
+  )
+}
+
+function copiedRow(row: Row): Row {
+  const copy: Record<string, unknown> = { ...row }
+  for (const field of [`$key`, `$collectionId`, `$origin`, `$synced`])
+    delete copy[field]
+  return copy as Row
+}
+
+function expectRawWindow(
+  actual: ReadonlyArray<Row>,
+  expected: ReadonlyArray<Row>,
+  direction: Scenario[`direction`],
+  idTieBreak: boolean,
+) {
+  expect([...actual].sort(compareRows(direction))).toStrictEqual(
+    [...expected].sort(compareRows(direction)),
+  )
+  for (let index = 1; index < actual.length; index++) {
+    const left = actual[index - 1]!
+    const right = actual[index]!
+    const rank =
+      direction === `asc` ? left.rank - right.rank : right.rank - left.rank
+    expect(rank || (idTieBreak ? left.id - right.id : 0)).toBeLessThanOrEqual(0)
+  }
+}
+
+function expectInitialWindows(
+  publications: ReadonlyArray<ReadonlyArray<Row>>,
+  expected: ReadonlyArray<Row>,
+  direction: Scenario[`direction`],
+  idTieBreak: boolean,
+) {
+  let published = expected.length === 0
+  for (const rows of publications) {
+    if (!published && rows.length === 0) continue
+    expectRawWindow(rows, expected, direction, idTieBreak)
+    published = true
+  }
+  expect(published, `complete initial public window reached`).toBe(true)
+}
+
+function expectNoProviderStart(before: number, after: number) {
+  expect(after, `no provider start during disposal`).toBe(before)
+}
+
+function expectDistinctRequests(
+  requests: ReadonlyArray<{ fingerprint: string }>,
+) {
+  expect(new Set(requests.map(({ fingerprint }) => fingerprint)).size).toBe(
+    requests.length,
+  )
+}
+
 async function observeConsumer(
   kind: `collection` | `effect`,
   scenario: Scenario,
@@ -153,6 +264,7 @@ async function observeConsumer(
             requests.push({
               kind: isPage ? `page` : `boundary`,
               key: getLoadSubsetDemandKey(options),
+              fingerprint: requestFingerprint(options),
               hasCursor: options.cursor !== undefined,
               limit: options.limit,
               offset: options.offset,
@@ -215,6 +327,10 @@ async function observeConsumer(
   let live: ReturnType<typeof createLiveQueryCollection> | undefined
   let effect: ReturnType<typeof createEffect> | undefined
   const publications: Array<Array<Row>> = []
+  const rawPublications: Array<Array<Row>> = []
+  let subscription:
+    | ReturnType<NonNullable<typeof live>[`subscribeChanges`]>
+    | undefined
   const query = (q: InitialQueryBuilder) => {
     const ordered = q
       .from({ row: source })
@@ -240,96 +356,134 @@ async function observeConsumer(
       .map(({ id, rank, eligible, label }) => ({ id, rank, eligible, label }))
       .sort(compareRows(scenario.direction))
 
-  try {
-    if (kind === `collection`) {
-      live = createLiveQueryCollection(query)
-      live.subscribeChanges(() => {
-        publications.push(visibleRows())
-      })
-      await live.preload()
-    } else {
-      effect = createEffect<Row, number>({
-        query,
-        onBatch: (events) => {
-          for (const event of events) {
-            if (event.type === `exit`) effectRows.delete(event.key)
-            else effectRows.set(event.key, { ...event.value })
-          }
+  return withHistoryCleanup(
+    async () => {
+      if (kind === `collection`) {
+        live = createLiveQueryCollection(query)
+        subscription = live.subscribeChanges(() => {
           publications.push(visibleRows())
-        },
-        onSourceError: (error) => errors.push(error.message),
-      })
-    }
+          rawPublications.push([...live!.values()].map(copiedRow))
+        })
+        await live.preload()
+      } else {
+        effect = createEffect<Row, number>({
+          query,
+          onBatch: (events) => {
+            for (const event of events) {
+              if (event.type === `exit`) effectRows.delete(event.key)
+              else effectRows.set(event.key, { ...event.value })
+            }
+            publications.push(visibleRows())
+          },
+          onSourceError: (error) => errors.push(error.message),
+        })
+      }
 
-    for (let turn = 0; turn < truth.length * 3 + 6; turn++) {
-      await flushPromises()
-    }
-
-    const rows = visibleRows()
-    const expected = eligibleTruth.slice(0, 2)
-    expect(rows, JSON.stringify({ kind, scenario, requests })).toEqual(expected)
-    for (const publication of publications) {
-      expect(publication).toEqual(expected.slice(0, publication.length))
-    }
-    const semanticPublications = publications.filter(
-      (publication, index) =>
-        index === 0 ||
-        JSON.stringify(publication) !== JSON.stringify(publications[index - 1]),
-    )
-    for (let index = 1; index < semanticPublications.length; index++) {
-      expect(semanticPublications[index]!.length).toBeGreaterThan(
-        semanticPublications[index - 1]!.length,
-      )
-    }
-    // Single-term bootstrap demand should be identical across entry points.
-    // Multi-term loading may schedule a different bounded number of prefix
-    // and tie refinements, so compare that path by rows and work bounds.
-    let finalRows = rows
-    const publicationsBeforeMutation = publications.length
-    if (rowToDelete) {
-      truth.splice(truth.indexOf(rowToDelete), 1)
-      delivered.delete(rowToDelete.id)
-      sync.begin({ immediate: true })
-      sync.write({ type: `delete`, value: { ...rowToDelete } })
-      const receipt = sync.commit()
-      if (receipt !== true) await receipt
-      for (let turn = 0; turn < sourceSize * 3 + 6; turn++) {
+      for (let turn = 0; turn < truth.length * 3 + 6; turn++) {
         await flushPromises()
       }
-      finalRows = visibleRows()
-      expect(finalRows, JSON.stringify({ kind, scenario, requests })).toEqual(
-        truth.filter(({ eligible }) => eligible).slice(0, 2),
-      )
-      expect(
-        publications.length - publicationsBeforeMutation,
-      ).toBeLessThanOrEqual(1)
-    }
-    expect(publications.at(-1) ?? []).toEqual(finalRows)
-    // The explicit source deletion can publish without another provider call.
-    expect(publications.length).toBeLessThanOrEqual(
-      requests.length + 1 + Number(rowToDelete !== undefined),
-    )
-    expect(requests.length).toBeLessThanOrEqual(sourceSize * 3 + 2)
-    expect(
-      requests.every(
-        (request) => request.kind === `boundary` || request.limit !== undefined,
-      ),
-    ).toBe(true)
 
-    return {
-      rows: finalRows,
-      requests,
-      compareRequestTrace: rowToDelete === undefined,
-      publications,
-      errors,
-      live: live ? live.status === `ready` : effect?.disposed === false,
-    }
-  } finally {
-    if (effect) await effect.dispose()
-    if (live) await live.cleanup()
-    await markerSource.cleanup()
-    await source.cleanup()
-  }
+      const rows = visibleRows()
+      const expected = eligibleTruth.slice(0, 2)
+      expect(rows, JSON.stringify({ kind, scenario, requests })).toEqual(
+        expected,
+      )
+      if (live) {
+        expectRawWindow(
+          [...live.values()].map(copiedRow),
+          expected,
+          scenario.direction,
+          rowToDelete !== undefined,
+        )
+        expectInitialWindows(
+          rawPublications,
+          expected,
+          scenario.direction,
+          rowToDelete !== undefined,
+        )
+      }
+      for (const publication of publications) {
+        expect(publication).toEqual(expected.slice(0, publication.length))
+      }
+      const semanticPublications = publications.filter(
+        (publication, index) =>
+          index === 0 ||
+          JSON.stringify(publication) !==
+            JSON.stringify(publications[index - 1]),
+      )
+      for (let index = 1; index < semanticPublications.length; index++) {
+        expect(semanticPublications[index]!.length).toBeGreaterThan(
+          semanticPublications[index - 1]!.length,
+        )
+      }
+      // Single-term bootstrap demand should be identical across entry points.
+      // Multi-term loading may schedule a different bounded number of prefix
+      // and tie refinements, so compare that path by rows and work bounds.
+      let finalRows = rows
+      const publicationsBeforeMutation = publications.length
+      if (rowToDelete) {
+        truth.splice(truth.indexOf(rowToDelete), 1)
+        delivered.delete(rowToDelete.id)
+        sync.begin({ immediate: true })
+        sync.write({ type: `delete`, value: { ...rowToDelete } })
+        const receipt = sync.commit()
+        if (receipt !== true) await receipt
+        for (let turn = 0; turn < sourceSize * 3 + 6; turn++) {
+          await flushPromises()
+        }
+        finalRows = visibleRows()
+        expect(finalRows, JSON.stringify({ kind, scenario, requests })).toEqual(
+          truth.filter(({ eligible }) => eligible).slice(0, 2),
+        )
+        if (live)
+          expectRawWindow(
+            [...live.values()].map(copiedRow),
+            truth.filter(({ eligible }) => eligible).slice(0, 2),
+            scenario.direction,
+            true,
+          )
+        expect(
+          publications.length - publicationsBeforeMutation,
+        ).toBeLessThanOrEqual(1)
+      }
+      expect(publications.at(-1) ?? []).toEqual(finalRows)
+      // The explicit source deletion can publish without another provider call.
+      expect(publications.length).toBeLessThanOrEqual(
+        requests.length + 1 + Number(rowToDelete !== undefined),
+      )
+      expect(requests.length).toBeLessThanOrEqual(sourceSize * 3 + 2)
+      expect(
+        requests.every(
+          (request) =>
+            request.kind === `boundary` || request.limit !== undefined,
+        ),
+      ).toBe(true)
+
+      return {
+        rows: finalRows,
+        requests: requests.map((request) => ({ ...request })),
+        compareRequestTrace: rowToDelete === undefined,
+        publications: publications.map((publication) =>
+          publication.map(copiedRow),
+        ),
+        errors: [...errors],
+        live: live ? live.status === `ready` : effect?.disposed === false,
+      }
+    },
+    () => {
+      const requestCount = requests.length
+      return [
+        () => subscription?.unsubscribe(),
+        () => effect?.dispose(),
+        () => live?.cleanup(),
+        () => markerSource.cleanup(),
+        () => source.cleanup(),
+        () => {
+          expectNoProviderStart(requestCount, requests.length)
+        },
+      ]
+    },
+  )
 }
 
 async function assertConsumerParity(scenario: Scenario): Promise<void> {
@@ -367,6 +521,7 @@ async function observeLaterOrderTermMutation(
   ]
   const delivered = new Set<number>()
   const requests: Array<string | undefined> = []
+  const fingerprints: Array<string> = []
   const effectRows = new Map<number, Row>()
   let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
 
@@ -384,6 +539,7 @@ async function observeLaterOrderTermMutation(
         return {
           loadSubset: async (options) => {
             requests.push(getLoadSubsetDemandKey(options))
+            fingerprints.push(requestFingerprint(options))
             let selected = options.where
               ? truth.filter(
                   (row) =>
@@ -456,25 +612,37 @@ async function observeLaterOrderTermMutation(
       )
       .map(({ id }) => id)
 
-  try {
-    if (live) await live.preload()
-    else await vi.waitFor(() => expect(visibleIds()).toEqual([1, 2]))
-    expect(visibleIds()).toEqual([1, 2])
+  return withHistoryCleanup(
+    async () => {
+      if (live) await live.preload()
+      else await vi.waitFor(() => expect(visibleIds()).toEqual([1, 2]))
+      expect(visibleIds()).toEqual([1, 2])
+      if (live) expect([...live.values()].map(({ id }) => id)).toEqual([1, 2])
 
-    const first = { ...source.get(1)!, label: `z` }
-    sync.begin({ immediate: true })
-    sync.write({ type: `update`, value: { ...first } })
-    const receipt = sync.commit()
-    if (receipt !== true) await receipt
-    await vi.waitFor(() => expect(visibleIds()).toEqual([2, 3]))
+      const first = { ...source.get(1)!, label: `z` }
+      sync.begin({ immediate: true })
+      sync.write({ type: `update`, value: { ...first } })
+      const receipt = sync.commit()
+      if (receipt !== true) await receipt
+      await vi.waitFor(() => expect(visibleIds()).toEqual([2, 3]))
+      if (live) expect([...live.values()].map(({ id }) => id)).toEqual([2, 3])
 
-    expect(requests.length).toBeLessThanOrEqual(6)
-    return { rows: visibleIds(), requests }
-  } finally {
-    if (effect) await effect.dispose()
-    if (live) await live.cleanup()
-    await source.cleanup()
-  }
+      expect(requests.length).toBeLessThanOrEqual(6)
+      expect(fingerprints).toHaveLength(requests.length)
+      return { rows: visibleIds(), requests: [...requests] }
+    },
+    () => {
+      const requestCount = requests.length
+      return [
+        () => effect?.dispose(),
+        () => live?.cleanup(),
+        () => source.cleanup(),
+        () => {
+          expectNoProviderStart(requestCount, requests.length)
+        },
+      ]
+    },
+  )
 }
 
 async function observeFinitePrefixMutation(
@@ -576,41 +744,108 @@ async function observeFinitePrefixMutation(
       .sort((left, right) => left.rank - right.rank)
       .map(({ id }) => id)
 
-  try {
-    if (live) {
-      live.subscribeChanges(() => publications.push(visibleIds()))
-      await live.preload()
-    } else {
-      await vi.waitFor(() => expect(visibleIds()).toEqual([1]))
-    }
-    const requestsBeforeMutation = requests
-    const moved = { ...truth.get(1)!, rank: 10 }
-    if (mutation === `delete`) truth.delete(1)
-    else truth.set(1, moved)
-    sync.begin({ immediate: true })
-    sync.write({
-      type: mutation === `delete` ? `delete` : `update`,
-      value: { ...moved },
-    })
-    const receipt = sync.commit()
-    if (receipt !== true) await receipt
-    await vi.waitFor(() =>
-      expect(
-        visibleIds(),
-        JSON.stringify({ kind, requests, source: source.toArray }),
-      ).toEqual([2]),
-    )
+  return withHistoryCleanup(
+    async () => {
+      if (live) {
+        live.subscribeChanges(() => publications.push(visibleIds()))
+        await live.preload()
+      } else {
+        await vi.waitFor(() => expect(visibleIds()).toEqual([1]))
+      }
+      if (live) expect([...live.values()].map(({ id }) => id)).toEqual([1])
+      const requestsBeforeMutation = requests
+      const moved = { ...truth.get(1)!, rank: 10 }
+      if (mutation === `delete`) truth.delete(1)
+      else truth.set(1, moved)
+      sync.begin({ immediate: true })
+      sync.write({
+        type: mutation === `delete` ? `delete` : `update`,
+        value: { ...moved },
+      })
+      const receipt = sync.commit()
+      if (receipt !== true) await receipt
+      await vi.waitFor(() =>
+        expect(
+          visibleIds(),
+          JSON.stringify({ kind, requests, source: source.toArray }),
+        ).toEqual([2]),
+      )
 
-    expect(requests).toBeGreaterThan(requestsBeforeMutation)
-    return { rows: visibleIds(), requests, publications }
-  } finally {
-    if (effect) await effect.dispose()
-    if (live) await live.cleanup()
-    await source.cleanup()
-  }
+      expect(requests).toBeGreaterThan(requestsBeforeMutation)
+      if (live) expect([...live.values()].map(({ id }) => id)).toEqual([2])
+      return {
+        rows: visibleIds(),
+        requests,
+        publications: publications.map((rows) => [...rows]),
+      }
+    },
+    () => {
+      const requestCount = requests
+      return [
+        () => effect?.dispose(),
+        () => live?.cleanup(),
+        () => source.cleanup(),
+        () => {
+          expectNoProviderStart(requestCount, requests)
+        },
+      ]
+    },
+  )
 }
 
 describe(`ordered source work oracle`, () => {
+  it(`rejects scrambled order and partial or regressed initial publications`, () => {
+    const rows: Array<Row> = [
+      { id: 1, rank: 1, eligible: true, label: `first` },
+      { id: 2, rank: 2, eligible: true, label: `second` },
+    ]
+    expectInitialWindows([[], rows], rows, `asc`, true)
+    expect(() =>
+      expectRawWindow([...rows].reverse(), rows, `asc`, true),
+    ).toThrow()
+    expect(() =>
+      expectInitialWindows([[rows[0]!], rows], rows, `asc`, true),
+    ).toThrow()
+    expect(() => expectInitialWindows([rows, []], rows, `asc`, true)).toThrow()
+    const tied = rows.map((row) => ({ ...row, rank: 1 })).reverse()
+    expectRawWindow(tied, tied, `asc`, false)
+    expect(() => expectRawWindow(tied, tied, `asc`, true)).toThrow()
+  })
+
+  it(`identifies repeated finite requests without the production request key`, () => {
+    const options: LoadSubsetOptions = { limit: 1 }
+    const fingerprint = requestFingerprint(options)
+    const requests = [
+      { key: `a`, fingerprint },
+      { key: `b`, fingerprint },
+    ]
+    expect(() => expectDistinctRequests(requests)).toThrow()
+    options.limit = 2
+    expectDistinctRequests([
+      requests[0]!,
+      { fingerprint: requestFingerprint(options) },
+    ])
+    expect(fingerprint).toBe(requestFingerprint({ limit: 1 }))
+    expect(() =>
+      requestFingerprint({
+        where: new Func<boolean>(`eq`, [
+          new Value(new Date()),
+          new Value(new Date()),
+        ]),
+      }),
+    ).toThrow()
+  })
+
+  it(`checks the live request recorder after disposal rather than its earlier copy`, () => {
+    const requests = [{ fingerprint: requestFingerprint({ limit: 1 }) }]
+    const returned = [...requests]
+    const before = requests.length
+    expectNoProviderStart(before, requests.length)
+    requests.push({ fingerprint: requestFingerprint({ limit: 2 }) })
+    expect(returned).toHaveLength(1)
+    expect(() => expectNoProviderStart(before, requests.length)).toThrow()
+  })
+
   it(`keeps later order-term invalidation equal across consumers`, async () => {
     const [collection, effect] = await Promise.all([
       observeLaterOrderTermMutation(`collection`),
@@ -1544,6 +1779,7 @@ describe(`ordered source work oracle`, () => {
           new Set(observation.requests.map(({ key }) => key)).size,
           JSON.stringify(observation.requests),
         ).toBe(observation.requests.length)
+        expectDistinctRequests(observation.requests)
       }
     },
   )

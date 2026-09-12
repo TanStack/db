@@ -1,15 +1,145 @@
 import { describe, expect, it } from 'vitest'
+import fc from 'fast-check'
 import { SortedMap } from '../src/SortedMap'
+import { oraclePropertyOptions, oracleRuns } from './oracle-config'
+
+type Order = `key` | `ascending` | `descending`
+
+function expectMap(
+  actual: SortedMap<number, number>,
+  model: Map<number, number>,
+  order: Order,
+) {
+  // Recompute from a plain Map; do not copy SortedMap's binary insertion logic.
+  const expected = [...model].sort(
+    ([ka, va], [kb, vb]) =>
+      (order === `key` ? 0 : order === `ascending` ? va - vb : vb - va) ||
+      ka - kb,
+  )
+  expect(actual.size).toBe(model.size)
+  expect([...actual]).toEqual(expected)
+  expect([...actual.entries()]).toEqual(expected)
+  expect([...actual.keys()]).toEqual(expected.map(([key]) => key))
+  expect([...actual.values()]).toEqual(expected.map(([, value]) => value))
+  const visited: Array<[number, number]> = []
+  actual.forEach((value, key) => visited.push([key, value]))
+  expect(visited).toEqual(expected)
+  for (let key = -3; key <= 3; key++) {
+    expect(actual.has(key)).toBe(model.has(key))
+    expect(actual.get(key)).toBe(model.get(key))
+  }
+}
+
+describe.each([`key`, `ascending`, `descending`] as const)(
+  `SortedMap %s history`,
+  (order) => {
+    const property = {
+      key: `sorted-map.key`,
+      ascending: `sorted-map.ascending`,
+      descending: `sorted-map.descending`,
+    }[order]
+    it.each([20260912, undefined])(
+      `agrees with full recomputation (seed %s)`,
+      async (seed) => {
+        await fc.assert(
+          fc.asyncProperty(
+            fc.array(
+              fc.record({
+                kind: fc.constantFrom(`set`, `set`, `delete`, `clear`),
+                key: fc.integer({ min: -3, max: 3 }),
+                value: fc.integer({ min: -3, max: 3 }),
+              }),
+              { maxLength: 40 },
+            ),
+            (actions) => {
+              const actual = new SortedMap<number, number>(
+                order === `key`
+                  ? undefined
+                  : order === `ascending`
+                    ? (a, b) => a - b
+                    : (a, b) => b - a,
+              )
+              const model = new Map<number, number>()
+              expectMap(actual, model, order)
+              for (const action of actions) {
+                if (action.kind === `set`) {
+                  expect(actual.set(action.key, action.value)).toBe(actual)
+                  model.set(action.key, action.value)
+                } else if (action.kind === `delete`) {
+                  expect(actual.delete(action.key)).toBe(
+                    model.delete(action.key),
+                  )
+                } else {
+                  actual.clear()
+                  model.clear()
+                }
+                expectMap(actual, model, order)
+              }
+              return Promise.resolve()
+            },
+          ),
+          {
+            ...(seed === undefined
+              ? oraclePropertyOptions(100, property)
+              : { seed, numRuns: oracleRuns(100) }),
+            examples: [
+              [
+                [
+                  { kind: `set`, key: 1, value: 3 },
+                  { kind: `set`, key: -1, value: 3 },
+                  { kind: `set`, key: 1, value: -3 },
+                  { kind: `delete`, key: -1, value: 0 },
+                  { kind: `clear`, key: 0, value: 0 },
+                  { kind: `set`, key: -1, value: 2 },
+                ],
+              ],
+            ],
+          },
+        )
+      },
+    )
+  },
+)
+
+it(`rejects wrong default ordering, missing tied entries, and stale overwrites`, () => {
+  const byValue = new SortedMap<number, number>((a, b) => a - b)
+  byValue.set(1, 3).set(-1, 4)
+  expect(() =>
+    expectMap(
+      byValue,
+      new Map([
+        [1, 3],
+        [-1, 4],
+      ]),
+      `key`,
+    ),
+  ).toThrow()
+  const missingTie = new SortedMap<number, number>((a, b) => a - b)
+  missingTie.set(1, 3)
+  expect(() =>
+    expectMap(
+      missingTie,
+      new Map([
+        [1, 3],
+        [-1, 3],
+      ]),
+      `ascending`,
+    ),
+  ).toThrow()
+  const stale = new SortedMap<number, number>()
+  stale.set(1, 3)
+  expect(() => expectMap(stale, new Map([[1, 2]]), `key`)).toThrow()
+})
 
 describe(`SortedMap`, () => {
-  it(`maintains sorted order by values`, () => {
+  it(`sorts by key by default, even when values have the opposite order`, () => {
     const map = new SortedMap<string, number>()
-    map.set(`c`, 3)
-    map.set(`a`, 1)
+    map.set(`c`, 1)
+    map.set(`a`, 3)
     map.set(`b`, 2)
 
     const values = Array.from(map.values())
-    expect(values).toEqual([1, 2, 3])
+    expect(values).toEqual([3, 2, 1])
   })
 
   it(`works with custom comparator`, () => {
@@ -71,8 +201,7 @@ describe(`SortedMap`, () => {
     expect(forEachResults).toEqual([1, 2, 3])
   })
 
-  // Test to cover the defaultComparator method (line 32)
-  it(`uses defaultComparator correctly when no custom comparator is provided`, () => {
+  it(`orders string keys when no custom comparator is provided`, () => {
     const map = new SortedMap<string, string>()
     map.set(`c`, `charlie`)
     map.set(`a`, `alpha`)

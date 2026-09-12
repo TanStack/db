@@ -141,17 +141,22 @@ type OrderRow = { id: number; partId: number }
 type ProductionRow = { id: number; orderId: number }
 type CorrelationTarget = `source` | `joined`
 
-function createCorrelationSources(correlationId: number, productionId: number) {
+function createCorrelationSources(
+  correlationId: number,
+  productionId: number,
+  orderId: number,
+) {
   const sources = {
-    parts: createControlledCollection<PartRow>(`correlation-parts`, [
-      { id: correlationId },
-    ]),
+    parts: createControlledCollection<PartRow>(
+      `correlation-parts`,
+      [...new Set([correlationId, orderId])].map((id) => ({ id })),
+    ),
     orders: createControlledCollection<OrderRow>(`correlation-orders`, [
-      { id: correlationId, partId: correlationId },
+      { id: orderId, partId: correlationId },
     ]),
     productions: createControlledCollection<ProductionRow>(
       `correlation-productions`,
-      [{ id: productionId, orderId: correlationId }],
+      [{ id: productionId, orderId }],
     ),
   }
   sources.orders.collection.createIndex((row) => row.id, {
@@ -216,24 +221,33 @@ function createCorrelationDriver(
   target: CorrelationTarget,
   correlationId: number,
   productionId: number,
-): TraceDriver<never, CorrelationContext> {
+  orderId = correlationId,
+): TraceDriver<OrderRow, CorrelationContext> {
   return {
     setup: () => {
-      const part = { id: correlationId }
-      const order = { id: correlationId, partId: correlationId }
-      const production = { id: productionId, orderId: correlationId }
-      const sources = createCorrelationSources(correlationId, productionId)
+      const parts = [...new Set([correlationId, orderId])].map((id) => ({ id }))
+      const order = { id: orderId, partId: correlationId }
+      const production = { id: productionId, orderId }
+      const sources = createCorrelationSources(
+        correlationId,
+        productionId,
+        orderId,
+      )
       return {
         target,
         sources,
         live: createCorrelationQuery(sources, target),
-        parts: rowsById([part]),
+        parts: rowsById(parts),
         orders: rowsById([order]),
         productions: rowsById([production]),
       }
     },
     start: ({ live }) => live.preload(),
-    apply: () => undefined,
+    apply: (order, { sources, orders }) => {
+      if (!orders.has(order.id)) throw new Error(`Missing order ${order.id}`)
+      sources.orders.write(`update`, { ...order })
+      orders.set(order.id, { ...order })
+    },
     cleanup: ({ live, sources }) => cleanupQuery(live, Object.values(sources)),
   }
 }
@@ -414,6 +428,38 @@ describe(`includes query-shape recompute oracle`, () => {
       }),
   )
 
+  fcTest.each([`source`, `joined`] as const)(
+    `keeps %s correlation distinct from join identity through route moves`,
+    (target) =>
+      runTrace({
+        // Part 1 is the joined correlation; part 7 is the source correlation.
+        // Moving order.partId changes only the joined query, then restores it.
+        steps: [
+          { id: 7, partId: 7 },
+          { id: 7, partId: 1 },
+        ],
+        driver: createCorrelationDriver(target, 1, 101, 7),
+        projection: correlationProjection,
+      }),
+  )
+
+  fcTest(
+    `rejects the wrong correlation alias at the initial checkpoint`,
+    async () => {
+      await expect(
+        runTrace({
+          steps: [],
+          driver: createCorrelationDriver(`source`, 1, 101, 7),
+          projection: {
+            ...correlationProjection,
+            recompute: (context) =>
+              correlationProjection.recompute({ ...context, target: `joined` }),
+          },
+        }),
+      ).rejects.toMatchObject({ name: `TraceAssertionError`, checkpoint: 0 })
+    },
+  )
+
   fcTest.prop([fc.integer({ min: 1, max: 100 })], {
     numRuns: oracleRuns(12),
     seed: 1706,
@@ -449,5 +495,42 @@ describe(`includes query-shape recompute oracle`, () => {
         ),
         projection: nullableProjection,
       }),
+  )
+
+  fcTest(
+    `reactivates a singleton after null and repeated route retirement`,
+    () =>
+      runTrace({
+        steps: [
+          { id: 1, authorId: 1 },
+          { id: 1, authorId: null },
+          { id: 1, authorId: 1 },
+        ],
+        driver: createNullableDriver(
+          [{ id: 1, name: `Ada` }],
+          [{ id: 1, authorId: null }],
+        ),
+        projection: nullableProjection,
+      }),
+  )
+
+  fcTest(
+    `rejects a stale empty singleton at its reactivation checkpoint`,
+    async () => {
+      await expect(
+        runTrace({
+          steps: [{ id: 1, authorId: 1 }],
+          driver: createNullableDriver(
+            [{ id: 1, name: `Ada` }],
+            [{ id: 1, authorId: null }],
+          ),
+          projection: {
+            ...nullableProjection,
+            observe: ({ live }) =>
+              live.toArray.map((row) => ({ id: row.id, author: undefined })),
+          },
+        }),
+      ).rejects.toMatchObject({ name: `TraceAssertionError`, checkpoint: 1 })
+    },
   )
 })

@@ -35,6 +35,54 @@ const graphArbitrary = fc
     edges.map((targets) => targets.map((target) => target % edges.length)),
   )
 
+function expectGraphHash(
+  edges: Array<Array<number>>,
+  hashValue: (value: unknown) => number = hash,
+): void {
+  const nodes = edges.map((_, value) => ({
+    value,
+    children: [] as Array<unknown>,
+  }))
+  edges.forEach((targets, index) => {
+    nodes[index]!.children = targets.map((target) => nodes[target])
+  })
+  if (!isAcyclic(edges)) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      expect(() => hashValue(nodes[0])).toThrow(
+        `Cannot hash cyclic structural values`,
+      )
+    }
+    return
+  }
+  // Unfold sharing into equal but distinct subtrees. Hash identity must
+  // depend on values, not whether the graph reused an object reference.
+  const unfold = (node: number): unknown => ({
+    value: node,
+    children: edges[node]!.map(unfold),
+  })
+  expect(hashValue(nodes[0])).toBe(hashValue(unfold(0)))
+}
+
+// Named semantic cells run on every campaign; random frequency is not evidence
+// that disconnected cycles, repeated references, or duplicate edges were reached.
+const graphWitnesses: Array<{
+  name: string
+  edges: Array<Array<number>>
+  acyclic: boolean
+}> = [
+  { name: `isolated root`, edges: [[]], acyclic: true },
+  { name: `root self-cycle`, edges: [[0]], acyclic: false },
+  { name: `reachable mutual cycle`, edges: [[1], [0]], acyclic: false },
+  { name: `unreachable self-cycle`, edges: [[], [1]], acyclic: true },
+  {
+    name: `shared acyclic diamond`,
+    edges: [[1, 2], [3], [3], []],
+    acyclic: true,
+  },
+  { name: `duplicate acyclic edges`, edges: [[1, 1], []], acyclic: true },
+  { name: `duplicate cyclic edges`, edges: [[1, 1], [0]], acyclic: false },
+]
+
 describe(`structural hash graph boundary`, () => {
   it.each([
     `object`,
@@ -67,38 +115,55 @@ describe(`structural hash graph boundary`, () => {
     }
   })
 
+  it.each(graphWitnesses)(`matches the $name witness`, ({ edges, acyclic }) => {
+    // These expected categories are specified independently of Kahn's result.
+    expect(isAcyclic(edges)).toBe(acyclic)
+    expectGraphHash(edges)
+  })
+
   for (const seed of [1657019, undefined]) {
     it(`matches reachable graph cycles and shared DAGs (${seed ?? `random`})`, () => {
       fc.assert(
         fc.property(graphArbitrary, (edges) => {
-          const nodes = edges.map((_, value) => ({
-            value,
-            children: [] as Array<unknown>,
-          }))
-          edges.forEach((targets, index) => {
-            nodes[index]!.children = targets.map((target) => nodes[target])
-          })
-          if (!isAcyclic(edges)) {
-            expect(() => hash(nodes[0])).toThrow(
-              `Cannot hash cyclic structural values`,
-            )
-            expect(() => hash(nodes[0])).toThrow(
-              `Cannot hash cyclic structural values`,
-            )
-            return
-          }
-          // Unfold sharing into equal but distinct subtrees. Hash identity must
-          // depend on values, not whether the graph reused an object reference.
-          const unfold = (node: number): unknown => ({
-            value: node,
-            children: edges[node]!.map(unfold),
-          })
-          expect(hash(nodes[0])).toBe(hash(unfold(0)))
+          expectGraphHash(edges)
         }),
         { numRuns: 300, ...(seed === undefined ? {} : { seed }) },
       )
     })
   }
+
+  it(`rejects cycle acceptance while accepting its acyclic near-neighbor`, () => {
+    expect(() => expectGraphHash([[1], [0]], () => 0)).toThrow()
+    expectGraphHash([[1], []], () => 0)
+    expectGraphHash([[1], [0]])
+    expectGraphHash([[1], []])
+  })
+
+  it(`rejects false cycle rejection for unreachable cycles and shared DAGs`, () => {
+    const rejectAll = (): number => {
+      throw new TypeError(`Cannot hash cyclic structural values`)
+    }
+    for (const edges of [
+      [[], [1]],
+      [[1, 2], [3], [3], []],
+      [[1, 1], []],
+    ]) {
+      expect(() => expectGraphHash(edges, rejectAll)).toThrow(
+        `Cannot hash cyclic structural values`,
+      )
+      expectGraphHash(edges)
+    }
+    expectGraphHash([[0]], rejectAll)
+  })
+
+  it(`rejects unequal hashes of a shared DAG and its unfolding`, () => {
+    let calls = 0
+    expect(() =>
+      expectGraphHash([[1, 2], [3], [3], []], () => ++calls),
+    ).toThrow()
+    expect(calls).toBe(2)
+    expectGraphHash([[1, 2], [3], [3], []])
+  })
 
   it(`leaves completed siblings uncached after a cycle rejects the root`, () => {
     let reads = 0

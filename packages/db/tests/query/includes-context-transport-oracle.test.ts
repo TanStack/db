@@ -498,6 +498,7 @@ async function runLexicalScopeCell({ scope }: LexicalScopeCell): Promise<void> {
 
       parents.write(`update`, { id: 1, group: 1, threshold: 4 })
       expectEveryForm(live.get(1)!, ids, expected(1))
+      expectEveryForm(live.get(2)!, ids, expected(2))
 
       children.write(`insert`, {
         id: 30,
@@ -596,6 +597,7 @@ async function runLexicalScopeCell({ scope }: LexicalScopeCell): Promise<void> {
 
     parents.write(`update`, { id: 1, group: 1, threshold: 4 })
     assertNestedProduct(1)
+    assertNestedProduct(2)
 
     grandchildren.write(`insert`, { id: 300, parentGroup: 10, value: 2 })
     assertNestedProduct(1)
@@ -672,6 +674,7 @@ async function runAggregationCell({
 
     parents.write(`update`, { id: 2, group: 1, factor: 3 })
     expectEveryForm(live.get(2)!, project, expected(2))
+    expectEveryForm(live.get(1)!, project, expected(1))
 
     children.write(`insert`, { id: 30, parentGroup: 1, value: 4 })
     for (const parent of parents.collection.toArray) {
@@ -1037,6 +1040,12 @@ async function runRecursiveSourceCell({
     parents.write(`update`, { id: 1, group: 1, parameter: updatedParameter })
     assertParents()
 
+    if (phase === `having`) {
+      // Keep the rejected cut above, then make the child continuation visible.
+      parents.write(`update`, { id: 1, group: 1, parameter: 0 })
+      assertParents()
+    }
+
     const inserted = {
       id: 50,
       parentGroup: 1,
@@ -1341,6 +1350,45 @@ function expectNoRouteMetadata(row: object): void {
   expect(Object.hasOwn(row, `__parentContext`)).toBe(false)
 }
 
+// Public VirtualRowProps names these four keys, not arbitrary $-prefixed data.
+const publicMetadataKeys = new Set([
+  `$synced`,
+  `$origin`,
+  `$key`,
+  `$collectionId`,
+])
+
+function expectSelectedOwnKeys(
+  row: object,
+  selected: ReadonlyArray<string>,
+): void {
+  expect(
+    new Set(
+      Reflect.ownKeys(row).filter(
+        (key) => typeof key !== `string` || !publicMetadataKeys.has(key),
+      ),
+    ),
+  ).toEqual(new Set(selected))
+}
+
+function captureMetadataRows(
+  rows: Iterable<{ id: number; label: string }>,
+): Array<{ id: number; label: string }> {
+  if (Array.isArray(rows)) {
+    expect(new Set(Reflect.ownKeys(rows))).toEqual(
+      new Set([
+        `length`,
+        ...Array.from({ length: rows.length }, (_, index) => String(index)),
+      ]),
+    )
+  }
+  return [...rows].map((row) => {
+    expectNoRouteMetadata(row)
+    expectSelectedOwnKeys(row, [`id`, `label`])
+    return { id: row.id, label: row.label }
+  })
+}
+
 async function runQueryRefMetadataCell(
   routeMode: QueryRefMetadataMode,
 ): Promise<void> {
@@ -1372,10 +1420,14 @@ async function runQueryRefMetadataCell(
 
     try {
       await live.preload()
-      expectNoRouteMetadata(live.toArray[0]!)
+      expect(captureMetadataRows(live.toArray)).toEqual([
+        { id: 10, label: `ten` },
+      ])
 
       candidates.write(`update`, { id: 10, label: `updated` })
-      expectNoRouteMetadata(live.toArray[0]!)
+      expect(captureMetadataRows(live.toArray)).toEqual([
+        { id: 10, label: `updated` },
+      ])
     } finally {
       await cleanup(live, [anchors, candidates])
     }
@@ -1405,26 +1457,28 @@ async function runQueryRefMetadataCell(
       return { id: parent.id, ...includeInEveryForm(rows) }
     }),
   )
-  const assertClean = () => {
+  const assertClean = (expected: Array<{ id: number; label: string }>) => {
+    expect(live.toArray.map(({ id }) => id)).toEqual([1])
     const forms = live.get(1)!
+    expectSelectedOwnKeys(forms, [`id`, `collection`, `array`, `materialized`])
     for (const rows of [
       forms.collection.values(),
       forms.array,
       forms.materialized,
     ]) {
-      for (const row of rows) expectNoRouteMetadata(row)
+      expect(captureMetadataRows(rows)).toEqual(expected)
     }
   }
 
   try {
     await live.preload()
-    assertClean()
+    assertClean([{ id: 10, label: `ten` }])
 
     parents.write(`update`, { id: 1, group: 2 })
-    assertClean()
+    assertClean([])
 
     anchors.write(`update`, { id: 1, candidateId: 10, parentGroup: 2 })
-    assertClean()
+    assertClean([{ id: 10, label: `ten` }])
   } finally {
     await cleanup(live, [parents, anchors, candidates])
   }
@@ -1531,10 +1585,14 @@ async function runNamespaceCollisionCell({
   const children = createGrammarCollection(`${cellName}-children`, [
     { id: 10, parentGroup: 1, token: `one`, label: `one` },
     { id: 20, parentGroup: 2, token: `two`, label: `two` },
+    { id: 11, parentGroup: 1, token: `two`, label: `group-only` },
+    { id: 21, parentGroup: 2, token: `one`, label: `token-only` },
   ])
   const tags = createGrammarCollection(`${cellName}-tags`, [
     { id: 10 },
     { id: 20 },
+    { id: 11 },
+    { id: 21 },
   ])
   const live =
     location === `parent-alias`
@@ -1895,6 +1953,7 @@ async function runPublicSurfaceCell({
   )
 
   const assertCurrent = () => {
+    expect(live.toArray.map(({ id }) => id)).toEqual([1])
     const forms = live.get(1)!
     const rowsByForm = [
       [...forms.collection.values()],
@@ -1902,6 +1961,7 @@ async function runPublicSurfaceCell({
       [...forms.materialized],
     ]
     for (const rows of rowsByForm) {
+      expect(rows).toHaveLength(1)
       for (const row of rows) {
         expectNoPrivateSymbolsDeep(row, new Set([userSymbol]))
       }
@@ -2091,6 +2151,34 @@ async function runGrammarCell(cell: GrammarCell): Promise<void> {
 }
 
 describe(`correlated include route-context transport grammar`, () => {
+  test(`metadata observations reject vacuity, extra rows, and unknown own keys`, () => {
+    const expected = [{ id: 10, label: `ten` }]
+    const valid = { id: 10, label: `ten` }
+    for (const key of publicMetadataKeys) {
+      Object.defineProperty(valid, key, { value: undefined })
+    }
+    expect(captureMetadataRows([valid])).toEqual(expected)
+    expect(captureMetadataRows([])).toEqual([])
+    const check = (rows: Array<{ id: number; label: string }>) =>
+      expect(captureMetadataRows(rows)).toEqual(expected)
+    for (const rows of [
+      [],
+      [...expected, ...expected],
+      [{ id: 10, label: `wrong` }],
+    ])
+      expect(() => check(rows)).toThrow()
+    for (const key of [`extra`, `$unknown`, Symbol(`private`)] as const) {
+      const row = { id: 10, label: `ten` }
+      Object.defineProperty(row, key, { value: undefined })
+      expect(() => check([row])).toThrow()
+    }
+    const rows = [...expected]
+    Object.defineProperty(rows, Symbol(`private array carrier`), {
+      value: undefined,
+    })
+    expect(() => check(rows)).toThrow()
+  })
+
   test(`expands every declared product without duplicate cells`, () => {
     const expectedCellCount =
       routeContextGrammar.parentProjection.shapes.length +

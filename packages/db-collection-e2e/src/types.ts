@@ -50,6 +50,8 @@ export interface SeedDataResult {
  * Test configuration for e2e tests
  */
 export interface E2ETestConfig {
+  // Exact initial test input, detached on every read; never collection output.
+  fixture: () => SeedDataResult
   collections: {
     eager: {
       users: Collection<User>
@@ -75,6 +77,7 @@ export interface E2ETestConfig {
     updateUser: (id: string, updates: Partial<User>) => Promise<void>
     deleteUser: (id: string) => Promise<void>
     insertPost: (post: Post) => Promise<void>
+    deletePost: (id: string) => Promise<void>
   }
 
   // Helper to get txid for Electric txid tracking tests (Electric only)

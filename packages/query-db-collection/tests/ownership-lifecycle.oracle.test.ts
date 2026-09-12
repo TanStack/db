@@ -1,9 +1,16 @@
 import { QueryClient, hashKey, isCancelledError } from '@tanstack/query-core'
-import { createCollection, eq, getLoadSubsetDemandKey } from '@tanstack/db'
+import { IR, createCollection, eq, getLoadSubsetDemandKey } from '@tanstack/db'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createDeferred } from '../../db/src/deferred.js'
+import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src/index.js'
 import { queryCollectionOptions } from '../src/query.js'
-import type { Collection, SyncMetadataApi } from '@tanstack/db'
+import type {
+  Collection,
+  LoadSubsetOptions,
+  SyncMetadataApi,
+} from '@tanstack/db'
+import type { QueryFunctionContext } from '@tanstack/query-core'
+import type { PersistenceAdapter } from '../../db-sqlite-persistence-core/src/index.js'
 import type { NonSingleResult } from '../../db/src/types.js'
 import type { QueryCollectionUtils } from '../src/query.js'
 
@@ -68,6 +75,7 @@ function recordMetadata(
   metadata: SyncMetadataApi<string | number>,
   recorder: MetadataRecorder,
 ): SyncMetadataApi<string | number> {
+  // These are emitted writes, captured before delegation, not durable commits.
   return {
     row: {
       get: (key) => metadata.row.get(key),
@@ -168,6 +176,277 @@ function persistedOwners(
   if (!queryCollection || typeof queryCollection !== `object`) return []
   const owners = (queryCollection as Record<string, unknown>).owners
   return owners && typeof owners === `object` ? Object.keys(owners).sort() : []
+}
+
+type StoredOwnership = {
+  rows: Map<string | number, Item>
+  rowMetadata: Map<string | number, unknown>
+  collectionMetadata: Map<string, unknown>
+}
+
+function categorySubset(category: `detail` | `list`): LoadSubsetOptions {
+  return {
+    where: new IR.Func(`in`, [
+      new IR.PropRef([`category`]),
+      new IR.Value([`shared`, category]),
+    ]),
+  }
+}
+
+function selectOwnershipRows(
+  items: Iterable<Item>,
+  options: LoadSubsetOptions,
+): Array<Item> {
+  if (
+    options.orderBy !== undefined ||
+    options.limit !== undefined ||
+    options.offset !== undefined ||
+    options.cursor !== undefined
+  ) {
+    throw new Error(`Ownership fixture does not support ordering or windows`)
+  }
+  const { where } = options
+  if (!where) return Array.from(items, (item) => structuredClone(item))
+  if (
+    where.type !== `func` ||
+    where.name !== `in` ||
+    where.args.length !== 2 ||
+    where.args[0]?.type !== `ref` ||
+    where.args[0].path.length !== 1 ||
+    where.args[0].path[0] !== `category` ||
+    where.args[1]?.type !== `val` ||
+    !Array.isArray(where.args[1].value) ||
+    !where.args[1].value.every((value: unknown) => typeof value === `string`)
+  ) {
+    throw new Error(`Ownership fixture supports only category membership`)
+  }
+  const categories = new Set<string>(where.args[1].value)
+  return Array.from(items)
+    .filter((item) => categories.has(item.category))
+    .map((item) => structuredClone(item))
+}
+
+function createOwnershipStorage(
+  seed?: StoredOwnership,
+  gateFirstCommit = false,
+) {
+  const state: StoredOwnership = structuredClone(
+    seed ?? {
+      rows: new Map(),
+      rowMetadata: new Map(),
+      collectionMetadata: new Map(),
+    },
+  )
+  const entered = createDeferred<void>()
+  const released = createDeferred<void>()
+  let commitCount = 0
+  const adapter: PersistenceAdapter = {
+    loadSubset: (_id, options) =>
+      Promise.resolve(
+        selectOwnershipRows(state.rows.values(), options).map((value) => ({
+          key: value.id,
+          value,
+          metadata: structuredClone(state.rowMetadata.get(value.id)),
+        })),
+      ),
+    loadCollectionMetadata: () =>
+      Promise.resolve(
+        Array.from(state.collectionMetadata, ([key, value]) => ({
+          key,
+          value: structuredClone(value),
+        })),
+      ),
+    scanRows: () =>
+      Promise.resolve(
+        Array.from(state.rows, ([key, value]) => ({
+          key,
+          value: structuredClone(value),
+          metadata: structuredClone(state.rowMetadata.get(key)),
+        })),
+      ),
+    ensureIndex: () => Promise.resolve(),
+    applyCommittedTx: async (_id, transaction) => {
+      const tx = structuredClone(transaction)
+      commitCount++
+      if (gateFirstCommit && commitCount === 1) {
+        entered.resolve()
+        await released.promise
+      }
+      if (tx.truncate) {
+        state.rows.clear()
+        state.rowMetadata.clear()
+      }
+      for (const mutation of tx.mutations) {
+        if (mutation.type === `delete`) {
+          state.rows.delete(mutation.key)
+          state.rowMetadata.delete(mutation.key)
+        } else {
+          const { id, category, name } = mutation.value
+          if (
+            typeof id !== `string` ||
+            typeof category !== `string` ||
+            typeof name !== `string`
+          ) {
+            throw new Error(`Ownership fixture received an invalid row`)
+          }
+          state.rows.set(mutation.key, { id, category, name })
+          if (mutation.metadataChanged) {
+            state.rowMetadata.set(
+              mutation.key,
+              structuredClone(mutation.metadata),
+            )
+          }
+        }
+      }
+      for (const mutation of tx.rowMetadataMutations ?? []) {
+        if (mutation.type === `delete`) state.rowMetadata.delete(mutation.key)
+        else
+          state.rowMetadata.set(mutation.key, structuredClone(mutation.value))
+      }
+      for (const mutation of tx.collectionMetadataMutations ?? []) {
+        if (mutation.type === `delete`)
+          state.collectionMetadata.delete(mutation.key)
+        else
+          state.collectionMetadata.set(
+            mutation.key,
+            structuredClone(mutation.value),
+          )
+      }
+    },
+  }
+  return {
+    adapter,
+    entered: entered.promise,
+    release: () => released.resolve(),
+    snapshot: (): StoredOwnership => structuredClone(state),
+  }
+}
+
+function createPersistedOwnershipFixture(
+  id: string,
+  storage: ReturnType<typeof createOwnershipStorage>,
+  serverRows: Array<Item>,
+) {
+  const queryClient = createQueryClient()
+  const providerRows = structuredClone(serverRows)
+  const queryFn = vi.fn((context: QueryFunctionContext) =>
+    Promise.resolve(
+      selectOwnershipRows(providerRows, context.meta?.loadSubsetOptions ?? {}),
+    ),
+  )
+  const collection = createCollection(
+    persistedCollectionOptions<
+      Item,
+      string | number,
+      never,
+      QueryCollectionUtils<Item, string | number, Item, unknown>
+    >({
+      ...queryCollectionOptions<Item>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        persistedGcTime: Number.POSITIVE_INFINITY,
+        startSync: true,
+      }),
+      persistence: { adapter: storage.adapter },
+    }),
+  )
+  cleanups.push(async () => {
+    storage.release()
+    try {
+      await collection.cleanup()
+    } finally {
+      queryClient.clear()
+    }
+  })
+  return { collection, queryFn }
+}
+
+function storedItems(
+  storage: ReturnType<typeof createOwnershipStorage>,
+): Array<Item> {
+  return [...storage.snapshot().rows.values()].sort((a, b) =>
+    a.id.localeCompare(b.id),
+  )
+}
+
+type ColdOwnershipObservation = { stored: Array<Item>; visible: Array<Item> }
+
+async function observeColdOwnerRevalidation(
+  dropMetadata = false,
+): Promise<Array<ColdOwnershipObservation>> {
+  const hotStorage = createOwnershipStorage(undefined, true)
+  const hot = createPersistedOwnershipFixture(
+    `cold-owner-revalidation`,
+    hotStorage,
+    [shared, detailOnly, listOnly],
+  )
+  const detail = categorySubset(`detail`)
+  const list = categorySubset(`list`)
+  const firstLoad = Promise.resolve(hot.collection._sync.loadSubset(detail))
+  // Observe rejection before any gate assertion can abort the test.
+  void firstLoad.catch(() => undefined)
+  try {
+    await hotStorage.entered
+    expect(hotStorage.snapshot().rows.size).toBe(0)
+    expect(hotStorage.snapshot().rowMetadata.size).toBe(0)
+    hotStorage.release()
+    await firstLoad
+    await hot.collection._sync.loadSubset(list)
+    await vi.waitFor(() =>
+      expect(storedItems(hotStorage)).toEqual([detailOnly, listOnly, shared]),
+    )
+    hot.collection._sync.unloadSubset(detail)
+    hot.collection._sync.unloadSubset(list)
+    // Both retention markers must commit before making a separate cold store.
+    // Their private hash encoding is not the expected ownership authority.
+    await vi.waitFor(() =>
+      expect(hotStorage.snapshot().collectionMetadata.size).toBe(2),
+    )
+    const coldSeed = hotStorage.snapshot()
+    if (dropMetadata) coldSeed.rowMetadata.clear()
+    const coldStorage = createOwnershipStorage(coldSeed)
+    const cold = createPersistedOwnershipFixture(
+      `cold-owner-revalidation`,
+      coldStorage,
+      [],
+    )
+    expect(cold.queryFn).not.toHaveBeenCalled()
+    const capture = (): ColdOwnershipObservation => ({
+      stored: storedItems(coldStorage),
+      visible: cold.collection.toArray
+        .map(({ id, category, name }) => ({ id, category, name }))
+        .sort((a, b) => a.id.localeCompare(b.id)),
+    })
+    const observations = [capture()]
+    await cold.collection._sync.loadSubset(detail)
+    await vi.waitFor(() =>
+      expect(coldStorage.snapshot().collectionMetadata.size).toBe(1),
+    )
+    observations.push(capture())
+    await cold.collection._sync.loadSubset(list)
+    await vi.waitFor(() =>
+      expect(coldStorage.snapshot().collectionMetadata.size).toBe(0),
+    )
+    observations.push(capture())
+    expect(cold.queryFn).toHaveBeenCalledTimes(2)
+    return observations
+  } finally {
+    hotStorage.release()
+  }
+}
+
+function expectColdOwnerRevalidation(
+  observations: Array<ColdOwnershipObservation>,
+): void {
+  expect(observations).toEqual([
+    { stored: [detailOnly, listOnly, shared], visible: [] },
+    { stored: [listOnly, shared], visible: [shared] },
+    { stored: [], visible: [] },
+  ])
 }
 
 describe(`query collection ownership lifecycle`, () => {
@@ -455,7 +734,7 @@ describe(`query collection ownership lifecycle`, () => {
     expect(rows(collection)).toEqual([])
   })
 
-  it(`persists every owner of rows shared by overlapping queries`, async () => {
+  it(`emits metadata for every owner of rows shared by overlapping queries`, async () => {
     const metadata: MetadataRecorder = { rows: new Map(), writes: [] }
     const { collection } = createOwnershipFixture({
       id: `persisted-overlap`,
@@ -475,6 +754,15 @@ describe(`query collection ownership lifecycle`, () => {
     collection._sync.unloadSubset(list)
     expect(rows(collection)).toEqual([shared.id])
     expect(persistedOwners(metadata.rows, shared.id)).toHaveLength(1)
+  })
+
+  it(`preserves committed peer ownership through a cold revalidation`, async () => {
+    expectColdOwnerRevalidation(await observeColdOwnerRevalidation())
+  })
+
+  it(`rejects emitted ownership that is absent from cold storage`, async () => {
+    const observations = await observeColdOwnerRevalidation(true)
+    expect(() => expectColdOwnerRevalidation(observations)).toThrow()
   })
 
   it(`restages a persisted owner when its absent row arrives`, async () => {

@@ -9,6 +9,7 @@ import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
 import type { SyncConfig } from '../../src/types.js'
 
 type Row = { id: number; value: number }
+type WritePhase = `initial` | `update` | `insert`
 const cases = ([`pass-through`, `order`, `select`] as const).flatMap((shape) =>
   [false, true].flatMap((layered) =>
     ([`acknowledge`, `rollback`] as const).flatMap((outcome) =>
@@ -28,6 +29,7 @@ const flushHistory = fc.array(
 )
 async function runFlushHistory(
   steps: Array<{ inserts: number; update: boolean }>,
+  prepareDriverRow: (row: Row, phase: WritePhase) => Row = (row) => row,
 ) {
   let sync!: Parameters<SyncConfig<Row>[`sync`]>[0]
   const expected = new Map([[1, { id: 1, value: 0 }]])
@@ -37,7 +39,10 @@ async function runFlushHistory(
       sync: (actions) => {
         sync = actions
         actions.begin()
-        actions.write({ type: `insert`, value: expected.get(1)! })
+        actions.write({
+          type: `insert`,
+          value: prepareDriverRow({ ...expected.get(1)! }, `initial`),
+        })
         actions.commit()
         actions.markReady()
       },
@@ -59,12 +64,18 @@ async function runFlushHistory(
       if (step.update) {
         const row = { id: 1, value: index + 1 }
         expected.set(1, row)
-        sync.write({ type: `update`, value: row })
+        sync.write({
+          type: `update`,
+          value: prepareDriverRow({ ...row }, `update`),
+        })
       }
       for (let offset = 0; offset < step.inserts; offset++) {
         const row = { id: expected.size + 1, value: index }
         expected.set(row.id, row)
-        sync.write({ type: `insert`, value: row })
+        sync.write({
+          type: `insert`,
+          value: prepareDriverRow({ ...row }, `insert`),
+        })
       }
       expect(sync.commit()).toBe(true)
       expect(lookup, `flush ${index}`).toHaveBeenCalledTimes(
@@ -86,6 +97,20 @@ async function runFlushHistory(
     await source.cleanup()
   }
 }
+
+it.each([`initial`, `update`, `insert`] as const)(
+  `detects driver-only row mutation at the %s boundary`,
+  async (phase) => {
+    const steps = [{ inserts: 2, update: phase === `update` }]
+    await expect(
+      runFlushHistory(steps, (row, at) => {
+        if (at === phase) row.value += 100
+        return row
+      }),
+    ).rejects.toMatchObject({ name: `AssertionError` })
+    await runFlushHistory(steps)
+  },
+)
 
 fcTest.prop([flushHistory], { numRuns: oracleRuns(40), seed: 41703 })(
   `shares membership work only for balanced deltas across fixed queue histories`,

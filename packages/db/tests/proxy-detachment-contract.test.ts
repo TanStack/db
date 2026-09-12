@@ -31,7 +31,117 @@ function storedRow<T extends object>(row: T & { id: number }) {
   })
 }
 
+type CycleKind = `Map` | `Set` | `array` | `object`
+type CycleMember = { owner: CycleRow }
+type CycleContainer =
+  | Map<string, CycleMember>
+  | Set<CycleMember>
+  | Array<CycleMember>
+  | { member: CycleMember }
+type CycleRow = { id: number; count: number; link?: CycleContainer }
+
+const cycleKinds: ReadonlyArray<CycleKind> = [`Map`, `Set`, `array`, `object`]
+
+function cycleContainer(kind: CycleKind, owner: CycleRow): CycleContainer {
+  const member = { owner }
+  if (kind === `Map`) return new Map([[`member`, member]])
+  if (kind === `Set`) return new Set([member])
+  if (kind === `array`) return [member]
+  return { member }
+}
+
+function cycleMember(link: CycleContainer | undefined, kind: CycleKind) {
+  if (kind === `Map`) {
+    expect(link).toBeInstanceOf(Map)
+    const map = link as Map<string, CycleMember>
+    expect([...map.keys()]).toEqual([`member`])
+    return map.get(`member`)!
+  }
+  if (kind === `Set`) {
+    expect(link).toBeInstanceOf(Set)
+    const set = link as Set<CycleMember>
+    expect(set.size).toBe(1)
+    return [...set][0]!
+  }
+  if (kind === `array`) {
+    expect(Array.isArray(link)).toBe(true)
+    expect(link).toHaveLength(1)
+    return (link as Array<CycleMember>)[0]!
+  }
+  expect(Object.keys(link!)).toEqual([`member`])
+  return (link as { member: CycleMember }).member
+}
+
+function expectCycleSnapshot(row: CycleRow, kind: CycleKind) {
+  expect(row.id).toBe(1)
+  expect(row.count).toBe(1)
+  const member = cycleMember(row.link, kind)
+  expect(Object.keys(member)).toEqual([`owner`])
+  const owner = member.owner
+  expect(owner.id).toBe(1)
+  expect(owner.count).toBe(1)
+  expect(owner.link).toBe(row.link)
+  expect(cycleMember(owner.link, kind).owner).toBe(owner)
+}
+
 describe(`Mutation result detachment`, () => {
+  it.each(
+    cycleKinds.flatMap((kind) =>
+      [`before`, `after`].map((edit) => ({ kind, edit })),
+    ),
+  )(
+    `detaches a $kind draft backedge with the scalar edit $edit assignment`,
+    async ({ kind, edit }) => {
+      const original: CycleRow = { id: 1, count: 0 }
+      const collection = storedRow(original)
+      let settled: Promise<unknown> | undefined
+      try {
+        const tx = collection.update(1, (draft) => {
+          if (edit === `before`) draft.count = 1
+          draft.link = cycleContainer(kind, draft)
+          if (edit === `after`) draft.count = 1
+        })
+        settled = Promise.allSettled([tx.isPersisted.promise])
+        expectCycleSnapshot(collection.get(1)!, kind)
+        expect(original).toEqual({ id: 1, count: 0 })
+        await tx.isPersisted.promise
+        await settled
+        expectCycleSnapshot(collection.get(1)!, kind)
+        expect(original).toEqual({ id: 1, count: 0 })
+      } finally {
+        await settled
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it.each(cycleKinds)(`accepts a native %s cyclic snapshot`, (kind) => {
+    const row: CycleRow = { id: 1, count: 1 }
+    row.link = cycleContainer(kind, row)
+    expectCycleSnapshot(row, kind)
+  })
+
+  it.each(
+    cycleKinds.flatMap((kind) =>
+      [`old-value`, `missing-member`, `broken-backedge`].map((fault) => ({
+        kind,
+        fault,
+      })),
+    ),
+  )(`rejects $fault in a $kind cyclic snapshot`, ({ kind, fault }) => {
+    const row: CycleRow = { id: 1, count: 1 }
+    row.link = cycleContainer(kind, row)
+    if (fault === `old-value`)
+      cycleMember(row.link, kind).owner = { ...row, count: 0 }
+    else if (fault === `broken-backedge`)
+      cycleMember(row.link, kind).owner = { id: 1, count: 1 }
+    else if (row.link instanceof Map || row.link instanceof Set)
+      row.link.clear()
+    else if (Array.isArray(row.link)) row.link.length = 0
+    else Reflect.deleteProperty(row.link, `member`)
+    expect(() => expectCycleSnapshot(row, kind)).toThrow()
+  })
+
   it(`keeps arbitrary class instances by reference as an explicit isolation exception`, async () => {
     const label = new Label(`before`)
     const collection = storedRow({ id: 1, value: undefined as unknown })
