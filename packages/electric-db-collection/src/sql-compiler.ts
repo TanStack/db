@@ -194,9 +194,23 @@ function compileFunction(
     }
   }
 
-  const compiledArgs = args.map((arg: IR.BasicExpression) =>
-    compileBasicExpression(arg, params, encodeColumnName),
-  )
+  const compiledArgs = args.map((arg: IR.BasicExpression) => {
+    const compiled = compileBasicExpression(arg, params, encodeColumnName)
+    // AND/OR group their children by precedence; NOT already wraps its operand.
+    // In value positions, preserve any nested operator as a single expression.
+    return arg.type === `func` &&
+      (arg.name === `and` ||
+        arg.name === `or` ||
+        (name !== `and` &&
+          name !== `or` &&
+          name !== `not` &&
+          (isBinaryOp(arg.name) ||
+            arg.name === `not` ||
+            arg.name === `isNull` ||
+            arg.name === `isUndefined`)))
+      ? `(${compiled})`
+      : compiled
+  })
 
   // Special case for IS NULL / IS NOT NULL - these are postfix operators
   if (name === `isNull` || name === `isUndefined`) {
@@ -231,7 +245,7 @@ function compileFunction(
     // Special handling for AND/OR which can be variadic
     if ((name === `and` || name === `or`) && compiledArgs.length > 2) {
       // Chain multiple arguments: (a AND b AND c) or (a OR b OR c)
-      return compiledArgs.map((arg) => `(${arg})`).join(` ${opName} `)
+      return compiledArgs.join(` ${opName} `)
     }
 
     if (compiledArgs.length !== 2) {

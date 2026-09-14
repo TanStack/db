@@ -7,7 +7,10 @@ import {
   createBrowserWASQLitePersistence,
   persistedCollectionOptions,
 } from '../src'
-import { generateSeedData } from '../../db-collection-e2e/src/fixtures/seed-data'
+import {
+  captureSeedData,
+  generateSeedData,
+} from '../../db-collection-e2e/src/fixtures/seed-data'
 import { runPersistedCollectionConformanceSuite } from '../../db-sqlite-persistence-core/tests/contracts/persisted-collection-conformance-contract'
 import { createWASQLiteTestDatabase } from '../tests/helpers/wa-sqlite-test-db'
 import type { Collection } from '@tanstack/db'
@@ -142,6 +145,11 @@ beforeAll(async () => {
     filename: dbPath,
   })
   const seedData = generateSeedData()
+  const fixture = captureSeedData(seedData, {
+    registration:
+      'packages/browser-db-sqlite-persistence/e2e/browser-single-tab-persisted-collection.e2e.test.ts',
+    provider: 'WASQLite test database fixture',
+  })
 
   const eagerUsers = createPersistedCollection<User>(
     database,
@@ -189,6 +197,7 @@ beforeAll(async () => {
   await onDemandComments.seedPersisted(seedData.comments)
 
   config = {
+    fixture,
     collections: {
       eager: {
         users: eagerUsers.collection,
@@ -222,6 +231,11 @@ beforeAll(async () => {
         insertRowIntoCollections(
           [eagerPosts.collection, onDemandPosts.collection],
           post,
+        ),
+      deletePost: async (id) =>
+        deleteRowAcrossCollections(
+          [eagerPosts.collection, onDemandPosts.collection],
+          id,
         ),
     },
     setup: async () => {},

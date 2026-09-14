@@ -13,6 +13,7 @@ import {
   mixedAbortedRestartHistory,
   pendingSupersessionHistory,
   reduceLifecycle,
+  settle,
   syncLifecycleHistory,
   syncLifecycleHistoryArbitrary,
 } from './collection-subscription-lifecycle-grammar.js'
@@ -27,6 +28,7 @@ import type {
   DemandName,
   LifecycleCommand,
   LifecycleLoadEvent,
+  LifecycleModel,
   LifecycleResultEvent,
   LifecycleTraceEvent,
   LifecycleUnloadEvent,
@@ -49,6 +51,83 @@ type RuntimeOwner = {
   aborted: boolean
   attemptId?: number
 }
+type ReturnedResult = {
+  attemptId: number | `unacquired`
+  result: unknown
+  outcome:
+    | { status: `synchronous` | `pending` }
+    | { status: `fulfilled`; value: unknown }
+    | { status: `rejected`; error: unknown }
+}
+type CallerFault = `early` | `pending` | `wrong-value` | `wrong-error`
+type ExpectedCaller = {
+  ownerId: number
+  attemptId: number | `unacquired`
+  outcome:
+    | ReturnedResult[`outcome`]
+    | { status: `aborted` }
+    | { status: `normalized-rejection`; source: unknown }
+}
+
+// A physical Promise belongs to its original transport even after retirement.
+// A caller waiting for a loader instead owns a cancellable publication wait.
+// These expectations come from the caller contract, not subscription status.
+function updateCallerOutcomes(
+  callers: Array<ExpectedCaller>,
+  model: LifecycleModel,
+  command: LifecycleCommand,
+  failedAttempts: ReadonlyMap<number, unknown>,
+): void {
+  for (const caller of callers) {
+    if (caller.outcome.status !== `pending`) continue
+    if (caller.attemptId !== `unacquired`) {
+      const attempt = model.attempts[caller.attemptId]!
+      if (attempt.outcome === `resolve`) {
+        caller.outcome = { status: `fulfilled`, value: undefined }
+      } else if (attempt.outcome === `reject`) {
+        caller.outcome = {
+          status: `rejected`,
+          error: failedAttempts.get(attempt.id),
+        }
+      }
+      continue
+    }
+    const owner = model.owners.find(({ id }) => id === caller.ownerId)
+    if (
+      command.type === `cleanup` ||
+      model.unsubscribed ||
+      !owner ||
+      owner.aborted
+    ) {
+      caller.outcome = { status: `aborted` }
+      continue
+    }
+    if (owner.attemptId === undefined) continue
+    // Even this caller's successful acquisition cannot bypass an unfinished
+    // peer or overlapping replay transport.
+    if (
+      model.attempts.some(
+        ({ inReplacement, gating }) => inReplacement && gating,
+      )
+    )
+      continue
+    const current = new Set(model.owners.map(({ attemptId }) => attemptId))
+    const failure = [...failedAttempts.keys()].find((attemptId) =>
+      current.has(attemptId),
+    )
+    if (failure !== undefined) {
+      const error = failedAttempts.get(failure)
+      // Replay exposes one normalized Error. Some hosts' DOMException is not
+      // an Error instance; a physical Promise still preserves that raw reason.
+      caller.outcome =
+        error instanceof Error
+          ? { status: `rejected`, error }
+          : { status: `normalized-rejection`, source: error }
+    } else if (!model.publicationBarrierOpen) {
+      caller.outcome = { status: `fulfilled`, value: undefined }
+    }
+  }
+}
 
 async function runHistory(
   history: ReadonlyArray<LifecycleCommand>,
@@ -56,11 +135,30 @@ async function runHistory(
     acquisitionMode?: `async-pending` | `sync-success`
     cancellation?: `manual` | `reject`
     continueAfterMismatch?: boolean
+    retiredDelivery?: `resolve` | `reject`
+    callerFault?: CallerFault
+    onResultCheckpoint?: (
+      command: LifecycleCommand,
+      results: ReadonlyArray<ReturnedResult>,
+      failures: ReadonlyMap<number, Error>,
+    ) => void
   } = {},
 ): Promise<Set<string>> {
   const acquisitionMode = runOptions.acquisitionMode ?? `async-pending`
   const check = runOptions.continueAfterMismatch ? expect.soft : expect
   const failures = new Map<number, Error>()
+  const abortFailures = new Map<number, Error>()
+  const abortFailureForAttempt = (attemptId: number): Error => {
+    let failure = abortFailures.get(attemptId)
+    if (!failure) {
+      failure = new DOMException(
+        `acquisition ${attemptId} aborted`,
+        `AbortError`,
+      )
+      abortFailures.set(attemptId, failure)
+    }
+    return failure
+  }
   const failureForAttempt = (attemptId: number): Error => {
     const existing = failures.get(attemptId)
     if (existing) return existing
@@ -96,6 +194,12 @@ async function runHistory(
   const observedResults: Array<
     LifecycleResultEvent | { attemptId: `unacquired`; resultKind: string }
   > = []
+  const returnedResults: Array<ReturnedResult> = []
+  const expectedCallers: Array<ExpectedCaller> = []
+  // A later abort cannot change an already rejected transport's reason.
+  const failedAttempts = new Map<number, unknown>()
+  const normalizedRejections = new Map<unknown, unknown>()
+  const terminalReach = new Set<string>()
   const observedStatuses: Array<string> = []
   const observedTrace: Array<
     | LifecycleTraceEvent
@@ -161,9 +265,7 @@ async function runHistory(
                   const attempt = runtimeAttempts.get(observed.id)!
                   if (attempt.settled) return
                   attempt.settled = true
-                  deferred.reject(
-                    new DOMException(`acquisition aborted`, `AbortError`),
-                  )
+                  deferred.reject(abortFailureForAttempt(observed.id))
                 },
                 { once: true },
               )
@@ -220,6 +322,42 @@ async function runHistory(
     for (const [index, { error }] of observedErrors.entries()) {
       check(error, context).toBe(model.errors[index]?.error)
     }
+    for (const { result } of returnedResults) {
+      check(result === true || result instanceof Promise, context).toBe(true)
+    }
+    check(returnedResults.length, `caller outcome count: ${context}`).toBe(
+      expectedCallers.length,
+    )
+    for (const [index, expected] of expectedCallers.entries()) {
+      const actual = returnedResults[index]!.outcome
+      const message = `caller outcome ${index}: ${context}`
+      if (expected.outcome.status === `aborted`) {
+        check(actual.status, message).toBe(`rejected`)
+        if (actual.status === `rejected`)
+          check(actual.error, message).toMatchObject({ name: `AbortError` })
+      } else if (expected.outcome.status === `normalized-rejection`) {
+        check(actual.status, message).toBe(`rejected`)
+        if (actual.status === `rejected`) {
+          check(actual.error, message).toBeInstanceOf(Error)
+          check(actual.error, message).toMatchObject({
+            message: String(expected.outcome.source),
+          })
+          if (!normalizedRejections.has(expected.outcome.source))
+            normalizedRejections.set(expected.outcome.source, actual.error)
+          check(actual.error, message).toBe(
+            normalizedRejections.get(expected.outcome.source),
+          )
+        }
+      } else {
+        check(actual, message).toEqual(expected.outcome)
+        if (
+          actual.status === `rejected` &&
+          expected.outcome.status === `rejected`
+        ) {
+          check(actual.error, message).toBe(expected.outcome.error)
+        }
+      }
+    }
     check(observedResults, context).toEqual(model.results)
     check(observedStatuses, context).toEqual(model.statuses)
     check(subscription.status, context).toBe(model.status)
@@ -273,6 +411,27 @@ async function runHistory(
       const runtimeAttempt =
         command.type === `settle` ? selectRuntimeAttempt(command) : undefined
       const effect = reduceLifecycle(model, command)
+      if (command.type === `request` && effect.ownerId !== undefined) {
+        const result = model.results.at(-1)!
+        expectedCallers.push({
+          ownerId: effect.ownerId,
+          attemptId: result.attemptId,
+          outcome: {
+            status: result.resultKind === `true` ? `synchronous` : `pending`,
+          },
+        })
+      }
+      for (const attempt of model.attempts) {
+        if (attempt.outcome === `reject` && !failedAttempts.has(attempt.id)) {
+          failedAttempts.set(
+            attempt.id,
+            attempt.aborted && cancellation === `reject`
+              ? abortFailureForAttempt(attempt.id)
+              : attempt.failure,
+          )
+        }
+      }
+      updateCallerOutcomes(expectedCallers, model, command, failedAttempts)
       if (command.type === `request`) {
         check(effect.ownerId).toBe(
           model.unsubscribed ? undefined : runtimeOwner?.id,
@@ -281,8 +440,50 @@ async function runHistory(
           where: where[command.demand],
           signal: runtimeOwner?.controller.signal,
           onLoadSubsetResult: (loadResult, requestOptions) => {
+            // Challenge the caller-result observer without altering source work,
+            // subscription status, or ownership: all are distinct observations.
+            const callerResult =
+              loadResult instanceof Promise && runOptions.callerFault
+                ? runOptions.callerFault === `early`
+                  ? Promise.resolve()
+                  : runOptions.callerFault === `pending`
+                    ? new Promise<void>(() => {})
+                    : loadResult.then(
+                        (value) =>
+                          runOptions.callerFault === `wrong-value`
+                            ? `wrong value`
+                            : value,
+                        (error: unknown) => {
+                          throw runOptions.callerFault === `wrong-error`
+                            ? new Error(`wrong error`)
+                            : error
+                        },
+                      )
+                : loadResult
             const attemptId =
               attemptByOptions.get(requestOptions) ?? `unacquired`
+            const returned: ReturnedResult = {
+              attemptId,
+              result: callerResult,
+              outcome: {
+                status: callerResult === true ? `synchronous` : `pending`,
+              },
+            }
+            returnedResults.push(returned)
+            // Keep malformed values observable instead of classifying every
+            // non-true value as a Promise. Both handlers attach at capture.
+            if (callerResult !== true && !(callerResult instanceof Promise))
+              return
+            if (callerResult instanceof Promise) {
+              void callerResult.then(
+                (value) => {
+                  returned.outcome = { status: `fulfilled`, value }
+                },
+                (error: unknown) => {
+                  returned.outcome = { status: `rejected`, error }
+                },
+              )
+            }
             const resultKind = loadResult === true ? `true` : `promise`
             observedResults.push({ attemptId, resultKind })
             observedTrace.push({ type: `result`, attemptId, resultKind })
@@ -360,6 +561,60 @@ async function runHistory(
       }
       await flushPromises()
       assertState(command)
+      runOptions.onResultCheckpoint?.(command, returnedResults, failures)
+    }
+    if (runOptions.retiredDelivery) {
+      check(observedUnsubscribed).toBe(true)
+      check(collection.subscriberCount).toBe(0)
+      check(runtimeAttempts.size).toBe(1)
+      const attempt = runtimeAttempts.get(0)
+      if (!attempt?.deferred)
+        throw new Error(`Missing retired physical attempt`)
+      check(attempt.settled).toBe(false)
+      check(attempt.options.signal?.aborted).toBe(true)
+      check(returnedResults).toHaveLength(1)
+      check(returnedResults[0]?.outcome.status).toBe(`pending`)
+
+      const observeTerminal = () => ({
+        loads: observedLoads.map((load) => ({ ...load })),
+        unloads: observedUnloads.map((unload) => ({ ...unload })),
+        errors: observedErrors.map((error) => ({ ...error })),
+        results: observedResults.map((result) => ({ ...result })),
+        statuses: [...observedStatuses],
+        trace: observedTrace.map((event) => ({ ...event })),
+        publications: structuredClone(publications),
+        signals: [...runtimeAttempts.values()].map(({ id, options }) => ({
+          id,
+          aborted: options.signal?.aborted,
+        })),
+        subscriberCount: collection.subscriberCount,
+        status: subscription.status,
+        lastError: subscription.lastError,
+        collectionStatus: collection.status,
+      })
+      const retired = observeTerminal()
+      attempt.settled = true
+      if (runOptions.retiredDelivery === `resolve`) attempt.deferred.resolve()
+      else attempt.deferred.reject(attempt.failure)
+      await flushPromises()
+      const delivered = observeTerminal()
+      check(delivered).toEqual(retired)
+      check(delivered.lastError).toBe(retired.lastError)
+      for (const [index, { error }] of delivered.errors.entries()) {
+        check(error).toBe(retired.errors[index]?.error)
+      }
+      const outcome = returnedResults[0]!.outcome
+      if (runOptions.retiredDelivery === `resolve`) {
+        check(outcome).toEqual({ status: `fulfilled`, value: undefined })
+      } else {
+        check(outcome.status).toBe(`rejected`)
+        if (outcome.status !== `rejected`)
+          throw new Error(`Missing late rejection`)
+        check(outcome.error).toBe(attempt.failure)
+      }
+      terminalReach.add(
+        `retired-physical-delivery:${runOptions.retiredDelivery}`,
+      )
     }
   } finally {
     for (const { deferred } of runtimeAttempts.values()) deferred?.resolve()
@@ -367,7 +622,7 @@ async function runHistory(
     subscription.unsubscribe()
     await collection.cleanup()
   }
-  return model.reach
+  return new Set([...model.reach, ...terminalReach])
 }
 
 if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
@@ -383,6 +638,179 @@ if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
 }
 
 describe(`CollectionSubscription async lifecycle history oracle`, () => {
+  it.each([`resolve`, `reject`] as const)(
+    `retains an earlier peer failure after aborting it while another peer will %s`,
+    async (outcome) => {
+      await runHistory(
+        [
+          { type: `cleanup` },
+          { type: `request`, demand: `a` },
+          { type: `request`, demand: `b` },
+          { type: `restart` },
+          settle(`a`, `current`, `oldest`, `reject`),
+          { type: `abort`, demand: `a` },
+          settle(`b`, `current`, `oldest`, outcome),
+        ],
+        { cancellation: `reject` },
+      )
+    },
+  )
+
+  it(`shares one normalized replay rejection among surviving detached callers`, async () => {
+    await runHistory(
+      [
+        { type: `cleanup` },
+        { type: `request`, demand: `a` },
+        { type: `request`, demand: `a` },
+        { type: `request`, demand: `b` },
+        { type: `restart` },
+        settle(`a`, `current`, `oldest`, `resolve`),
+        settle(`a`, `current`, `newest`, `resolve`),
+        { type: `abort`, demand: `b` },
+      ],
+      { cancellation: `reject` },
+    )
+  })
+
+  it.each([
+    `resolve`,
+    `reject`,
+    `release`,
+    `abort`,
+    `cleanup`,
+    `unsubscribe`,
+  ] as const)(
+    `holds detached callers for their peer until %s`,
+    async (finish) => {
+      const history: Array<LifecycleCommand> = [
+        { type: `cleanup` },
+        { type: `request`, demand: `a` },
+        { type: `request`, demand: `b` },
+        { type: `restart` },
+        settle(`a`, `current`, `oldest`, `resolve`),
+        ...(finish === `resolve` || finish === `reject`
+          ? [settle(`b`, `current`, `oldest`, finish)]
+          : finish === `release` || finish === `abort`
+            ? [{ type: finish, demand: `b` } as const]
+            : [{ type: finish } as const]),
+      ]
+      let checkpoints = 0
+      await runHistory(history, {
+        cancellation: `reject`,
+        onResultCheckpoint: (_command, callers) => {
+          if (checkpoints++ === 4) {
+            expect(callers.map(({ outcome }) => outcome.status)).toEqual([
+              `pending`,
+              `pending`,
+            ])
+          }
+        },
+      })
+      expect(checkpoints).toBe(6)
+    },
+  )
+
+  it(`does not revive a discarded caller when its logical demand restarts`, async () => {
+    await runHistory([
+      { type: `cleanup` },
+      { type: `request`, demand: `a` },
+      { type: `restart` },
+      { type: `cleanup` },
+      { type: `restart` },
+      settle(`a`, `obsolete`, `oldest`, `resolve`),
+      settle(`a`, `current`, `oldest`, `resolve`),
+      { type: `request`, demand: `b` },
+      settle(`b`, `current`, `oldest`, `resolve`),
+    ])
+  })
+
+  it.each(
+    ([`initial`, `detached`] as const).flatMap((origin) =>
+      ([`early`, `pending`, `wrong-value`, `wrong-error`] as const).map(
+        (fault) => ({ origin, fault }),
+      ),
+    ),
+  )(`checks corrupted caller outcomes: %j`, async ({ origin, fault }) => {
+    const history: Array<LifecycleCommand> = [
+      ...(origin === `detached` ? [{ type: `cleanup` } as const] : []),
+      { type: `request`, demand: `a` },
+      ...(origin === `detached` ? [{ type: `restart` } as const] : []),
+      settle(
+        `a`,
+        `current`,
+        `oldest`,
+        fault === `wrong-error` ? `reject` : `resolve`,
+      ),
+    ]
+    await expect(runHistory(history, { callerFault: fault })).rejects.toThrow(
+      `caller outcome`,
+    )
+  })
+
+  for (const outcome of [`resolve`, `reject`] as const) {
+    it(`keeps terminal observations unchanged after a retired physical ${outcome}`, async () => {
+      const reach = await runHistory(
+        [{ type: `request`, demand: `a` }, { type: `unsubscribe` }],
+        { retiredDelivery: outcome },
+      )
+      expect(reach).toContain(`retired-physical-delivery:${outcome}`)
+    })
+  }
+
+  for (const firstOutcome of [`resolve`, `reject`] as const) {
+    it(`settles only the corresponding returned result when the first acquisition ${firstOutcome}s`, async () => {
+      const secondOutcome = firstOutcome === `resolve` ? `reject` : `resolve`
+      const history: Array<LifecycleCommand> = [
+        { type: `request`, demand: `a` },
+        { type: `request`, demand: `b` },
+        {
+          type: `settle`,
+          demand: `a`,
+          scope: `current`,
+          age: `oldest`,
+          outcome: firstOutcome,
+        },
+        {
+          type: `settle`,
+          demand: `b`,
+          scope: `current`,
+          age: `oldest`,
+          outcome: secondOutcome,
+        },
+      ]
+      const expectedStatuses = [
+        [`pending`],
+        [`pending`, `pending`],
+        [firstOutcome === `resolve` ? `fulfilled` : `rejected`, `pending`],
+        [
+          firstOutcome === `resolve` ? `fulfilled` : `rejected`,
+          secondOutcome === `resolve` ? `fulfilled` : `rejected`,
+        ],
+      ]
+      const identities: Array<unknown> = []
+      let cut = 0
+      await runHistory(history, {
+        onResultCheckpoint: (_command, results, failures) => {
+          expect(results.map(({ outcome }) => outcome.status)).toEqual(
+            expectedStatuses[cut++],
+          )
+          for (const [index, returned] of results.entries()) {
+            expect(returned.attemptId).toBe(index)
+            expect(returned.result).toBeInstanceOf(Promise)
+            if (identities.length === index) identities.push(returned.result)
+            expect(returned.result).toBe(identities[index])
+            if (returned.outcome.status === `fulfilled`) {
+              expect(returned.outcome.value).toBeUndefined()
+            } else if (returned.outcome.status === `rejected`) {
+              expect(returned.outcome.error).toBe(failures.get(index))
+            }
+          }
+        },
+      })
+      expect(cut).toBe(4)
+    })
+  }
+
   it(`covers every required command and cross-phase transition`, async () => {
     const reach = new Set<string>()
     for (const history of [

@@ -51,6 +51,7 @@ export class OfflineExecutor {
   private leaderElection: LeaderElection | null
   private onlineDetector: OnlineDetector
   private isLeaderState = false
+  private disposed = false
   private unsubscribeOnline: (() => void) | null = null
   private unsubscribeLeadership: (() => void) | null = null
 
@@ -209,14 +210,19 @@ export class OfflineExecutor {
     if (this.leaderElection) {
       this.unsubscribeLeadership = this.leaderElection.onLeadershipChange(
         (isLeader) => {
+          // A custom elector may repeat the initial result while replay is active.
+          if (this.disposed || isLeader === this.isLeaderState) return
           this.isLeaderState = isLeader
+          if (!isLeader) this.executor?.pause()
 
           if (this.config.onLeadershipChange) {
             this.config.onLeadershipChange(isLeader)
           }
 
           if (isLeader) {
-            this.loadAndReplayTransactions()
+            this.loadAndReplayTransactions().catch((error) => {
+              console.warn(`Failed to load and replay transactions:`, error)
+            })
           }
         },
       )
@@ -264,6 +270,10 @@ export class OfflineExecutor {
       try {
         // Probe storage and create adapter
         const { storage, diagnostic } = await this.createStorage()
+        if (this.disposed) {
+          this.initResolve()
+          return
+        }
 
         // Cast to writable to set readonly properties
         ;(this as any).storage = storage
@@ -295,6 +305,13 @@ export class OfflineExecutor {
 
         // Request leadership first
         const isLeader = await this.leaderElection.requestLeadership()
+        // Disposal may have run while leadership was pending.
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        if (this.disposed) {
+          this.leaderElection.releaseLeadership()
+          this.initResolve()
+          return
+        }
         this.isLeaderState = isLeader
         span.setAttribute(`isLeader`, isLeader)
 
@@ -327,22 +344,17 @@ export class OfflineExecutor {
       return
     }
 
-    try {
-      // Load pending transactions and restore optimistic state
-      await this.executor.loadPendingTransactions()
+    // Startup must observe a failed read instead of reporting an empty outbox.
+    await this.executor.loadPendingTransactions()
 
-      // Start execution in the background - don't await to avoid blocking initialization
-      // The transactions will execute and complete asynchronously
-      this.executor.executeAll().catch((error) => {
-        console.warn(`Failed to execute transactions:`, error)
-      })
-    } catch (error) {
-      console.warn(`Failed to load and replay transactions:`, error)
-    }
+    // Replay completion is separate from initialization and durable admission.
+    this.executor.executeAll().catch((error) => {
+      console.warn(`Failed to execute transactions:`, error)
+    })
   }
 
   get isOfflineEnabled(): boolean {
-    return this.mode === `offline` && this.isLeaderState
+    return !this.disposed && this.mode === `offline` && this.isLeaderState
   }
 
   /**
@@ -442,7 +454,11 @@ export class OfflineExecutor {
 
         try {
           await this.outbox.add(transaction)
-          await this.executor.execute(transaction)
+          // A shared queue error belongs to its execution, not every caller
+          // that durably admitted a transaction. Per-ID signals settle callers.
+          this.executor.execute(transaction).catch((error) => {
+            console.warn(`Failed to execute transactions:`, error)
+          })
           span.setAttribute(`result`, `persisted`)
         } catch (error) {
           console.error(
@@ -596,6 +612,8 @@ export class OfflineExecutor {
   }
 
   dispose(): void {
+    this.disposed = true
+    this.executor?.pause()
     for (const collection of Object.values(this.config.collections)) {
       collection.deferDataRefresh = null
     }

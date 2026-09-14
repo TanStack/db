@@ -56,8 +56,13 @@ const arbitraryComparableArray = fc.array(arbitraryComparablePrimitive, {
   maxLength: 5,
 })
 
-// Helper to get sign of a number
+function assertValidComparison(result: number): void {
+  expect(Number.isFinite(result), `comparator result must be finite`).toBe(true)
+}
+
+// Validate before reducing: NaN must not become an apparent equality.
 const sign = (n: number): -1 | 0 | 1 => {
+  assertValidComparison(n)
   if (n < 0) return -1
   if (n > 0) return 1
   return 0
@@ -112,6 +117,106 @@ const arbitrarySameTypeTriple = fc.oneof(
   ),
 )
 
+const arbitraryChangedBytes = fc
+  .tuple(
+    fc.uint8Array({ minLength: 1, maxLength: 50 }),
+    fc.integer({ min: 0, max: 49 }),
+    fc.integer({ min: 1, max: 255 }),
+  )
+  .map(([bytes, indexHint, delta]) => {
+    const index = indexHint % bytes.length
+    const changed = new Uint8Array(bytes)
+    changed[index] = (bytes[index]! + delta) % 256
+    return { bytes, changed, index }
+  })
+
+function assertChangedBytes(
+  {
+    bytes,
+    changed,
+    index,
+  }: { bytes: Uint8Array; changed: Uint8Array; index: number },
+  equal: (a: Uint8Array, b: Uint8Array) => boolean,
+): void {
+  expect(index).toBeLessThan(bytes.length)
+  expect(changed).toHaveLength(bytes.length)
+  expect(changed[index]).not.toBe(bytes[index])
+  expect(equal(bytes, new Uint8Array(bytes)), `byte copy must be equal`).toBe(
+    true,
+  )
+  expect(equal(bytes, changed), `changed byte must be unequal`).toBe(false)
+  expect(equal(changed, bytes), `changed byte must be unequal`).toBe(false)
+}
+
+describe(`comparison law controls`, () => {
+  fcTest(`rejects non-finite outputs before reducing their signs`, () => {
+    for (const invalid of [NaN, Infinity, -Infinity]) {
+      expect(() => checkAntisymmetry(invalid, -invalid)).toThrow(
+        `comparator result must be finite`,
+      )
+    }
+    expect(checkAntisymmetry(0, -0)).toBe(true)
+    expect(checkAntisymmetry(-12, 12)).toBe(true)
+    expect(checkAntisymmetry(-12, -12)).toBe(false)
+  })
+
+  fcTest(
+    `rejects and replays a comparator returning NaN only for unequal pairs`,
+    () => {
+      const mutant = (a: number, b: number): number => (a === b ? 0 : NaN)
+      const property = fc.property(fc.integer({ min: -100, max: 100 }), (a) => {
+        expect(mutant(a, a)).toBe(0)
+        expect(checkAntisymmetry(mutant(a, a + 1), mutant(a + 1, a))).toBe(true)
+      })
+      const failure = fc.check(property, { seed: 20260911, numRuns: 20 })
+      expect(failure.failed).toBe(true)
+      expect(failure.error).toContain(`comparator result must be finite`)
+      expect(failure.counterexample).toEqual([0])
+      if (failure.counterexamplePath === null) {
+        throw new Error(`mutant did not produce a replay path`)
+      }
+      const replay = fc.check(property, {
+        seed: failure.seed,
+        path: failure.counterexamplePath,
+        numRuns: 1,
+        endOnFailure: true,
+      })
+      expect(replay.failed).toBe(true)
+      expect(replay.error).toContain(`comparator result must be finite`)
+      expect(replay.counterexample).toEqual(failure.counterexample)
+    },
+  )
+
+  fcTest(
+    `changed-byte law rejects length-only equality and accepts indexed equality`,
+    () => {
+      const sample = {
+        bytes: new Uint8Array([255]),
+        changed: new Uint8Array([0]),
+        index: 0,
+      }
+      expect(() =>
+        assertChangedBytes(sample, (a, b) => a.length === b.length),
+      ).toThrow(`changed byte must be unequal`)
+      assertChangedBytes(
+        sample,
+        (a, b) =>
+          a.length === b.length && a.every((byte, index) => byte === b[index]),
+      )
+    },
+  )
+
+  fcTest(`fixed campaign reaches a changed byte in every case`, () => {
+    const result = fc.check(
+      fc.property(arbitraryChangedBytes, (sample) => {
+        assertChangedBytes(sample, areValuesEqual)
+      }),
+      { seed: 20260911, numRuns: 100 },
+    )
+    expect(result).toMatchObject({ failed: false, numRuns: 100, numSkips: 0 })
+  })
+})
+
 describe(`ascComparator property-based tests`, () => {
   describe(`comparator laws`, () => {
     fcTest.prop([arbitraryComparablePrimitive])(
@@ -137,6 +242,8 @@ describe(`ascComparator property-based tests`, () => {
         const bc = ascComparator(b, c, defaultOpts)
         const ac = ascComparator(a, c, defaultOpts)
 
+        for (const result of [ab, bc, ac]) assertValidComparison(result)
+
         if (ab <= 0 && bc <= 0) {
           expect(ac).toBeLessThanOrEqual(0)
         }
@@ -148,6 +255,8 @@ describe(`ascComparator property-based tests`, () => {
       ([a, b]) => {
         const result1 = ascComparator(a, b, defaultOpts)
         const result2 = ascComparator(a, b, defaultOpts)
+        assertValidComparison(result1)
+        assertValidComparison(result2)
         expect(result1).toBe(result2)
       },
     )
@@ -433,18 +542,10 @@ describe(`areValuesEqual property-based tests`, () => {
     },
   )
 
-  fcTest.prop([
-    fc.uint8Array({ minLength: 1, maxLength: 50 }),
-    fc.integer({ min: 0, max: 49 }),
-    fc.integer({ min: 0, max: 255 }),
-  ])(
+  fcTest.prop([arbitraryChangedBytes])(
     `Uint8Arrays with different content are not equal`,
-    (arr, index, newValue) => {
-      if (index < arr.length && arr[index] !== newValue) {
-        const modified = new Uint8Array(arr)
-        modified[index] = newValue
-        expect(areValuesEqual(arr, modified)).toBe(false)
-      }
+    (sample) => {
+      assertChangedBytes(sample, areValuesEqual)
     },
   )
 

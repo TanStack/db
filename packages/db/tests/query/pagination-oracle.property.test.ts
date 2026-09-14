@@ -14,6 +14,7 @@ import {
 import { evaluateReferenceExpression } from '../reference-expression.js'
 import { TraceAssertionError } from '../trace-runner.js'
 import { flushPromises, mockSyncCollectionOptions } from '../utils.js'
+import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import type { Deferred } from '../../src/deferred.js'
 import type {
   ChangeMessage,
@@ -1241,22 +1242,26 @@ async function expectOnDemandWindowsAreCompletionOrderIndependent(
   }
 }
 
-async function runAdversarialOrderedProviderScenario(options: {
-  providerRows: ReadonlyArray<AdversarialOrderedRow>
-  initialRows?: ReadonlyArray<AdversarialOrderedRow>
-  order:
-    | { kind: `rank`; direction: `asc` | `desc`; nulls: `first` | `last` }
-    | {
-        kind: `reference`
-        direction?: `asc` | `desc`
-        nulls?: `first` | `last`
-      }
-    | { kind: `locale` }
-  limit: number
-  expectedIds: ReadonlyArray<number>
-  useOffsetWhenAvailable?: boolean
-}): Promise<Array<LoadSubsetOptions>> {
+async function runAdversarialOrderedProviderScenario(
+  options: {
+    providerRows: ReadonlyArray<AdversarialOrderedRow>
+    initialRows?: ReadonlyArray<AdversarialOrderedRow>
+    order:
+      | { kind: `rank`; direction: `asc` | `desc`; nulls: `first` | `last` }
+      | {
+          kind: `reference`
+          direction?: `asc` | `desc`
+          nulls?: `first` | `last`
+        }
+      | { kind: `locale` }
+    limit: number
+    expectedIds: ReadonlyArray<number>
+    useOffsetWhenAvailable?: boolean
+  },
+  fault?: `post-cleanup-request`,
+): Promise<Array<LoadSubsetOptions>> {
   const loads: Array<LoadSubsetOptions> = []
+  let recordedProvider!: (options: LoadSubsetOptions) => Promise<void>
   const delivered = new Set(options.initialRows?.map(({ id }) => id) ?? [])
   const source = createCollection<AdversarialOrderedRow>({
     id: `pagination-adversarial-order-source-${collectionSequence++}`,
@@ -1276,7 +1281,7 @@ async function runAdversarialOrderedProviderScenario(options: {
         }
         markReady()
         return {
-          loadSubset: (loadOptions: LoadSubsetOptions) => {
+          loadSubset: (recordedProvider = (loadOptions: LoadSubsetOptions) => {
             loads.push(loadOptions)
             if (loads.length > options.providerRows.length * 4 + 4) {
               throw new Error(
@@ -1313,7 +1318,7 @@ async function runAdversarialOrderedProviderScenario(options: {
             }
             const receipt = commit()
             return receipt === true ? Promise.resolve() : receipt
-          },
+          }),
         }
       },
     },
@@ -1344,18 +1349,32 @@ async function runAdversarialOrderedProviderScenario(options: {
     return ordered.limit(options.limit).select(({ row }) => ({ id: row.id }))
   })
 
-  try {
-    await live.preload()
-    expect(Array.from(live.values(), ({ id }) => id)).toEqual(
-      options.expectedIds,
-    )
-    // Snapshot observations before cleanup. Teardown must not create fresh
-    // source demand, and callers must not mistake such work for the scenario's
-    // final refinement request.
-    return [...loads]
-  } finally {
-    await cleanupAll(live, source)
-  }
+  return withHistoryCleanup(
+    async () => {
+      await live.preload()
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual(
+        options.expectedIds,
+      )
+      // Keep the pre-cleanup snapshot, but judge disposal against the live recorder.
+      return [...loads]
+    },
+    () => {
+      const beforeCleanup = loads.length
+      return [
+        () => live.cleanup(),
+        () => {
+          if (fault === `post-cleanup-request`)
+            return recordedProvider(loads[0]!)
+          return undefined
+        },
+        () => source.cleanup(),
+        () =>
+          expect(loads.length, `no provider start during disposal`).toBe(
+            beforeCleanup,
+          ),
+      ]
+    },
+  )
 }
 
 async function runPendingMutationScenario(
@@ -1364,6 +1383,15 @@ async function runPendingMutationScenario(
   finalLimitAfterMutation?: number,
   explicitPublicKeyOrder = true,
   transport: `cursor` | `offset` | `key` = `cursor`,
+  fault?:
+    | `held-publication`
+    | `held-window`
+    | `early-settlement`
+    | `wrong-rejection`
+    | `callback-key`
+    | `callback-value`
+    | `delete-value`
+    | `final-value`,
 ): Promise<void> {
   const rows = new Map<number, PageRow>(
     scenario.ranks.map((rank, index) => [index + 1, { id: index + 1, rank }]),
@@ -1374,6 +1402,7 @@ async function runPendingMutationScenario(
     { offset: 0, limit: 1 },
   )[0]!
   const pending: Array<PendingCursorLoad> = []
+  const physicallySettled = new Set<PendingCursorLoad>()
   const deliveredIds = new Set<number>([firstDelivered.id])
   // A rejected initial subset load is fatal. Establish a ready baseline first
   // so reject scenarios exercise subscription-scoped window recovery.
@@ -1405,7 +1434,12 @@ async function runPendingMutationScenario(
           loadSubset: (options: LoadSubsetOptions) => {
             if (!capturePending) return true
             const deferred = createDeferred<void>()
-            pending.push({ options, deferred })
+            const request = { options, deferred }
+            pending.push(request)
+            void deferred.promise.then(
+              () => physicallySettled.add(request),
+              () => physicallySettled.add(request),
+            )
             return deferred.promise
           },
         }
@@ -1423,6 +1457,82 @@ async function runPendingMutationScenario(
     ).limit(scenario.responseOutcome === `reject` ? 1 : scenario.limit)
   })
   const outstanding: Array<Promise<unknown>> = []
+  const outcomes: Array<{
+    label: string
+    state: `pending` | `fulfilled` | `rejected`
+    error?: unknown
+  }> = []
+  type MutationStage = `initial` | `failed-window` | `later` | `retry`
+  let stage: MutationStage = `initial`
+  const initialLimit =
+    scenario.responseOutcome === `reject` ? 1 : scenario.limit
+  const cuts: Array<{
+    phase: string
+    stage: MutationStage
+    held: boolean
+    rows: Array<Record<string, unknown>>
+    expected: Array<PageRow>
+    window: unknown
+    outcomes: typeof outcomes
+    changes: Array<{
+      type: `insert` | `update` | `delete`
+      key: unknown
+      value: Record<string, unknown>
+    }>
+  }> = []
+  const copyRow = (row: PageRow): Record<string, unknown> =>
+    Object.fromEntries(
+      Object.entries(row).filter(
+        ([key]) =>
+          ![`$key`, `$collectionId`, `$origin`, `$synced`].includes(key),
+      ),
+    )
+  const capture = (
+    phase: string,
+    changes: ReadonlyArray<ChangeMessage<PageRow>> = [],
+  ) => {
+    cuts.push({
+      phase,
+      stage,
+      held: pending.some((request) => !physicallySettled.has(request)),
+      rows: Array.from(live.values(), copyRow),
+      expected: referenceWindowRows([...rows.values()], scenario.direction, {
+        offset: 0,
+        limit: initialLimit,
+      }).map((row) => ({ ...row })),
+      window: { ...live.utils.getWindow() },
+      outcomes: outcomes.map((outcome) => ({ ...outcome })),
+      changes: changes.map(({ type, key, value }) => ({
+        type,
+        key,
+        value: copyRow(value),
+      })),
+    })
+  }
+  const observe = (label: string, result: true | Promise<void>) => {
+    const outcome: (typeof outcomes)[number] = { label, state: `pending` }
+    outcomes.push(outcome)
+    if (result === true) {
+      outcome.state = `fulfilled`
+      capture(`${label}-fulfilled`)
+      return Promise.resolve()
+    }
+    const observed = result.then(
+      () => {
+        outcome.state = `fulfilled`
+        capture(`${label}-fulfilled`)
+      },
+      (error: unknown) => {
+        outcome.state = `rejected`
+        outcome.error = error
+        capture(`${label}-rejected`)
+      },
+    )
+    outstanding.push(observed)
+    return observed
+  }
+  let subscription: ReturnType<typeof live.subscribeChanges> | undefined
+  const cursorError = new Error(`cursor failed`)
 
   const applyMutation = () => {
     const { mutation } = scenario
@@ -1439,12 +1549,15 @@ async function runPendingMutationScenario(
       write({ type: mutation.type, value: { ...mutation.row } })
     }
     commit()
+    capture(`mutation-commit`)
   }
 
   const settlePending = async () => {
     // Settling one request can append its boundary-refinement request.
-    // eslint-disable-next-line @typescript-eslint/prefer-for-of
     for (let index = 0; index < pending.length; index++) {
+      if (index > (scenario.ranks.length + 1) * 8) {
+        throw new Error(`Pending mutation exceeded finite provider work bound`)
+      }
       const request = pending[index]!
       if (request.settled) continue
       request.settled = true
@@ -1476,104 +1589,270 @@ async function runPendingMutationScenario(
         write({ type: `insert`, value: { ...row } })
       }
       commit()
+      capture(`provider-commit`)
       request.deferred.resolve()
+      capture(`provider-resolve-call`)
       await flushPromises()
+      capture(`provider-drain`)
     }
   }
 
-  try {
-    const preload = live.preload()
-    outstanding.push(preload)
-    let finalLimit = scenario.limit
-    if (scenario.responseOutcome === `resolve`) {
-      expect(pending).toHaveLength(1)
-      if (timing === `before-response`) applyMutation()
-      await settlePending()
-      await preload
-      if (timing === `after-response`) {
-        applyMutation()
+  return withHistoryCleanup(
+    async () => {
+      const preload = live.preload()
+      observe(`preload`, preload)
+      subscription = live.subscribeChanges(
+        (changes) => capture(`callback`, changes),
+        { includeInitialState: true },
+      )
+      capture(`preload-call`)
+      let finalLimit = scenario.limit
+      if (scenario.responseOutcome === `resolve`) {
+        expect(pending).toHaveLength(1)
+        if (timing === `before-response`) applyMutation()
+        await settlePending()
+        await preload
+        capture(`initial-complete`)
+        stage = `later`
+        if (timing === `after-response`) {
+          applyMutation()
+          await flushPromises()
+        }
+        if (finalLimitAfterMutation !== undefined) {
+          finalLimit = finalLimitAfterMutation
+          const widened = live.utils.setWindow({
+            offset: 0,
+            limit: finalLimit,
+          })
+          observe(`widen`, widened)
+          capture(`widen-call`)
+        }
+        await settlePending()
+        await Promise.all(outstanding)
+      } else {
+        await preload
         await flushPromises()
-      }
-      if (finalLimitAfterMutation !== undefined) {
-        finalLimit = finalLimitAfterMutation
-        const widened = live.utils.setWindow({
+        capturePending = true
+        expect(pending).toHaveLength(0)
+        finalLimit += 1
+        stage = `failed-window`
+        const failedWindow = live.utils.setWindow({
           offset: 0,
           limit: finalLimit,
         })
-        if (widened instanceof Promise) outstanding.push(widened)
-      }
-      await settlePending()
-      await Promise.all(outstanding)
-    } else {
-      await preload
-      await flushPromises()
-      capturePending = true
-      expect(pending).toHaveLength(0)
-      finalLimit += 1
-      const failedWindow = live.utils.setWindow({
-        offset: 0,
-        limit: finalLimit,
-      })
-      expect(failedWindow).toBeInstanceOf(Promise)
-      const cursorError = new Error(`cursor failed`)
-      const observedFailure = (failedWindow as Promise<void>).then(
-        () => undefined,
-        (error: unknown) => error,
-      )
-      outstanding.push((failedWindow as Promise<void>).catch(() => {}))
-      expect(pending).toHaveLength(1)
-      if (timing === `before-response`) applyMutation()
-      pending[0]!.settled = true
-      pending[0]!.deferred.reject(cursorError)
-      if (timing === `after-response`) applyMutation()
-      await flushPromises()
-      await settlePending()
-      expect(await observedFailure).toBe(cursorError)
-      expect(live.status).toBe(`ready`)
-      expect(live.utils.lastSubsetError).toBe(cursorError)
+        observe(`failed-window`, failedWindow)
+        capture(`failed-window-call`)
+        expect(failedWindow).toBeInstanceOf(Promise)
+        const observedFailure = (failedWindow as Promise<void>).then(
+          () => undefined,
+          (error: unknown) => error,
+        )
+        expect(pending).toHaveLength(1)
+        if (timing === `before-response`) applyMutation()
+        pending[0]!.settled = true
+        pending[0]!.deferred.reject(cursorError)
+        capture(`provider-reject-call`)
+        if (timing === `after-response`) applyMutation()
+        await flushPromises()
+        await settlePending()
+        capture(`recovery-drain`)
+        expect(await observedFailure).toBe(cursorError)
+        expect(live.status).toBe(`ready`)
+        expect(live.utils.lastSubsetError).toBe(cursorError)
 
-      const retry = live.utils.setWindow({ offset: 0, limit: finalLimit })
-      const observedRetry =
-        retry instanceof Promise
-          ? retry.then(undefined, (error: unknown) => {
-              throw error
-            })
-          : undefined
-      await flushPromises()
-      await settlePending()
-      await flushPromises()
-      if (observedRetry) {
-        outstanding.push(observedRetry)
+        stage = `retry`
+        const retry = live.utils.setWindow({ offset: 0, limit: finalLimit })
+        const observedRetry = observe(`retry`, retry)
+        capture(`retry-call`)
+        await flushPromises()
+        await settlePending()
+        await flushPromises()
         await observedRetry
+        expect(live.status).toBe(`ready`)
+        expect(live.utils.lastSubsetError).toBe(cursorError)
       }
-      expect(live.status).toBe(`ready`)
-      expect(live.utils.lastSubsetError).toBe(cursorError)
-    }
 
-    try {
+      await Promise.all(outstanding)
+      capture(`final`)
+      const heldCut = () => {
+        const cut = cuts.find(({ held, phase }) => held && phase !== `callback`)
+        expect(cut, `held mutation cut reached`).toBeDefined()
+        return cut!
+      }
+      if (fault === `held-publication`)
+        heldCut().rows =
+          scenario.responseOutcome === `resolve` ? [{ ...firstDelivered }] : []
+      if (fault === `held-window`) heldCut().window = { offset: 0, limit: 999 }
+      if (fault === `early-settlement`) {
+        const cut = heldCut()
+        const outcome = cut.outcomes.find(
+          ({ label }) =>
+            label ===
+            (scenario.responseOutcome === `resolve`
+              ? `preload`
+              : `failed-window`),
+        )!
+        outcome.state = `fulfilled`
+      }
+      if (fault === `wrong-rejection`) {
+        const outcome = outcomes.find(({ label }) => label === `failed-window`)
+        expect(outcome?.state, `failed caller reached`).toBe(`rejected`)
+        outcome!.error = new Error(`cursor failed`)
+      }
+      if (fault === `callback-key` || fault === `callback-value`) {
+        const cut = cuts.find(({ changes }) => changes.length > 0)
+        expect(cut, `mutation callback reached`).toBeDefined()
+        if (fault === `callback-key`)
+          cut!.changes[0]!.key = String(cut!.changes[0]!.key)
+        else cut!.changes[0]!.value.rank = 999
+      }
+      if (fault === `delete-value`) {
+        const change = cuts
+          .flatMap((cut) => cut.changes)
+          .find((message) => message.type === `delete`)
+        expect(change, `mutation delete callback reached`).toBeDefined()
+        change!.value = { ...change!.value, rank: 999 }
+      }
+      if (fault === `final-value`) cuts.at(-1)!.rows[0]!.rank = 999
+
+      try {
+        expect(
+          Array.from(live.values(), ({ id, rank }) => ({ id, rank })),
+        ).toEqual(
+          referenceWindowRows([...rows.values()], scenario.direction, {
+            offset: 0,
+            limit: finalLimit,
+          }),
+        )
+      } catch (error) {
+        throw new PendingMutationTraceAssertionError(
+          error,
+          referenceWindowRows(
+            [...rows.values()].filter(({ id }) => deliveredIds.has(id)),
+            scenario.direction,
+            { offset: 0, limit: deliveredIds.size },
+          ),
+        )
+      }
+
+      // Judge recorded public observations after the driver: assertions never
+      // throw into the runtime's listener/error handling. Later mutation repair
+      // and retry cuts retain raw replicas; their endpoints keep the old law.
+      const replica = new Map<unknown, Record<string, unknown>>()
+      let initialPublished = false
+      for (const cut of cuts) {
+        for (const change of cut.changes) {
+          expect(typeof change.key, `mutation native callback key`).toBe(
+            `number`,
+          )
+          expect(change.key, `mutation callback key owns value`).toBe(
+            change.value.id,
+          )
+          expect(replica.has(change.key), `mutation callback predecessor`).toBe(
+            change.type !== `insert`,
+          )
+          if (change.type === `delete`) {
+            expect(
+              change.value,
+              `mutation deleted callback full value`,
+            ).toStrictEqual(replica.get(change.key))
+            replica.delete(change.key)
+          } else replica.set(change.key, change.value)
+        }
+        if (cut.phase === `callback` || cut.phase === `final`) {
+          const byId = (
+            a: Record<string, unknown>,
+            b: Record<string, unknown>,
+          ) => (a.id as number) - (b.id as number)
+          expect(
+            [...replica.values()].sort(byId),
+            `mutation callback replica full values`,
+          ).toStrictEqual([...cut.rows].sort(byId))
+        }
+        if (cut.stage === `initial`) {
+          const preloadState = cut.outcomes.find(
+            ({ label }) => label === `preload`,
+          )!.state
+          if (cut.held) {
+            expect(cut.rows, `held mutation publication`).toStrictEqual([])
+            expect(preloadState, `held mutation logical settlement`).toBe(
+              `pending`,
+            )
+          } else if (cut.rows.length > 0 || preloadState === `fulfilled`) {
+            expect(
+              cut.rows,
+              `complete initial mutation publication`,
+            ).toStrictEqual(cut.expected)
+          }
+          if (initialPublished)
+            expect(
+              cut.rows.length,
+              `initial mutation publication cannot withdraw`,
+            ).toBeGreaterThan(0)
+          if (cut.rows.length > 0) initialPublished = true
+          expect(cut.window, `held mutation window`).toStrictEqual({
+            offset: 0,
+            limit: initialLimit,
+          })
+        } else if (cut.stage === `failed-window`) {
+          expect(
+            cut.rows,
+            `failed mutation keeps complete baseline`,
+          ).toStrictEqual([{ ...firstDelivered }])
+          expect(cut.window, `held mutation window`).toStrictEqual({
+            offset: 0,
+            limit: 1,
+          })
+          const failed = cut.outcomes.find(
+            ({ label }) => label === `failed-window`,
+          )
+          if (cut.held && failed)
+            expect(failed.state, `held mutation logical settlement`).not.toBe(
+              `fulfilled`,
+            )
+        }
+      }
       expect(
-        Array.from(live.values(), ({ id, rank }) => ({ id, rank })),
-      ).toEqual(
+        outcomes.map(({ label }) => label),
+        `all mutation callers observed`,
+      ).toStrictEqual(
+        scenario.responseOutcome === `reject`
+          ? [`preload`, `failed-window`, `retry`]
+          : [
+              `preload`,
+              ...(finalLimitAfterMutation === undefined ? [] : [`widen`]),
+            ],
+      )
+      for (const outcome of outcomes) {
+        if (outcome.label === `failed-window`) {
+          expect(outcome.state, `failed mutation caller state`).toBe(`rejected`)
+          expect(outcome.error, `failed mutation caller exact error`).toBe(
+            cursorError,
+          )
+        } else
+          expect(outcome.state, `mutation caller fulfilled`).toBe(`fulfilled`)
+      }
+      expect(cuts.at(-1)!.rows, `complete final mutation values`).toStrictEqual(
         referenceWindowRows([...rows.values()], scenario.direction, {
           offset: 0,
           limit: finalLimit,
         }),
       )
-    } catch (error) {
-      throw new PendingMutationTraceAssertionError(
-        error,
-        referenceWindowRows(
-          [...rows.values()].filter(({ id }) => deliveredIds.has(id)),
-          scenario.direction,
-          { offset: 0, limit: deliveredIds.size },
-        ),
-      )
-    }
-  } finally {
-    for (const request of pending) request.deferred.resolve()
-    await Promise.allSettled(outstanding)
-    await cleanupAll(live, source)
-  }
+      expect(
+        cuts.at(-1)!.window,
+        `complete final mutation window`,
+      ).toStrictEqual({ offset: 0, limit: finalLimit })
+    },
+    () => [
+      () => subscription?.unsubscribe(),
+      () => live.cleanup(),
+      () => {
+        for (const request of pending) request.deferred.resolve()
+      },
+      () => Promise.all(outstanding),
+      () => source.cleanup(),
+    ],
+  )
 }
 
 async function runRejectedCursorRetryAfterMutation(): Promise<void> {
@@ -1690,6 +1969,14 @@ async function runRejectedCursorRetryAfterMutation(): Promise<void> {
 
 async function runPendingHistoryScenario(
   scenario: PendingHistoryScenario,
+  fault?:
+    | `partial-publication`
+    | `wrong-window`
+    | `early-settlement`
+    | `wrong-final-value`
+    | `wrong-callback-value`
+    | `wrong-callback-key`
+    | `retracted-publication`,
 ): Promise<void> {
   const rows = new Map<number, PageRow>(
     scenario.ranks.map((rank, index) => [index + 1, { id: index + 1, rank }]),
@@ -1700,8 +1987,27 @@ async function runPendingHistoryScenario(
     { offset: 0, limit: 1 },
   )[0]!
   const pending: Array<PendingCursorLoad> = []
+  const fulfilled = new Set<PendingCursorLoad>()
   const deliveredIds = new Set<number>([firstDelivered.id])
   const outstanding: Array<Promise<unknown>> = []
+  const outcomes: Array<{
+    settled: boolean
+    error?: unknown
+    rejected?: true
+  }> = []
+  const cuts: Array<{
+    phase: string
+    held: boolean
+    rows: Array<Record<string, unknown>>
+    window: unknown
+    settled: boolean
+    windowSettled: boolean
+    changes: Array<{
+      type: `insert` | `update` | `delete`
+      key: unknown
+      value: Record<string, unknown>
+    }>
+  }> = []
   let begin!: () => void
   let write!: (message: { type: `insert` | `update`; value: PageRow }) => void
   let commit!: () => void
@@ -1724,7 +2030,13 @@ async function runPendingHistoryScenario(
         return {
           loadSubset: (options: LoadSubsetOptions) => {
             const deferred = createDeferred<void>()
-            pending.push({ options, deferred })
+            const request = { options, deferred }
+            pending.push(request)
+            // Observe physical fulfillment before handing its Promise to the loader.
+            void deferred.promise.then(
+              () => fulfilled.add(request),
+              () => {},
+            )
             return deferred.promise
           },
         }
@@ -1738,6 +2050,32 @@ async function runPendingHistoryScenario(
       .orderBy(({ row }) => row.id, `asc`)
       .limit(scenario.initialLimit),
   )
+  const copyRow = (row: PageRow): Record<string, unknown> =>
+    Object.fromEntries(
+      Object.entries(row).filter(
+        ([key]) =>
+          ![`$key`, `$collectionId`, `$origin`, `$synced`].includes(key),
+      ),
+    )
+  const capture = (
+    phase: string,
+    changes: ReadonlyArray<ChangeMessage<PageRow>> = [],
+  ) => {
+    cuts.push({
+      phase,
+      held: pending.some((request) => !fulfilled.has(request)),
+      rows: Array.from(live.values(), copyRow),
+      window: { ...live.utils.getWindow() },
+      settled: outcomes.some((outcome) => outcome.settled),
+      windowSettled: outcomes.length === 3 && outcomes[2]!.settled,
+      changes: changes.map(({ type, key, value }) => ({
+        type,
+        key,
+        value: copyRow(value),
+      })),
+    })
+  }
+  let subscription: ReturnType<typeof live.subscribeChanges> | undefined
 
   const updateFirstDelivered = (rank: number): void => {
     const previous = rows.get(firstDelivered.id)!
@@ -1763,64 +2101,230 @@ async function runPendingHistoryScenario(
       write({ type: `insert`, value: { ...row } })
     }
     commit()
+    capture(`provider-commit`)
     request.deferred.resolve()
+    capture(`provider-resolve-call`)
     await flushPromises()
+    capture(`provider-drain`)
   }
 
   const track = (result: true | Promise<void>): void => {
-    if (result instanceof Promise) outstanding.push(result)
+    const outcome: { settled: boolean; error?: unknown; rejected?: true } = {
+      settled: false,
+    }
+    outcomes.push(outcome)
+    if (result instanceof Promise) {
+      outstanding.push(
+        result.then(
+          () => {
+            outcome.settled = true
+            capture(`logical-settlement`)
+          },
+          (error: unknown) => {
+            outcome.settled = true
+            outcome.rejected = true
+            outcome.error = error
+          },
+        ),
+      )
+    } else outcome.settled = true
   }
 
-  try {
-    outstanding.push(live.preload())
-    expect(pending).toHaveLength(1)
+  return withHistoryCleanup(
+    async () => {
+      track(live.preload())
+      subscription = live.subscribeChanges(
+        (changes) => capture(`callback`, changes),
+        { includeInitialState: false },
+      )
+      capture(`initial-held`)
+      expect(pending).toHaveLength(1)
 
-    updateFirstDelivered(scenario.firstRank)
-    track(live.utils.setWindow({ offset: 0, limit: scenario.narrowLimit }))
-    track(live.utils.setWindow({ offset: 0, limit: scenario.wideLimit }))
-    expect(pending.length).toBeGreaterThan(0)
-    updateFirstDelivered(scenario.secondRank)
+      updateFirstDelivered(scenario.firstRank)
+      capture(`first-update`)
+      track(live.utils.setWindow({ offset: 0, limit: scenario.narrowLimit }))
+      capture(`narrow`)
+      track(live.utils.setWindow({ offset: 0, limit: scenario.wideLimit }))
+      capture(`wide`)
+      expect(pending.length).toBeGreaterThan(0)
+      updateFirstDelivered(scenario.secondRank)
+      capture(`second-update`)
 
-    await settle(pending[0]!)
-    for (let index = 1; index < pending.length; index++) {
-      if (index > rows.size * 4) {
-        throw new Error(
-          `Ordered continuation exceeded its finite source work bound: ${JSON.stringify(
-            pending.map(({ options }) => ({
-              limit: options.limit,
-              offset: options.offset,
-              lastKey: options.cursor?.lastKey,
+      await settle(pending[0]!)
+      for (let index = 1; index < pending.length; index++) {
+        if (index > rows.size * 4) {
+          throw new Error(
+            `Ordered continuation exceeded its finite source work bound: ${JSON.stringify(
+              pending.map(({ options }) => ({
+                limit: options.limit,
+                offset: options.offset,
+                lastKey: options.cursor?.lastKey,
+              })),
+            )}`,
+          )
+        }
+        await settle(pending[index]!)
+      }
+      await Promise.all(outstanding)
+      capture(`final`)
+      expect(
+        outcomes.every(({ settled, rejected }) => settled && !rejected),
+        `all logical requests fulfilled`,
+      ).toBe(true)
+
+      // Corrupt captured real observations, never the runtime or the authority.
+      if (fault === `partial-publication`)
+        cuts.find(({ held }) => held)!.rows = [{ ...firstDelivered }]
+      if (fault === `wrong-window`)
+        cuts.find(({ held }) => held)!.window = {
+          offset: 0,
+          limit: scenario.wideLimit,
+        }
+      if (fault === `early-settlement`)
+        cuts.find(({ held }) => held)!.settled = true
+      if (fault === `wrong-final-value`) cuts.at(-1)!.rows[0]!.rank = 99999
+      if (fault === `retracted-publication`) {
+        const index = cuts.findIndex(
+          (cut) => cut.phase === `callback` && cut.rows.length > 0,
+        )
+        expect(index, `complete callback reached`).toBeGreaterThanOrEqual(0)
+        const complete = cuts[index]!
+        cuts.splice(
+          index + 1,
+          0,
+          {
+            ...complete,
+            rows: [],
+            changes: complete.rows.map((value) => ({
+              type: `delete`,
+              key: value.id,
+              value,
             })),
-          )}`,
+          },
+          {
+            ...complete,
+            changes: complete.rows.map((value) => ({
+              type: `insert`,
+              key: value.id,
+              value,
+            })),
+          },
         )
       }
-      await settle(pending[index]!)
-    }
-    await Promise.all(outstanding)
-
-    try {
-      const actual = Array.from(live.values(), ({ id, rank }) => ({ id, rank }))
-      const expected = referenceWindowRows(
+      if (fault === `wrong-callback-value` || fault === `wrong-callback-key`) {
+        const changed = cuts.find((cut) => cut.changes.length > 0)
+        expect(changed, `real callback reached`).toBeDefined()
+        const change = changed!.changes[0]!
+        if (fault === `wrong-callback-key`) change.key = String(change.key)
+        else change.value.rank = 99999
+      }
+      const completeRows = referenceWindowRows(
         [...rows.values()],
         scenario.direction,
         { offset: 0, limit: scenario.wideLimit },
       )
-      expect(actual).toEqual(expected)
-    } catch (error) {
-      throw new PendingHistoryTraceAssertionError(
-        error,
-        referenceWindowRows(
-          [...rows.values()].filter(({ id }) => deliveredIds.has(id)),
+      const replica = new Map<unknown, Record<string, unknown>>()
+      let published = false
+      for (const cut of cuts) {
+        if (published)
+          expect(
+            cut.rows.length,
+            `published window cannot withdraw`,
+          ).toBeGreaterThan(0)
+        if (cut.rows.length > 0) published = true
+        for (const change of cut.changes) {
+          expect(typeof change.key, `native callback key`).toBe(`number`)
+          expect(change.key, `callback key owns value`).toBe(change.value.id)
+          expect(
+            replica.has(change.key),
+            `callback operation predecessor`,
+          ).toBe(change.type !== `insert`)
+          if (change.type === `delete`) replica.delete(change.key)
+          else replica.set(change.key, change.value)
+        }
+        if (cut.phase === `callback`) {
+          const byId = (
+            left: Record<string, unknown>,
+            right: Record<string, unknown>,
+          ) => (left.id as number) - (right.id as number)
+          expect(
+            [...replica.values()].sort(byId),
+            `callback replica full values`,
+          ).toStrictEqual([...cut.rows].sort(byId))
+        }
+        if (cut.held) {
+          expect(
+            cut.rows,
+            `held initial publication ${cut.phase}`,
+          ).toStrictEqual([])
+          expect(cut.window, `held initial window ${cut.phase}`).toStrictEqual({
+            offset: 0,
+            limit: scenario.initialLimit,
+          })
+          expect(cut.settled, `held logical settlement ${cut.phase}`).toBe(
+            false,
+          )
+        } else if (
+          cut.rows.length === 0 &&
+          !cut.windowSettled &&
+          cut.phase !== `final`
+        ) {
+          expect(cut.window, `unpublished initial window`).toStrictEqual({
+            offset: 0,
+            limit: scenario.initialLimit,
+          })
+        } else {
+          expect(cut.rows, `complete publication ${cut.phase}`).toStrictEqual(
+            completeRows,
+          )
+          // getWindow reports Promise-settled state, not the publication callback.
+          const target = { offset: 0, limit: scenario.wideLimit }
+          if (cut.windowSettled || cut.phase === `final`) {
+            expect(
+              cut.window,
+              `settled complete window ${cut.phase}`,
+            ).toStrictEqual(target)
+          } else {
+            expect(
+              [target, { offset: 0, limit: scenario.initialLimit }],
+              `pending window metadata ${cut.phase}`,
+            ).toContainEqual(cut.window)
+          }
+        }
+      }
+
+      try {
+        const actual = Array.from(live.values(), ({ id, rank }) => ({
+          id,
+          rank,
+        }))
+        const expected = referenceWindowRows(
+          [...rows.values()],
           scenario.direction,
           { offset: 0, limit: scenario.wideLimit },
-        ),
-      )
-    }
-  } finally {
-    for (const request of pending) request.deferred.resolve()
-    await Promise.allSettled(outstanding)
-    await cleanupAll(live, source)
-  }
+        )
+        expect(actual).toEqual(expected)
+      } catch (error) {
+        throw new PendingHistoryTraceAssertionError(
+          error,
+          referenceWindowRows(
+            [...rows.values()].filter(({ id }) => deliveredIds.has(id)),
+            scenario.direction,
+            { offset: 0, limit: scenario.wideLimit },
+          ),
+        )
+      }
+    },
+    () => [
+      () => subscription?.unsubscribe(),
+      () => live.cleanup(),
+      () => {
+        for (const request of pending) request.deferred.resolve()
+      },
+      () => Promise.all(outstanding),
+      () => source.cleanup(),
+    ],
+  )
 }
 
 function changedRankValue(previous: number, requested: number): number {
@@ -3587,6 +4091,78 @@ describe(`pagination recomputation oracle`, () => {
     },
   )
 
+  it.each(
+    ([`resolve`, `reject`] as const).flatMap((responseOutcome) =>
+      (
+        [
+          [
+            `held-publication`,
+            /held mutation publication|failed mutation keeps complete baseline/,
+          ],
+          [`held-window`, /held mutation window/],
+          [`early-settlement`, /held mutation logical settlement/],
+          [`callback-key`, /mutation native callback key/],
+          [`callback-value`, /mutation callback replica full values/],
+          [
+            `final-value`,
+            /mutation callback replica full values|complete final mutation values/,
+          ],
+          ...(responseOutcome === `reject`
+            ? [
+                [
+                  `wrong-rejection`,
+                  /failed mutation caller exact error/,
+                ] as const,
+              ]
+            : []),
+        ] as const
+      ).map(([fault, message]) => ({ responseOutcome, fault, message })),
+    ),
+  )(
+    `rejects a reached $fault in a $responseOutcome mutation history`,
+    async ({ responseOutcome, fault, message }) => {
+      const scenario: PendingMutationScenario = {
+        ranks: [0, 1, 2, 3],
+        direction: `asc`,
+        limit: 2,
+        mutation: { type: `insert`, row: { id: 5, rank: -1 } },
+        responseOutcome,
+      }
+      await runPendingMutationScenario(scenario, `before-response`)
+      await expect(
+        runPendingMutationScenario(
+          scenario,
+          `before-response`,
+          undefined,
+          true,
+          `cursor`,
+          fault,
+        ),
+      ).rejects.toThrow(message)
+    },
+  )
+
+  it(`rejects a wrong deleted payload before removing its replica row`, async () => {
+    const scenario: PendingMutationScenario = {
+      ranks: [0, 1, 2, 3],
+      direction: `asc`,
+      limit: 2,
+      mutation: { type: `delete`, id: 1 },
+      responseOutcome: `resolve`,
+    }
+    await runPendingMutationScenario(scenario, `after-response`)
+    await expect(
+      runPendingMutationScenario(
+        scenario,
+        `after-response`,
+        undefined,
+        true,
+        `cursor`,
+        `delete-value`,
+      ),
+    ).rejects.toThrow(/mutation deleted callback full value/)
+  })
+
   it.each([
     [`insert`, { type: `insert`, row: { id: 9, rank: 0.5 } }],
     [`delete`, { type: `delete`, id: 1 }],
@@ -4019,6 +4595,33 @@ describe(`pagination recomputation oracle`, () => {
     runPendingHistoryScenario,
   )
 
+  it.each([
+    [`partial-publication`, `held initial publication`],
+    [`wrong-window`, `held initial window`],
+    [`early-settlement`, `held logical settlement`],
+    [`wrong-final-value`, `complete publication final`],
+    [`wrong-callback-value`, `callback replica full values`],
+    [`wrong-callback-key`, `native callback key`],
+    [`retracted-publication`, `published window cannot withdraw`],
+  ] as const)(
+    `rejects %s in a captured pending history`,
+    async (fault, message) => {
+      const scenario: PendingHistoryScenario = {
+        ranks: [0, 0, 1, 2],
+        direction: `asc`,
+        initialLimit: 2,
+        narrowLimit: 1,
+        wideLimit: 4,
+        firstRank: 2,
+        secondRank: -2,
+      }
+      await runPendingHistoryScenario(scenario)
+      await expect(
+        runPendingHistoryScenario(scenario, fault),
+      ).rejects.toThrowError(message)
+    },
+  )
+
   fcTest.prop(
     [pendingHistoryScenarioArbitrary],
     oracleRandomParameters(
@@ -4290,7 +4893,7 @@ describe(`pagination recomputation oracle`, () => {
       ),
     ),
   )(
-    `loads the source prefix when moving past an intervening insert: %j`,
+    `keeps eager window membership when moving past an intervening insert: %j`,
     async ({ direction, explicitPublicKeyOrder, tied, limit }) => {
       const sign = direction === `asc` ? 1 : -1
       await runPaginationStateScenario({
@@ -4663,6 +5266,24 @@ describe(`pagination recomputation oracle`, () => {
 
   it(`expands a multi-column boundary before choosing top-K`, async () => {
     await expectMultiOrderBoundaryMatches()
+  })
+
+  it(`rejects a real provider entry hidden by a copied pre-cleanup trace`, async () => {
+    const scenario = {
+      providerRows: [
+        { id: 1, rank: 1, label: `first` },
+        { id: 2, rank: 2, label: `second` },
+      ],
+      order: { kind: `rank`, direction: `asc`, nulls: `first` } as const,
+      limit: 1,
+      expectedIds: [1],
+    }
+    expect(
+      (await runAdversarialOrderedProviderScenario(scenario)).length,
+    ).toBeGreaterThan(0)
+    await expect(
+      runAdversarialOrderedProviderScenario(scenario, `post-cleanup-request`),
+    ).rejects.toMatchObject({ name: `AssertionError` })
   })
 
   it(`expands a provider tie before applying the public-key tie-breaker`, async () => {

@@ -5,19 +5,27 @@ export class KeyScheduler {
   private pendingTransactions: Array<OfflineTransaction> = []
   private isRunning = false
 
-  schedule(transaction: OfflineTransaction): void {
-    withSyncSpan(
+  schedule(transaction: OfflineTransaction): boolean {
+    return withSyncSpan(
       `scheduler.schedule`,
       {
         'transaction.id': transaction.id,
         queueLength: this.pendingTransactions.length,
       },
       () => {
+        if (
+          this.pendingTransactions.some(
+            (pending) => pending.id === transaction.id,
+          )
+        ) {
+          return false
+        }
         this.pendingTransactions.push(transaction)
         // Sort by creation time to maintain FIFO order
         this.pendingTransactions.sort(
           (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
         )
+        return true
       },
     )
   }

@@ -895,7 +895,7 @@ export function queryCollectionOptions(
     // Track whether sync has been started
     let syncStarted = false
     let startupRetentionSettled = false
-    const pendingStartupLoads = new Set<LoadSubsetOptions>()
+    const pendingStartupLoads = new Map<LoadSubsetOptions, Set<object>>()
     const retainedQueriesPendingRevalidation = new Set<string>()
     const pendingResultApplications = new Map<string, Promise<void>>()
     const failedResultApplications = new Map<string, unknown>()
@@ -1314,11 +1314,16 @@ export function queryCollectionOptions(
       queryFunction: typeof queryFn = queryFn,
     ): true | Promise<void> => {
       if (!startupRetentionSettled) {
-        pendingStartupLoads.add(opts)
+        // Immutable request data may be reused; ownership belongs to each call.
+        const acquisition = {}
+        const pending = pendingStartupLoads.get(opts) ?? new Set<object>()
+        pending.add(acquisition)
+        pendingStartupLoads.set(opts, pending)
         return startupRetentionMaintenancePromise.then(() => {
-          if (!pendingStartupLoads.delete(opts)) {
+          if (!pendingStartupLoads.get(opts)?.delete(acquisition)) {
             throw new LoadSubsetOperationAbortedError()
           }
+          if (pending.size === 0) pendingStartupLoads.delete(opts)
           const resumed = createQueryFromOpts(opts, queryFunction)
           return resumed === true ? undefined : resumed
         })
@@ -2118,7 +2123,12 @@ export function queryCollectionOptions(
      */
     const unloadSubset = (options: LoadSubsetOptions) => {
       // No observer lease exists until startup maintenance has finished.
-      if (pendingStartupLoads.delete(options)) return
+      const pending = pendingStartupLoads.get(options)
+      if (pending) {
+        pending.delete(pending.values().next().value!)
+        if (pending.size === 0) pendingStartupLoads.delete(options)
+        return
+      }
       // 1. Same predicates → 2. Same queryKey
       const key = generateQueryKeyFromOptions(options)
       const hashedQueryKey = hashKey(key)

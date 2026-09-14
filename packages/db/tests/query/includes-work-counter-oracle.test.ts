@@ -193,6 +193,21 @@ function observeLink(link: LinkObservation): LinkObservation {
   return exhaustive
 }
 
+function observeResult(
+  roots: ReadonlyArray<WorkObservation[`result`][number]>,
+): WorkObservation[`result`] {
+  return roots.map((root) => ({
+    id: root.id,
+    meanings: root.meanings.map((meaning) => ({
+      id: meaning.id,
+      groups: meaning.groups.map((group) => ({
+        id: group.id,
+        links: group.links.map(observeLink),
+      })),
+    })),
+  }))
+}
+
 async function observeWork({
   filler,
   joinTargets,
@@ -282,20 +297,8 @@ async function observeWork({
     cleanupLive = () => live.cleanup()
 
     await live.preload()
-    const root = live.toArray[0]!
     return {
-      result: [
-        {
-          id: root.id,
-          meanings: root.meanings.map((meaning) => ({
-            id: meaning.id,
-            groups: meaning.groups.map((group) => ({
-              id: group.id,
-              links: group.links.map(observeLink),
-            })),
-          })),
-        },
-      ],
+      result: observeResult(live.toArray),
       sourceWork: {
         terms: counters.terms(),
         meanings: counters.meanings(),
@@ -383,6 +386,23 @@ async function expectCorrelatedJoinWorkBound(
 }
 
 describe(`includes deterministic work-counter oracle`, () => {
+  it.each([true, false])(
+    `retains and rejects extra roots with joinTargets=%s`,
+    (joinTargets) => {
+      const expected = expectedResult({ joinTargets })
+      expect(observeResult(expected)).toEqual(expected)
+      const extra = { id: `term-extra`, meanings: [] }
+      const faulty = [...expected, extra]
+      // The old first-root capture erases this violation.
+      expect(observeResult(faulty.slice(0, 1))).toEqual(expected)
+      const observed = observeResult(faulty)
+      expect(observed).toEqual(faulty)
+      expect(() => expect(observed).toEqual(expected)).toThrow()
+      expect(observeResult([])).toEqual([])
+      expect(() => expect(observeResult([])).toEqual(expected)).toThrow()
+    },
+  )
+
   beforeAll(async () => {
     const [joinedBaseline, joinFreeBaseline] = await Promise.all([
       observeWork({ filler: noFillers, joinTargets: true }),

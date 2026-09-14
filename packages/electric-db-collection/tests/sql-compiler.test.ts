@@ -119,6 +119,34 @@ describe(`sql-compiler`, () => {
     })
 
     describe(`compound where clauses`, () => {
+      it(`preserves boolean grouping beneath a comparison`, () => {
+        const result = compileSQL({
+          where: func(`eq`, [
+            func(`or`, [ref(`enabled`), ref(`visible`)]),
+            val(false),
+          ]),
+        })
+
+        expect(result.where).toBe(`("enabled" OR "visible") = $1`)
+        expect(result.params).toEqual({ '1': `false` })
+      })
+
+      it(`preserves nested boolean grouping`, () => {
+        const result = compileSQL({
+          where: func(`and`, [
+            func(`or`, [
+              func(`eq`, [ref(`status`), val(`active`)]),
+              func(`eq`, [ref(`status`), val(`pending`)]),
+            ]),
+            func(`eq`, [ref(`visible`), val(true)]),
+          ]),
+        })
+
+        expect(result.where).toBe(
+          `("status" = $1 OR "status" = $2) AND "visible" = $3`,
+        )
+      })
+
       it(`should compile AND with two conditions`, () => {
         const result = compileSQL({
           where: func(`and`, [
@@ -140,7 +168,7 @@ describe(`sql-compiler`, () => {
           ]),
         })
         // >2 args adds parentheses
-        expect(result.where).toBe(`("a" = $1) AND ("b" = $2) AND ("c" = $3)`)
+        expect(result.where).toBe(`"a" = $1 AND "b" = $2 AND "c" = $3`)
         expect(result.params).toEqual({ '1': `1`, '2': `2`, '3': `3` })
       })
 
@@ -446,7 +474,7 @@ describe(`sql-compiler`, () => {
           { encodeColumnName: camelToSnake },
         )
         expect(result.where).toBe(
-          `"user_id" = $1 AND "account_type" = $2 OR "total_spend" >= $3`,
+          `"user_id" = $1 AND ("account_type" = $2 OR "total_spend" >= $3)`,
         )
       })
 

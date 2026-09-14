@@ -60,6 +60,32 @@ describe.each([`Map`, `Set`] as const)(`%s draft iteration`, (kind) => {
 
 type Item = { x: number }
 
+function expectPublishedMembers(
+  actual: Map<unknown, Item> | Set<Item>,
+  expected: Map<unknown, Item> | Set<Item>,
+): void {
+  expect(actual).toBeInstanceOf(expected instanceof Map ? Map : Set)
+  // Preserve Map keys, cardinality and iteration order before checking values.
+  // An empty container must not pass a per-member predicate vacuously.
+  expect([...actual]).toEqual([...expected])
+}
+
+it.each([`Map`, `Set`] as const)(
+  `%s member checker rejects missing output and accepts complete output`,
+  (kind) => {
+    const expected =
+      kind === `Map` ? new Map([[`item`, { x: 2 }]]) : new Set([{ x: 2 }])
+    const empty = kind === `Map` ? new Map() : new Set<Item>()
+    expect(() => expectPublishedMembers(empty, expected)).toThrow()
+    expectPublishedMembers(expected, expected)
+    if (kind === `Map`) {
+      expect(() =>
+        expectPublishedMembers(new Map([[`wrong`, { x: 2 }]]), expected),
+      ).toThrow()
+    }
+  },
+)
+
 describe.each([`Map`, `Set`] as const)(
   `%s caller-owned insertion values`,
   (kind) => {
@@ -262,11 +288,15 @@ describe.each([`Map`, `Set`] as const)(`%s nested iteration laws`, (kind) => {
       }
     })
     expect(item.x).toBe(1)
-    expect(
-      [...(changes.values as typeof values).values()].every(
-        (value) => value.x === 2,
-      ),
-    ).toBe(true)
+    expectPublishedMembers(
+      changes.values as typeof values,
+      kind === `Map`
+        ? new Map([
+            [`old`, { x: 2 }],
+            [`new`, { x: 2 }],
+          ])
+        : new Set([{ x: 2 }]),
+    )
   })
 
   it.each(protocols)(
@@ -392,11 +422,15 @@ describe.each([`Map`, `Set`] as const)(`%s nested iteration laws`, (kind) => {
     })
     expect(item.x).toBe(2)
     item.x = 3
-    expect(
-      [...(changes.values as typeof values).values()].every(
-        (value) => value.x === 2,
-      ),
-    ).toBe(true)
+    expectPublishedMembers(
+      changes.values as typeof values,
+      kind === `Map`
+        ? new Map([
+            [`a`, { x: 2 }],
+            [`b`, { x: 2 }],
+          ])
+        : new Set([{ x: 2 }]),
+    )
   })
 })
 
@@ -468,36 +502,56 @@ it.each([...protocols, `keys`] as const)(
   },
 )
 
-it(`Map for-of nested writes reach collection.update`, async () => {
-  const collection = createCollection<{
-    id: number
-    values: Map<string, Item>
-  }>({
-    getKey: (row) => row.id,
-    startSync: true,
-    sync: {
-      sync: ({ begin, write, commit, markReady }) => {
-        begin()
-        write({
-          type: `insert`,
-          value: { id: 1, values: new Map([[`a`, { x: 1 }]]) },
-        })
-        commit()
-        markReady()
-      },
-    },
-    onUpdate: async () => {},
-  })
-  try {
-    const tx = collection.update(1, (draft) => {
-      for (const [, value] of draft.values) value.x = 2
+it.each(
+  ([`Map`, `Set`] as const).flatMap((kind) =>
+    protocols.map((protocol) => ({ kind, protocol })),
+  ),
+)(
+  `$kind $protocol writes match native values before and after persistence`,
+  async ({ kind, protocol }) => {
+    const make = () =>
+      kind === `Map` ? new Map([[`a`, { x: 1 }]]) : new Set([{ x: 1 }])
+    const expected = make()
+    visit(expected, protocol, (value) => {
+      value.x = 2
     })
-    expect(tx.mutations[0]?.changes.values).toEqual(new Map([[`a`, { x: 2 }]]))
-    expect(collection.get(1)?.values.get(`a`)?.x).toBe(2)
-  } finally {
-    await collection.cleanup()
-  }
-})
+    const collection = createCollection<{
+      id: number
+      values: ReturnType<typeof make>
+    }>({
+      getKey: (row) => row.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 1, values: make() },
+          })
+          commit()
+          markReady()
+        },
+      },
+      onUpdate: async () => {},
+    })
+    try {
+      const tx = collection.update(1, (draft) => {
+        visit(draft.values, protocol, (value) => {
+          value.x = 2
+        })
+      })
+      expectPublishedMembers(
+        tx.mutations[0]!.changes.values as ReturnType<typeof make>,
+        expected,
+      )
+      expectPublishedMembers(collection.get(1)!.values, expected)
+      await tx.isPersisted.promise
+      expectPublishedMembers(collection.get(1)!.values, expected)
+    } finally {
+      await collection.cleanup()
+    }
+  },
+)
 
 it.each([`Map`, `Set`] as const)(
   `%s accepts raw edits inside the callback but detaches committed values afterward`,
@@ -537,7 +591,7 @@ it.each([`Map`, `Set`] as const)(
 )
 
 it.each([`entries`, `values`] as const)(
-  `taking one Map %s value does not scan every entry`,
+  `taking one Map %s value advances one entries step after draft construction`,
   (protocol) => {
     const { proxy } = createChangeProxy({
       values: new Map(Array.from({ length: 1000 }, (_, i) => [i, i])),

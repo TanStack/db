@@ -23,6 +23,9 @@ const cells = boundaries.flatMap((boundary) =>
     ),
   ),
 )
+const orderedPairCells = cells
+  .filter(({ initial }) => initial === `populated`)
+  .map((cell) => ({ ...cell, initial: `ordered-pair` as const }))
 const consumers = [`expression`, `functional`] as const
 const valueShapes = [`number`, `null`, `date`, `dropped-record`] as const
 const valueCells = forms.flatMap((form) =>
@@ -90,10 +93,12 @@ function readChildren(value: unknown, form: (typeof forms)[number]): ChildView {
 
 // Keep only the selected public fields in row comparisons. Callback-time shape
 // and facade readiness have their own assertions rather than being normalized away.
+function selectedRows(rows: ReadonlyArray<Child>) {
+  return rows.map(({ id, parentGroup, value }) => ({ id, parentGroup, value }))
+}
+
 function publicRows(rows: ReadonlyArray<Child>) {
-  return rows
-    .map(({ id, parentGroup, value }) => ({ id, parentGroup, value }))
-    .sort((left, right) => left.id - right.id)
+  return selectedRows(rows).sort((left, right) => left.id - right.id)
 }
 
 const collectionInputError = `fn.select() cannot consume Collection-valued includes`
@@ -455,6 +460,10 @@ describe(`functional projection output compatibility`, () => {
         number,
         (keys: Array<number>) => Array<number | string>
       >()
+      const retainedIndexReaders = new Map<
+        number,
+        (keys: Array<number>) => Array<number | string>
+      >()
       const query = createLiveQueryCollection((q) =>
         q
           .from({
@@ -477,6 +486,14 @@ describe(`functional projection output compatibility`, () => {
         const view = row.children
         const expectedKeys = [row.groupId * 10, row.groupId * 10 + 1]
         const createIndex = view.createIndex.bind(view)
+        if (surface === `index`) {
+          const retainedIndex = createIndex((child) => child.id, {
+            indexType: BasicIndex,
+          })
+          retainedIndexReaders.set(row.groupId, (keys) =>
+            keys.flatMap((key) => [...retainedIndex.lookup(`eq`, key)]),
+          )
+        }
         const read = (keys: Array<number>) => {
           let ids: Array<number | string>
           switch (surface) {
@@ -563,6 +580,16 @@ describe(`functional projection output compatibility`, () => {
               ? [...ids].reverse()
               : ids
         expect.soft(actual, phase).toEqual(result)
+        if (surface === `index`) {
+          const readRetained = retainedIndexReaders.get(group)
+          expect(readRetained, `${phase}: retained index reader`).toBeDefined()
+          expect
+            .soft(
+              readRetained!([group * 10, group * 10 + 1, group * 10 + 2]),
+              `${phase}: retained index`,
+            )
+            .toEqual(result)
+        }
       }
       try {
         await query.preload()
@@ -732,8 +759,11 @@ describe(`functional projection output compatibility`, () => {
           expect(held.toArray.map((child) => child.id)).toEqual([10])
         } else if (surface === `index`) {
           expect(index.lookup(`eq`, 10)).toEqual(new Set([10]))
+          expect(index.lookup(`eq`, 20)).toEqual(new Set())
         } else {
           expect(observed).toEqual([10])
+          if (surface === `captured-method`)
+            expect(capturedGet(20)).toBeUndefined()
         }
       } finally {
         await query.cleanup()
@@ -854,7 +884,8 @@ describe(`functional projection output compatibility`, () => {
               const view = readsInclude
                 ? readChildren(row.children, form)
                 : undefined
-              if (view) observed.push({ ...view, rows: publicRows(view.rows) })
+              if (view)
+                observed.push({ ...view, rows: selectedRows(view.rows) })
               return {
                 id: operator === `distinct` ? 0 : row.id,
                 score: view
@@ -1079,8 +1110,8 @@ describe(`functional projection output compatibility`, () => {
         calls.push({
           phase,
           stage,
-          primary: { ...view, rows: publicRows(view.rows) },
-          sibling: second && { ...second, rows: publicRows(second.rows) },
+          primary: { ...view, rows: selectedRows(view.rows) },
+          sibling: second && { ...second, rows: selectedRows(second.rows) },
         })
         return (
           view.rows.reduce((sum, row) => sum + row.value, 0) +
@@ -1316,6 +1347,7 @@ describe(`functional include projection boundary grammar`, () => {
     )
     try {
       await live.preload()
+      expect(live.toArray).toHaveLength(1)
       const row = live.toArray[0]
       expect(row?.id).toBe(1)
       expect(row?.kind).toBe(`plain`)
@@ -1331,9 +1363,15 @@ describe(`functional include projection boundary grammar`, () => {
   it(`covers every declared boundary product without duplicate cells`, () => {
     expect(cells).toHaveLength(54)
     expect(new Set(cells.map((cell) => JSON.stringify(cell))).size).toBe(54)
+    expect(orderedPairCells).toHaveLength(27)
+    expect(
+      new Set(
+        [...cells, ...orderedPairCells].map((cell) => JSON.stringify(cell)),
+      ).size,
+    ).toBe(81)
   })
 
-  it.each(cells)(
+  it.each([...cells, ...orderedPairCells])(
     `$boundary / $form / $output / $initial`,
     async ({ boundary, form, output, initial }) => {
       const parents = createControlledCollection(`projection-parents`, [
@@ -1343,10 +1381,14 @@ describe(`functional include projection boundary grammar`, () => {
         { id: 2 },
       ])
       const initialChildren: Array<Child> = [
-        ...(initial === `populated`
-          ? [{ id: 10, parentGroup: 1, value: 3 }]
-          : []),
+        ...(initial !== `empty` ? [{ id: 10, parentGroup: 1, value: 3 }] : []),
         { id: 20, parentGroup: 2, value: 5 },
+        ...(initial === `ordered-pair`
+          ? [
+              { id: 5, parentGroup: 1, value: 9 },
+              { id: 15, parentGroup: 2, value: 11 },
+            ]
+          : []),
       ]
       const children = createControlledCollection(
         `projection-children`,
@@ -1369,7 +1411,7 @@ describe(`functional include projection boundary grammar`, () => {
           phase,
           kind: row.kind,
           child,
-          view: { ...view, rows: publicRows(view.rows) },
+          view: { ...view, rows: selectedRows(view.rows) },
         })
         const total = view.rows.reduce((sum, item) => sum + item.value, 0)
         return output === `opaque-root`
@@ -1441,6 +1483,17 @@ describe(`functional include projection boundary grammar`, () => {
       const live = buildQuery()
       let facade: unknown
       const check = () => {
+        expect
+          .soft(
+            live.toArray
+              .map(({ id, kind }) => ({ id, kind }))
+              .sort((left, right) => left.id - right.id),
+            `${phase}: complete public roots`,
+          )
+          .toEqual([
+            { id: 1, kind: `included` },
+            ...(boundary === `union` ? [{ id: 2, kind: `absent` }] : []),
+          ])
         const row: (Input & { total: number }) | undefined = live.toArray.find(
           (item) => item.kind === `included`,
         )
@@ -1452,7 +1505,7 @@ describe(`functional include projection boundary grammar`, () => {
         const view = readChildren(row.children, form)
         expect.soft(view.valid, `${phase}: public include form`).toBe(true)
         expect
-          .soft(publicRows(view.rows), `${phase}: public children`)
+          .soft(selectedRows(view.rows), `${phase}: public children`)
           .toEqual(expected)
         if (form === `collection`) {
           expect.soft(view.ready, `${phase}: public facade ready`).toBe(true)

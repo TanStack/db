@@ -13,7 +13,13 @@ import {
 } from '../oracle-config.js'
 import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
 
-type Row = { id: number; rank: number; version: number }
+type Row = {
+  id: number
+  rank: number | null
+  secondary: number | null
+  version: number
+}
+type OrderTerm = { direction: `asc` | `desc`; nulls: `first` | `last` }
 type Route = `page` | `prefix` | `boundary` | `full-source`
 type Scenario = {
   route: Route
@@ -24,6 +30,21 @@ type Scenario = {
   barrier: `initial` | `replay`
   rankOffset?: number
   rankStep?: number
+  nullable?: { primary: OrderTerm; secondary: OrderTerm }
+  repair?: boolean
+}
+
+function compareNullable(
+  left: unknown,
+  right: unknown,
+  term: OrderTerm,
+): number {
+  if (left === right) return 0
+  if (left === null) return term.nulls === `first` ? -1 : 1
+  if (right === null) return term.nulls === `first` ? 1 : -1
+  if (typeof left !== `number` || typeof right !== `number`)
+    throw new Error(`numeric/null palette only`)
+  return (left < right ? -1 : 1) * (term.direction === `asc` ? 1 : -1)
 }
 
 const routes: ReadonlyArray<Route> = [
@@ -33,7 +54,10 @@ const routes: ReadonlyArray<Route> = [
   `full-source`,
 ]
 
-async function observeHistory(scenario: Scenario) {
+async function observeHistory(
+  scenario: Scenario,
+  fault?: `secondary-order` | `null-placement`,
+) {
   const mismatches: Array<{ law: string; actual: unknown; expected: unknown }> =
     []
   const check = (law: string, actual: unknown, expected: unknown) => {
@@ -41,15 +65,41 @@ async function observeHistory(scenario: Scenario) {
       mismatches.push({ law, actual, expected })
   }
   type Sync = Parameters<SyncConfig<Row, number>[`sync`]>[0]
-  const truth: Array<Row> = [1, 2, 3, 4, 5].map((id) => ({
+  const finiteValue = (value: number | null) =>
+    value === null
+      ? null
+      : (scenario.rankOffset ?? 0) + (scenario.rankStep ?? 1) * value
+  const truth: Array<Row> = (
+    scenario.nullable ? [1, 2, 3, 4, 5, 6, 7, 8, 9] : [1, 2, 3, 4, 5]
+  ).map((id) => ({
     id,
     version: 1,
-    rank:
-      (scenario.rankOffset ?? 0) +
-      (scenario.rankStep ?? 1) *
-        (scenario.route === `boundary` && id === 2 ? 1 : id),
+    secondary: scenario.nullable
+      ? finiteValue([null, 2, -2][(id - 1) % 3]!)
+      : 0,
+    rank: scenario.nullable
+      ? finiteValue([null, -2, 2][Math.floor((id - 1) / 3)]!)
+      : (scenario.rankOffset ?? 0) +
+        (scenario.rankStep ?? 1) *
+          (scenario.route === `boundary` && id === 2 ? 1 : id),
   }))
-  const referenceWindow = (limit: number) => truth.slice(0, limit)
+  const primary =
+    scenario.nullable?.primary ??
+    ({ direction: `asc`, nulls: `first` } as const)
+  const secondary =
+    scenario.nullable?.secondary ??
+    ({ direction: `asc`, nulls: `first` } as const)
+  const referenceWindow = (limit: number) =>
+    [...truth]
+      .sort(
+        (a, b) =>
+          compareNullable(a.rank, b.rank, primary) ||
+          (scenario.nullable
+            ? compareNullable(a.secondary, b.secondary, secondary)
+            : 0) ||
+          a.id - b.id,
+      )
+      .slice(0, limit)
   const gate = createDeferred<void>()
   const failure =
     scenario.outcome === `abort-error`
@@ -74,6 +124,7 @@ async function observeHistory(scenario: Scenario) {
   let targetWrites = 0
   let appliedBeforeSettlement = false
   let replayStarted = false
+  let repaired = false
   let allowTarget = scenario.barrier === `initial`
   const source = createCollection<Row, number>({
     id: `ordered-history-source-${JSON.stringify(scenario)}`,
@@ -105,6 +156,18 @@ async function observeHistory(scenario: Scenario) {
                     row,
                   ) === true,
               )
+            if (options.orderBy)
+              rows.sort((a, b) => {
+                for (const term of options.orderBy!) {
+                  const compared = compareNullable(
+                    evaluateReferenceExpression(term.expression, a),
+                    evaluateReferenceExpression(term.expression, b),
+                    term.compareOptions,
+                  )
+                  if (compared) return compared
+                }
+                return a.id - b.id
+              })
             const offset = options.cursor ? 0 : (options.offset ?? 0)
             rows = rows.slice(
               offset,
@@ -169,17 +232,41 @@ async function observeHistory(scenario: Scenario) {
   })
   const live = createLiveQueryCollection((q) => {
     const from = q.from({ row: source })
-    return (scenario.route === `full-source` ? from.distinct() : from)
-      .orderBy(({ row }) => row.rank)
-      .limit(1)
-      .select(({ row }) => ({
-        id: row.id,
-        rank: row.rank,
-        version: row.version,
-      }))
+    const ordered = (
+      scenario.route === `full-source` && !scenario.nullable
+        ? from.distinct()
+        : from
+    ).orderBy(
+      ({ row }) => row.rank,
+      fault === `null-placement`
+        ? { ...primary, nulls: primary.nulls === `first` ? `last` : `first` }
+        : primary,
+    )
+    const query = scenario.nullable
+      ? ordered.orderBy(
+          ({ row }) => row.secondary,
+          fault === `secondary-order`
+            ? {
+                ...secondary,
+                direction: secondary.direction === `asc` ? `desc` : `asc`,
+              }
+            : secondary,
+        )
+      : ordered
+    return query.limit(1).select(({ row }) => ({
+      id: row.id,
+      rank: row.rank,
+      secondary: row.secondary,
+      version: row.version,
+    }))
   })
   const read = () =>
-    live.toArray.map(({ id, rank, version }) => ({ id, rank, version }))
+    live.toArray.map(({ id, rank, secondary: secondaryValue, version }) => ({
+      id,
+      rank,
+      secondary: secondaryValue,
+      version,
+    }))
   const subscription = live.subscribeChanges(
     (batch) => {
       // subscribeChanges also sends an empty initial-snapshot completion callback.
@@ -189,6 +276,7 @@ async function observeHistory(scenario: Scenario) {
         const value = {
           id: change.value.id,
           rank: change.value.rank,
+          secondary: change.value.secondary,
           version: change.value.version,
         }
         if (change.type === `delete`) {
@@ -201,6 +289,7 @@ async function observeHistory(scenario: Scenario) {
               change.previousValue && {
                 id: change.previousValue.id,
                 rank: change.previousValue.rank,
+                secondary: change.previousValue.secondary,
                 version: change.previousValue.version,
               },
               deliveredRows.get(change.key),
@@ -342,9 +431,13 @@ async function observeHistory(scenario: Scenario) {
         publications.length,
         callbacksBeforeSettlement,
       )
-      truth[0] = { ...truth[0]!, rank: truth[0]!.rank - 1 }
+      const first = referenceWindow(1)[0]!
+      const firstIndex = truth.findIndex((row) => row.id === first.id)
+      truth[firstIndex] = scenario.nullable
+        ? { ...first, version: first.version + 1 }
+        : { ...first, rank: first.rank! - 1 }
       activeSync.begin()
-      activeSync.write({ type: `update`, value: truth[0] })
+      activeSync.write({ type: `update`, value: truth[firstIndex] })
       activeSync.commit()
       for (let turn = 0; turn < 4; turn++) await flushPromises()
       check(`restart-reactivity`, read(), referenceWindow(1))
@@ -417,6 +510,43 @@ async function observeHistory(scenario: Scenario) {
         limit: 1,
       })
       check(`failure-publication`, publications, [])
+      if (scenario.repair) {
+        const beforeRetry = requests.length
+        // A failed source replacement is not an ordered-request failure.
+        // Window work cannot reopen it even when the source itself is ready.
+        await expect(
+          live.utils.setWindow({ offset: 0, limit: 3 }),
+        ).rejects.toBe(failure)
+        expect(requests).toHaveLength(beforeRetry)
+        expect(read()).toEqual(baseline)
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
+        expect(live.utils.lastSubsetError).toBe(failure)
+        expect(source.status).toBe(`ready`)
+        activeInstalled.clear()
+        activeSync.begin()
+        activeSync.truncate()
+        const repairReceipt = activeSync.commit()
+        if (repairReceipt !== true) await repairReceipt
+        for (let turn = 0; turn < 8; turn++) await flushPromises()
+        await live.utils.setWindow({ offset: 0, limit: 3 })
+        const retry = requests.slice(beforeRetry)
+        check(
+          `repair-authoritative-request`,
+          retry.some(
+            ({ options }) =>
+              options.limit === undefined &&
+              options.cursor === undefined &&
+              options.where === undefined,
+          ),
+          true,
+        )
+        check(`repair-window`, read(), referenceWindow(3))
+        check(`repair-window-options`, live.utils.getWindow(), {
+          offset: 0,
+          limit: 3,
+        })
+        repaired = true
+      }
     }
   } finally {
     allowTarget = false
@@ -447,6 +577,20 @@ async function observeHistory(scenario: Scenario) {
         ? `full`
         : `finite`,
     generation,
+    repaired,
+    orderedRequests: requests.filter(
+      ({ options }) => options.orderBy !== undefined,
+    ).length,
+    tieRequests: requests.filter(
+      ({ options, ids }) =>
+        options.orderBy === undefined &&
+        options.where !== undefined &&
+        ids.length > 1,
+    ).length,
+    fullSourceRequests: requests.filter(
+      ({ options }) =>
+        options.limit === undefined && options.where === undefined,
+    ).length,
     coordinates: [
       route,
       appliedBeforeSettlement ? `before-settlement` : `after-success`,
@@ -459,8 +603,11 @@ async function observeHistory(scenario: Scenario) {
   }
 }
 
-async function assertHistory(scenario: Scenario) {
-  const result = await observeHistory(scenario)
+async function assertHistory(
+  scenario: Scenario,
+  fault?: `secondary-order` | `null-placement`,
+) {
+  const result = await observeHistory(scenario, fault)
   expect(result.route).toBe(scenario.route)
   expect(result.authority).toBe(
     scenario.route === `full-source` ? `full` : `finite`,
@@ -539,4 +686,125 @@ describe(`ordered lifecycle product`, () => {
     },
     Math.max(10000, multiplier * 1500),
   )
+})
+
+describe(`nullable multi-term lifecycle product`, () => {
+  const cells: Array<Scenario> = ([`first`, `last`] as const)
+    .flatMap((primaryNulls) =>
+      ([`first`, `last`] as const).flatMap((secondaryNulls) =>
+        ([`prefix`, `boundary`] as const).flatMap((route) =>
+          ([`resolve`, `repair`, `restart`] as const).map(
+            (mode) =>
+              ({
+                nullable: {
+                  primary: { direction: `asc`, nulls: primaryNulls },
+                  secondary: { direction: `desc`, nulls: secondaryNulls },
+                },
+                route:
+                  route === `boundary` && primaryNulls === `first`
+                    ? `full-source`
+                    : route,
+                delivery: `before-settlement`,
+                window: `widen`,
+                outcome: mode === `repair` ? `reject` : `resolve`,
+                session: mode === `restart` ? `restart` : `retain`,
+                barrier: mode === `repair` ? `replay` : `initial`,
+                repair: mode === `repair`,
+              }) as const,
+          ),
+        ),
+      ),
+    )
+    // Null-leading completion acquires full source and retires its prefix.
+    // Replay can hold that full demand, but cannot target the retired prefix.
+    .filter(
+      (scenario) =>
+        !(
+          scenario.nullable.primary.nulls === `first` &&
+          scenario.route === `prefix` &&
+          scenario.repair
+        ),
+    )
+  it.each(cells)(
+    `observes nullable tie and lifecycle coordinates: %j`,
+    async (scenario) => {
+      const result = await assertHistory(scenario)
+      expect(result.orderedRequests).toBeGreaterThan(0)
+      expect(
+        scenario.nullable!.primary.nulls === `first`
+          ? result.fullSourceRequests
+          : result.tieRequests,
+      ).toBeGreaterThan(0)
+      expect(result.repaired).toBe(scenario.repair)
+    },
+  )
+  it.each([`secondary-order`, `null-placement`] as const)(
+    `rejects a wrong %s through live loader output`,
+    async (fault) => {
+      const scenario = cells[0]!
+      await assertHistory(scenario)
+      await expect(assertHistory(scenario, fault)).rejects.toMatchObject({
+        name: `AssertionError`,
+      })
+    },
+  )
+  const arbitrary = fc
+    .record({
+      scenario: fc.constantFrom(...cells),
+      reverse: fc.boolean(),
+      rankOffset: fc.integer({ min: -20, max: 20 }),
+      rankStep: fc.integer({ min: 1, max: 5 }),
+    })
+    .map(
+      ({ scenario, reverse, rankOffset, rankStep }): Scenario => ({
+        ...scenario,
+        rankOffset,
+        rankStep,
+        nullable: {
+          primary: {
+            ...scenario.nullable!.primary,
+            direction: reverse ? `desc` : `asc`,
+          },
+          secondary: {
+            ...scenario.nullable!.secondary,
+            direction: reverse ? `asc` : `desc`,
+          },
+        },
+      }),
+    )
+  it(`generates the nullable value and lifecycle dimensions`, () => {
+    const sample = fc.sample(arbitrary, { seed: 93472, numRuns: 100 })
+    expect(new Set(sample.map((scenario) => scenario.route))).toEqual(
+      new Set([`prefix`, `boundary`, `full-source`]),
+    )
+    expect(
+      new Set(sample.map((scenario) => scenario.nullable!.primary.nulls)),
+    ).toEqual(new Set([`first`, `last`]))
+    expect(
+      new Set(sample.map((scenario) => scenario.nullable!.secondary.nulls)),
+    ).toEqual(new Set([`first`, `last`]))
+    expect(
+      new Set(sample.map((scenario) => scenario.nullable!.primary.direction)),
+    ).toEqual(new Set([`asc`, `desc`]))
+    expect(sample.some((scenario) => scenario.repair)).toBe(true)
+    expect(sample.some((scenario) => scenario.session === `restart`)).toBe(true)
+  })
+  const { multiplier, ...replay } = readOracleRunConfig()
+  fcTest.prop(
+    [arbitrary],
+    oracleRandomParameters(
+      20 * multiplier,
+      replay,
+      `ordered-work.nullable-lifecycle`,
+    ),
+  )(`matches nullable multi-term lifecycle histories`, async (scenario) => {
+    const result = await assertHistory(scenario)
+    expect(result.orderedRequests).toBeGreaterThan(0)
+    expect(result.repaired).toBe(scenario.repair)
+    expect(
+      scenario.nullable!.primary.nulls === `first`
+        ? result.fullSourceRequests
+        : result.tieRequests,
+    ).toBeGreaterThan(0)
+  })
 })

@@ -1,7 +1,12 @@
 import { DifferenceStreamWriter, UnaryOperator } from '../graph.js'
 import { StreamBuilder } from '../d2.js'
 import { MultiSet } from '../multiset.js'
-import { TopKState, handleMoveIn, handleMoveOut } from './topKState.js'
+import {
+  TopKState,
+  handleMoveIn,
+  handleMoveOut,
+  topKBatch,
+} from './topKState.js'
 import { TopKArray, createKeyedComparator } from './topKArray.js'
 import type { IndexedValue, TopK } from './topKArray.js'
 import type { DifferenceStreamReader } from '../graph.js'
@@ -125,11 +130,10 @@ export class GroupedTopKWithFractionalIndexOperator<
 
   run(): void {
     const result: Array<[[K, IndexedValue<T>], number]> = []
-    for (const message of this.inputMessages()) {
-      for (const [item, multiplicity] of message.getInner()) {
-        const [key, value] = item
-        this.#processElement(key, value, multiplicity, result)
-      }
+    for (const [[key, value], multiplicity] of topKBatch(
+      this.inputMessages(),
+    )) {
+      this.#processElement(key, value, multiplicity, result)
     }
 
     if (result.length > 0) {

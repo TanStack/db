@@ -6,6 +6,21 @@ import type {
 } from '../types'
 import type { Collection, PendingMutation } from '@tanstack/db'
 
+function setDataProperty(
+  object: Record<string, unknown>,
+  key: string,
+  value: unknown,
+): void {
+  if (key !== `__proto__`) object[key] = value
+  else
+    Object.defineProperty(object, key, {
+      value,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    })
+}
+
 export class TransactionSerializer {
   private collections: Record<string, Collection<any, any, any, any, any>>
   private collectionIdToKey: Map<string, string>
@@ -24,6 +39,7 @@ export class TransactionSerializer {
   serialize(transaction: OfflineTransaction): string {
     const serialized: SerializedOfflineTransaction = {
       ...transaction,
+      valueEncoding: 2,
       createdAt: transaction.createdAt.toISOString(),
       mutations: transaction.mutations.map((mutation) =>
         this.serializeMutation(mutation),
@@ -33,9 +49,19 @@ export class TransactionSerializer {
   }
 
   deserialize(data: string): OfflineTransaction {
-    // Parse without a reviver - let deserializeValue handle dates in mutation data
-    // using the { __type: 'Date' } marker system
-    const parsed: SerializedOfflineTransaction = JSON.parse(data)
+    // Old records retain their Date-marker meaning. New records also escape
+    // marker-shaped user objects; the encoding tag is not application metadata.
+    const {
+      valueEncoding,
+      ...parsed
+    }: Omit<SerializedOfflineTransaction, `valueEncoding`> & {
+      valueEncoding?: unknown
+    } = JSON.parse(data)
+    if (valueEncoding !== undefined && valueEncoding !== 2) {
+      throw new Error(
+        `Unsupported transaction value encoding: ${valueEncoding}`,
+      )
+    }
 
     const createdAt = new Date(parsed.createdAt)
     if (isNaN(createdAt.getTime())) {
@@ -48,7 +74,7 @@ export class TransactionSerializer {
       ...parsed,
       createdAt,
       mutations: parsed.mutations.map((mutationData) =>
-        this.deserializeMutation(mutationData),
+        this.deserializeMutation(mutationData, valueEncoding === 2),
       ),
     }
   }
@@ -71,13 +97,16 @@ export class TransactionSerializer {
     }
   }
 
-  private deserializeMutation(data: SerializedMutation): PendingMutation {
+  private deserializeMutation(
+    data: SerializedMutation,
+    escapedObjects: boolean,
+  ): PendingMutation {
     const collection = this.collections[data.collectionId]
     if (!collection) {
       throw new Error(`Collection with id ${data.collectionId} not found`)
     }
 
-    const modified = this.deserializeValue(data.modified)
+    const modified = this.deserializeValue(data.modified, escapedObjects)
 
     // Extract the key from the modified data using the collection's getKey function
     // This is needed for optimistic state restoration to work correctly
@@ -89,8 +118,8 @@ export class TransactionSerializer {
       globalKey: data.globalKey,
       type: data.type as any,
       modified,
-      original: this.deserializeValue(data.original),
-      changes: this.deserializeValue(data.changes) ?? {},
+      original: this.deserializeValue(data.original, escapedObjects),
+      changes: this.deserializeValue(data.changes, escapedObjects) ?? {},
       collection,
       // These fields would need to be reconstructed by the executor
       mutationId: ``, // Will be regenerated
@@ -116,16 +145,19 @@ export class TransactionSerializer {
       const result: any = Array.isArray(value) ? [] : {}
       for (const key in value) {
         if (Object.prototype.hasOwnProperty.call(value, key)) {
-          result[key] = this.serializeValue(value[key])
+          setDataProperty(result, key, this.serializeValue(value[key]))
         }
       }
-      return result
+      return !Array.isArray(value) &&
+        Object.prototype.hasOwnProperty.call(value, `__type`)
+        ? { __type: `Object`, value: result }
+        : result
     }
 
     return value
   }
 
-  private deserializeValue(value: any): any {
+  private deserializeValue(value: any, escapedObjects: boolean): any {
     if (value === null || value === undefined) {
       return value
     }
@@ -144,10 +176,25 @@ export class TransactionSerializer {
     }
 
     if (typeof value === `object`) {
+      // Unwrap once, then decode only the fields: the object's own __type is data.
+      if (escapedObjects && value.__type === `Object`) {
+        if (
+          value.value === null ||
+          typeof value.value !== `object` ||
+          Array.isArray(value.value)
+        ) {
+          throw new Error(`Corrupted Object marker: expected an object value`)
+        }
+        value = value.value
+      }
       const result: any = Array.isArray(value) ? [] : {}
       for (const key in value) {
         if (Object.prototype.hasOwnProperty.call(value, key)) {
-          result[key] = this.deserializeValue(value[key])
+          setDataProperty(
+            result,
+            key,
+            this.deserializeValue(value[key], escapedObjects),
+          )
         }
       }
       return result

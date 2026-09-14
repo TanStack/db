@@ -64,6 +64,19 @@ function createDeferred<T>() {
   return { promise, resolve, reject }
 }
 
+function observeLifecycleRows(rows: Iterable<TestItem>) {
+  return Array.from(rows, ({ id, name }) => ({ id, name })).sort((a, b) =>
+    a.id.localeCompare(b.id),
+  )
+}
+
+function expectLifecycleRows(
+  observed: Array<{ id: string; name: string }>,
+  expected: Array<{ id: string; name: string }>,
+) {
+  expect(observed).toEqual(expected)
+}
+
 function createInMemorySyncMetadataApi<
   TKey extends string | number = string | number,
   TItem extends object = Record<string, unknown>,
@@ -6318,39 +6331,106 @@ describe(`QueryCollection`, () => {
             .select(({ item }) => ({ id: item.id, name: item.name })),
       })
 
-      // Load both queries
-      await query1.preload()
-      await query2.preload()
+      const initial = [
+        { id: `1`, name: `Item 1` },
+        { id: `2`, name: `Item 2` },
+        { id: `3`, name: `Item 3` },
+      ]
+      const observations: Array<ReturnType<typeof observeLifecycleRows>> = []
+      try {
+        // Load both queries
+        await query1.preload()
+        await query2.preload()
 
-      // Wait for data to load
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(3)
-      })
-      expect(queryFn).toHaveBeenCalledTimes(1) // Deduplicated
+        // Wait for data to load
+        await vi.waitFor(() => {
+          expect(collection.size).toBe(3)
+        })
+        expect(queryFn).toHaveBeenCalledTimes(1) // Deduplicated
+        observations.push(observeLifecycleRows(query2.values()))
+        expectLifecycleRows(observations[0]!, initial)
 
-      // Cleanup query1
-      await query1.cleanup()
-      await flushPromises()
+        // Cleanup query1
+        await query1.cleanup()
+        await flushPromises()
 
-      // BUG: Without refcount increment on reuse, the observer is destroyed
-      // and query2 stops receiving updates. Collection data is also removed.
-      // EXPECTED: query2 should still work since it's using the same observer
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(3) // Should still have data for query2
-      })
+        // BUG: Without refcount increment on reuse, the observer is destroyed
+        // and query2 stops receiving updates. Collection data is also removed.
+        // EXPECTED: query2 should still work since it's using the same observer
+        await vi.waitFor(() => {
+          expect(collection.size).toBe(3) // Should still have data for query2
+        })
+        expectLifecycleRows(observeLifecycleRows(query2.values()), initial)
 
-      // Verify query2 still works by mutating data
-      await collection.insert({ id: `4`, name: `Item 4`, category: `A` })
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(4)
-        expect(collection.has(`4`)).toBe(true)
-      })
+        // Verify query2 still works by mutating data
+        const inserted = collection.insert({
+          id: `4`,
+          name: `Item 4`,
+          category: `A`,
+        })
+        await inserted.isPersisted.promise
+        await vi.waitFor(() => {
+          expect(collection.size).toBe(4)
+          expect(collection.has(`4`)).toBe(true)
+        })
+        expectLifecycleRows(observeLifecycleRows(query2.values()), [
+          ...initial,
+          { id: `4`, name: `Item 4` },
+        ])
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        queryFn.mockResolvedValue([
+          { id: `1`, name: `Provider changed`, category: `A` },
+          { id: `2`, name: `Item 2`, category: `A` },
+          { id: `3`, name: `Item 3`, category: `A` },
+          { id: `4`, name: `Provider accepted`, category: `A` },
+        ])
+        await collection.utils.refetch()
+        const refreshed = [
+          { id: `1`, name: `Provider changed` },
+          { id: `2`, name: `Item 2` },
+          { id: `3`, name: `Item 3` },
+          { id: `4`, name: `Provider accepted` },
+        ]
+        await vi.waitFor(() =>
+          expectLifecycleRows(observeLifecycleRows(query2.values()), refreshed),
+        )
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        expect(
+          Array.from(collection.values(), ({ id, name, category }) => ({
+            id,
+            name,
+            category,
+          })).sort((a, b) => a.id.localeCompare(b.id)),
+        ).toEqual(refreshed.map((row) => ({ ...row, category: `A` })))
+        const actual = observeLifecycleRows(query2.values())
+        expect(() =>
+          expectLifecycleRows(
+            actual.map((row, index) =>
+              index === 0 ? { ...row, id: `wrong-key` } : row,
+            ),
+            refreshed,
+          ),
+        ).toThrow()
+        expect(() =>
+          expectLifecycleRows(
+            actual.map((row, index) =>
+              index === 0 ? { ...row, name: `wrong-value` } : row,
+            ),
+            refreshed,
+          ),
+        ).toThrow()
+        expectLifecycleRows(observations[0]!, initial)
 
-      // Now cleanup query2
-      await query2.cleanup()
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(0) // NOW it should be cleaned up
-      })
+        // Now cleanup query2
+        await query2.cleanup()
+        await vi.waitFor(() => {
+          expect(collection.size).toBe(0) // NOW it should be cleaned up
+        })
+      } finally {
+        await query1.cleanup()
+        await query2.cleanup()
+        await collection.cleanup()
+      }
     })
 
     it(`should not let initial data satisfy persisted revalidation`, async () => {
@@ -7452,40 +7532,75 @@ describe(`QueryCollection`, () => {
         query: (q) => q.from({ item: collection }).select(({ item }) => item),
       })
 
-      await query1.preload()
+      let cleanupRemount: (() => Promise<void>) | undefined
+      try {
+        await query1.preload()
 
-      // Wait for initial data to load
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(2)
-      })
-      expect(queryFn).toHaveBeenCalledTimes(1)
+        // Wait for initial data to load
+        await vi.waitFor(() => {
+          expect(collection.size).toBe(2)
+        })
+        expect(queryFn).toHaveBeenCalledTimes(1)
 
-      // Unmount: cleanup the query, triggering subscriberCount -> 0
-      // This calls unsubscribeFromQueries() which destroys observers
-      await query1.cleanup()
-      await flushPromises()
+        // Unmount: cleanup the query, triggering subscriberCount -> 0
+        // This calls unsubscribeFromQueries() which destroys observers
+        await query1.cleanup()
+        await flushPromises()
 
-      // At this point, observer.destroy() was called but observer is still in state.observers
+        // At this point, observer.destroy() was called but observer is still in state.observers
 
-      // Remount quickly (before gcTime expires): cache should still be valid
-      const query2 = createLiveQueryCollection({
-        query: (q) => q.from({ item: collection }).select(({ item }) => item),
-      })
+        // Remount quickly (before gcTime expires): cache should still be valid
+        const query2 = createLiveQueryCollection({
+          query: (q) => q.from({ item: collection }).select(({ item }) => item),
+        })
+        cleanupRemount = () => query2.cleanup()
 
-      // BUG: subscribeToQueries() tries to subscribe to the destroyed observer
-      // QueryObserver.destroy() is terminal - reactivation isn't guaranteed
-      // This breaks cache processing on remount
+        // BUG: subscribeToQueries() tries to subscribe to the destroyed observer
+        // QueryObserver.destroy() is terminal - reactivation isn't guaranteed
+        // This breaks cache processing on remount
 
-      await query2.preload()
+        await query2.preload()
 
-      // EXPECTED: Should process cached data immediately without refetch
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(2)
-      })
-      expect(queryFn).toHaveBeenCalledTimes(1) // No refetch!
+        // EXPECTED: Should process cached data immediately without refetch
+        await vi.waitFor(() => {
+          expect(collection.size).toBe(2)
+        })
+        expect(queryFn).toHaveBeenCalledTimes(1) // No refetch!
+        const cached = observeLifecycleRows(query2.values())
+        expectLifecycleRows(cached, [
+          { id: `1`, name: `Item 1` },
+          { id: `2`, name: `Item 2` },
+        ])
+        queryFn.mockResolvedValue([
+          { id: `1`, name: `Refetched item 1` },
+          { id: `3`, name: `Refetched item 3` },
+        ])
+        await collection.utils.refetch()
+        const refreshed = [
+          { id: `1`, name: `Refetched item 1` },
+          { id: `3`, name: `Refetched item 3` },
+        ]
+        await vi.waitFor(() =>
+          expectLifecycleRows(observeLifecycleRows(query2.values()), refreshed),
+        )
+        expectLifecycleRows(
+          observeLifecycleRows(collection.values()),
+          refreshed,
+        )
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        expectLifecycleRows(cached, [
+          { id: `1`, name: `Item 1` },
+          { id: `2`, name: `Item 2` },
+        ])
 
-      // BUG SYMPTOM: If destroyed observer doesn't process cached results,
-      // collection will be empty or queryFn will be called again
+        // BUG SYMPTOM: If destroyed observer doesn't process cached results,
+        // collection will be empty or queryFn will be called again
+      } finally {
+        await query1.cleanup()
+        await cleanupRemount?.()
+        await collection.cleanup()
+        customQueryClient.clear()
+      }
     })
 
     it(`should not leak data when unsubscribing while load is in flight`, async () => {
@@ -7501,11 +7616,12 @@ describe(`QueryCollection`, () => {
       ]
 
       // Create a delayed queryFn that we can control
-      let resolveQuery: ((value: Array<TestItem>) => void) | undefined
-      const queryFnPromise = new Promise<Array<TestItem>>((resolve) => {
-        resolveQuery = resolve
+      const endpoint = createDeferred<Array<TestItem>>()
+      const entered = createDeferred<void>()
+      const queryFn = vi.fn(() => {
+        entered.resolve()
+        return endpoint.promise
       })
-      const queryFn = vi.fn().mockReturnValue(queryFnPromise)
 
       const customQueryClient = new QueryClient({
         defaultOptions: {
@@ -7537,32 +7653,56 @@ describe(`QueryCollection`, () => {
 
       // Start preload but don't await - this triggers the queryFn
       const preloadPromise = query1.preload()
-
-      // Wait a bit to ensure queryFn has been called
-      await flushPromises()
-      expect(queryFn).toHaveBeenCalledTimes(1)
-      expect(collection.size).toBe(0) // No data yet
-
-      // Unsubscribe while the query is still in flight (before queryFn resolves)
-      await query1.cleanup()
-      await flushPromises()
-
-      // Collection should be empty after cleanup
-      expect(collection.size).toBe(0)
-
-      // Now resolve the query - this is the "late-arriving data"
-      resolveQuery!(items)
-      await flushPromises()
-
-      // CRITICAL: After the late-arriving data is processed, the collection
-      // should still be empty. No rows should leak back in.
-      expect(collection.size).toBe(0)
-
-      // Clean up
+      const outcome = preloadPromise.then(
+        () => ({ status: `fulfilled` as const }),
+        (reason: unknown) => ({ status: `rejected` as const, reason }),
+      )
+      const events: Array<unknown> = []
+      const sourceSubscription = collection.subscribeChanges((changes) => {
+        events.push(structuredClone(changes))
+      })
       try {
-        await preloadPromise
-      } catch {
-        // Query was cancelled, this is expected
+        // The actual endpoint must have entered before retiring its caller.
+        await entered.promise
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(collection.size).toBe(0) // No data yet
+
+        // Unsubscribe while the query is still in flight (before queryFn resolves)
+        await query1.cleanup()
+        await flushPromises()
+
+        // Collection should be empty after cleanup
+        expect(collection.size).toBe(0)
+        const canceled = await outcome
+        expect(canceled.status).toBe(`rejected`)
+        if (canceled.status !== `rejected`)
+          throw new Error(`Expected canceled preload`)
+        expect(canceled.reason).toBeInstanceOf(Error)
+        expect(canceled.reason).toMatchObject({
+          name: `AbortError`,
+          message: `Collection preload was abandoned during cleanup`,
+        })
+        const retiredEvents = structuredClone(events)
+
+        // Now resolve the query - this is the "late-arriving data"
+        endpoint.resolve(items)
+        await endpoint.promise
+        await flushPromises()
+
+        // CRITICAL: After the late-arriving data is processed, the collection
+        // should still be empty. No rows should leak back in.
+        expect(collection.size).toBe(0)
+        expect(events).toEqual(retiredEvents)
+        expect(events.flat()).toEqual([])
+        expect(await outcome).toBe(canceled)
+      } finally {
+        endpoint.resolve(items)
+        await query1.cleanup()
+        await outcome
+        sourceSubscription.unsubscribe()
+        await collection.cleanup()
+        customQueryClient.clear()
+        await flushPromises()
       }
     })
   })
@@ -8465,9 +8605,6 @@ describe(`QueryCollection`, () => {
   })
 
   describe(`Stale cache consistency`, () => {
-    const sleep = (ms: number) =>
-      new Promise((resolve) => setTimeout(resolve, ms))
-
     it(`should not re-insert deleted item when a destroyed query is recreated with stale cache`, async () => {
       const customQueryClient = new QueryClient({
         defaultOptions: {
@@ -8489,7 +8626,19 @@ describe(`QueryCollection`, () => {
         hours_per_day: number
       }
 
-      const MUTATION_DELAY = 50
+      const creates = Array.from({ length: 2 }, () => ({
+        entered: createDeferred<void>(),
+        release: createDeferred<void>(),
+      }))
+      const deletion = {
+        entered: createDeferred<void>(),
+        release: createDeferred<void>(),
+      }
+      let createCount = 0
+      const outcomes: Array<Promise<unknown>> = []
+      const loadOutcomes: Array<Promise<unknown>> = []
+      const settled: Array<string> = []
+      const cleanups: Array<() => Promise<void>> = []
 
       let serverItems: Array<Assignment> = [
         { id: 1, task_id: 10, resource_id: 1, hours_per_day: 8 },
@@ -8501,14 +8650,20 @@ describe(`QueryCollection`, () => {
       const apiCreate = async (
         item: Omit<Assignment, 'id'>,
       ): Promise<Assignment> => {
-        await sleep(MUTATION_DELAY)
+        const gate = creates[createCount++]
+        if (!gate) throw new Error(`Unexpected additional create`)
+        expect(item).toEqual({ task_id: 10, resource_id: 4, hours_per_day: 8 })
+        gate.entered.resolve()
+        await gate.release.promise
         const created = { ...item, id: nextId++ }
         serverItems.push(created)
         return created
       }
 
       const apiDelete = async (id: number): Promise<void> => {
-        await sleep(MUTATION_DELAY)
+        expect(id).toBe(100)
+        deletion.entered.resolve()
+        await deletion.release.promise
         serverItems = serverItems.filter((a) => a.id !== id)
       }
 
@@ -8538,6 +8693,45 @@ describe(`QueryCollection`, () => {
         }),
       )
 
+      // Complete server population is deliberately returned for every demand:
+      // this fixture tests cache writeback/ownership, not backend filtering.
+      const world = new Map<number, Assignment>([
+        [1, { id: 1, task_id: 10, resource_id: 1, hours_per_day: 8 }],
+        [2, { id: 2, task_id: 10, resource_id: 2, hours_per_day: 4 }],
+        [3, { id: 3, task_id: 20, resource_id: 3, hours_per_day: 8 }],
+      ])
+      const projectRows = (rows: Iterable<Assignment>) =>
+        Array.from(rows, ({ id, task_id, resource_id, hours_per_day }) => ({
+          id,
+          task_id,
+          resource_id,
+          hours_per_day,
+        })).sort((a, b) => a.id - b.id)
+      const archive: Array<{
+        observed: {
+          source: Array<Assignment>
+          task: Array<Assignment>
+          project: Array<Assignment>
+          workload: Array<Assignment>
+        }
+        expected: Array<Assignment>
+        resources: Array<number>
+      }> = []
+      const expectCut = (cut: (typeof archive)[number]) => {
+        expect(cut.observed).toEqual({
+          source: projectRows(cut.expected),
+          task: projectRows(cut.expected.filter((row) => row.task_id === 10)),
+          project: projectRows(
+            cut.expected.filter((row) => row.task_id === 10),
+          ),
+          workload: projectRows(
+            cut.expected.filter((row) =>
+              cut.resources.includes(row.resource_id),
+            ),
+          ),
+        })
+      }
+
       // Always-active queries
       const taskQuery = createLiveQueryCollection({
         query: (q) =>
@@ -8545,128 +8739,246 @@ describe(`QueryCollection`, () => {
             .from({ assignment: collection })
             .where(({ assignment }) => inArray(assignment.task_id, [10])),
       })
-      await taskQuery.preload()
+      cleanups.push(() => taskQuery.cleanup())
+      try {
+        await taskQuery.preload()
 
-      const projectQuery = createLiveQueryCollection({
-        query: (q) =>
-          q
-            .from({ assignment: collection })
-            .where(({ assignment }) => eq(assignment.task_id, 10)),
-      })
-      await projectQuery.preload()
+        const projectQuery = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ assignment: collection })
+              .where(({ assignment }) => eq(assignment.task_id, 10)),
+        })
+        cleanups.push(() => projectQuery.cleanup())
+        await projectQuery.preload()
 
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(3)
-      })
+        await vi.waitFor(() => {
+          expect(collection.size).toBe(3)
+        })
 
-      // Step 1: Toggle ON → add item → toggle OFF
-      let workloadQuery = createLiveQueryCollection({
-        query: (q) =>
-          q
-            .from({ assignment: collection })
-            .where(({ assignment }) =>
-              inArray(assignment.resource_id, [1, 2, 3, 4]),
+        // Step 1: Toggle ON → add item → toggle OFF
+        let workloadQuery = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ assignment: collection })
+              .where(({ assignment }) =>
+                inArray(assignment.resource_id, [1, 2, 3, 4]),
+              ),
+        })
+        cleanups.push(() => workloadQuery.cleanup())
+        await workloadQuery.preload()
+
+        const capture = (resources: Array<number>) => {
+          const cut = {
+            observed: {
+              source: projectRows(collection.values()),
+              task: projectRows(taskQuery.values()),
+              project: projectRows(projectQuery.values()),
+              workload: projectRows(workloadQuery.values()),
+            },
+            expected: structuredClone(Array.from(world.values())),
+            resources: [...resources],
+          }
+          expectCut(cut)
+          archive.push(cut)
+        }
+        const startHeldWorkloadLoad = () => {
+          const promise = workloadQuery.preload()
+          const outcome: { status: `pending` | `fulfilled` | `rejected` } = {
+            status: `pending`,
+          }
+          loadOutcomes.push(
+            promise.then(
+              () => {
+                outcome.status = `fulfilled`
+                return `fulfilled`
+              },
+              (reason: unknown) => {
+                outcome.status = `rejected`
+                return { reason }
+              },
             ),
-      })
-      await workloadQuery.preload()
+          )
+          return { promise, outcome }
+        }
+        capture([1, 2, 3, 4])
 
-      collection.insert({
-        id: -1,
-        task_id: 10,
-        resource_id: 4,
-        hours_per_day: 8,
-      })
+        const firstInsert = collection.insert({
+          id: -1,
+          task_id: 10,
+          resource_id: 4,
+          hours_per_day: 8,
+        })
+        outcomes.push(
+          firstInsert.isPersisted.promise.then(
+            () => {
+              settled.push(`first insert`)
+              return `fulfilled`
+            },
+            (error: unknown) => error,
+          ),
+        )
+        await creates[0]!.entered.promise
 
-      workloadQuery.cleanup()
-      workloadQuery = createLiveQueryCollection({
-        query: (q) =>
-          q
-            .from({ assignment: collection })
-            .where(({ assignment }) =>
-              inArray(assignment.resource_id, [1, 2, 4]),
-            ),
-      })
-      await workloadQuery.preload()
-      await flushPromises()
-      await sleep(MUTATION_DELAY + 50)
-      await flushPromises()
+        await workloadQuery.cleanup()
+        workloadQuery = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ assignment: collection })
+              .where(({ assignment }) =>
+                inArray(assignment.resource_id, [1, 2, 4]),
+              ),
+        })
+        const firstLoad = startHeldWorkloadLoad()
+        await flushPromises()
+        expect(settled).toEqual([])
+        expect(firstLoad.outcome.status).toBe(`pending`)
+        creates[0]!.release.resolve()
+        await firstInsert.isPersisted.promise
+        await firstLoad.promise
+        await flushPromises()
+        world.set(100, {
+          id: 100,
+          task_id: 10,
+          resource_id: 4,
+          hours_per_day: 8,
+        })
+        capture([1, 2, 4])
 
-      const carolId = 100
-      expect(collection.has(carolId)).toBe(true)
+        const carolId = 100
+        expect(collection.has(carolId)).toBe(true)
 
-      // Step 2: Delete
-      collection.delete(carolId)
+        // Step 2: Delete
+        const firstDelete = collection.delete(carolId)
+        outcomes.push(
+          firstDelete.isPersisted.promise.then(
+            () => {
+              settled.push(`delete`)
+              return `fulfilled`
+            },
+            (error: unknown) => error,
+          ),
+        )
+        await deletion.entered.promise
 
-      workloadQuery.cleanup()
-      workloadQuery = createLiveQueryCollection({
-        query: (q) =>
-          q
-            .from({ assignment: collection })
-            .where(({ assignment }) => inArray(assignment.resource_id, [1, 2])),
-      })
-      await workloadQuery.preload()
-      await flushPromises()
-      await sleep(MUTATION_DELAY + 50)
-      await flushPromises()
+        await workloadQuery.cleanup()
+        workloadQuery = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ assignment: collection })
+              .where(({ assignment }) =>
+                inArray(assignment.resource_id, [1, 2]),
+              ),
+        })
+        const deleteLoad = startHeldWorkloadLoad()
+        await flushPromises()
+        expect(settled).toEqual([`first insert`])
+        expect(deleteLoad.outcome.status).toBe(`pending`)
+        deletion.release.resolve()
+        await firstDelete.isPersisted.promise
+        await deleteLoad.promise
+        await flushPromises()
+        world.delete(100)
+        capture([1, 2])
 
-      expect(collection.has(carolId)).toBe(false)
-      expect(collection._state.syncedData.has(carolId)).toBe(false)
+        expect(collection.has(carolId)).toBe(false)
+        expect(collection._state.syncedData.has(carolId)).toBe(false)
 
-      // Step 3: Toggle ON again (stale cache)
-      workloadQuery.cleanup()
-      workloadQuery = createLiveQueryCollection({
-        query: (q) =>
-          q
-            .from({ assignment: collection })
-            .where(({ assignment }) =>
-              inArray(assignment.resource_id, [1, 2, 3, 4]),
-            ),
-      })
-      await workloadQuery.preload()
-      await flushPromises()
+        // Step 3: Toggle ON again (stale cache)
+        await workloadQuery.cleanup()
+        workloadQuery = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ assignment: collection })
+              .where(({ assignment }) =>
+                inArray(assignment.resource_id, [1, 2, 3, 4]),
+              ),
+        })
+        await workloadQuery.preload()
+        await flushPromises()
+        capture([1, 2, 3, 4])
 
-      // Step 4: Re-add → toggle OFF
-      const t2 = collection.insert({
-        id: -2,
-        task_id: 10,
-        resource_id: 4,
-        hours_per_day: 8,
-      })
+        // Step 4: Re-add → toggle OFF
+        const t2 = collection.insert({
+          id: -2,
+          task_id: 10,
+          resource_id: 4,
+          hours_per_day: 8,
+        })
+        outcomes.push(
+          t2.isPersisted.promise.then(
+            () => {
+              settled.push(`second insert`)
+              return `fulfilled`
+            },
+            (error: unknown) => error,
+          ),
+        )
+        await creates[1]!.entered.promise
 
-      workloadQuery.cleanup()
-      workloadQuery = createLiveQueryCollection({
-        query: (q) =>
-          q
-            .from({ assignment: collection })
-            .where(({ assignment }) =>
-              inArray(assignment.resource_id, [1, 2, 4]),
-            ),
-      })
-      await workloadQuery.preload()
-      await flushPromises()
+        await workloadQuery.cleanup()
+        workloadQuery = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ assignment: collection })
+              .where(({ assignment }) =>
+                inArray(assignment.resource_id, [1, 2, 4]),
+              ),
+        })
+        const secondLoad = startHeldWorkloadLoad()
+        await flushPromises()
 
-      await t2.isPersisted.promise
-      await flushPromises()
-      await sleep(50)
+        expect(settled).toEqual([`first insert`, `delete`])
+        expect(secondLoad.outcome.status).toBe(`pending`)
+        creates[1]!.release.resolve()
+        await t2.isPersisted.promise
+        await secondLoad.promise
+        await flushPromises()
+        world.set(101, {
+          id: 101,
+          task_id: 10,
+          resource_id: 4,
+          hours_per_day: 8,
+        })
+        capture([1, 2, 4])
 
-      // The deleted item (id=100) must NOT be in syncedData
-      expect(collection._state.syncedData.has(carolId)).toBe(false)
+        // The deleted item (id=100) must NOT be in syncedData
+        expect(collection._state.syncedData.has(carolId)).toBe(false)
 
-      // The new item (id=101) should exist
-      expect(collection.has(101)).toBe(true)
+        // The new item (id=101) should exist
+        expect(collection.has(101)).toBe(true)
 
-      // Only one assignment with resource_id=4
-      const allItems = Array.from(collection.values())
-      const carolAssignments = allItems.filter((a) => a.resource_id === 4)
-      expect(carolAssignments).toHaveLength(1)
-      expect(carolAssignments[0]?.id).toBe(101)
+        // Only one assignment with resource_id=4
+        const allItems = Array.from(collection.values())
+        const carolAssignments = allItems.filter((a) => a.resource_id === 4)
+        expect(carolAssignments).toHaveLength(1)
+        expect(carolAssignments[0]?.id).toBe(101)
 
-      expect(collection.size).toBe(4)
-
-      workloadQuery.cleanup()
-      taskQuery.cleanup()
-      projectQuery.cleanup()
-      customQueryClient.clear()
+        expect(collection.size).toBe(4)
+        expect(createCount).toBe(2)
+        for (const cut of archive) expectCut(cut)
+        const corrupted = structuredClone(archive[archive.length - 1]!)
+        corrupted.observed.source[0]!.hours_per_day = 99
+        expect(() => expectCut(corrupted)).toThrow()
+        expect(await Promise.all(outcomes)).toEqual([
+          `fulfilled`,
+          `fulfilled`,
+          `fulfilled`,
+        ])
+        expect(await Promise.all(loadOutcomes)).toEqual([
+          `fulfilled`,
+          `fulfilled`,
+          `fulfilled`,
+        ])
+      } finally {
+        creates.forEach((gate) => gate.release.resolve())
+        deletion.release.resolve()
+        await Promise.all(outcomes)
+        await Promise.all(loadOutcomes)
+        for (const cleanup of cleanups.reverse()) await cleanup()
+        await collection.cleanup()
+        customQueryClient.clear()
+      }
     })
   })
 })

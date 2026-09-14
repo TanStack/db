@@ -1,3 +1,4 @@
+import { getPersistedConformanceTestNames } from '../../../../db-collection-e2e/src/fixtures/persisted-conformance-manifest'
 import { createNativeTauriSQLiteTestDatabase } from './native-tauri-sql-test-db'
 import { registerTauriNativeE2ESuite } from './register-tauri-e2e-suite'
 import {
@@ -11,6 +12,7 @@ const detailsElement = document.querySelector(`#details`) as HTMLPreElement
 const runtimeRunId =
   import.meta.env.VITE_TANSTACK_DB_TAURI_E2E_RUN_ID ?? Date.now().toString(36)
 const reportUrl = import.meta.env.VITE_TANSTACK_DB_TAURI_E2E_REPORT_URL
+const suiteName = `tauri persisted collection conformance`
 
 function setStatus(status: string, details?: unknown): void {
   statusElement.textContent = status
@@ -65,7 +67,7 @@ async function run(): Promise<void> {
 
     resetRegisteredTests()
     registerTauriNativeE2ESuite({
-      suiteName: `tauri persisted collection conformance`,
+      suiteName,
       database,
       runId: runtimeRunId,
     })
@@ -81,6 +83,7 @@ async function run(): Promise<void> {
     })
 
     const result = await runRegisteredTests({
+      expectedTestNames: getPersistedConformanceTestNames(suiteName),
       onTestStart: ({ index, name, total }) => {
         setStatus(`Running test ${String(index)}/${String(total)}`, {
           currentTest: name,
@@ -96,14 +99,14 @@ async function run(): Promise<void> {
       (entry) => entry.status === `failed`,
     )
     const summary = {
-      passed: result.passed,
-      failed: result.failed,
-      skipped: result.skipped,
-      total: result.total,
-      failures: failedResults.slice(0, 10),
+      ...result,
+      failures: failedResults,
+      runtime: `tauri`,
+      provider: `@tauri-apps/plugin-sql`,
+      runId: runtimeRunId,
     }
 
-    if (result.failed > 0) {
+    if (!result.complete || result.failed > 0) {
       await reportRunResult({
         status: `failed`,
         payload: summary,

@@ -57,6 +57,8 @@ export interface OfflineTransaction {
 
 // Serialized representation for storage
 export interface SerializedOfflineTransaction {
+  /** Absent for the original Date-marker format. */
+  valueEncoding?: 2
   id: string
   mutationFnName: string
   mutations: Array<SerializedMutation>
@@ -131,6 +133,7 @@ export interface LeaderElection {
 }
 
 export interface TransactionSignaler {
+  readonly isOfflineEnabled: boolean
   resolveTransaction: (transactionId: string, result: any) => void
   rejectTransaction: (transactionId: string, error: Error) => void
   registerRestorationTransaction: (

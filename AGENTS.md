@@ -360,6 +360,14 @@ const dependentBuilders = [] // Accurately describes dependents
 
 ## Testing Requirements
 
+### Required reading: oracle tests
+
+Before designing, changing, or reviewing an oracle or generated-history test,
+read [Writing reliable oracle tests](docs/contributing/oracle-tests.md).
+Use the [coverage map](docs/contributing/oracle-coverage.md) to find an existing
+owner and its limits before adding another model. The guide explains testing
+methods; it does not authorize new product behavior or retire existing laws.
+
 ### Always Add Tests for Bugs
 
 **Key Principle:** Reproduce a bug in a test before fixing it. Prefer extending

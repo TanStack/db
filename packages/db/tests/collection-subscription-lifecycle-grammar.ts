@@ -59,7 +59,6 @@ export type LifecycleAttempt = {
   demand: DemandName
   session: number
   replay: number
-  settled: boolean
   outcome?: `resolve` | `reject`
   gating: boolean
   inReplacement: boolean
@@ -195,7 +194,6 @@ function startAttempt(
     demand: owner.demand,
     session: model.session,
     replay: model.replay,
-    settled: model.acquisitionMode === `sync-success`,
     ...(model.acquisitionMode === `sync-success`
       ? { outcome: `resolve` as const }
       : {}),
@@ -245,7 +243,7 @@ function retireAttempt(
   const attempt = model.attempts[owner.attemptId]
   owner.attemptId = undefined
   if (!attempt) throw new Error(`model lost attempt`)
-  attempt.gating = options.keepPending === true && !attempt.settled
+  attempt.gating = options.keepPending === true && attempt.outcome === undefined
   attempt.reportable = false
   abortAttempt(model, attempt)
   if (options.unload) {
@@ -262,8 +260,7 @@ function retireAttempt(
 
 function abortAttempt(model: LifecycleModel, attempt: LifecycleAttempt): void {
   attempt.aborted = true
-  if (model.cancellation === `reject` && !attempt.settled) {
-    attempt.settled = true
+  if (model.cancellation === `reject` && attempt.outcome === undefined) {
     attempt.outcome = `reject`
     attempt.gating = false
   }
@@ -280,7 +277,7 @@ function selectAttempt(
   )
   const candidates = model.attempts.filter(
     (attempt) =>
-      !attempt.settled &&
+      attempt.outcome === undefined &&
       attempt.demand === command.demand &&
       (command.scope === `current`
         ? currentAttemptIds.has(attempt.id)
@@ -402,7 +399,6 @@ export function reduceLifecycle(
     model.reach.add(`settle-age:${command.age}`)
     model.reach.add(`settle-outcome:${command.outcome}`)
     model.reach.add(`settle:${command.scope}:${command.age}:${command.outcome}`)
-    attempt.settled = true
     attempt.outcome = command.outcome
     attempt.gating = false
     if (
@@ -430,7 +426,8 @@ export function reduceLifecycle(
     if (
       model.replay > 0 &&
       model.attempts.some(
-        ({ session, settled }) => session === model.session && !settled,
+        ({ session, outcome }) =>
+          session === model.session && outcome === undefined,
       )
     ) {
       model.reach.add(`overlapping-replay`)
@@ -474,8 +471,8 @@ export function reduceLifecycle(
       ({ session }) => session === model.session,
     )
     if (
-      current.some(({ settled }) => settled) &&
-      current.some(({ settled }) => !settled)
+      current.some(({ outcome }) => outcome !== undefined) &&
+      current.some(({ outcome }) => outcome === undefined)
     ) {
       model.reach.add(`partial-generation-supersession`)
     }

@@ -1,7 +1,10 @@
 # TrailBase lifecycle oracle
 
 `lifecycle-oracle.property.test.ts` runs the real adapter and collection against
-a controlled RecordApi and native ReadableStream. Only network I/O is mocked.
+a controlled RecordApi and native ReadableStream. The mock supplies requests and
+already-decoded events at the RecordApi boundary; it bypasses the SDK's fetch,
+SSE decoding, and wildcard subscription routing. Adapter, core, and native stream
+lifecycle code execute unchanged.
 An independent Map models rows; explicit gates control subscribe/list settlement.
 The same interpreter runs a fixed corpus and generated histories.
 
@@ -19,11 +22,22 @@ The same interpreter runs a fixed corpus and generated histories.
   then resolve or reject it; cleanup cannot turn failed startup into readiness.
 - Cleanup clears the collection. Late work from an old session cannot publish
   into, cancel, or report errors against a replacement session.
+- A late acquired old stream is canceled once and stays unlocked, including when
+  its native cancellation rejects. An unfinished old preload rejects with
+  AbortError before late work settles; an already-ready on-demand preload stays
+  fulfilled. Its direct subset promise settles as a canceled no-op after I/O.
+- Error and detached-rejection observations are append-only through final gate
+  release and cleanup. Epoch tags record when an observation arrives, not the
+  hidden session that caused it. Exact console output checks pin the adapter's
+  current compatibility policy, not a general service reporting contract.
 
 Histories contain one to three sessions, eager/on-demand modes, delayed startup
 and list resolve/reject, zero to eight row edits, five stream endings, and
 immediate versus settled cleanup. Thirty-two fixed cases pin the boundaries;
 ordinary runs add 30 fixed-seed and 50 fresh-seed histories with shrinking.
+Additional controls cover rejecting late cancellation in both modes and mutate
+provider-owned list, event, and buffered rows before parsing. Model rows derive
+separately from command scalars, so provider mutation cannot change the answer.
 
 This is not a model of pagination, filtered subsets, optimistic mutation
 acknowledgements, service reconnects, or arbitrary event/list interleavings.
@@ -45,11 +59,14 @@ TANSTACK_DB_ORACLE_RUNS_MULTIPLIER=10 pnpm test:oracles --coverage.enabled=false
 For a failing random campaign, use its reported seed and shrink path:
 
 ```sh
-TANSTACK_DB_ORACLE_SEED=123 TANSTACK_DB_ORACLE_PATH=0:1 TANSTACK_DB_ORACLE_PROPERTY=trailbase.lifecycle pnpm test:oracles --coverage.enabled=false -t 'random or replayed'
+TANSTACK_DB_ORACLE_SEED=123 TANSTACK_DB_ORACLE_PATH=0:1 TANSTACK_DB_ORACLE_PROPERTY=trailbase.lifecycle node --import tsx ../db/tests/oracle-replay.ts tests/lifecycle-oracle.property.test.ts --coverage.enabled=false -t 'random or replayed'
 ```
 
-Replace the example seed/path with the failure's values. Shared configuration
-lives in `packages/db/tests/oracle-config.ts`; do not copy its replay parser.
+Replace the example seed/path with the failure's values. The guarded runner
+requires a witness that the named property executed with this seed and path;
+wrong-property and zero-reach commands fail. Direct Vitest commands do not supply
+that guard. Shared configuration lives in `packages/db/tests/oracle-config.ts`;
+do not copy its replay parser.
 
 ## Evidence against false greens
 

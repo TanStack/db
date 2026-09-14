@@ -220,38 +220,94 @@ async function assertConcurrentExactDemandTrace({
   await restarted
 }
 
-async function expectExactWaitersShareRejection(): Promise<void> {
-  const deferred = createDeferred<void>()
-  void deferred.promise.catch(() => undefined)
+type RejectedWaiterScenario = {
+  demand: ExactDemand
+  failures: number
+  waiters: number
+  failureKind: `error` | `undefined`
+}
+
+const rejectedWaiterScenarioArbitrary = fc.record({
+  demand: exactDemandArbitrary,
+  failures: fc.integer({ min: 1, max: 3 }),
+  waiters: fc.integer({ min: 2, max: 4 }),
+  failureKind: fc.constantFrom(`error` as const, `undefined` as const),
+})
+
+async function expectExactWaitersShareRejection({
+  demand,
+  failures,
+  waiters,
+  failureKind,
+}: RejectedWaiterScenario): Promise<void> {
+  const transports: Array<ReturnType<typeof createDeferred<void>>> = []
+  const observed: Array<Promise<unknown>> = []
   const dedupe = new DeduplicatedLoadSubset({
-    loadSubset: () => deferred.promise,
+    loadSubset: () => {
+      const deferred = createDeferred<void>()
+      transports.push(deferred)
+      observed.push(Promise.allSettled([deferred.promise]))
+      return deferred.promise
+    },
   })
-  const demand: ExactDemand = {
-    values: [1, 2],
-    orderField: `rank`,
-    direction: `asc`,
-    nulls: `last`,
-    stringSort: `lexical`,
-    offset: 0,
-    limit: 2,
-    cursorBoundary: undefined,
+  let previous: LoadSubsetRequestResult | undefined
+  try {
+    for (let attempt = 0; attempt <= failures; attempt++) {
+      const callers: Array<LoadSubsetRequestResult> = []
+      const settlements: Array<`fulfilled` | `rejected`> = []
+      for (let waiter = 0; waiter < waiters; waiter++) {
+        const result = dedupe.loadSubset(toLoadSubsetOptions(demand))
+        observed.push(
+          Promise.resolve(result).then(
+            () => {
+              settlements.push(`fulfilled`)
+            },
+            () => {
+              settlements.push(`rejected`)
+            },
+          ),
+        )
+        callers.push(result)
+        expect(result).toBeInstanceOf(Promise)
+        expect(result).toBe(callers[0])
+        expect(transports).toHaveLength(attempt + 1)
+      }
+      expect(callers[0]).not.toBe(previous)
+      previous = callers[0]
+      const outcomes = Promise.allSettled(callers)
+      observed.push(outcomes)
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(settlements).toEqual([])
+
+      const transport = transports[attempt]!
+      if (attempt < failures) {
+        const failure =
+          failureKind === `error` ? new Error(`transport failed`) : undefined
+        transport.reject(failure)
+        for (const outcome of await outcomes) {
+          expect(outcome.status).toBe(`rejected`)
+          if (outcome.status === `rejected`)
+            expect(outcome.reason).toBe(failure)
+        }
+        expect(settlements).toEqual(Array(waiters).fill(`rejected`))
+      } else {
+        transport.resolve()
+        expect(await outcomes).toEqual(
+          Array.from({ length: waiters }, () => ({
+            status: `fulfilled`,
+            value: undefined,
+          })),
+        )
+        expect(settlements).toEqual(Array(waiters).fill(`fulfilled`))
+      }
+    }
+    expect(dedupe.loadSubset(toLoadSubsetOptions(demand))).toBe(true)
+    expect(transports).toHaveLength(failures + 1)
+  } finally {
+    for (const transport of transports) transport.resolve()
+    await Promise.all(observed)
   }
-
-  const first = dedupe.loadSubset(toLoadSubsetOptions(demand))
-  const second = dedupe.loadSubset(toLoadSubsetOptions(demand))
-  expect(first).toBeInstanceOf(Promise)
-  expect(second).toBe(first)
-
-  const outcomes = Promise.allSettled([first, second])
-  deferred.reject(new Error(`transport failed`))
-  expect((await outcomes).map(({ status }) => status)).toEqual([
-    `rejected`,
-    `rejected`,
-  ])
-
-  const retry = dedupe.loadSubset(toLoadSubsetOptions(demand))
-  expect(retry).toBeInstanceOf(Promise)
-  await expect(retry).rejects.toThrow(`transport failed`)
 }
 
 const { multiplier, ...replay } = readOracleRunConfig()
@@ -1145,8 +1201,61 @@ describe(`exact loadSubset demand oracle`, () => {
   )
 
   it(`reports one rejection to every exact waiter and then retries`, async () => {
-    await expectExactWaitersShareRejection()
+    await expectExactWaitersShareRejection({
+      demand: {
+        values: [1, 2],
+        orderField: `rank`,
+        direction: `asc`,
+        nulls: `last`,
+        stringSort: `lexical`,
+        offset: 0,
+        limit: 2,
+        cursorBoundary: undefined,
+      },
+      failures: 1,
+      waiters: 2,
+      failureKind: `error`,
+    })
   })
+
+  fcTest.prop([rejectedWaiterScenarioArbitrary], {
+    numRuns: exactScenarioRuns,
+    seed: 703027,
+    examples: [
+      [
+        {
+          demand: {
+            values: [1, 2],
+            orderField: `rank`,
+            direction: `asc`,
+            nulls: `last`,
+            stringSort: `lexical`,
+            offset: 0,
+            limit: 2,
+            cursorBoundary: undefined,
+          },
+          failures: 3,
+          waiters: 4,
+          failureKind: `undefined`,
+        },
+      ],
+    ],
+  })(
+    `retries failed exact demand histories through fresh success for a fixed seed`,
+    expectExactWaitersShareRejection,
+  )
+
+  fcTest.prop(
+    [rejectedWaiterScenarioArbitrary],
+    oracleRandomParameters(
+      exactScenarioRuns,
+      replay,
+      `load-subset.rejected-waiter`,
+    ),
+  )(
+    `retries failed exact demand histories through fresh success for a random or replayed seed`,
+    expectExactWaitersShareRejection,
+  )
 })
 
 describe(`loadSubset application and cancellation`, () => {

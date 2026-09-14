@@ -45,11 +45,18 @@ type ReconciliationStep =
   | { type: `restart` }
 
 type ReconciliationModel = {
+  // Only sourceRows is expected state. sentRows belongs to the real helper;
+  // relation independently integrates that helper's raw weighted output.
   sourceRows: Map<SourceKey, SourceRow>
   sentRows: Map<SourceKey, SourceRow>
   relation: Map<string, number>
   graphActive: boolean
 }
+
+type Reconciler = (
+  changes: Array<ChangeMessage<SourceRow, SourceKey>>,
+  sentRows: Map<SourceKey, SourceRow>,
+) => Array<ChangeMessage<SourceRow, SourceKey>>
 
 const sourceRowArbitrary = fc.record({
   id: fc.integer({ min: 0, max: 3 }),
@@ -193,33 +200,33 @@ function sourceChangesFor(
       const previousValue = sourceRows.get(operation.key)
       changes.push(
         previousValue === undefined
-          ? { type: `insert`, key: operation.key, value: operation.row }
+          ? { type: `insert`, key: operation.key, value: { ...operation.row } }
           : {
               type: `update`,
               key: operation.key,
-              value: operation.row,
-              previousValue: operation.reportedPreviousValue,
+              value: { ...operation.row },
+              previousValue: { ...operation.reportedPreviousValue },
             },
       )
-      sourceRows.set(operation.key, operation.row)
+      sourceRows.set(operation.key, { ...operation.row })
     } else if (operation.type === `rawUpdate`) {
       changes.push({
         type: `update`,
         key: operation.key,
-        value: operation.row,
-        previousValue: operation.reportedPreviousValue,
+        value: { ...operation.row },
+        previousValue: { ...operation.reportedPreviousValue },
       })
-      sourceRows.set(operation.key, operation.row)
+      sourceRows.set(operation.key, { ...operation.row })
     } else if (operation.type === `replay`) {
       const row = sourceRows.get(operation.key)
       if (row !== undefined) {
-        changes.push({ type: `insert`, key: operation.key, value: row })
+        changes.push({ type: `insert`, key: operation.key, value: { ...row } })
       }
     } else {
       changes.push({
         type: `delete`,
         key: operation.key,
-        value: operation.reportedValue,
+        value: { ...operation.reportedValue },
       })
       sourceRows.delete(operation.key)
     }
@@ -286,7 +293,10 @@ function snapshotModel(model: ReconciliationModel): {
 function applyReconciliationStep(
   model: ReconciliationModel,
   step: ReconciliationStep,
+  reconcile: Reconciler = reconcileChangesForD2,
 ): void {
+  // This is a helper/session simulation, not real graph restart wiring.
+  // The separate Effect/live tests below inject events at a real consumer.
   if (step.type === `truncate`) {
     // Truncate is only an early lifecycle signal. Its later source batch
     // still needs the retained exact rows to retract the active graph.
@@ -299,18 +309,15 @@ function applyReconciliationStep(
       const replay = [...model.sourceRows].map(([key, value]) => ({
         type: `insert` as const,
         key,
-        value,
+        value: { ...value },
       }))
-      applyToRelation(
-        model.relation,
-        reconcileChangesForD2(replay, model.sentRows),
-      )
+      applyToRelation(model.relation, reconcile(replay, model.sentRows))
       model.graphActive = true
     }
   } else {
     const changes = sourceChangesFor(step.operations, model.sourceRows)
     if (model.graphActive) {
-      const reconciled = reconcileChangesForD2(changes, model.sentRows)
+      const reconciled = reconcile(changes, model.sentRows)
       applyToRelation(model.relation, reconciled)
     }
   }
@@ -336,6 +343,9 @@ function upsert(
 }
 
 function createOrderedSourceHarness(id: string) {
+  // Intentional fault-injection boundary: substitute stale subscription events
+  // while retaining the actual ordered Effect/live-query consumer. This does
+  // not establish that a particular SDK emits these events naturally.
   let sync!: SourceSyncActions
   let loadSubsetCalls = 0
   const replayResolvers: Array<() => void> = []
@@ -756,34 +766,127 @@ it(`replays external source changes made while the graph is down`, () => {
   )
 })
 
-it(`generates teardown, down-state source changes, and restart`, () => {
+function executedReplayReach(steps: ReadonlyArray<ReconciliationStep>): number {
+  const model = createReconciliationModel()
+  let sourceAtTeardown: Array<string> = []
+  let completedChangedRestarts = 0
+  for (const step of steps) {
+    const activeBefore = model.graphActive
+    if (step.type === `teardown` && activeBefore)
+      sourceAtTeardown = snapshotModel(model).source
+    applyReconciliationStep(model, step)
+    if (step.type === `restart` && !activeBefore) {
+      const replayed = snapshotModel(model).source
+      if (
+        sourceAtTeardown.length !== replayed.length ||
+        sourceAtTeardown.some((value, index) => value !== replayed[index])
+      )
+        completedChangedRestarts++
+    }
+  }
+  return completedChangedRestarts
+}
+
+it(`executes changed down-state sources and checks their restart replay`, () => {
   const histories = fc.sample(reconciliationHistoryArbitrary, {
     seed: 1780,
     numRuns: 500,
   })
 
-  expect(
-    histories.some((steps) => {
-      let graphActive = true
-      let sawTeardown = false
-      let sawDownStateSourceChange = false
-      for (const step of steps) {
-        if (step.type === `teardown`) {
-          graphActive = false
-          sawTeardown = true
-        } else if (step.type === `restart`) {
-          if (!graphActive && sawTeardown && sawDownStateSourceChange) {
-            return true
-          }
-          graphActive = true
-        } else if (step.type === `batch` && !graphActive) {
-          sawDownStateSourceChange = true
-        }
-      }
-      return false
-    }),
-  ).toBe(true)
+  // Run every history, not just the first syntax match. Each accepted restart
+  // has already passed tracker and signed-relation assertions above.
+  const counts = histories.map((steps, sample) => {
+    try {
+      return executedReplayReach(steps)
+    } catch (cause) {
+      throw new Error(JSON.stringify({ seed: 1780, sample, steps }), { cause })
+    }
+  })
+  expect(counts.reduce((sum, count) => sum + count, 0)).toBeGreaterThan(0)
 })
+
+it(`does not count absent replay or an unfinished downtime as replay coverage`, () => {
+  const absent: ReconciliationStep = {
+    type: `batch`,
+    operations: [{ type: `replay`, key: `missing` }],
+  }
+  expect(
+    executedReplayReach([{ type: `teardown` }, absent, { type: `restart` }]),
+  ).toBe(0)
+  const change = upsert(`row`, { id: 1, revision: 1, value: 1 })
+  expect(executedReplayReach([{ type: `teardown` }, change])).toBe(0)
+  expect(
+    executedReplayReach([{ type: `teardown` }, change, { type: `restart` }]),
+  ).toBe(1)
+  expect(
+    executedReplayReach([
+      change,
+      { type: `teardown` },
+      change,
+      { type: `restart` },
+    ]),
+  ).toBe(0)
+})
+
+fcTest.prop([sourceRowArbitrary, sourceKeyArbitrary], { numRuns: 100 })(
+  `forces a changed source payload through every generated helper restart`,
+  (row, key) => {
+    const replacement = { ...row, revision: row.revision + 1 }
+    expect(
+      executedReplayReach([
+        upsert(key, row),
+        { type: `teardown` },
+        upsert(key, replacement, row),
+        { type: `restart` },
+      ]),
+    ).toBe(1)
+  },
+)
+
+it.each([`upsert`, `rawUpdate`, `replay`, `restart`] as const)(
+  `detects driver mutation at %s without changing expected source rows`,
+  (entry) => {
+    const model = createReconciliationModel()
+    const row = { id: 1, revision: 1, value: 1 }
+    const step: ReconciliationStep =
+      entry === `restart`
+        ? { type: `restart` }
+        : entry === `replay`
+          ? { type: `batch`, operations: [{ type: `replay`, key: `row` }] }
+          : {
+              type: `batch`,
+              operations: [
+                { type: entry, key: `row`, row, reportedPreviousValue: row },
+              ],
+            }
+    if (entry === `restart` || entry === `replay`) {
+      applyReconciliationStep(model, upsert(`row`, row))
+      applyReconciliationStep(model, { type: `teardown` })
+      if (entry === `replay`) model.graphActive = true
+    }
+    const corrupt: Reconciler = (changes, sent) => {
+      for (const change of changes) change.value.value++
+      return reconcileChangesForD2(changes, sent)
+    }
+    expect(() => applyReconciliationStep(model, step, corrupt)).toThrowError(
+      expect.objectContaining({ name: `AssertionError` }),
+    )
+    expect(model.sourceRows.get(`row`)).toEqual({
+      id: 1,
+      revision: 1,
+      value: 1,
+    })
+    expect(row).toEqual({ id: 1, revision: 1, value: 1 })
+    // Fresh real helper control at the same entry, including restart hydration.
+    const valid = createReconciliationModel()
+    if (entry === `restart` || entry === `replay`) {
+      applyReconciliationStep(valid, upsert(`row`, row))
+      applyReconciliationStep(valid, { type: `teardown` })
+      if (entry === `replay`) valid.graphActive = true
+    }
+    applyReconciliationStep(valid, step)
+  },
+)
 
 fcTest.prop(
   [reconciliationHistoryArbitrary],

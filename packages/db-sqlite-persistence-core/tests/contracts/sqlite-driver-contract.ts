@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { expectAdmissionHistory } from './driver-admission-laws'
 import type { SQLiteDriver } from '../../src'
 
 export type SQLiteDriverContractHarness = {
@@ -105,25 +106,30 @@ export function runSQLiteDriverContractSuite(
             [2],
           )
         })
+        const observed = [Promise.allSettled([txPromise])]
+        try {
+          await entered
 
-        await entered
+          let outsideResolved = false
+          const outsidePromise = driver
+            .run(`INSERT INTO events (value) VALUES (?)`, [3])
+            .then(() => {
+              outsideResolved = true
+            })
+          observed.push(Promise.allSettled([outsidePromise]))
 
-        let outsideResolved = false
-        const outsidePromise = driver
-          .run(`INSERT INTO events (value) VALUES (?)`, [3])
-          .then(() => {
-            outsideResolved = true
-          })
+          await Promise.resolve()
+          expect(outsideResolved).toBe(false)
 
-        await Promise.resolve()
-        expect(outsideResolved).toBe(false)
-
-        if (!resolveHold) {
-          throw new Error(`transaction hold signal missing`)
+          if (!resolveHold) {
+            throw new Error(`transaction hold signal missing`)
+          }
+          resolveHold()
+          await Promise.all([txPromise, outsidePromise])
+        } finally {
+          resolveHold?.()
+          await Promise.all(observed)
         }
-        resolveHold()
-
-        await Promise.all([txPromise, outsidePromise])
 
         const rows = await driver.query<{ value: number }>(
           `SELECT value
@@ -131,6 +137,60 @@ export function runSQLiteDriverContractSuite(
            ORDER BY value ASC`,
         )
         expect(rows.map((row) => row.value)).toEqual([1, 2, 3])
+        // Sorting by value masks an outside write admitted between 1 and 2.
+        expectAdmissionHistory(
+          await driver.query<{ value: number }>(
+            `SELECT value FROM events ORDER BY rowid ASC`,
+          ),
+          [1, 2, 3],
+        )
+      })
+    })
+
+    it(`admits an outside write after a held transaction rolls back`, async () => {
+      await withHarness(createHarness, async ({ driver }) => {
+        await driver.exec(`CREATE TABLE events (value INTEGER NOT NULL)`)
+        let releaseHold!: () => void
+        const hold = new Promise<void>((resolve) => {
+          releaseHold = resolve
+        })
+        let signalEntered!: () => void
+        const entered = new Promise<void>((resolve) => {
+          signalEntered = resolve
+        })
+        const failure = new Error(`held transaction rollback`)
+        const transaction = driver.transaction(async (transactionDriver) => {
+          await transactionDriver.run(
+            `INSERT INTO events (value) VALUES (?)`,
+            [1],
+          )
+          signalEntered()
+          await hold
+          throw failure
+        })
+        const outcome = Promise.allSettled([transaction])
+        let outside: Promise<unknown> | undefined
+        try {
+          await entered
+          outside = driver.run(`INSERT INTO events (value) VALUES (?)`, [3])
+          // Observe rejection before any assertion or gate release.
+          const outsideOutcome = Promise.allSettled([outside])
+          releaseHold()
+          const result = (await outcome)[0]
+          expect(result.status).toBe(`rejected`)
+          if (result.status === `rejected`) expect(result.reason).toBe(failure)
+          await outside
+          await outsideOutcome
+          expectAdmissionHistory(
+            await driver.query<{ value: number }>(
+              `SELECT value FROM events ORDER BY rowid ASC`,
+            ),
+            [3],
+          )
+        } finally {
+          releaseHold()
+          await Promise.allSettled([transaction, outside])
+        }
       })
     })
 

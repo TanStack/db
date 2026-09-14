@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '@tanstack/db'
@@ -10,6 +11,24 @@ import type { PersistenceAdapter } from '../../db-sqlite-persistence-core/src'
 import type { ElectricCollectionUtils } from '../src/electric'
 
 type TestRow = { id: number; name: string; stable: string }
+type TagExposure = { cut: string; rows: Array<TestRow> }
+
+function expectWholeTagRecovery(
+  entries: Array<TagExposure>,
+  allowed: Array<Array<TestRow>>,
+) {
+  let position = 0
+  for (const entry of entries) {
+    while (
+      position < allowed.length &&
+      !isDeepStrictEqual(entry.rows, allowed[position])
+    )
+      position++
+    expect(position, JSON.stringify({ entry, entries, allowed })).toBeLessThan(
+      allowed.length,
+    )
+  }
+}
 type StreamHarness = {
   send: (messages: Array<Message<TestRow>>) => void
   unsubscribe: ReturnType<typeof vi.fn>
@@ -185,6 +204,7 @@ async function runTagHistory(history: {
         )
       const first = create()
       let current = first
+      let stopRecoveryObservation = () => {}
       const expectedRows = () => [...model.values()].map((entry) => entry.row)
       const publicRows = () =>
         [...current.values()].map(({ id, name, stable }) => ({
@@ -279,20 +299,48 @@ async function runTagHistory(history: {
           { offset: rebuild ? undefined : `20_0` },
         )
         if (rebuild) {
-          const cachedRows = expectedRows()
+          const cachedRows = structuredClone(expectedRows())
+          const exposures: Array<TagExposure> = []
+          const record = (cut: string) => {
+            exposures.push({ cut, rows: structuredClone(publicRows()) })
+          }
+          const observe = () => {
+            const owner = current
+            const subscription = owner.subscribeChanges(
+              () => {
+                exposures.push({
+                  cut: `event`,
+                  rows: [...owner.values()].map(({ id, name, stable }) => ({
+                    id,
+                    name,
+                    stable,
+                  })),
+                })
+              },
+              { includeInitialState: false },
+            )
+            stopRecoveryObservation = () => subscription.unsubscribe()
+          }
+          observe()
+          record(`before replacement`)
           // Replacement omits a cached row. Its partial delivery must not
           // expose a torn snapshot or erase the still-visible cached rows.
           model.delete(2)
           for (const entry of model.values()) entry.tags = new Set([`fresh`])
           resumedStream.send(snapshot())
+          record(`after partial replacement`)
           expect(publicRows()).toEqual(cachedRows)
           // A concurrent subset request finishing is not completion of the
           // full replacement snapshot used to recover cold membership.
           if (!fresh && cold && (history.tagged || history.legacyResume)) {
             resumedStream.send([{ headers: { control: `subset-end` } }])
+            record(`after subset completion`)
             expect(publicRows()).toEqual(cachedRows)
           }
+          expectWholeTagRecovery(exposures, [cachedRows])
           if (history.interruptRecovery) {
+            const abandoned = resumedStream
+            stopRecoveryObservation()
             await current.cleanup()
             current.startSyncImmediate()
             await vi.waitFor(() => expect(streams).toHaveLength(start + 3), {
@@ -305,11 +353,37 @@ async function runTagHistory(history: {
             expect(
               vi.mocked(ShapeStream).mock.calls[start + 2]?.[0],
             ).toMatchObject({ offset: undefined })
+            observe()
+            record(`replacement lifecycle hydrated`)
+            const metadataBefore = structuredClone(
+              current.config.sync.exportSyncMeta?.(),
+            )
+            const abandonedSend = vi.spyOn(abandoned, `send`)
+            try {
+              abandoned.send([insert(999, `abandoned`), upToDate])
+              expect(abandonedSend).toHaveBeenCalledOnce()
+            } finally {
+              abandonedSend.mockRestore()
+            }
+            record(`after abandoned callback`)
+            expect(current.config.sync.exportSyncMeta?.()).toEqual(
+              metadataBefore,
+            )
+            expectWholeTagRecovery(exposures, [cachedRows])
             resumedStream = streams[start + 2]!
             resumedStream.send(snapshot())
+            record(`after restarted partial replacement`)
+            expectWholeTagRecovery(exposures, [cachedRows])
           }
           resumedStream.send([upToDate])
+          record(`after replacement commit`)
           await check()
+          record(`replacement settled`)
+          expectWholeTagRecovery(exposures, [
+            cachedRows,
+            structuredClone(expectedRows()),
+          ])
+          stopRecoveryObservation()
         }
         for (const tag of history.tagged
           ? [...history.removals, `fresh`]
@@ -323,6 +397,7 @@ async function runTagHistory(history: {
           await check()
         }
       } finally {
+        stopRecoveryObservation()
         await current.cleanup()
         if (current !== first) await first.cleanup()
       }
@@ -345,6 +420,46 @@ fcTest.prop(
 beforeEach(() => {
   streams.length = 0
   vi.clearAllMocks()
+})
+
+it.each([`eager`, `on-demand`, `progressive`] as const)(
+  `delivers abandoned tag-recovery callbacks after replacement starts in %s mode`,
+  async (syncMode) => {
+    await runTagHistory({
+      syncMode,
+      tagged: true,
+      legacyResume: false,
+      interruptRecovery: true,
+      edits: [],
+      removals: [`left`, `right`, `other`],
+    })
+    // Three interrupted rebuilds plus one compatible warm resume. Each
+    // interrupted branch checks its abandoned callback was actually invoked.
+    expect(streams).toHaveLength(11)
+  },
+)
+
+it(`rejects torn or reverted tag-recovery histories even when their last snapshot is correct`, () => {
+  const cached = [{ id: 1, name: `cached`, stable: `stable-1` }]
+  const replacement = [{ id: 2, name: `replacement`, stable: `stable-2` }]
+  const record = (rows: Array<Array<TestRow>>) =>
+    rows.map((snapshot, index) => ({
+      cut: `cut-${index}`,
+      rows: structuredClone(snapshot),
+    }))
+  expectWholeTagRecovery(record([cached, cached, replacement, replacement]), [
+    cached,
+    replacement,
+  ])
+  for (const rows of [
+    [cached, [], replacement],
+    [cached, [...cached, ...replacement], replacement],
+    [cached, replacement, cached, replacement],
+  ]) {
+    expect(() =>
+      expectWholeTagRecovery(record(rows), [cached, replacement]),
+    ).toThrow()
+  }
 })
 
 const ownerHistory = fc.record({

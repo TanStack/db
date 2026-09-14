@@ -5,11 +5,12 @@
  * Uses shared test suites from @tanstack/db-collection-e2e.
  */
 
-import { describe, expect, inject } from 'vitest'
+import { afterEach, describe, expect, inject } from 'vitest'
 import { BTreeIndex, createCollection } from '@tanstack/db'
 import { initClient } from 'trailbase'
 import { trailBaseCollectionOptions } from '../src/trailbase'
 import {
+  captureSeedData,
   createCollationTestSuite,
   createDeduplicationTestSuite,
   createJoinsTestSuite,
@@ -159,6 +160,7 @@ function createCollectionsForSyncMode(
   testId: string,
   syncMode: TrailBaseSyncMode,
   suffix: string,
+  own: (collection: { cleanup: () => Promise<void> }) => void,
 ) {
   const usersRecordApi = client.records<UserRecord>(`users_e2e`)
   const postsRecordApi = client.records<PostRecord>(`posts_e2e`)
@@ -189,6 +191,7 @@ function createCollectionsForSyncMode(
       },
     }),
   )
+  own(usersCollection)
 
   const postsCollection = createCollection(
     trailBaseCollectionOptions({
@@ -213,6 +216,7 @@ function createCollectionsForSyncMode(
       },
     }),
   )
+  own(postsCollection)
 
   const commentsCollection = createCollection(
     trailBaseCollectionOptions({
@@ -235,6 +239,7 @@ function createCollectionsForSyncMode(
       },
     }),
   )
+  own(commentsCollection)
 
   return {
     users: usersCollection as Collection<User>,
@@ -280,6 +285,7 @@ async function initialCleanup(client: Client) {
 }
 
 async function setupInitialData(client: Client, seedData: SeedDataResult) {
+  const errors: Array<unknown> = []
   const usersRecordApi = client.records<UserRecord>(`users_e2e`)
   const postsRecordApi = client.records<PostRecord>(`posts_e2e`)
   const commentsRecordApi = client.records<CommentRecord>(`comments_e2e`)
@@ -294,6 +300,7 @@ async function setupInitialData(client: Client, seedData: SeedDataResult) {
         console.log('First user data:', JSON.stringify(serialized))
       await usersRecordApi.create(serialized)
     } catch (e) {
+      errors.push(e)
       userErrors++
       if (userErrors <= 3) console.error('User insert error:', e)
     }
@@ -309,6 +316,7 @@ async function setupInitialData(client: Client, seedData: SeedDataResult) {
     try {
       await postsRecordApi.create(serializePost(post))
     } catch (e) {
+      errors.push(e)
       postErrors++
       if (postErrors <= 3) console.error('Post insert error:', e)
     }
@@ -323,6 +331,7 @@ async function setupInitialData(client: Client, seedData: SeedDataResult) {
     try {
       await commentsRecordApi.create(serializeComment(comment))
     } catch (e) {
+      errors.push(e)
       commentErrors++
       if (commentErrors <= 3) console.error('Comment insert error:', e)
     }
@@ -330,16 +339,39 @@ async function setupInitialData(client: Client, seedData: SeedDataResult) {
   console.log(
     `Inserted comments: ${seedData.comments.length - commentErrors} success, ${commentErrors} errors`,
   )
+  if (errors.length > 0)
+    throw new AggregateError(errors, 'TrailBase fixture insertions failed')
 }
 
 describe(`TrailBase Collection E2E Tests`, async () => {
   const baseUrl = inject(`baseUrl`)
   const client = initClient(baseUrl)
+  const cleanups: Array<() => Promise<void>> = []
+  const own = (collection: { cleanup: () => Promise<void> }) => {
+    cleanups.push(() => collection.cleanup())
+  }
+  afterEach(async () => {
+    const errors: Array<unknown> = []
+    for (const cleanup of cleanups.splice(0).reverse()) {
+      try {
+        await cleanup()
+      } catch (error) {
+        errors.push(error)
+      }
+    }
+    if (errors.length === 1) throw errors[0]
+    if (errors.length > 1)
+      throw new AggregateError(errors, 'TrailBase collection cleanup failed')
+  })
 
   // Wipe all pre-existing data, e.g. when using a persistent TB instance.
   await initialCleanup(client)
 
   const seedData = generateSeedData()
+  const fixture = captureSeedData(seedData, {
+    registration: 'packages/trailbase-db-collection/e2e/trailbase.e2e.test.ts',
+    provider: 'TrailBase SDK with test service',
+  })
   await setupInitialData(client, seedData)
 
   async function getConfig(): Promise<E2ETestConfig> {
@@ -351,6 +383,7 @@ describe(`TrailBase Collection E2E Tests`, async () => {
       testId,
       `on-demand`,
       `ondemand`,
+      own,
     )
 
     // On-demand collections are marked ready immediately
@@ -365,6 +398,7 @@ describe(`TrailBase Collection E2E Tests`, async () => {
       testId,
       `eager`,
       `eager`,
+      own,
     )
 
     // Wait for eager collections to sync (they need to fetch all data before marking ready)
@@ -386,6 +420,7 @@ describe(`TrailBase Collection E2E Tests`, async () => {
     const postsRecordApi = client.records<PostRecord>(`posts_e2e`)
 
     return {
+      fixture,
       collections: {
         eager: {
           users: eagerCollections.users,
@@ -423,6 +458,9 @@ describe(`TrailBase Collection E2E Tests`, async () => {
         insertPost: async (post) => {
           // Insert with the provided ID
           await postsRecordApi.create(serializePost(post))
+        },
+        deletePost: async (id) => {
+          await postsRecordApi.delete(id)
         },
       },
       setup: async () => {},

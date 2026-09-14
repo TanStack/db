@@ -1,10 +1,52 @@
+import { equalHashValues } from '../hashing/hash.js'
 import { TopKArray } from './topKArray.js'
+import type { MultiSet } from '../multiset.js'
 import type {
   IndexedValue,
   TopK,
   TopKChanges,
   TopKMoveChanges,
 } from './topKArray.js'
+
+/** Apply a keyed batch's retractions before additions. An outer join can emit
+ * a replacement in the opposite order; key multiplicity alone would hide it.
+ * Consolidate first so a transient value added and removed in this same turn
+ * cannot be mistaken for the final replacement. Use structural relation
+ * identity: map can allocate a fresh value for each side of a cancelling pair.
+ * No state survives the run.
+ */
+export function* topKBatch<K, T>(messages: Array<MultiSet<[K, T]>>) {
+  const keyed = new Map<K, Array<[[K, T], number]>>()
+  for (const message of messages) {
+    for (const [value, weight] of message.getInner()) {
+      const entries = keyed.get(value[0])
+      if (entries) entries.push([value, weight])
+      else keyed.set(value[0], [[value, weight]])
+    }
+  }
+  const batch: Array<[[K, T], number]> = []
+  for (const entries of keyed.values()) {
+    // Ordering distinct keys needs only the caller's comparator. In particular,
+    // do not traverse irrelevant payloads or merge keys on a hash collision.
+    if (entries.length === 1) {
+      batch.push(entries[0]!)
+      continue
+    }
+    // A per-key scan keeps normal two-version replacements cheap and permits
+    // cycles, at the cost of quadratic comparisons for long same-key histories.
+    const consolidated: Array<[[K, T], number]> = []
+    for (const [value, weight] of entries) {
+      const previous = consolidated.find(([candidate]) =>
+        equalHashValues(candidate[1], value[1]),
+      )
+      if (previous) previous[1] += weight
+      else consolidated.push([value, weight])
+    }
+    batch.push(...consolidated)
+  }
+  for (const entry of batch) if (entry[1] < 0) yield entry
+  for (const entry of batch) if (entry[1] > 0) yield entry
+}
 
 /**
  * Helper class that manages the state for a single topK window.

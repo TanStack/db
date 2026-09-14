@@ -575,6 +575,10 @@ async function runAsyncRestartScenario(
   })
   subscription.on(`status:change`, ({ status }) => statuses.push(status))
 
+  let failed = false
+  let primaryError: unknown
+  let reached: Set<string> | undefined
+  const cleanupErrors: Array<unknown> = []
   try {
     for (const demand of scenario.demands) {
       subscription.requestSnapshot({ where: where[demand] })
@@ -599,14 +603,35 @@ async function runAsyncRestartScenario(
       generation++
     ) {
       const discardedSession = session
+      const prefixStart = publications.length
+      const retainedVersion = publishedBeforeRetirement.size
+        ? Math.max(...publishedBeforeRetirement) + 1
+        : 1
+      const retainedRows = [...scenario.demands]
+        .sort((a, b) => a.localeCompare(b))
+        .map((id) => ({ id, version: retainedVersion }))
+      const assertRetainedPrefix = () => {
+        expect(
+          [...visible.values()].sort((a, b) => a.id.localeCompare(b.id)),
+        ).toEqual(retainedRows)
+        // Repeated coherent notifications are legal; each copied snapshot
+        // must retain the last complete publication until replacement settles.
+        for (const snapshot of publications.slice(prefixStart)) {
+          expect(snapshot).toEqual(retainedRows)
+        }
+      }
+      assertRetainedPrefix()
       await collection.cleanup()
+      assertRetainedPrefix()
       for (const attempt of attempts.filter(
         ({ session: attemptSession }) => attemptSession === discardedSession,
       )) {
         expect(attempt.options.signal?.aborted).toBe(true)
       }
       collection.startSyncImmediate()
+      assertRetainedPrefix()
       await flushPromises()
+      assertRetainedPrefix()
       const expectedSession = generation + 1
       expect(
         attempts
@@ -830,11 +855,52 @@ async function runAsyncRestartScenario(
         demand,
       })),
     )
-    return reach
+    reached = reach
+  } catch (error) {
+    failed = true
+    primaryError = error
   } finally {
-    subscription.unsubscribe()
-    await collection.cleanup()
+    try {
+      subscription.unsubscribe()
+    } catch (error) {
+      cleanupErrors.push(error)
+    }
+    try {
+      await collection.cleanup()
+    } catch (error) {
+      cleanupErrors.push(error)
+    }
+    if (
+      collection.status === `cleaned-up` &&
+      attempts.every(({ options }) => options.signal?.aborted === true)
+    ) {
+      // Retire captured sessions before releasing any still-pending transport.
+      for (const { deferred } of attempts) deferred.resolve()
+      try {
+        await flushPromises()
+      } catch (error) {
+        cleanupErrors.push(error)
+      }
+    } else {
+      cleanupErrors.push(
+        new Error(`Async restart cleanup did not retire all work`),
+      )
+    }
   }
+  if (cleanupErrors.length) {
+    if (failed) {
+      throw new AggregateError(
+        [primaryError, ...cleanupErrors],
+        `Async restart and cleanup failed`,
+        { cause: primaryError },
+      )
+    }
+    if (cleanupErrors.length === 1) throw cleanupErrors[0]
+    throw new AggregateError(cleanupErrors, `Async restart cleanup failed`)
+  }
+  if (failed) throw primaryError
+  if (!reached) throw new Error(`Async restart did not record its reach`)
+  return reached
 }
 
 /**
@@ -2518,6 +2584,11 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const newWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`new`)])
       const loads: Array<LoadSubsetOptions> = []
       const observed: Array<unknown> = []
+      type ResultOutcome =
+        | { status: `pending` }
+        | { status: `fulfilled`; value: unknown }
+        | { status: `rejected`; error: unknown }
+      const outcomes: Array<{ outcome: ResultOutcome }> = []
       let session = 0
       let requestOnReady = false
       const collection = createOnDemandCollection<{ id: string }>({
@@ -2548,25 +2619,95 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         requestOnReady = false
         subscription.requestSnapshot({
           where: newWhere,
-          onLoadSubsetResult: (result) => observed.push(result),
+          onLoadSubsetResult: (result) => {
+            observed.push(result)
+            const entry: { outcome: ResultOutcome } = {
+              outcome: { status: `pending` },
+            }
+            outcomes.push(entry)
+            if (result instanceof Promise) {
+              void result.then(
+                (value) => {
+                  entry.outcome = { status: `fulfilled`, value }
+                },
+                (error: unknown) => {
+                  entry.outcome = { status: `rejected`, error }
+                },
+              )
+            } else {
+              entry.outcome = { status: `fulfilled`, value: result }
+            }
+          },
         })
       })
-      subscription.requestSnapshot({ where: oldWhere })
+      let failed = false
+      let primaryError: unknown
+      try {
+        subscription.requestSnapshot({ where: oldWhere })
 
-      await collection.cleanup()
-      requestOnReady = true
-      expect(() => collection.startSyncImmediate()).toThrow(
-        /did not return a loadSubset handler/,
-      )
-      reach(`starting:syncReturn`)
+        await collection.cleanup()
+        requestOnReady = true
+        expect(() => collection.startSyncImmediate()).toThrow(
+          /did not return a loadSubset handler/,
+        )
+        reach(`starting:syncReturn`)
 
-      expect(observed).toEqual([expect.any(Promise)])
-      expect(collection.status).toBe(`error`)
-      expect(loads.map(({ where }) => where)).toEqual([oldWhere])
+        expect(observed).toEqual([expect.any(Promise)])
+        expect(collection.status).toBe(`error`)
+        expect(loads.map(({ where }) => where)).toEqual([oldWhere])
+        await flushPromises()
+        expect(outcomes).toHaveLength(1)
+        const beforeUnsubscribe = outcomes[0]!.outcome
+        expect(beforeUnsubscribe.status).not.toBe(`fulfilled`)
+        expect(loads.map(({ where }) => where)).toEqual([oldWhere])
 
-      removeReadyListener()
-      subscription.unsubscribe()
-      await collection.cleanup()
+        removeReadyListener()
+        subscription.unsubscribe()
+        await flushPromises()
+        const afterUnsubscribe = outcomes[0]!.outcome
+        if (beforeUnsubscribe.status === `pending`) {
+          expect(afterUnsubscribe.status).toBe(`rejected`)
+          if (afterUnsubscribe.status !== `rejected`) {
+            throw new Error(`Unsubscribed startup waiter did not reject`)
+          }
+          expect(afterUnsubscribe.error).toMatchObject({ name: `AbortError` })
+        } else {
+          // Invalid startup may already have rejected. Do not impose an
+          // earlier rejection time or replace its observed error identity.
+          expect(afterUnsubscribe).toBe(beforeUnsubscribe)
+        }
+        expect(observed).toHaveLength(1)
+        expect(outcomes).toHaveLength(1)
+        expect(collection.subscriberCount).toBe(0)
+        expect(loads.map(({ where }) => where)).toEqual([oldWhere])
+      } catch (error) {
+        failed = true
+        primaryError = error
+      }
+      const cleanupErrors: Array<unknown> = []
+      for (const cleanup of [
+        removeReadyListener,
+        () => subscription.unsubscribe(),
+        () => collection.cleanup(),
+      ]) {
+        try {
+          await cleanup()
+        } catch (error) {
+          cleanupErrors.push(error)
+        }
+      }
+      if (cleanupErrors.length) {
+        if (failed) {
+          throw new AggregateError(
+            [primaryError, ...cleanupErrors],
+            `No-loader observation and cleanup failed`,
+            { cause: primaryError },
+          )
+        }
+        if (cleanupErrors.length === 1) throw cleanupErrors[0]
+        throw new AggregateError(cleanupErrors, `No-loader cleanup failed`)
+      }
+      if (failed) throw primaryError
     },
   )
 
