@@ -1,0 +1,3 @@
+waxsql==1.0.0 \
+    --hash=sha256:36d4cb907af4da181b1a3da5620a55ee145c21b1cf46400ff0610f8b12d764f7 \
+    --hash=sha256:67c3b50ceac5758c0bc1742e7f22a75e294192938e4aee18db2b98abeed2f12f
