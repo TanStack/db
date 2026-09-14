@@ -23,6 +23,7 @@
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
     "test": "vitest --run",
+    "typecheck": "tsc --noEmit",
     "bench:hash": "vitest bench --run tests/hash.bench.ts --coverage.enabled=false"
   },
   "type": "module",

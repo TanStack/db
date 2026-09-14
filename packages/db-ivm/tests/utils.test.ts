@@ -404,7 +404,7 @@ describe(`hash`, () => {
     ])(
       `treats a large %s as an opaque leaf before structural work`,
       (_name, createLeaf) => {
-        const leaves = Array.from({ length: 700 }, createLeaf)
+        const leaves = Array.from({ length: 700 }, () => createLeaf())
         for (const leaf of leaves) Object.assign(leaf, { self: leaf })
         const createChain = () => {
           const ring = leaves.map((leaf, value) => ({
@@ -429,7 +429,7 @@ describe(`hash`, () => {
         }
         expect(() => hash(atDepthBoundary)).not.toThrow()
 
-        const adoptionLeaves = Array.from({ length: 20 }, createLeaf)
+        const adoptionLeaves = Array.from({ length: 20 }, () => createLeaf())
         const createAdoptionGraph = () => {
           const nodes = adoptionLeaves.map((leaf, value) => ({
             value,
