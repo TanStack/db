@@ -30,6 +30,7 @@ it(`wakes at the FIFO head deadline rather than polling ready tails`, async () =
             },
           },
           {
+            isOfflineEnabled: true,
             resolveTransaction: () => {},
             rejectTransaction: () => {},
             registerRestorationTransaction: () => {},

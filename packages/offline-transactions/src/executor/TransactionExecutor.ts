@@ -61,7 +61,7 @@ export class TransactionExecutor {
 
   private async runExecution(): Promise<void> {
     while (this.scheduler.getPendingCount() > 0) {
-      if (!this.isOnline()) {
+      if (!this.canExecute()) {
         break
       }
 
@@ -233,6 +233,9 @@ export class TransactionExecutor {
       filteredTransactions = this.config.beforeRetry(transactions)
     }
 
+    // The outbox read or retry hook may outlive this owner's right to replay.
+    if (!this.offlineExecutor.isOfflineEnabled) return
+
     const newlyLoaded = filteredTransactions.filter((transaction) =>
       this.scheduler.schedule(transaction),
     )
@@ -326,6 +329,11 @@ export class TransactionExecutor {
     this.clearRetryTimer()
   }
 
+  pause(): void {
+    // Retain queued work and let the issued call finish its acknowledgment.
+    this.clearRetryTimer()
+  }
+
   getPendingCount(): number {
     return this.scheduler.getPendingCount()
   }
@@ -334,7 +342,7 @@ export class TransactionExecutor {
     // Clear existing timer
     this.clearRetryTimer()
 
-    if (!this.isOnline()) {
+    if (!this.canExecute()) {
       return
     }
 
@@ -371,8 +379,10 @@ export class TransactionExecutor {
     }
   }
 
-  private isOnline(): boolean {
-    return this.offlineExecutor.isOnline()
+  private canExecute(): boolean {
+    return (
+      this.offlineExecutor.isOfflineEnabled && this.offlineExecutor.isOnline()
+    )
   }
 
   getRunningCount(): number {

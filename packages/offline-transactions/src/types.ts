@@ -133,6 +133,7 @@ export interface LeaderElection {
 }
 
 export interface TransactionSignaler {
+  readonly isOfflineEnabled: boolean
   resolveTransaction: (transactionId: string, result: any) => void
   rejectTransaction: (transactionId: string, error: Error) => void
   registerRestorationTransaction: (
