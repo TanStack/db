@@ -196,7 +196,18 @@ function compileFunction(
 
   const compiledArgs = args.map((arg: IR.BasicExpression) => {
     const compiled = compileBasicExpression(arg, params, encodeColumnName)
-    return arg.type === `func` && (arg.name === `and` || arg.name === `or`)
+    // AND/OR group their children by precedence; NOT already wraps its operand.
+    // In value positions, preserve any nested operator as a single expression.
+    return arg.type === `func` &&
+      (arg.name === `and` ||
+        arg.name === `or` ||
+        (name !== `and` &&
+          name !== `or` &&
+          name !== `not` &&
+          (isBinaryOp(arg.name) ||
+            arg.name === `not` ||
+            arg.name === `isNull` ||
+            arg.name === `isUndefined`)))
       ? `(${compiled})`
       : compiled
   })
@@ -234,17 +245,13 @@ function compileFunction(
     // Special handling for AND/OR which can be variadic
     if ((name === `and` || name === `or`) && compiledArgs.length > 2) {
       // Chain multiple arguments: (a AND b AND c) or (a OR b OR c)
-      return compiledArgs.map((arg) => `(${arg})`).join(` ${opName} `)
+      return compiledArgs.join(` ${opName} `)
     }
 
     if (compiledArgs.length !== 2) {
       throw new Error(`Binary operator ${name} expects 2 arguments`)
     }
     const [lhs, rhs] = compiledArgs
-
-    if (name === `and` || name === `or`) {
-      return compiledArgs.join(` ${opName} `)
-    }
 
     // Special case for comparison operators with boolean values
     // PostgreSQL doesn't support < > <= >= on booleans

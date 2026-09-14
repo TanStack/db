@@ -403,6 +403,4 @@ describe(`leader failover`, () => {
 
     env.executor.dispose()
   })
-
-  // Redundant leadership reports are covered by the generated replay oracle.
 })

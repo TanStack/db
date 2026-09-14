@@ -23,6 +23,13 @@ type Predicate =
   | { type: `not`; value: Predicate }
   | { type: `and`; left: Predicate; right: Predicate }
   | { type: `or`; left: Predicate; right: Predicate }
+  | {
+      type: `test`
+      op: `eq` | `in` | `isNull`
+      value: Predicate
+      expected: boolean
+      both: boolean
+    }
 
 /*
 Compiler contract inventory:
@@ -92,6 +99,13 @@ const predicate: fc.Memo<Predicate> = fc.memo<Predicate>((depth) =>
           left: predicate(depth - 1),
           right: predicate(depth - 1),
         }),
+        fc.record({
+          type: fc.constant(`test` as const),
+          op: fc.constantFrom(`eq` as const, `in` as const, `isNull` as const),
+          value: predicate(depth - 1),
+          expected: fc.boolean(),
+          both: fc.boolean(),
+        }),
       ),
 )
 
@@ -112,6 +126,9 @@ const requiredReach = [
   `predicate:or`,
   `predicate:not`,
   `predicate:isNull`,
+  `context:eq`,
+  `context:in`,
+  `context:isNull`,
   `comparison:eq`,
   `comparison:gt`,
   `comparison:gte`,
@@ -129,6 +146,11 @@ const requiredReach = [
 
 function recordPredicateReach(value: Predicate, reached: Set<string>): void {
   reached.add(`predicate:${value.type}`)
+  if (value.type === `test`) {
+    reached.add(`context:${value.op}`)
+    recordPredicateReach(value.value, reached)
+    return
+  }
   if (value.type === `compare`) {
     reached.add(`comparison:${value.op}`)
     reached.add(`column:${value.column}`)
@@ -156,6 +178,24 @@ function recordRowReach(world: Array<Row>, reached: Set<string>): void {
 }
 
 function toExpression(value: Predicate): IR.BasicExpression<boolean> {
+  if (value.type === `test`) {
+    const inner = toExpression(value.value)
+    return new IR.Func(
+      value.op,
+      value.op === `isNull`
+        ? [inner]
+        : [
+            inner,
+            new IR.Value(
+              value.op === `eq`
+                ? value.expected
+                : value.both
+                  ? [true, false]
+                  : [value.expected],
+            ),
+          ],
+    )
+  }
   if (value.type === `compare`) {
     return new IR.Func(value.op, [
       new IR.PropRef([value.column]),
@@ -188,6 +228,12 @@ function combine(type: `and` | `or`, left: Truth, right: Truth): Truth {
 }
 
 function evaluate(value: Predicate, row: Row): Truth {
+  if (value.type === `test`) {
+    const actual = evaluate(value.value, row)
+    if (value.op === `isNull`) return actual === null
+    if (actual === null) return null
+    return value.op === `in` && value.both ? true : actual === value.expected
+  }
   if (value.type === `isNull`) return row[value.column] === null
   if (value.type === `not`) return negate(evaluate(value.value, row))
   if (value.type === `and` || value.type === `or`) {
@@ -266,7 +312,45 @@ describe(`Electric predicate compiler semantics`, () => {
           executedCells++
         },
       ),
-      { seed: 1814, numRuns: 50 },
+      {
+        seed: 1814,
+        numRuns: 50,
+        // Compound booleans are values too: cross comparison, membership, and
+        // null tests, including NOT with both possible membership values.
+        examples: [
+          ...([`eq`, `in`, `isNull`] as const).map(
+            (op): [Array<Row>, Predicate] => [
+              [
+                { id: 1, count: 4, label: null, enabled: true },
+                { id: 2, count: 2, label: `a`, enabled: false },
+                { id: 3, count: null, label: `O'Reilly`, enabled: null },
+              ],
+              {
+                type: `test`,
+                op,
+                expected: true,
+                both: true,
+                value:
+                  op === `in`
+                    ? {
+                        type: `not`,
+                        value: {
+                          type: `compare`,
+                          op: `eq`,
+                          column: `enabled`,
+                          value: true,
+                        },
+                      }
+                    : { type: `compare`, op: `gt`, column: `count`, value: 3 },
+              },
+            ],
+          ),
+          [
+            [{ id: 1, count: 0, label: `O'Reilly`, enabled: null }],
+            { type: `compare`, op: `eq`, column: `label`, value: `O'Reilly` },
+          ],
+        ],
+      },
     )
     expect(executedCells).toBe(50)
     expect([...reached].sort()).toEqual(

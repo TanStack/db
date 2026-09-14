@@ -12,6 +12,10 @@ function defineDataProperty(
   key: PropertyKey,
   value: unknown,
 ): void {
+  if (key !== `__proto__`) {
+    ;(object as Record<PropertyKey, unknown>)[key] = value
+    return
+  }
   Object.defineProperty(object, key, {
     value,
     enumerable: true,

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
 import { createCollection } from '../src/collection/index.js'
 import { createChangeProxy, withChangeTracking } from '../src/proxy.js'
@@ -113,6 +113,33 @@ function expectOwnDataProperty(object: object, key: string, value: unknown) {
 }
 
 describe(`Mutation result detachment`, () => {
+  it(`copies ordinary fields without descriptor writes`, () => {
+    fc.assert(
+      fc.property(fc.integer({ min: 1, max: 40 }), (count) => {
+        const row = Object.fromEntries(
+          Array.from({ length: count }, (_, i) => [`field${i}`, i]),
+        )
+        const define = vi.spyOn(Object, `defineProperty`)
+        let changes: Record<string | symbol, unknown>
+        let writes: number
+        try {
+          changes = withChangeTracking(row, (draft) => {
+            draft.field0 = 42
+          })
+          writes = define.mock.calls.filter(([, key]) =>
+            String(key).startsWith(`field`),
+          ).length
+        } finally {
+          define.mockRestore()
+        }
+        expect(changes).toEqual({ field0: 42 })
+        expect(row.field0).toBe(0)
+        expect(writes).toBe(0)
+      }),
+      { seed: 20260914, numRuns: 40 },
+    )
+  })
+
   it.each([`value`, `__proto__`, `constructor`, `toString`])(
     `rejects missing or prototype-changing %s data properties`,
     (key) => {

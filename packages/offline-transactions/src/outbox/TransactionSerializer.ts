@@ -6,6 +6,21 @@ import type {
 } from '../types'
 import type { Collection, PendingMutation } from '@tanstack/db'
 
+function setDataProperty(
+  object: Record<string, unknown>,
+  key: string,
+  value: unknown,
+): void {
+  if (key !== `__proto__`) object[key] = value
+  else
+    Object.defineProperty(object, key, {
+      value,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    })
+}
+
 export class TransactionSerializer {
   private collections: Record<string, Collection<any, any, any, any, any>>
   private collectionIdToKey: Map<string, string>
@@ -130,12 +145,7 @@ export class TransactionSerializer {
       const result: any = Array.isArray(value) ? [] : {}
       for (const key in value) {
         if (Object.prototype.hasOwnProperty.call(value, key)) {
-          Object.defineProperty(result, key, {
-            value: this.serializeValue(value[key]),
-            enumerable: true,
-            configurable: true,
-            writable: true,
-          })
+          setDataProperty(result, key, this.serializeValue(value[key]))
         }
       }
       return !Array.isArray(value) &&
@@ -167,16 +177,24 @@ export class TransactionSerializer {
 
     if (typeof value === `object`) {
       // Unwrap once, then decode only the fields: the object's own __type is data.
-      if (escapedObjects && value.__type === `Object`) value = value.value
+      if (escapedObjects && value.__type === `Object`) {
+        if (
+          value.value === null ||
+          typeof value.value !== `object` ||
+          Array.isArray(value.value)
+        ) {
+          throw new Error(`Corrupted Object marker: expected an object value`)
+        }
+        value = value.value
+      }
       const result: any = Array.isArray(value) ? [] : {}
       for (const key in value) {
         if (Object.prototype.hasOwnProperty.call(value, key)) {
-          Object.defineProperty(result, key, {
-            value: this.deserializeValue(value[key], escapedObjects),
-            enumerable: true,
-            configurable: true,
-            writable: true,
-          })
+          setDataProperty(
+            result,
+            key,
+            this.deserializeValue(value[key], escapedObjects),
+          )
         }
       }
       return result

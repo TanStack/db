@@ -219,8 +219,10 @@ async function checkRoundtrip(
       let encoded = input
       if (fault === `date-as-string`)
         encoded = encoded.replace(
-          /\{"__type":"Date","value":"([^"]+)"\}/g,
-          `"$1"`,
+          // Mutate the semantic payload, not a Date-shaped user object inside
+          // an Object escape: the latter would test malformed wire instead.
+          /("payload":)\{"__type":"Date","value":"([^"]+)"\}/g,
+          `$1"$2"`,
         )
       if (fault === `string-as-date`)
         encoded = encoded.replace(
@@ -296,6 +298,63 @@ const twin: Pair = {
   runtime: `2024-01-01T00:00:00.000Z`,
   wire: `2024-01-01T00:00:00.000Z`,
 }
+
+// Roundtrips generate valid envelopes. Corrupted wire must be rejected before
+// it can replace any mutation field with an invented empty object.
+it.each([`modified`, `original`, `changes`] as const)(
+  `rejects malformed escaped objects anywhere in %s`,
+  async (field) => {
+    const collection = createCollection<Row>({
+      getKey: (row) => row.id,
+      sync: { sync: ({ markReady }) => markReady() },
+    })
+    const serializer = new TransactionSerializer({ rows: collection })
+    try {
+      fc.assert(
+        fc.property(
+          fc.constantFrom(undefined, null, 1, `text`, false, []),
+          fc.array(fc.boolean(), { maxLength: 4 }),
+          (invalid, containers) => {
+            let payload: unknown =
+              invalid === undefined
+                ? { __type: `Object` }
+                : { __type: `Object`, value: invalid }
+            for (const array of containers)
+              payload = array ? [payload] : { child: payload }
+            const mutation = {
+              globalKey: `rows:one`,
+              type: `update`,
+              collectionId: `rows`,
+              modified: { id: `one`, revision: 1, payload: null as unknown },
+              original: { id: `one`, revision: 0, payload: null as unknown },
+              changes: { payload: null as unknown },
+            }
+            mutation[field].payload = payload
+            expect(() =>
+              serializer.deserialize(
+                JSON.stringify({
+                  id: `bad`,
+                  createdAt: new Date(0).toISOString(),
+                  valueEncoding: 2,
+                  mutations: [mutation],
+                }),
+              ),
+            ).toThrow(`Corrupted Object marker`)
+          },
+        ),
+        {
+          seed: 20260914,
+          numRuns: 100,
+          examples: [undefined, null, 1, `text`, false, []].map(
+            (value): [typeof value, Array<boolean>] => [value, []],
+          ),
+        },
+      )
+    } finally {
+      await collection.cleanup()
+    }
+  },
+)
 const pinned: Array<Edit> = [
   { kind: `insert`, slot: 1, before: twin, after: { runtime: 0.5, wire: 0.5 } },
   { kind: `insert`, slot: 0, before: twin, after: datePair(1704067200000) },

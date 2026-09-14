@@ -319,8 +319,6 @@ describe(`offline executor end-to-end`, () => {
     replayEnv.executor.dispose()
   })
 
-  // Same-key FIFO and caller settlement are covered by transaction-settlement.property.test.ts.
-
   it(`processes mutations sequentially regardless of keys`, async () => {
     const pendingResolvers: Array<() => void> = []
     // eslint-disable-next-line prefer-const

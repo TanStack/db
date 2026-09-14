@@ -218,7 +218,12 @@ describe.each([
                 limit,
                 offset,
               }),
-              output((message) => relation.add(message.getInner())),
+              output((message) => {
+                // An always-empty window needs no transfer work. Signed
+                // consolidation alone would hide a cancelling in/out pair.
+                if (limit === 0) expect(message.getInner()).toEqual([])
+                relation.add(message.getInner())
+              }),
             )
             graph.finalize()
             const initial = [1, 2, 3].map((key) => ({

@@ -168,7 +168,7 @@ describe(`sql-compiler`, () => {
           ]),
         })
         // >2 args adds parentheses
-        expect(result.where).toBe(`("a" = $1) AND ("b" = $2) AND ("c" = $3)`)
+        expect(result.where).toBe(`"a" = $1 AND "b" = $2 AND "c" = $3`)
         expect(result.params).toEqual({ '1': `1`, '2': `2`, '3': `3` })
       })
 
