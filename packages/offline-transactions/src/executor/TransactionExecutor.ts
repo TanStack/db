@@ -100,8 +100,12 @@ export class TransactionExecutor {
           try {
             const result = await this.runMutationFn(transaction)
 
-            this.scheduler.markCompleted(transaction)
-            await this.outbox.remove(transaction.id)
+            try {
+              // Replay can still see this ID until durable deletion settles.
+              await this.outbox.remove(transaction.id)
+            } finally {
+              this.scheduler.markCompleted(transaction)
+            }
 
             span.setAttribute(`result`, `success`)
             this.offlineExecutor.resolveTransaction(transaction.id, result)

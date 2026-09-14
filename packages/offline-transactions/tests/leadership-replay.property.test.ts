@@ -326,9 +326,13 @@ it.each(
 // Repeated reports and reacquisition must not readmit work already in flight.
 // Use the real serializer and executor: an invalid storage key would let a
 // zero-execution trace falsely satisfy an at-most-once assertion.
-it.each([20260912, undefined])(
-  `preserves replay under repeated reports and leadership regain (seed %s)`,
-  async (seed) => {
+it.each(
+  [`provider`, `acknowledgment`].flatMap((boundary) =>
+    [20260912, undefined].map((seed) => ({ boundary, seed })),
+  ),
+)(
+  `preserves replay under repeated reports and leadership regain at $boundary (seed $seed)`,
+  async ({ boundary, seed }) => {
     await fc.assert(
       fc.asyncProperty(
         fc.record({
@@ -348,7 +352,16 @@ it.each([20260912, undefined])(
           const request = gate()
           const entered = gate()
           const release = gate()
-          const storage = new FakeStorageAdapter()
+          const acknowledging = gate()
+          const acknowledgment = gate()
+          class Storage extends FakeStorageAdapter {
+            override async delete(key: string) {
+              acknowledging.resolve()
+              await acknowledgment.promise
+              return super.delete(key)
+            }
+          }
+          const storage = new Storage()
           const callbacks = new Set<(leader: boolean) => void>()
           const calls: Array<{
             id: string
@@ -441,9 +454,17 @@ it.each([20260912, undefined])(
               `replay initialized`,
             )
             expect(calls).toEqual(expected)
+            if (boundary === `acknowledgment`) {
+              release.resolve()
+              await atOracleCheckpoint(
+                acknowledging.promise,
+                `provider completed; durable deletion held`,
+              )
+            }
             await report(pendingReports)
             expect(calls).toEqual(expected)
             release.resolve()
+            acknowledgment.resolve()
             expect(
               await atOracleCheckpoint(completion, `replay completed`),
             ).toBe(`fulfilled`)
@@ -459,6 +480,7 @@ it.each([20260912, undefined])(
           } finally {
             request.resolve()
             release.resolve()
+            acknowledgment.resolve()
             await cleanupOfflineOracle(
               [
                 () => {

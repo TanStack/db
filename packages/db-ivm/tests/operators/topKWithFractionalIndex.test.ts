@@ -88,6 +88,107 @@ describe.each([
   { name: `BTree`, topK: topKWithFractionalIndexBTree },
   { name: `grouped array`, topK: groupedWindow },
 ])('Generated fractional $name windows', ({ topK }) => {
+  it.each([409036, undefined])(
+    `preserves cyclic payloads through replacements and fresh transients (seed %s)`,
+    (seed) => {
+      fc.assert(
+        fc.property(
+          fc.boolean(),
+          fc.integer({ min: 0, max: 3 }),
+          fc.array(
+            fc.record({
+              key: fc.integer({ min: 1, max: 3 }),
+              value: fc.option(fc.integer({ min: 0, max: 5 }), { nil: null }),
+              additionFirst: fc.boolean(),
+            }),
+            { minLength: 1, maxLength: 20 },
+          ),
+          (useClass, limit, steps) => {
+            class Row {
+              payload: unknown
+              constructor(
+                public id: number,
+                public value: string,
+              ) {
+                this.payload = this
+              }
+            }
+            const make = (id: number, value: string) => {
+              if (useClass) return new Row(id, value)
+              const row = { id, value, payload: undefined as unknown }
+              row.payload = row
+              return row
+            }
+            const graph = new D2()
+            const input = graph.newInput<[number, Row]>()
+            const rows = new TopKRelation<number, string>()
+            const values = new Map<number, string>([[1, `0`]])
+            const live = new Map([[1, make(1, `0`)]])
+            input.pipe(
+              topK((a, b) => a.value.localeCompare(b.value) || a.id - b.id, {
+                limit,
+              }),
+              output((message) => {
+                for (const [[, [row]]] of message.getInner())
+                  expect(row.payload).toBe(row)
+                rows.add(message.getInner())
+              }),
+            )
+            graph.finalize()
+            const check = () =>
+              rows.expectRows(
+                [...values]
+                  .sort(([a, av], [b, bv]) => av.localeCompare(bv) || a - b)
+                  .slice(0, limit)
+                  .map(([id, value]) => [id, id, value]),
+              )
+            input.sendData(new MultiSet([[[1, live.get(1)!], 1]]))
+            graph.run()
+            check()
+            for (const { key, value, additionFirst } of steps) {
+              const changes: Array<[[number, Row], number]> = []
+              const before = live.get(key)
+              if (before) changes.push([[key, before], -1])
+              if (value === null) {
+                values.delete(key)
+                live.delete(key)
+              } else {
+                const next = make(key, String(value))
+                values.set(key, String(value))
+                live.set(key, next)
+                changes.push([[key, next], 1])
+              }
+              // Independently allocated equal cycles must cancel even when
+              // their deltas straddle a real replacement in separate messages.
+              changes.push([[key, make(key, `transient`)], 1])
+              changes.unshift([[key, make(key, `transient`)], -1])
+              if (additionFirst) changes.reverse()
+              for (const change of changes)
+                input.sendData(new MultiSet([change]))
+              graph.run()
+              check()
+            }
+          },
+        ),
+        {
+          seed,
+          numRuns: 30,
+          examples: [
+            [
+              false,
+              1,
+              [
+                { key: 1, value: 2, additionFirst: true },
+                { key: 1, value: null, additionFirst: false },
+                { key: 1, value: 3, additionFirst: false },
+              ],
+            ],
+          ],
+        },
+      )
+    },
+  )
+
   it.each([409032, undefined])(
     `matches outer-join replacements (seed %s)`,
     (seed) => {

@@ -96,6 +96,18 @@ const valueRelations: Array<{
     pair: (n) => [{ [Symbol(`key`)]: n }, { [Symbol(`key`)]: n }, false],
   },
   { name: `distinct functions`, pair: (n) => [() => n, () => n, false] },
+  ...[true, false].map((equivalent) => ({
+    name: `cyclic values (equivalent ${equivalent})`,
+    pair: (n: number): [unknown, unknown, boolean] => {
+      const left: { self?: unknown; value: number } = { value: n }
+      const right: { self?: unknown; value: number } = {
+        value: equivalent ? n : n + 1,
+      }
+      left.self = left
+      right.self = right
+      return [left, right, equivalent]
+    },
+  })),
   {
     name: `opaque handles`,
     pair: (n) => {
@@ -118,20 +130,37 @@ const valueRelations: Array<{
 
 it.each(
   valueRelations.flatMap((relation) =>
-    [false, true].map((collision) => ({ ...relation, collision })),
+    [
+      [false, false],
+      [true, false],
+      [true, true],
+    ].map(([largeGroup, collision]) => ({
+      ...relation,
+      largeGroup,
+      collision,
+    })),
   ),
 )(
-  `preserves $name cancellation (collision $collision)`,
-  ({ pair, collision }) => {
+  `preserves $name cancellation (large group $largeGroup, collision $collision)`,
+  ({ pair, largeGroup, collision }) => {
     if (collision) vi.spyOn(hashing, `hash`).mockReturnValue(7)
     fc.assert(
       fc.property(fc.integer({ min: 0, max: 254 }), (n) => {
         const [left, right, equivalent] = pair(n)
         const before: [number, { value: unknown }] = [1, { value: left }]
         const after: [number, { value: unknown }] = [1, { value: right }]
+        const transient: [number, { value: unknown }] = [1, { value: Symbol() }]
         const actual = [
           ...topKBatch([
             new MultiSet([[after, 1]]),
+            ...(largeGroup
+              ? [
+                  new MultiSet([
+                    [transient, 1],
+                    [transient, -1],
+                  ]),
+                ]
+              : []),
             new MultiSet([[before, -1]]),
           ]),
         ]
@@ -146,6 +175,7 @@ it.each(
       }),
       { seed: 409033, numRuns: 25 },
     )
+    if (collision) expect(hashing.hash).not.toHaveBeenCalled()
   },
 )
 
@@ -211,6 +241,70 @@ it(`does not inspect payloads when each key occurs once`, () => {
     expect(weight).toBe(1)
   }
 })
+
+it(`short-circuits replacements without hashing unrelated payloads`, () => {
+  fc.assert(
+    fc.property(fc.integer({ min: 1, max: 100 }), (count) => {
+      let reads = 0
+      const make = (rank: number) => ({
+        rank,
+        get unrelated() {
+          reads++
+          return new Array(100).fill(rank)
+        },
+      })
+      const batch: Array<[[number, ReturnType<typeof make>], number]> = []
+      for (let key = 0; key < count; key++) {
+        batch.push([[key, make(1)], 1], [[key, make(0)], -1])
+      }
+      expect([...topKBatch([new MultiSet(batch)])]).toHaveLength(count * 2)
+      expect(reads).toBe(0)
+    }),
+    { seed: 409035, numRuns: 25 },
+  )
+})
+
+it(`cancels long same-key histories with independently allocated values`, () => {
+  fc.assert(
+    fc.property(fc.integer({ min: 10, max: 150 }), (count) => {
+      const make = (value: number) => ({ value })
+      const changes: Array<[[number, ReturnType<typeof make>], number]> = []
+      for (let value = 0; value < count; value++)
+        changes.push([[1, make(value)], 1])
+      for (let value = count - 1; value >= 0; value--)
+        changes.push([[1, make(value)], -1])
+      expect([...topKBatch([new MultiSet(changes)])]).toEqual([])
+    }),
+    { seed: 409037, numRuns: 25 },
+  )
+})
+
+it.each([TypeError, RangeError])(
+  `does not swallow user %s exceptions while bucketing`,
+  (ErrorType) => {
+    const error = new ErrorType(`Cannot hash cyclic structural values`)
+    const row = {
+      get value(): number {
+        throw error
+      },
+    }
+    let observed: unknown
+    try {
+      Array.from(
+        topKBatch([
+          new MultiSet<[number, object]>([
+            [[1, row], 1],
+            [[1, row], -1],
+            [[1, { value: 2 }], 1],
+          ]),
+        ]),
+      )
+    } catch (caught) {
+      observed = caught
+    }
+    expect(observed).toBe(error)
+  },
+)
 
 it.each([`plain cycle`, `class cycle`, `large payload`] as const)(
   `orders a unique key without imposing a structural hash domain: %s`,

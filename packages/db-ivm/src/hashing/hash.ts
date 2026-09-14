@@ -260,8 +260,8 @@ function structuralShape(
   return [input instanceof Array ? `array` : `object`, input]
 }
 
-/** @internal Resolve collisions using the structural hash domain, not the
- * digest. Call after hashing has validated the immutable structural inputs.
+/** @internal Compare immutable structural values without computing a digest.
+ * Pair memoization also permits cyclic values that structural hashing rejects.
  * Reference-valued leaves remain opaque, including registered mutable handles.
  */
 export function equalHashValues(left: unknown, right: unknown): boolean {
@@ -303,7 +303,7 @@ export function equalHashValues(left: unknown, right: unknown): boolean {
         a.toString() === b.toString()
       )
 
-    // Shared acyclic subtrees should not multiply comparison work.
+    // Revisited pairs close cycles and avoid expanding shared subtrees.
     const peers = compared.get(a)
     if (peers?.has(b)) return true
     if (peers) peers.add(b)
