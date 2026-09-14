@@ -49,7 +49,7 @@ try {
     stdin: {
       contents:
         compiled.code +
-        '\nexport {DbClient} from "@tanstack/db"; export {pool,trace,setActor,responses,extractStarts} from "./database.server";',
+        '\nexport {DbClient} from "@tanstack/db"; export {pool,trace,setActor,responses,extractStarts,mutationInputs} from "./database.server";',
       resolveDir: join(kitchen, 'src/endpoints'),
       loader: 'ts',
     },
@@ -93,7 +93,7 @@ try {
                 : path === 'transport'
                   ? `import {responses} from './database.server';export function createServerFn(){return {inputValidator(schema){return {handler(fn){return async({data})=>{const result=await fn({data:schema.parse(data)});responses.push(result);return result}}}}}}`
                   : path === 'database'
-                    ? `import pg from 'pg';import {drizzle} from 'drizzle-orm/node-postgres';export * from '${kitchen}/src/db/schema';export const pool=new pg.Pool({connectionString:'postgresql://postgres@127.0.0.1:55480/kitchen_endpoints'});export const trace=[],responses=[],extractStarts=[];export const db=drizzle(pool,{casing:'snake_case',logger:{logQuery(sql){trace.push(sql)}}});let actor;export const setActor=(id)=>actor=id;export async function requireUser(req){if(!actor||req.scope!==actor)throw Error('Unauthorized');return {id:actor}}`
+                    ? `import pg from 'pg';import {drizzle} from 'drizzle-orm/node-postgres';export * from '${kitchen}/src/db/schema';export const pool=new pg.Pool({connectionString:'postgresql://postgres@127.0.0.1:55480/kitchen_endpoints'});export const trace=[],responses=[],extractStarts=[],mutationInputs=[];export const db=drizzle(pool,{casing:'snake_case',logger:{logQuery(sql){trace.push(sql)}}});let actor;export const setActor=(id)=>actor=id;export async function requireUser(req){if(req.kind==='mutation')mutationInputs.push(req.body);if(!actor||req.scope!==actor)throw Error('Unauthorized');return {id:actor}}`
                     : path === 'ingredients.server'
                       ? `export async function describeIngredient(){return {parsed:{description:'Fixture ingredient',grocery_section:'Pantry'},embedding:[0,1]}}`
                       : path === 'ai.server'
@@ -155,12 +155,36 @@ try {
         name,
       )
   }
+  function assertWritableInput(value) {
+    if (!value || typeof value !== 'object') return
+    for (const [key, child] of Object.entries(value)) {
+      assert.ok(
+        !['user_id', 'created_at', 'updated_at'].includes(key),
+        `server-owned field reached handler: ${key}`,
+      )
+      assertWritableInput(child)
+    }
+  }
   async function action(name, input, expectedFailure = false) {
     const start = loaded.trace.length,
-      responseStart = loaded.responses.length
+      responseStart = loaded.responses.length,
+      inputStart = loaded.mutationInputs.length
     const tx = app[name](input)
+    for (const mutation of tx.mutations.filter(
+      (entry) => entry.type === 'insert',
+    )) {
+      const row = mutation.modified
+      assert.ok(row.created_at instanceof Date && row.created_at.getTime() > 0)
+      if ('updated_at' in row)
+        assert.ok(
+          row.updated_at instanceof Date && row.updated_at.getTime() > 0,
+        )
+      if ('user_id' in row) assert.equal(row.user_id, user)
+    }
     if (expectedFailure) await assert.rejects(tx.isPersisted.promise)
     else await tx.isPersisted.promise
+    assert.equal(loaded.mutationInputs.length, inputStart + 1)
+    assertWritableInput(loaded.mutationInputs.at(-1))
     await check()
     const response = loaded.responses
       .slice(responseStart)
