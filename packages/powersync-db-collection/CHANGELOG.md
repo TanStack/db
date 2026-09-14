@@ -1,5 +1,18 @@
 # @tanstack/powersync-db-collection
 
+## 0.1.68
+
+### Patch Changes
+
+- Preserve native values, arbitrary class references, and draft cycles during mutation detachment; keep transaction persistence receipts settled after publication errors and avoid restoring an acknowledged direct insert over its server row. Keep a delete/reinsert visible when the old synced row has not yet been replaced. ([#1800](https://github.com/TanStack/db/pull/1800))
+
+  Retire replaced ordered prefixes without interrupting successful-load bookkeeping if release throws. Retry automatic ordered repair at most twice while retaining stale results and exposing the error; cleanup cancels retries and explicit window retry remains available.
+
+  Keep persisted acquisitions independent, avoid retaining one-shot refreshes as permanent demand, and reject upstream load failures without discarding cached rows. Restore PowerSync readiness only after the recovered baseline also removes rows deleted or moved outside active filters during the tracking outage.
+
+- Updated dependencies [[`a378bd3`](https://github.com/TanStack/db/commit/a378bd3a65f6b9ed0c9a85f793b7dc2e2a59a313), [`ad043b7`](https://github.com/TanStack/db/commit/ad043b7455a5bdc549c36833bc72ddbe9ce8afed), [`025a079`](https://github.com/TanStack/db/commit/025a0799dd7690d892cacff5493b7270c33fdc2c), [`ddc129e`](https://github.com/TanStack/db/commit/ddc129eeab84d7eca4f2972c3dcc37506202a43d)]:
+  - @tanstack/db@0.9.1
+
 ## 0.1.67
 
 ### Patch Changes

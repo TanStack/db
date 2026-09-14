@@ -1,5 +1,13 @@
 # @tanstack/db-example-react-next-ssr-e2e
 
+## 0.0.3
+
+### Patch Changes
+
+- Updated dependencies [[`a378bd3`](https://github.com/TanStack/db/commit/a378bd3a65f6b9ed0c9a85f793b7dc2e2a59a313), [`ad043b7`](https://github.com/TanStack/db/commit/ad043b7455a5bdc549c36833bc72ddbe9ce8afed), [`025a079`](https://github.com/TanStack/db/commit/025a0799dd7690d892cacff5493b7270c33fdc2c), [`ddc129e`](https://github.com/TanStack/db/commit/ddc129eeab84d7eca4f2972c3dcc37506202a43d), [`6e60d30`](https://github.com/TanStack/db/commit/6e60d30a0e19642eeda72895722afdfca6cec749)]:
+  - @tanstack/db@0.9.1
+  - @tanstack/react-db@0.4.0
+
 ## 0.0.2
 
 ### Patch Changes
