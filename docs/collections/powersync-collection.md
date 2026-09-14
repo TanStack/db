@@ -1103,7 +1103,7 @@ const liveQuery = createLiveQueryCollection({
 
 ## Attachments
 
-`@tanstack/powersync-db-collection` ships `TanStackDBAttachmentQueue`, an [`AttachmentQueue`](https://docs.powersync.com/usage/use-case-examples/attachments-files) whose file operations commit inside a TanStack DB collection transaction. This lets you create (or delete) an attachment and mutate a related collection row (for example, setting `lists.photo_id`) atomically in a single transaction, instead of issuing two independent writes.
+`@tanstack/powersync-db-collection` ships `TanStackDBAttachmentQueue`, an [`AttachmentQueue`](https://docs.powersync.com/usage/use-case-examples/attachments-files) that commits attachment metadata and related collection mutations (for example, setting `lists.photo_id`) in one database transaction. File I/O is separate: a failed save attempts to remove its local file, while the SDK performs remote uploads and deletes later.
 
 The queue extends PowerSync's `AttachmentQueue`, so the generic concepts are unchanged and documented once in the SDK.
 
@@ -1129,6 +1129,10 @@ These are standard PowerSync attachment requirements. See the SDK attachments do
 ### 1. Create the attachments collection
 
 This is the piece that makes the integration TanStack-aware: a normal PowerSync collection over the attachments table. The queue reads and writes attachment records through it.
+
+Both eager and on-demand collections work. Before `save` or `delete` opens its mutation, the queue loads the attachment ID through a temporary live query and retains that query until the transaction is confirmed. It does not call `preload()` inside a mutation function or require loading the entire table.
+
+An existing ID, or a concurrent save of that ID through the same PowerSync database object, is rejected before writing the file. This is an in-process guard, not a lock across separate database handles, SDK queues, tabs, or processes. File names retain the SDK's ID-based convention so restart can find files after the app's storage directory moves.
 
 ```ts
 import { createCollection } from "@tanstack/react-db"
@@ -1234,6 +1238,8 @@ await attachmentQueue.save({
 ### 5. Delete an attachment and detach it from the row
 
 `delete` queues the file for deletion and runs your `updateHook` in the same transaction. Clear the foreign key so the row and the attachment stay consistent. As with `save`, the hook must be synchronous.
+
+**Upstream limitation:** the SDK version used by this PR can overwrite a queued deletion when an already-running upload succeeds or fails. The related row is detached, but the SDK can lose the remote deletion or retry the obsolete upload. This integration does not work around that SDK completion race. The [attachment oracle notes](../../packages/powersync-db-collection/tests/ATTACHMENT-ORACLE.md) include runnable native-SDK and integration repros; a green ordinary suite does not establish safety for this overlap.
 
 ```ts
 await attachmentQueue.delete({

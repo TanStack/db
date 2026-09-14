@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import pDefer from 'p-defer'
 import {
   AttachmentState,
   AttachmentTable,
@@ -56,7 +57,7 @@ const describePowerSync = TEST_DATABASE_IMPLEMENTATION
   : describe.skip
 
 describePowerSync(`PowerSync AttachmentQueue (TanStackDB)`, () => {
-  async function setup() {
+  async function setup(syncMode: `eager` | `on-demand` = `eager`) {
     const db = new PowerSyncDatabase({
       database: {
         dbFilename: `attachments-test-${randomUUID()}.sqlite`,
@@ -91,6 +92,7 @@ describePowerSync(`PowerSync AttachmentQueue (TanStackDB)`, () => {
       powerSyncCollectionOptions({
         database: db,
         table: APP_SCHEMA.props.attachments,
+        syncMode,
       }),
     )
     const usersCollection = createCollection(
@@ -212,6 +214,292 @@ describePowerSync(`PowerSync AttachmentQueue (TanStackDB)`, () => {
   }
 
   describe(`save`, () => {
+    it(`serializes successive watched snapshots through the SDK context`, async () => {
+      const fixture = await setup()
+      let update!: Parameters<WatchAttachments>[0]
+      const queue = fixture.createQueue({
+        archivedCacheLimit: 100,
+        watchAttachments: (callback) => {
+          update = callback
+        },
+      })
+      const record = await queue.save({
+        data: createMockJpegBuffer(),
+        fileExtension: `jpg`,
+      })
+      await queue.syncStorage()
+      await queue.startSync()
+      const entered = pDefer<void>()
+      const release = pDefer<void>()
+      const held = queue.withAttachmentContext(async () => {
+        entered.resolve()
+        await release.promise
+      })
+      await entered.promise
+      const completed: Array<number> = []
+      const first = update([]).then(() => {
+        completed.push(1)
+      })
+      const second = update([{ id: record.id, fileExtension: `jpg` }]).then(
+        () => {
+          completed.push(2)
+        },
+      )
+      try {
+        await Promise.resolve()
+        expect(completed).toEqual([])
+        release.resolve()
+        await Promise.all([held, first, second])
+        expect(completed).toEqual([1, 2])
+        expect(
+          await fixture.db.get(`SELECT state FROM attachments WHERE id = ?`, [
+            record.id,
+          ]),
+        ).toEqual({ state: AttachmentState.SYNCED })
+      } finally {
+        release.resolve()
+        await Promise.all([held, first, second])
+      }
+    })
+
+    it(`preserves the winner file across two queue instances sharing storage`, async () => {
+      const fixture = await setup()
+      const first = fixture.createQueue()
+      const second = fixture.createQueue()
+      const entered = pDefer<void>()
+      const release = pDefer<void>()
+      const saveFile = fixture.localStorage.saveFile.bind(fixture.localStorage)
+      const write = vi
+        .spyOn(fixture.localStorage, `saveFile`)
+        .mockImplementation(async (...args) => {
+          const size = await saveFile(...args)
+          if (write.mock.calls.length === 1) {
+            entered.resolve()
+            await release.promise
+          }
+          return size
+        })
+      const saving = first.save({
+        id: `shared-id`,
+        data: createMockJpegBuffer(),
+        fileExtension: `jpg`,
+      })
+      try {
+        await entered.promise
+        await expect(
+          second.save({
+            id: `shared-id`,
+            data: new Uint8Array([7, 8, 9]).buffer,
+            fileExtension: `jpg`,
+          }),
+        ).rejects.toThrow(/already/)
+        expect(write).toHaveBeenCalledTimes(1)
+      } finally {
+        release.resolve()
+        await saving
+      }
+      const winner = await saving
+      expect(
+        new Uint8Array(await fixture.localStorage.readFile(winner.local_uri!)),
+      ).toEqual(new Uint8Array(createMockJpegBuffer()))
+    })
+
+    it.each([`ready`, `cold`, `on-demand`] as const)(
+      `preserves an existing file when reused through a %s collection`,
+      async (phase) => {
+        const fixture = await setup()
+        const original = await fixture.createQueue().save({
+          id: `reused-after-reopen`,
+          data: createMockJpegBuffer(),
+          fileExtension: `jpg`,
+        })
+        const collection =
+          phase === `ready`
+            ? fixture.attachmentsCollection
+            : createCollection(
+                powerSyncCollectionOptions({
+                  database: fixture.db,
+                  table: APP_SCHEMA.props.attachments,
+                  syncMode: phase === `on-demand` ? `on-demand` : `eager`,
+                }),
+              )
+        onTestFinished(() => collection.cleanup())
+        const queue = new TanStackDBAttachmentQueue({
+          db: fixture.db,
+          attachmentsCollection: collection,
+          localStorage: fixture.localStorage,
+          remoteStorage: fixture.remoteStorage,
+          watchAttachments: () => {},
+        })
+        onTestFinished(() => queue.stopSync())
+        if (phase !== `ready`)
+          expect(collection.get(original.id)).toBeUndefined()
+        await expect(
+          queue.save({
+            id: original.id,
+            data: new Uint8Array([7, 8, 9]).buffer,
+            fileExtension: `jpg`,
+          }),
+        ).rejects.toThrow()
+        expect(
+          await fixture.db.getOptional(
+            `SELECT id FROM attachments WHERE id = ?`,
+            [original.id],
+          ),
+        ).toEqual({ id: original.id })
+        expect(await fixture.localStorage.fileExists(original.local_uri!)).toBe(
+          true,
+        )
+        expect(
+          new Uint8Array(
+            await fixture.localStorage.readFile(original.local_uri!),
+          ),
+        ).toEqual(new Uint8Array(createMockJpegBuffer()))
+      },
+    )
+
+    it(`cleans a partial write and releases its ID for retry`, async () => {
+      const fixture = await setup()
+      const write = fixture.localStorage.saveFile.bind(fixture.localStorage)
+      const savedPaths: Array<string> = []
+      vi.spyOn(fixture.localStorage, `saveFile`).mockImplementationOnce(
+        async (uri, data) => {
+          savedPaths.push(uri)
+          await write(uri, data)
+          throw new Error(`partial write failure`)
+        },
+      )
+      const options = {
+        id: `partial`,
+        data: createMockJpegBuffer(),
+        fileExtension: `jpg`,
+      }
+      await expect(fixture.createQueue().save(options)).rejects.toThrow(
+        `partial write failure`,
+      )
+      expect(savedPaths).toHaveLength(1)
+      expect(await fixture.localStorage.fileExists(savedPaths[0]!)).toBe(false)
+      expect(
+        await fixture.db.getOptional(
+          `SELECT id FROM attachments WHERE id = ?`,
+          [options.id],
+        ),
+      ).toBeNull()
+      const saved = await fixture.createQueue().save(options)
+      expect(await fixture.localStorage.fileExists(saved.local_uri!)).toBe(true)
+    })
+
+    it(`allows another queue to save a distinct ID while a write is held`, async () => {
+      const fixture = await setup()
+      const entered = pDefer<void>()
+      const release = pDefer<void>()
+      const write = fixture.localStorage.saveFile.bind(fixture.localStorage)
+      vi.spyOn(fixture.localStorage, `saveFile`).mockImplementationOnce(
+        async (...args) => {
+          const size = await write(...args)
+          entered.resolve()
+          await release.promise
+          return size
+        },
+      )
+      const saving = fixture
+        .createQueue()
+        .save({
+          id: `held`,
+          data: createMockJpegBuffer(),
+          fileExtension: `jpg`,
+        })
+      try {
+        await entered.promise
+        const other = await fixture
+          .createQueue()
+          .save({
+            id: `other`,
+            data: createMockJpegBuffer(),
+            fileExtension: `jpg`,
+          })
+        expect(await fixture.localStorage.fileExists(other.local_uri!)).toBe(
+          true,
+        )
+      } finally {
+        release.resolve()
+        await saving
+      }
+    })
+
+    it.each([`before`, `after`] as const)(
+      `preserves delete intent %s an SDK upload`,
+      async (timing) => {
+        const fixture = await setup()
+        const queue = fixture.createQueue()
+        const uploaded = pDefer<void>()
+        const release = pDefer<void>()
+        const remoteFiles = new Set<string>()
+        fixture.uploadFile.mockImplementation(async (_, attachment) => {
+          uploaded.resolve()
+          await release.promise
+          remoteFiles.add(attachment.id)
+        })
+        fixture.deleteFile.mockImplementation((attachment) => {
+          remoteFiles.delete(attachment.id)
+          return Promise.resolve()
+        })
+        const userId = randomUUID()
+        const record = await queue.save({
+          data: createMockJpegBuffer(),
+          fileExtension: `jpg`,
+          updateHook: (attachment) => {
+            fixture.usersCollection.insert({
+              id: userId,
+              name: `owner`,
+              email: null,
+              photo_id: attachment.id,
+            })
+          },
+        })
+        let sync: Promise<void> | undefined
+        try {
+          if (timing !== `before`) {
+            sync = queue.syncStorage()
+            await uploaded.promise
+            release.resolve()
+            await sync
+          }
+          await queue.delete({
+            id: record.id,
+            updateHook: () => {
+              fixture.usersCollection.update(userId, (row) => {
+                row.photo_id = null
+              })
+            },
+          })
+          expect(
+            await fixture.db.get(`SELECT state FROM attachments WHERE id = ?`, [
+              record.id,
+            ]),
+          ).toEqual({ state: AttachmentState.QUEUED_DELETE })
+          expect(
+            await fixture.db.get(`SELECT photo_id FROM users WHERE id = ?`, [
+              userId,
+            ]),
+          ).toEqual({ photo_id: null })
+          release.resolve()
+          await sync
+          // Complete two real SDK passes, not a timeout waiting for a mock state.
+          await queue.syncStorage()
+          await queue.syncStorage()
+          expect(fixture.deleteFile).toHaveBeenCalledTimes(1)
+          expect(remoteFiles.has(record.id)).toBe(false)
+          expect(await fixture.localStorage.fileExists(record.local_uri!)).toBe(
+            false,
+          )
+        } finally {
+          release.resolve()
+          await sync
+        }
+      },
+    )
+
     it(`writes the local file and inserts a QUEUED_UPLOAD row into the collection`, async () => {
       const { createQueue, attachmentsCollection, localStorage } = await setup()
       const queue = createQueue()
@@ -376,7 +664,9 @@ describePowerSync(`PowerSync AttachmentQueue (TanStackDB)`, () => {
       expect(fulfilled).toHaveLength(1)
       expect(rejected).toHaveLength(1)
       expect(rejected[0]!.reason).toEqual(
-        expect.objectContaining({ message: expect.stringMatching(/exists/) }),
+        expect.objectContaining({
+          message: expect.stringMatching(/exists|being saved/),
+        }),
       )
 
       const winner = fulfilled[0]!.value
@@ -398,9 +688,8 @@ describePowerSync(`PowerSync AttachmentQueue (TanStackDB)`, () => {
       } = await setup()
       const queue = createQueue()
 
-      // A caller-supplied id lets us derive the local uri without a returned record.
       const id = randomUUID()
-      const localUri = localStorage.getLocalUri(`${id}.jpg`)
+      let localUri: string | undefined
 
       await expect(
         queue.save({
@@ -408,6 +697,7 @@ describePowerSync(`PowerSync AttachmentQueue (TanStackDB)`, () => {
           data: createMockJpegBuffer(),
           fileExtension: `jpg`,
           updateHook: (attachment) => {
+            localUri = attachment.local_uri!
             usersCollection.insert({
               id: randomUUID(),
               name: `steven`,
@@ -420,7 +710,8 @@ describePowerSync(`PowerSync AttachmentQueue (TanStackDB)`, () => {
       ).rejects.toThrow(/updateHook failed/)
 
       // The file is written before the transaction opens, so it must be cleaned up.
-      expect(await localStorage.fileExists(localUri)).toBe(false)
+      expect(localUri).toBeDefined()
+      expect(await localStorage.fileExists(localUri!)).toBe(false)
 
       // Neither the attachment nor the hook's own mutation may survive the failure.
       expect(attachmentsCollection.get(id)).toBeUndefined()
@@ -429,6 +720,110 @@ describePowerSync(`PowerSync AttachmentQueue (TanStackDB)`, () => {
   })
 
   describe(`delete file`, () => {
+    it.each([`eager`, `on-demand`] as const)(
+      `can retry a failed save and later delete in %s mode`,
+      async (syncMode) => {
+        const fixture = await setup(syncMode)
+        const first = fixture.createQueue()
+        const options = {
+          id: `retry`,
+          data: createMockJpegBuffer(),
+          fileExtension: `jpg`,
+        }
+        await expect(
+          first.save({
+            ...options,
+            updateHook: () => {
+              throw new Error(`hook failure`)
+            },
+          }),
+        ).rejects.toThrow(`hook failure`)
+        const second = fixture.createQueue()
+        const saved = await second.save(options)
+        expect(
+          new Uint8Array(await fixture.localStorage.readFile(saved.local_uri!)),
+        ).toEqual(new Uint8Array(createMockJpegBuffer()))
+        await first.delete({ id: saved.id })
+        expect(
+          await fixture.db.get(`SELECT state FROM attachments WHERE id = ?`, [
+            saved.id,
+          ]),
+        ).toEqual({ state: AttachmentState.QUEUED_DELETE })
+      },
+    )
+
+    it(`finds a queued file after its storage root moves`, async () => {
+      const fixture = await setup()
+      const original = await fixture.createQueue().save({
+        id: `moving`,
+        data: createMockJpegBuffer(),
+        fileExtension: `jpg`,
+      })
+      const moved = new NodeFileSystemAdapter(
+        join(tmpdir(), `ps-moved-${randomUUID()}`),
+      )
+      await moved.initialize()
+      onTestFinished(() => moved.clear())
+      // Move the bytes without changing SQLite, as a changed app directory does.
+      const movedUri = moved.getLocalUri(original.local_uri!.split(`/`).at(-1)!)
+      await moved.saveFile(
+        movedUri,
+        await fixture.localStorage.readFile(original.local_uri!),
+      )
+      await fixture.localStorage.deleteFile(original.local_uri!)
+      const queue = new TanStackDBAttachmentQueue({
+        db: fixture.db,
+        attachmentsCollection: fixture.attachmentsCollection,
+        localStorage: moved,
+        remoteStorage: fixture.remoteStorage,
+        watchAttachments: () => {},
+      })
+      onTestFinished(() => queue.stopSync())
+      await queue.startSync()
+      await vi.waitFor(() =>
+        expect(fixture.uploadFile).toHaveBeenCalledTimes(1),
+      )
+      expect(fixture.uploadFile.mock.calls[0]![1].localUri).toBe(movedUri)
+      expect(new Uint8Array(await moved.readFile(movedUri))).toEqual(
+        new Uint8Array(createMockJpegBuffer()),
+      )
+    })
+
+    it.each([`eager`, `on-demand`] as const)(
+      `loads an uncached attachment before deleting in %s mode`,
+      async (syncMode) => {
+        const fixture = await setup()
+        const original = await fixture.createQueue().save({
+          id: `uncached`,
+          data: createMockJpegBuffer(),
+          fileExtension: `jpg`,
+        })
+        const collection = createCollection(
+          powerSyncCollectionOptions({
+            database: fixture.db,
+            table: APP_SCHEMA.props.attachments,
+            syncMode,
+          }),
+        )
+        onTestFinished(() => collection.cleanup())
+        const queue = new TanStackDBAttachmentQueue({
+          db: fixture.db,
+          attachmentsCollection: collection,
+          localStorage: fixture.localStorage,
+          remoteStorage: fixture.remoteStorage,
+          watchAttachments: () => {},
+        })
+        onTestFinished(() => queue.stopSync())
+        expect(collection.get(original.id)).toBeUndefined()
+        await queue.delete({ id: original.id })
+        expect(
+          await fixture.db.get(`SELECT state FROM attachments WHERE id = ?`, [
+            original.id,
+          ]),
+        ).toEqual({ state: AttachmentState.QUEUED_DELETE })
+      },
+    )
+
     it(`queues an existing attachment for deletion and removes the local file`, async () => {
       const {
         createQueue,

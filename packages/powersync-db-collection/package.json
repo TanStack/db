@@ -27,7 +27,8 @@
     "build": "vite build",
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
-    "test": "vitest --run"
+    "test": "vitest --run",
+    "test:upstream-repros": "vitest run --config tests/upstream.config.ts --maxWorkers=2"
   },
   "type": "module",
   "main": "dist/cjs/index.cjs",

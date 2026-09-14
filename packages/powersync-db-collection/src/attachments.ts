@@ -1,5 +1,9 @@
-import { AttachmentQueue, AttachmentState } from '@powersync/common'
-import { createTransaction } from '@tanstack/db'
+import {
+  AttachmentQueue,
+  AttachmentState,
+  sanitizeSQL,
+} from '@powersync/common'
+import { createLiveQueryCollection, createTransaction, eq } from '@tanstack/db'
 import { PowerSyncTransactor } from './PowerSyncTransactor'
 
 import type {
@@ -10,6 +14,10 @@ import type {
 } from '@powersync/common'
 import type { Collection, Transaction } from '@tanstack/db'
 import type { OptionalExtractedTable } from './helpers'
+
+// SDK context locks belong to individual queues. Reserve saves across queues
+// sharing this database so a rejected insert cannot remove another save's file.
+const savingIds = new WeakMap<AbstractPowerSyncDatabase, Set<string>>()
 
 export type TanStackDBAttachmentQueueOptions = AttachmentQueueOptions & {
   /**
@@ -28,7 +36,8 @@ export interface SaveOptions {
   /**
    * Optional custom ID. If not provided, a UUID will be generated.
    *
-   * Rejected if an attachment with this ID is already in the queue.
+   * Rejected if this ID is already in the queue or is being saved by another
+   * call sharing the same PowerSync database object.
    */
   id?: string
   /**
@@ -89,35 +98,80 @@ export class TanStackDBAttachmentQueue extends AttachmentQueue {
     const resolvedId = id ?? (await this.generateAttachmentId())
     const filename = `${resolvedId}.${fileExtension}`
     const localUri = this.localStorage.getLocalUri(filename)
+    let pending = savingIds.get(this.powersync)
+    if (!pending) savingIds.set(this.powersync, (pending = new Set()))
+    if (pending.has(resolvedId)) {
+      throw new Error(`Attachment with id ${resolvedId} is already being saved`)
+    }
+    pending.add(resolvedId)
 
-    return this.withAttachmentContext(async (ctx) => {
-      /**
-       * Checked before the file is written. Writing first would overwrite the existing
-       * attachment's local file, and the cleanup below would then delete it — leaving the
-       * pre-existing record pointing at a file that no longer exists.
-       *
-       * Deliberately outside the `try`: this throw must not reach the cleanup, because the file
-       * at `localUri` belongs to the pre-existing attachment rather than to this call.
-       */
-      if (this.collection.get(resolvedId)) {
-        throw new Error(`Attachment with id ${resolvedId} already exists`)
-      }
+    try {
+      return await this.withLoadedAttachment(resolvedId, () =>
+        this.withAttachmentContext(async (ctx) => {
+          // A missing in-memory row is not proof that SQLite has no attachment.
+          if (
+            this.collection.get(resolvedId) ||
+            (await ctx.db.getOptional(
+              sanitizeSQL`SELECT id FROM ${ctx.tableName} WHERE id = ?`,
+              [resolvedId],
+            ))
+          ) {
+            throw new Error(`Attachment with id ${resolvedId} already exists`)
+          }
 
-      const size = await this.localStorage.saveFile(localUri, data)
+          try {
+            const size = await this.localStorage.saveFile(localUri, data)
+            const attachment: AttachmentQueueRow = {
+              id: resolvedId,
+              filename,
+              media_type: mediaType ?? null,
+              local_uri: localUri,
+              state: AttachmentState.QUEUED_UPLOAD,
+              has_synced: 0,
+              size,
+              timestamp: new Date().getTime(),
+              meta_data: metaData ?? null,
+            }
 
-      const attachment: AttachmentQueueRow = {
-        id: resolvedId,
-        filename,
-        media_type: mediaType ?? null,
-        local_uri: localUri,
-        state: AttachmentState.QUEUED_UPLOAD,
-        has_synced: 0,
-        size,
-        timestamp: new Date().getTime(),
-        meta_data: metaData ?? null,
-      }
+            const tanStackDBTransaction = createTransaction({
+              autoCommit: false,
+              mutationFn: async ({ transaction }) => {
+                await new PowerSyncTransactor({
+                  database: ctx.db,
+                }).applyTransaction(transaction)
+              },
+            })
 
-      try {
+            await this.runInTransaction(tanStackDBTransaction, () => {
+              this.collection.insert(attachment)
+              // allow the user to associate values in this transaction
+              updateHook?.(attachment)
+            })
+            return attachment
+          } catch (error) {
+            /**
+             * The file is written before the transaction opens, so a failed transaction would
+             * otherwise leave an orphaned file behind that no attachment record points to.
+             */
+            await this.deleteLocalFile(localUri)
+            throw error
+          }
+        }),
+      )
+    } finally {
+      pending.delete(resolvedId)
+    }
+  }
+
+  /**
+   * Queues a file for deletion from local and remote storage.
+   *
+   * Exposes an `updateHook` option which is called inside a TanStackDB transaction,
+   * relational associations with the provided attachment ID should be cleaned up in this hook.
+   */
+  async delete({ id, updateHook }: DeleteOptions): Promise<void> {
+    await this.withLoadedAttachment(id, () =>
+      this.withAttachmentContext(async (ctx) => {
         const tanStackDBTransaction = createTransaction({
           autoCommit: false,
           mutationFn: async ({ transaction }) => {
@@ -128,55 +182,41 @@ export class TanStackDBAttachmentQueue extends AttachmentQueue {
         })
 
         await this.runInTransaction(tanStackDBTransaction, () => {
-          this.collection.insert(attachment)
+          const attachment = this.collection.get(id)
+          if (!attachment) {
+            throw new Error(`Attachment with id ${id} not found`)
+          }
+
+          this.collection.update(id, (draft) => {
+            draft.state = AttachmentState.QUEUED_DELETE
+            draft.has_synced = 0
+          })
+
           // allow the user to associate values in this transaction
           updateHook?.(attachment)
         })
-      } catch (error) {
-        /**
-         * The file is written before the transaction opens, so a failed transaction would
-         * otherwise leave an orphaned file behind that no attachment record points to.
-         */
-        await this.deleteLocalFile(localUri)
-        throw error
-      }
-
-      return attachment
-    })
+      }),
+    )
   }
 
-  /**
-   * Queues a file for deletion from local and remote storage.
-   *
-   * Exposes an `updateHook` option which is called inside a TanStackDB transaction,
-   * relational associations with the provided attachment ID should be cleaned up in this hook.
-   */
-  async delete({ id, updateHook }: DeleteOptions): Promise<void> {
-    await this.withAttachmentContext(async (ctx) => {
-      const tanStackDBTransaction = createTransaction({
-        autoCommit: false,
-        mutationFn: async ({ transaction }) => {
-          await new PowerSyncTransactor({
-            database: ctx.db,
-          }).applyTransaction(transaction)
-        },
-      })
-
-      await this.runInTransaction(tanStackDBTransaction, () => {
-        const attachment = this.collection.get(id)
-        if (!attachment) {
-          throw new Error(`Attachment with id ${id} not found`)
-        }
-
-        this.collection.update(id, (draft) => {
-          draft.state = AttachmentState.QUEUED_DELETE
-          draft.has_synced = 0
-        })
-
-        // allow the user to associate values in this transaction
-        updateHook?.(attachment)
-      })
+  private async withLoadedAttachment<T>(
+    id: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const query = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ attachment: this.collection })
+          .where(({ attachment }) => eq(attachment.id, id)),
     })
+    try {
+      // Acquire just this ID before opening a mutation and retain its demand
+      // until PowerSync has confirmed the transaction back to the collection.
+      await query.preload()
+      return await operation()
+    } finally {
+      await query.cleanup()
+    }
   }
 
   /**
