@@ -233,13 +233,13 @@ export class TransactionExecutor {
       filteredTransactions = this.config.beforeRetry(transactions)
     }
 
-    for (const transaction of filteredTransactions) {
-      this.scheduler.schedule(transaction)
-    }
+    const newlyLoaded = filteredTransactions.filter((transaction) =>
+      this.scheduler.schedule(transaction),
+    )
 
     // Restore optimistic state for loaded transactions
     // This ensures the UI shows the optimistic data while transactions are pending
-    this.restoreOptimisticState(filteredTransactions)
+    this.restoreOptimisticState(newlyLoaded)
 
     // Reset retry delays for all loaded transactions so they can run immediately
     this.resetRetryDelays()
@@ -338,14 +338,13 @@ export class TransactionExecutor {
       return
     }
 
-    // Find the earliest retry time among pending transactions
-    const earliestRetryTime = this.getEarliestRetryTime()
+    const nextRetryTime = this.getNextRetryTime()
 
-    if (earliestRetryTime === null) {
+    if (nextRetryTime === null) {
       return // No transactions pending retry
     }
 
-    const delay = Math.max(0, earliestRetryTime - Date.now())
+    const delay = Math.max(0, nextRetryTime - Date.now())
 
     this.retryTimer = setTimeout(() => {
       this.executeAll().catch((error) => {
@@ -354,14 +353,15 @@ export class TransactionExecutor {
     }, delay)
   }
 
-  private getEarliestRetryTime(): number | null {
+  private getNextRetryTime(): number | null {
     const allTransactions = this.scheduler.getAllPendingTransactions()
 
     if (allTransactions.length === 0) {
       return null
     }
 
-    return Math.min(...allTransactions.map((tx) => tx.nextAttemptAt))
+    // Later transactions cannot overtake the FIFO head, even if they are ready.
+    return allTransactions[0]!.nextAttemptAt
   }
 
   private clearRetryTimer(): void {

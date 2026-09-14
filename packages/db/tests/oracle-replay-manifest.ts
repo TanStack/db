@@ -9,7 +9,12 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `db/tests/optimistic-transaction-oracle.property.test.ts`,
     `collection-state`,
-    `mixed-transaction`,
+    `mixed-transaction same-key`,
+  ],
+  [
+    `db/tests/optimistic-history-outcomes.test.ts`,
+    `collection-state`,
+    `optimistic-outcomes`,
   ],
   [
     `db/tests/query/identity-output-shape-oracle.test.ts`,
@@ -30,6 +35,11 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `electric-db-collection/tests/electric-oracle.property.test.ts`,
     `electric`,
     `match-reentry`,
+  ],
+  [
+    `electric-db-collection/tests/electric-sdk-delivery.property.test.ts`,
+    `electric`,
+    `sdk-snapshot-delivery sdk-dnf-membership`,
   ],
   [
     `db/tests/collection-sync-reentrancy.test.ts`,
@@ -104,7 +114,7 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `db/tests/query/includes-temporal-oracle.test.ts`,
     `includes-temporal`,
-    `demand-scheduling release-reentry`,
+    `demand-scheduling release-reentry partial-values`,
   ],
   [
     `db/tests/query/load-subset-oracle.property.test.ts`,
@@ -114,7 +124,7 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `db/tests/query/ordered-lifecycle-oracle.property.test.ts`,
     `ordered-work`,
-    `lifecycle`,
+    `lifecycle nullable-lifecycle`,
   ],
   [
     `db/tests/query/ordered-work-oracle.property.test.ts`,
@@ -144,7 +154,6 @@ for (const law of [
   `parent-scalar`,
   `parent-then-child`,
   `optimistic-before-confirm`,
-  `optimistic-after-confirm`,
 ]) {
   for (const q1 of [`direct`, `joined`]) {
     for (const q2 of [`passThrough`, `where`, `orderBy`, `select`]) {

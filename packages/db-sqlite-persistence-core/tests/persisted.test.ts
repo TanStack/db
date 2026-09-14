@@ -909,8 +909,10 @@ describe(`persistedCollectionOptions`, () => {
       })
 
       const abortController = new AbortController()
+      let appliedPublications = 0
       const subscription = collection.subscribeChanges((changes) => {
         if (changes.some((change) => change.key === `remote`)) {
+          appliedPublications++
           abortController.abort()
         }
       })
@@ -927,6 +929,8 @@ describe(`persistedCollectionOptions`, () => {
       await receipt
       subscription.unsubscribe()
 
+      expect(appliedPublications).toBe(1)
+      expect(abortController.signal.aborted).toBe(true)
       expect(stripVirtualProps(collection.get(`remote`))).toEqual({
         id: `remote`,
         title: `Already visible`,
@@ -1906,7 +1910,16 @@ describe(`persistedCollectionOptions`, () => {
   )(
     `keeps sibling requests owned after one release: %j`,
     async ({ sharedSubscription, identical }) => {
-      const adapter = createRecordingAdapter([{ id: `1`, title: `Before` }])
+      const adapter = createRecordingAdapter([
+        { id: `1`, title: `Page row` },
+        { id: `2`, title: `All-only row` },
+      ])
+      // This finite provider honors the only selection this law generates.
+      const loadRows = adapter.loadSubset
+      adapter.loadSubset = async (...args) => {
+        const rows = await loadRows(...args)
+        return rows.slice(0, args[1].limit)
+      }
       const coordinator = createCoordinatorHarness()
       const collection = createCollection(
         persistedCollectionOptions<Todo, string>({
@@ -1932,23 +1945,31 @@ describe(`persistedCollectionOptions`, () => {
       const all: LoadSubsetOptions = { ...owner }
       try {
         await collection._sync.loadSubset(page)
+        expect([...collection.keys()]).toEqual(identical ? [`1`, `2`] : [`1`])
         await collection._sync.loadSubset(all)
+        expect([...collection.keys()]).toEqual([`1`, `2`])
         collection._sync.unloadSubset(page)
+        adapter.rows.set(`2`, { id: `2`, title: `After page release` })
+        const beforeReload = adapter.loadSubsetCalls.length
         coordinator.emit({
           type: `tx:committed`,
           term: 1,
           seq: 1,
           txId: `sibling-update`,
           latestRowVersion: 1,
-          requiresFullReload: false,
-          changedRows: [{ key: `1`, value: { id: `1`, title: `After` } }],
-          deletedKeys: [],
+          requiresFullReload: true,
         })
         await flushAsyncWork()
-        expect(stripVirtualProps(collection.get(`1`))).toEqual({
-          id: `1`,
-          title: `After`,
-        })
+        await flushAsyncWork()
+        expect(
+          adapter.loadSubsetCalls
+            .slice(beforeReload)
+            .map(({ options }) => options.limit),
+        ).toEqual([undefined])
+        expect([...collection.values()].map(stripVirtualProps)).toEqual([
+          { id: `1`, title: `Page row` },
+          { id: `2`, title: `After page release` },
+        ])
       } finally {
         subscription.unsubscribe()
         await collection.cleanup()

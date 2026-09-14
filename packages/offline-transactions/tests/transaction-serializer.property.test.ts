@@ -2,6 +2,7 @@ import { createCollection, createTransaction } from '@tanstack/db'
 import fc from 'fast-check'
 import { expect, it, vi } from 'vitest'
 import { TransactionSerializer } from '../src/outbox/TransactionSerializer'
+import { cleanupOfflineOracle } from './oracle-lifecycle'
 import type { OfflineTransaction } from '../src/types'
 
 type Value =
@@ -40,6 +41,9 @@ const scalar = fc.oneof(
   fc.constant(null),
   fc.boolean(),
   fc.integer(),
+  fc
+    .double({ noNaN: true, noDefaultInfinity: true })
+    .filter((value) => !Object.is(value, -0)),
   fc.string({ maxLength: 30 }),
 )
 const leaf: fc.Arbitrary<Pair> = fc.oneof(
@@ -149,6 +153,7 @@ async function checkRoundtrip(
     mutationFn: async () => {},
   })
   const rollback = transaction.isPersisted.promise.catch(() => undefined)
+  let hasPrimaryFailure = false
   try {
     transaction.mutate(() => {
       edits.forEach((edit, index) => {
@@ -268,11 +273,21 @@ async function checkRoundtrip(
         }).toEqual(data(edit, index, `runtime`))
       })
     }
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
   } finally {
-    transaction.rollback()
-    await rollback
-    await Promise.all(
-      [...writers, ...readers].map((collection) => collection.cleanup()),
+    await cleanupOfflineOracle(
+      [
+        () => {
+          transaction.rollback()
+        },
+        () => rollback,
+        ...[...writers, ...readers].map(
+          (collection) => () => collection.cleanup(),
+        ),
+      ],
+      hasPrimaryFailure,
     )
   }
 }
@@ -282,6 +297,7 @@ const twin: Pair = {
   wire: `2024-01-01T00:00:00.000Z`,
 }
 const pinned: Array<Edit> = [
+  { kind: `insert`, slot: 1, before: twin, after: { runtime: 0.5, wire: 0.5 } },
   { kind: `insert`, slot: 0, before: twin, after: datePair(1704067200000) },
   { kind: `update`, slot: 1, before: datePair(0), after: twin },
   { kind: `delete`, slot: 0, before: datePair(1), after: twin },
@@ -385,6 +401,9 @@ it.each([20260915, undefined])(
       {
         seed: seed ?? replaySeed,
         numRuns,
+        ...(seed === undefined && replayPath !== undefined
+          ? { path: replayPath }
+          : {}),
         examples: [
           [[{ kind: `update`, slot: 0, before: datePair(0), after: twin }]],
         ],
@@ -413,7 +432,19 @@ it.each(
   async ({ fault, boundary }) => {
     const decode = vi.spyOn(TransactionSerializer.prototype, `deserialize`)
     try {
-      await expect(checkRoundtrip(pinned, 0, fault, boundary)).rejects.toThrow()
+      const expectedFailure =
+        boundary === `encoder` ||
+        (fault !== `wrong-registry` && fault !== `unknown-encoding`)
+          ? { name: `AssertionError` }
+          : {
+              message:
+                fault === `wrong-registry`
+                  ? `Collection with id writer:0 not found`
+                  : `Unsupported transaction value encoding: 3`,
+            }
+      await expect(
+        checkRoundtrip(pinned, 0, fault, boundary),
+      ).rejects.toMatchObject(expectedFailure)
       expect(decode).toHaveBeenCalledTimes(boundary === `encoder` ? 0 : 1)
     } finally {
       decode.mockRestore()

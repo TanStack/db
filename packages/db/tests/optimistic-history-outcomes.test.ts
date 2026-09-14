@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import fc from 'fast-check'
 import { createDeferred } from '../src/deferred.js'
+import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
 import {
   expectHistoryOutcome,
   observeHistoryPromise,
@@ -88,7 +89,9 @@ describe(`Optimistic request outcome histories`, () => {
           }),
           runOutcomeScenario,
         ),
-        { seed, numRuns: 100 },
+        seed === undefined
+          ? oraclePropertyOptions(100, `collection-state.optimistic-outcomes`)
+          : { seed, numRuns: oracleRuns(100) },
       )
     },
   )

@@ -10,12 +10,17 @@ type Expected<K> = Array<[K, number, string]>
  * Unlike the work tracker, it never resets, drops negatives or merges weight 2
  * into one row. Exact fractional tokens are not an expected-result authority.
  */
-export class TopKRelation<K extends number | null, I extends number | string> {
+export class TopKRelation<
+  K extends string | number | null,
+  I extends number | string,
+> {
   private entries = new Map<string, { entry: Entry<K, I>; weight: number }>()
 
   add(messages: Array<[Entry<K, I>, number]>) {
     for (const [[key, [row, index]], weight] of messages) {
       expect(Number.isInteger(weight)).toBe(true)
+      // This finite-scalar oracle must not silently serialize NaN as null.
+      if (typeof key === `number`) expect(Number.isFinite(key)).toBe(true)
       const identity = JSON.stringify([key, row.id, row.value, index])
       const next = (this.entries.get(identity)?.weight ?? 0) + weight
       if (next === 0) this.entries.delete(identity)
@@ -54,7 +59,7 @@ export class TopKRelation<K extends number | null, I extends number | string> {
 // Keep existing resettable transfer-work observations. Only the separate
 // semantic relation persists through reset; it uses no MultiSet consolidation.
 export class TopKMessageTracker<
-  K extends number | null,
+  K extends string | number | null,
   I extends number | string,
 > extends MessageTracker<Entry<K, I>> {
   readonly relation = new TopKRelation<K, I>()

@@ -1,14 +1,16 @@
 import { isDeepStrictEqual } from 'node:util'
 import { expect } from 'vitest'
+import { z } from 'zod'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { createLiveQueryCollection } from '../src/query/index.js'
-import type { SyncConfig } from '../src/types.js'
+import type { CollectionConfig, SyncConfig } from '../src/types.js'
 
 export type HistoryRow = { id: number; a: number; b: number; c: number }
 type Fields = Partial<Omit<HistoryRow, `id`>>
 export type OptimisticStep =
   | { type: `edit`; key: number; fields: Fields; optimistic: boolean }
+  | { type: `delete`; key: number; optimistic: boolean }
   | {
       type: `settle`
       slot: number
@@ -26,8 +28,7 @@ export type OptimisticStep =
 
 type Intent = {
   key: number
-  kind: `insert` | `update`
-  fields: Fields
+  kind: `insert` | `update` | `delete`
   snapshot: HistoryRow
   optimistic: boolean
   dependency?: number
@@ -54,7 +55,10 @@ class HistoryModel {
   queue: Array<Extract<OptimisticStep, { type: `sync` }>> = []
   clock = 0
 
-  constructor(rows: Array<HistoryRow>) {
+  constructor(
+    rows: Array<HistoryRow>,
+    private insertDefault = 0,
+  ) {
     for (const row of rows) {
       this.base.set(row.id, row)
       this.origins.set(row.id, `remote`)
@@ -86,6 +90,10 @@ class HistoryModel {
       (intent) => intent.state === `active` && intent.optimistic,
     )
     const apply = (intent: Intent) => {
+      if (intent.kind === `delete`) {
+        result.delete(intent.key)
+        return
+      }
       result.set(intent.key, {
         ...intent.snapshot,
         $origin: `local`,
@@ -109,19 +117,23 @@ class HistoryModel {
     return result
   }
 
-  edit(step: Extract<OptimisticStep, { type: `edit` }>): number | undefined {
+  author(
+    step: Extract<OptimisticStep, { type: `edit` | `delete` }>,
+  ): number | undefined {
     const row = this.visible().get(step.key)
+    if (step.type === `delete` && !row) return
     if (
+      step.type === `edit` &&
       row &&
       Object.entries(step.fields).every(
         ([key, value]) => row[key as keyof Fields] === value,
       )
     )
       return
-    const kind = row ? `update` : `insert`
+    const kind = step.type === `delete` ? `delete` : row ? `update` : `insert`
     const snapshot = {
-      ...(row ?? { id: step.key, a: 0, b: 0, c: 0 }),
-      ...step.fields,
+      ...(row ?? { id: step.key, a: 0, b: 0, c: this.insertDefault }),
+      ...(step.type === `edit` ? step.fields : {}),
     }
     const dependency = this.intents.reduce(
       (previous, intent, index) =>
@@ -138,7 +150,6 @@ class HistoryModel {
     this.intents.push({
       key: step.key,
       kind,
-      fields: step.fields,
       snapshot,
       optimistic: step.optimistic,
       dependency: dependency < 0 ? undefined : dependency,
@@ -267,6 +278,47 @@ const observed = (
 const sorted = <T extends HistoryRow>(rows: Iterable<T>) =>
   [...rows].sort((a, b) => a.id - b.id)
 
+/** Validate native deltas before their kind/old value are lost to Map.set. */
+export function expectHistoryEventSemantics<T>(
+  before: ReadonlyMap<unknown, T>,
+  changes: ReadonlyArray<{
+    key: unknown
+    type: string
+    value: T
+    previousValue?: T
+  }>,
+  label: string,
+): void {
+  const rows = new Map(before)
+  for (const change of changes) {
+    const message = `${label}: event semantics ${change.type} ${String(change.key)}`
+    if (change.type === `insert`) {
+      expect(rows.has(change.key), `${message}: absent old membership`).toBe(
+        false,
+      )
+      rows.set(change.key, change.value)
+    } else {
+      expect(rows.has(change.key), `${message}: present old membership`).toBe(
+        true,
+      )
+      const previous = rows.get(change.key)
+      if (change.type === `update`) {
+        expect(
+          change.previousValue,
+          `${message}: previous visible row`,
+        ).toStrictEqual(previous)
+        rows.set(change.key, change.value)
+      } else {
+        expect(change.type, message).toBe(`delete`)
+        expect(change.value, `${message}: removed visible row`).toStrictEqual(
+          previous,
+        )
+        rows.delete(change.key)
+      }
+    }
+  }
+}
+
 export type HistoryOutcome<T> =
   | { status: `pending` }
   | { status: `fulfilled`; value: T }
@@ -340,16 +392,25 @@ export async function withHistoryCleanup<T>(
 export async function runOptimisticHistory(
   initial: Array<HistoryRow>,
   steps: ReadonlyArray<OptimisticStep>,
-  fault?: `wrong-key` | `transient-field` | `partial-batch` | `backwards-cuts`,
+  fault?:
+    | `wrong-key`
+    | `transient-field`
+    | `partial-batch`
+    | `backwards-cuts`
+    | `previous-value`
+    | `update-as-insert`
+    | `retained-default`,
+  options: { insertDefault?: number } = {},
 ) {
-  const model = new HistoryModel(initial)
+  const model = new HistoryModel(initial, options.insertDefault)
   let sync!: Parameters<SyncConfig<HistoryRow>[`sync`]>[0]
   let starting: ReturnType<typeof createDeferred<void>> | undefined
   const handler = () => starting!.promise
-  const collection = createCollection<HistoryRow>({
+  const config: CollectionConfig<HistoryRow> = {
     getKey: (row) => row.id,
     onInsert: handler,
     onUpdate: handler,
+    onDelete: handler,
     sync: {
       rowUpdateMode: `full`,
       sync: (actions) => {
@@ -361,7 +422,20 @@ export async function runOptimisticHistory(
         actions.markReady()
       },
     },
-  })
+  }
+  const schemaCollection =
+    options.insertDefault === undefined
+      ? undefined
+      : createCollection({
+          ...config,
+          schema: z.object({
+            id: z.number(),
+            a: z.number(),
+            b: z.number(),
+            c: z.number().default(options.insertDefault),
+          }),
+        })
+  const collection = schemaCollection ?? createCollection<HistoryRow>(config)
   const downstream = createLiveQueryCollection({
     query: (q) => q.from({ row: collection }),
   })
@@ -373,10 +447,12 @@ export async function runOptimisticHistory(
     done: ReturnType<typeof createDeferred<void>>
     outcome: ReturnType<typeof observeHistoryPromise<unknown>>
     expected: HistoryOutcome<unknown>
+    changes: object
   }> = []
   const receipts: Array<ReturnType<typeof observeHistoryPromise<void>>> = []
   const counts = {
     edits: 0,
+    deletes: 0,
     settlements: 0,
     replacements: 0,
     queued: 0,
@@ -387,11 +463,11 @@ export async function runOptimisticHistory(
   return withHistoryCleanup(
     async () => {
       await downstream.preload()
-      const replica = new Map(
-        [...collection.values()].map((row) => [row.id, observed(row)]),
-      )
+      // includeInitialState supplies inserts; the listener's prior state is empty.
+      const replica = new Map<number, ObservedRow>()
       let deliveries = 0
       type Publication = {
+        before: Map<number, ObservedRow>
         batch: Array<{
           key: unknown
           type: string
@@ -422,11 +498,13 @@ export async function runOptimisticHistory(
               : {}),
           }))
           const record = (entries: typeof captured) => {
+            const before = new Map(replica)
             for (const change of entries) {
               if (change.type === `delete`) replica.delete(change.key as number)
               else replica.set(change.key as number, change.value)
             }
             publications.push({
+              before,
               batch: entries,
               replica: sorted(replica.values()),
               source: sorted([...collection.values()].map(observed)),
@@ -466,6 +544,24 @@ export async function runOptimisticHistory(
             injected = true
             record(captured.slice(0, 1))
             record(captured)
+          } else if (
+            !injected &&
+            (fault === `previous-value` || fault === `update-as-insert`) &&
+            captured.some((change) => change.type === `update`)
+          ) {
+            injected = true
+            record(
+              captured.map((change) =>
+                change.type !== `update`
+                  ? change
+                  : fault === `previous-value`
+                    ? {
+                        ...change,
+                        previousValue: { ...change.previousValue!, c: 999999 },
+                      }
+                    : { ...change, type: `insert` as const },
+              ),
+            )
           } else record(captured)
         },
         { includeInitialState: true },
@@ -486,6 +582,11 @@ export async function runOptimisticHistory(
         }
         let cutIndex = 0
         for (const publication of publications) {
+          expectHistoryEventSemantics(
+            publication.before,
+            publication.batch,
+            label,
+          )
           for (const change of publication.batch) {
             expect(typeof change.key, `${label}: native callback key`).toBe(
               `number`,
@@ -529,9 +630,22 @@ export async function runOptimisticHistory(
             operation.tx.mutations[0]!.modified,
             `${label}: immutable request ${index}`,
           ).toMatchObject(plain(model.intents[index]!.snapshot))
+          expect(
+            operation.tx.mutations[0]!.changes,
+            `${label}: authored request ${index}`,
+          ).toStrictEqual(operation.changes)
         }
         const expected = sorted(model.visible().values())
         const actual = sorted([...collection.values()].map(observed))
+        if (
+          fault === `retained-default` &&
+          settling &&
+          !injected &&
+          actual.length
+        ) {
+          actual[0]!.c = -999999
+          injected = true
+        }
         expect(
           actual,
           `${label}: reads ${JSON.stringify(actual)} expected ${JSON.stringify(expected)}`,
@@ -551,34 +665,65 @@ export async function runOptimisticHistory(
         settling = step.type === `settle`
         const before = sorted(model.visible().values())
         const deliveredBefore = deliveries
-        if (step.type === `edit`) {
-          const index = model.edit(step)
+        if (step.type === `edit` || step.type === `delete`) {
+          const index = model.author(step)
           if (index === undefined) continue
           const intent = model.intents[index]!
           cuts = [sorted(model.visible().values())]
           const done = createDeferred<void>()
           starting = done
           const tx =
-            intent.kind === `insert`
-              ? collection.insert(plain(intent.snapshot), {
-                  optimistic: step.optimistic,
-                })
-              : collection.update(
-                  step.key,
-                  { optimistic: step.optimistic },
-                  (draft) => Object.assign(draft, step.fields),
-                )
+            step.type === `delete`
+              ? collection.delete(step.key, { optimistic: step.optimistic })
+              : intent.kind === `insert`
+                ? schemaCollection && step.fields.c === undefined
+                  ? schemaCollection.insert(
+                      {
+                        id: intent.key,
+                        a: intent.snapshot.a,
+                        b: intent.snapshot.b,
+                      },
+                      { optimistic: step.optimistic },
+                    )
+                  : collection.insert(plain(intent.snapshot), {
+                      optimistic: step.optimistic,
+                    })
+                : collection.update(
+                    step.key,
+                    { optimistic: step.optimistic },
+                    (draft) => Object.assign(draft, step.fields),
+                  )
           operations.push({
             tx,
             done,
             outcome: observeHistoryPromise<unknown>(tx.isPersisted.promise),
             expected: { status: `pending` },
+            changes:
+              step.type === `delete`
+                ? plain(intent.snapshot)
+                : intent.kind === `insert`
+                  ? schemaCollection && step.fields.c === undefined
+                    ? {
+                        id: intent.key,
+                        a: intent.snapshot.a,
+                        b: intent.snapshot.b,
+                      }
+                    : plain(intent.snapshot)
+                  : Object.fromEntries(
+                      Object.entries(step.fields).filter(
+                        ([key, value]) =>
+                          before.find((row) => row.id === intent.key)?.[
+                            key as keyof Fields
+                          ] !== value,
+                      ),
+                    ),
           })
           expect(
             tx.mutations[0]!.modified,
             `captured request snapshot`,
           ).toMatchObject(plain(intent.snapshot))
           counts.edits++
+          if (step.type === `delete`) counts.deletes++
           if (intent.dependency !== undefined) counts.dependencies++
         } else if (step.type === `settle`) {
           const active = model.intents.flatMap((intent, index) =>

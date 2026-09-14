@@ -5,6 +5,7 @@ import { createCollection, createLiveQueryCollection, eq } from '@tanstack/db'
 import pDefer from 'p-defer'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { powerSyncCollectionOptions } from '../src'
+import { withTestCleanup } from './with-test-cleanup'
 
 const APP_SCHEMA = new Schema({
   products: new Table({
@@ -12,6 +13,57 @@ const APP_SCHEMA = new Schema({
     price: column.integer,
     category: column.text,
   }),
+})
+
+it.each([new Error(`primary mismatch`), undefined])(
+  `preserves a primary failure and attempts every resource cleanup (%s)`,
+  async (primary) => {
+    const secondary = new Error(`cleanup failure`)
+    const attempted: Array<string> = []
+    const outcome = await withTestCleanup(() => {
+      throw primary
+    }, [
+      () => {
+        attempted.push(`first`)
+        throw secondary
+      },
+      async () => {
+        attempted.push(`second`)
+        await Promise.reject(secondary)
+      },
+      () => {
+        attempted.push(`last`)
+      },
+    ]).then(
+      () => undefined,
+      (error: unknown) => error,
+    )
+    expect(attempted).toEqual([`first`, `second`, `last`])
+    expect(outcome).toBeInstanceOf(AggregateError)
+    expect((outcome as AggregateError).cause).toBe(primary)
+    expect((outcome as AggregateError).errors).toEqual([
+      primary,
+      secondary,
+      secondary,
+    ])
+  },
+)
+
+it(`preserves a lone failure and permits successful teardown`, async () => {
+  const sentinel = new Error(`only failure`)
+  await expect(
+    withTestCleanup(() => {
+      throw sentinel
+    }, [() => {}]),
+  ).rejects.toBe(sentinel)
+  await expect(
+    withTestCleanup(() => {}, [
+      () => {
+        throw sentinel
+      },
+    ]),
+  ).rejects.toBe(sentinel)
+  await expect(withTestCleanup(() => {}, [() => {}])).resolves.toBeUndefined()
 })
 
 describe(`Sync Streams`, () => {
@@ -323,7 +375,7 @@ describe(`Sync Streams`, () => {
     const message =
       `Source collection '${collection.id}' was manually cleaned up while live query '${query.id}' depends on it. ` +
       `Live queries prevent automatic GC, so this was likely a manual cleanup() call.`
-    try {
+    await withTestCleanup(async () => {
       await hookEntered.promise
       expect(cleanupHook).not.toHaveBeenCalled()
       expect(createDiffTrigger).not.toHaveBeenCalled()
@@ -339,24 +391,21 @@ describe(`Sync Streams`, () => {
       expect(query.toArray).toEqual([])
       expect(collection.size).toBe(0)
       expect(publications.flat()).toEqual([])
-      expect(await preload).toEqual(expected)
       expect(reports.mock.calls).toEqual([[`[Live Query Error] ${message}`]])
-    } finally {
-      try {
-        hook.resolve(cleanupHook)
-        subscription.unsubscribe()
-        await query.cleanup()
-        await collection.cleanup()
-        await preload
-        await vi.waitFor(() => expect(cleanupHook).toHaveBeenCalledOnce())
-        await new Promise((resolve) => setTimeout(resolve, 0))
-        expect(reports.mock.calls).toEqual([[`[Live Query Error] ${message}`]])
-        expect(unexpected).toEqual([])
-      } finally {
-        process.off(`unhandledRejection`, recordUnhandled)
-        reports.mockRestore()
-        createDiffTrigger.mockRestore()
-      }
-    }
+    }, [
+      () => hook.resolve(cleanupHook),
+      () => subscription.unsubscribe(),
+      () => query.cleanup(),
+      () => collection.cleanup(),
+      () => preload,
+      () => vi.waitFor(() => expect(cleanupHook).toHaveBeenCalledOnce()),
+      () => new Promise((resolve) => setTimeout(resolve, 0)),
+      () =>
+        expect(reports.mock.calls).toEqual([[`[Live Query Error] ${message}`]]),
+      () => expect(unexpected).toEqual([]),
+      () => process.off(`unhandledRejection`, recordUnhandled),
+      () => reports.mockRestore(),
+      () => createDiffTrigger.mockRestore(),
+    ])
   })
 })

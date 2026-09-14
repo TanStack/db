@@ -112,7 +112,7 @@ export class CollectionMutationsManager<
         typeof existingData === `object`
       ) {
         // Merge the update with the existing data
-        const mergedData = Object.assign({}, existingData, data)
+        const mergedData = { ...existingData, ...data }
 
         // Validate the merged data
         const result = standardSchema[`~standard`].validate(mergedData)
@@ -371,11 +371,7 @@ export class CollectionMutationsManager<
         )
 
         // Construct the full modified item by applying the validated update payload to the original item
-        const modifiedItem = Object.assign(
-          {},
-          originalItem,
-          validatedUpdatePayload,
-        )
+        const modifiedItem = { ...originalItem, ...validatedUpdatePayload }
 
         // Check if the ID of the item is being changed
         const originalItemId = this.config.getKey(originalItem)

@@ -744,6 +744,14 @@ const historyRow = fc.record({
 })
 const optimisticStep: fc.Arbitrary<OptimisticStep> = fc.oneof(
   {
+    weight: 2,
+    arbitrary: fc.record({
+      type: fc.constant(`delete` as const),
+      key: fc.integer({ min: 1, max: 3 }),
+      optimistic: fc.boolean(),
+    }),
+  },
+  {
     weight: 4,
     arbitrary: fc.record({
       type: fc.constant(`edit` as const),
@@ -794,6 +802,101 @@ const optimisticHistory = fc.record({
 
 // These are replay programs for the same model and driver as randomized runs,
 // not separate assertions that only know the reported final state.
+it.each(
+  [false, true].flatMap((acceptBeforeTruncate) =>
+    [false, true].flatMap((replacementHasKey) =>
+      [false, true].map((reinsert) => ({
+        acceptBeforeTruncate,
+        replacementHasKey,
+        reinsert,
+      })),
+    ),
+  ),
+)(
+  `retains direct deletion across replacement and later sync: %j`,
+  async ({ acceptBeforeTruncate, replacementHasKey, reinsert }) => {
+    const row = { id: 1, a: 1, b: 2, c: 3 }
+    const steps: Array<OptimisticStep> = [
+      { type: `delete`, key: 1, optimistic: true },
+      ...(acceptBeforeTruncate
+        ? [{ type: `settle`, slot: 0, success: true, cascade: false } as const]
+        : []),
+      ...(reinsert
+        ? [
+            {
+              type: `edit`,
+              key: 1,
+              fields: { a: 4 },
+              optimistic: true,
+            } as const,
+          ]
+        : []),
+      {
+        type: `sync`,
+        rows: replacementHasKey ? [row] : [],
+        truncate: true,
+        immediate: false,
+        copies: 1,
+      },
+      ...(!acceptBeforeTruncate
+        ? [{ type: `settle`, slot: 0, success: true, cascade: false } as const]
+        : []),
+      ...(reinsert
+        ? [{ type: `settle`, slot: 0, success: true, cascade: false } as const]
+        : []),
+      {
+        type: `sync`,
+        rows: [{ id: 2, a: 2, b: 2, c: 2 }],
+        truncate: false,
+        immediate: false,
+        copies: 1,
+      },
+    ]
+    const counts = await runOptimisticHistory([row], steps)
+    expect(counts.deletes).toBe(1)
+    expect(counts.settlements).toBe(reinsert ? 2 : 1)
+  },
+)
+
+it(`generates direct delete actions`, () => {
+  const commands = fc.sample(optimisticStep, { seed: 86104, numRuns: 100 })
+  expect(commands.some((step) => step.type === `delete`)).toBe(true)
+})
+
+const defaultHistory = (
+  truncate: boolean,
+  success: boolean,
+): Array<OptimisticStep> => [
+  { type: `edit`, key: 1, fields: { a: 1 }, optimistic: true },
+  { type: `edit`, key: 1, fields: { b: 2 }, optimistic: true },
+  { type: `settle`, slot: 1, success: true, cascade: false },
+  { type: `sync`, rows: [], truncate, immediate: false, copies: 1 },
+  { type: `settle`, slot: 0, success, cascade: false },
+]
+it.each(
+  [false, true].flatMap((truncate) =>
+    [false, true].map((success) => ({ truncate, success })),
+  ),
+)(
+  `retains validated defaults independently from authored fields: %j`,
+  async ({ truncate, success }) => {
+    for (const insertDefault of [3, 11])
+      await runOptimisticHistory(
+        [],
+        defaultHistory(truncate, success),
+        undefined,
+        { insertDefault },
+      )
+  },
+)
+it(`rejects a default lost only after settlement`, async () => {
+  const steps = defaultHistory(true, true)
+  await runOptimisticHistory([], steps, undefined, { insertDefault: 3 })
+  await expect(
+    runOptimisticHistory([], steps, `retained-default`, { insertDefault: 3 }),
+  ).rejects.toMatchObject({ name: `AssertionError` })
+})
+
 const insertionPrefix: Array<OptimisticStep> = [
   { type: `edit`, key: 1, fields: { a: 1 }, optimistic: true },
   { type: `edit`, key: 1, fields: { b: 2 }, optimistic: true },

@@ -3,10 +3,23 @@
  * and provides a way to retrieve those changes.
  */
 
-import { deepEquals, deepEqualsInternal, isTemporal } from './utils'
+import { deepEquals, isTemporal } from './utils'
 
 // Resolve draft handles before calling native Map/Set membership methods.
 const draftCopies = new WeakMap<object, object>()
+function defineDataProperty(
+  object: object,
+  key: PropertyKey,
+  value: unknown,
+): void {
+  Object.defineProperty(object, key, {
+    value,
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  })
+}
+
 function unwrapDraft(value: unknown): unknown {
   return value !== null && typeof value === `object`
     ? (draftCopies.get(value) ?? value)
@@ -70,115 +83,6 @@ function isProxiableObject(
     !((value as any) instanceof RegExp) &&
     !isTemporal(value)
   )
-}
-
-/**
- * Creates a handler for array iteration methods that ensures proxied elements
- * are passed to callbacks and returned from methods like find/filter.
- */
-function createArrayIterationHandler<T extends object>(
-  methodName: string,
-  methodFn: (...args: Array<unknown>) => unknown,
-  changeTracker: ChangeTracker<T>,
-  memoizedCreateChangeProxy: (
-    obj: Record<string | symbol, unknown>,
-    parent?: {
-      tracker: ChangeTracker<Record<string | symbol, unknown>>
-      prop: string | symbol
-    },
-  ) => { proxy: Record<string | symbol, unknown> },
-): ((...args: Array<unknown>) => unknown) | undefined {
-  if (!CALLBACK_ITERATION_METHODS.has(methodName)) {
-    return undefined
-  }
-
-  return function (...args: Array<unknown>) {
-    const callback = args[0]
-    if (typeof callback !== `function`) {
-      return methodFn.apply(changeTracker.copy_, args)
-    }
-
-    // Create a helper to get proxied version of an array element
-    const getProxiedElement = (element: unknown, index: number): unknown => {
-      if (isProxiableObject(element)) {
-        const nestedParent = {
-          tracker: changeTracker as unknown as ChangeTracker<
-            Record<string | symbol, unknown>
-          >,
-          prop: String(index),
-        }
-        const { proxy: elementProxy } = memoizedCreateChangeProxy(
-          element,
-          nestedParent,
-        )
-        return elementProxy
-      }
-      return element
-    }
-
-    // Wrap the callback to pass proxied elements
-    const wrappedCallback = function (
-      this: unknown,
-      element: unknown,
-      index: number,
-      array: unknown,
-    ) {
-      const proxiedElement = getProxiedElement(element, index)
-      return callback.call(this, proxiedElement, index, array)
-    }
-
-    // For reduce/reduceRight, the callback signature is different
-    if (methodName === `reduce` || methodName === `reduceRight`) {
-      const reduceCallback = function (
-        this: unknown,
-        accumulator: unknown,
-        element: unknown,
-        index: number,
-        array: unknown,
-      ) {
-        const proxiedElement = getProxiedElement(element, index)
-        return callback.call(this, accumulator, proxiedElement, index, array)
-      }
-      return methodFn.apply(changeTracker.copy_, [
-        reduceCallback,
-        ...args.slice(1),
-      ])
-    }
-
-    const result = methodFn.apply(changeTracker.copy_, [
-      wrappedCallback,
-      ...args.slice(1),
-    ])
-
-    // For find/findLast, proxy the returned element if it's an object
-    if (
-      (methodName === `find` || methodName === `findLast`) &&
-      result &&
-      typeof result === `object`
-    ) {
-      const foundIndex = (
-        changeTracker.copy_ as unknown as Array<unknown>
-      ).indexOf(result)
-      if (foundIndex !== -1) {
-        return getProxiedElement(result, foundIndex)
-      }
-    }
-
-    // For filter, proxy each element in the result array
-    if (methodName === `filter` && Array.isArray(result)) {
-      return result.map((element) => {
-        const originalIndex = (
-          changeTracker.copy_ as unknown as Array<unknown>
-        ).indexOf(element)
-        if (originalIndex !== -1) {
-          return getProxiedElement(element, originalIndex)
-        }
-        return element
-      })
-    }
-
-    return result
-  }
 }
 
 /**
@@ -382,7 +286,7 @@ function deepClone<T extends unknown>(
   }
 
   if (Array.isArray(obj)) {
-    const arrayClone = [] as Array<unknown>
+    const arrayClone = new Array<unknown>(obj.length)
     visited.set(obj as object, arrayClone)
     obj.forEach((item, index) => {
       arrayClone[index] = deepClone(item, visited, detach)
@@ -445,16 +349,15 @@ function deepClone<T extends unknown>(
   for (const key in obj) {
     if (Object.prototype.hasOwnProperty.call(obj, key)) {
       // Copy data properties without invoking Object.prototype.__proto__.
-      Object.defineProperty(clone, key, {
-        value: deepClone(
+      defineDataProperty(
+        clone,
+        key,
+        deepClone(
           (obj as Record<string | symbol, unknown>)[key],
           visited,
           detach,
         ),
-        enumerable: true,
-        configurable: true,
-        writable: true,
-      })
+      )
     }
   }
 
@@ -468,6 +371,91 @@ function deepClone<T extends unknown>(
   }
 
   return clone as T
+}
+
+// Generic value equality intentionally ignores some native state. Draft
+// assignments must also preserve Set contents/order and RegExp match position.
+function draftValuesEqual(
+  left: unknown,
+  right: unknown,
+  paired = new Map<object, object>(),
+): boolean {
+  if (left === right) return true
+  if (
+    left === null ||
+    right === null ||
+    typeof left !== `object` ||
+    typeof right !== `object`
+  )
+    return deepEquals(left, right)
+  if (paired.has(left)) return paired.get(left) === right
+  paired.set(left, right)
+  try {
+    if (left instanceof Set || right instanceof Set) {
+      if (
+        !(left instanceof Set) ||
+        !(right instanceof Set) ||
+        left.size !== right.size
+      )
+        return false
+      const values = [...right]
+      return [...left].every((value, index) =>
+        draftValuesEqual(value, values[index], paired),
+      )
+    }
+    if (left instanceof RegExp || right instanceof RegExp)
+      return (
+        left instanceof RegExp &&
+        right instanceof RegExp &&
+        deepEquals(left, right) &&
+        left.lastIndex === right.lastIndex
+      )
+    if (left instanceof Map || right instanceof Map) {
+      if (
+        !(left instanceof Map) ||
+        !(right instanceof Map) ||
+        left.size !== right.size
+      )
+        return false
+      const entries = [...right]
+      return [...left].every(
+        ([key, value], index) =>
+          (key === entries[index]![0] || Object.is(key, entries[index]![0])) &&
+          draftValuesEqual(value, entries[index]![1], paired),
+      )
+    }
+    // Native leaf values retain their existing equality contract. Traverse
+    // ordinary containers so a nested Set or RegExp cannot bypass refinement.
+    if (
+      left instanceof Date ||
+      right instanceof Date ||
+      ArrayBuffer.isView(left) ||
+      ArrayBuffer.isView(right) ||
+      isTemporal(left) ||
+      isTemporal(right)
+    )
+      return deepEquals(left, right)
+    if (Array.isArray(left) !== Array.isArray(right)) return false
+    if (Array.isArray(left) && left.length !== (right as Array<unknown>).length)
+      return false
+    const keys = (value: object) =>
+      Reflect.ownKeys(value).filter((key) =>
+        Object.prototype.propertyIsEnumerable.call(value, key),
+      )
+    const leftKeys = keys(left)
+    if (leftKeys.length !== keys(right).length) return false
+    return leftKeys.every(
+      (key) =>
+        Object.prototype.propertyIsEnumerable.call(right, key) &&
+        draftValuesEqual(
+          (left as Record<PropertyKey, unknown>)[key],
+          (right as Record<PropertyKey, unknown>)[key],
+          paired,
+        ),
+    )
+  } finally {
+    paired.delete(left)
+  }
 }
 
 /**
@@ -525,7 +513,7 @@ export function createChangeProxy<
       : deepClone(target, valueCopies),
     originalObject: deepClone(target),
     modified: false,
-    assigned_: {},
+    assigned_: Object.create(null),
     parent,
     target, // Store reference to the target object
   }
@@ -539,9 +527,12 @@ export function createChangeProxy<
 
     // Propagate the change up the parent chain
     if (state.parent) {
-      if (!state.parent.retainIdentity) {
-        // Update parent's copy with this object's current state
-        state.parent.tracker.copy_[state.parent.prop] = state.copy_
+      if (
+        !state.parent.retainIdentity &&
+        state.parent.tracker.copy_[state.parent.prop] === state.copy_
+      ) {
+        // Only mark an edge that still points to this child. A retained handle
+        // must not reinstall itself after the callback replaces or deletes it.
         state.parent.tracker.assigned_[state.parent.prop] = true
       }
 
@@ -556,7 +547,7 @@ export function createChangeProxy<
   ): boolean {
     if (state.copy_ instanceof Map || state.copy_ instanceof Set) {
       // Compare entry contents: these containers have no assigned properties.
-      return deepEquals(
+      return draftValuesEqual(
         Array.from(state.copy_),
         Array.from(
           state.originalObject as unknown as
@@ -581,7 +572,7 @@ export function createChangeProxy<
         const originalValue = (state.originalObject as any)[prop]
 
         // If the value is not equal to original, something is still changed
-        if (!deepEquals(currentValue, originalValue)) {
+        if (!draftValuesEqual(currentValue, originalValue)) {
           return false
         }
       } else if (state.assigned_[prop] === false) {
@@ -598,7 +589,7 @@ export function createChangeProxy<
         const originalValue = (state.originalObject as any)[sym]
 
         // If the value is not equal to original, something is still changed
-        if (!deepEquals(currentValue, originalValue)) {
+        if (!draftValuesEqual(currentValue, originalValue)) {
           return false
         }
       } else if (state.assigned_[sym] === false) {
@@ -621,7 +612,7 @@ export function createChangeProxy<
     if (isReverted) {
       // If everything is reverted, clear the tracking
       parentState.modified = false
-      parentState.assigned_ = {}
+      parentState.assigned_ = Object.create(null)
 
       // Continue up the chain
       if (parentState.parent) {
@@ -640,9 +631,7 @@ export function createChangeProxy<
     // Create a proxy for the object
     const proxy = new Proxy(obj, {
       get(ptarget, prop, receiver) {
-        const value =
-          changeTracker.copy_[prop as keyof T] ??
-          changeTracker.originalObject[prop as keyof T]
+        const value = changeTracker.copy_[prop as keyof T]
 
         // If it's a getter, return the value directly
         const desc = Object.getOwnPropertyDescriptor(ptarget, prop)
@@ -664,15 +653,14 @@ export function createChangeProxy<
               )
             }
 
-            // Handle array iteration methods (find, filter, forEach, etc.)
-            const iterationHandler = createArrayIterationHandler(
-              methodName,
-              value,
-              changeTracker,
-              memoizedCreateChangeProxy,
-            )
-            if (iterationHandler) {
-              return iterationHandler
+            // Native callbacks and iterators read through the draft itself.
+            // This also tracks the callback array and implicit reduce seed.
+            if (
+              CALLBACK_ITERATION_METHODS.has(methodName) ||
+              methodName === `values` ||
+              methodName === `entries`
+            ) {
+              return value.bind(receiver)
             }
 
             // Handle array Symbol.iterator for for...of loops
@@ -773,11 +761,16 @@ export function createChangeProxy<
         const currentValue = changeTracker.copy_[prop as keyof T]
 
         // Only track the change if the value is actually different
-        if (!deepEquals(currentValue, value)) {
+        if (
+          !Object.hasOwn(changeTracker.copy_, prop) ||
+          !draftValuesEqual(currentValue, value)
+        ) {
           // Check if the new value is equal to the original value
           // Important: Use the originalObject to get the true original value
           const originalValue = changeTracker.originalObject[prop as keyof T]
-          const isRevertToOriginal = deepEquals(value, originalValue)
+          const isRevertToOriginal =
+            Object.hasOwn(changeTracker.originalObject, prop) &&
+            draftValuesEqual(value, originalValue)
 
           if (isRevertToOriginal) {
             // If the value is reverted to its original state, remove it from changes
@@ -792,7 +785,7 @@ export function createChangeProxy<
             if (allReverted) {
               // If all have been reverted, clear tracking
               changeTracker.modified = false
-              changeTracker.assigned_ = {}
+              changeTracker.assigned_ = Object.create(null)
 
               // If we're a nested object, check if the parent needs updating
               if (parent) {
@@ -847,10 +840,12 @@ export function createChangeProxy<
       deleteProperty(dobj, prop) {
         const stringProp = typeof prop === `symbol` ? prop.toString() : prop
 
-        if (stringProp in dobj) {
+        if (Object.hasOwn(dobj, prop)) {
           // Check if the property exists in the original object
-          const hadPropertyInOriginal =
-            stringProp in changeTracker.originalObject
+          const hadPropertyInOriginal = Object.hasOwn(
+            changeTracker.originalObject,
+            prop,
+          )
 
           // Forward the delete to the target using Reflect
           // This respects Object.seal/preventExtensions constraints
@@ -924,7 +919,9 @@ export function createChangeProxy<
 
       const result: Record<string, any | undefined> = {}
       const mayHaveChangedAliases = Object.keys(changeTracker.assigned_).some(
-        (key) => typeof changeTracker.copy_[key] === `object`,
+        (key) =>
+          typeof changeTracker.copy_[key] === `object` ||
+          typeof changeTracker.originalObject[key] === `object`,
       )
       const pairedRoots = new Map<object, object>([
         [changeTracker.copy_, changeTracker.originalObject],
@@ -939,14 +936,20 @@ export function createChangeProxy<
         if (
           (changeTracker.assigned_[key] === true ||
             (mayHaveChangedAliases &&
-              !deepEqualsInternal(
+              !draftValuesEqual(
                 value instanceof Set ? Array.from(value) : value,
                 original instanceof Set ? Array.from(original) : original,
                 pairedRoots,
               ))) &&
           key in changeTracker.copy_
         ) {
-          result[key] = changeTracker.copy_[key]
+          defineDataProperty(result, key, changeTracker.copy_[key])
+        }
+      }
+
+      for (const key of Object.keys(changeTracker.assigned_)) {
+        if (changeTracker.assigned_[key] === false) {
+          defineDataProperty(result, key, undefined)
         }
       }
 

@@ -16,17 +16,33 @@ import type {
  * No state survives the run.
  */
 export function* topKBatch<K, T>(messages: Array<MultiSet<[K, T]>>) {
-  const batch = new Map<number, [[K, T], number]>()
+  const keyed = new Map<K, Array<[[K, T], number]>>()
   for (const message of messages) {
     for (const [value, weight] of message.getInner()) {
-      const identity = hash(value)
-      const previous = batch.get(identity)
-      if (previous) previous[1] += weight
-      else batch.set(identity, [value, weight])
+      const entries = keyed.get(value[0])
+      if (entries) entries.push([value, weight])
+      else keyed.set(value[0], [[value, weight]])
     }
   }
-  for (const entry of batch.values()) if (entry[1] < 0) yield entry
-  for (const entry of batch.values()) if (entry[1] > 0) yield entry
+  const batch: Array<[[K, T], number]> = []
+  for (const entries of keyed.values()) {
+    // Ordering distinct keys needs only the caller's comparator. In particular,
+    // do not traverse irrelevant payloads or merge keys on a hash collision.
+    if (entries.length === 1) {
+      batch.push(entries[0]!)
+      continue
+    }
+    const consolidated = new Map<number, [[K, T], number]>()
+    for (const [value, weight] of entries) {
+      const identity = hash(value)
+      const previous = consolidated.get(identity)
+      if (previous) previous[1] += weight
+      else consolidated.set(identity, [value, weight])
+    }
+    batch.push(...consolidated.values())
+  }
+  for (const entry of batch) if (entry[1] < 0) yield entry
+  for (const entry of batch) if (entry[1] > 0) yield entry
 }
 
 /**

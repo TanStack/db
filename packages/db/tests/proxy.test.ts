@@ -1,6 +1,7 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it, vi } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
+import { createCollection } from '../src/collection/index'
 import {
   createArrayChangeProxy,
   createChangeProxy,
@@ -106,7 +107,7 @@ function observeArrayCallbacks(
           ? { items: changes.items.map((item) => ({ ...item })) }
           : {}),
       },
-      initial: copyCallbackRow(initial),
+      initial,
       original: copyCallbackRow(original),
     }
   })
@@ -122,6 +123,76 @@ function assertArrayCallbacks(cuts: ReturnType<typeof observeArrayCallbacks>) {
 }
 
 describe(`native array callback oracle`, () => {
+  it(`keeps the shared baseline independent of every captured actual cut`, () => {
+    const cuts = observeArrayCallbacks(
+      [1, 2],
+      [
+        { method: `forEach`, target: 0, delta: 3 },
+        { method: `forEach`, target: 0, delta: -3 },
+      ],
+    )
+    assertArrayCallbacks(cuts)
+    cuts[0]!.actualRow.items[0]!.value = 99
+    cuts[0]!.original.items[0]!.value = 98
+    expect(cuts[0]!.initial.items[0]!.value).toBe(1)
+    expect(cuts[0]!.expectedRow.items[0]!.value).toBe(4)
+    expect(cuts[1]!.actualRow.items[0]!.value).toBe(1)
+    expect(cuts[1]!.original.items[0]!.value).toBe(1)
+    expect(() => assertArrayCallbacks(cuts)).toThrow()
+  })
+  it.each([`element`, `array`, `accumulator`, `values`, `entries`] as const)(
+    `preserves native writes through the %s access path`,
+    async (path) => {
+      for (const delta of [0, 3, -2]) {
+        const make = () => ({ id: 1, items: [{ value: 1 }, { value: 2 }] })
+        const run = (row: ReturnType<typeof make>) => {
+          if (path === `accumulator`)
+            row.items.reduce((first) => {
+              first.value += delta
+              return first
+            })
+          else if (path === `values`)
+            row.items.values().next().value!.value += delta
+          else if (path === `entries`)
+            row.items.entries().next().value![1].value += delta
+          else
+            row.items.forEach((item, index, array) => {
+              expect(array).toBe(row.items)
+              if (index === 0)
+                (path === `element` ? item : array[index]!).value += delta
+            })
+        }
+        const expected = make()
+        run(expected)
+        const original = make()
+        const changes = withChangeTracking(original, run)
+        expect({ ...original, ...changes }).toStrictEqual(expected)
+        expect(original).toStrictEqual(make())
+        const collection = createCollection({
+          getKey: (row: ReturnType<typeof make>) => row.id,
+          startSync: true,
+          sync: {
+            sync: ({ begin, write, commit, markReady }) => {
+              begin()
+              write({ type: `insert`, value: make() })
+              commit()
+              markReady()
+            },
+          },
+          onUpdate: () => Promise.resolve(),
+        })
+        try {
+          const tx = collection.update(1, run)
+          await tx.isPersisted.promise
+          const saved = collection.get(1)!
+          // This oracle covers row data, not collection-owned virtual fields.
+          expect({ id: saved.id, items: saved.items }).toStrictEqual(expected)
+        } finally {
+          await collection.cleanup()
+        }
+      }
+    },
+  )
   it.each(callbackMethods)(
     `matches native %s reads, writes and reverts`,
     (method) => {
@@ -307,7 +378,7 @@ describe(`Proxy Library`, () => {
 
       delete proxy.role
 
-      expect(getChanges()).toEqual({
+      expect(getChanges()).toStrictEqual({
         role: undefined,
       })
       expect(obj).toEqual({

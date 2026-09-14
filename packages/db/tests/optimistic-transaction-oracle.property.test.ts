@@ -5,6 +5,7 @@ import { createDeferred } from '../src/deferred.js'
 import { createLiveQueryCollection } from '../src/query/index.js'
 import { createTransaction } from '../src/transactions.js'
 import {
+  expectHistoryEventSemantics,
   expectHistoryOutcome,
   observeHistoryPromise,
   withHistoryCleanup,
@@ -27,6 +28,8 @@ type ObservationFault =
   | `partial-publication`
   | `payload`
   | `string-key`
+  | `previous-value`
+  | `update-as-insert`
 const orders: Array<Array<Operation>> = [
   [`insert`, `update`, `delete`],
   [`insert`, `delete`, `update`],
@@ -35,6 +38,197 @@ const orders: Array<Array<Operation>> = [
   [`delete`, `insert`, `update`],
   [`delete`, `update`, `insert`],
 ]
+
+const sameKeySequences = [
+  `insert-update`,
+  `insert-delete`,
+  `update-update`,
+  `update-delete`,
+] as const
+type SameKeyScenario = {
+  sequence: (typeof sameKeySequences)[number]
+  value: number
+  note: string
+  success: boolean
+}
+
+async function runSameKey(
+  scenario: SameKeyScenario,
+  fault?: `dropped-field` | `canceled-persistence`,
+) {
+  const { sequence, value, note, success } = scenario
+  const startsAbsent = sequence.startsWith(`insert`)
+  const endsAbsent = sequence.endsWith(`delete`)
+  const original = { id: 1, value: 0, note: `original` }
+  const first = { id: 1, value, note: startsAbsent ? `created` : original.note }
+  const final = { ...first, note }
+  let sync!: Parameters<SyncConfig<Row>[`sync`]>[0]
+  const source = createCollection<Row>({
+    getKey: (row) => row.id,
+    sync: {
+      sync: (actions) => {
+        sync = actions
+        actions.begin()
+        if (!startsAbsent) actions.write({ type: `insert`, value: original })
+        actions.commit()
+        actions.markReady()
+      },
+    },
+  })
+  const gate = createDeferred<void>()
+  let calls = 0
+  let request: Array<{
+    type: Operation
+    original: object
+    modified: object
+    changes: object
+  }> = []
+  const tx = createTransaction<Row>({
+    autoCommit: false,
+    mutationFn: ({ transaction }) => {
+      calls++
+      request = transaction.mutations.map((mutation) => ({
+        type: mutation.type,
+        original: userRow(mutation.original as Row),
+        modified: userRow(mutation.modified),
+        changes: { ...mutation.changes },
+      }))
+      return gate.promise
+    },
+  })
+  const persisted = observeHistoryPromise(tx.isPersisted.promise)
+  let committed: ReturnType<typeof observeHistoryPromise> | undefined
+  await withHistoryCleanup(
+    async () => {
+      await source.preload()
+      tx.mutate(() => {
+        if (startsAbsent) source.insert(first)
+        else
+          source.update(1, (draft) => {
+            draft.value = value
+          })
+        expectRows(source.values(), [first], `first authored prefix`)
+        if (endsAbsent) source.delete(1)
+        else
+          source.update(1, (draft) => {
+            draft.note = note
+          })
+        expectRows(
+          source.values(),
+          endsAbsent ? [] : [final],
+          `second authored prefix`,
+        )
+      })
+      committed = observeHistoryPromise(tx.commit())
+      await Promise.resolve()
+      const canceled = sequence === `insert-delete`
+      if (fault === `dropped-field`)
+        request = request.map((mutation) => ({
+          ...mutation,
+          changes: { note },
+        }))
+      expect(
+        calls + (fault === `canceled-persistence` ? 1 : 0),
+        `net persistence count`,
+      ).toBe(canceled ? 0 : 1)
+      const expected = canceled
+        ? []
+        : [
+            {
+              type: endsAbsent ? `delete` : startsAbsent ? `insert` : `update`,
+              original: startsAbsent ? {} : endsAbsent ? first : original,
+              modified: endsAbsent ? first : final,
+              changes: endsAbsent
+                ? first
+                : startsAbsent
+                  ? final
+                  : { value, note },
+            },
+          ]
+      expect(request, `net authored payload`).toStrictEqual(expected)
+      if (success || canceled) gate.resolve()
+      else gate.reject(new Error(`same-key rejection`))
+      await persisted.settled
+      await committed.settled
+      expect(persisted.read().status).toBe(
+        success || canceled ? `fulfilled` : `rejected`,
+      )
+      expect(committed.read().status).toBe(
+        success || canceled ? `fulfilled` : `rejected`,
+      )
+      expectRows(
+        source.values(),
+        startsAbsent ? [] : [original],
+        `manual settlement releases overlay`,
+      )
+      sync.begin()
+      sync.write({
+        type: `insert`,
+        value: { id: 2, value: 77, note: `later peer` },
+      })
+      const receipt = sync.commit()
+      if (receipt !== true) await receipt
+      expectRows(
+        source.values(),
+        [
+          ...(startsAbsent ? [] : [original]),
+          { id: 2, value: 77, note: `later peer` },
+        ],
+        `later source write`,
+      )
+    },
+    () => [
+      () => {
+        if (tx.state === `pending` || tx.state === `persisting`) tx.rollback()
+      },
+      () => gate.resolve(),
+      () => persisted.settled,
+      () => committed?.settled,
+      () => source.cleanup(),
+    ],
+  )
+}
+
+describe(`Same-key transaction laws`, () => {
+  it.each(sameKeySequences)(
+    `preserves authored sequence %s`,
+    async (sequence) => {
+      for (const success of [false, true])
+        await runSameKey({ sequence, success, value: 7, note: `last` })
+    },
+  )
+  it(`varies merged request fields`, async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.record({
+          sequence: fc.constantFrom(...sameKeySequences),
+          success: fc.boolean(),
+          value: fc.integer({ min: 1, max: 50 }),
+          note: fc
+            .string({ minLength: 1, maxLength: 8 })
+            .map((s) => `new:${s}`),
+        }),
+        (scenario) => runSameKey(scenario),
+      ),
+      oraclePropertyOptions(40, `collection-state.same-key`),
+    )
+  })
+  it.each([`dropped-field`, `canceled-persistence`] as const)(
+    `rejects %s`,
+    async (fault) => {
+      const scenario: SameKeyScenario = {
+        sequence: fault === `dropped-field` ? `update-update` : `insert-delete`,
+        success: true,
+        value: 7,
+        note: `last`,
+      }
+      await runSameKey(scenario)
+      await expect(runSameKey(scenario, fault)).rejects.toMatchObject({
+        name: `AssertionError`,
+      })
+    },
+  )
+})
 
 // Observe user fields without discarding unexpected fields or undefined keys.
 function userRow(value: Row): Row {
@@ -110,6 +304,7 @@ async function runTransaction(scenario: Scenario, fault?: ObservationFault) {
   let subscription: ReturnType<typeof source.subscribeChanges> | undefined
   const replica = new Map<number, Row>()
   const publications: Array<{
+    before: Map<number, Row>
     changes: Array<ChangeMessage<Row>>
     rows: Array<Row>
     replica: Array<Row>
@@ -131,6 +326,7 @@ async function runTransaction(scenario: Scenario, fault?: ObservationFault) {
       const partial = new Map(base)
       partial.delete(1)
       publications.splice(checked, 0, {
+        before: new Map(base),
         changes: [],
         rows: ordered(partial.values()),
         replica: ordered(partial.values()),
@@ -141,6 +337,11 @@ async function runTransaction(scenario: Scenario, fault?: ObservationFault) {
       expectRows(derived.values(), expected.values(), `${label}: derived`)
     expectRows(replica.values(), expected.values(), `${label}: replica`)
     for (const publication of publications.slice(checked)) {
+      expectHistoryEventSemantics(
+        publication.before,
+        publication.changes,
+        label,
+      )
       for (const change of publication.changes) {
         expect(typeof change.key, `${label}: native callback key type`).toBe(
           `number`,
@@ -163,16 +364,26 @@ async function runTransaction(scenario: Scenario, fault?: ObservationFault) {
       await derived.preload()
       subscription = source.subscribeChanges(
         (batch) => {
+          const before = new Map(replica)
           // Copy entries before reduction: key identity and previous values
           // cannot be recovered from a final reconstructed row snapshot.
           const changes = batch.map((change) => ({
             ...change,
+            type:
+              fault === `update-as-insert` && change.type === `update`
+                ? (`insert` as const)
+                : change.type,
             key: fault === `string-key` ? String(change.key) : change.key,
             value: userRow(change.value),
             ...(`previousValue` in change
               ? {
                   previousValue: change.previousValue
-                    ? userRow(change.previousValue)
+                    ? {
+                        ...userRow(change.previousValue),
+                        ...(fault === `previous-value`
+                          ? { note: `wrong prior note` }
+                          : {}),
+                      }
                     : change.previousValue,
                 }
               : {}),
@@ -182,6 +393,7 @@ async function runTransaction(scenario: Scenario, fault?: ObservationFault) {
             else replica.set(change.key as number, userRow(change.value))
           }
           publications.push({
+            before,
             changes,
             rows: ordered(source.values()),
             replica: ordered(replica.values()),
@@ -360,6 +572,8 @@ describe(`Whole mixed transaction publication`, () => {
     `partial-publication`,
     `payload`,
     `string-key`,
+    `previous-value`,
+    `update-as-insert`,
   ] as const)(
     `rejects captured %s through the real transaction driver's checks`,
     async (fault) => {

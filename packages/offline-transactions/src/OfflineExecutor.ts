@@ -218,7 +218,9 @@ export class OfflineExecutor {
           }
 
           if (isLeader) {
-            this.loadAndReplayTransactions()
+            this.loadAndReplayTransactions().catch((error) => {
+              console.warn(`Failed to load and replay transactions:`, error)
+            })
           }
         },
       )
@@ -329,18 +331,13 @@ export class OfflineExecutor {
       return
     }
 
-    try {
-      // Load pending transactions and restore optimistic state
-      await this.executor.loadPendingTransactions()
+    // Startup must observe a failed read instead of reporting an empty outbox.
+    await this.executor.loadPendingTransactions()
 
-      // Start execution in the background - don't await to avoid blocking initialization
-      // The transactions will execute and complete asynchronously
-      this.executor.executeAll().catch((error) => {
-        console.warn(`Failed to execute transactions:`, error)
-      })
-    } catch (error) {
-      console.warn(`Failed to load and replay transactions:`, error)
-    }
+    // Replay completion is separate from initialization and durable admission.
+    this.executor.executeAll().catch((error) => {
+      console.warn(`Failed to execute transactions:`, error)
+    })
   }
 
   get isOfflineEnabled(): boolean {
@@ -444,7 +441,11 @@ export class OfflineExecutor {
 
         try {
           await this.outbox.add(transaction)
-          await this.executor.execute(transaction)
+          // A shared queue error belongs to its execution, not every caller
+          // that durably admitted a transaction. Per-ID signals settle callers.
+          this.executor.execute(transaction).catch((error) => {
+            console.warn(`Failed to execute transactions:`, error)
+          })
           span.setAttribute(`result`, `persisted`)
         } catch (error) {
           console.error(

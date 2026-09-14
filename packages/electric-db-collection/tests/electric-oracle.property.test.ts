@@ -8,6 +8,7 @@ import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src
 import { queryCollectionOptions } from '../../query-db-collection/src/query'
 import { electricCollectionOptions } from '../src/electric'
 import { oraclePropertyOptions, oracleRuns } from '../../db/tests/oracle-config'
+import { withElectricCleanup } from './electric-oracle-lifecycle'
 import type { Collection, SyncMetadataApi } from '@tanstack/db'
 import type { ChangeMessage, Message, Offset, Row } from '@electric-sql/client'
 import type {
@@ -424,6 +425,10 @@ async function runTrace(
   prefix: Array<Array<Message<OracleRow>>>,
   batches: Array<Array<Message<OracleRow>>>,
   seed: ReadonlyMap<string, unknown> = new Map(),
+  hooks: {
+    beforeDelivery?: () => void
+    cleanup?: (cleanup: () => Promise<void>) => Promise<void>
+  } = {},
 ): Promise<TraceResult> {
   const metadata = createMetadata(seed)
   const { collection, subscriber } = createOracleCollection(
@@ -431,21 +436,25 @@ async function runTrace(
     syncMode,
     metadata.api,
   )
-  for (const batch of prefix) subscriber(batch)
-  const snapshots: Array<Array<[string | number, string, string]>> = []
-  for (const batch of batches) {
+  const deliver = (batch: Array<Message<OracleRow>>) => {
+    hooks.beforeDelivery?.()
     subscriber(batch)
-    snapshots.push(rowsFromCollection(collection))
   }
-  const rows = rowsFromCollection(collection)
-  const result = {
-    rows,
-    snapshots,
-    status: collection.status,
-    resume: observableResume(metadata.state.get(`electric:resume`)),
-  }
-  await collection.cleanup()
-  return result
+  const cleanup = () => collection.cleanup()
+  return withElectricCleanup(() => {
+    for (const batch of prefix) deliver(batch)
+    const snapshots: Array<Array<[string | number, string, string]>> = []
+    for (const batch of batches) {
+      deliver(batch)
+      snapshots.push(rowsFromCollection(collection))
+    }
+    return {
+      rows: rowsFromCollection(collection),
+      snapshots,
+      status: collection.status,
+      resume: observableResume(metadata.state.get(`electric:resume`)),
+    }
+  }, [() => (hooks.cleanup ? hooks.cleanup(cleanup) : cleanup())])
 }
 
 async function runPersistedTrace(
@@ -1550,6 +1559,44 @@ describe(`Electric adapter laws`, () => {
     mockStream.shapeHandle = `shape-current`
     mockStream.lastOffset = `20_0`
   })
+
+  it.each([false, true])(
+    `cleans direct traces after delivery failure and preserves the primary error (cleanup failure: %s)`,
+    async (failCleanup) => {
+      const primary = new Error(`delivery sentinel`)
+      const secondary = new Error(`cleanup sentinel`)
+      const cleanup = vi.fn(async (release: () => Promise<void>) => {
+        await release()
+        if (failCleanup) throw secondary
+      })
+      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      try {
+        await expect(
+          runTrace(`cleanup-${failCleanup}`, `eager`, [[]], [], new Map(), {
+            beforeDelivery: () => {
+              throw primary
+            },
+            cleanup,
+          }),
+        ).rejects.toBe(primary)
+        expect(cleanup).toHaveBeenCalledTimes(1)
+        const unsubscribe = mockSubscribe.mock.results.at(-1)!.value
+        expect(unsubscribe).toHaveBeenCalledTimes(1)
+        const streamOptions = vi.mocked(ShapeStream).mock.calls.at(-1)![0] as {
+          signal?: AbortSignal
+        }
+        expect(streamOptions.signal?.aborted).toBe(true)
+        if (failCleanup)
+          expect(warning).toHaveBeenCalledWith(
+            `Electric oracle cleanup failed after a primary error`,
+            secondary,
+          )
+        else expect(warning).not.toHaveBeenCalled()
+      } finally {
+        warning.mockRestore()
+      }
+    },
+  )
 
   it.each(
     ([`eager`, `on-demand`, `progressive`] as const).flatMap((syncMode) =>
@@ -3771,7 +3818,7 @@ describe(`Electric adapter laws`, () => {
       ],
     },
   )(
-    `subset acquisitions preserve row validity through generated stream histories`,
+    `subset request invocation preserves row validity through generated stream histories without response delivery`,
     async (commands) => {
       const trace = createOracleCollection(
         `acquisition-history`,
@@ -3786,8 +3833,9 @@ describe(`Electric adapter laws`, () => {
       try {
         for (const command of commands) {
           if (command.operation === `acquire`) {
-            // A real acquisition, not just a synthetic subset-end marker. Use a
-            // fresh predicate so exact request deduplication cannot bypass it.
+            // This enters the acquisition API with a fresh disjoint predicate,
+            // but the mock does not deliver response rows. Actual installed-SDK
+            // delivery and overlap are in electric-sdk-delivery.property.test.ts.
             await trace.collection._sync.loadSubset({
               where: new IR.Func(`eq`, [
                 new IR.PropRef([`id`]),

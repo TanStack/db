@@ -8,10 +8,14 @@ const staticOracleProperties = [
   `electric.bound-descriptor-history`,
   `electric.persisted-tag-history`,
   `electric.match-reentry`,
+  `electric.sdk-snapshot-delivery`,
+  `electric.sdk-dnf-membership`,
   `collection-sync.reentrant-drain`,
   `collection-state.retention`,
   `collection-state.optimistic-history`,
   `collection-state.mixed-transaction`,
+  `collection-state.optimistic-outcomes`,
+  `collection-state.same-key`,
   `query-identity.compiled-output`,
   `derived-publication.membership-work`,
   `collection-publication.metadata-cancellation`,
@@ -43,6 +47,7 @@ const staticOracleProperties = [
   `includes-publication.optimistic-rollback`,
   `includes-publication.parent-route`,
   `includes-temporal.release-reentry`,
+  `includes-temporal.partial-values`,
   `includes-temporal.demand-scheduling`,
   `includes.alpha-renaming`,
   `includes.incremental-history`,
@@ -77,6 +82,7 @@ const staticOracleProperties = [
   `ordered-work.snapshot-reuse`,
   `ordered-work.consumer-parity`,
   `ordered-work.lifecycle`,
+  `ordered-work.nullable-lifecycle`,
   `pagination.async-cursor`,
   `pagination.multi-order`,
   `pagination.nullable-cursor`,
@@ -110,7 +116,6 @@ const publicationProperties = [
   `parent-scalar`,
   `parent-then-child`,
   `optimistic-before-confirm`,
-  `optimistic-after-confirm`,
 ].flatMap((law) =>
   [`direct`, `joined`].flatMap((q1Shape) =>
     [`passThrough`, `where`, `orderBy`, `select`].map(

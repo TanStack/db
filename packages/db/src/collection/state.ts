@@ -1060,6 +1060,21 @@ export class CollectionStateManager<
       }
 
       const events: Array<ChangeMessage<TOutput, TKey>> = []
+      if (hasTruncateSync) {
+        // All queued transactions publish as one batch. Its clear prefix must
+        // describe the prior visible rows, not intermediate queued writes.
+        // Freeze metadata before replacement writes change row attribution.
+        for (const [key, value] of this.entries()) {
+          events.push({
+            type: `delete`,
+            key,
+            value: this.enrichWithVirtualPropsSnapshot(
+              value,
+              this.getVirtualPropsSnapshotForState(key),
+            ),
+          })
+        }
+      }
       const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
       const completedOptimisticOps = new Map<
         TKey,
@@ -1085,25 +1100,7 @@ export class CollectionStateManager<
         // Handle truncate operations first
         if (transaction.truncate) {
           // TRUNCATE PHASE
-          // 1) Emit a delete for every visible key (synced + optimistic) so downstream listeners/indexes
-          //    observe a clear-before-rebuild. We intentionally skip keys already in
-          //    optimisticDeletes because their delete was previously emitted by the user.
-          // Use the snapshot to ensure we emit deletes for all items that existed at truncate start.
-          const visibleKeys = new Set([
-            ...this.syncedData.keys(),
-            ...(truncateOptimisticSnapshot?.upserts.keys() || []),
-          ])
-          for (const key of visibleKeys) {
-            if (truncateOptimisticSnapshot?.deletes.has(key)) continue
-            const previousValue =
-              truncateOptimisticSnapshot?.upserts.get(key) ||
-              this.syncedData.get(key)
-            if (previousValue !== undefined) {
-              events.push({ type: `delete`, key, value: previousValue })
-            }
-          }
-
-          // 2) Clear the authoritative synced base. Subsequent server ops in this
+          // Clear the authoritative synced base. Subsequent server ops in this
           //    same commit will rebuild the base atomically.
           // Preserve pending local tracking just long enough for operations in this
           // truncate batch to retain correct local origin semantics.
@@ -1115,14 +1112,14 @@ export class CollectionStateManager<
           this.hydratedKeys.clear()
           this.clearOriginTrackingState()
 
-          // 3) Clear currentVisibleState for truncated keys to ensure subsequent operations
+          // Clear currentVisibleState for truncated keys to ensure subsequent operations
           //    are compared against the post-truncate state (undefined) rather than pre-truncate state
           //    This ensures that re-inserted keys are emitted as INSERT events, not UPDATE events
           for (const key of changedKeys) {
             currentVisibleState.delete(key)
           }
 
-          // 4) Emit truncate event so subscriptions can reset their cursor tracking state
+          // Emit truncate event so subscriptions can reset their cursor tracking state
           this._events.emit(`truncate`, {
             type: `truncate`,
             collection: this.collection,

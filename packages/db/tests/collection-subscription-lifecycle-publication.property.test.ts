@@ -204,7 +204,7 @@ function publicationPhase(
     ),
   )
   return lifecycle.attempts.some(
-    ({ id, settled }) => currentAttemptIds.has(id) && settled,
+    ({ id, outcome }) => currentAttemptIds.has(id) && outcome !== undefined,
   )
     ? `private-settling`
     : `private-pending`

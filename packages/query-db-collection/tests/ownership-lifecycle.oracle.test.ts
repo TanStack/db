@@ -531,6 +531,71 @@ describe(`query collection ownership lifecycle`, () => {
     },
   )
 
+  // Request data is reusable; each invocation still creates its own owner.
+  // Cross startup with reference reuse and partial retirement, not only the
+  // already-started observer path tested above.
+  it.each(
+    [2, 3].flatMap((owners) =>
+      [false, true].flatMap((sharedReference) =>
+        [0, 1, owners].map((retired) => ({
+          owners,
+          sharedReference,
+          retired,
+        })),
+      ),
+    ),
+  )(
+    `preserves startup ownership for $owners calls, shared reference $sharedReference, $retired retired`,
+    async ({ owners, sharedReference, retired }) => {
+      const id = `startup-owner-history`
+      const subset = { where: eq(`category`, `shared`) }
+      const queryHash = hashKey([id, getLoadSubsetDemandKey(subset)])
+      const { collection, queryFn } = createOwnershipFixture({
+        id,
+        results: [[shared]],
+        setupMetadata: (metadata) =>
+          metadata.collection.set(`queryCollection:gc:${queryHash}`, {
+            queryHash,
+            mode: `until-revalidated`,
+          }),
+      })
+      collection.startSyncImmediate()
+      const requests = Array.from({ length: owners }, () =>
+        sharedReference ? subset : { ...subset },
+      )
+      const results = Promise.allSettled(
+        requests.map((request) => collection._sync.loadSubset(request)),
+      )
+      for (const request of requests.slice(0, retired)) {
+        collection._sync.unloadSubset(request)
+      }
+      const outcomes = await results
+      const live = owners - retired
+      expect(
+        outcomes.filter((outcome) => outcome.status === `fulfilled`),
+      ).toHaveLength(live)
+      const failures = outcomes.filter(
+        (outcome) => outcome.status === `rejected`,
+      )
+      expect(failures).toHaveLength(retired)
+      for (const failure of failures) {
+        expect(failure.reason).toMatchObject({ name: `AbortError` })
+      }
+      expect(queryFn).toHaveBeenCalledTimes(live > 0 ? 1 : 0)
+      const observedRows = () =>
+        collection.toArray.map(({ id: rowId, category, name }) => ({
+          id: rowId,
+          category,
+          name,
+        }))
+      expect(observedRows()).toEqual(live > 0 ? [shared] : [])
+      for (let index = retired; index < owners; index++) {
+        collection._sync.unloadSubset(requests[index]!)
+        expect(observedRows()).toEqual(index + 1 < owners ? [shared] : [])
+      }
+    },
+  )
+
   it.each([false, true])(
     `replaces an active eager cache entry with custom hash %s`,
     async (customHash) => {

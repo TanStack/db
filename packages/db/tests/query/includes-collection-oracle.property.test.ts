@@ -51,6 +51,47 @@ type ProjectedParent = {
 type CollectionObservation = {
   rows: Array<ProjectedParent>
   publications: Array<Array<ProjectedParent>>
+  events: Array<ParentEvent>
+}
+
+type EventValue = Pick<
+  ProjectedParent,
+  `id` | `group` | `arrayChildren` | `materializedChildren`
+>
+type ParentEvent = {
+  type: `insert` | `update` | `delete`
+  key: number | string
+  value: EventValue
+  previousValue?: EventValue
+}
+
+function projectEventValue(row: EventValue): EventValue {
+  const children = (rows: Array<ChildRow>) =>
+    rows.map(({ id, parentGroup, value }) => ({ id, parentGroup, value }))
+  return {
+    id: row.id,
+    group: row.group,
+    arrayChildren: children(row.arrayChildren),
+    materializedChildren: children(row.materializedChildren),
+  }
+}
+
+function diffParents(
+  before: Array<ProjectedParent>,
+  after: Array<ProjectedParent>,
+): Array<ParentEvent> {
+  const prior = new Map(before.map((row) => [row.id, projectEventValue(row)]))
+  const next = new Map(after.map((row) => [row.id, projectEventValue(row)]))
+  const result: Array<ParentEvent> = []
+  for (const key of new Set([...prior.keys(), ...next.keys()])) {
+    const oldValue = prior.get(key)
+    const value = next.get(key)
+    if (!value) result.push({ type: `delete`, key, value: oldValue! })
+    else if (!oldValue) result.push({ type: `insert`, key, value })
+    else if (JSON.stringify(oldValue) !== JSON.stringify(value))
+      result.push({ type: `update`, key, value, previousValue: oldValue })
+  }
+  return result.sort((a, b) => Number(a.key) - Number(b.key))
 }
 
 type CollectionContext = {
@@ -62,6 +103,8 @@ type CollectionContext = {
     children: Map<number, ChildRow>
   }
   publications: Array<Array<ProjectedParent>>
+  events: Array<ParentEvent>
+  before: Array<ProjectedParent>
   subscription?: { unsubscribe: () => void }
 }
 
@@ -235,17 +278,34 @@ function createCollectionDriver(
           children: new Map(initialChildren.map((row) => [row.id, { ...row }])),
         },
         publications: [],
+        events: [],
+        before: [],
       }
     },
     async start(context) {
       await context.live.preload()
+      context.before = recompute(context)
       context.subscription = context.live.subscribeChanges(
-        () => context.publications.push(projectLive(context.live)),
+        (changes) => {
+          context.publications.push(projectLive(context.live))
+          context.events.push(
+            ...changes.map((change) => ({
+              type: change.type,
+              key: change.key,
+              value: projectEventValue(change.value),
+              ...(change.previousValue
+                ? { previousValue: projectEventValue(change.previousValue) }
+                : {}),
+            })),
+          )
+        },
         { includeInitialState: false },
       )
     },
     apply(action, context) {
       context.publications = []
+      context.events = []
+      context.before = recompute(context)
       switch (action.type) {
         case `putParent`: {
           const type = context.model.parents.has(action.row.id)
@@ -327,6 +387,8 @@ function createOptimisticCollectionDriver(
     ...base,
     async apply(action, context, checkpoint) {
       context.publications = []
+      context.events = []
+      context.before = recompute(context)
       if (action.type === `insert`) {
         const transaction = context.children.collection.insert({
           ...action.row,
@@ -335,6 +397,8 @@ function createOptimisticCollectionDriver(
         context.model.children.set(action.row.id, { ...action.row })
         checkpoint()
         context.publications = []
+        context.events = []
+        context.before = recompute(context)
         if (action.settlement === `confirm`) {
           context.children.write(`insert`, action.row)
           pendingMutation.syncReleased = true
@@ -363,6 +427,8 @@ function createOptimisticCollectionDriver(
       context.model.children.delete(action.id)
       checkpoint()
       context.publications = []
+      context.events = []
+      context.before = recompute(context)
       if (action.settlement === `confirm`) {
         context.children.write(`delete`, previous)
         pendingMutation.syncReleased = true
@@ -434,16 +500,28 @@ const collectionProjection: TraceProjection<
   observe: (context) => ({
     rows: projectLive(context.live),
     publications: context.publications,
+    events: context.events,
   }),
   recompute: (context) => {
     const rows = recompute(context)
     return {
       rows,
       publications: context.publications.map(() => rows),
+      events: diffParents(context.before, rows),
     }
   },
   assertEqual(observed, expected) {
-    expect(observed).toEqual(expected)
+    expect(observed.rows).toEqual(expected.rows)
+    expect(observed.publications).toEqual(expected.publications)
+    // The mixed fixture has array/materialized siblings, so user-value changes
+    // require root events. Bare-facade identity is tested separately. Do not
+    // prohibit metadata-only events for otherwise unchanged rows here.
+    const changedKeys = new Set(expected.events.map((event) => event.key))
+    expect(
+      observed.events
+        .filter((event) => changedKeys.has(event.key))
+        .sort((a, b) => Number(a.key) - Number(b.key)),
+    ).toEqual(expected.events)
     return undefined
   },
 }
@@ -512,6 +590,54 @@ const exhaustiveActions: ReadonlyArray<CollectionAction> = [
 ]
 
 describe(`Collection-valued includes oracle`, () => {
+  fcTest(
+    `root event observations reject missing, repeated, and corrupt changed-row events`,
+    async () => {
+      const driver = createCollectionDriver(
+        [{ id: 1, group: 1 }],
+        [{ id: 10, parentGroup: 1, value: 1 }],
+      )
+      const context = await driver.setup()
+      try {
+        await driver.start?.(context)
+        await driver.apply(
+          { type: `putChild`, row: { id: 10, parentGroup: 1, value: 2 } },
+          context,
+          () => undefined,
+        )
+        const observed = collectionProjection.observe(context)
+        const expected = collectionProjection.recompute(context)
+        collectionProjection.assertEqual(observed, expected)
+        expect(expected.events).toHaveLength(1)
+        for (const fault of [
+          `missing`,
+          `duplicate`,
+          `value`,
+          `previousValue`,
+          `type`,
+        ] as const) {
+          const bad = structuredClone(observed)
+          const event = bad.events[0]!
+          if (fault === `missing`) bad.events = []
+          else if (fault === `duplicate`)
+            bad.events.push(structuredClone(event))
+          else if (fault === `value`) event.value.arrayChildren[0]!.value = -999
+          else if (fault === `previousValue`)
+            event.previousValue!.materializedChildren[0]!.value = -999
+          else event.type = `insert`
+          // The previous checker accepted all these payload/count corruptions.
+          expect(bad.rows).toEqual(expected.rows)
+          expect(bad.publications).toEqual(expected.publications)
+          expect(() =>
+            collectionProjection.assertEqual(bad, expected),
+          ).toThrowError(expect.objectContaining({ name: `AssertionError` }))
+        }
+      } finally {
+        await driver.cleanup(context)
+      }
+    },
+  )
+
   for (const kind of [`insert`, `delete`] as const) {
     for (const failRollback of [false, true]) {
       fcTest(

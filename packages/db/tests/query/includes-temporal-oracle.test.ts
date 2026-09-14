@@ -2138,4 +2138,129 @@ describe(`includes temporal oracle`, () => {
 
   it(`a nested progressive subset loads inside the fast-path window`, () =>
     expectProgressiveTraceMatches(`nested`))
+
+  fcTest.prop(
+    [fc.array(fc.string({ maxLength: 8 }), { minLength: 2, maxLength: 4 })],
+    oraclePropertyOptions(20, `includes-temporal.partial-values`),
+  )(
+    `publishes each partial child prefix before demand settles`,
+    async (bodies) => {
+      for (const form of [`array`, `materialized`] as const) {
+        const parents = createMutablePosts([
+          { id: 1, authorId: `selected`, title: `Receiving children` },
+          { id: 2, authorId: `selected`, title: `Empty sibling` },
+        ])
+        const acquired = createDeferred<void>()
+        const settled = createDeferred<void>()
+        const requested = new Set<number>()
+        let deliver!: (row: Comment) => Promise<void>
+        let complete!: () => void
+        const children = createCollection<Comment>({
+          id: nextCollectionId(`partial-children`),
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          sync: {
+            sync: ({ begin, write, commit, markReady }) => {
+              deliver = async (value) => {
+                begin()
+                write({ type: `insert`, value })
+                await commit()
+              }
+              complete = () => {
+                markReady()
+                settled.resolve()
+              }
+              return {
+                loadSubset: (options) => {
+                  for (const key of correlationKeys([options], `postId`))
+                    requested.add(key)
+                  acquired.resolve()
+                  return settled.promise
+                },
+              }
+            },
+          },
+        })
+        // Keep wrappers concrete at compilation; a union of wrapper types is
+        // not a supported query-builder result type.
+        const live =
+          form === `array`
+            ? createLiveQueryCollection((q) =>
+                q.from({ post: parents.collection }).select(({ post }) => ({
+                  id: post.id,
+                  children: toArray(
+                    q
+                      .from({ child: children })
+                      .where(({ child }) => eq(child.postId, post.id))
+                      .orderBy(({ child }) => child.id),
+                  ),
+                })),
+              )
+            : createLiveQueryCollection((q) =>
+                q.from({ post: parents.collection }).select(({ post }) => ({
+                  id: post.id,
+                  children: materialize(
+                    q
+                      .from({ child: children })
+                      .where(({ child }) => eq(child.postId, post.id))
+                      .orderBy(({ child }) => child.id),
+                  ),
+                })),
+              )
+        const preload: PreloadState = { preloadSettled: false }
+        startPreload(live, preload)
+        const expected: Array<Comment> = []
+        const observe = () =>
+          live.toArray
+            .map((row) => ({
+              id: row.id,
+              children: row.children.map(({ id, postId, body }) => ({
+                id,
+                postId,
+                body,
+              })),
+            }))
+            .sort((a, b) => a.id - b.id)
+        const assertRows = (actual: ReturnType<typeof observe>) => {
+          expect(actual).toEqual([
+            { id: 1, children: expected },
+            { id: 2, children: [] },
+          ])
+        }
+        try {
+          await acquired.promise
+          await flushPromises()
+          expect([...requested].sort()).toEqual([1, 2])
+          for (let count = 0; count <= bodies.length; count++) {
+            if (count > 0) {
+              const row = { id: count, postId: 1, body: bodies[count - 1]! }
+              expected.push(row)
+              await deliver(row)
+            }
+            const actual = observe()
+            assertRows(actual)
+            if (count === 1) {
+              const lostPrefix = structuredClone(actual)
+              lostPrefix[0]!.children = []
+              const wrongValue = structuredClone(actual)
+              wrongValue[0]!.children[0]!.body += `corrupt`
+              for (const bad of [lostPrefix, wrongValue, actual.slice(0, 1)]) {
+                expect(() => assertRows(bad)).toThrowError(expect.objectContaining({ name: `AssertionError` }))
+              }
+            }
+            expect(live.isReady()).toBe(false)
+            expect(preload.preloadSettled).toBe(false)
+          }
+          complete()
+          await finishPreload(preload)
+          expect(live.isReady()).toBe(true)
+          assertRows(observe())
+        } finally {
+          settled.resolve()
+          await live.cleanup()
+          await Promise.all([parents.collection.cleanup(), children.cleanup()])
+        }
+      }
+    },
+  )
 })

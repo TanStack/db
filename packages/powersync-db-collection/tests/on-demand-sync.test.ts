@@ -16,6 +16,7 @@ import {
 import pDefer from 'p-defer'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { powerSyncCollectionOptions } from '../src'
+import { withTestCleanup } from './with-test-cleanup'
 import type { LoadSubsetOptions } from '@tanstack/db'
 
 const APP_SCHEMA = new Schema({
@@ -267,7 +268,7 @@ describe(`On-Demand Sync Mode`, () => {
       })
     }
 
-    try {
+    await withTestCleanup(async () => {
       for (const row of seed) {
         await db.execute(
           `INSERT INTO products (id, name, price, category) VALUES (?, ?, ?, ?)`,
@@ -333,21 +334,27 @@ describe(`On-Demand Sync Mode`, () => {
         true,
       )
       expect(triggerRecords.length).toBeGreaterThan(0)
-    } finally {
-      try {
-        for (const session of allSessions) await session.cleanup()
-        for (const subscription of subscriptions) subscription.unsubscribe()
-        await collection.cleanup()
-        await expectTrackingGone()
-        await new Promise<void>((resolve) => setTimeout(resolve, 0))
-        expect(reports).toEqual([])
-        expect(rejections).toEqual([])
-      } finally {
-        triggers.mockRestore()
-        errors.mockRestore()
-        process.off(`unhandledRejection`, recordRejection)
-      }
-    }
+    }, [
+      // Resources are acquired during the body; enumerate them at teardown.
+      () =>
+        withTestCleanup(
+          () => {},
+          allSessions.map((session) => () => session.cleanup()),
+        ),
+      () =>
+        withTestCleanup(
+          () => {},
+          subscriptions.map((subscription) => () => subscription.unsubscribe()),
+        ),
+      () => collection.cleanup(),
+      expectTrackingGone,
+      () => new Promise<void>((resolve) => setTimeout(resolve, 0)),
+      () => expect(reports).toEqual([]),
+      () => expect(rejections).toEqual([]),
+      () => triggers.mockRestore(),
+      () => errors.mockRestore(),
+      () => process.off(`unhandledRejection`, recordRejection),
+    ])
   })
 
   it(`should not load any data initially in on-demand mode`, async () => {
@@ -435,81 +442,186 @@ describe(`On-Demand Sync Mode`, () => {
     expect(prices).toEqual([150, 200])
   })
 
-  it(`resolves subset readiness only after its rows are applied`, async () => {
-    const db = await createDatabase()
-    await createTestProducts(db)
+  it.each([`apply`, `cleanup`] as const)(
+    `settles staged subset baseline rows after %s`,
+    async (outcome) => {
+      const db = await createDatabase()
+      await createTestProducts(db)
 
-    let resolvePersistence!: () => void
-    const persistence = new Promise<void>((resolve) => {
-      resolvePersistence = resolve
-    })
-    const transaction = createTransaction({
-      mutationFn: () => persistence,
-    })
-    const options = powerSyncCollectionOptions({
-      database: db,
-      table: APP_SCHEMA.props.products,
-      syncMode: `on-demand`,
-      onLoadSubset: () => {
-        transaction.mutate(() =>
-          collection.insert({
-            id: `local`,
-            name: `Local product`,
-            price: 1,
-            category: `local`,
-          }),
-        )
-      },
-    })
-    const collection = createCollection(options)
-    onTestFinished(() => collection.cleanup())
-    await collection.stateWhenReady()
-
-    const electronics = createLiveQueryCollection({
-      query: (q) =>
-        q
-          .from({ product: collection })
-          .where(({ product }) => eq(product.category, `electronics`)),
-    })
-    onTestFinished(() => electronics.cleanup())
-    const preload = electronics.preload()
-    let settled = false
-    void preload.then(() => {
-      settled = true
-    })
-
-    try {
-      const { trackedTableName } = options.utils.getMeta()
-      await vi.waitFor(
-        async () => {
-          const table = await db.writeLock((context) =>
-            context.get<{ count: number }>(
-              `SELECT COUNT(*) as count FROM sqlite_temp_master WHERE type = 'table' AND name = ?`,
-              [trackedTableName],
-            ),
+      let resolvePersistence!: () => void
+      const persistence = new Promise<void>((resolve) => {
+        resolvePersistence = resolve
+      })
+      const transaction = createTransaction({
+        mutationFn: () => persistence,
+      })
+      const cleanupHook = vi.fn()
+      const triggerDisposals: Array<ReturnType<typeof vi.fn>> = []
+      const createTrigger = db.triggers.createDiffTrigger.bind(db.triggers)
+      const triggerSpy = vi
+        .spyOn(db.triggers, `createDiffTrigger`)
+        .mockImplementation(async (triggerOptions) => {
+          const dispose = await createTrigger(triggerOptions)
+          const trackedDispose = vi.fn(dispose)
+          triggerDisposals.push(trackedDispose)
+          return trackedDispose
+        })
+      const options = powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+        onLoadSubset: () => {
+          transaction.mutate(() =>
+            collection.insert({
+              id: `local`,
+              name: `Local product`,
+              price: 1,
+              category: `local`,
+            }),
           )
-          expect(table.count).toBe(1)
+          return cleanupHook
         },
-        { timeout: 2_000 },
+      })
+      const collection = createCollection(options)
+      onTestFinished(() => collection.cleanup())
+      await collection.stateWhenReady()
+
+      const electronics = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ product: collection })
+            .where(({ product }) => eq(product.category, `electronics`)),
+      })
+      onTestFinished(() => electronics.cleanup())
+      const publications: Array<unknown> = []
+      const subscription = electronics.subscribeChanges((changes) => {
+        publications.push(
+          ...changes.map(({ type, key, value }) => ({
+            type,
+            key,
+            value: { ...value },
+          })),
+        )
+      })
+      let settled = false
+      const preload = electronics.preload().then(
+        () => {
+          settled = true
+          return { status: `fulfilled` as const }
+        },
+        (error: unknown) => {
+          settled = true
+          return { status: `rejected` as const, error }
+        },
       )
+      const reports = vi.spyOn(console, `error`).mockImplementation(() => {})
+      const sdkErrors = vi.spyOn(db.logger, `error`)
+      const unexpected: Array<unknown> = []
+      const recordUnhandled = (error: unknown) => unexpected.push(error)
+      process.on(`unhandledRejection`, recordUnhandled)
+      const { trackedTableName } = options.utils.getMeta()
+      const expectTrackingCount = async (count: number) => {
+        await vi.waitFor(
+          async () => {
+            const table = await db.writeLock((context) =>
+              context.get<{ count: number }>(
+                `SELECT COUNT(*) as count FROM sqlite_temp_master WHERE type = 'table' AND name = ?`,
+                [trackedTableName],
+              ),
+            )
+            expect(table.count).toBe(count)
+          },
+          { timeout: 2_000 },
+        )
+      }
+      const observeAbandoned = () => ({
+        source: collection.toArray.map((row) => ({ ...row })),
+        query: electronics.toArray.map((row) => ({ ...row })),
+        publications: structuredClone(publications),
+      })
+      const checkAbandoned = (
+        observed: ReturnType<typeof observeAbandoned>,
+      ) => {
+        expect(observed).toEqual({ source: [], query: [], publications: [] })
+      }
 
-      expect(transaction.state).toBe(`persisting`)
-      expect(settled).toBe(false)
-      expect(electronics.size).toBe(0)
+      await withTestCleanup(async () => {
+        await expectTrackingCount(1)
 
-      resolvePersistence()
-      await transaction.isPersisted.promise
-      await preload
+        expect(transaction.state).toBe(`persisting`)
+        expect(settled).toBe(false)
+        expect(electronics.size).toBe(0)
+        expect(cleanupHook).not.toHaveBeenCalled()
+        expect(triggerDisposals).toHaveLength(1)
+        expect(publications).toEqual([])
 
-      expect(electronics.toArray.map((product) => product.name).sort()).toEqual(
-        [`Product A`, `Product B`, `Product D`],
-      )
-    } finally {
-      resolvePersistence()
-      await transaction.isPersisted.promise.catch(() => undefined)
-      await Promise.allSettled([preload])
-    }
-  })
+        if (outcome === `cleanup`) {
+          await collection.cleanup()
+          const message =
+            `Source collection '${collection.id}' was manually cleaned up while live query '${electronics.id}' depends on it. ` +
+            `Live queries prevent automatic GC, so this was likely a manual cleanup() call.`
+          expect(await preload).toEqual({
+            status: `rejected`,
+            error: new Error(message),
+          })
+          expect(transaction.state).toBe(`persisting`)
+          await expectTrackingCount(0)
+          expect(cleanupHook).toHaveBeenCalledOnce()
+          expect(triggerDisposals[0]).toHaveBeenCalledOnce()
+          checkAbandoned(observeAbandoned())
+          expect(reports.mock.calls).toEqual([
+            [`[Live Query Error] ${message}`],
+          ])
+        }
+
+        resolvePersistence()
+        await transaction.isPersisted.promise
+        if (outcome === `apply`) {
+          expect(await preload).toEqual({ status: `fulfilled` })
+          expect(
+            electronics.toArray.map((product) => product.name).sort(),
+          ).toEqual([`Product A`, `Product B`, `Product D`])
+          expect(reports).not.toHaveBeenCalled()
+        } else {
+          // A later native write exercises the abandoned stream after the held
+          // transaction settles; checking only before release would miss leakage.
+          await db.execute(
+            `UPDATE products SET name = 'After cleanup' WHERE category = 'electronics'`,
+          )
+          await new Promise<void>((resolve) => setTimeout(resolve, 0))
+          const observed = observeAbandoned()
+          checkAbandoned(observed)
+          const stale = structuredClone(observed)
+          stale.publications.push({
+            type: `insert`,
+            key: `stale`,
+            value: { name: `Product A` },
+          })
+          expect(() => checkAbandoned(stale)).toThrowError(
+            expect.objectContaining({ name: `AssertionError` }),
+          )
+          expect(collection.status).toBe(`cleaned-up`)
+          expect(electronics.status).toBe(`error`)
+        }
+      }, [
+        resolvePersistence,
+        () => transaction.isPersisted.promise,
+        () => subscription.unsubscribe(),
+        () => electronics.cleanup(),
+        () => collection.cleanup(),
+        () => preload,
+        () => expectTrackingCount(0),
+        () => expect(cleanupHook).toHaveBeenCalledOnce(),
+        () => expect(triggerDisposals[0]).toHaveBeenCalledOnce(),
+        () => expect(sdkErrors).not.toHaveBeenCalled(),
+        () => expect(unexpected).toEqual([]),
+        () => process.off(`unhandledRejection`, recordUnhandled),
+        () => reports.mockRestore(),
+        () => sdkErrors.mockRestore(),
+        () => triggerSpy.mockRestore(),
+      ])
+    },
+  )
 
   it(`should reactively update live query when new matching data is inserted into SQLite`, async () => {
     const db = await createDatabase()
