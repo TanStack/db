@@ -2245,7 +2245,9 @@ describe(`includes temporal oracle`, () => {
               const wrongValue = structuredClone(actual)
               wrongValue[0]!.children[0]!.body += `corrupt`
               for (const bad of [lostPrefix, wrongValue, actual.slice(0, 1)]) {
-                expect(() => assertRows(bad)).toThrowError(expect.objectContaining({ name: `AssertionError` }))
+                expect(() => assertRows(bad)).toThrowError(
+                  expect.objectContaining({ name: `AssertionError` }),
+                )
               }
             }
             expect(live.isReady()).toBe(false)

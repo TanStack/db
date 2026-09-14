@@ -304,7 +304,8 @@ it.each([
     const failure = new NonRetriableError(`restored permanent failure`)
     const outcomes: Array<unknown> = rows.map(() => `pending`)
     const waits: Array<Promise<void>> = []
-    const calls: Array<{ id: string; rows: Array<Record<string, unknown>> }> = []
+    const calls: Array<{ id: string; rows: Array<Record<string, unknown>> }> =
+      []
     const env = createTestOfflineEnvironment({
       storage,
       mutationFn: async (params) => {
