@@ -3,6 +3,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { createLiveQueryCollection, gt } from '@tanstack/db'
 import { waitForQueryData } from '../utils/helpers'
 import {
+  expectNotificationHistory,
+  expectNotificationsStopped,
+} from '../utils/notification-laws'
+import {
   assertUserRows,
   captureUserRows,
   userFixture,
@@ -33,6 +37,7 @@ export function createLiveUpdatesTestSuite(
           const initialSize = query.size
           expect(initialSize).toBeGreaterThan(0)
           const row = userFixture('Live Update User', 45)
+          row.metadata = { owned: true }
           const remove = await owned.insert(row)
           const observed = await waitForUserRows(query, [...peers, row])
           expect(query.size).toBe(initialSize + 1)
@@ -41,10 +46,10 @@ export function createLiveUpdatesTestSuite(
           expect(() => assertUserRows(wrongKey, [...peers, row])).toThrow()
           const wrongMetadata = structuredClone(observed)
           const metadataPeer = wrongMetadata.find(
-            (value) => value.metadata !== null,
+            (value) => value.id === row.id,
           )
           if (!metadataPeer || metadataPeer.metadata === null)
-            throw new Error('Expected a captured peer with non-null metadata')
+            throw new Error('Expected the owned row with non-null metadata')
           Object.defineProperty(metadataPeer.metadata, 'unexpected', {
             value: undefined,
             enumerable: true,
@@ -130,28 +135,36 @@ export function createLiveUpdatesTestSuite(
             type: string
             key: string | number
             value: User
+            previousValue?: User
           }> = []
           const callbacks: Array<{
             events: typeof events
             rows: Array<User>
           }> = []
-          const subscription = query.subscribeChanges((changes) => {
-            changeCount++
-            const batch: typeof events = []
-            for (const change of changes) {
-              batch.push({
-                type: change.type,
-                key: change.key,
-                value: captureUserRows([change.value])[0]!,
+          const subscription = query.subscribeChanges(
+            (changes) => {
+              changeCount++
+              const batch: typeof events = []
+              for (const change of changes) {
+                batch.push({
+                  type: change.type,
+                  key: change.key,
+                  value: captureUserRows([change.value])[0]!,
+                  previousValue:
+                    change.previousValue === undefined
+                      ? undefined
+                      : captureUserRows([change.previousValue])[0]!,
+                })
+              }
+              events.push(...batch)
+              // Empty event callbacks are retained with their complete public rows.
+              callbacks.push({
+                events: batch,
+                rows: captureUserRows(query.values()),
               })
-            }
-            events.push(...batch)
-            // Empty event callbacks are retained with their complete public rows.
-            callbacks.push({
-              events: batch,
-              rows: captureUserRows(query.values()),
-            })
-          })
+            },
+            { includeInitialState: true },
+          )
           owned.track({
             cleanup() {
               subscription.unsubscribe()
@@ -200,19 +213,14 @@ export function createLiveUpdatesTestSuite(
           wrongFirstKey[0]!.key = wrongFirstKey[0]!.value.id + '-wrong'
           expect(() => expectOwnedInsert(wrongFirstKey)).toThrow()
           expect(callbacks.length).toBeGreaterThan(0)
-          let inserted = false
-          for (const callback of callbacks) {
-            inserted ||= callback.events.some(
-              (event) => event.type === 'insert' && event.value.id === row.id,
-            )
-            // Empty callbacks before the owned insert can expose the old world.
-            assertUserRows(callback.rows, inserted ? [...peers, row] : peers)
-          }
+          expectNotificationHistory([], callbacks, [...peers, row])
           const archived = structuredClone(events)
+          const archivedCallbacks = structuredClone(callbacks)
           subscription.unsubscribe()
           await remove()
           await waitForUserRows(query, peers)
           expect(events).toStrictEqual(archived)
+          expectNotificationsStopped(callbacks, archivedCallbacks)
         })
       })
     })

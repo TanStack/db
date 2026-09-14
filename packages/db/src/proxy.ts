@@ -444,11 +444,17 @@ function deepClone<T extends unknown>(
 
   for (const key in obj) {
     if (Object.prototype.hasOwnProperty.call(obj, key)) {
-      clone[key] = deepClone(
-        (obj as Record<string | symbol, unknown>)[key],
-        visited,
-        detach,
-      )
+      // Copy data properties without invoking Object.prototype.__proto__.
+      Object.defineProperty(clone, key, {
+        value: deepClone(
+          (obj as Record<string | symbol, unknown>)[key],
+          visited,
+          detach,
+        ),
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      })
     }
   }
 

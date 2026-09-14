@@ -1,7 +1,94 @@
+import { runInNewContext } from 'node:vm'
 import { describe, expect, it } from 'vitest'
 import { ScenarioLifetime } from './conformance/scenario-lifetime'
 
 describe(`scenario resource lifetime`, () => {
+  it.each(
+    [Promise, runInNewContext(`Promise`) as PromiseConstructor].flatMap(
+      (Constructor, realm) =>
+        [false, true].map((reject) => ({ Constructor, realm, reject })),
+    ),
+  )(
+    `awaits gated cleanup realm=$realm reject=$reject`,
+    async ({ Constructor, reject }) => {
+      const scope = new ScenarioLifetime()
+      const error = new Error(`cleanup`)
+      let release!: () => void
+      let exited = false
+      let peerRan = false
+      const gate = new Constructor<void>((resolve, fail) => {
+        release = () => (reject ? fail(error) : resolve())
+      })
+      // Keep the diagnostic failure itself from leaving an unobserved rejection.
+      void gate.catch(() => undefined)
+      scope.defer(() => gate)
+      scope.defer(() => {
+        peerRan = true
+      })
+      const result = scope
+        .run(() => {})
+        .then(
+          () => {
+            exited = true
+            return []
+          },
+          (caught: unknown) => {
+            exited = true
+            return [caught]
+          },
+        )
+      try {
+        for (let turn = 0; turn < 10; turn++) await Promise.resolve()
+        expect(exited).toBe(false)
+        expect(peerRan).toBe(false)
+      } finally {
+        release()
+        await result
+      }
+      expect(peerRan).toBe(true)
+      expect(await result).toEqual(reject ? [error] : [])
+    },
+  )
+  it.each(
+    [`pending request`, `query cleanup`].flatMap((first) =>
+      [false, true].flatMap((firstFails) =>
+        [false, true].map((sourceFails) => ({
+          first,
+          firstFails,
+          sourceFails,
+        })),
+      ),
+    ),
+  )(
+    `finishes source cleanup after $first firstFails=$firstFails sourceFails=$sourceFails`,
+    async ({ first, firstFails, sourceFails }) => {
+      const scope = new ScenarioLifetime()
+      const calls: Array<string> = []
+      const firstError = new Error(first)
+      const sourceError = new Error(`source cleanup`)
+      scope.defer(() => {
+        calls.push(first)
+        return firstFails ? Promise.reject(firstError) : Promise.resolve()
+      })
+      scope.defer(() => {
+        calls.push(`source cleanup`)
+        return sourceFails ? Promise.reject(sourceError) : Promise.resolve()
+      })
+      const errors = [
+        ...(firstFails ? [firstError] : []),
+        ...(sourceFails ? [sourceError] : []),
+      ]
+      const result = await scope
+        .run(() => {})
+        .then(
+          () => [],
+          (error: unknown) =>
+            error instanceof AggregateError ? error.errors : [error],
+        )
+      expect(calls).toEqual([first, `source cleanup`])
+      expect(result).toEqual(errors)
+    },
+  )
   const cases = [false, true].flatMap((bodyFails) =>
     [false, true].flatMap((manual) =>
       [false, true].flatMap((cleanupFails) =>

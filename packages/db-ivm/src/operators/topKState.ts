@@ -1,3 +1,4 @@
+import { MultiSet } from '../multiset.js'
 import { TopKArray } from './topKArray.js'
 import type {
   IndexedValue,
@@ -5,6 +6,19 @@ import type {
   TopKChanges,
   TopKMoveChanges,
 } from './topKArray.js'
+
+/** Apply a keyed batch's retractions before additions. An outer join can emit
+ * a replacement in the opposite order; key multiplicity alone would hide it.
+ * Consolidate first so a transient value added and removed in this same turn
+ * cannot be mistaken for the final replacement. No state survives the run.
+ */
+export function* topKBatch<K, T>(messages: Array<MultiSet<[K, T]>>) {
+  const batch = new MultiSet(messages.flatMap((message) => message.getInner()))
+    .consolidate()
+    .getInner()
+  for (const entry of batch) if (entry[1] < 0) yield entry
+  for (const entry of batch) if (entry[1] > 0) yield entry
+}
 
 /**
  * Helper class that manages the state for a single topK window.

@@ -3,11 +3,12 @@ import fc from 'fast-check'
 import { D2 } from '../../src/d2.js'
 import { MultiSet } from '../../src/multiset.js'
 import { topKWithFractionalIndex } from '../../src/operators/topKWithFractionalIndex.js'
+import { groupedTopKWithFractionalIndex } from '../../src/operators/groupedTopKWithFractionalIndex.js'
 import {
   loadBTree,
   topKWithFractionalIndexBTree,
 } from '../../src/operators/topKWithFractionalIndexBTree.js'
-import { output } from '../../src/operators/index.js'
+import { leftJoin, map, output } from '../../src/operators/index.js'
 import {
   MessageTracker,
   assertOnlyKeysAffected,
@@ -73,10 +74,94 @@ beforeAll(async () => {
   await loadBTree()
 })
 
+const groupedWindow: typeof topKWithFractionalIndex = (comparator, options) =>
+  groupedTopKWithFractionalIndex(comparator, {
+    ...options,
+    groupKeyFn: () => `group`,
+  })
+
 describe.each([
   { name: `array`, topK: topKWithFractionalIndex },
   { name: `BTree`, topK: topKWithFractionalIndexBTree },
+  { name: `grouped array`, topK: groupedWindow },
 ])('Generated fractional $name windows', ({ topK }) => {
+  it.each([409032, undefined])(
+    `matches outer-join replacements (seed %s)`,
+    (seed) => {
+      fc.assert(
+        fc.property(
+          fc.integer({ min: 0, max: 4 }),
+          fc.array(
+            fc.record({
+              key: fc.integer({ min: 1, max: 4 }),
+              value: fc.option(fc.constantFrom(`a`, `b`, `c`, `d`), {
+                nil: null,
+              }),
+            }),
+            { minLength: 1, maxLength: 20 },
+          ),
+          (limit, steps) => {
+            const graph = new D2()
+            const left = graph.newInput<[number, string]>()
+            const right = graph.newInput<[number, string]>()
+            const rows = new TopKRelation<number, string>()
+            const matches = new Map<number, string>()
+            left.pipe(
+              leftJoin(right),
+              map(
+                ([id, [fallback, matched]]) =>
+                  [id, { id, value: matched ?? fallback }] as [
+                    number,
+                    { id: number; value: string },
+                  ],
+              ),
+              topK((a, b) => a.value.localeCompare(b.value), { limit }),
+              output((message) => rows.add(message.getInner())),
+            )
+            graph.finalize()
+            left.sendData(
+              new MultiSet([1, 2, 3, 4].map((key) => [[key, `z`], 1])),
+            )
+            graph.run()
+            for (const step of steps) {
+              const changes: Array<[[number, string], number]> = []
+              const old = matches.get(step.key)
+              if (old !== undefined) changes.push([[step.key, old], -1])
+              if (step.value === null) matches.delete(step.key)
+              else {
+                matches.set(step.key, step.value)
+                changes.push([[step.key, step.value], 1])
+              }
+              right.sendData(new MultiSet(changes))
+              graph.run()
+              // Recompute the full left join, then sort and slice. No incremental
+              // state or top-K helper determines the expected result.
+              rows.expectRows(
+                [1, 2, 3, 4]
+                  .map((id) => ({ id, value: matches.get(id) ?? `z` }))
+                  .sort((a, b) => a.value.localeCompare(b.value) || a.id - b.id)
+                  .slice(0, limit)
+                  .map(({ id, value }) => [id, id, value]),
+              )
+            }
+          },
+        ),
+        {
+          seed,
+          numRuns: 100,
+          examples: [
+            [
+              1,
+              [
+                { key: 1, value: `a` },
+                { key: 1, value: null },
+              ],
+            ],
+          ],
+        },
+      )
+    },
+  )
   it.each([409031, undefined])(
     `matches a signed cumulative relation through keyed histories (seed %s)`,
     (seed) => {
@@ -85,16 +170,19 @@ describe.each([
           fc.record({
             limit: fc.integer({ min: 0, max: 6 }),
             offset: fc.integer({ min: 0, max: 3 }),
+            split: fc.boolean(),
+            transient: fc.boolean(),
             steps: fc.array(
               fc.record({
                 key: fc.integer({ min: 1, max: 8 }),
                 value: fc.constantFrom(`a`, `b`, `c`, `d`),
                 remove: fc.boolean(),
+                insertFirst: fc.boolean(),
               }),
               { minLength: 1, maxLength: 30 },
             ),
           }),
-          ({ limit, offset, steps }) => {
+          ({ limit, offset, split, transient, steps }) => {
             type Row = { id: number; value: string }
             const graph = new D2()
             const input = graph.newInput<[number, Row]>()
@@ -112,6 +200,7 @@ describe.each([
               key,
               value: `b`,
               remove: false,
+              insertFirst: false,
             }))
             for (const step of [...initial, ...steps]) {
               const changes: Array<[[number, Row], number]> = []
@@ -123,7 +212,18 @@ describe.each([
                 source.set(step.key, row)
                 changes.push([[step.key, { ...row }], 1])
               }
-              input.sendData(new MultiSet(changes))
+              if (transient) {
+                const intermediate: [number, Row] = [
+                  step.key,
+                  { id: step.key, value: `transient` },
+                ]
+                changes.push([intermediate, 1], [intermediate, -1])
+              }
+              if (step.insertFirst) changes.reverse()
+              if (split) {
+                for (const change of changes)
+                  input.sendData(new MultiSet([change]))
+              } else input.sendData(new MultiSet(changes))
               graph.run()
               const expected = [...source.values()]
                 .sort((a, b) => a.value.localeCompare(b.value) || a.id - b.id)
@@ -145,9 +245,11 @@ describe.each([
               {
                 offset: 1,
                 limit: 1,
+                split: true,
+                transient: true,
                 steps: [
-                  { key: 2, value: `b`, remove: true },
-                  { key: 1, value: `a`, remove: false },
+                  { key: 2, value: `b`, remove: true, insertFirst: false },
+                  { key: 1, value: `a`, remove: false, insertFirst: true },
                 ],
               },
             ],
@@ -156,11 +258,13 @@ describe.each([
                 {
                   offset,
                   limit,
+                  split: true,
+                  transient: true,
                   steps: [
-                    { key: 4, value: `a`, remove: false },
-                    { key: 2, value: `c`, remove: false },
-                    { key: 1, value: `b`, remove: true },
-                    { key: 1, value: `d`, remove: false },
+                    { key: 4, value: `a`, remove: false, insertFirst: true },
+                    { key: 2, value: `c`, remove: false, insertFirst: true },
+                    { key: 1, value: `b`, remove: true, insertFirst: false },
+                    { key: 1, value: `d`, remove: false, insertFirst: false },
                   ],
                 },
               ]),

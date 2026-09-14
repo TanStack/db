@@ -41,7 +41,7 @@ export function expectUnorderedRows(
   expected: ReadonlyArray<unknown>,
   field = `id`,
 ): void {
-  const ordered = (value: unknown): Array<unknown> => {
+  const selected = (value: unknown): Array<unknown> => {
     expect(Array.isArray(value)).toBe(true)
     const rows = value as Array<Record<string, unknown>>
     for (const row of rows) {
@@ -49,15 +49,25 @@ export function expectUnorderedRows(
       expect(typeof row).toBe(`object`)
       expect(typeof row[field]).toBe(`string`)
     }
-    return [...rows]
-      .sort((a, b) => {
-        const left = a[field] as string
-        const right = b[field] as string
-        return left < right ? -1 : left > right ? 1 : 0
-      })
-      .map(selectedRow)
+    return rows.map(selectedRow)
   }
-  expect(ordered(actual)).toStrictEqual(ordered(expected))
+  const remaining = selected(expected)
+  const rows = selected(actual)
+  expect(rows).toHaveLength(remaining.length)
+  // These tiny fixtures need strict selected-value equality, including symbols
+  // and absent-vs-undefined fields. Consume one match, never fold duplicates.
+  for (const row of rows) {
+    const match = remaining.findIndex((candidate) => {
+      try {
+        expect(row).toStrictEqual(candidate)
+        return true
+      } catch {
+        return false
+      }
+    })
+    expect(match, `No matching selected row`).toBeGreaterThanOrEqual(0)
+    remaining.splice(match, 1)
+  }
 }
 
 export function expectOrderedRows(actual: unknown, expected: unknown): void {

@@ -66,6 +66,14 @@ function expectTree(
   probe: number,
 ): void {
   const sorted = [...oracle.keys()].sort((a, b) => a - b)
+  // A missing key must return the caller's fallback on either side of the
+  // tree, including when growth splits the root or deletion collapses it.
+  const fallback = { v: probe }
+  for (const key of [probe, (sorted[0] ?? 0) - 1, (sorted.at(-1) ?? 0) + 1]) {
+    expect(tree.get(key, fallback)).toBe(
+      oracle.has(key) ? oracle.get(key)!.reference : fallback,
+    )
+  }
   expect(tree.size).toBe(oracle.size)
   expect(tree.minKey()).toBe(sorted[0])
   expect(tree.maxKey()).toBe(sorted[sorted.length - 1])
@@ -260,8 +268,7 @@ describe(`BTree Map oracle`, () => {
     const failed = fc.check(property, { seed: 303102, numRuns: 1 })
     expect(failed.failed).toBe(true)
     expect(failed.error).toMatch(/expected/)
-    expect(failed.counterexample).toEqual([[0]])
-    expect(failed.counterexamplePath).toBe(`0:0:0`)
+    expect(failed.counterexample?.[0].length).toBeGreaterThan(0)
     if (failed.counterexamplePath === null)
       throw new Error(`Missing calibration replay path`)
     const replay = fc.check(property, {

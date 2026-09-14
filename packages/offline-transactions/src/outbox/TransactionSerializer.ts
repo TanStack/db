@@ -116,7 +116,12 @@ export class TransactionSerializer {
       const result: any = Array.isArray(value) ? [] : {}
       for (const key in value) {
         if (Object.prototype.hasOwnProperty.call(value, key)) {
-          result[key] = this.serializeValue(value[key])
+          Object.defineProperty(result, key, {
+            value: this.serializeValue(value[key]),
+            enumerable: true,
+            configurable: true,
+            writable: true,
+          })
         }
       }
       return result
@@ -147,7 +152,12 @@ export class TransactionSerializer {
       const result: any = Array.isArray(value) ? [] : {}
       for (const key in value) {
         if (Object.prototype.hasOwnProperty.call(value, key)) {
-          result[key] = this.deserializeValue(value[key])
+          Object.defineProperty(result, key, {
+            value: this.deserializeValue(value[key]),
+            enumerable: true,
+            configurable: true,
+            writable: true,
+          })
         }
       }
       return result

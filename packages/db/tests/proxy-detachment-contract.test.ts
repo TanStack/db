@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import fc from 'fast-check'
 import { createCollection } from '../src/collection/index.js'
 import { withChangeTracking } from '../src/proxy.js'
 
@@ -85,6 +86,43 @@ function expectCycleSnapshot(row: CycleRow, kind: CycleKind) {
 }
 
 describe(`Mutation result detachment`, () => {
+  it.each([20260914, undefined])(
+    `preserves JSON data keys on assignment seed=%s`,
+    (seed) => {
+      fc.assert(
+        fc.property(
+          fc.constantFrom(`__proto__`, `constructor`, `toString`, `ordinary`),
+          fc.integer(),
+          fc.boolean(),
+          (key, value, nested) => {
+            const object = Object.fromEntries([[key, { value }]])
+            const payload = nested ? { nested: [object] } : object
+            const expected = structuredClone(payload)
+            const original = { payload: { before: true } as object }
+            const changes = withChangeTracking(original, (draft) => {
+              draft.payload = payload
+            })
+            // JSON data can own a non-function "constructor" field. Do not
+            // let the assertion library mistake that field for a class tag.
+            expect(JSON.stringify(changes.payload)).toBe(
+              JSON.stringify(expected),
+            )
+            const saved = nested
+              ? (changes.payload as { nested: Array<object> }).nested[0]!
+              : changes.payload!
+            expect(Object.hasOwn(saved, key)).toBe(true)
+            expect(Object.getPrototypeOf(saved)).toBe(Object.prototype)
+            object[key]!.value++
+            expect(JSON.stringify(changes.payload)).toBe(
+              JSON.stringify(expected),
+            )
+            expect(original).toEqual({ payload: { before: true } })
+          },
+        ),
+        { seed, numRuns: 100, examples: [[`__proto__`, 1, false]] },
+      )
+    },
+  )
   it.each(
     cycleKinds.flatMap((kind) =>
       [`before`, `after`].map((edit) => ({ kind, edit })),

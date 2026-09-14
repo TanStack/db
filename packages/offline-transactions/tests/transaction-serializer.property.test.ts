@@ -1,6 +1,6 @@
 import { createCollection, createTransaction } from '@tanstack/db'
 import fc from 'fast-check'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { TransactionSerializer } from '../src/outbox/TransactionSerializer'
 import type { OfflineTransaction } from '../src/types'
 
@@ -60,7 +60,16 @@ function tree(depth: number): fc.Arbitrary<Pair> {
     })),
     fc
       .dictionary(
-        fc.constantFrom(`left`, `right`, `nested`, `date`, `text`),
+        fc.oneof(
+          fc.constantFrom(
+            `__proto__`,
+            `constructor`,
+            `toString`,
+            `left`,
+            `date`,
+          ),
+          fc.string({ maxLength: 12 }).filter((key) => key !== `__type`),
+        ),
         child,
         { maxKeys: 3 },
       )
@@ -79,6 +88,7 @@ async function checkRoundtrip(
   edits: Array<Edit>,
   time: number,
   fault: Fault = `none`,
+  boundary: `encoder` | `decoder` = `encoder`,
 ) {
   const row = (index: number, revision: number, payload: Value): Row => ({
     id: `row:${index}`,
@@ -184,29 +194,41 @@ async function checkRoundtrip(
         ...data(edit, index, `wire`),
       })),
     }
-    let encoded = serializer.serialize(offline)
-    if (fault === `date-as-string`)
-      encoded = encoded.replace(
-        /\{"__type":"Date","value":"([^"]+)"\}/g,
-        `"$1"`,
-      )
-    if (fault === `string-as-date`)
-      encoded = encoded.replace(
-        `"payload":"2024-01-01T00:00:00.000Z"`,
-        `"payload":{"__type":"Date","value":"2024-01-01T00:00:00.000Z"}`,
-      )
-    if (fault === `wrong-registry`)
-      encoded = encoded.replace(
-        `"collectionId":"slot:0"`,
-        `"collectionId":"writer:0"`,
-      )
-    if (fault === `omit-changes`)
-      encoded = encoded.replaceAll(`"changes":`, `"lostChanges":`)
+    const corrupt = (input: string) => {
+      let encoded = input
+      if (fault === `date-as-string`)
+        encoded = encoded.replace(
+          /\{"__type":"Date","value":"([^"]+)"\}/g,
+          `"$1"`,
+        )
+      if (fault === `string-as-date`)
+        encoded = encoded.replace(
+          `"payload":"2024-01-01T00:00:00.000Z"`,
+          `"payload":{"__type":"Date","value":"2024-01-01T00:00:00.000Z"}`,
+        )
+      if (fault === `wrong-registry`)
+        encoded = encoded.replace(
+          `"collectionId":"slot:0"`,
+          `"collectionId":"writer:0"`,
+        )
+      if (fault === `omit-changes`)
+        encoded = encoded.replaceAll(`"changes":`, `"lostChanges":`)
+      return encoded
+    }
+    const serialized = serializer.serialize(offline)
+    const encoded = boundary === `encoder` ? corrupt(serialized) : serialized
     expect(JSON.parse(encoded)).toEqual(expectedWire)
     const fresh = new TransactionSerializer(registry(readers))
     // Also decode independently constructed wire data, so two matching wrong
     // halves cannot establish the format's compatibility by roundtrip alone.
-    for (const wire of [encoded, JSON.stringify(expectedWire)]) {
+    // Decoder calibration starts with authored wire, not a faulty encoder.
+    // A Date/string swap is valid wire: the semantic oracle must reject its
+    // changed meaning; the decoder itself need not throw.
+    const wires =
+      boundary === `decoder`
+        ? [corrupt(JSON.stringify(expectedWire))]
+        : [encoded, JSON.stringify(expectedWire)]
+    for (const wire of wires) {
       const decoded = fresh.deserialize(wire)
       const { mutations, ...rest } = decoded
       expect(rest).toEqual({ ...envelope, createdAt: new Date(time) })
@@ -241,6 +263,16 @@ const pinned: Array<Edit> = [
   { kind: `insert`, slot: 0, before: twin, after: datePair(1704067200000) },
   { kind: `update`, slot: 1, before: datePair(0), after: twin },
   { kind: `delete`, slot: 0, before: datePair(1), after: twin },
+  ...([`insert`, `update`, `delete`] as const).map((kind): Edit => {
+    const runtime = Object.fromEntries([[`__proto__`, { nested: 1 }]])
+    const wire = Object.fromEntries([[`__proto__`, { nested: 1 }]])
+    return {
+      kind,
+      slot: 0,
+      before: { runtime, wire },
+      after: { runtime, wire },
+    }
+  }),
 ]
 // This package's test root is separate from core's named replay portfolio.
 // Keep a local replay entry point rather than importing files outside rootDir.
@@ -289,11 +321,29 @@ it.each([20260914, undefined])(
   },
 )
 
-it.each([
-  `date-as-string`,
-  `string-as-date`,
-  `wrong-registry`,
-  `omit-changes`,
-] as const)(`rejects the %s serializer`, async (fault) => {
-  await expect(checkRoundtrip(pinned, 0, fault)).rejects.toThrow()
-})
+it.each(
+  (
+    [
+      `date-as-string`,
+      `string-as-date`,
+      `wrong-registry`,
+      `omit-changes`,
+    ] as const
+  ).flatMap((fault) =>
+    ([`encoder`, `decoder`] as const).map((boundary) => ({
+      fault,
+      boundary,
+    })),
+  ),
+)(
+  `rejects the $fault $boundary mutant at its own boundary`,
+  async ({ fault, boundary }) => {
+    const decode = vi.spyOn(TransactionSerializer.prototype, `deserialize`)
+    try {
+      await expect(checkRoundtrip(pinned, 0, fault, boundary)).rejects.toThrow()
+      expect(decode).toHaveBeenCalledTimes(boundary === `encoder` ? 0 : 1)
+    } finally {
+      decode.mockRestore()
+    }
+  },
+)

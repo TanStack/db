@@ -13,8 +13,8 @@ export class ScenarioLifetime {
       attempted = true
       try {
         const result = cleanup()
-        if (result instanceof Promise) {
-          completion = result.catch((error: unknown) => {
+        if (result !== undefined) {
+          completion = Promise.resolve(result).catch((error: unknown) => {
             this.failures.push(error)
             throw error
           })

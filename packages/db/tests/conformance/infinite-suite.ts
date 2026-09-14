@@ -391,13 +391,16 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         }
         const originalSetWindow = utils.setWindow.bind(utils)
         let calls = 0
-        let resolveWindow: (() => void) | undefined
-        lifetime!.defer(() => resolveWindow?.())
+        const windows: Array<() => void> = []
+        // A faulty driver can create more than one request. Release all of
+        // them even when the coalescing assertion fails, before joining fetches.
+        const releaseWindows = () => windows.forEach((resolve) => resolve())
+        lifetime!.defer(releaseWindows)
         utils.setWindow = (window) => {
           calls++
           originalSetWindow(window)
           return new Promise<void>((resolve) => {
-            resolveWindow = resolve
+            windows.push(resolve)
           })
         }
 
@@ -413,12 +416,12 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
               secondSettled = true
             },
           )
-          await waitFor(() => resolveWindow !== undefined)
+          await waitFor(() => windows.length > 0)
 
           expect(calls).toBe(1)
           expect(handle.current().isFetchingNextPage).toBe(true)
           expect(secondSettled).toBe(false)
-          resolveWindow?.()
+          releaseWindows()
           await Promise.all([first, second])
           await handle.flush()
           expect(handle.current().pages.map((page) => page.length)).toEqual([

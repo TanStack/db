@@ -10,6 +10,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { electricCollectionOptions } from '@tanstack/electric-db-collection'
 import { waitFor } from '../utils/helpers'
+import { expectNotificationHistory } from '../utils/notification-laws'
 import type { E2ETestConfig, Post, User } from '../types'
 import type { Client } from 'pg'
 import type { Collection } from '@tanstack/db'
@@ -276,32 +277,58 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
                 type: string
                 key: string | number
                 value: Post
+                previousValue?: Post
               }>
               rows: Array<CapturedPost>
             }> = []
-            const subscription = collection.subscribeChanges((changes) => {
-              // Empty callbacks and unowned peers stay visible as evidence.
-              // No SQL-transaction-to-single-delivery framing law is assumed.
-              callbacks.push({
-                changes: changes.map(({ type, key, value }) => ({
-                  type,
-                  key,
-                  value: structuredClone(value),
-                })),
-                rows: Array.from(collection.entries(), ([key, value]) => ({
-                  key,
-                  value: structuredClone(value),
-                })),
-              })
-            })
+            const subscription = collection.subscribeChanges(
+              (changes) => {
+                // Empty callbacks and unowned peers stay visible as evidence.
+                // No SQL-transaction-to-single-delivery framing law is assumed.
+                callbacks.push({
+                  changes: changes.map(
+                    ({ type, key, value, previousValue }) => ({
+                      type,
+                      key,
+                      value: capturePost(value),
+                      previousValue:
+                        previousValue === undefined
+                          ? undefined
+                          : capturePost(previousValue),
+                    }),
+                  ),
+                  rows: Array.from(collection.entries(), ([key, value]) => ({
+                    key,
+                    value: capturePost(value),
+                  })),
+                })
+              },
+              { includeInitialState: true },
+            )
             resources.push(() => {
               subscription.unsubscribe()
               return Promise.resolve()
             })
             return () => {
               const captured = structuredClone(callbacks)
-              const expected = structuredClone(captured)
-              archives.push(() => expect(captured).toStrictEqual(expected))
+              const final = Array.from(collection.entries(), ([key, value]) => {
+                expect(key).toBe(value.id)
+                return capturePost(value)
+              })
+              const check = () =>
+                expectNotificationHistory(
+                  [],
+                  captured.map((callback) => ({
+                    events: callback.changes,
+                    rows: callback.rows.map(({ key, value }) => {
+                      expect(key).toBe(value.id)
+                      return value
+                    }),
+                  })),
+                  final,
+                )
+              check()
+              archives.push(check)
             }
           },
         })

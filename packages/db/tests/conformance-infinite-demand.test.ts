@@ -3,6 +3,7 @@ import { BTreeIndex, createCollection, createLiveQueryCollection } from '../src'
 import { Func, PropRef, Value } from '../src/query/ir'
 import { makeInfiniteOnDemandSource } from './conformance/infinite-on-demand'
 import { selectedRow } from './conformance/result-laws'
+import { ScenarioLifetime } from './conformance/scenario-lifetime'
 import type { LoadSubsetOptions } from '../src'
 
 const runtime = { BTreeIndex, createCollection }
@@ -129,7 +130,12 @@ it(`captures rows, both cursor trees and comparator options before asynchronous 
   }
   const { collection, calls } = makeInfiniteOnDemandSource(runtime, input, 1)
   let pending: ReturnType<typeof collection._sync.loadSubset> | undefined
-  try {
+  const lifetime = new ScenarioLifetime()
+  lifetime.defer(async () => {
+    await pending
+  })
+  lifetime.defer(() => collection.cleanup())
+  await lifetime.run(async () => {
     pending = collection._sync.loadSubset(options)
     if (pending instanceof Promise) void pending.catch(() => undefined)
     input[0]!.label = `mutated`
@@ -147,10 +153,7 @@ it(`captures rows, both cursor trees and comparator options before asynchronous 
     expect(calls[0]).toEqual({ orderBy: orderBy(), cursor: cursor(), limit: 2 })
     expect(Object.isFrozen(calls[0]!.cursor!.whereCurrent)).toBe(true)
     expect(Object.isFrozen(calls[0]!.orderBy![0]!.compareOptions)).toBe(true)
-  } finally {
-    await pending
-    await collection.cleanup()
-  }
+  })
 })
 
 it.each([undefined, 1])(
@@ -163,7 +166,10 @@ it.each([undefined, 1])(
         .orderBy(({ row }) => row.rank, `desc`)
         .limit(2),
     )
-    try {
+    const lifetime = new ScenarioLifetime()
+    lifetime.defer(() => query.cleanup())
+    lifetime.defer(() => collection.cleanup())
+    await lifetime.run(async () => {
       await query.preload()
       expect([...query.values()].map(selectedRow)).toEqual([
         { id: `4`, rank: 4, label: `row4` },
@@ -177,9 +183,6 @@ it.each([undefined, 1])(
           label: `row${rank}`,
         })),
       )
-    } finally {
-      await query.cleanup()
-      await collection.cleanup()
-    }
+    })
   },
 )

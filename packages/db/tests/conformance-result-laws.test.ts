@@ -58,6 +58,39 @@ it(`accepts reordered complete unordered rows without mutating inputs`, () => {
   expectOrderedRows(actual, [...rows].reverse())
 })
 
+it.each([20260913, undefined])(
+  `preserves equal-key row multisets seed=%s`,
+  (seed) => {
+    fc.assert(
+      fc.property(
+        fc.array(fc.integer(), { minLength: 2, maxLength: 12 }),
+        (values) => {
+          const expected = values.map((count) => ({ id: `a`, count }))
+          // Force distinct ties as well as generated repeated identical rows.
+          expected.push({ id: `a`, count: values[0]! + 1 })
+          const actual = [...expected].reverse()
+          expectUnorderedRows(actual, expected)
+          expect(actual).toEqual([...expected].reverse())
+          expect(() => expectUnorderedRows(actual.slice(1), expected)).toThrow()
+          expect(() =>
+            expectUnorderedRows([...actual, actual[0]], expected),
+          ).toThrow()
+          const first = { id: `a`, count: values[0]! }
+          const other = { id: `a`, count: values[0]! + 1 }
+          expect(() =>
+            expectUnorderedRows([first, other, other], [first, first, other]),
+          ).toThrow()
+          const corrupted = actual.map((row, index) =>
+            index === 0 ? { ...row, extra: undefined } : row,
+          )
+          expect(() => expectUnorderedRows(corrupted, expected)).toThrow()
+        },
+      ),
+      { seed, numRuns: 50 },
+    )
+  },
+)
+
 it.each(
   [
     [],
