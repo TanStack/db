@@ -172,6 +172,8 @@ describe.each([
             offset: fc.integer({ min: 0, max: 3 }),
             split: fc.boolean(),
             transient: fc.boolean(),
+            mapped: fc.boolean(),
+            transientValue: fc.constantFrom(`a`, `b`, `c`, `d`, `transient`),
             steps: fc.array(
               fc.record({
                 key: fc.integer({ min: 1, max: 8 }),
@@ -182,13 +184,26 @@ describe.each([
               { minLength: 1, maxLength: 30 },
             ),
           }),
-          ({ limit, offset, split, transient, steps }) => {
+          ({
+            limit,
+            offset,
+            split,
+            transient,
+            mapped,
+            transientValue,
+            steps,
+          }) => {
             type Row = { id: number; value: string }
             const graph = new D2()
             const input = graph.newInput<[number, Row]>()
             const relation = new TopKRelation<number, string>()
             const source = new Map<number, Row>()
-            input.pipe(
+            const projected = mapped
+              ? input.pipe(
+                  map(([key, row]) => [key, { ...row }] as [number, Row]),
+                )
+              : input
+            projected.pipe(
               topK((a, b) => a.value.localeCompare(b.value), {
                 limit,
                 offset,
@@ -215,7 +230,7 @@ describe.each([
               if (transient) {
                 const intermediate: [number, Row] = [
                   step.key,
-                  { id: step.key, value: `transient` },
+                  { id: step.key, value: transientValue },
                 ]
                 changes.push([intermediate, 1], [intermediate, -1])
               }
@@ -247,6 +262,8 @@ describe.each([
                 limit: 1,
                 split: true,
                 transient: true,
+                mapped: true,
+                transientValue: `a`,
                 steps: [
                   { key: 2, value: `b`, remove: true, insertFirst: false },
                   { key: 1, value: `a`, remove: false, insertFirst: true },
@@ -260,6 +277,8 @@ describe.each([
                   limit,
                   split: true,
                   transient: true,
+                  mapped: true,
+                  transientValue: `a`,
                   steps: [
                     { key: 4, value: `a`, remove: false, insertFirst: true },
                     { key: 2, value: `c`, remove: false, insertFirst: true },

@@ -15,10 +15,24 @@ vi.mock('vitest', async (load) => ({
 }))
 const { it, expect } = await vi.importActual<typeof Vitest>('vitest')
 
-it.each([1, 2, 3])(
-  `rejects uncoalesced fetches and releases every gate fanout=%s`,
-  async (fanout) => {
+it.each(
+  [1, 2, 3].flatMap((fanout) =>
+    ([`coalesced`, `simultaneous`, `sequential`] as const).map((schedule) => ({
+      fanout,
+      schedule,
+    })),
+  ),
+)(
+  `checks fetch coalescing and releases every gate fanout=$fanout schedule=$schedule`,
+  async ({ fanout, schedule }) => {
     let cleaned = false
+    let queued = Promise.resolve()
+    let coalesced: Promise<void> | undefined
+    const data = Array.from({ length: 6 }, (_, index) => ({
+      id: `${index + 1}`,
+      label: `row-${index + 1}`,
+      rank: 8 - index,
+    }))
     const utils = {
       setWindow: (_window: unknown): true | Promise<void> => true,
     }
@@ -34,10 +48,31 @@ it.each([1, 2, 3])(
         },
       }),
       mount: () => ({
-        current: () => ({ collection: { utils }, isFetchingNextPage: true }),
+        current: () => ({
+          collection: { utils },
+          isFetchingNextPage: true,
+          data,
+          pages: [data.slice(0, 3), data.slice(3)],
+        }),
         flush: () => Promise.resolve(),
         unmount: () => {},
         fetchNextPage: async () => {
+          if (schedule === `coalesced`) {
+            coalesced ??= Promise.resolve(
+              utils.setWindow({ offset: 0, limit: 6 }),
+            ).then(() => undefined)
+            await coalesced
+            return
+          }
+          if (schedule === `sequential`) {
+            for (let i = 0; i < fanout; i++) {
+              queued = queued.then(async () => {
+                await utils.setWindow({ offset: 0, limit: 6 })
+              })
+            }
+            await queued
+            return
+          }
           await Promise.all(
             Array.from({ length: fanout }, () =>
               utils.setWindow({ offset: 0, limit: 6 }),
@@ -62,7 +97,10 @@ it.each([1, 2, 3])(
           timer = setTimeout(() => resolve(`hung`), 1000)
         }),
       ])
-      expect({ result, cleaned }).toEqual({ result: `rejected`, cleaned: true })
+      expect({ result, cleaned }).toEqual({
+        result: schedule === `coalesced` ? `passed` : `rejected`,
+        cleaned: true,
+      })
     } finally {
       clearTimeout(timer)
     }

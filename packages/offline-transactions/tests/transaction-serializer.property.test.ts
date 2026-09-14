@@ -26,11 +26,12 @@ type Fault =
   | `string-as-date`
   | `wrong-registry`
   | `omit-changes`
+  | `unknown-encoding`
 
 // Construct both representations from semantic leaves, not by walking a
 // production value with a copy of serializeValue. This is JSON trees + Date,
-// not arbitrary JS: cycles, undefined, non-finite numbers, native objects and
-// user objects using the reserved __type Date marker are outside this format.
+// not arbitrary JS: cycles, undefined, non-finite numbers and other native
+// objects are outside this format. User keys, including codec markers, are data.
 const datePair = (time: number): Pair => ({
   runtime: new Date(time),
   wire: { __type: `Date`, value: new Date(time).toISOString() },
@@ -54,6 +55,10 @@ function tree(depth: number): fc.Arbitrary<Pair> {
   const child = tree(depth - 1)
   return fc.oneof(
     leaf,
+    fc.tuple(fc.constantFrom(`Date`, `Object`), child).map(([tag, value]) => ({
+      runtime: { __type: tag, value: value.runtime },
+      wire: { __type: `Object`, value: { __type: tag, value: value.wire } },
+    })),
     fc.array(child, { maxLength: 3 }).map((items) => ({
       runtime: items.map((item) => item.runtime),
       wire: items.map((item) => item.wire),
@@ -67,8 +72,9 @@ function tree(depth: number): fc.Arbitrary<Pair> {
             `toString`,
             `left`,
             `date`,
+            `__type`,
           ),
-          fc.string({ maxLength: 12 }).filter((key) => key !== `__type`),
+          fc.string({ maxLength: 12 }),
         ),
         child,
         { maxKeys: 3 },
@@ -77,11 +83,19 @@ function tree(depth: number): fc.Arbitrary<Pair> {
         runtime: Object.fromEntries(
           Object.entries(fields).map(([key, value]) => [key, value.runtime]),
         ),
-        wire: Object.fromEntries(
-          Object.entries(fields).map(([key, value]) => [key, value.wire]),
+        wire: objectWire(
+          Object.fromEntries(
+            Object.entries(fields).map(([key, value]) => [key, value.wire]),
+          ),
         ),
       })),
   )
+}
+
+function objectWire(fields: { [key: string]: Value }): Value {
+  return Object.hasOwn(fields, `__type`)
+    ? { __type: `Object`, value: fields }
+    : fields
 }
 
 async function checkRoundtrip(
@@ -89,6 +103,7 @@ async function checkRoundtrip(
   time: number,
   fault: Fault = `none`,
   boundary: `encoder` | `decoder` = `encoder`,
+  legacy = false,
 ) {
   const row = (index: number, revision: number, payload: Value): Row => ({
     id: `row:${index}`,
@@ -186,6 +201,7 @@ async function checkRoundtrip(
     }
     const expectedWire = {
       ...envelope,
+      valueEncoding: 2,
       createdAt: new Date(time).toISOString(),
       mutations: edits.map((edit, index) => ({
         globalKey: transaction.mutations[index]!.globalKey,
@@ -213,6 +229,8 @@ async function checkRoundtrip(
         )
       if (fault === `omit-changes`)
         encoded = encoded.replaceAll(`"changes":`, `"lostChanges":`)
+      if (fault === `unknown-encoding`)
+        encoded = encoded.replace(`"valueEncoding":2`, `"valueEncoding":3`)
       return encoded
     }
     const serialized = serializer.serialize(offline)
@@ -228,6 +246,10 @@ async function checkRoundtrip(
       boundary === `decoder`
         ? [corrupt(JSON.stringify(expectedWire))]
         : [encoded, JSON.stringify(expectedWire)]
+    if (legacy) {
+      const { valueEncoding: _encoding, ...oldWire } = expectedWire
+      wires.push(JSON.stringify(oldWire))
+    }
     for (const wire of wires) {
       const decoded = fresh.deserialize(wire)
       const { mutations, ...rest } = decoded
@@ -263,6 +285,11 @@ const pinned: Array<Edit> = [
   { kind: `insert`, slot: 0, before: twin, after: datePair(1704067200000) },
   { kind: `update`, slot: 1, before: datePair(0), after: twin },
   { kind: `delete`, slot: 0, before: datePair(1), after: twin },
+  ...([`insert`, `update`, `delete`] as const).map((kind): Edit => {
+    const runtime = { __type: `Date`, value: `2024-01-01T00:00:00.000Z` }
+    const pair = { runtime, wire: objectWire(runtime) }
+    return { kind, slot: 0, before: pair, after: pair }
+  }),
   ...([`insert`, `update`, `delete`] as const).map((kind): Edit => {
     const runtime = Object.fromEntries([[`__proto__`, { nested: 1 }]])
     const wire = Object.fromEntries([[`__proto__`, { nested: 1 }]])
@@ -321,6 +348,51 @@ it.each([20260914, undefined])(
   },
 )
 
+it.each([20260915, undefined])(
+  `reads unversioned Date-marker records across restart (seed %s)`,
+  async (seed) => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(
+          fc.record({
+            kind: fc.constantFrom<Edit[`kind`]>(`insert`, `update`, `delete`),
+            slot: fc.integer({ min: 0, max: 1 }),
+            before: leaf,
+            after: leaf,
+          }),
+          { minLength: 1, maxLength: 6 },
+        ),
+        async (edits) => {
+          // Old records had no object escape. Use only unambiguous legacy trees,
+          // but cross nested arrays, ordinary objects, Dates and date-like strings.
+          const nest = (pair: Pair): Pair => ({
+            runtime: { nested: [pair.runtime] },
+            wire: { nested: [pair.wire] },
+          })
+          await checkRoundtrip(
+            edits.map((edit) => ({
+              ...edit,
+              before: nest(edit.before),
+              after: nest(edit.after),
+            })),
+            0,
+            `none`,
+            `encoder`,
+            true,
+          )
+        },
+      ),
+      {
+        seed: seed ?? replaySeed,
+        numRuns,
+        examples: [
+          [[{ kind: `update`, slot: 0, before: datePair(0), after: twin }]],
+        ],
+      },
+    )
+  },
+)
+
 it.each(
   (
     [
@@ -328,6 +400,7 @@ it.each(
       `string-as-date`,
       `wrong-registry`,
       `omit-changes`,
+      `unknown-encoding`,
     ] as const
   ).flatMap((fault) =>
     ([`encoder`, `decoder`] as const).map((boundary) => ({

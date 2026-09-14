@@ -1,5 +1,6 @@
-import { MultiSet } from '../multiset.js'
+import { hash } from '../hashing/index.js'
 import { TopKArray } from './topKArray.js'
+import type { MultiSet } from '../multiset.js'
 import type {
   IndexedValue,
   TopK,
@@ -10,14 +11,22 @@ import type {
 /** Apply a keyed batch's retractions before additions. An outer join can emit
  * a replacement in the opposite order; key multiplicity alone would hide it.
  * Consolidate first so a transient value added and removed in this same turn
- * cannot be mistaken for the final replacement. No state survives the run.
+ * cannot be mistaken for the final replacement. Use structural relation
+ * identity: map can allocate a fresh value for each side of a cancelling pair.
+ * No state survives the run.
  */
 export function* topKBatch<K, T>(messages: Array<MultiSet<[K, T]>>) {
-  const batch = new MultiSet(messages.flatMap((message) => message.getInner()))
-    .consolidate()
-    .getInner()
-  for (const entry of batch) if (entry[1] < 0) yield entry
-  for (const entry of batch) if (entry[1] > 0) yield entry
+  const batch = new Map<number, [[K, T], number]>()
+  for (const message of messages) {
+    for (const [value, weight] of message.getInner()) {
+      const identity = hash(value)
+      const previous = batch.get(identity)
+      if (previous) previous[1] += weight
+      else batch.set(identity, [value, weight])
+    }
+  }
+  for (const entry of batch.values()) if (entry[1] < 0) yield entry
+  for (const entry of batch.values()) if (entry[1] > 0) yield entry
 }
 
 /**
