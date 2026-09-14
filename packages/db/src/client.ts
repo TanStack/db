@@ -9,6 +9,7 @@ import { getBuilderFromConfig } from './query/live/collection-registry.js'
 import { createLiveQueryCollection } from './query/live-query-collection.js'
 import { createLiveQueryObserver } from './live-query-observer.js'
 import { createDeferred } from './deferred.js'
+import { withPublicationContext } from './scheduler.js'
 import {
   getLiveQueryHash,
   prepareLiveQueryValue,
@@ -426,6 +427,11 @@ export class DbClient {
     materializeOptions?: CollectionMaterializeOptions<any>,
   ): AnyCollection {
     return this.materializeCollection(options, materializeOptions, false)
+  }
+
+  /** @internal Install coordinated collection state before delivering changes. */
+  _batch<T>(callback: () => T): T {
+    return withPublicationContext(callback)
   }
 
   /** @internal */

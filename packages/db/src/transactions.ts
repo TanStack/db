@@ -8,7 +8,10 @@ import {
   TransactionNotPendingCommitError,
   TransactionNotPendingMutateError,
 } from './errors'
-import { transactionScopedScheduler } from './scheduler.js'
+import {
+  transactionScopedScheduler,
+  withPublicationContext,
+} from './scheduler.js'
 import type { Deferred } from './deferred'
 import type {
   MutationFn,
@@ -532,6 +535,13 @@ class Transaction<T extends object = Record<string, unknown>> {
    * }
    */
   rollback(config?: { isSecondaryRollback?: boolean }): Transaction<T> {
+    return withPublicationContext(() => this.rollbackWithinPublication(config))
+  }
+
+  /** @internal */
+  rollbackWithinPublication(config?: {
+    isSecondaryRollback?: boolean
+  }): Transaction<T> {
     const isSecondaryRollback = config?.isSecondaryRollback ?? false
     if (this.state === `completed`) {
       throw new TransactionAlreadyCompletedRollbackError()
@@ -561,6 +571,11 @@ class Transaction<T extends object = Record<string, unknown>> {
 
   // Tell collection that something has changed with the transaction
   touchCollection(): void {
+    withPublicationContext(() => this.notifyCollections())
+  }
+
+  /** @internal */
+  notifyCollections(): void {
     const hasCalled = new Set()
     for (const mutation of this.mutations) {
       if (!hasCalled.has(mutation.collection.id)) {
@@ -658,6 +673,18 @@ class Transaction<T extends object = Record<string, unknown>> {
 
     if ((this.state as TransactionState) !== `persisting`) return this
 
+    this._settle()
+    return this
+  }
+
+  /** @internal Acknowledge externally coordinated persistence synchronously. */
+  _settle(error?: Error): void {
+    if (this.state !== `persisting`) return
+    if (error) {
+      this.error = { message: error.message, error }
+      this.rollback()
+      return
+    }
     this.setState(`completed`)
     // Publication errors cannot undo persistence or leave its receipt pending.
     // Keep normal publication queued before callers resume from the receipt.
@@ -666,8 +693,6 @@ class Transaction<T extends object = Record<string, unknown>> {
     } finally {
       this.isPersisted.resolve(this)
     }
-
-    return this
   }
 
   /**

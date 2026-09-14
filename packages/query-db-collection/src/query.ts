@@ -122,6 +122,13 @@ export interface QueryCollectionConfig<
    * The Query cache keeps the original response shape.
    */
   select?: (data: TQueryData) => Array<T>
+
+  /**
+   * Optional data-bound authority permit, captured when a result reaches the observer.
+   * Aborting it cancels queued sync application and readiness for that result.
+   * The owner must separately cancel obsolete Query requests/cache writes.
+   */
+  getSyncSignal?: (data: TQueryData) => AbortSignal
   /** The TanStack Query client instance */
   queryClient: QueryClient
 
@@ -677,6 +684,7 @@ export function queryCollectionOptions(
     queryKey,
     queryFn,
     select,
+    getSyncSignal,
     queryClient,
     enabled,
     refetchInterval,
@@ -1711,6 +1719,12 @@ export function queryCollectionOptions(
       const hashedQueryKey = hashKey(queryKey)
       const handleQueryResult: UpdateHandler = (result) => {
         if (result.isSuccess) {
+          const authoritySignal = getSyncSignal?.(result.data)
+          if (authoritySignal?.aborted) return
+          const applicationSignal = (signal: AbortSignal) =>
+            authoritySignal
+              ? AbortSignal.any([signal, authoritySignal])
+              : signal
           // Error state follows observer notification order, not the later
           // publication time of a queued successful result.
           state.lastError = undefined
@@ -1757,12 +1771,17 @@ export function queryCollectionOptions(
                 queryKey,
                 result,
                 applicationToken,
-                signal,
+                applicationSignal(signal),
               ),
             )
           } else {
             enqueueResultApplication(hashedQueryKey, (signal) =>
-              applySuccessfulResult(queryKey, result, undefined, signal),
+              applySuccessfulResult(
+                queryKey,
+                result,
+                undefined,
+                applicationSignal(signal),
+              ),
             )
           }
         } else if (result.isError) {

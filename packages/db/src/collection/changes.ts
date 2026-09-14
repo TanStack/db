@@ -1,5 +1,9 @@
 import { NegativeActiveSubscribersError } from '../errors'
-import { recordPublicationError, withPublicationContext } from '../scheduler.js'
+import {
+  enqueuePublication,
+  recordPublicationError,
+  withPublicationContext,
+} from '../scheduler.js'
 import { runAllCallbacks } from '../utils/callbacks.js'
 import {
   createSingleRowRefProxy,
@@ -40,6 +44,7 @@ export class CollectionChangesManager<
   private discardDeferredPublications = false
   private deferredStateRevision = 0
   private deferredLayoutRevision = 0
+  private publicationLifetime = 0
   private deferredPublications: Array<{
     changes: Array<ChangeMessage<TOutput, TKey>>
     layoutChanged: boolean
@@ -224,7 +229,9 @@ export class CollectionChangesManager<
     // graphs run. This keeps repeated aliases and sibling subqueries coherent.
     const layoutListeners = [...this.layoutChangeListeners]
     const subscriptions = [...this.changeSubscriptions]
-    withPublicationContext(() => {
+    const lifetime = this.publicationLifetime
+    enqueuePublication(() => {
+      if (lifetime !== this.publicationLifetime) return
       const callbacks: Array<() => void> = subscriptions.map(
         (subscription) => () => subscription.emitEvents(enrichedEvents),
       )
@@ -379,6 +386,7 @@ export class CollectionChangesManager<
    * This can be called manually or automatically by garbage collection
    */
   public cleanup(): void {
+    this.publicationLifetime++
     // Cleanup clears visible state without publishing row changes. Detached
     // consumers may miss every status transition before an empty restart.
     this.stateRevision++

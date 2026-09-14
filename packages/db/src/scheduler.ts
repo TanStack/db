@@ -187,6 +187,14 @@ export const transactionScopedScheduler = new Scheduler()
 
 let activePublicationContext: SchedulerContextId | undefined
 let activePublicationFailure: { error: unknown } | undefined
+let publicationDeliveries: Array<() => void> = []
+
+/** Keep reentrant source notifications behind the batch already being delivered. */
+export function enqueuePublication(deliver: () => void): void {
+  withPublicationContext(() => {
+    publicationDeliveries.push(deliver)
+  })
+}
 
 function getActivePublicationFailure(): { error: unknown } | undefined {
   return activePublicationFailure
@@ -222,7 +230,14 @@ export function withPublicationContext<T>(publish: () => T): T {
   let listenerFailure: { error: unknown } | undefined
   try {
     result = publish()
-    transactionScopedScheduler.flush(contextId)
+    do {
+      // Index traversal also visits deliveries appended by reentrant actions.
+      for (let index = 0; index < publicationDeliveries.length; index++) {
+        publicationDeliveries[index]!()
+      }
+      publicationDeliveries = []
+      transactionScopedScheduler.flush(contextId)
+    } while (publicationDeliveries.length > 0)
     listenerFailure = getActivePublicationFailure()
   } catch (error) {
     try {
@@ -239,6 +254,7 @@ export function withPublicationContext<T>(publish: () => T): T {
   } finally {
     activePublicationContext = undefined
     activePublicationFailure = undefined
+    publicationDeliveries = []
   }
   if (listenerFailure) throw listenerFailure.error
   return result

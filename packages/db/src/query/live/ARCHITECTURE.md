@@ -1032,6 +1032,15 @@ queries must all observe the same fully materialized commit. The facade adapter
 may defer event delivery across its Collection transactions, but it must not
 defer state or index installation. Routing and identity remain inside D2.
 
+Source change notifications are delivered in causal order inside the outer
+publication context. A reentrant action installs its state synchronously, but
+its change notifications follow those already queued. Event payloads describe
+that ordered history: if an earlier listener made another action, a later
+listener may read newer complete state while receiving an older change. The
+dependent graph consumes the ordered deltas and agrees with current source
+state after the outer context drains. This does not make event payloads a
+snapshot accessor or allow a partially materialized state to become public.
+
 ## External boundaries
 
 ### Query-db ownership
