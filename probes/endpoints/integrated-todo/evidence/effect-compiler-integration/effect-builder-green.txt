@@ -1,0 +1,19 @@
+✔ follows aliased reexports, local helpers and transaction parameters (792.612958ms)
+✔ unions writes through branches and callbacks, including writes before failure (452.473917ms)
+✔ follows returned service objects and query transforms (434.052417ms)
+✔ unknown effects, recursive calls and raw SQL cannot yield partial proofs (450.421667ms)
+✔ helper source changes invalidate endpoint versions (425.757833ms)
+✔ driver coercions cannot hide writes in SQL argument objects (454.80325ms)
+✔ function parameters preserve callbacks and namespace aliases (400.143542ms)
+✔ reassigned exported functions keep unknown effects (415.333667ms)
+✔ ordinary validation and transforms in service functions preserve write discovery (400.041458ms)
+✔ validator callbacks with database effects remain unknown (414.390875ms)
+✔ reused update builders retain every possible changed foreign-key column (407.669042ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5305.166584

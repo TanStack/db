@@ -1,0 +1,4 @@
+
+> kitchen-ai@0.0.0 typecheck /Users/kylemathews/programs/kitchen-ai/.worktrees/codex-db-endpoints
+> tsc --noEmit -p tsconfig.typecheck.json
+

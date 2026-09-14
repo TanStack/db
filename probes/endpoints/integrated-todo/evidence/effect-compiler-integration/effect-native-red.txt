@@ -1,0 +1,33 @@
+✖ native enum and clock or UUID defaults do not invent writes, while changing query values stay unknown (734.562333ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 859.055083
+
+✖ failing tests:
+
+test at tests/sql-effects.test.mjs:15:1
+✖ native enum and clock or UUID defaults do not invent writes, while changing query values stay unknown (734.562333ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + null
+  - [
+  -   '["public","items"]'
+  - ]
+  
+      at file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/sql-effects.test.mjs:18:12
+      at fixture (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/sql-effects.test.mjs:35:11)
+      at async TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/sql-effects.test.mjs:16:3)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:332:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: [ '["public","items"]' ],
+    operator: 'deepStrictEqual'
+  }

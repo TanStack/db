@@ -1,0 +1,18 @@
+{
+  "ok": true,
+  "clientJavaScriptFiles": 34,
+  "serverMarkersAbsent": [
+    "kitchenCaller",
+    "makeTrelloRequest",
+    "processRecipeWithAI",
+    "postgresql://",
+    "DATABASE_URL",
+    "GOOGLE_CLIENT_SECRET",
+    "TRELLO_TOKEN",
+    "pg_current_xact_id",
+    "inspectSqlEffects",
+    "refreshRegisteredMutation",
+    "writeDependencies"
+  ],
+  "found": []
+}

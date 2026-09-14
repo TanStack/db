@@ -2,10 +2,10 @@
 type: field-log
 format: field-log/v1
 event-stream: ./field_log.jsonl
-generated-through: 425
+generated-through: 426
 title: "Endpoints: optimistic coherence and update delivery"
 opened-at: 2026-09-11T16:54:36.780Z
-updated-at: 2026-09-14T17:51:09.566Z
+updated-at: 2026-09-14T18:52:21.953Z
 ---
 
 # Endpoints: optimistic coherence and update delivery
@@ -1760,3 +1760,15 @@ The repairs preserve first failures, full publication traces and secondary diagn
 A combined browser run failed retrieving Chrome response bodies and remains classified as infrastructure failure. An isolated Todo rerun passed without secondary errors; parallel-load causation is unproved. The cold fixture and a source-map edit needed repair during this work; these are harness mistakes, not production data bugs. No new production data bug was established.
 
 Earlier production/compiler/oracle/design work is now preserved in five granular commits, 64899b9b4 through 66f9a61a6. New repair commits are separate. Push follows the documentation commit; this note does not claim it has already succeeded.
+
+### SQL-effect compiler integrated; Kitchen verified; broad SQL corpus pilot
+
+_2026-09-14T18:52:21.953Z_
+
+[Implementation, receipts and limits](../../integrated-todo/SQL-EFFECT-COMPILER-RESULTS.md). The compiler now uses format-2 SQL-effect artifacts, one relation/event analyzer for Drizzle and static SQL templates, operation-specific FK/default/index facts, and supported PostgreSQL routine bodies. No auth code is generated or rewritten, and no catalog inspection runs in request paths.
+
+The original expression-index case is red at three reads instead of one. Final compiled oracle: 20 scenarios × three histories plus fixed controls, 274 operations, 397 reads and 366 skips. SQL-routine omission fails on stale values, reproduces as the same violation and passes without the fault. Browser companion: nine operations, 13 reads and 14 skips. Ninety contract tests and typecheck pass. A new reused-builder column-tracking mistake was caught and repaired by preserving the union of assignments.
+
+Kitchen has known SQL dependencies for eight queries and ten mutations. Actual compiled handlers pass 88 collection comparisons and exact affected-collection counts; real-session browser passes 232 comparisons. Build and typecheck pass, and 34 client artifacts exclude the checked server markers. Only disposable PostgreSQL data was used. Live AI/Trello effects and deployment remain outside this validation. The previously uncommitted Kitchen application port is being preserved separately from the framework commits.
+
+Broad generation pilot: pinned waxsql 1.0.0 produces 12 schemas × 12 queries. PostgreSQL plans 142 of 144; the analyzer admits 39 and falls back on 103. Six FK-cycle data-generation failures and two division-by-zero planning errors remain explicit. A partial plan-relation oracle rejects an omitted dependency, reproduces it and passes with the omission removed. This is a breadth survey, not broad browser/value/mutation coverage or proof of exact dependencies. Full generated histories and structural SQL shrinking remain the next expansion. No new Field Lab instrument was run during this implementation pass.

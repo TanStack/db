@@ -1,0 +1,68 @@
+[
+  {
+    "name": "effect-compiler-red",
+    "ok": false,
+    "outcome": "semantic-rejection",
+    "reportSha256": "301307b623026acc6c980b7f80313691ec757fa0846cfccdd4bcd49b6dfcfdfd"
+  },
+  {
+    "name": "effect-compiler-final",
+    "ok": true,
+    "outcome": "passed",
+    "reportSha256": "a4ed7b266b25df51c2316a29e2dcb65de5d8da8452a43da47e02352e8b0bdd75"
+  },
+  {
+    "name": "effect-routine-mutant",
+    "ok": false,
+    "outcome": "semantic-rejection",
+    "reportSha256": "dbe5b796f1b517df657f3138b9dbc518a210a5750aaebe0be7f51648f7af866b"
+  },
+  {
+    "name": "effect-routine-replay-red",
+    "ok": false,
+    "outcome": "semantic-rejection",
+    "reportSha256": "070250f02d60c108c380bd8beb849d45a0f6a20e81f887e068a917a9fb2bdcd9"
+  },
+  {
+    "name": "effect-routine-replay-green",
+    "ok": true,
+    "outcome": "passed",
+    "reportSha256": "9414949d8237ccac6d9d37c3183375f3762e870457314aed74844f730f11f3a5"
+  },
+  {
+    "name": "effect-compiled-browser-green",
+    "ok": true,
+    "outcome": "passed",
+    "reportSha256": "eeb58a3e40c2700be0785d696942e30cdfa9891abd202166100a359d93e11e48"
+  },
+  {
+    "name": "pg-corpus-complete",
+    "ok": true,
+    "outcome": "passed",
+    "reportSha256": "d52f578a504e34df44455dca710329fd5be497bea5177ce33cb34f66b6d099a2"
+  },
+  {
+    "name": "pg-corpus-red",
+    "ok": false,
+    "outcome": "semantic-rejection",
+    "reportSha256": "3af1aa1d079815447eee100075263010f84cbb7bc500fa1c853494bf30c922c7"
+  },
+  {
+    "name": "pg-corpus-replay-red",
+    "ok": false,
+    "outcome": "semantic-rejection",
+    "reportSha256": "30460d9eaf526f05e2199bc3384d1524d356dea67e6baa67e733aa5f77e717b9"
+  },
+  {
+    "name": "pg-corpus-replay-green",
+    "ok": true,
+    "outcome": "passed",
+    "reportSha256": "6e5edb40098e21d4685542306254dd54b2bbc7fae929eb3ed66d64f121742975"
+  },
+  {
+    "name": "kitchen-effects-final",
+    "ok": true,
+    "outcome": null,
+    "reportSha256": "14732b34d3e5a81769113473ee3106e102e50b0795d0f4dd8bbfff4e8d2004e1"
+  }
+]

@@ -1,0 +1,93 @@
+{
+  "format": 1,
+  "generator": "saved-case",
+  "schemas": [
+    {
+      "seed": 20260914,
+      "complexity": 1,
+      "queries": [
+        {
+          "seed": 20260914000,
+          "sql": "SELECT t1.employee\nFROM permissions AS t1\nWHERE t1.default_feature"
+        },
+        {
+          "seed": 20260914001,
+          "sql": "SELECT t1.employee\nFROM permissions AS t1\nWHERE true"
+        },
+        {
+          "seed": 20260914002,
+          "sql": "SELECT substr('north'::text, 1000)\nFROM materials AS t1"
+        },
+        {
+          "seed": 20260914003,
+          "sql": "SELECT t1.size % 42\nFROM materials AS t1"
+        },
+        {
+          "seed": 20260914004,
+          "sql": "SELECT repeat('south'::text, t1.size)\nFROM materials AS t1\nWHERE '00000000-0000-0000-0000-000000000000'::uuid <= '00000000-0000-0000-0000-000000000000'::uuid"
+        },
+        {
+          "seed": 20260914005,
+          "sql": "SELECT mod(t1.batch, 5)\nFROM roles AS t1"
+        },
+        {
+          "seed": 20260914006,
+          "sql": "SELECT t1.batch\nFROM roles AS t1\nWHERE true"
+        },
+        {
+          "seed": 20260914007,
+          "sql": "SELECT '{\"k\":\"v\"}'::jsonb ->> t1.zone\nFROM permissions AS t1\nWHERE t1.default_feature"
+        },
+        {
+          "seed": 20260914008,
+          "sql": "SELECT false\nFROM materials AS t1"
+        },
+        {
+          "seed": 20260914009,
+          "sql": "SELECT 'foo'::text\nFROM materials AS t1\nWHERE false"
+        },
+        {
+          "seed": 20260914010,
+          "sql": "SELECT mod(t1.size, t1.size)\nFROM materials AS t1"
+        },
+        {
+          "seed": 20260914011,
+          "sql": "SELECT t1.employee\nFROM permissions AS t1"
+        }
+      ],
+      "ddl": "CREATE TABLE materials (\n  id int8 NOT NULL,\n  shared_feature timestamptz,\n  size int4,\n  pending_customer date NOT NULL,\n  PRIMARY KEY (id)\n);\n\nCREATE TABLE permissions (\n  id int8 NOT NULL,\n  employee int8,\n  zone text,\n  historical_release int8,\n  default_feature bool NOT NULL,\n  public_transaction int8 NOT NULL,\n  PRIMARY KEY (id)\n);\n\nCREATE TABLE roles (\n  id int8 NOT NULL,\n  host uuid NOT NULL,\n  batch int4,\n  artifact uuid NOT NULL,\n  PRIMARY KEY (id)\n);\n\nALTER TABLE roles ADD CONSTRAINT fk_roles_batch FOREIGN KEY (batch) REFERENCES permissions (id) ON DELETE SET NULL ON UPDATE NO ACTION;\n\nCREATE INDEX ix_permissions_historical_release_x0 ON permissions (historical_release);\n\nCREATE INDEX ix_roles_batch ON roles (batch);\n",
+      "tables": [
+        {
+          "name": "materials",
+          "types": [
+            "int8",
+            "timestamptz",
+            "int4",
+            "date"
+          ]
+        },
+        {
+          "name": "permissions",
+          "types": [
+            "int8",
+            "int8",
+            "text",
+            "int8",
+            "bool",
+            "int8"
+          ]
+        },
+        {
+          "name": "roles",
+          "types": [
+            "int8",
+            "uuid",
+            "int4",
+            "uuid"
+          ]
+        }
+      ],
+      "data": "COPY \"materials\" (\"id\", \"shared_feature\", \"size\", \"pending_customer\") FROM STDIN;\n1\t2026-12-23 17:03:50.699461+00:00\t1053609929\t2029-04-29\n2\t\\N\t1027687237\t2027-02-01\n3\t2029-07-18 19:18:34.716018+00:00\t652096632\t2023-03-14\n\\.\n\nCOPY \"permissions\" (\"id\", \"employee\", \"zone\", \"historical_release\", \"default_feature\", \"public_transaction\") FROM STDIN;\n1\t1644850248888795919\tclover\t4103161496566480796\tf\t3937249060737356374\n2\t-2951375405274789313\tmarsh\t718334449024850483\tt\t4223775567910442963\n3\t-2751969965810414737\tmineral\t1842271500668760891\tt\t4319658806403259247\n\\.\n\nCOPY \"roles\" (\"id\", \"host\", \"batch\", \"artifact\") FROM STDIN;\n1\tb76dc24a-1ff3-2899-d138-2ab687901b70\t\\N\t104bb191-623a-5ec1-f984-728502e9f10f\n2\t88bc4da6-c7fe-654c-9f6d-f737ad9f1976\t\\N\tfa80182b-c9af-2e79-474a-8786ecb96ea7\n3\tf1a9a5e3-5d78-9353-46f9-9cd878c149a3\t3\tb51fd3db-43a1-e17a-c569-94c8cf93eac5\n\\.\n"
+    }
+  ]
+}

@@ -1,0 +1,79 @@
+{
+  "property": "endpoints.compiled-dependencies",
+  "original": {
+    "input": {
+      "program": {
+        "count": 3,
+        "expressionIndex": true,
+        "opaqueIndex": true
+      },
+      "histories": [
+        [
+          {
+            "kind": "update",
+            "table": 0,
+            "value": 7
+          }
+        ]
+      ]
+    },
+    "failure": {
+      "law": "read-obligation",
+      "operation": "update",
+      "step": 0,
+      "checkpoint": "settled",
+      "actual": 3,
+      "expected": 1,
+      "difference": [],
+      "trace": [
+        {
+          "type": "operation",
+          "step": {
+            "kind": "update",
+            "table": 0,
+            "value": 7
+          }
+        }
+      ],
+      "faults": []
+    }
+  },
+  "reduced": {
+    "input": {
+      "program": {
+        "count": 3,
+        "expressionIndex": true,
+        "opaqueIndex": true
+      },
+      "histories": [
+        [
+          {
+            "kind": "update",
+            "table": 0,
+            "value": 7
+          }
+        ]
+      ]
+    },
+    "failure": {
+      "law": "read-obligation",
+      "operation": "update",
+      "step": 0,
+      "checkpoint": "settled",
+      "actual": 3,
+      "expected": 1,
+      "difference": [],
+      "trace": [
+        {
+          "type": "operation",
+          "step": {
+            "kind": "update",
+            "table": 0,
+            "value": 7
+          }
+        }
+      ],
+      "faults": []
+    }
+  }
+}
