@@ -40,6 +40,7 @@ const input = {
     { count: 3, pgFunctions: true, expressionIndex: true, opaqueIndex: true },
   ],
   operations: [
+    { kind: 'invalid', table: 0, value: 0.5 },
     { kind: 'update', table: 0, value: 7 },
     { kind: 'update', table: 2, value: 9 },
     { kind: 'delete', table: 0 },
@@ -76,13 +77,59 @@ async function execute(input) {
           evidence.at({ program, operation: operation.kind, step })
           evidence.record({ type: 'operation', operation })
           await driver.control({ command: 'clearTrace' })
+          if (operation.kind === 'invalid') {
+            const actual = await page.evaluate(async (operation) => {
+              const app = window.compiledOracle
+              const rows = () =>
+                app.collections.map((c) =>
+                  [...c.values()].map(({ id, value }) => ({ id, value })),
+                )
+              const before = rows()
+              const tx = app.actions['update' + operation.table]({
+                value: operation.value,
+              })
+              const optimistic = rows()
+              let error
+              try {
+                await tx.isPersisted.promise
+              } catch (failure) {
+                error = { code: failure.code, issues: failure.issues }
+              }
+              return { before, optimistic, settled: rows(), error }
+            }, operation)
+            evidence.check(
+              'validation-error-code',
+              actual.error?.code,
+              'INVALID_INPUT',
+            )
+            evidence.check(
+              'validation-error-path',
+              actual.error?.issues[0].path,
+              ['input', 'value'],
+            )
+            evidence.check(
+              'validation-optimism',
+              actual.optimistic[operation.table][0].value,
+              operation.value,
+            )
+            evidence.check('validation-rollback', actual.settled, actual.before)
+            evidence.check(
+              'validation-no-sql',
+              (await driver.control({})).trace,
+              [],
+            )
+            report.operations++
+            continue
+          }
           if (operation.kind === 'delete')
             await pg.exec(
               `DELETE FROM ${tableName(operation.table)} WHERE id='row'`,
             )
           else
             await pg.query(
-              `UPDATE ${tableName(operation.table)} SET value=$1 WHERE id='row'`,
+              `UPDATE ${tableName(
+                operation.table,
+              )} SET value=$1 WHERE id='row'`,
               [operation.value],
             )
           if (
@@ -109,7 +156,11 @@ async function execute(input) {
               pg
                 .query(
                   program.pgFunctions && i === 0
-                    ? `SELECT a.id,a.value + coalesce((SELECT b.value FROM ${tableName(1)} b WHERE b.id='row'),0) AS value FROM ${tableName(0)} a ORDER BY a.id`
+                    ? `SELECT a.id,a.value + coalesce((SELECT b.value FROM ${tableName(
+                        1,
+                      )} b WHERE b.id='row'),0) AS value FROM ${tableName(
+                        0,
+                      )} a ORDER BY a.id`
                     : `SELECT id,value FROM ${tableName(i)} ORDER BY id`,
                 )
                 .then((r) => r.rows),

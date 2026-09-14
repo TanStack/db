@@ -54,7 +54,9 @@ const report = {
 // reusing its body or asking the compiler which relations it reads.
 const referenceRead = (program, i) =>
   program.pgFunctions && i === 0
-    ? `SELECT a.id,a.value + coalesce((SELECT b.value FROM ${tableName(1)} b WHERE b.id='row'),0) AS value FROM ${tableName(0)} a ORDER BY a.id`
+    ? `SELECT a.id,a.value + coalesce((SELECT b.value FROM ${tableName(
+        1,
+      )} b WHERE b.id='row'),0) AS value FROM ${tableName(0)} a ORDER BY a.id`
     : `SELECT id,value FROM ${tableName(i)} ORDER BY id`
 const plain = (rows) =>
   rows
@@ -224,8 +226,50 @@ async function execute(program, histories) {
           evidence.record({ type: 'operation', step })
           const target = step.table % program.count
           const before = structuredClone(admitted)
-          const action = app.actions[step.kind + target]
+          const action =
+            app.actions[
+              (step.kind === 'invalid' ? 'update' : step.kind) + target
+            ]
           const start = module.sutTrace.length
+          if (step.kind === 'invalid') {
+            // A fractional number is valid collection data but invalid endpoint
+            // input. No statement should reach either database for this step.
+            const tx = action({ value: step.value + 0.5 })
+            evidence.check(
+              'invalid-input-optimism',
+              app.collections.map((c) => plain([...c.values()])),
+              before.map((rows, i) =>
+                i === target
+                  ? rows.map((row) => ({ ...row, value: step.value + 0.5 }))
+                  : rows,
+              ),
+              { checkpoint: 'same-turn' },
+            )
+            await assert.rejects(tx.isPersisted.promise, (error) => {
+              evidence.check(
+                'validation-error-code',
+                error.code,
+                'INVALID_INPUT',
+              )
+              evidence.check('validation-error-path', error.issues[0].path, [
+                'input',
+                'value',
+              ])
+              return true
+            })
+            evidence.check(
+              'validation-no-sql',
+              module.sutTrace.slice(start),
+              [],
+            )
+            evidence.check(
+              'validation-rollback',
+              app.collections.map((c) => plain([...c.values()])),
+              before,
+            )
+            report.operations++
+            continue
+          }
           // An independent PG database executes separately rendered statements.
           let rejected = false
           try {
@@ -351,7 +395,7 @@ async function execute(program, histories) {
 
 const step = fc.record({
   table: fc.nat(20),
-  kind: fc.constantFrom('update', 'insert', 'delete'),
+  kind: fc.constantFrom('update', 'insert', 'delete', 'invalid'),
   value: fc.integer({ min: -20, max: 20 }),
 })
 try {
@@ -362,6 +406,15 @@ try {
       (value) => scenario(value.program, value.histories),
     )
   else {
+    await scenario({ count: 2 }, [
+      [
+        { kind: 'invalid', table: 0, value: 3 },
+        { kind: 'update', table: 0, value: 4 },
+        { kind: 'delete', table: 0, value: 0 },
+        { kind: 'invalid', table: 0, value: 5 },
+        { kind: 'insert', table: 0, value: 6 },
+      ],
+    ])
     await scenario({ count: 3, pgFunctions: true }, [
       [
         { kind: 'update', table: 0, value: 7 },

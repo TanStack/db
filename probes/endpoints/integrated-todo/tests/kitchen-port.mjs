@@ -275,8 +275,28 @@ try {
   assert.equal(app.tagsCollection.get(tag).user_id, user)
   assert.ok(app.tagsCollection.get(tag).created_at.getTime() > 0)
   assert.ok(app.recipeTagsCollection.get(link).created_at.getTime() > 0)
+  const beforeInvalidInput = loaded.trace.length
+  const invalidTag = app.updateTagAssignments({
+    target: { entity: 'recipe', entity_id: recipe },
+    new_tags: [
+      { id: randomUUID(), name: '   ', user_id: user, created_at: now },
+    ],
+    links: [],
+    removed_link_ids: [],
+  })
+  await assert.rejects(invalidTag.isPersisted.promise, (error) => {
+    assert.equal(error.code, 'INVALID_INPUT')
+    assert.deepEqual(error.issues[0].path, ['input', 'new_tags', 0, 'name'])
+    return true
+  })
+  assert.deepEqual(loaded.trace.slice(beforeInvalidInput), [])
+  await check()
   loaded.setActor(other)
-  await action('updateIngredient', { id: ingredient, data: { count: 99 } }, true)
+  await action(
+    'updateIngredient',
+    { id: ingredient, data: { count: 99 } },
+    true,
+  )
   loaded.setActor(user)
   await action('deleteComment', comment)
   await action('deleteRecipe', recipe)
