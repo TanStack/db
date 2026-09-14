@@ -1,5 +1,6 @@
-import { beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
+import * as hashing from '../../src/hashing/index.js'
 import { D2 } from '../../src/d2.js'
 import { MultiSet } from '../../src/multiset.js'
 import { topKWithFractionalIndex } from '../../src/operators/topKWithFractionalIndex.js'
@@ -73,6 +74,8 @@ function verifyOrder(results: Array<any>, expectedOrder: Array<string>) {
 beforeAll(async () => {
   await loadBTree()
 })
+
+afterEach(() => vi.restoreAllMocks())
 
 const groupedWindow: typeof topKWithFractionalIndex = (comparator, options) =>
   groupedTopKWithFractionalIndex(comparator, {
@@ -162,9 +165,16 @@ describe.each([
       )
     },
   )
-  it.each([409031, undefined])(
-    `matches a signed cumulative relation through keyed histories (seed %s)`,
-    (seed) => {
+  it.each(
+    [409031, undefined].flatMap((seed) =>
+      [false, true].map((collision) => ({ seed, collision })),
+    ),
+  )(
+    `matches a signed cumulative relation through keyed histories (seed $seed, collision $collision)`,
+    ({ seed, collision }) => {
+      // The reference relation observes full rows and signed weights. Forcing
+      // every bucket to collide must not change what the graph publishes.
+      if (collision) vi.spyOn(hashing, `hash`).mockReturnValue(7)
       fc.assert(
         fc.property(
           fc.record({

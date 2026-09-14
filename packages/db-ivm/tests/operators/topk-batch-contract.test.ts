@@ -1,12 +1,153 @@
 import { afterEach, expect, it, vi } from 'vitest'
+import fc from 'fast-check'
+import { Temporal } from 'temporal-polyfill'
 import { MultiSet } from '../../src/multiset.js'
 import * as hashing from '../../src/hashing/index.js'
+import { registerOpaqueHash } from '../../src/hashing/hash.js'
 import { topKBatch } from '../../src/operators/topKState.js'
 import { D2 } from '../../src/d2.js'
 import { topKWithFractionalIndex } from '../../src/operators/topKWithFractionalIndex.js'
 import { output } from '../../src/operators/index.js'
 
 afterEach(() => vi.restoreAllMocks())
+
+// Each constructor states a relation independently of hashing. Cross that
+// relation with natural/forced collisions and fresh enclosing row allocations.
+const valueRelations: Array<{
+  name: string
+  pair: (value: number) => [unknown, unknown, boolean]
+}> = [
+  {
+    name: `plain key order`,
+    pair: (n) => [{ a: n, b: 1 }, { b: 1, a: n }, true],
+  },
+  {
+    name: `different plain values`,
+    pair: (n) => [{ a: n }, { a: n + 1 }, false],
+  },
+  { name: `signed zero`, pair: () => [-0, 0, true] },
+  { name: `NaN`, pair: () => [NaN, Number.NaN, true] },
+  { name: `typed scalars`, pair: (n) => [n, String(n), false] },
+  { name: `dates`, pair: (n) => [new Date(n), new Date(n), true] },
+  {
+    name: `different dates`,
+    pair: (n) => [new Date(n), new Date(n + 1), false],
+  },
+  {
+    name: `temporal`,
+    pair: (n) => [
+      Temporal.Instant.fromEpochMilliseconds(n),
+      Temporal.Instant.fromEpochMilliseconds(n),
+      true,
+    ],
+  },
+  {
+    name: `different temporal types`,
+    pair: () => [Temporal.PlainDate.from(`2026-01-01`), `2026-01-01`, false],
+  },
+  {
+    name: `small binary`,
+    pair: (n) => [Buffer.from([n]), new Uint8Array([n]), true],
+  },
+  {
+    name: `different small binary`,
+    pair: (n) => [new Uint8Array([n]), new Uint8Array([n + 1]), false],
+  },
+  {
+    name: `large binary handles`,
+    pair: () => [new Uint8Array(129), new Uint8Array(129), false],
+  },
+  {
+    name: `map values`,
+    pair: (n) => [new Map([[`x`, { n }]]), new Map([[`x`, { n }]]), true],
+  },
+  {
+    name: `map order`,
+    pair: (n) => [
+      new Map([
+        [`x`, n],
+        [`y`, n],
+      ]),
+      new Map([
+        [`y`, n],
+        [`x`, n],
+      ]),
+      false,
+    ],
+  },
+  {
+    name: `set values`,
+    pair: (n) => [new Set([{ n }]), new Set([{ n }]), true],
+  },
+  {
+    name: `set order`,
+    pair: (n) => [new Set([n, n + 1]), new Set([n + 1, n]), false],
+  },
+  { name: `array versus object`, pair: (n) => [[n], { 0: n }, false] },
+  {
+    name: `shared symbol property`,
+    pair: (n) => {
+      const key = Symbol(`key`)
+      return [{ [key]: n }, { [key]: n }, true]
+    },
+  },
+  {
+    name: `distinct symbol properties`,
+    pair: (n) => [{ [Symbol(`key`)]: n }, { [Symbol(`key`)]: n }, false],
+  },
+  { name: `distinct functions`, pair: (n) => [() => n, () => n, false] },
+  {
+    name: `opaque handles`,
+    pair: (n) => {
+      const a = { n }
+      const b = { n }
+      registerOpaqueHash(a)
+      registerOpaqueHash(b)
+      return [a, b, false]
+    },
+  },
+  {
+    name: `same opaque handle`,
+    pair: (n) => {
+      const handle = { n }
+      registerOpaqueHash(handle)
+      return [handle, handle, true]
+    },
+  },
+]
+
+it.each(
+  valueRelations.flatMap((relation) =>
+    [false, true].map((collision) => ({ ...relation, collision })),
+  ),
+)(
+  `preserves $name cancellation (collision $collision)`,
+  ({ pair, collision }) => {
+    if (collision) vi.spyOn(hashing, `hash`).mockReturnValue(7)
+    fc.assert(
+      fc.property(fc.integer({ min: 0, max: 254 }), (n) => {
+        const [left, right, equivalent] = pair(n)
+        const before: [number, { value: unknown }] = [1, { value: left }]
+        const after: [number, { value: unknown }] = [1, { value: right }]
+        const actual = [
+          ...topKBatch([
+            new MultiSet([[after, 1]]),
+            new MultiSet([[before, -1]]),
+          ]),
+        ]
+        if (equivalent) expect(actual).toEqual([])
+        else {
+          expect(actual).toHaveLength(2)
+          expect(actual[0]![0]).toBe(before)
+          expect(actual[0]![1]).toBe(-1)
+          expect(actual[1]![0]).toBe(after)
+          expect(actual[1]![1]).toBe(1)
+        }
+      }),
+      { seed: 409033, numRuns: 25 },
+    )
+  },
+)
 
 it(`keeps distinct row keys when structural hashes collide`, () => {
   // A hash is an accelerator, never proof that two keyed rows are equal.
@@ -16,6 +157,37 @@ it(`keeps distinct row keys when structural hashes collide`, () => {
     [[`1`, { id: 2 }], 1],
   ])
   expect([...topKBatch([batch])]).toEqual(batch.getInner())
+})
+
+it(`compares shared subtrees without expanding every path`, () => {
+  vi.spyOn(hashing, `hash`).mockReturnValue(7)
+  fc.assert(
+    fc.property(fc.integer({ min: 0, max: 20 }), (depth) => {
+      let reads = 0
+      function tree(): object {
+        let node: object = {
+          get value() {
+            reads++
+            return 1
+          },
+        }
+        for (let level = 0; level < depth; level++)
+          node = { left: node, right: node }
+        return node
+      }
+      const actual = [
+        ...topKBatch([
+          new MultiSet<[number, object]>([
+            [[1, tree()], 1],
+            [[1, tree()], -1],
+          ]),
+        ]),
+      ]
+      expect(actual).toEqual([])
+      expect(reads).toBe(2)
+    }),
+    { seed: 409034, numRuns: 25 },
+  )
 })
 
 it(`does not inspect payloads when each key occurs once`, () => {

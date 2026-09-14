@@ -13,10 +13,12 @@ const UNDEFINED = randomHash()
 const KEY = randomHash()
 const FUNCTIONS = randomHash()
 const DATE_MARKER = randomHash()
-const OBJECT_MARKER = randomHash()
-const ARRAY_MARKER = randomHash()
-const MAP_MARKER = randomHash()
-const SET_MARKER = randomHash()
+const STRUCTURAL_MARKERS = {
+  object: randomHash(),
+  array: randomHash(),
+  map: randomHash(),
+  set: randomHash(),
+}
 const UINT8ARRAY_MARKER = randomHash()
 const TEMPORAL_MARKER = randomHash()
 // Bound structural recursion and value visits. Shared acyclic subtrees are
@@ -51,6 +53,7 @@ function isTemporal(input: object): input is TemporalLike {
 const UINT8ARRAY_CONTENT_HASH_THRESHOLD = 128
 
 const hashCache = new WeakMap<object, number>()
+const referenceValues = new WeakSet<object>()
 
 /** @internal Register a mutable handle before it enters a structural value. */
 export function registerOpaqueHash(value: object): void {
@@ -87,24 +90,12 @@ function hashObject(input: object, context: HashContext): number {
     } else if (isTemporal(input)) {
       valueHash = hashTemporal(input)
     } else {
-      let plainObjectInput = input
-      let marker = OBJECT_MARKER
-
-      if (input instanceof Array) {
-        marker = ARRAY_MARKER
-      }
-
-      if (input instanceof Map) {
-        marker = MAP_MARKER
-        plainObjectInput = [...input.entries()]
-      }
-
-      if (input instanceof Set) {
-        marker = SET_MARKER
-        plainObjectInput = [...input.entries()]
-      }
-
-      valueHash = hashPlainObject(plainObjectInput, marker, context)
+      const [kind, plainObjectInput] = structuralShape(input)
+      valueHash = hashPlainObject(
+        plainObjectInput,
+        STRUCTURAL_MARKERS[kind],
+        context,
+      )
     }
   } finally {
     context.activeObjects.delete(input)
@@ -261,6 +252,80 @@ function isBinaryValue(input: object): input is Uint8Array {
   )
 }
 
+function structuralShape(
+  input: object,
+): [keyof typeof STRUCTURAL_MARKERS, object] {
+  if (input instanceof Map) return [`map`, [...input.entries()]]
+  if (input instanceof Set) return [`set`, [...input.values()]]
+  return [input instanceof Array ? `array` : `object`, input]
+}
+
+/** @internal Resolve collisions using the structural hash domain, not the
+ * digest. Call after hashing has validated the immutable structural inputs.
+ * Reference-valued leaves remain opaque, including registered mutable handles.
+ */
+export function equalHashValues(left: unknown, right: unknown): boolean {
+  const compared = new Map<object, Set<object>>()
+  function equal(a: unknown, b: unknown): boolean {
+    if (a === b || (Number.isNaN(a) && Number.isNaN(b))) return true
+    if (
+      a === null ||
+      b === null ||
+      typeof a !== `object` ||
+      typeof b !== `object`
+    )
+      return false
+    if (
+      referenceValues.has(a) ||
+      referenceValues.has(b) ||
+      isReferenceHashedObject(a) ||
+      isReferenceHashedObject(b)
+    )
+      return false
+    if (a instanceof Date || b instanceof Date)
+      return (
+        a instanceof Date &&
+        b instanceof Date &&
+        equal(a.getTime(), b.getTime())
+      )
+    if (isBinaryValue(a) || isBinaryValue(b))
+      return (
+        isBinaryValue(a) &&
+        isBinaryValue(b) &&
+        a.byteLength === b.byteLength &&
+        a.every((value, index) => value === b[index])
+      )
+    if (isTemporal(a) || isTemporal(b))
+      return (
+        isTemporal(a) &&
+        isTemporal(b) &&
+        a[Symbol.toStringTag] === b[Symbol.toStringTag] &&
+        a.toString() === b.toString()
+      )
+
+    // Shared acyclic subtrees should not multiply comparison work.
+    const peers = compared.get(a)
+    if (peers?.has(b)) return true
+    if (peers) peers.add(b)
+    else compared.set(a, new Set([b]))
+    const [aKind, aShape] = structuralShape(a)
+    const [bKind, bShape] = structuralShape(b)
+    if (aKind !== bKind) return false
+    const keys = (value: object) =>
+      Reflect.ownKeys(value).filter((key) =>
+        Object.prototype.propertyIsEnumerable.call(value, key),
+      )
+    const aKeys = keys(aShape)
+    if (aKeys.length !== keys(bShape).length) return false
+    return aKeys.every(
+      (key) =>
+        Object.prototype.propertyIsEnumerable.call(bShape, key) &&
+        equal(aShape[key as keyof object], bShape[key as keyof object]),
+    )
+  }
+  return equal(left, right)
+}
+
 let nextRefId = 1
 function cachedReferenceHash(fn: object): number {
   let valueHash = hashCache.get(fn)
@@ -268,6 +333,7 @@ function cachedReferenceHash(fn: object): number {
     valueHash = nextRefId ^ FUNCTIONS
     nextRefId++
     hashCache.set(fn, valueHash)
+    referenceValues.add(fn)
   }
   return valueHash
 }

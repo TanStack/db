@@ -1,4 +1,5 @@
 import { hash } from '../hashing/index.js'
+import { equalHashValues } from '../hashing/hash.js'
 import { TopKArray } from './topKArray.js'
 import type { MultiSet } from '../multiset.js'
 import type {
@@ -32,14 +33,18 @@ export function* topKBatch<K, T>(messages: Array<MultiSet<[K, T]>>) {
       batch.push(entries[0]!)
       continue
     }
-    const consolidated = new Map<number, [[K, T], number]>()
+    const consolidated = new Map<number, Array<[[K, T], number]>>()
     for (const [value, weight] of entries) {
       const identity = hash(value)
-      const previous = consolidated.get(identity)
+      const collisions = consolidated.get(identity)
+      const previous = collisions?.find(([candidate]) =>
+        equalHashValues(candidate[1], value[1]),
+      )
       if (previous) previous[1] += weight
-      else consolidated.set(identity, [value, weight])
+      else if (collisions) collisions.push([value, weight])
+      else consolidated.set(identity, [[value, weight]])
     }
-    batch.push(...consolidated.values())
+    for (const collisions of consolidated.values()) batch.push(...collisions)
   }
   for (const entry of batch) if (entry[1] < 0) yield entry
   for (const entry of batch) if (entry[1] > 0) yield entry
