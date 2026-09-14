@@ -4,6 +4,8 @@ import MagicString, { Bundle } from 'magic-string'
 import { resolve } from 'node:path'
 import { realpathSync, readFileSync } from 'node:fs'
 import { transformBoundEndpoints } from './bound-transform.mjs'
+import {queryRegistry,isEndpointModule} from './query-registry.mjs'
+import { loadSchema } from './compiled-dependencies.mjs'
 
 const cleanId = (id) => id.split('?')[0]
 function canonical(id) {
@@ -57,11 +59,12 @@ export function serverBoundary({ serverModules = [] } = {}) {
     },
     load(id) {
       if (this.environment?.name !== 'client') return
-      if (cleanId(id).endsWith('/endpoint.tsx') && /[?&](raw|url)(?:[=&]|$)/.test(id)) this.error('ENDPOINT_UNSUPPORTED_GRAMMAR endpoint raw/url imports expose authored server code')
+      if (isEndpointModule(id) && /[?&](raw|url)(?:[=&]|$)/.test(id)) this.error('ENDPOINT_UNSUPPORTED_GRAMMAR endpoint raw/url imports expose authored server code')
       const file = canonical(id)
+      if (/[\\/]\.endpoints[\\/]schema\.json$/.test(file)) this.error('ENDPOINT_SERVER_IMPORT_IN_CLIENT compilation schema snapshot')
       // Validate authored endpoint syntax while still in the load hook. Vite
       // transform errors otherwise include its entire active source in dev.
-      if (file.endsWith('/endpoint.tsx')) endpointsProbe().transform(readFileSync(file, 'utf8'), id)
+      if (isEndpointModule(file)) endpointsProbe().transform(readFileSync(file, 'utf8'), id)
       if (serverFiles.has(file) || /\.server\.[cm]?[jt]sx?$/.test(file)) {
         this.error(`ENDPOINT_SERVER_IMPORT_IN_CLIENT ${file}: a server-only module remains reachable in the client after endpoint extraction`)
       }
@@ -70,15 +73,25 @@ export function serverBoundary({ serverModules = [] } = {}) {
 }
 
 export function endpointsProbe() {
+  const context = { root: process.cwd(), dependencies: new Set() }
   return {
+    ...queryRegistry(context),
     name: 'endpoints-probe',
     enforce: 'pre',
     transform(code, id) {
-      if (!cleanId(id).endsWith('/endpoint.tsx')) return
+      if (!isEndpointModule(id)) return
       if (/[?&](raw|url)(?:[=&]|$)/.test(id)) throw new Error('ENDPOINT_UNSUPPORTED_GRAMMAR endpoint raw/url imports expose authored server code')
       const ast = parse(code, { sourceType: 'module', plugins: ['typescript','jsx'] })
-      const bound = transformBoundEndpoints(code, cleanId(id), ast)
-      if (bound) return bound
+      const bound = transformBoundEndpoints(code, cleanId(id), ast, { root: context.root, snapshot: loadSchema(context.root) })
+      if (bound) {
+        // Vite 8 turns transform addWatchFile entries into module dependencies.
+        // Compiler inputs belong to the dev watcher, never the client graph.
+        for (const file of [...bound.watchFiles, resolve(context.root, '.endpoints/schema.json')]) {
+          context.dependencies.add(file)
+          context.watchFile?.(file)
+        }
+        return {code:bound.code,map:bound.map}
+      }
       const runtimeImport = ast.program.body.find(node => node.type === 'ImportDeclaration' && node.source.value === './runtime')
       const mutationImport = runtimeImport?.specifiers.find(node => node.type === 'ImportSpecifier' && node.imported.name === 'mutation')
       const queryImport = runtimeImport?.specifiers.find(node => node.type === 'ImportSpecifier' && node.imported.name === 'query')
@@ -136,7 +149,7 @@ export function endpointsProbe() {
       let cursor = 0
       for (const { statement, item, values, kind } of declarations) {
         source(cursor, statement.start)
-        append(`const ${item.id.name}Rpc=__endpointCreateServerFn({method:'POST'}).inputValidator(z.object({scope:z.enum(['alice','bob']),input:`)
+        append(`const ${item.id.name}Rpc=__endpointCreateServerFn({method:'POST'}).inputValidator(z.object({scope:z.string().min(1),input:`)
         source(values.input.value.start, values.input.value.end)
         append('})).handler(async ({data})=>(')
         method(values.handler)

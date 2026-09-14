@@ -1,0 +1,140 @@
+{
+  "program": {
+    "scope": "alice",
+    "orders": [
+      [
+        "id",
+        "createdAt"
+      ],
+      [
+        "createdAt",
+        "id"
+      ],
+      [
+        "id",
+        "createdAt"
+      ]
+    ],
+    "filters": [
+      null,
+      false,
+      true
+    ],
+    "canonicalize": true,
+    "repeatedNames": true,
+    "initial": [
+      {
+        "id": "seed-0",
+        "text": "initial",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "alice"
+      },
+      {
+        "id": "seed-1",
+        "text": "initial",
+        "completed": true,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "alice"
+      }
+    ]
+  },
+  "sequences": [
+    {
+      "steps": [
+        {
+          "kind": "edit",
+          "target": 0,
+          "slot": 0,
+          "text": " first ",
+          "rank": 0,
+          "outcome": "success",
+          "actualEffect": "same",
+          "failAfterCommit": false
+        },
+        {
+          "kind": "edit",
+          "target": 0,
+          "slot": 0,
+          "text": " second ",
+          "rank": 0,
+          "outcome": "success",
+          "actualEffect": "same",
+          "failAfterCommit": false
+        }
+      ],
+      "writeOrder": [
+        1,
+        0
+      ],
+      "deliveryOrder": [
+        0,
+        1
+      ]
+    },
+    {
+      "steps": [
+        {
+          "kind": "complete",
+          "target": 0,
+          "slot": 0,
+          "text": " second ",
+          "rank": 0,
+          "outcome": "success",
+          "actualEffect": "flip",
+          "failAfterCommit": false
+        },
+        {
+          "kind": "edit",
+          "target": 2,
+          "slot": 0,
+          "text": " second ",
+          "rank": 0,
+          "outcome": "success",
+          "actualEffect": "same",
+          "failAfterCommit": false
+        }
+      ],
+      "writeOrder": [
+        0,
+        1
+      ],
+      "deliveryOrder": [
+        1,
+        0
+      ]
+    },
+    {
+      "steps": [
+        {
+          "kind": "insert",
+          "target": 0,
+          "slot": 0,
+          "text": " second ",
+          "rank": 0,
+          "outcome": "reject",
+          "actualEffect": "same",
+          "failAfterCommit": false
+        },
+        {
+          "kind": "edit",
+          "target": 0,
+          "slot": 0,
+          "text": " second ",
+          "rank": 0,
+          "outcome": "success",
+          "actualEffect": "same",
+          "failAfterCommit": true
+        }
+      ],
+      "writeOrder": [
+        0,
+        1
+      ],
+      "deliveryOrder": [
+        1,
+        0
+      ]
+    }
+  ]
+}

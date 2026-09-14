@@ -7,60 +7,29 @@
     "strict": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
-    "types": [
-      "node",
-      "vite/client"
-    ],
+    "types": ["node", "vite/client"],
     "noEmit": true,
     "baseUrl": ".",
     "paths": {
-      "@tanstack/db": [
-        "../../../packages/db/src/index.ts"
-      ],
-      "@tanstack/db-ivm": [
-        "../../../packages/db-ivm/src/index.ts"
-      ],
-      "@tanstack/react-db": [
-        "../../../packages/react-db/src/index.ts"
-      ],
+      "@tanstack/db": ["../../../packages/db/src/index.ts"],
+      "@tanstack/db-ivm": ["../../../packages/db-ivm/src/index.ts"],
+      "@tanstack/react-db": ["../../../packages/react-db/src/index.ts"],
       "@tanstack/query-db-collection": [
         "../../../packages/query-db-collection/src/index.ts"
       ],
-      "@tanstack/query-core": [
-        "./node_modules/@tanstack/query-core"
-      ],
-      "@tanstack/pacer-lite": [
-        "./node_modules/@tanstack/pacer-lite"
-      ],
-      "fractional-indexing": [
-        "./node_modules/fractional-indexing"
-      ],
-      "sorted-btree": [
-        "./node_modules/sorted-btree"
-      ],
-      "use-sync-external-store": [
-        "./node_modules/use-sync-external-store"
-      ],
-      "react": [
-        "./node_modules/@types/react"
-      ],
-      "react/*": [
-        "./node_modules/@types/react/*"
-      ],
-      "react-dom": [
-        "./node_modules/@types/react-dom"
-      ],
-      "@standard-schema/spec": [
-        "./node_modules/@standard-schema/spec"
-      ],
-      "@tanstack/pacer-lite/*": [
-        "./node_modules/@tanstack/pacer-lite/dist/*"
-      ]
+      "@tanstack/query-core": ["./node_modules/@tanstack/query-core"],
+      "@tanstack/pacer-lite": ["./node_modules/@tanstack/pacer-lite"],
+      "fractional-indexing": ["./node_modules/fractional-indexing"],
+      "sorted-btree": ["./node_modules/sorted-btree"],
+      "use-sync-external-store": ["./node_modules/use-sync-external-store"],
+      "react": ["./node_modules/@types/react"],
+      "react/*": ["./node_modules/@types/react/*"],
+      "react-dom": ["./node_modules/@types/react-dom"],
+      "@standard-schema/spec": ["./node_modules/@standard-schema/spec"],
+      "@tanstack/pacer-lite/*": ["./node_modules/@tanstack/pacer-lite/dist/*"]
     },
-    "noUnusedLocals": true
+    "noUnusedLocals": true,
+    "allowImportingTsExtensions": true
   },
-  "include": [
-    "src",
-    "tests/types.ts"
-  ]
+  "include": ["src", "tests/types.ts", "tests/oracles/join-model.ts"]
 }
