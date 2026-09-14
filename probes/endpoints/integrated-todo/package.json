@@ -3,11 +3,27 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "schema:compile": "node compile-schema.mjs",
+    "prebuild": "node compile-schema.mjs",
+    "predev": "node compile-schema.mjs",
     "build": "node node_modules/vite/bin/vite.js build",
     "dev": "node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 4191",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
     "test": "node tests/browser.mjs",
-    "preview": "node node_modules/vite/bin/vite.js preview --host 127.0.0.1 --port 4192"
+    "preview": "node node_modules/vite/bin/vite.js preview --host 127.0.0.1 --port 4192",
+    "test:oracles": "node tests/oracles/e2e.mjs",
+    "test:oracles:concurrent": "node --experimental-strip-types tests/oracles/concurrent.mjs",
+    "test:contracts": "node --experimental-strip-types --test tests/server-order.test.mjs tests/refresh.test.mjs tests/registry.test.mjs tests/runtime.test.mjs tests/scalar-query.test.mjs tests/scalar-membership.test.mjs tests/snapshot-encoding.test.mjs tests/pruning.test.mjs tests/dependencies.test.mjs tests/handler-dependencies.test.mjs tests/function-dependencies.test.mjs tests/compiled-dependencies.test.mjs tests/schema-snapshot.test.mjs tests/sql-effects.test.mjs tests/oracle-evidence.test.mjs",
+    "test:oracles:compiled": "node tests/oracles/compiled-dependencies.mjs",
+    "test:oracles:compiled-browser": "node tests/oracles/compiled-browser.mjs",
+    "test:oracles:dependencies": "node tests/oracles/dependencies.mjs",
+    "test:oracles:sql-effects": "node tests/oracles/sql-effect-rules.mjs",
+    "test:oracles:sql": "node --experimental-strip-types tests/oracles/sql.mjs",
+    "test:oracles:loading": "node --experimental-strip-types tests/oracles/loading.mjs",
+    "test:oracles:effects": "ENDPOINT_ORACLE_EFFECTS=1 node tests/oracles/sql.mjs",
+    "test:oracles:joins": "node tests/oracles/joins.mjs",
+    "test:oracles:combined-reads": "node tests/oracles/combined-reads.mjs",
+    "test:oracles:registry": "node tests/oracles/registry.mjs"
   },
   "dependencies": {
     "@tanstack/react-start": "1.159.5",
@@ -21,9 +37,11 @@
     "@tanstack/pacer-lite": "0.2.1",
     "fractional-indexing": "3.2.0",
     "sorted-btree": "1.8.1",
-    "use-sync-external-store": "1.6.0"
+    "use-sync-external-store": "1.6.0",
+    "pgsql-ast-parser": "12.0.1"
   },
   "devDependencies": {
+    "pg": "8.23.0",
     "vite": "7.3.2",
     "@vitejs/plugin-react": "5.1.3",
     "typescript": "5.9.3",
@@ -36,6 +54,7 @@
     "magic-string": "0.30.21",
     "@jridgewell/trace-mapping": "0.3.31",
     "@babel/traverse": "7.29.0",
-    "@standard-schema/spec": "1.1.0"
+    "@standard-schema/spec": "1.1.0",
+    "fast-check": "3.23.2"
   }
 }

@@ -1,6 +1,10 @@
 type OracleEnvironment = Record<string, string | undefined>
 
 const staticOracleProperties = [
+  `endpoints.e2e.controls`,
+  `endpoints.e2e.coherence`,
+  `endpoints.e2e.read-failure`,
+  `endpoints.e2e.read-retry`,
   `trailbase.lifecycle`,
   `collection-sync.reentrant-drain`,
   `collection-state.retention`,
