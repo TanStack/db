@@ -26,6 +26,10 @@ export function ddl(program) {
             `CREATE INDEX folded${i} ON ${tableName(i)} (${program.opaqueIndex ? 'alpha.opaque_index(id)' : 'lower(id)'});`,
         ).join('')
       : '') +
+    (program.pgFunctions
+      ? `CREATE FUNCTION alpha.read_value(integer) RETURNS integer LANGUAGE SQL STABLE AS $$SELECT $1 + coalesce((SELECT value FROM ${tableName(1)} WHERE id='row'),0)$$;
+         CREATE FUNCTION alpha.write_value(integer) RETURNS integer LANGUAGE SQL VOLATILE AS $$UPDATE ${tableName(0)} SET value=$1 WHERE id='row';UPDATE ${tableName(1)} SET value=$1+1 WHERE id='row';SELECT $1$$;`
+      : '') +
     (program.trigger
       ? `CREATE FUNCTION alpha.fanout() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN UPDATE ${tableName(1)} SET value=NEW.value+1 WHERE id=NEW.id;RETURN NEW;END$$;CREATE TRIGGER fanout AFTER UPDATE ON ${tableName(0)} FOR EACH ROW EXECUTE FUNCTION alpha.fanout();`
       : '')
@@ -89,8 +93,19 @@ const insert${i}=mutation({input:z.object({value:z.number().int()}),onMutate({in
         )
     }
   }
+  if (program.pgFunctions) {
+    declarations = declarations
+      .replace(
+        'await db.select({id:t0.id,value:t0.value}).from(t0)',
+        '(await db.execute(sql`SELECT id, alpha.read_value(value) AS value FROM "alpha"."items" ORDER BY id`)).rows',
+      )
+      .replace(
+        "await db.update(t0).set({value:req.body.value}).where(eq(t0.id,'row'))",
+        'await db.execute(sql`SELECT alpha.write_value(${req.body.value})`)',
+      )
+  }
   const result = `{collections:[${Array.from({ length: program.count }, (_, i) => `q${i}`).join(',')}],actions:{${Array.from({ length: program.count }, (_, i) => `update${i},delete${i},insert${i}`).join(',')}}}`
-  return `${program.inlineSql ? "import {authorize} from './guard.server';" : ''}${program.helpers ? "import {service} from './service.server';" : ''}import {z} from 'zod';import {endpoints} from './runtime';import {db,${Array.from({ length: program.count }, (_, i) => `t${i}`).join(',')}} from './database.server';import {eq} from 'drizzle-orm';
+  return `${program.inlineSql ? "import {authorize} from './guard.server';" : ''}${program.helpers ? "import {service} from './service.server';" : ''}import {z} from 'zod';import {endpoints} from './runtime';import {db,${Array.from({ length: program.count }, (_, i) => `t${i}`).join(',')}} from './database.server';import {eq,sql} from 'drizzle-orm';
 ${browser ? "import {useEffect} from 'react';import {useDbClient,useLiveQuery} from '@tanstack/react-db';" : ''}
 export function ${browser ? 'TodoApp()' : 'App(dbClient)'} {${browser ? 'const dbClient=useDbClient();' : ''}const {query,mutation}=endpoints(dbClient);${declarations}
 ${browser ? `const result=useLiveQuery(q0);useEffect(()=>{window.compiledOracle=${result}},[${Array.from({ length: program.count }, (_, i) => `q${i},update${i},delete${i},insert${i}`).join(',')}]);return <main>{result.data.map(row=><p key={row.id}>{row.value}</p>)}</main>` : `return ${result}`}}

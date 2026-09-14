@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module'
 import { mkdir, writeFile, rename, rm } from 'node:fs/promises'
 import { resolve, dirname, relative } from 'node:path'
-import { inspectSchema } from './schema-snapshot.mjs'
+import { inspectSqlEffects as inspectSchema } from './sql-effects.mjs'
 
 // Run in the application's build environment, with the same DATABASE_URL as its
 // database module. Do not evaluate application modules or copy connection secrets

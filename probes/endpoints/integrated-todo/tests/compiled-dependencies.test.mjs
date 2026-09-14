@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parse } from '@babel/parser'
 import { PGlite } from '@electric-sql/pglite'
-import { inspectSchema } from '../schema-snapshot.mjs'
+import { inspectSqlEffects as inspectSchema } from '../sql-effects.mjs'
 import { transformBoundEndpoints } from '../bound-transform.mjs'
 import { loadSchema } from '../compiled-dependencies.mjs'
 
@@ -32,6 +32,33 @@ test('compilation emits inspected read and write footprints, without catalog cod
         { root, snapshot: schema },
       )
     const result = compile()
+    assert.match(
+      compile(source, { ...snapshot, format: 1 }).code,
+      /scope:data.scope},\(\)=>null/,
+    )
+    for (const sql of [
+      'sql.raw(req.body.value)',
+      'sql`SELECT ${sql.raw(req.body.value)}`',
+      'sql`SELECT ${req.body.value}`',
+    ]) {
+      const raw = source
+        .replace('import {eq}', 'import {eq,sql}')
+        .replace(
+          "db.update(a).set({value:req.body.value}).where(eq(a.id,'row'))",
+          `db.execute(${sql})`,
+        )
+      const mutation = compile(raw).dependencyDiagnostics.find(
+        (d) => d.kind === 'mutation',
+      )
+      if (sql.includes('req.body.value}`'))
+        assert.deepEqual(mutation.dependencies, [])
+      else
+        assert.equal(
+          mutation.dependencies,
+          null,
+          'dynamic SQL must not yield a partial proof',
+        )
+    }
     assert.match(result.code, /scope:data.scope},\(\)=>\[/)
     assert.match(result.registryCode, /undefined,\[/)
     assert.doesNotMatch(

@@ -34,7 +34,13 @@ test('direct read dependencies come from the actual Drizzle table binding', () =
     analyze(
       'const rows=await db.select().from(items).where(gt(items.value,req.body.value));return res.json(rows)',
     ),
-    { database: 'db', tables: ['items'], operation: 'select' },
+    {
+      database: 'db',
+      tables: ['items'],
+      operation: 'select',
+      kind: 'query',
+      values: undefined,
+    },
   )
 })
 test('one direct insert, update or delete yields a bounded write candidate', () => {
@@ -45,11 +51,26 @@ test('one direct insert, update or delete yields a bounded write candidate', () 
       'db.update(items).set({value:req.body.value}).where(eq(items.id,"a"))',
     ],
     ['delete', 'db.delete(items).where(eq(items.id,"a"))'],
-  ])
-    assert.deepEqual(
-      analyze(`await ${query};return res.json({ok:true})`, 'mutation'),
-      { database: 'db', tables: ['items'], operation },
+  ]) {
+    const { values, ...result } = analyze(
+      `await ${query};return res.json({ok:true})`,
+      'mutation',
     )
+    assert.deepEqual(result, {
+      database: 'db',
+      tables: ['items'],
+      operation,
+      kind: 'mutation',
+    })
+    assert.deepEqual(
+      values?.properties.map((p) => p.key.name),
+      operation === 'insert'
+        ? ['id', 'value']
+        : operation === 'update'
+          ? ['value']
+          : undefined,
+    )
+  }
 })
 test('opaque calls, additional SQL, raw SQL and validator effects remain unknown', () => {
   for (const body of [

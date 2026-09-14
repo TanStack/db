@@ -5,11 +5,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parse } from '@babel/parser'
 import { PGlite } from '@electric-sql/pglite'
-import { inspectSchema } from '../schema-snapshot.mjs'
+import { inspectSqlEffects as inspectSchema } from '../sql-effects.mjs'
 import { transformBoundEndpoints } from '../bound-transform.mjs'
 import { databaseSource } from './fixtures/compiler-source.mjs'
 
-async function fixture(run) {
+async function fixture(
+  run,
+  ddl = 'CREATE TABLE a(id text PRIMARY KEY,value integer);CREATE TABLE b(id text PRIMARY KEY,value integer)',
+) {
   const root = await realpath(
     await mkdtemp(join(tmpdir(), 'function-dependencies-')),
   )
@@ -17,9 +20,7 @@ async function fixture(run) {
   try {
     await mkdir(join(root, 'src'))
     await writeFile(join(root, 'src/database.server.ts'), databaseSource)
-    await pg.exec(
-      'CREATE TABLE a(id text PRIMARY KEY,value integer);CREATE TABLE b(id text PRIMARY KEY,value integer)',
-    )
+    await pg.exec(ddl)
     const snapshot = await inspectSchema(
       (sql) => pg.query(sql),
       'src/database.server.ts',
@@ -158,3 +159,19 @@ test('validator callbacks with database effects remain unknown', async () =>
     )
     assert.equal(writeDependencies(result), null)
   }))
+
+// Builder reuse is a compiler aliasing boundary; check both assignment orders.
+test('reused update builders retain every possible changed foreign-key column', async () => {
+  await fixture(async (compile) => {
+    for (const assignments of [
+      ["{id:'next'}", '{value:input.value}'],
+      ['{value:input.value}', "{id:'next'}"],
+    ]) {
+      const result = await compile(
+        imports +
+          `export async function change(input){const update=db.update(a);${assignments.map((value) => `await update.set(${value});`).join('')}return {ok:true}}`,
+      )
+      assert.equal(writeDependencies(result)?.length, 2)
+    }
+  }, 'CREATE TABLE a(id text PRIMARY KEY,value integer);CREATE TABLE b(id text PRIMARY KEY REFERENCES a(id) ON UPDATE CASCADE,value integer)')
+})

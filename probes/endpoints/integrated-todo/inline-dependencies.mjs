@@ -52,17 +52,99 @@ export function compileInlineDependencies(
     const binding = path.scope.getBinding(path.node.name)
     return databases.get(binding) ?? null
   }
-  function record(db, table, operation) {
+  function record(db, table, operation, values) {
     if (!imported(table)) return fail('SQL table must be a direct import')
-    effects.push({ database: db, tables: [table.node.name], operation })
+    effects.push({
+      database: db,
+      tables: [table.node.name],
+      operation,
+      values: values?.node,
+    })
   }
-  // Only arithmetic SQL fragments are accepted here. Larger raw SQL statements
-  // need the SQL parser path; arbitrary fragments must never become plain data.
+  const sqlNodes = new Set()
+  function primitiveInput(path) {
+    if (path.isLiteral() && !path.isRegExpLiteral()) return true
+    const n = path.node
+    if (n.type !== 'MemberExpression' || n.computed) return false
+    const request = handler.node.params[0]?.name
+    if (
+      !request ||
+      path.scope.getBinding(request) !== handler.scope.getBinding(request)
+    )
+      return false
+    if (n.object.name === request && n.property.name === 'scope') return true
+    if (
+      n.object.type !== 'MemberExpression' ||
+      n.object.computed ||
+      n.object.object.name !== request ||
+      n.object.property.name !== 'body'
+    )
+      return false
+    let schema = input
+    if (
+      !schema?.isCallExpression() ||
+      schema.node.callee.type !== 'MemberExpression' ||
+      schema.node.callee.property.name !== 'object' ||
+      schema.node.arguments[0]?.type !== 'ObjectExpression'
+    )
+      return false
+    const z = imported(schema.get('callee.object'), 'zod')
+    if (z?.path.node.imported.name !== 'z') return false
+    const field = schema
+      .get('arguments.0.properties')
+      .find(
+        (p) =>
+          p.isObjectProperty() &&
+          !p.node.computed &&
+          (p.node.key.name ?? p.node.key.value) === n.property.name,
+      )
+    if (!field) return false
+    schema = field.get('value')
+    while (
+      schema.isCallExpression() &&
+      schema.node.callee.type === 'MemberExpression' &&
+      [
+        'int',
+        'min',
+        'max',
+        'nonnegative',
+        'positive',
+        'optional',
+        'nullable',
+        'uuid',
+      ].includes(schema.node.callee.property.name)
+    )
+      schema = schema.get('callee.object')
+    return (
+      schema.isCallExpression() &&
+      schema.node.callee.type === 'MemberExpression' &&
+      !schema.node.callee.computed &&
+      ['number', 'string', 'boolean'].includes(
+        schema.node.callee.property.name,
+      ) &&
+      imported(schema.get('callee.object'), 'zod') === z
+    )
+  }
+  function template(path) {
+    if (
+      !path?.isTaggedTemplateExpression() ||
+      imported(path.get('tag'), 'drizzle-orm')?.path.node.imported.name !==
+        'sql'
+    )
+      return null
+    const values = path.get('quasi.expressions')
+    if (!values.every(primitiveInput)) return null
+    sqlNodes.add(path.node)
+    return path.node.quasi.quasis
+      .map((q, i) => q.value.cooked + (i < values.length ? '$' + (i + 1) : ''))
+      .join('')
+  }
+  // Arithmetic fragments retain the earlier bounded Drizzle expression grammar.
+  // Whole static templates go through the SQL parser; dynamic fragments fall back.
   function expression(path) {
-    if (path.isTaggedTemplateExpression()) {
+    if (path.isTaggedTemplateExpression() && !sqlNodes.has(path.node)) {
       if (
-        !imported(path.get('tag'), 'drizzle-orm') ||
-        imported(path.get('tag'), 'drizzle-orm').path.node.imported.name !==
+        imported(path.get('tag'), 'drizzle-orm')?.path.node.imported.name !==
           'sql' ||
         path.node.quasi.quasis.some(
           (q) => !/^[\s\d+*/().-]*$/.test(q.value.cooked),
@@ -74,8 +156,7 @@ export function compileInlineDependencies(
       const c = chain(path)
       if (
         c.root.isIdentifier() &&
-        imported(c.root, 'drizzle-orm') &&
-        imported(c.root, 'drizzle-orm').path.node.imported.name === 'sql'
+        imported(c.root, 'drizzle-orm')?.path.node.imported.name === 'sql'
       )
         fail('Dynamic SQL fragment')
     }
@@ -144,6 +225,18 @@ export function compileInlineDependencies(
         handled.add(c.root.node)
         const first = c.methods[0]
         if (first.name === 'transaction') return
+        if (first.name === 'execute') {
+          const sql = first.args.length === 1 && template(first.args[0])
+          if (!sql || c.methods.length !== 1)
+            return fail('Unsupported executable SQL template')
+          effects.push({
+            database: db,
+            tables: [],
+            operation: 'sql',
+            sql: [sql],
+          })
+          return
+        }
         const allowed = {
           select: [
             'select',
@@ -167,7 +260,13 @@ export function compileInlineDependencies(
           return fail('Unsupported direct SQL chain')
         if (kind === 'query' && first.name !== 'select')
           return fail('Query contains a write')
-        if (first.name !== 'select') record(db, first.args[0], first.name)
+        if (first.name !== 'select')
+          record(
+            db,
+            first.args[0],
+            first.name,
+            c.methods.find((m) => ['set', 'values'].includes(m.name))?.args[0],
+          )
         if (
           first.name === 'select' &&
           !c.methods.some((m) => m.name === 'from')
@@ -199,8 +298,13 @@ export function compileInlineDependencies(
     })
   const dependencies = new Set()
   for (const effect of effects) {
-    if (kind === 'mutation' && effect.operation === 'select') continue
-    const proof = compileDependencies(effect, handler, file, root, snapshot)
+    const proof = compileDependencies(
+      { ...effect, kind },
+      handler,
+      file,
+      root,
+      snapshot,
+    )
     proof.files.forEach((f) => files.add(f))
     if (!proof.dependencies) fail('Unsupported schema footprint')
     else proof.dependencies.forEach((d) => dependencies.add(d))

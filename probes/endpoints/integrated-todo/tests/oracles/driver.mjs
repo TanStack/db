@@ -100,6 +100,7 @@ export class Driver {
       'schema-snapshot.mjs',
       'schema-footprint.mjs',
       'sql-dependencies.mjs',
+      'sql-effects.mjs',
       'inline-dependencies.mjs',
       'query-registry.mjs',
       'tsconfig.json',

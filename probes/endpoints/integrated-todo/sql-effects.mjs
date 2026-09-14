@@ -52,13 +52,13 @@ export async function inspectSqlEffects(query, databaseModule) {
       FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace JOIN pg_catalog.pg_language l ON l.oid=p.prolang
       ORDER BY p.oid) f) AS routines,
     EXISTS (SELECT 1 FROM pg_catalog.pg_cast WHERE oid>=16384) AS custom_casts,
-    COALESCE((SELECT json_agg(json_build_object('schema',n.nspname,'name',t.typname)) FROM pg_catalog.pg_type t
+    COALESCE((SELECT json_agg(json_build_object('schema',n.nspname,'name',t.typname,'oid',t.oid,'kind',t.typtype)) FROM pg_catalog.pg_type t
       JOIN pg_catalog.pg_namespace n ON n.oid=t.typnamespace WHERE t.oid>=16384),'[]') AS custom_types,
     COALESCE((SELECT json_agg(json_build_object('schema',n.nspname,'name',o.oprname)) FROM pg_catalog.pg_operator o
       JOIN pg_catalog.pg_namespace n ON n.oid=o.oprnamespace WHERE o.oid>=16384),'[]') AS custom_operators`)
   const row = (Array.isArray(result) ? result : result.rows)[0]
   const facts = {
-    format: 1,
+    format: 2,
     databaseModule,
     searchPath: row.search_path,
     tables: row.tables ?? [],
@@ -80,14 +80,23 @@ export async function inspectSqlEffects(query, databaseModule) {
 // this avoids pretending that an arity match is PostgreSQL type resolution.
 // Each body/event is visited once. Recursion adds facts until the worklist empties.
 export function analyzeSqlEffects(sql, snapshot) {
+  return analyzeEffects([{ sql }], snapshot)
+}
+
+// Drizzle bindings and parsed SQL share the same relation/event worklist.
+export function analyzeEffects(statements, snapshot) {
   const reads = new Set(),
     writes = new Set(),
     unknown = [],
     derivation = []
+  const enumTypes = snapshot.customTypes.filter((type) => type.kind === 'e')
+  const enumOids = new Set(enumTypes.map((type) => String(type.oid)))
   const tables = new Map(
     snapshot.tables.map((table) => [relationId(table), table]),
   )
-  const pending = [{ sql, source: 'endpoint' }],
+  const pending = statements
+      .filter((item) => item.sql !== undefined)
+      .map((item) => ({ ...item, source: 'endpoint' })),
     visited = new Set()
   const unresolved = (source, reason, dimensions = ['reads', 'writes']) => {
     unknown.push({ source, reason, dimensions })
@@ -106,6 +115,23 @@ export function analyzeSqlEffects(sql, snapshot) {
     derivation.push({ rule: 'routine-call', source, target: key })
     if (visited.has(key)) return
     visited.add(key)
+    if (
+      fn.oid < 16384 &&
+      fn.schema === 'pg_catalog' &&
+      !fn.extension &&
+      [
+        'now',
+        'transaction_timestamp',
+        'statement_timestamp',
+        'clock_timestamp',
+        'gen_random_uuid',
+      ].includes(fn.name)
+    ) {
+      unresolved(key, 'Value can change independently of table writes', [
+        'reads',
+      ])
+      return
+    }
     if (
       fn.oid < 16384 &&
       fn.schema === 'pg_catalog' &&
@@ -167,7 +193,10 @@ export function analyzeSqlEffects(sql, snapshot) {
     }
     if (
       actual.columns.some(
-        (column) => !nativeTypes.has(column.type) || column.generated === 'v',
+        (column) =>
+          (!nativeTypes.has(column.type) &&
+            !enumOids.has(String(column.type))) ||
+          column.generated === 'v',
       )
     )
       unresolved(id, 'Unsupported type or virtual generated expression')
@@ -241,6 +270,9 @@ export function analyzeSqlEffects(sql, snapshot) {
       )
     }
   }
+  for (const item of statements)
+    if (item.table)
+      relation(item.table, item.operation, item.details ?? {}, 'endpoint')
   while (pending.length) {
     const item = pending.pop()
     const parsed = analyzeSqlDependencies(item.sql, snapshot, {
@@ -289,6 +321,16 @@ export function analyzeSqlEffects(sql, snapshot) {
       },
       type: (type) => {
         if (
+          enumTypes.some(
+            (candidate) =>
+              candidate.name === type.name &&
+              (type.schema
+                ? candidate.schema === type.schema
+                : snapshot.searchPath.includes(candidate.schema)),
+          )
+        )
+          return
+        if (
           !casts.has(type.name) ||
           (type.schema && type.schema !== 'pg_catalog') ||
           (!type.schema &&
@@ -312,7 +354,9 @@ export function analyzeSqlEffects(sql, snapshot) {
     unknown,
     derivation,
     artifact: snapshot.fingerprint,
-    statement: createHash('sha256').update(sql).digest('hex'),
+    statement: createHash('sha256')
+      .update(JSON.stringify(statements))
+      .digest('hex'),
   }
 }
 

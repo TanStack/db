@@ -33,6 +33,13 @@ const compiled = transformBoundEndpoints(
   parse(code, { sourceType: 'module', plugins: ['typescript'] }),
   { root: kitchen, snapshot: loadSchema(kitchen) },
 )
+assert.equal(compiled.dependencyDiagnostics.length, 18)
+assert.ok(
+  compiled.dependencyDiagnostics.every((entry) =>
+    Array.isArray(entry.dependencies),
+  ),
+  'every moved SQL endpoint has build-time dependencies',
+)
 const dir = await mkdtemp(join(tmpdir(), 'kitchen-port-'))
 await symlink(join(kitchen, 'node_modules'), join(dir, 'node_modules'))
 let loaded, client
@@ -161,18 +168,23 @@ try {
       snapshots,
       sqlStatements: loaded.trace.length - start,
     })
-    if (
-      !expectedFailure &&
-      [
-        'saveIngredient',
-        'addToShoppingList',
-        'saveComment',
-        'deleteComment',
-        'insertComment',
-      ].includes(name)
-    )
-      assert.equal(unaffected, 7, name)
-    if (name === 'deleteRecipe') assert.equal(unaffected, 4, name)
+    if (!expectedFailure) {
+      // SQL paths and FK effects in Kitchen, independent of compiler diagnostics.
+      const retainedAffected = {
+        saveIngredient: 1,
+        addToShoppingList: 1,
+        saveComment: 1,
+        deleteComment: 1,
+        insertComment: 1,
+        createIngredientAction: 3,
+        createRecipeAction: 4,
+        changeTagAssignmentsAction: 3,
+        deleteRecipe: 4,
+        deleteIngredient: 2,
+      }
+      assert.equal(snapshots, retainedAffected[name], name)
+      assert.equal(unaffected, 8 - retainedAffected[name], name)
+    }
   }
   const ingredient = randomUUID(),
     recipe = randomUUID(),
@@ -247,7 +259,10 @@ try {
   client = null
   // Auth stub checks scope, while the separate browser test checks real sessions.
   await loaded.pool.query('DELETE FROM users WHERE id=ANY($1)', [[user, other]])
-  const output = join(base, 'evidence/kitchen-inline-sql')
+  const output = resolve(
+    process.env.ENDPOINT_ORACLE_OUTPUT ??
+      join(base, 'evidence/kitchen-inline-sql'),
+  )
   await mkdir(output, { recursive: true })
   await writeFile(
     join(output, 'report.json'),

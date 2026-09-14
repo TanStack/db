@@ -3,7 +3,7 @@ import { mkdir, writeFile, readFile } from 'node:fs/promises'
 import { resolve, join } from 'node:path'
 import { PGlite } from '@electric-sql/pglite'
 import { Driver } from './driver.mjs'
-import { inspectSchema } from '../../schema-snapshot.mjs'
+import { inspectSqlEffects as inspectSchema } from '../../sql-effects.mjs'
 import {
   ddl,
   endpointSource,
@@ -37,6 +37,7 @@ const input = {
   programs: [
     { helpers: true, count: 3, trigger: false, foreignKey: true },
     { helpers: true, count: 3, trigger: true, foreignKey: false },
+    { count: 3, pgFunctions: true, expressionIndex: true, opaqueIndex: true },
   ],
   operations: [
     { kind: 'update', table: 0, value: 7 },
@@ -84,6 +85,15 @@ async function execute(input) {
               `UPDATE ${tableName(operation.table)} SET value=$1 WHERE id='row'`,
               [operation.value],
             )
+          if (
+            program.pgFunctions &&
+            operation.kind === 'update' &&
+            operation.table === 0
+          )
+            await pg.query(
+              `UPDATE ${tableName(1)} SET value=$1 WHERE id='row'`,
+              [operation.value + 1],
+            )
           const actual = await page.evaluate(async (operation) => {
             const app = window.compiledOracle
             const tx = app.actions[operation.kind + operation.table](
@@ -97,7 +107,11 @@ async function execute(input) {
           const expected = await Promise.all(
             Array.from({ length: program.count }, (_, i) =>
               pg
-                .query(`SELECT id,value FROM ${tableName(i)} ORDER BY id`)
+                .query(
+                  program.pgFunctions && i === 0
+                    ? `SELECT a.id,a.value + coalesce((SELECT b.value FROM ${tableName(1)} b WHERE b.id='row'),0) AS value FROM ${tableName(0)} a ORDER BY a.id`
+                    : `SELECT id,value FROM ${tableName(i)} ORDER BY id`,
+                )
                 .then((r) => r.rows),
             ),
           )
@@ -117,17 +131,27 @@ async function execute(input) {
               (statement) => !/pg_catalog|lock table|^begin/i.test(statement),
             ),
           )
-          const reads = trace.filter((statement) =>
-            /^select /i.test(statement),
-          ).length
+          const reads =
+            trace.filter((statement) => /^select /i.test(statement)).length -
+            Number(
+              !!program.pgFunctions &&
+                operation.kind === 'update' &&
+                operation.table === 0,
+            )
           const wanted =
-            program.trigger && operation.table === 0
+            program.trigger &&
+            operation.table === 0 &&
+            operation.kind === 'update'
               ? 3
               : program.foreignKey &&
                   operation.kind === 'delete' &&
                   operation.table === 0
                 ? 2
-                : 1
+                : program.pgFunctions &&
+                    operation.kind === 'update' &&
+                    operation.table === 0
+                  ? 2
+                  : 1
           evidence.check('read-obligation', reads, wanted, {
             checkpoint: 'settled',
           })

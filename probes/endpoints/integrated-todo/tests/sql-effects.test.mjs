@@ -11,6 +11,31 @@ import {
 
 const id = (name) => JSON.stringify(['public', name])
 const authority = { hasBaseline: true, optimistic: false, needsRepair: false }
+
+test('native enum and clock or UUID defaults do not invent writes, while changing query values stay unknown', async () => {
+  await fixture(
+    `CREATE TYPE state AS ENUM ('ready','done');
+    CREATE TABLE items(id uuid DEFAULT gen_random_uuid(), state state DEFAULT 'ready', created_at timestamptz DEFAULT now());`,
+    async (pg, analyze) => {
+      assert.deepEqual(queryDependencies(analyze('SELECT * FROM items')), [
+        id('items'),
+      ])
+      assert.deepEqual(
+        mutationDependencies(
+          analyze("INSERT INTO items(state) VALUES('ready')"),
+        ),
+        [id('items')],
+      )
+      assert.equal(queryDependencies(analyze('SELECT now()')), null)
+      assert.equal(queryDependencies(analyze('SELECT gen_random_uuid()')), null)
+      await pg.exec('INSERT INTO items DEFAULT VALUES')
+      const rows = (await pg.query('SELECT * FROM items')).rows
+      assert.equal(rows[0].state, 'ready')
+      assert.ok(rows[0].id)
+      assert.ok(rows[0].created_at)
+    },
+  )
+})
 async function fixture(ddl, run) {
   const pg = new PGlite()
   let primary

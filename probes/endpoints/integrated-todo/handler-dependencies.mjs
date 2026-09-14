@@ -224,5 +224,11 @@ export function analyzeHandlerDependencies(handler, kind, input) {
     !value(returned)
   )
     return null
-  return { database, tables: [...tables], operation }
+  return {
+    database,
+    tables: [...tables],
+    operation,
+    kind,
+    values: methods.find((m) => ['set', 'values'].includes(m.name))?.args[0],
+  }
 }

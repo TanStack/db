@@ -85,6 +85,7 @@ const controlVariables = [
   'ENDPOINT_EFFECT_MUTANT',
 ]
 const expectedLaws = {
+  'omit-plan-relation': ['planned-relations-covered'],
   'compiled-row': ['settled-rows'],
   'preload-cold': ['cold-baseline'],
   'bad-baseline': ['reference-baseline'],
@@ -101,6 +102,7 @@ const expectedLaws = {
     'persistence-pending',
   ],
   'omit-publication-batch': ['notification-rows', 'event-materialization'],
+  'omit-routine-body': ['settled-rows', 'read-obligation'],
   'ignore-triggers': ['settled-rows', 'read-obligation'],
   'omit-helper': ['settled-rows', 'read-obligation'],
   'omit-fk': ['settled-rows'],
@@ -118,7 +120,7 @@ function provenance() {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name)
       if (entry.isDirectory() && recursive) walk(path)
-      else if (entry.isFile() && /\.(mjs|ts|tsx|json)$/.test(entry.name))
+      else if (entry.isFile() && /\.(mjs|ts|tsx|json|py)$/.test(entry.name))
         paths.push(path)
     }
   }

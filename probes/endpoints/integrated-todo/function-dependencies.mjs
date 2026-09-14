@@ -305,12 +305,14 @@ export function compileFunctionDependencies(
   function effect(db, table, operation) {
     if (!db.binding || table.kind !== 'table' || !table.binding)
       return unknown('Unknown SQL binding')
-    effects.push({
+    const recorded = {
       database: 'database',
       tables: ['table'],
       operation,
       bindings: { database: db.binding, table: table.binding },
-    })
+    }
+    effects.push(recorded)
+    return recorded
   }
   function call(fn, args) {
     if (fn.kind === 'function') return invoke(fn, args)
@@ -454,8 +456,8 @@ export function compileFunctionDependencies(
     if (owner.kind === 'db') {
       if (name === 'transaction') return invoke(args[0], [owner])
       if (['insert', 'update', 'delete'].includes(name)) {
-        effect(owner, args[0], name)
-        return { kind: 'sql', db: owner, operation: name }
+        const recorded = effect(owner, args[0], name)
+        return { kind: 'sql', db: owner, operation: name, recorded }
       }
       if (name === 'select') {
         requirePlain(args)
@@ -488,6 +490,12 @@ export function compileFunctionDependencies(
         ].includes(name)
       ) {
         requirePlain(args)
+        if (name === 'set') {
+          owner.recorded.assignments ??= []
+          owner.recorded.assignments.push(
+            args[0]?.kind === 'object' ? [...args[0].fields.keys()] : null,
+          )
+        }
         return owner
       }
       if (name === 'onConflictDoUpdate')
@@ -708,10 +716,17 @@ export function compileFunctionDependencies(
     ])
     const dependencies = new Set()
     for (const analysis of effects) {
-      if (kind === 'mutation' && analysis.operation === 'select') continue
+      if (analysis.assignments?.every((columns) => columns !== null))
+        analysis.columns = [...new Set(analysis.assignments.flat())]
       if (kind === 'query' && analysis.operation !== 'select')
         return unknown('Effectful query')
-      const proof = compileDependencies(analysis, handler, file, root, snapshot)
+      const proof = compileDependencies(
+        { ...analysis, kind },
+        handler,
+        file,
+        root,
+        snapshot,
+      )
       for (const path of proof.files) if (!files.has(path)) module(path)
       if (!proof.dependencies) return unknown('Unsupported schema footprint')
       for (const dependency of proof.dependencies) dependencies.add(dependency)

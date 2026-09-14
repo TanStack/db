@@ -2,7 +2,11 @@ import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { createHash } from 'node:crypto'
 import { parse } from '@babel/parser'
-import { schemaFootprint } from './schema-snapshot.mjs'
+import {
+  analyzeEffects,
+  queryDependencies,
+  mutationDependencies,
+} from './sql-effects.mjs'
 
 export function loadSchema(root) {
   try {
@@ -11,10 +15,13 @@ export function loadSchema(root) {
     )
     const { fingerprint, ...contents } = snapshot
     if (
-      snapshot.format !== 1 ||
+      snapshot.format !== 2 ||
       typeof snapshot.databaseModule !== 'string' ||
       !Array.isArray(snapshot.searchPath) ||
       !Array.isArray(snapshot.tables) ||
+      !Array.isArray(snapshot.routines) ||
+      !Array.isArray(snapshot.customTypes) ||
+      !Array.isArray(snapshot.customOperators) ||
       createHash('sha256').update(JSON.stringify(contents)).digest('hex') !==
         fingerprint
     )
@@ -26,7 +33,8 @@ export function loadSchema(root) {
 }
 
 export function compileDependencies(analysis, handler, file, root, snapshot) {
-  if (!analysis || !snapshot) return { dependencies: null, files: [] }
+  if (!analysis || snapshot?.format !== 2)
+    return { dependencies: null, files: [] }
   const files = new Map()
   function sourcePath(specifier, from) {
     const path = specifier.startsWith('@/')
@@ -172,6 +180,7 @@ export function compileDependencies(analysis, handler, file, root, snapshot) {
         return null
       schema = literal(init.arguments[0])
     } else return null
+    const columns = {}
     for (const column of call.arguments[1].properties) {
       if (column.type !== 'ObjectProperty' || column.computed) return null
       let expression = column.value
@@ -201,6 +210,9 @@ export function compileDependencies(analysis, handler, file, root, snapshot) {
         expression.callee.type !== 'Identifier'
       )
         return null
+      const columnName = literal(expression.arguments[0])
+      if (columnName === null) return null
+      columns[column.key.name ?? column.key.value] = columnName
       const factory = local(symbol.path, expression.callee.name, new Set())
       const enumFactory =
         factory?.node?.type === 'CallExpression' &&
@@ -233,7 +245,7 @@ export function compileDependencies(analysis, handler, file, root, snapshot) {
       )
         return null
     }
-    return { schema, name: literal(call.arguments[0]) }
+    return { schema, name: literal(call.arguments[0]), columns }
   }
   try {
     const database = binding(analysis.database)
@@ -267,7 +279,40 @@ export function compileDependencies(analysis, handler, file, root, snapshot) {
     const tables = analysis.tables.map((name) => table(binding(name)))
     if (tables.some((t) => !t))
       return { dependencies: null, files: [...files.keys()] }
-    const dependencies = schemaFootprint(snapshot, tables, analysis.operation)
+    const statements = tables.map(({ columns, ...table }) => {
+      let assigned = analysis.columns
+      if (
+        assigned === undefined &&
+        analysis.values?.type === 'ObjectExpression' &&
+        analysis.values.properties.every(
+          (p) => p.type === 'ObjectProperty' && !p.computed,
+        )
+      )
+        assigned = analysis.values.properties.map(
+          (p) => p.key.name ?? p.key.value,
+        )
+      if (assigned?.some((name) => !Object.hasOwn(columns, name)))
+        throw Error('Unknown column binding')
+      return {
+        table,
+        operation: analysis.operation,
+        details: {
+          // A runtime value may be undefined, causing Drizzle to select a default.
+          // Inserts therefore include every potentially selected column default.
+          columns:
+            analysis.operation === 'insert'
+              ? undefined
+              : assigned?.map((name) => columns[name]),
+        },
+      }
+    })
+    for (const sql of analysis.sql ?? []) statements.push({ sql })
+    const summary = analyzeEffects(statements, snapshot)
+    const dependencies =
+      (analysis.kind ??
+        (analysis.operation === 'select' ? 'query' : 'mutation')) === 'query'
+        ? queryDependencies(summary)
+        : mutationDependencies(summary)
     // The module identifies the configured database; schema/name identify tables.
     const authority = createHash('sha256')
       .update(database.path + ':' + database.name)

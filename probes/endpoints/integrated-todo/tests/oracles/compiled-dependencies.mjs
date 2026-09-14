@@ -16,7 +16,7 @@ import { pathToFileURL } from 'node:url'
 import { parse } from '@babel/parser'
 import fc from 'fast-check'
 import { PGlite } from '@electric-sql/pglite'
-import { inspectSchema } from '../../schema-snapshot.mjs'
+import { inspectSqlEffects as inspectSchema } from '../../sql-effects.mjs'
 import { transformBoundEndpoints } from '../../bound-transform.mjs'
 import {
   ddl,
@@ -50,6 +50,12 @@ const report = {
   skippedReads: 0,
   runtimeCatalogQueries: 0,
 }
+// Independent expected query: expand the routine mathematically rather than
+// reusing its body or asking the compiler which relations it reads.
+const referenceRead = (program, i) =>
+  program.pgFunctions && i === 0
+    ? `SELECT a.id,a.value + coalesce((SELECT b.value FROM ${tableName(1)} b WHERE b.id='row'),0) AS value FROM ${tableName(0)} a ORDER BY a.id`
+    : `SELECT id,value FROM ${tableName(i)} ORDER BY id`
 const plain = (rows) =>
   rows
     .map(({ id, value }) => ({ id, value }))
@@ -60,12 +66,15 @@ async function scenario(program, histories) {
 }
 async function execute(program, histories) {
   program = { helpers: false, helperFanout: false, ...program }
+  if (program.pgFunctions)
+    program = { ...program, helpers: false, inlineSql: false }
   const dir = await mkdtemp(join(tmpdir(), 'compiled-dependency-oracle-'))
   const pg = new PGlite()
   let compiled,
     loaded,
     alteredTrigger = false,
-    alteredHelper = false
+    alteredHelper = false,
+    alteredRoutine = false
   try {
     await mkdir(join(dir, 'src'))
     await symlink(join(base, 'node_modules'), join(dir, 'node_modules'), 'dir')
@@ -88,12 +97,28 @@ async function execute(program, histories) {
     )
     if (process.env.ENDPOINT_COMPILED_MUTANT === 'ignore-triggers') {
       for (const table of snapshot.tables) {
-        if (!table.writable) alteredTrigger = true
-        table.writable = true
+        if (table.triggers.length) alteredTrigger = true
+        table.triggers = []
       }
       if (alteredTrigger)
         evidence.fault('ignore-triggers', { stage: 'applied' })
     }
+    if (
+      process.env.ENDPOINT_COMPILED_MUTANT === 'omit-routine-body' &&
+      program.pgFunctions
+    ) {
+      for (const fn of snapshot.routines)
+        if (
+          fn.schema === 'alpha' &&
+          ['read_value', 'write_value'].includes(fn.name)
+        ) {
+          fn.body = 'SELECT $1'
+          alteredRoutine = true
+        }
+      if (alteredRoutine)
+        evidence.fault('omit-routine-body', { stage: 'applied' })
+    }
+    evidence.artifact('schema:' + report.compilations, JSON.stringify(snapshot))
     const code = endpointSource(program)
     compiled = transformBoundEndpoints(
       code,
@@ -184,12 +209,7 @@ async function execute(program, histories) {
         let admitted = await Promise.all(
           Array.from(
             { length: program.count },
-            async (_, i) =>
-              (
-                await pg.query(
-                  `SELECT id,value FROM ${tableName(i)} ORDER BY id`,
-                )
-              ).rows,
+            async (_, i) => (await pg.query(referenceRead(program, i))).rows,
           ),
         )
         evidence.phase = 'execution'
@@ -222,9 +242,10 @@ async function execute(program, histories) {
                 step.value,
               ])
             if (
-              program.helpers &&
-              !program.inlineSql &&
-              program.helperFanout &&
+              (program.pgFunctions ||
+                (program.helpers &&
+                  !program.inlineSql &&
+                  program.helperFanout)) &&
               target === 0 &&
               step.kind === 'update'
             )
@@ -237,6 +258,8 @@ async function execute(program, histories) {
           }
           if (alteredTrigger && target === 0 && program.trigger)
             evidence.fault('ignore-triggers', { operation: step.kind })
+          if (alteredRoutine)
+            evidence.fault('omit-routine-body', { operation: step.kind })
           if (alteredHelper && target === 0 && step.kind === 'update')
             evidence.fault('omit-helper', { operation: step.kind })
           const tx = action(step.kind === 'delete' ? {} : { value: step.value })
@@ -266,28 +289,35 @@ async function execute(program, histories) {
             ),
             'requests contain no schema proof queries or proof transactions',
           )
-          const reads = trace.filter((statement) =>
-            /^select /i.test(statement),
-          ).length
+          const reads =
+            trace.filter((statement) => /^select /i.test(statement)).length -
+            Number(
+              !!program.pgFunctions && target === 0 && step.kind === 'update',
+            )
+          // The reference law uses the generated semantics, never compiler output.
+          const changed = new Set([target])
+          if (
+            target === 0 &&
+            ((program.foreignKey && step.kind === 'delete') ||
+              (step.kind === 'update' &&
+                (program.pgFunctions ||
+                  (program.helpers &&
+                    !program.inlineSql &&
+                    program.helperFanout))))
+          )
+            changed.add(1)
           const expectedReads =
-            (program.expressionIndex && program.opaqueIndex) ||
-            (program.trigger && target === 0)
+            program.trigger && target === 0 && step.kind === 'update'
               ? program.count
-              : 1 +
-                Number(
-                  (program.foreignKey &&
-                    step.kind === 'delete' &&
-                    target === 0) ||
-                    (program.helpers &&
-                      !program.inlineSql &&
-                      program.helperFanout &&
-                      step.kind === 'update' &&
-                      target === 0),
-                )
+              : Array.from(
+                  { length: program.count },
+                  (_, i) =>
+                    i === target ||
+                    changed.has(i) ||
+                    (program.pgFunctions && i === 0 && changed.has(1)),
+                ).filter(Boolean).length
           for (let i = 0; i < program.count; i++) {
-            const expected = (
-              await pg.query(`SELECT id,value FROM ${tableName(i)} ORDER BY id`)
-            ).rows
+            const expected = (await pg.query(referenceRead(program, i))).rows
             evidence.check(
               'settled-rows',
               plain([...app.collections[i].values()]),
@@ -332,6 +362,15 @@ try {
       (value) => scenario(value.program, value.histories),
     )
   else {
+    await scenario({ count: 3, pgFunctions: true }, [
+      [
+        { kind: 'update', table: 0, value: 7 },
+        { kind: 'update', table: 1, value: 9 },
+      ],
+    ])
+    await scenario({ count: 3, expressionIndex: true, opaqueIndex: true }, [
+      [{ kind: 'update', table: 0, value: 7 }],
+    ])
     await scenario(
       {
         inlineSql: true,
@@ -361,6 +400,7 @@ try {
         await fc.check(
           fc.asyncProperty(
             fc.record({
+              pgFunctions: fc.boolean(),
               opaqueIndex: fc.boolean(),
               expressionIndex: fc.boolean(),
               nativeDefaults: fc.boolean(),

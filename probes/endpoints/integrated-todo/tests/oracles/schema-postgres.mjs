@@ -29,7 +29,10 @@ try {
   )
   const snapshot = loadSchema(root)
   assert.ok(snapshot, 'CLI snapshot validates')
-  assert.deepEqual(snapshot.searchPath, ['public'])
+  assert.equal(snapshot.format, 2)
+  assert.ok(snapshot.routines.some((routine) => routine.name === 'lower'))
+  assert.ok(snapshot.customTypes.some((type) => type.kind === 'e'))
+  assert.deepEqual(snapshot.searchPath, ['pg_catalog', 'public'])
   assert.ok(snapshot.tables.some((t) => t.name === 'recipe_comments'))
   assert.doesNotMatch(
     await readFile(join(root, '.endpoints/schema.json'), 'utf8'),
