@@ -3,8 +3,6 @@ import fc from 'fast-check'
 import { expect, it } from 'vitest'
 import { OutboxManager } from '../src/outbox/OutboxManager'
 import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
-import type { TestItem } from './harness'
-import type { PendingMutation } from '@tanstack/db'
 
 function gate() {
   let resolve!: () => void
@@ -36,7 +34,11 @@ it.each([20260912, undefined])(
           const release = gate()
           const storage = new FakeStorageAdapter()
           const callbacks = new Set<(leader: boolean) => void>()
-          const calls: Array<{ id: string; key: string; row: TestItem }> = []
+          const calls: Array<{
+            id: string
+            key: string
+            row: Record<string, unknown>
+          }> = []
           const row = {
             id: `row`,
             value,
@@ -62,12 +64,11 @@ it.each([20260912, undefined])(
               },
             },
             mutationFn: async (params) => {
-              const mutations = params.transaction
-                .mutations as unknown as Array<PendingMutation<TestItem>>
+              const mutations = params.transaction.mutations
               calls.push({
                 id: params.transaction.id,
                 key: params.idempotencyKey,
-                row: structuredClone(mutations[0]!.modified),
+                row: structuredClone(mutations[0].modified),
               })
               entered.resolve()
               await release.promise

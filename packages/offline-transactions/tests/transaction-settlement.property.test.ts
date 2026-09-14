@@ -3,7 +3,6 @@ import { expect, it } from 'vitest'
 import { NonRetriableError } from '../src/types'
 import { createTestOfflineEnvironment } from './harness'
 import type { TestItem } from './harness'
-import type { PendingMutation } from '@tanstack/db'
 
 function gate() {
   let resolve!: () => void
@@ -46,7 +45,10 @@ it.each([20260913, undefined])(
               ),
             )
           }
-          const calls: Array<{ id: string; rows: Array<TestItem> }> = []
+          const calls: Array<{
+            id: string
+            rows: Array<Record<string, unknown>>
+          }> = []
           const expectedRows = succeeds.map((_, index) =>
             Array.from({ length: width }, (_unused, column) => ({
               id: `${sharedKeys ? 0 : index}:${column}`,
@@ -58,8 +60,7 @@ it.each([20260913, undefined])(
           const env = createTestOfflineEnvironment({
             mutationFn: async (params) => {
               const index = calls.length
-              const mutations = params.transaction
-                .mutations as unknown as Array<PendingMutation<TestItem>>
+              const mutations = params.transaction.mutations
               calls.push({
                 id: params.transaction.id,
                 rows: mutations.map((mutation) =>
