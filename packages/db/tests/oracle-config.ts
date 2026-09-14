@@ -21,6 +21,8 @@ const staticOracleProperties = [
   `coverage-registry.state-machine`,
   `d2-source.exact-retractions`,
   `d2-source.disjoint-commutation`,
+  `live-query-observer.granular-history`,
+  `live-query-observer.wholesale-history`,
   `includes-collection.layout-swap`,
   `includes-collection.optimistic-child-history`,
   `includes-collection.public-key-order`,
