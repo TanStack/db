@@ -1,5 +1,11 @@
 # @tanstack/db-ivm
 
+## 0.1.21
+
+### Patch Changes
+
+- Correct the `distinct` operator's return type to reflect its numeric keys and preserved input values. ([#1819](https://github.com/TanStack/db/pull/1819))
+
 ## 0.1.20
 
 ### Patch Changes
