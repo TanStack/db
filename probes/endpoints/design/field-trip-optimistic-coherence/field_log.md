@@ -2,10 +2,10 @@
 type: field-log
 format: field-log/v1
 event-stream: ./field_log.jsonl
-generated-through: 426
+generated-through: 429
 title: "Endpoints: optimistic coherence and update delivery"
 opened-at: 2026-09-11T16:54:36.780Z
-updated-at: 2026-09-14T18:52:21.953Z
+updated-at: 2026-09-14T21:21:43.772Z
 ---
 
 # Endpoints: optimistic coherence and update delivery
@@ -1772,3 +1772,29 @@ The original expression-index case is red at three reads instead of one. Final c
 Kitchen has known SQL dependencies for eight queries and ten mutations. Actual compiled handlers pass 88 collection comparisons and exact affected-collection counts; real-session browser passes 232 comparisons. Build and typecheck pass, and 34 client artifacts exclude the checked server markers. Only disposable PostgreSQL data was used. Live AI/Trello effects and deployment remain outside this validation. The previously uncommitted Kitchen application port is being preserved separately from the framework commits.
 
 Broad generation pilot: pinned waxsql 1.0.0 produces 12 schemas × 12 queries. PostgreSQL plans 142 of 144; the analyzer admits 39 and falls back on 103. Six FK-cycle data-generation failures and two division-by-zero planning errors remain explicit. A partial plan-relation oracle rejects an omitted dependency, reproduces it and passes with the omission removed. This is a breadth survey, not broad browser/value/mutation coverage or proof of exact dependencies. Full generated histories and structural SQL shrinking remain the next expansion. No new Field Lab instrument was run during this implementation pass.
+
+### Kyle
+
+_2026-09-14T21:21:43.770Z_
+
+> **Kyle:** “- ok write up a note in the field log about exploring generating optimistic mutations — it's not the most pressing as coding agents can do it pretty easily but could be worth it
+- on what to return — we do need return types to generate what gets loaded in the browser — so yeah queries need to return the data — good point on people will want to return specific data — perhaps the contract is we expose what they return but we can modify the return ourselves of course as needed
+- yes, endpoints() is all we want”
+
+### Generated optimistic mutations: useful exploration, lower priority
+
+_2026-09-14T21:21:43.772Z_
+
+Kyle wants to retain generating onMutate from mutation handlers as a possible future improvement. It is lower priority because coding agents can already author these callbacks easily. No new design instrument or implementation is selected.
+
+The proposed exploration would identify how often ordinary inserts, updates, deletes, increments, and locally evaluable predicates can supply a useful optimistic prediction. Local state may be stale and server execution may differ: the prediction remains an overlay that authoritative reconciliation replaces. Missing data, generated identities, server-only values, external services, and application-specific placeholders need explicit treatment; SQL alone does not express the desired Processing UI for an AI recipe. Complete generation, useful partial predictions, and authored callbacks remain possibilities to examine.
+
+The earlier 95% suggestion is a hypothesis, not a measured coverage claim. When this becomes a priority, classify real mutation examples, then test any generated predictions against independent local semantics and subsequent authoritative reconciliation, including server outcomes that differ from the guess. Keep server implementation code off the client and distinguish predicting an effect from selecting affected collections or generating authoritative updates.
+
+### Application return values and one public Vite plugin
+
+_2026-09-14T21:21:43.772Z_
+
+Queries must return their data; their result shape and types inform the browser collection. Mutations may also return useful application data. Kyle proposes exposing what handlers return while allowing the framework to wrap or encode that value with collection updates and other transport metadata. The application value and the wire response are separate contracts: transport rewriting must preserve the promised application result. The exact typed accessor for mutation results and its settlement/error behavior remain to be designed; current actions return DB transactions and do not expose handler.result. This note does not claim that result access has been implemented.
+
+The agreed public Vite setup is endpoints() alone. It installs endpoint compilation and server-code protection together; the application should not have to select or order separate plugins. The internal split can remain an implementation detail.
