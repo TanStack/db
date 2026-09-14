@@ -1,5 +1,12 @@
 # @tanstack/db-sqlite-persistence-core
 
+## 0.2.23
+
+### Patch Changes
+
+- Updated dependencies [[`3c4c35d`](https://github.com/TanStack/db/commit/3c4c35d5868c908979058c4dbeae7c4ac9eab88b)]:
+  - @tanstack/db@0.9.2
+
 ## 0.2.22
 
 ### Patch Changes

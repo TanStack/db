@@ -9,8 +9,8 @@
     "test:e2e": "pnpm --filter @tanstack/db build && pnpm --filter @tanstack/react-db build && playwright test"
   },
   "dependencies": {
-    "@tanstack/db": "^0.9.1",
-    "@tanstack/react-db": "^0.4.0",
+    "@tanstack/db": "^0.9.2",
+    "@tanstack/react-db": "^0.4.1",
     "next": "^16.3.1",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
