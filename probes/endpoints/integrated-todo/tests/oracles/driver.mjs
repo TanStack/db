@@ -219,7 +219,7 @@ export class Driver {
     for (const [name] of extraModules)
       assert.match(
         name,
-        /^(?:[a-z0-9-]+\/)*[a-z0-9-]+\.(?:endpoint|server)\.tsx?$/i,
+        /^(?:[a-z0-9-]+\/)*[a-z0-9-]+\.(?:endpoint|server|client)\.tsx?$/i,
       )
     this.lastSource = source
     this.evidence.artifact(

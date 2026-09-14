@@ -94,6 +94,7 @@ const expectedLaws = {
   'rendered-text': ['rendered-values'],
   'omit-order': ['collection-rows'],
   'early-settlement': ['persistence-pending'],
+  'omit-cold-start': ['retained-baseline-after-demand'],
   'omit-fanout': ['collection-rows'],
   'optimistic-recipients-only': ['collection-rows'],
   'misroute-relations': ['collection-rows'],

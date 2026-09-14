@@ -4,6 +4,14 @@ The [Kitchen test audit](../KITCHEN-TEST-AUDIT.md) maps each former app-specific
 assertion to its owner. General parsed-input checks now run in the generated
 compiled oracle; the remaining app smoke test lives in Kitchen itself.
 
+The compiled browser campaign exercises both component-bound declarations and
+module-level collection/action exports. The latter use an imported shared client
+with a deferred scope getter. Both shapes pass through Start RPC and the same
+optimistic/settled PGlite comparisons, including strict/strip/passthrough inputs.
+Production assets and source maps are scanned for server code in each program.
+The runtime lifecycle tests separately cover imports before a session exists,
+no reads before demand, synchronous actions, and rejecting scope changes.
+
 The [SQL coverage and loading report](../../../SQL-COVERAGE-RESULTS.md) describes
 the new schema-first campaign. It generates 2–3 tables, nullable scalar columns,
 foreign keys, predicates and mutations. The same full-stack driver runs against

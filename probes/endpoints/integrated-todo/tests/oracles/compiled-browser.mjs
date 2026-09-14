@@ -19,7 +19,10 @@ const driver = new Driver({
   renderProgram: (p) => endpointSource(p, true),
   renderDatabase: databaseSource,
   schemaSnapshot: () => snapshot,
-  extraModules: (p) => ({ 'service.server.ts': serviceSource(p) }),
+  extraModules: (p) => ({
+    'service.server.ts': serviceSource(p),
+    'db.client.ts': `import {DbClient} from '@tanstack/db';export const dbClient=new DbClient({endpointScope:()=> 'oracle'});`,
+  }),
 })
 const output = resolve(
   process.env.ENDPOINT_ORACLE_OUTPUT ?? 'evidence/compiled-dependency-browser',
@@ -39,15 +42,18 @@ const input = {
     { helpers: true, count: 3, trigger: false, foreignKey: true },
     { helpers: true, count: 3, trigger: true, foreignKey: false },
     { count: 3, pgFunctions: true, expressionIndex: true, opaqueIndex: true },
-    ...['strip', 'passthrough', 'strict'].map((unknown) => ({
-      count: 3,
-      inputContract: {
-        unknown,
-        offset: 3,
-        defaultWeight: 7,
-        extraKey: 'user_id',
-      },
-    })),
+    ...[false, true].flatMap((moduleLevel) =>
+      ['strip', 'passthrough', 'strict'].map((unknown) => ({
+        moduleLevel,
+        count: 3,
+        inputContract: {
+          unknown,
+          offset: 3,
+          defaultWeight: 7,
+          extraKey: 'user_id',
+        },
+      })),
+    ),
   ],
   operations: [
     { kind: 'invalid', table: 0, value: 0.5 },
@@ -76,6 +82,12 @@ async function referenceRows(program) {
     ),
   )
 }
+async function recordFaults(page) {
+  for (const point of await page.evaluate(() =>
+    window.compiledFaults.splice(0),
+  ))
+    evidence.fault(point, { checkpoint: 'compiled-browser' })
+}
 async function execute(input) {
   return evidence.run(input, async () => {
     await driver.init()
@@ -92,15 +104,34 @@ async function execute(input) {
       await driver.prepare(program)
       report.programs++
       const page = await driver.browser.newPage()
+      await page.addInitScript(() => {
+        window.compiledFaults = []
+        globalThis.__endpointOracleFault = (point) =>
+          window.compiledFaults.push(point)
+      })
       const errors = []
       page.on('pageerror', (error) => errors.push(String(error)))
       try {
         await page.goto(driver.url)
         await page.waitForFunction(() => !!window.compiledOracle)
-        await page.evaluate(() =>
-          Promise.all(
-            window.compiledOracle.collections.map((c) => c.preload()),
-          ),
+        const baseline = await page.evaluate(async (moduleLevel) => {
+          const collections = window.compiledOracle.collections
+          await Promise.all(
+            (moduleLevel ? collections.slice(0, 1) : collections).map((c) =>
+              c.preload(),
+            ),
+          )
+          return collections.map((c) =>
+            [...c.values()].map(({ id, value }) => ({ id, value })),
+          )
+        }, !!program.moduleLevel)
+        evidence.phase = 'execution'
+        await recordFaults(page)
+        evidence.check(
+          'retained-baseline-after-demand',
+          baseline,
+          await referenceRows(program),
+          { checkpoint: 'initial-demand' },
         )
         for (const [step, operation] of input.operations.entries()) {
           evidence.phase = 'execution'
@@ -149,6 +180,7 @@ async function execute(input) {
                 ? []
                 : rows.map((row) => ({ ...row, value: payload.value })),
           )
+          await recordFaults(page)
           evidence.check('optimistic-rows', actual.optimistic, optimistic, {
             checkpoint: 'same-turn',
           })
@@ -238,6 +270,12 @@ async function execute(input) {
         }
         assert.deepEqual(errors, [])
       } finally {
+        await evidence.cleanup('fault-observations', async () => {
+          for (const point of await page.evaluate(
+            () => window.compiledFaults?.splice(0) ?? [],
+          ))
+            evidence.fault(point, { checkpoint: 'compiled-browser' })
+        })
         await driver.evidence.cleanup('page', () => page.close())
       }
     }

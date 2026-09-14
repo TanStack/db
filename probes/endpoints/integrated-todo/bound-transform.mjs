@@ -102,13 +102,17 @@ export function transformBoundEndpoints(
       const component = path.findParent((parent) =>
         parent.isFunctionDeclaration(),
       )
+      const body = component?.node.body ?? ast.program
       if (
-        !component?.node.id ||
-        path.parentPath.parentPath.node !== component.node.body ||
+        (component && !component.node.id) ||
+        path.parentPath.parentPath.node !== body ||
         path.parent.kind !== 'const' ||
         path.parent.declarations.length !== 1
       )
-        fail('bind endpoints in a component function body', node)
+        fail(
+          'bind endpoints at module scope or in a component function body',
+          node,
+        )
       if (
         node.init.arguments.length !== 1 ||
         node.init.arguments[0].type !== 'Identifier' ||
@@ -138,6 +142,10 @@ export function transformBoundEndpoints(
         for (const reference of binding.referencePaths) {
           const call = reference.parentPath
           const declaration = call.parentPath
+          const statement = declaration.parentPath
+          const container = statement.parentPath?.isExportNamedDeclaration()
+            ? statement.parentPath.parentPath
+            : statement.parentPath
           if (
             !call.isCallExpression() ||
             call.node.callee !== reference.node ||
@@ -145,11 +153,11 @@ export function transformBoundEndpoints(
             declaration.node.init !== call.node ||
             declaration.parent.kind !== 'const' ||
             declaration.parent.declarations.length !== 1 ||
-            declaration.parentPath.parentPath.node !== component.node.body ||
+            container?.node !== body ||
             declaration.node.id.type !== 'Identifier'
           )
             fail(
-              'declare endpoints directly in the component body',
+              'declare endpoints directly in the bound module or component body',
               reference.node,
             )
           const kind = property.key.name
@@ -336,7 +344,7 @@ export function transformBoundEndpoints(
             kind,
             client: node.init.arguments[0].name,
             name: declaration.node.id.name,
-            owner: component.node.id.name,
+            owner: component?.node.id.name ?? '<module>',
             model,
             proof,
           })

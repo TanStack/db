@@ -101,7 +101,6 @@ function compareText(left: string, right: string): number {
 }
 function options(
   endpoint: Query<Record<string, never>, EndpointRow>,
-  scope: Scope,
   queryClient: QueryClient,
   order: ReadonlyArray<SortField> = [],
   read: () => Promise<EndpointRow[]>,
@@ -109,12 +108,12 @@ function options(
 ) {
   return collectionOptions(
     queryCollectionOptions({
-      id: `${endpoint.id}:${scope}`,
-      queryKey: [endpoint.id, scope],
+      id: endpoint.id,
+      queryKey: [endpoint.id],
       queryClient,
       queryFn: read,
       getSyncSignal,
-      startSync: true,
+      startSync: false,
       // The coordinator owns the three retries; do not multiply them here.
       retry: false,
       getKey: (row: EndpointRow) => row.id,
@@ -250,10 +249,21 @@ class EndpointRuntime {
   private permit = new AbortController()
   private changed = deferred()
   private refreshing: Promise<void> | undefined
-  constructor(
-    readonly core: DbClient,
-    readonly scope: Scope,
-  ) {}
+  private scope: Scope | undefined
+  constructor(readonly core: DbClient) {}
+  private resolveScope(): Scope {
+    const dependency = this.core.requireDependency<unknown>('endpointScope')
+    const scope: unknown =
+      typeof dependency === 'function' ? dependency() : dependency
+    if (typeof scope !== 'string' || scope.length === 0)
+      throw Error('Invalid endpoint scope')
+    if (this.scope !== undefined && this.scope !== scope)
+      throw Error(
+        'Endpoint scope changed; use a new DbClient for a new session',
+      )
+    this.scope = scope
+    return scope
+  }
   private createCollection(
     endpoint: Query<Record<string, never>, EndpointRow>,
     order: ReadonlyArray<SortField> = [],
@@ -261,7 +271,6 @@ class EndpointRuntime {
     const collection = this.core.collection(
       options(
         endpoint,
-        this.scope,
         this.queryClient,
         order,
         async () => {
@@ -281,7 +290,7 @@ class EndpointRuntime {
         this.certificates.delete(endpoint.id)
         if (status === 'cleaned-up')
           this.queryClient.removeQueries({
-            queryKey: [endpoint.id, this.scope],
+            queryKey: [endpoint.id],
             exact: true,
           })
         this.wake()
@@ -432,6 +441,8 @@ class EndpointRuntime {
   }
   private install(id: string, rows: EndpointRow[]) {
     const collection = this.collections.get(id)!
+    // Retained declarations may still be idle when another endpoint refreshes them.
+    collection.startSyncImmediate()
     const baseline = this.confirmed.get(id) ?? new Map<string, EndpointRow>()
     const next = new Map(rows.map((row) => [row.id, row]))
     if (next.size !== rows.length)
@@ -444,7 +455,7 @@ class EndpointRuntime {
     // An empty-to-empty write batch has no operations and does not seed Query.
     // Its successful empty result must still establish initial readiness.
     if (baseline.size === 0 && next.size === 0)
-      this.queryClient.setQueryData([id, this.scope], rows)
+      this.queryClient.setQueryData([id], rows)
     this.confirmed.set(id, next)
     this.readErrors.delete(id)
   }
@@ -459,7 +470,7 @@ class EndpointRuntime {
     // Cancellation is synchronous even when a transport ignores AbortSignal.
     for (const [id] of this.collections)
       void this.queryClient.cancelQueries({
-        queryKey: [id, this.scope],
+        queryKey: [id],
         exact: true,
       })
   }
@@ -480,9 +491,10 @@ class EndpointRuntime {
       )
   }
   private async readRows(endpoint: Query<Record<string, never>, EndpointRow>) {
+    const scope = this.resolveScope()
     for (let attempt = 0; ; attempt++) {
       try {
-        return await endpoint.rpc({ data: { scope: this.scope, input: {} } })
+        return await endpoint.rpc({ data: { scope, input: {} } })
       } catch (error) {
         if (attempt === 3) throw error
         await new Promise((resolve) => setTimeout(resolve, 1000 * 2 ** attempt))
@@ -626,11 +638,12 @@ class EndpointRuntime {
     input: I,
     transaction: Transaction,
     retained: ReturnType<EndpointRuntime['retained']>,
+    scope: Scope,
   ) {
     const operation = this.operations.get(transaction)!
     if (!endpoint.inline) {
       try {
-        await endpoint.rpc({ data: { scope: this.scope, input } })
+        await endpoint.rpc({ data: { scope, input } })
         operation.state = 'closed'
         this.wake()
         await this.refresh()
@@ -650,7 +663,7 @@ class EndpointRuntime {
     try {
       value = await endpoint.rpc({
         data: {
-          scope: this.scope,
+          scope,
           input,
           reads: requests,
         },
@@ -801,11 +814,13 @@ class EndpointRuntime {
     throw Error(message)
   }
   run<I, O>(endpoint: Mutation<I, O>, input: I): Transaction {
+    // Reject missing or changed sessions before applying optimism or dispatching.
+    const scope = this.resolveScope()
     const retained = this.retained()
     const transaction = this.core.createTransaction({
       autoCommit: false,
       mutationFn: async ({ transaction }) => {
-        await this.persist(endpoint, input, transaction, retained)
+        await this.persist(endpoint, input, transaction, retained, scope)
       },
     })
     const operation: Operation = {
@@ -838,7 +853,7 @@ class EndpointRuntime {
         // DB skips persistence for empty transactions. An endpoint handler must
         // still execute when its optimistic guess makes no local row changes.
         transaction.setState('persisting')
-        void this.persist(endpoint, input, transaction, retained).catch(
+        void this.persist(endpoint, input, transaction, retained, scope).catch(
           (error) =>
             this.fail(
               [operation],
@@ -854,10 +869,7 @@ const runtimes = new WeakMap<DbClient, EndpointRuntime>()
 export function endpointRuntime(client: DbClient) {
   let runtime = runtimes.get(client)
   if (!runtime) {
-    const scope = client.requireDependency<unknown>('endpointScope')
-    if (typeof scope !== 'string' || scope.length === 0)
-      throw Error('Invalid endpoint scope')
-    runtime = new EndpointRuntime(client, scope)
+    runtime = new EndpointRuntime(client)
     runtimes.set(client, runtime)
   }
   return runtime

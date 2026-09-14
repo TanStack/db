@@ -290,3 +290,88 @@ test('non-fixture scopes reconcile application rows without Todo fields', async 
     await collection.cleanup()
   }
 })
+
+test('declarations are inert until demand and resolve the session at operation time', async () => {
+  let session: string | undefined
+  let resolutions = 0
+  const core = new DbClient({
+    endpointScope: () => {
+      resolutions++
+      return session
+    },
+  })
+  const client = endpointRuntime(core)
+  const scopes: string[] = []
+  const collection = client.bindQuery(
+    'lazy',
+    async ({ data }) => {
+      scopes.push(data.scope)
+      return [row(data.scope)]
+    },
+    model,
+  )
+  const action = client.bindMutation(
+    'write',
+    async ({ data }) => {
+      scopes.push(data.scope)
+      return confirmed([{ id: 'lazy', rows: [row(data.scope)] }])
+    },
+    () => {},
+  )
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    assert.equal(resolutions, 0)
+    assert.deepEqual(scopes, [])
+    assert.throws(() => action({}), /Invalid endpoint scope/)
+    assert.equal(client.lastTransaction, undefined)
+    session = 'alice'
+    await collection.preload()
+    assert.deepEqual([...collection.keys()], ['alice'])
+    const tx = action({})
+    assert.equal(typeof (tx as unknown as { then?: unknown }).then, 'undefined')
+    await tx.isPersisted.promise
+    assert.deepEqual(scopes, ['alice', 'alice'])
+    session = 'bob'
+    assert.throws(() => action({}), /new DbClient/)
+    assert.deepEqual(scopes, ['alice', 'alice'])
+  } finally {
+    await core.cleanup()
+  }
+})
+
+test('authority initializes retained collections that have never been subscribed', async () => {
+  const core = new DbClient({ endpointScope: 'alice' })
+  const client = endpointRuntime(core)
+  const first = client.bindQuery('first', async () => [row('shared')], model)
+  const cold = client.bindQuery('cold', async () => [row('shared')], model)
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    assert.equal(cold.status, 'idle')
+    await Promise.race([
+      first.preload(),
+      new Promise((_, reject) => {
+        timeout = setTimeout(
+          () => reject(Error('Initial authority did not settle')),
+          500,
+        )
+      }),
+    ])
+    assert.deepEqual([...first.keys()], ['shared'])
+    assert.deepEqual([...cold.keys()], ['shared'])
+    const tx = client.bindMutation(
+      'edit',
+      async () =>
+        confirmed([
+          { id: 'first', rows: [row('shared'), row('new')] },
+          { id: 'cold', rows: [row('shared'), row('new')] },
+        ]),
+      () => cold.insert(row('new')),
+    )({})
+    assert.equal(cold.has('new'), true)
+    await tx.isPersisted.promise
+    assert.deepEqual([...cold.keys()], ['new', 'shared'])
+  } finally {
+    clearTimeout(timeout)
+    await core.cleanup()
+  }
+})

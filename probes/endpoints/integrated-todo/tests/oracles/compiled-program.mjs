@@ -106,9 +106,13 @@ const insert${i}=mutation({input:${mutationInputSchema(program, true)},onMutate(
       )
   }
   const result = `{collections:[${Array.from({ length: program.count }, (_, i) => `q${i}`).join(',')}],actions:{${Array.from({ length: program.count }, (_, i) => `update${i},delete${i},insert${i}`).join(',')}}}`
+  const moduleLevel = browser && program.moduleLevel
+  const binding = `const {query,mutation}=endpoints(dbClient);${moduleLevel ? declarations.replaceAll('\nconst ', '\nexport const ') : declarations}`
   return `${program.inlineSql ? "import {authorize} from './guard.server';" : ''}${program.helpers ? "import {service} from './service.server';" : ''}import {z} from 'zod';import {endpoints} from './runtime';import {db,handlerInputs,${Array.from({ length: program.count }, (_, i) => `t${i}`).join(',')}} from './database.server';import {eq,sql} from 'drizzle-orm';
+${moduleLevel ? "import {dbClient} from './db.client';" : ''}
 ${browser ? "import {useEffect} from 'react';import {useDbClient,useLiveQuery} from '@tanstack/react-db';" : ''}
-export function ${browser ? 'TodoApp()' : 'App(dbClient)'} {${browser ? 'const dbClient=useDbClient();' : ''}const {query,mutation}=endpoints(dbClient);${declarations}
+${moduleLevel ? binding : ''}
+export function ${browser ? 'TodoApp()' : 'App(dbClient)'} {${browser && !moduleLevel ? 'const dbClient=useDbClient();' : ''}${moduleLevel ? '' : binding}
 ${browser ? `const result=useLiveQuery(q0);useEffect(()=>{window.compiledOracle=${result}},[${Array.from({ length: program.count }, (_, i) => `q${i},update${i},delete${i},insert${i}`).join(',')}]);return <main>{result.data.map(row=><p key={row.id}>{row.value}</p>)}</main>` : `return ${result}`}}
 `
 }

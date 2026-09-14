@@ -15,6 +15,36 @@ import { endpoints } from './transform.mjs'
 plugins: [endpoints(), tanstackStart(), react()]
 ```
 
+Endpoint declarations can also live at module scope. See the
+[implementation and regression receipts](./MODULE-EXPORTS.md).
+
+```ts
+// todos.endpoint.ts
+import { dbClient } from './db-client'
+import { endpoints } from './runtime'
+
+const { query, mutation } = endpoints(dbClient)
+export const listTodos = query({ /* input, schema, handler */ })
+export const updateTodo = mutation({ /* input, onMutate, handler */ })
+
+// A route or component imports the actual collection and action.
+import { listTodos, updateTodo } from './todos.endpoint'
+useLiveQuery(listTodos)
+updateTodo({ id, text }) // synchronous Transaction
+```
+
+Imports create stable collections without dispatching reads. Preloading,
+subscribing, or mutation reconciliation starts data loading. Lazy route modules
+can therefore register endpoints when their code loads. Server registry discovery
+still finds their query handlers before the browser imports them.
+
+An application may provide `endpointScope` as a string or a synchronous getter.
+The runtime resolves it when a read or action starts. Kitchen uses one client per
+browser page and waits for its session in the authenticated route. The client
+pins its first valid scope and rejects a different scope; account changes require
+a new client (Kitchen reloads on logout). Server-rendered applications still need
+request-scoped clients; a module singleton is not a per-request session store.
+
 The [first coherence draft](../design/representation/implementation-draft.md) adds cross-query optimism and inline authoritative results, with measured costs and explicit scope limits.
 
 The [authority coordinator](../design/authority-coordinator/README.md) extends it

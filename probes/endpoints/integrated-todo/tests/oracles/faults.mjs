@@ -8,6 +8,7 @@ export const runtimeMutants = [
   'omit-fanout',
   'omit-order',
   'early-settlement',
+  'omit-cold-start',
 ]
 
 // Apply only to a disposable runtime. The hook records execution separately
@@ -15,6 +16,7 @@ export const runtimeMutants = [
 export function applyRuntimeMutant(source, mutant) {
   const hook = `globalThis.__endpointOracleFault?.(${JSON.stringify(mutant)})`
   const edits = {
+    'omit-cold-start': ['collection.startSyncImmediate()', `${hook}`],
     'accept-overlapping-inline': [
       'operation.alone &&',
       `(${hook}, true) || operation.alone &&`,
@@ -37,8 +39,8 @@ export function applyRuntimeMutant(source, mutant) {
     ],
     'omit-order': ['      model.order,\n', `      (${hook}, []),\n`],
     'early-settlement': [
-      'await this.persist(endpoint, input, transaction, retained)',
-      `${hook}\n        void this.persist(endpoint, input, transaction, retained)`,
+      'await this.persist(endpoint, input, transaction, retained, scope)',
+      `${hook}\n        void this.persist(endpoint, input, transaction, retained, scope)`,
     ],
   }
   assert.ok(Object.hasOwn(edits, mutant), `Unknown oracle mutant: ${mutant}`)

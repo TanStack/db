@@ -1,0 +1,199 @@
+{
+  "property": "endpoints.browser",
+  "original": {
+    "input": {
+      "programs": [
+        {
+          "moduleLevel": true,
+          "count": 3,
+          "inputContract": {
+            "unknown": "strip",
+            "offset": 3,
+            "defaultWeight": 7,
+            "extraKey": "user_id"
+          }
+        }
+      ],
+      "operations": [
+        {
+          "kind": "update",
+          "table": 0,
+          "value": 7,
+          "extraAt": "root"
+        },
+        {
+          "kind": "delete",
+          "table": 0
+        }
+      ]
+    },
+    "failure": {
+      "law": "retained-baseline-after-demand",
+      "program": {
+        "moduleLevel": true,
+        "count": 3,
+        "inputContract": {
+          "unknown": "strip",
+          "offset": 3,
+          "defaultWeight": 7,
+          "extraKey": "user_id"
+        }
+      },
+      "checkpoint": "initial-demand",
+      "actual": [
+        [
+          {
+            "id": "row",
+            "value": 1
+          }
+        ],
+        [],
+        []
+      ],
+      "expected": [
+        [
+          {
+            "id": "row",
+            "value": 1
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 2
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 3
+          }
+        ]
+      ],
+      "difference": [
+        "1",
+        "0"
+      ],
+      "trace": [],
+      "faults": [
+        {
+          "point": "omit-cold-start",
+          "stage": "applied",
+          "case": 1,
+          "before": "collection.startSyncImmediate()",
+          "after": "globalThis.__endpointOracleFault?.(\"omit-cold-start\")"
+        },
+        {
+          "point": "omit-cold-start",
+          "stage": "reached",
+          "case": 1,
+          "checkpoint": "compiled-browser"
+        },
+        {
+          "point": "omit-cold-start",
+          "stage": "reached",
+          "case": 1,
+          "checkpoint": "compiled-browser"
+        }
+      ]
+    }
+  },
+  "reduced": {
+    "input": {
+      "programs": [
+        {
+          "moduleLevel": true,
+          "count": 3,
+          "inputContract": {
+            "unknown": "strip",
+            "offset": 3,
+            "defaultWeight": 7,
+            "extraKey": "user_id"
+          }
+        }
+      ],
+      "operations": [
+        {
+          "kind": "update",
+          "table": 0,
+          "value": 7,
+          "extraAt": "root"
+        },
+        {
+          "kind": "delete",
+          "table": 0
+        }
+      ]
+    },
+    "failure": {
+      "law": "retained-baseline-after-demand",
+      "program": {
+        "moduleLevel": true,
+        "count": 3,
+        "inputContract": {
+          "unknown": "strip",
+          "offset": 3,
+          "defaultWeight": 7,
+          "extraKey": "user_id"
+        }
+      },
+      "checkpoint": "initial-demand",
+      "actual": [
+        [
+          {
+            "id": "row",
+            "value": 1
+          }
+        ],
+        [],
+        []
+      ],
+      "expected": [
+        [
+          {
+            "id": "row",
+            "value": 1
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 2
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 3
+          }
+        ]
+      ],
+      "difference": [
+        "1",
+        "0"
+      ],
+      "trace": [],
+      "faults": [
+        {
+          "point": "omit-cold-start",
+          "stage": "applied",
+          "case": 1,
+          "before": "collection.startSyncImmediate()",
+          "after": "globalThis.__endpointOracleFault?.(\"omit-cold-start\")"
+        },
+        {
+          "point": "omit-cold-start",
+          "stage": "reached",
+          "case": 1,
+          "checkpoint": "compiled-browser"
+        },
+        {
+          "point": "omit-cold-start",
+          "stage": "reached",
+          "case": 1,
+          "checkpoint": "compiled-browser"
+        }
+      ]
+    }
+  }
+}

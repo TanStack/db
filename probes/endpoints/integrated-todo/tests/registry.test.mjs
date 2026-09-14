@@ -212,3 +212,20 @@ test('nested query modules resolve shared runtime and relation bindings', () => 
   assert.equal(relation(parent), relation(child))
   assert.match(child, /\/test\/src\/registry\.server\.ts/)
 })
+
+test('module exports bind real query collections without a component factory', () => {
+  const source = specimen
+    .replace('function App(dbClient){', "import {dbClient} from './client'")
+    .replace(' const rows=query', ' export const rows=query')
+    .replace(' return rows\n}', '')
+  const result = compilerPlugin().transform(source, '/test/lazy.endpoint.ts')
+  assert.match(result.code, /export const rows=__boundQuery/)
+  assert.throws(
+    () =>
+      compilerPlugin().transform(
+        source + '\nexport {query}',
+        '/test/lazy.endpoint.ts',
+      ),
+    /ENDPOINT_BOUND_UNSUPPORTED/,
+  )
+})

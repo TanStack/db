@@ -111,7 +111,7 @@ test('a held ordinary read cannot replace authority after its action retires', a
     await turn()
     assert.equal(a.get('row')!.text, '10')
     assert.equal(
-      client.queryClient.getQueryData<Todo[]>(['a', 'alice'])?.[0]?.text,
+      client.queryClient.getQueryData<Todo[]>(['a'])?.[0]?.text,
       '10',
     )
   } finally {
