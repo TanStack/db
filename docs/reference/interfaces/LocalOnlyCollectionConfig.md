@@ -5,7 +5,7 @@ title: LocalOnlyCollectionConfig
 
 # Interface: LocalOnlyCollectionConfig\<T, TSchema, TKey\>
 
-Defined in: [packages/db/src/local-only.ts:23](https://github.com/TanStack/db/blob/main/packages/db/src/local-only.ts#L23)
+Defined in: [packages/db/src/local-only.ts:24](https://github.com/TanStack/db/blob/main/packages/db/src/local-only.ts#L24)
 
 Configuration interface for Local-only collection options
 
@@ -41,7 +41,7 @@ The type of the key returned by `getKey`
 optional autoIndex: "off" | "eager";
 ```
 
-Defined in: [packages/db/src/types.ts:571](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L571)
+Defined in: [packages/db/src/types.ts:663](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L663)
 
 Auto-indexing mode for the collection.
 When enabled, indexes will be automatically created for simple where expressions.
@@ -70,7 +70,7 @@ When enabled, indexes will be automatically created for simple where expressions
 optional compare: (x, y) => number;
 ```
 
-Defined in: [packages/db/src/types.ts:596](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L596)
+Defined in: [packages/db/src/types.ts:688](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L688)
 
 Optional function to compare two items.
 This is used to order the items in the collection.
@@ -116,7 +116,7 @@ Omit.compare
 optional defaultIndexType: IndexConstructor<TKey>;
 ```
 
-Defined in: [packages/db/src/types.ts:585](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L585)
+Defined in: [packages/db/src/types.ts:677](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L677)
 
 Default index type to use when creating indexes without an explicit type.
 Required for auto-indexing. Import from '@tanstack/db'.
@@ -146,7 +146,7 @@ Omit.defaultIndexType
 optional defaultStringCollation: StringCollationConfig;
 ```
 
-Defined in: [packages/db/src/types.ts:742](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L742)
+Defined in: [packages/db/src/types.ts:834](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L834)
 
 Specifies how to compare data in the collection.
 This should be configured to match data ordering on the backend.
@@ -167,7 +167,7 @@ Omit.defaultStringCollation
 getKey: (item) => TKey;
 ```
 
-Defined in: [packages/db/src/types.ts:545](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L545)
+Defined in: [packages/db/src/types.ts:637](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L637)
 
 Function to extract the ID from an object
 This is required for update/delete operations which now only accept IDs
@@ -207,7 +207,7 @@ Omit.getKey
 optional id: string;
 ```
 
-Defined in: [packages/db/src/types.ts:534](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L534)
+Defined in: [packages/db/src/types.ts:626](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L626)
 
 #### Inherited from
 
@@ -221,7 +221,7 @@ Defined in: [packages/db/src/types.ts:534](https://github.com/TanStack/db/blob/m
 optional initialData: T[];
 ```
 
-Defined in: [packages/db/src/local-only.ts:35](https://github.com/TanStack/db/blob/main/packages/db/src/local-only.ts#L35)
+Defined in: [packages/db/src/local-only.ts:36](https://github.com/TanStack/db/blob/main/packages/db/src/local-only.ts#L36)
 
 Optional initial data to populate the collection with on creation
 This data will be applied during the initial sync process
@@ -234,7 +234,7 @@ This data will be applied during the initial sync process
 optional onDelete: DeleteMutationFn<T, TKey, LocalOnlyCollectionUtils, any>;
 ```
 
-Defined in: [packages/db/src/types.ts:734](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L734)
+Defined in: [packages/db/src/types.ts:826](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L826)
 
 Optional asynchronous handler function called before a delete operation
 
@@ -304,7 +304,7 @@ Omit.onDelete
 optional onInsert: InsertMutationFn<T, TKey, LocalOnlyCollectionUtils, any>;
 ```
 
-Defined in: [packages/db/src/types.ts:647](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L647)
+Defined in: [packages/db/src/types.ts:739](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L739)
 
 Optional asynchronous handler function called before an insert operation
 
@@ -373,7 +373,7 @@ Omit.onInsert
 optional onUpdate: UpdateMutationFn<T, TKey, LocalOnlyCollectionUtils, any>;
 ```
 
-Defined in: [packages/db/src/types.ts:691](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L691)
+Defined in: [packages/db/src/types.ts:783](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L783)
 
 Optional asynchronous handler function called before an update operation
 
@@ -443,7 +443,7 @@ Omit.onUpdate
 optional schema: TSchema;
 ```
 
-Defined in: [packages/db/src/types.ts:535](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L535)
+Defined in: [packages/db/src/types.ts:627](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L627)
 
 #### Inherited from
 
@@ -459,7 +459,7 @@ Omit.schema
 optional syncMode: SyncMode;
 ```
 
-Defined in: [packages/db/src/types.ts:605](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L605)
+Defined in: [packages/db/src/types.ts:697](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L697)
 
 The mode of sync to use for the collection.
 
@@ -485,7 +485,7 @@ The exact implementation of the sync mode is up to the sync implementation.
 optional utils: LocalOnlyCollectionUtils;
 ```
 
-Defined in: [packages/db/src/types.ts:744](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L744)
+Defined in: [packages/db/src/types.ts:836](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L836)
 
 #### Inherited from
 

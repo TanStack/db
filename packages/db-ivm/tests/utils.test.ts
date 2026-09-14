@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
-import { DefaultMap } from '../src/utils.js'
+import { DefaultMap, compareKeys, serializeValue } from '../src/utils.js'
 import { hash } from '../src/hashing/index.js'
 
 describe(`DefaultMap`, () => {
@@ -27,6 +27,37 @@ describe(`DefaultMap`, () => {
 
     map.update(`key`, (value) => value * 2)
     expect(map.get(`key`)).toBe(2)
+  })
+})
+
+describe(`compareKeys`, () => {
+  it(`orders finite numeric keys before NaN`, () => {
+    expect(compareKeys(1, Number.NaN)).toBeLessThan(0)
+    expect(compareKeys(Number.NaN, 1)).toBeGreaterThan(0)
+    expect(compareKeys(Number.NaN, Number.NaN)).toBe(0)
+  })
+})
+
+describe(`serializeValue`, () => {
+  it(`preserves the established JSON form for ordinary keys`, () => {
+    expect(serializeValue(`user1`)).toBe(`"user1"`)
+    expect(serializeValue([1, `completed`])).toBe(`[1,"completed"]`)
+  })
+
+  it(`keeps distinct primitive types and special numbers distinct`, () => {
+    expect(serializeValue(1n)).not.toBe(serializeValue(`1`))
+    expect(serializeValue(Number.NaN)).not.toBe(serializeValue(null))
+    expect(serializeValue(undefined)).not.toBe(serializeValue(null))
+    expect(serializeValue(new Date(0))).not.toBe(
+      serializeValue(`1970-01-01T00:00:00.000Z`),
+    )
+    expect(serializeValue(new Date(Number.NaN))).not.toBe(
+      serializeValue(Number.NaN),
+    )
+  })
+
+  it(`canonicalizes plain-object property order`, () => {
+    expect(serializeValue({ a: 1, b: 2 })).toBe(serializeValue({ b: 2, a: 1 }))
   })
 })
 
@@ -122,11 +153,20 @@ describe(`hash`, () => {
       expect(typeof result1).toBe(hashType)
       expect(typeof result2).toBe(hashType)
       expect(typeof result3).toBe(hashType)
-      // Note: Different symbol instances with same description have same hash
-      expect(result1).toBe(result2)
+      expect(result1).not.toBe(result2)
       expect(result1).not.toBe(result3)
-      expect(result4).toBe(result5)
+      expect(result4).not.toBe(result5)
       expect(result1).not.toBe(result4)
+    })
+
+    it(`should hash registered symbols`, () => {
+      const first = Symbol.for(`tanstack-db-ivm-hash-first`)
+      const same = Symbol.for(`tanstack-db-ivm-hash-first`)
+      const second = Symbol.for(`tanstack-db-ivm-hash-second`)
+
+      expect(hash(first)).toBe(hash(same))
+      expect(hash(first)).not.toBe(hash(second))
+      expect(hash({ [first]: 1 })).not.toBe(hash({ [second]: 1 }))
     })
   })
 
@@ -141,6 +181,355 @@ describe(`hash`, () => {
       expect(typeof hash1).toBe(hashType)
       expect(typeof hash2).toBe(hashType)
       // Note: Different key orders might produce different hashes depending on JSON.stringify behavior
+    })
+
+    it(`includes enumerable symbol keys and values`, () => {
+      const key = Symbol(`key`)
+
+      expect(hash({ [key]: `before` })).not.toBe(hash({ [key]: `after` }))
+      expect(hash({ [Symbol(`key`)]: `value` })).not.toBe(
+        hash({ [Symbol(`key`)]: `value` }),
+      )
+    })
+
+    it(`rejects self and mutual cycles through symbol keys`, () => {
+      const key = Symbol(`cycle`)
+      const first: Record<PropertyKey, unknown> = {}
+      const second: Record<PropertyKey, unknown> = {}
+      first[key] = first
+      second[key] = second
+
+      const firstPeer: Record<PropertyKey, unknown> = {}
+      const secondPeer: Record<PropertyKey, unknown> = {}
+      firstPeer[key] = secondPeer
+      secondPeer[key] = firstPeer
+
+      for (const input of [first, second, firstPeer, secondPeer]) {
+        expect(() => hash(input)).toThrow(
+          `Cannot hash cyclic structural values`,
+        )
+        expect(() => hash(input)).toThrow(
+          `Cannot hash cyclic structural values`,
+        )
+      }
+    })
+
+    it.each([`object`, `map`] as const)(
+      `rejects shared cyclic branches through %s with bounded work`,
+      (container) => {
+        const size = 14
+        let reads = 0
+        const nodes: Array<Record<string, unknown> | Map<string, unknown>> =
+          Array.from({ length: size }, (_, value) =>
+            container === `object`
+              ? { value }
+              : new Map<string, unknown>([[`value`, value]]),
+          )
+
+        for (let index = 0; index < size; index++) {
+          const node = nodes[index]!
+          const next = nodes[(index + 1) % size]!
+          for (const key of [`left`, `right`] as const) {
+            const wrapper = Object.defineProperty({}, `next`, {
+              enumerable: true,
+              get: () => {
+                reads++
+                return next
+              },
+            })
+            if (node instanceof Map) node.set(key, wrapper)
+            else node[key] = wrapper
+          }
+        }
+
+        expect(() => hash(nodes[0]!)).toThrow(
+          `Cannot hash cyclic structural values`,
+        )
+        const firstReads = reads
+        const copy = structuredClone(nodes[0]!)
+
+        expect(() => hash(copy)).toThrow(`Cannot hash cyclic structural values`)
+        expect(firstReads).toBeLessThanOrEqual(size * 2)
+      },
+    )
+
+    it(`rejects a shared child that cycles to either ancestor`, () => {
+      const createGraph = (backBranch: `left` | `right`) => {
+        const root: Record<string, unknown> = {}
+        const left: Record<string, unknown> = {}
+        const right: Record<string, unknown> = {}
+        const shared: Record<string, unknown> = {}
+        root.left = left
+        root.right = right
+        left.next = shared
+        right.next = shared
+        shared.back = backBranch === `left` ? left : right
+        return root
+      }
+
+      const left = createGraph(`left`)
+      const equalLeft = createGraph(`left`)
+      const right = createGraph(`right`)
+
+      for (const input of [left, equalLeft, right]) {
+        expect(() => hash(input)).toThrow(
+          `Cannot hash cyclic structural values`,
+        )
+      }
+    })
+
+    it(`rejects cyclic graphs with exponentially many ancestor contexts`, () => {
+      const depth = 11
+      const shared = Array.from(
+        { length: depth + 1 },
+        (_, level) => ({ level }) as Record<string, unknown>,
+      )
+      const left = Array.from({ length: depth }, (_, level) => ({
+        side: `left`,
+        level,
+        next: shared[level + 1],
+      }))
+      const right = Array.from({ length: depth }, (_, level) => ({
+        side: `right`,
+        level,
+        next: shared[level + 1],
+      }))
+      for (let level = 0; level < depth; level++) {
+        shared[level]!.left = left[level]
+        shared[level]!.right = right[level]
+        shared[depth]![`left${level}`] = left[level]
+      }
+
+      expect(() => hash(shared[0])).toThrow(TypeError)
+      expect(() => hash(shared[0])).toThrow(
+        `Cannot hash cyclic structural values`,
+      )
+
+      const ring = Array.from(
+        { length: 600 },
+        (_, value) => ({ value }) as { value: number; next?: unknown },
+      )
+      for (let index = 0; index < ring.length; index++) {
+        ring[index]!.next = ring[(index + 1) % ring.length]
+      }
+      expect(() => hash(structuredClone(ring[0]))).toThrow(
+        `Cannot hash cyclic structural values`,
+      )
+      expect(() => hash(ring[0])).toThrow(
+        `Cannot hash cyclic structural values`,
+      )
+
+      const independent: Record<string, { self?: unknown }> = {}
+      for (let index = 0; index < 600; index++) {
+        const cycle: { self?: unknown } = {}
+        cycle.self = cycle
+        independent[String(index)] = cycle
+      }
+      expect(() => hash(structuredClone(independent))).toThrow(
+        `Cannot hash cyclic structural values`,
+      )
+      expect(() => hash(independent)).toThrow(
+        `Cannot hash cyclic structural values`,
+      )
+
+      const independentDiamonds: Record<string, unknown> = {}
+      for (let index = 0; index < 600; index++) {
+        const diamondCenter: Record<string, unknown> = {}
+        const leftIngress = { next: diamondCenter }
+        const rightIngress = { next: diamondCenter }
+        diamondCenter.back = leftIngress
+        independentDiamonds[`left${index}`] = leftIngress
+        independentDiamonds[`right${index}`] = rightIngress
+      }
+      expect(() => hash(structuredClone(independentDiamonds))).toThrow(
+        `Cannot hash cyclic structural values`,
+      )
+      expect(() => hash(independentDiamonds)).toThrow(
+        `Cannot hash cyclic structural values`,
+      )
+
+      const small: { self?: unknown } = {}
+      small.self = small
+      expect(() => hash(structuredClone(small))).toThrow(
+        `Cannot hash cyclic structural values`,
+      )
+      expect(() => hash(small)).toThrow(`Cannot hash cyclic structural values`)
+    })
+
+    it(`rejects both small and large repeated cyclic traversals`, () => {
+      const createGraph = (size: number) => {
+        const nodes = Array.from(
+          { length: size },
+          (_, value) => ({ value }) as Record<string, unknown>,
+        )
+        for (let index = 0; index < size; index++) {
+          const next = nodes[(index + 1) % size]!
+          nodes[index]!.left = { next }
+          nodes[index]!.right = { next }
+        }
+        return nodes[0]
+      }
+
+      expect(() => hash(createGraph(20))).toThrow(
+        `Cannot hash cyclic structural values`,
+      )
+      expect(() => hash(createGraph(300))).toThrow(
+        `Cannot hash cyclic structural values`,
+      )
+    })
+
+    it(`does not warm structural caches when a hash is rejected`, () => {
+      let reads = 0
+      const sentinel = Object.defineProperty({}, `value`, {
+        enumerable: true,
+        get: () => ++reads,
+      })
+      const shared: Record<string, unknown> = {
+        payload: Array.from({ length: 66_000 }, (_, value) => ({ value })),
+      }
+      const left = { next: shared }
+      const right = { next: shared }
+      shared.back = left
+      const root = { aSentinel: sentinel, left, right }
+
+      expect(() => hash(root)).toThrow(`Cannot hash cyclic structural values`)
+      expect(() => hash(root)).toThrow(`Cannot hash cyclic structural values`)
+      expect(reads).toBe(2)
+    })
+
+    it.each([
+      [`Buffer`, () => Buffer.alloc(129)],
+      [`Uint8Array`, () => new Uint8Array(129)],
+      [`File`, () => new File([`opaque`], `opaque.bin`)],
+    ])(
+      `treats a large %s as an opaque leaf before structural work`,
+      (_name, createLeaf) => {
+        const leaves = Array.from({ length: 700 }, createLeaf)
+        for (const leaf of leaves) Object.assign(leaf, { self: leaf })
+        const createChain = () => {
+          const ring = leaves.map((leaf, value) => ({
+            value,
+            leaf,
+            next: undefined as unknown,
+          }))
+          for (let index = 0; index < ring.length; index++) {
+            ring[index]!.next = ring[index + 1]
+          }
+          return ring[0]
+        }
+
+        const first = createChain()
+        const expectedHash = hash(first)
+        expect(hash(first)).toBe(expectedHash)
+        expect(hash(createChain())).toBe(expectedHash)
+
+        let atDepthBoundary: unknown = createLeaf()
+        for (let index = 0; index < 768; index++) {
+          atDepthBoundary = { next: atDepthBoundary }
+        }
+        expect(() => hash(atDepthBoundary)).not.toThrow()
+
+        const adoptionLeaves = Array.from({ length: 20 }, createLeaf)
+        const createAdoptionGraph = () => {
+          const nodes = adoptionLeaves.map((leaf, value) => ({
+            value,
+            leaf,
+          })) as Array<Record<string, unknown>>
+          for (let index = 0; index < nodes.length; index++) {
+            const next = nodes[index + 1]
+            nodes[index]!.left = { next }
+            nodes[index]!.right = { next }
+          }
+          return nodes[0]
+        }
+        expect(hash(createAdoptionGraph())).toBe(hash(createAdoptionGraph()))
+      },
+    )
+
+    it(`rejects deep structural recursion before the JavaScript stack overflows`, () => {
+      let reads = 0
+      const sentinel = Object.defineProperty({}, `value`, {
+        enumerable: true,
+        get: () => ++reads,
+      })
+      const ring = Array.from(
+        { length: 800 },
+        (_, value) => ({ value }) as { value: number; next?: unknown },
+      )
+      for (let index = 0; index < ring.length; index++) {
+        ring[index]!.next = ring[(index + 1) % ring.length]
+      }
+      Object.defineProperty(ring[0]!, `aSentinel`, {
+        enumerable: true,
+        value: sentinel,
+      })
+
+      expect(() => hash(ring[0])).toThrow(
+        `Value is too complex to hash safely: structural depth`,
+      )
+      expect(() => hash(ring[0])).toThrow(
+        `Value is too complex to hash safely: structural depth`,
+      )
+      expect(reads).toBe(2)
+
+      const createChain = (size: number) => {
+        const root: { next?: unknown } = {}
+        let tail = root
+        for (let index = 0; index < size; index++) {
+          const next: { next?: unknown } = {}
+          tail.next = next
+          tail = next
+        }
+        return root
+      }
+      const accepted = createChain(600)
+      expect(hash(structuredClone(accepted))).toBe(hash(accepted))
+
+      const root = createChain(800)
+      expect(() => hash(root)).toThrow(
+        `Value is too complex to hash safely: structural depth`,
+      )
+    })
+
+    it(`rejects dense ancestor back-references without warming siblings`, () => {
+      const createGraph = (size: number) => {
+        const nodes: Array<Record<string, unknown>> = []
+        for (let index = 0; index < size; index++) {
+          const node: Record<string, unknown> = { index }
+          if (index > 0) nodes[index - 1]!.next = node
+          for (let ancestor = 0; ancestor < index; ancestor++) {
+            node[`ancestor${ancestor}`] = nodes[ancestor]
+          }
+          nodes.push(node)
+        }
+        return nodes[0]!
+      }
+      const accepted = createGraph(50)
+      expect(() => hash(structuredClone(accepted))).toThrow(
+        `Cannot hash cyclic structural values`,
+      )
+      expect(() => hash(accepted)).toThrow(
+        `Cannot hash cyclic structural values`,
+      )
+
+      let reads = 0
+      const sentinel = Object.defineProperty({}, `value`, {
+        enumerable: true,
+        get: () => ++reads,
+      })
+      const rejected = createGraph(450)
+      Object.defineProperty(rejected, `aSentinel`, {
+        enumerable: true,
+        value: sentinel,
+      })
+
+      expect(() => hash(rejected)).toThrow(
+        `Cannot hash cyclic structural values`,
+      )
+      expect(() => hash(rejected)).toThrow(
+        `Cannot hash cyclic structural values`,
+      )
+      expect(reads).toBe(2)
     })
 
     it(`should hash arrays`, () => {

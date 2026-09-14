@@ -8,6 +8,7 @@ import {
   createOptimisticAction,
   eq,
   gt,
+  toArray,
 } from '@tanstack/db'
 import {
   For,
@@ -85,6 +86,37 @@ const initialIssues: Array<Issue> = [
 ]
 
 describe(`Query Collections`, () => {
+  it(`clears data immediately when switching to an already-ready empty collection`, async () => {
+    return createRoot(async (dispose) => {
+      const populated = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `solid-populated-switch`,
+          getKey: (person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+      const empty = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `solid-empty-switch`,
+          getKey: (person) => person.id,
+          initialData: [],
+        }),
+      )
+      populated.startSyncImmediate()
+      empty.startSyncImmediate()
+
+      const [current, setCurrent] = createSignal(populated)
+      const result = useLiveQuery(current)
+      await waitFor(() => expect(result()).toHaveLength(3))
+
+      setCurrent(empty)
+
+      expect(result()).toHaveLength(0)
+      expect(result.state.size).toBe(0)
+      dispose()
+    })
+  })
+
   it(`should work with basic collection and select`, async () => {
     const collection = createCollection(
       mockSyncCollectionOptions<Person>({
@@ -518,6 +550,125 @@ describe(`Query Collections`, () => {
 
       // Should now be empty
       expect(rendered.result.state.size).toBe(0)
+
+      dispose()
+    })
+  })
+
+  it(`should drop stale keys from state synchronously when parameters narrow`, async () => {
+    // Narrowing recompiles into a *new* collection with fewer keys. The
+    // observer re-seeds via `includeInitialState`, which only inserts current
+    // rows and never deletes the previous collection's keys. `state` must be
+    // cleared synchronously so the dropped keys don't linger in the window
+    // before the async resource reconciles (this reads `state` with no settle;
+    // `data`, rebuilt wholesale, stays correct either way).
+    return createRoot(async (dispose) => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `stale-keys-on-narrow-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const [minAge, setMinAge] = createSignal(10)
+      const rendered = renderHook(
+        (props: { minAge: Accessor<number> }) => {
+          return useLiveQuery((q) =>
+            q
+              .from({ collection })
+              .where(({ collection: c }) => gt(c.age, props.minAge()))
+              .select(({ collection: c }) => ({ id: c.id })),
+          )
+        },
+        { initialProps: [{ minAge }] },
+      )
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(rendered.result.state.size).toBe(3) // all three ages > 10
+
+      // Narrow to only John Smith (age 35); ids 1 and 2 must not linger.
+      setMinAge(32)
+
+      expect(rendered.result.state.size).toBe(1)
+      expect(rendered.result.state.has(`1`)).toBe(false)
+      expect(rendered.result.state.has(`2`)).toBe(false)
+
+      dispose()
+    })
+  })
+
+  it(`does not resurrect state from a superseded collection's async continuation`, async () => {
+    // The resource fetcher awaits toArrayWhenReady(); if the collection is
+    // switched while that await is pending, the old continuation must not
+    // write its (now stale) rows/status over the new collection's.
+    return createRoot(async (dispose) => {
+      let beginA: (() => void) | undefined
+      let writeA: ((msg: any) => void) | undefined
+      let commitA: (() => void) | undefined
+      let markReadyA: (() => void) | undefined
+
+      const slowCollection = createCollection<Person>({
+        id: `superseded-async-slow`,
+        getKey: (person: Person) => person.id,
+        startSync: false,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            beginA = begin
+            writeA = write
+            commitA = commit
+            markReadyA = markReady
+            // Stays loading until markReady is called manually.
+          },
+        },
+      })
+      const fastCollection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `superseded-async-fast`,
+          getKey: (person: Person) => person.id,
+          initialData: [initialPersons[0]!],
+        }),
+      )
+
+      const [useSlow, setUseSlow] = createSignal(true)
+      const rendered = renderHook(() => {
+        return useLiveQuery((q) =>
+          q
+            .from({ persons: useSlow() ? slowCollection : fastCollection })
+            .select(({ persons }) => ({ id: persons.id, name: persons.name })),
+        )
+      })
+
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      expect(rendered.result.isLoading).toBe(true)
+
+      // Switch collections while the slow fetch is still awaiting readiness.
+      setUseSlow(false)
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      expect(rendered.result.state.has(`1`)).toBe(true)
+
+      // The superseded collection now becomes ready with different rows; its
+      // continuation resolves but must not clobber the current state.
+      beginA!()
+      writeA!({
+        type: `insert`,
+        value: {
+          id: `stale`,
+          name: `Stale Row`,
+          age: 99,
+          email: `stale@example.com`,
+          isActive: false,
+          team: `none`,
+        },
+      })
+      commitA!()
+      markReadyA!()
+      await new Promise((resolve) => setTimeout(resolve, 20))
+
+      expect(rendered.result.state.has(`stale`)).toBe(false)
+      expect(rendered.result.state.has(`1`)).toBe(true)
+      expect(rendered.result.data.map((p: any) => p.id)).toEqual([`1`])
+      expect(rendered.result.status).toBe(`ready`)
 
       dispose()
     })
@@ -2585,6 +2736,155 @@ describe(`Query Collections`, () => {
       })
 
       expect(rendered.result()).toBeUndefined()
+    })
+  })
+})
+
+describe(`includes subqueries`, () => {
+  type Project = {
+    id: number
+    name: string
+  }
+
+  type ProjectIssue = {
+    id: number
+    projectId: number
+    title: string
+  }
+
+  function includedIssues(value: unknown): Array<ProjectIssue> {
+    if (Array.isArray(value)) {
+      return value as Array<ProjectIssue>
+    }
+    if (
+      value !== null &&
+      typeof value === `object` &&
+      `toArray` in value &&
+      Array.isArray(value.toArray)
+    ) {
+      return value.toArray as Array<ProjectIssue>
+    }
+    return []
+  }
+
+  it(`updates a rendered array include after a child insert`, async () => {
+    const projects = createCollection(
+      mockSyncCollectionOptions<Project>({
+        id: `includes-solid-array-projects`,
+        getKey: (project) => project.id,
+        initialData: [
+          { id: 1, name: `Alpha` },
+          { id: 2, name: `Beta` },
+        ],
+      }),
+    )
+    const issues = createCollection(
+      mockSyncCollectionOptions<ProjectIssue>({
+        id: `includes-solid-array-issues`,
+        getKey: (issue) => issue.id,
+        initialData: [
+          { id: 10, projectId: 1, title: `Bug in Alpha` },
+          { id: 20, projectId: 2, title: `Bug in Beta` },
+        ],
+      }),
+    )
+
+    function TestComponent() {
+      const query = useLiveQuery((q) =>
+        q.from({ project: projects }).select(({ project }) => ({
+          id: project.id,
+          issueTitles: toArray(
+            q
+              .from({ issue: issues })
+              .where(({ issue }) => eq(issue.projectId, project.id))
+              .select(({ issue }) => ({
+                id: issue.id,
+                title: issue.title,
+              })),
+          ),
+        })),
+      )
+
+      return (
+        <For each={query()}>
+          {(project) => (
+            <p data-testid={`project-${project.id}`}>
+              {project.issueTitles.map((issue) => issue.title).join(`|`)}
+            </p>
+          )}
+        </For>
+      )
+    }
+
+    const rendered = render(() => <TestComponent />)
+    await waitFor(() => {
+      expect(rendered.getByTestId(`project-1`).textContent).toBe(`Bug in Alpha`)
+    })
+
+    issues.utils.begin()
+    issues.utils.write({
+      type: `insert`,
+      value: { id: 11, projectId: 1, title: `Feature for Alpha` },
+    })
+    issues.utils.commit()
+
+    await waitFor(() => {
+      expect(rendered.getByTestId(`project-1`).textContent).toBe(
+        `Bug in Alpha|Feature for Alpha`,
+      )
+    })
+  })
+
+  it(`populates an initially empty collection include after its first child insert`, async () => {
+    const projects = createCollection(
+      mockSyncCollectionOptions<Project>({
+        id: `includes-solid-empty-projects`,
+        getKey: (project) => project.id,
+        initialData: [{ id: 1, name: `Alpha` }],
+      }),
+    )
+    const issues = createCollection(
+      mockSyncCollectionOptions<ProjectIssue>({
+        id: `includes-solid-empty-issues`,
+        getKey: (issue) => issue.id,
+        initialData: [],
+      }),
+    )
+
+    const rendered = renderHook(() =>
+      useLiveQuery((q) =>
+        q.from({ project: projects }).select(({ project }) => ({
+          id: project.id,
+          issues: q
+            .from({ issue: issues })
+            .where(({ issue }) => eq(issue.projectId, project.id))
+            .select(({ issue }) => ({
+              id: issue.id,
+              projectId: issue.projectId,
+              title: issue.title,
+            })),
+        })),
+      ),
+    )
+
+    await waitFor(() => {
+      expect(rendered.result.isReady).toBe(true)
+      expect(includedIssues(rendered.result()[0]?.issues)).toEqual([])
+    })
+
+    issues.utils.begin()
+    issues.utils.write({
+      type: `insert`,
+      value: { id: 10, projectId: 1, title: `Bug in Alpha` },
+    })
+    issues.utils.commit()
+
+    await waitFor(() => {
+      expect(
+        includedIssues(rendered.result()[0]?.issues).map(
+          (issue) => issue.title,
+        ),
+      ).toEqual([`Bug in Alpha`])
     })
   })
 })

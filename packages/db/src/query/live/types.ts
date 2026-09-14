@@ -16,6 +16,12 @@ export type Changes<T> = {
   inserts: number
   value: T
   orderByIndex: string | undefined
+  // Captured from the retract side of a change so the flush can detect an
+  // "order-only move": a row whose projected value is unchanged but whose
+  // `orderByIndex` moved. Such a move is swallowed by the collection's
+  // value-diff, so it needs an explicit layout notification.
+  previousValue?: T
+  previousOrderByIndex?: string | undefined
 }
 
 export type SyncState = {

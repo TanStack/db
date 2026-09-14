@@ -1,6 +1,27 @@
 import { Func, PropRef, Value } from '../ir.js'
 import type { BasicExpression, OrderBy } from '../ir.js'
 
+/** Extracts the source aliases referenced by an expression. */
+export function getSourceAliasesFromExpression(
+  expr: BasicExpression,
+): Set<string> {
+  switch (expr.type) {
+    case `ref`:
+      return new Set(expr.path[0] ? [expr.path[0]] : [])
+    case `func`: {
+      const sourceAliases = new Set<string>()
+      for (const arg of expr.args) {
+        for (const alias of getSourceAliasesFromExpression(arg)) {
+          sourceAliases.add(alias)
+        }
+      }
+      return sourceAliases
+    }
+    default:
+      return new Set()
+  }
+}
+
 /**
  * Normalizes a WHERE clause expression by removing table aliases from property references.
  *

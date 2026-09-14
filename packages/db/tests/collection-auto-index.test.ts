@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { CollectionConfigurationError } from '../src/errors'
 import { createCollection } from '../src/collection/index.js'
 import {
@@ -197,7 +197,7 @@ describe(`Collection Auto-Indexing`, () => {
 
     await collection.stateWhenReady()
 
-    expect(() => collection.createIndex((row) => row.age)).toThrow(
+    expect(() => collection.createIndex((item) => item.age)).toThrow(
       CollectionConfigurationError,
     )
   })
@@ -250,13 +250,60 @@ describe(`Collection Auto-Indexing`, () => {
     subscription.unsubscribe()
   })
 
+  it(`indexes symbol-valued equality fields without falling back to a scan`, async () => {
+    type SymbolItem = { id: string; group: symbol }
+    const firstGroup = Symbol(`first`)
+    const secondGroup = Symbol(`second`)
+    const symbolRow = createSingleRowRefProxy<SymbolItem>()
+    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const collection = createCollection<SymbolItem, string>({
+      getKey: (item) => item.id,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({ type: `insert`, value: { id: `one`, group: firstGroup } })
+          write({ type: `insert`, value: { id: `two`, group: secondGroup } })
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    try {
+      await collection.stateWhenReady()
+      const changes: Array<any> = []
+      const subscription = collection.subscribeChanges(
+        (items) => changes.push(...items),
+        {
+          includeInitialState: true,
+          whereExpression: eq(symbolRow.group, firstGroup),
+        },
+      )
+
+      expect(collection.indexes.size).toBe(1)
+      expect(changes.map(({ value }) => value.id)).toEqual([`one`])
+      expect(warning).not.toHaveBeenCalled()
+      subscription.unsubscribe()
+    } finally {
+      warning.mockRestore()
+      await collection.cleanup()
+    }
+  })
+
   it(`should create auto-indexes for transformed fields of subqueries when autoIndex is "eager"`, async () => {})
 
-  it(`should not create duplicate auto-indexes for the same field`, async () => {
+  it(`should not create duplicate auto-indexes when locale options are omitted`, async () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
       autoIndex: `eager`,
       defaultIndexType: BTreeIndex,
+      defaultStringCollation: {
+        stringSort: `locale`,
+        localeOptions: { sensitivity: undefined },
+      },
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {

@@ -130,6 +130,7 @@ function makeHandle(
       const result = getResult()
       return {
         data: result?.data,
+        state: result?.state,
         status: result?.status ?? `idle`,
         isReady: Boolean(result?.isReady),
         isError: Boolean(result?.isError),

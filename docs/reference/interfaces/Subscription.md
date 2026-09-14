@@ -5,7 +5,7 @@ title: Subscription
 
 # Interface: Subscription
 
-Defined in: [packages/db/src/types.ts:254](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L254)
+Defined in: [packages/db/src/types.ts:269](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L269)
 
 Public interface for a collection subscription
 Used by sync implementations to track subscription lifecycle
@@ -16,13 +16,25 @@ Used by sync implementations to track subscription lifecycle
 
 ## Properties
 
+### lastError
+
+```ts
+readonly lastError: unknown;
+```
+
+Defined in: [packages/db/src/types.ts:273](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L273)
+
+Most recent subset-load failure observed by this subscription.
+
+***
+
 ### status
 
 ```ts
 readonly status: SubscriptionStatus;
 ```
 
-Defined in: [packages/db/src/types.ts:256](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L256)
+Defined in: [packages/db/src/types.ts:271](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L271)
 
 Current status of the subscription
 
@@ -34,7 +46,7 @@ Current status of the subscription
 protected clearListeners(): void;
 ```
 
-Defined in: [packages/db/src/event-emitter.ts:115](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L115)
+Defined in: [packages/db/src/event-emitter.ts:156](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L156)
 
 Clear all listeners
 
@@ -56,7 +68,7 @@ EventEmitter.clearListeners
 protected emitInner<T>(event, eventPayload): void;
 ```
 
-Defined in: [packages/db/src/event-emitter.ts:96](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L96)
+Defined in: [packages/db/src/event-emitter.ts:124](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L124)
 
 **`Internal`**
 
@@ -95,13 +107,58 @@ EventEmitter.emitInner
 
 ***
 
+### emitInnerWhile()
+
+```ts
+protected emitInnerWhile<T>(
+   event, 
+   eventPayload, 
+   isCurrent): void;
+```
+
+Defined in: [packages/db/src/event-emitter.ts:132](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L132)
+
+Emit until a reentrant callback invalidates the event being delivered.
+
+#### Type Parameters
+
+##### T
+
+`T` *extends* keyof [`SubscriptionEvents`](../type-aliases/SubscriptionEvents.md)
+
+#### Parameters
+
+##### event
+
+`T`
+
+##### eventPayload
+
+[`SubscriptionEvents`](../type-aliases/SubscriptionEvents.md)\[`T`\]
+
+##### isCurrent
+
+() => `boolean`
+
+#### Returns
+
+`void`
+
+#### Inherited from
+
+```ts
+EventEmitter.emitInnerWhile
+```
+
+***
+
 ### off()
 
 ```ts
 off<T>(event, callback): void;
 ```
 
-Defined in: [packages/db/src/event-emitter.ts:53](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L53)
+Defined in: [packages/db/src/event-emitter.ts:72](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L72)
 
 Unsubscribe from an event
 
@@ -143,7 +200,7 @@ EventEmitter.off
 on<T>(event, callback): () => void;
 ```
 
-Defined in: [packages/db/src/event-emitter.ts:17](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L17)
+Defined in: [packages/db/src/event-emitter.ts:21](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L21)
 
 Subscribe to an event
 
@@ -193,7 +250,7 @@ EventEmitter.on
 once<T>(event, callback): () => void;
 ```
 
-Defined in: [packages/db/src/event-emitter.ts:37](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L37)
+Defined in: [packages/db/src/event-emitter.ts:50](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L50)
 
 Subscribe to an event once (automatically unsubscribes after first emission)
 
@@ -243,7 +300,7 @@ EventEmitter.once
 waitFor<T>(event, timeout?): Promise<SubscriptionEvents[T]>;
 ```
 
-Defined in: [packages/db/src/event-emitter.ts:66](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L66)
+Defined in: [packages/db/src/event-emitter.ts:94](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L94)
 
 Wait for an event to be emitted
 

@@ -9,7 +9,7 @@ title: ContextFromSource
 type ContextFromSource<TSource> = object;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:137](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L137)
+Defined in: [packages/db/src/query/builder/types.ts:151](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L151)
 
 ## Type Parameters
 
@@ -25,7 +25,7 @@ Defined in: [packages/db/src/query/builder/types.ts:137](https://github.com/TanS
 baseSchema: SchemaFromSource<TSource>;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:138](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L138)
+Defined in: [packages/db/src/query/builder/types.ts:152](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L152)
 
 ***
 
@@ -35,7 +35,7 @@ Defined in: [packages/db/src/query/builder/types.ts:138](https://github.com/TanS
 fromSourceName: keyof TSource & string;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:140](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L140)
+Defined in: [packages/db/src/query/builder/types.ts:154](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L154)
 
 ***
 
@@ -45,7 +45,7 @@ Defined in: [packages/db/src/query/builder/types.ts:140](https://github.com/TanS
 hasJoins: false;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:141](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L141)
+Defined in: [packages/db/src/query/builder/types.ts:155](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L155)
 
 ***
 
@@ -55,4 +55,4 @@ Defined in: [packages/db/src/query/builder/types.ts:141](https://github.com/TanS
 schema: SchemaFromSource<TSource>;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:139](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L139)
+Defined in: [packages/db/src/query/builder/types.ts:153](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L153)

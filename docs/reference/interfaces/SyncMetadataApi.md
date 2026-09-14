@@ -5,7 +5,7 @@ title: SyncMetadataApi
 
 # Interface: SyncMetadataApi\<TKey\>
 
-Defined in: [packages/db/src/types.ts:362](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L362)
+Defined in: [packages/db/src/types.ts:453](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L453)
 
 ## Type Parameters
 
@@ -21,7 +21,7 @@ Defined in: [packages/db/src/types.ts:362](https://github.com/TanStack/db/blob/m
 collection: object;
 ```
 
-Defined in: [packages/db/src/types.ts:370](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L370)
+Defined in: [packages/db/src/types.ts:461](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L461)
 
 #### delete()
 
@@ -99,7 +99,7 @@ set: (key, value) => void;
 row: object;
 ```
 
-Defined in: [packages/db/src/types.ts:365](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L365)
+Defined in: [packages/db/src/types.ts:456](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L456)
 
 #### delete()
 

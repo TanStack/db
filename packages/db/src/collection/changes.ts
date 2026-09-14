@@ -1,4 +1,6 @@
 import { NegativeActiveSubscribersError } from '../errors'
+import { recordPublicationError, withPublicationContext } from '../scheduler.js'
+import { runAllCallbacks } from '../utils/callbacks.js'
 import {
   createSingleRowRefProxy,
   toExpression,
@@ -12,6 +14,11 @@ import type { CollectionEventsManager } from './events.js'
 import type { CollectionImpl } from './index.js'
 import type { CollectionStateManager } from './state.js'
 import type { WithVirtualProps } from '../virtual-props.js'
+
+export type PublicationDeferral = {
+  publish: () => void
+  discard: () => void
+}
 
 export class CollectionChangesManager<
   TOutput extends object = Record<string, unknown>,
@@ -29,6 +36,30 @@ export class CollectionChangesManager<
   public changeSubscriptions = new Set<CollectionSubscription>()
   public batchedEvents: Array<ChangeMessage<TOutput, TKey>> = []
   public shouldBatchEvents = false
+  private publicationDeferralDepth = 0
+  private discardDeferredPublications = false
+  private deferredStateRevision = 0
+  private deferredLayoutRevision = 0
+  private deferredPublications: Array<{
+    changes: Array<ChangeMessage<TOutput, TKey>>
+    layoutChanged: boolean
+  }> = []
+  private layoutChangeListeners = new Set<() => void>()
+
+  /**
+   * Monotonic revision of the collection's visible state, advanced once per
+   * committed batch of changes and cleanup — including while nothing is subscribed.
+   * Lets consumers (the live-query observer) cheaply detect "did the data
+   * change" without subscribing, and stays untouched by subscription
+   * bootstrap replays, which do not go through emitEvents.
+   */
+  public stateRevision = 0
+
+  /**
+   * Monotonic revision advanced only for explicit layout-only publications.
+   * Observers use it to detect reordered rows whose values did not change.
+   */
+  public layoutRevision = 0
 
   /**
    * Creates a new CollectionChangesManager instance
@@ -54,10 +85,17 @@ export class CollectionChangesManager<
    * This bypasses the normal empty array check in emitEvents
    */
   public emitEmptyReadyEvent(): void {
-    // Emit empty array directly to all subscribers
-    for (const subscription of this.changeSubscriptions) {
-      subscription.emitEvents([])
-    }
+    withPublicationContext(() => {
+      try {
+        runAllCallbacks(
+          [...this.changeSubscriptions].map(
+            (subscription) => () => subscription.emitEvents([]),
+          ),
+        )
+      } catch (error) {
+        recordPublicationError(error)
+      }
+    })
   }
 
   /**
@@ -76,7 +114,13 @@ export class CollectionChangesManager<
   public emitEvents(
     changes: Array<ChangeMessage<TOutput, TKey>>,
     forceEmit = false,
+    layoutChanged = false,
   ): void {
+    // The visible state was already committed by the caller, so the revision
+    // advances even when the events below end up batched for later emission.
+    if (changes.length > 0) this.stateRevision++
+    if (layoutChanged) this.layoutRevision++
+
     // Skip batching for user actions (forceEmit=true) to keep UI responsive
     if (this.shouldBatchEvents && !forceEmit) {
       // Add events to the batch
@@ -92,13 +136,81 @@ export class CollectionChangesManager<
       // buffered optimistic events with the final changes so subscribers see the
       // whole picture, even if the sync diff is empty.
       if (this.batchedEvents.length > 0) {
-        rawEvents = [...this.batchedEvents, ...changes]
+        const combined = new Map(
+          this.batchedEvents.map((change) => [change.key, change]),
+        )
+        for (const change of changes) {
+          const pending = combined.get(change.key)
+          // A buffered removal was never delivered. Re-insertion replaces the
+          // subscriber's old row rather than inserting an already-sent key.
+          combined.set(
+            change.key,
+            pending?.type === `delete` && change.type === `insert`
+              ? { ...change, type: `update`, previousValue: pending.value }
+              : change,
+          )
+        }
+        rawEvents = [...combined.values()]
       }
       this.batchedEvents = []
       this.shouldBatchEvents = false
     }
 
-    if (rawEvents.length === 0) {
+    if (this.publicationDeferralDepth > 0) {
+      this.deferredPublications.push({ changes: rawEvents, layoutChanged })
+      return
+    }
+
+    this.publishEvents(rawEvents, layoutChanged)
+  }
+
+  /**
+   * Defers subscriber delivery while a coherent multi-Collection publication
+   * installs all of its visible state. State and indexes still commit at their
+   * normal transaction boundaries.
+   */
+  public deferPublication(): PublicationDeferral {
+    if (this.publicationDeferralDepth === 0) {
+      this.deferredStateRevision = this.stateRevision
+      this.deferredLayoutRevision = this.layoutRevision
+    }
+    this.publicationDeferralDepth++
+    let closed = false
+
+    const close = (discard: boolean) => {
+      if (closed) return
+      closed = true
+      if (this.publicationDeferralDepth === 0) return
+      this.discardDeferredPublications ||= discard
+
+      this.publicationDeferralDepth--
+      if (this.publicationDeferralDepth > 0) return
+
+      const publications = this.deferredPublications
+      this.deferredPublications = []
+      if (this.discardDeferredPublications) {
+        this.discardDeferredPublications = false
+        this.stateRevision = this.deferredStateRevision
+        this.layoutRevision = this.deferredLayoutRevision
+        return
+      }
+      this.publishEvents(
+        publications.flatMap(({ changes }) => changes),
+        publications.some(({ layoutChanged }) => layoutChanged),
+      )
+    }
+
+    return {
+      publish: () => close(false),
+      discard: () => close(true),
+    }
+  }
+
+  private publishEvents(
+    rawEvents: Array<ChangeMessage<TOutput, TKey>>,
+    layoutChanged: boolean,
+  ): void {
+    if (rawEvents.length === 0 && !layoutChanged) {
       return
     }
 
@@ -108,10 +220,29 @@ export class CollectionChangesManager<
       ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>
     > = rawEvents.map((change) => this.enrichChangeWithVirtualProps(change))
 
-    // Emit to all listeners
-    for (const subscription of this.changeSubscriptions) {
-      subscription.emitEvents(enrichedEvents)
-    }
+    // Every subscriber sees one committed source batch before dependent query
+    // graphs run. This keeps repeated aliases and sibling subqueries coherent.
+    const layoutListeners = [...this.layoutChangeListeners]
+    const subscriptions = [...this.changeSubscriptions]
+    withPublicationContext(() => {
+      const callbacks: Array<() => void> = subscriptions.map(
+        (subscription) => () => subscription.emitEvents(enrichedEvents),
+      )
+      if (rawEvents.length === 0) {
+        callbacks.unshift(...layoutListeners)
+      }
+      try {
+        runAllCallbacks(callbacks)
+      } catch (error) {
+        recordPublicationError(error)
+      }
+    })
+  }
+
+  /** Subscribe to layout-only publications. Internal observer channel. */
+  public subscribeLayoutChanges(listener: () => void): () => void {
+    this.layoutChangeListeners.add(listener)
+    return () => this.layoutChangeListeners.delete(listener)
   }
 
   /**
@@ -123,9 +254,6 @@ export class CollectionChangesManager<
     ) => void,
     options: SubscribeChangesOptions<TOutput, TKey> = {},
   ): CollectionSubscription {
-    // Start sync and track subscriber
-    this.addSubscriber()
-
     // Compile where callback to whereExpression if provided
     if (options.where && options.whereExpression) {
       throw new Error(
@@ -141,37 +269,58 @@ export class CollectionChangesManager<
       whereExpression = toExpression(result)
     }
 
-    const subscription = new CollectionSubscription(this.collection, callback, {
-      ...opts,
-      whereExpression,
-      onUnsubscribe: () => {
-        this.removeSubscriber()
-        this.changeSubscriptions.delete(subscription)
-      },
-    })
+    // Acquire ownership only after all fallible option validation and
+    // user-provided predicate compilation has completed.
+    this.addSubscriber()
 
-    // Register status listener BEFORE requesting snapshot to avoid race condition.
-    // This ensures the listener catches all status transitions, even if the
-    // loadSubset promise resolves synchronously or very quickly.
-    if (options.onStatusChange) {
-      subscription.on(`status:change`, options.onStatusChange)
-    }
-
-    if (options.includeInitialState) {
-      subscription.requestSnapshot({
-        trackLoadSubsetPromise: false,
-        orderBy: options.orderBy,
-        limit: options.limit,
-        onLoadSubsetResult: options.onLoadSubsetResult,
+    let subscription: CollectionSubscription | undefined
+    const setupState = { closed: false }
+    try {
+      subscription = new CollectionSubscription(this.collection, callback, {
+        ...opts,
+        whereExpression,
+        onUnsubscribe: () => {
+          setupState.closed = true
+          this.removeSubscriber()
+          if (subscription) this.changeSubscriptions.delete(subscription)
+        },
       })
-    } else if (options.includeInitialState === false) {
-      // When explicitly set to false (not just undefined), mark all state as "seen"
-      // so that all future changes (including deletes) pass through unfiltered.
-      subscription.markAllStateAsSeen()
-    }
 
-    // Add to batched listeners
-    this.changeSubscriptions.add(subscription)
+      // Register status listener BEFORE requesting snapshot to avoid race condition.
+      // This ensures the listener catches all status transitions, even if the
+      // loadSubset promise resolves synchronously or very quickly.
+      if (options.onStatusChange) {
+        subscription.on(`status:change`, options.onStatusChange)
+      }
+
+      if (options.includeInitialState) {
+        subscription.requestSnapshot({
+          trackLoadSubsetPromise: false,
+          orderBy: options.orderBy,
+          limit: options.limit,
+          onLoadSubsetResult: options.onLoadSubsetResult,
+        })
+      } else if (options.includeInitialState === false) {
+        // When explicitly set to false (not just undefined), mark all state as "seen"
+        // so that all future changes (including deletes) pass through unfiltered.
+        subscription.markAllStateAsSeen()
+      }
+
+      // Add to batched listeners
+      if (!setupState.closed) this.changeSubscriptions.add(subscription)
+    } catch (error) {
+      if (subscription) {
+        try {
+          subscription.unsubscribe()
+        } catch {
+          // Preserve the setup error. Cleanup still releases subscriber
+          // ownership and attempts every subset unload before it throws.
+        }
+      } else {
+        this.removeSubscriber()
+      }
+      throw error
+    }
 
     return subscription
   }
@@ -184,12 +333,20 @@ export class CollectionChangesManager<
     this.activeSubscribersCount++
     this.lifecycle.cancelGCTimer()
 
-    // Start sync if collection was cleaned up
-    if (
-      this.lifecycle.status === `cleaned-up` ||
-      this.lifecycle.status === `idle`
-    ) {
-      this.sync.startSync()
+    try {
+      // Start sync if collection was cleaned up
+      if (
+        this.lifecycle.status === `cleaned-up` ||
+        this.lifecycle.status === `idle`
+      ) {
+        this.sync.startSync()
+      }
+    } catch (error) {
+      this.activeSubscribersCount = previousSubscriberCount
+      if (this.activeSubscribersCount === 0) {
+        this.lifecycle.startGCTimer()
+      }
+      throw error
     }
 
     this.events.emitSubscribersChange(
@@ -222,7 +379,12 @@ export class CollectionChangesManager<
    * This can be called manually or automatically by garbage collection
    */
   public cleanup(): void {
+    // Cleanup clears visible state without publishing row changes. Detached
+    // consumers may miss every status transition before an empty restart.
+    this.stateRevision++
     this.batchedEvents = []
     this.shouldBatchEvents = false
+    this.deferredPublications = []
+    this.publicationDeferralDepth = 0
   }
 }

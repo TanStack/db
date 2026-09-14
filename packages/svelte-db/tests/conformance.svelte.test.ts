@@ -128,6 +128,7 @@ function makeHandle(getQuery: () => any, dispose: () => void): LiveQueryHandle {
       const query = getQuery()
       return {
         data: query?.data,
+        state: query?.state,
         status: query?.status ?? `idle`,
         isReady: Boolean(query?.isReady),
         isError: Boolean(query?.isError),

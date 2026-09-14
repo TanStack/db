@@ -32,6 +32,9 @@ import {
   concat,
   // Math
   add,
+  subtract,
+  multiply,
+  divide,
   // Utility
   coalesce,
 } from '@tanstack/db'
@@ -111,6 +114,17 @@ Check if value is `undefined` (absent). Especially useful after left joins where
 ```ts
 isUndefined(profile) // no matching profile in left join
 ```
+
+### Comparison semantics
+
+Comparisons involving `null` or `undefined` evaluate as unknown and do not
+match. Use `isNull()` or `isUndefined()` instead of `eq(value, null)` or
+`eq(value, undefined)`.
+
+`NaN` follows PostgreSQL rather than JavaScript semantics: it equals itself and
+is greater than every other non-null value. Invalid `Date` values behave the
+same way. This applies to equality, `inArray()`, range comparisons, and
+ordering.
 
 ---
 
@@ -208,14 +222,31 @@ concat(user.firstName, ' ', user.lastName)
 
 ## Math Functions
 
-### add(left, right) -> BasicExpression\<number\>
+### add, subtract, multiply (left, right) -> BasicExpression\<number\>
 
-Add two numeric values.
+Apply the named operation to two numeric values.
 
 ```ts
 add(order.price, order.tax)
-add(user.salary, coalesce(user.bonus, 0))
+subtract(user.salary, user.deductions)
+multiply(item.price, item.quantity)
 ```
+
+Nullish operands are treated as `0`.
+
+### divide(left, right) -> BasicExpression\<number | null\>
+
+Divide two numeric values. Nullish operands are treated as `0`; a zero or
+nullish divisor returns `null`.
+
+```ts
+divide(order.total, order.itemCount)
+```
+
+These functions may be used in `orderBy()`. With a computed `orderBy()` and
+`limit()`, all matching rows load before sorting because lazy-loading
+optimization cannot apply. Literal values such as `Date.now()` are captured
+when the query is built.
 
 ---
 

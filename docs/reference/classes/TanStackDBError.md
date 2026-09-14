@@ -28,6 +28,7 @@ Defined in: [packages/db/src/errors.ts:2](https://github.com/TanStack/db/blob/ma
 - [`StorageError`](StorageError.md)
 - [`SyncCleanupError`](SyncCleanupError.md)
 - [`QueryOptimizerError`](QueryOptimizerError.md)
+- [`SetWindowReentrancyError`](SetWindowReentrancyError.md)
 
 ## Constructors
 

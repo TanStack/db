@@ -5,7 +5,11 @@ import {
   UpdateOperationItemNotFoundError,
 } from './errors'
 import type { QueryClient } from '@tanstack/query-core'
-import type { ChangeMessage, Collection } from '@tanstack/db'
+import type {
+  ChangeMessage,
+  Collection,
+  SyncAppliedReceipt,
+} from '@tanstack/db'
 
 // Track active batch operations per context to prevent cross-collection contamination
 const activeBatchContexts = new WeakMap<
@@ -42,7 +46,7 @@ export interface SyncContext<
    */
   begin: (options?: { immediate?: boolean }) => void
   write: (message: Omit<ChangeMessage<TRow>, `key`>) => void
-  commit: () => void
+  commit: () => SyncAppliedReceipt
   /**
    * Optional function to update the query cache with the latest synced data.
    * Handles both direct array caches and wrapped response formats (when `select` is used).

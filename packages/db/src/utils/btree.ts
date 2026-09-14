@@ -32,71 +32,14 @@ type index = number
 //   - V8 source (NewElementsCapacity in src/objects.h): arrays grow by 50% + 16 elements
 
 /**
- * A reasonably fast collection of key-value pairs with a powerful API.
- * Largely compatible with the standard Map. BTree is a B+ tree data structure,
- * so the collection is sorted by key.
- *
- * B+ trees tend to use memory more efficiently than hashtables such as the
- * standard Map, especially when the collection contains a large number of
- * items. However, maintaining the sort order makes them modestly slower:
- * O(log size) rather than O(1). This B+ tree implementation supports O(1)
- * fast cloning. It also supports freeze(), which can be used to ensure that
- * a BTree is not changed accidentally.
- *
- * Confusingly, the ES6 Map.forEach(c) method calls c(value,key) instead of
- * c(key,value), in contrast to other methods such as set() and entries()
- * which put the key first. I can only assume that the order was reversed on
- * the theory that users would usually want to examine values and ignore keys.
- * BTree's forEach() therefore works the same way, but a second method
- * `.forEachPair((key,value)=>{...})` is provided which sends you the key
- * first and the value second; this method is slightly faster because it is
- * the "native" for-each method for this class.
- *
- * Out of the box, BTree supports keys that are numbers, strings, arrays of
- * numbers/strings, Date, and objects that have a valueOf() method returning a
- * number or string. Other data types, such as arrays of Date or custom
- * objects, require a custom comparator, which you must pass as the second
- * argument to the constructor (the first argument is an optional list of
- * initial items). Symbols cannot be used as keys because they are unordered
- * (one Symbol is never "greater" or "less" than another).
- *
- * @example
- * Given a {name: string, age: number} object, you can create a tree sorted by
- * name and then by age like this:
- *
- *     var tree = new BTree(undefined, (a, b) => {
- *       if (a.name > b.name)
- *         return 1; // Return a number >0 when a > b
- *       else if (a.name < b.name)
- *         return -1; // Return a number <0 when a < b
- *       else // names are equal (or incomparable)
- *         return a.age - b.age; // Return >0 when a.age > b.age
- *     });
- *
- *     tree.set({name:"Bill", age:17}, "happy");
- *     tree.set({name:"Fran", age:40}, "busy & stressed");
- *     tree.set({name:"Bill", age:55}, "recently laid off");
- *     tree.forEachPair((k, v) => {
- *       console.log(`Name: ${k.name} Age: ${k.age} Status: ${v}`);
- *     });
- *
- * @description
- * The "range" methods (`forEach, forRange, editRange`) will return the number
- * of elements that were scanned. In addition, the callback can return {break:R}
- * to stop early and return R from the outer function.
- *
- * - TODO: Test performance of preallocating values array at max size
- * - TODO: Add fast initialization when a sorted array is provided to constructor
- *
- * For more documentation see https://github.com/qwertie/btree-typescript
- *
- * Are you a C# developer? You might like the similar data structures I made for C#:
- * BDictionary, BList, etc. See http://core.loyc.net/collections/
- *
+ * Mutable B+ tree used by BTreeIndex for sorted value buckets. Keys use the
+ * supplied comparator; point operations cost O(log size). This local fork has
+ * no copy-on-write sharing, cloning, or optional-value storage.
+ * Range callbacks may return { break: result } to stop traversal early.
  * @author David Piepgrass
  */
 export class BTree<K = any, V = any> {
-  private _root: BNode<K, V> = EmptyLeaf as BNode<K, V>
+  private _root: BNode<K, V> = new BNode<K, V>()
   _size = 0
   _maxNodeSize: number
 
@@ -109,19 +52,12 @@ export class BTree<K = any, V = any> {
   /**
    * Initializes an empty B+ tree.
    * @param compare Custom function to compare pairs of elements in the tree.
-   *   If not specified, defaultComparator will be used which is valid as long as K extends DefaultComparable.
-   * @param entries A set of key-value pairs to initialize the tree
    * @param maxNodeSize Branching factor (maximum items or children per node)
    *   Must be in range 4..256. If undefined or <4 then default is used; if >256 then 256.
    */
-  public constructor(
-    compare: (a: K, b: K) => number,
-    entries?: Array<[K, V]>,
-    maxNodeSize?: number,
-  ) {
+  public constructor(compare: (a: K, b: K) => number, maxNodeSize?: number) {
     this._maxNodeSize = maxNodeSize! >= 4 ? Math.min(maxNodeSize!, 256) : 32
     this._compare = compare
-    if (entries) this.setPairs(entries)
   }
 
   // ///////////////////////////////////////////////////////////////////////////
@@ -131,18 +67,10 @@ export class BTree<K = any, V = any> {
   get size() {
     return this._size
   }
-  /** Gets the number of key-value pairs in the tree. */
-  get length() {
-    return this._size
-  }
-  /** Returns true iff the tree contains no key-value pairs. */
-  get isEmpty() {
-    return this._size === 0
-  }
 
   /** Releases the tree so that its size is 0. */
   clear() {
-    this._root = EmptyLeaf as BNode<K, V>
+    this._root = new BNode<K, V>()
     this._size = 0
   }
 
@@ -160,7 +88,7 @@ export class BTree<K = any, V = any> {
    * Adds or overwrites a key-value pair in the B+ tree.
    * @param key the key is used to determine the sort order of
    *        data in the tree.
-   * @param value data to associate with the key (optional)
+   * @param value data to associate with the key
    * @param overwrite Whether to overwrite an existing key-value pair
    *        (default: true). If this is false and there is an existing
    *        key-value pair then this method has no effect.
@@ -171,7 +99,6 @@ export class BTree<K = any, V = any> {
    * has data that does not affect its sort order.
    */
   set(key: K, value: V, overwrite?: boolean): boolean {
-    if (this._root.isShared) this._root = this._root.clone()
     const result = this._root.set(key, value, overwrite, this)
     if (result === true || result === false) return result
     // Root node has split, so create a new root node.
@@ -203,11 +130,6 @@ export class BTree<K = any, V = any> {
   // ///////////////////////////////////////////////////////////////////////////
   // Additional methods ///////////////////////////////////////////////////////
 
-  /** Returns the maximum number of children/values before nodes will split. */
-  get maxNodeSize() {
-    return this._maxNodeSize
-  }
-
   /** Gets the lowest key in the tree. Complexity: O(log size) */
   minKey(): K | undefined {
     return this._root.minKey()
@@ -216,23 +138,6 @@ export class BTree<K = any, V = any> {
   /** Gets the highest key in the tree. Complexity: O(1) */
   maxKey(): K | undefined {
     return this._root.maxKey()
-  }
-
-  /** Gets an array of all keys, sorted */
-  keysArray() {
-    const results: Array<K> = []
-    this._root.forRange(
-      this.minKey()!,
-      this.maxKey()!,
-      true,
-      false,
-      this,
-      0,
-      (k, _v) => {
-        results.push(k)
-      },
-    )
-    return results
   }
 
   /** Returns the next pair whose key is larger than the specified key (or undefined if there is none).
@@ -254,14 +159,6 @@ export class BTree<K = any, V = any> {
     )
   }
 
-  /** Returns the next key larger than the specified key, or undefined if there is none.
-   *  Also, nextHigherKey(undefined) returns the lowest key.
-   */
-  nextHigherKey(key: K | undefined): K | undefined {
-    const p = this.nextHigherPair(key, ReusedArray as [K, V])
-    return p && p[0]
-  }
-
   /** Returns the next pair whose key is smaller than the specified key (or undefined if there is none).
    *  If key === undefined, this function returns the highest pair.
    * @param key The key to search for.
@@ -274,31 +171,6 @@ export class BTree<K = any, V = any> {
       return this._root.maxPair(reusedArray)
     }
     return this._root.getPairOrNextLower(key, this._compare, false, reusedArray)
-  }
-
-  /** Returns the next key smaller than the specified key, or undefined if there is none.
-   *  Also, nextLowerKey(undefined) returns the highest key.
-   */
-  nextLowerKey(key: K | undefined): K | undefined {
-    const p = this.nextLowerPair(key, ReusedArray as [K, V])
-    return p && p[0]
-  }
-
-  /** Adds all pairs from a list of key-value pairs.
-   * @param pairs Pairs to add to this tree. If there are duplicate keys,
-   *        later pairs currently overwrite earlier ones (e.g. [[0,1],[0,7]]
-   *        associates 0 with 7.)
-   * @param overwrite Whether to overwrite pairs that already exist (if false,
-   *        pairs[i] is ignored when the key pairs[i][0] already exists.)
-   * @returns The number of pairs added to the collection.
-   * @description Computational complexity: O(pairs.length * log(size + pairs.length))
-   */
-  setPairs(pairs: Array<[K, V]>, overwrite?: boolean): number {
-    let added = 0
-    for (const pair of pairs) {
-      if (this.set(pair[0], pair[1], overwrite)) added++
-    }
-    return added
   }
 
   forRange(
@@ -348,12 +220,10 @@ export class BTree<K = any, V = any> {
   /**
    * Scans and potentially modifies values for a subsequence of keys.
    * Note: the callback `onFound` should ideally be a pure function.
-   *   Specfically, it must not insert items, call clone(), or change
-   *   the collection except via return value; out-of-band editing may
-   *   cause an exception or may cause incorrect data to be sent to
-   *   the callback (duplicate or missed items). It must not cause a
-   *   clone() of the collection, otherwise the clone could be modified
-   *   by changes requested by the callback.
+   *   Specfically, it must not insert items or change the collection
+   *   except via return value; out-of-band editing may cause an
+   *   exception or may cause incorrect data to be sent to the callback
+   *   (duplicate or missed items).
    * @param low The first key scanned will be greater than or equal to `low`.
    * @param high Scanning stops when a key larger than this is reached.
    * @param includeHigh If the `high` key is present, `onFound` is called for
@@ -370,9 +240,6 @@ export class BTree<K = any, V = any> {
    *        `{break:R}` to stop early.
    * @description
    *   Computational complexity: O(number of items scanned + log size)
-   *   Note: if the tree has been cloned with clone(), any shared
-   *   nodes are copied before `onFound` is called. This takes O(n) time
-   *   where n is proportional to the amount of shared data scanned.
    */
   editRange<R = V>(
     low: K,
@@ -382,7 +249,6 @@ export class BTree<K = any, V = any> {
     initialCounter?: number,
   ): R | number {
     let root = this._root
-    if (root.isShared) this._root = root = root.clone()
     try {
       const r = root.forRange(
         low,
@@ -395,17 +261,11 @@ export class BTree<K = any, V = any> {
       )
       return typeof r === `number` ? r : r.break!
     } finally {
-      let isShared
       while (root.keys.length <= 1 && !root.isLeaf) {
-        isShared ||= root.isShared
         this._root = root =
           root.keys.length === 0
-            ? EmptyLeaf
+            ? new BNode<K, V>()
             : (root as any as BNodeInternal<K, V>).children[0]!
-      }
-      // If any ancestor of the new root was shared, the new root must also be shared
-      if (isShared) {
-        root.isShared = true
       }
     }
   }
@@ -416,19 +276,13 @@ class BNode<K, V> {
   // If this is an internal node, _keys[i] is the highest key in children[i].
   keys: Array<K>
   values: Array<V>
-  // True if this node might be within multiple `BTree`s (or have multiple parents).
-  // If so, it must be cloned before being mutated to avoid changing an unrelated tree.
-  // This is transitive: if it's true, children are also shared even if `isShared!=true`
-  // in those children. (Certain operations will propagate isShared=true to children.)
-  isShared: true | undefined
   get isLeaf() {
     return (this as any).children === undefined
   }
 
-  constructor(keys: Array<K> = [], values?: Array<V>) {
+  constructor(keys: Array<K> = [], values: Array<V> = []) {
     this.keys = keys
-    this.values = values || undefVals
-    this.isShared = undefined
+    this.values = values
   }
 
   // /////////////////////////////////////////////////////////////////////////
@@ -486,11 +340,6 @@ class BNode<K, V> {
     return reusedArray
   }
 
-  clone(): BNode<K, V> {
-    const v = this.values
-    return new BNode<K, V>(this.keys.slice(0), v === undefVals ? v : v.slice(0))
-  }
-
   get(key: K, defaultValue: V | undefined, tree: BTree<K, V>): V | undefined {
     const i = this.indexOf(key, -1, tree._compare)
     return i < 0 ? defaultValue : this.values[i]
@@ -545,7 +394,7 @@ class BNode<K, V> {
       tree._size++
 
       if (this.keys.length < tree._maxNodeSize) {
-        return this.insertInLeaf(i, key, value, tree)
+        return this.insertInLeaf(i, key, value)
       } else {
         // This leaf node is full and must split
         const newRightSibling = this.splitOffRightSide()
@@ -554,13 +403,12 @@ class BNode<K, V> {
           i -= this.keys.length
           target = newRightSibling
         }
-        target.insertInLeaf(i, key, value, tree)
+        target.insertInLeaf(i, key, value)
         return newRightSibling
       }
     } else {
       // Key already exists
       if (overwrite !== false) {
-        if (value !== undefined) this.reifyValues()
         // usually this is a no-op, but some users may wish to edit the key
         this.keys[i] = key
         this.values[i] = value
@@ -569,61 +417,30 @@ class BNode<K, V> {
     }
   }
 
-  reifyValues() {
-    if (this.values === undefVals)
-      return (this.values = this.values.slice(0, this.keys.length))
-    return this.values
-  }
-
-  insertInLeaf(i: index, key: K, value: V, tree: BTree<K, V>) {
+  insertInLeaf(i: index, key: K, value: V) {
     this.keys.splice(i, 0, key)
-    if (this.values === undefVals) {
-      while (undefVals.length < tree._maxNodeSize) undefVals.push(undefined)
-      if (value === undefined) {
-        return true
-      } else {
-        this.values = undefVals.slice(0, this.keys.length - 1)
-      }
-    }
     this.values.splice(i, 0, value)
     return true
   }
 
   takeFromRight(rhs: BNode<K, V>) {
     // Reminder: parent node must update its copy of key for this node
-    // assert: neither node is shared
     // assert rhs.keys.length > (maxNodeSize/2 && this.keys.length<maxNodeSize)
-    let v = this.values
-    if (rhs.values === undefVals) {
-      if (v !== undefVals) v.push(undefined as any)
-    } else {
-      v = this.reifyValues()
-      v.push(rhs.values.shift()!)
-    }
+    this.values.push(rhs.values.shift()!)
     this.keys.push(rhs.keys.shift()!)
   }
 
   takeFromLeft(lhs: BNode<K, V>) {
     // Reminder: parent node must update its copy of key for this node
-    // assert: neither node is shared
     // assert rhs.keys.length > (maxNodeSize/2 && this.keys.length<maxNodeSize)
-    let v = this.values
-    if (lhs.values === undefVals) {
-      if (v !== undefVals) v.unshift(undefined as any)
-    } else {
-      v = this.reifyValues()
-      v.unshift(lhs.values.pop()!)
-    }
+    this.values.unshift(lhs.values.pop()!)
     this.keys.unshift(lhs.keys.pop()!)
   }
 
   splitOffRightSide(): BNode<K, V> {
     // Reminder: parent node must update its copy of key for this node
-    const half = this.keys.length >> 1,
-      keys = this.keys.splice(half)
-    const values =
-      this.values === undefVals ? undefVals : this.values.splice(half)
-    return new BNode<K, V>(keys, values)
+    const half = this.keys.length >> 1
+    return new BNode<K, V>(this.keys.splice(half), this.values.splice(half))
   }
 
   // ///////////////////////////////////////////////////////////////////////////
@@ -658,11 +475,11 @@ class BNode<K, V> {
         const result = onFound(key, values[i]!, count++)
         if (result !== undefined) {
           if (editMode === true) {
-            if (key !== keys[i] || this.isShared === true)
-              throw new Error(`BTree illegally changed or cloned in editRange`)
+            if (key !== keys[i])
+              throw new Error(`BTree illegally changed in editRange`)
             if (result.delete) {
               this.keys.splice(i, 1)
-              if (this.values !== undefVals) this.values.splice(i, 1)
+              this.values.splice(i, 1)
               tree._size--
               i--
               iHigh--
@@ -680,11 +497,7 @@ class BNode<K, V> {
   /** Adds entire contents of right-hand sibling (rhs is left unchanged) */
   mergeSibling(rhs: BNode<K, V>, _: number) {
     this.keys.push.apply(this.keys, rhs.keys)
-    if (this.values === undefVals) {
-      if (rhs.values === undefVals) return
-      this.values = this.values.slice(0, this.keys.length)
-    }
-    this.values.push.apply(this.values, rhs.reifyValues())
+    this.values.push.apply(this.values, rhs.values)
   }
 }
 
@@ -695,10 +508,6 @@ class BNodeInternal<K, V> extends BNode<K, V> {
   // keys[i] caches the value of children[i].maxKey().
   children: Array<BNode<K, V>>
 
-  /**
-   * This does not mark `children` as shared, so it is the responsibility of the caller
-   * to ensure children are either marked shared, or aren't included in another tree.
-   */
   constructor(children: Array<BNode<K, V>>, keys?: Array<K>) {
     if (!keys) {
       keys = []
@@ -783,10 +592,9 @@ class BNodeInternal<K, V> extends BNode<K, V> {
     const c = this.children,
       max = tree._maxNodeSize,
       cmp = tree._compare
-    let i = Math.min(this.indexOf(key, 0, cmp), c.length - 1),
-      child = c[i]!
+    let i = Math.min(this.indexOf(key, 0, cmp), c.length - 1)
+    const child = c[i]!
 
-    if (child.isShared) c[i] = child = child.clone()
     if (child.keys.length >= max) {
       // child is full; inserting anything else will cause a split.
       // Shifting an item to the left or right sibling may avoid a split.
@@ -798,7 +606,6 @@ class BNodeInternal<K, V> extends BNode<K, V> {
         (other = c[i - 1]!).keys.length < max &&
         cmp(child.keys[0]!, key) < 0
       ) {
-        if (other.isShared) c[i - 1] = other = other.clone()
         other.takeFromRight(child)
         this.keys[i - 1] = other.maxKey()!
       } else if (
@@ -806,7 +613,6 @@ class BNodeInternal<K, V> extends BNode<K, V> {
         other.keys.length < max &&
         cmp(child.maxKey()!, key) < 0
       ) {
-        if (other.isShared) c[i + 1] = other = other.clone()
         other.takeFromLeft(child)
         this.keys[i] = c[i]!.maxKey()!
       }
@@ -835,11 +641,7 @@ class BNodeInternal<K, V> extends BNode<K, V> {
     }
   }
 
-  /**
-   * Inserts `child` at index `i`.
-   * This does not mark `child` as shared, so it is the responsibility of the caller
-   * to ensure that either child is marked shared, or it is not included in another tree.
-   */
+  /** Inserts `child` at index `i`. */
   insert(i: index, child: BNode<K, V>) {
     this.children.splice(i, 0, child)
     this.keys.splice(i, 0, child.maxKey()!)
@@ -850,7 +652,6 @@ class BNodeInternal<K, V> extends BNode<K, V> {
    * Modifies this to remove the second half of the items, returning a separate node containing them.
    */
   splitOffRightSide() {
-    // assert !this.isShared;
     const half = this.children.length >> 1
     return new BNodeInternal<K, V>(
       this.children.splice(half),
@@ -860,7 +661,6 @@ class BNodeInternal<K, V> extends BNode<K, V> {
 
   takeFromRight(rhs: BNode<K, V>) {
     // Reminder: parent node must update its copy of key for this node
-    // assert: neither node is shared
     // assert rhs.keys.length > (maxNodeSize/2 && this.keys.length<maxNodeSize)
     this.keys.push(rhs.keys.shift()!)
     this.children.push((rhs as BNodeInternal<K, V>).children.shift()!)
@@ -868,7 +668,6 @@ class BNodeInternal<K, V> extends BNode<K, V> {
 
   takeFromLeft(lhs: BNode<K, V>) {
     // Reminder: parent node must update its copy of key for this node
-    // assert: neither node is shared
     // assert rhs.keys.length > (maxNodeSize/2 && this.keys.length<maxNodeSize)
     this.keys.unshift(lhs.keys.pop()!)
     this.children.unshift((lhs as BNodeInternal<K, V>).children.pop()!)
@@ -916,7 +715,6 @@ class BNodeInternal<K, V> extends BNode<K, V> {
     } else if (i <= iHigh) {
       try {
         for (; i <= iHigh; i++) {
-          if (children[i]!.isShared) children[i] = children[i]!.clone()
           const result = children[i]!.forRange(
             low,
             high,
@@ -959,9 +757,6 @@ class BNodeInternal<K, V> extends BNode<K, V> {
     const children = this.children
     if (i >= 0 && i + 1 < children.length) {
       if (children[i]!.keys.length + children[i + 1]!.keys.length <= maxSize) {
-        if (children[i]!.isShared)
-          // cloned already UNLESS i is outside scan range
-          children[i] = children[i]!.clone()
         children[i]!.mergeSibling(children[i + 1]!, maxSize)
         children.splice(i + 1, 1)
         this.keys.splice(i + 1, 1)
@@ -974,21 +769,13 @@ class BNodeInternal<K, V> extends BNode<K, V> {
 
   /**
    * Move children from `rhs` into this.
-   * `rhs` must be part of this tree, and be removed from it after this call
-   * (otherwise isShared for its children could be incorrect).
+   * `rhs` must be part of this tree, and be removed from it after this call.
    */
   mergeSibling(rhs: BNode<K, V>, maxNodeSize: number) {
-    // assert !this.isShared;
     const oldLength = this.keys.length
     this.keys.push.apply(this.keys, rhs.keys)
     const rhsChildren = (rhs as any as BNodeInternal<K, V>).children
     this.children.push.apply(this.children, rhsChildren)
-
-    if (rhs.isShared && !this.isShared) {
-      // All children of a shared node are implicitly shared, and since their new
-      // parent is not shared, they must now be explicitly marked as shared.
-      for (const child of rhsChildren) child.isShared = true
-    }
 
     // If our children are themselves almost empty due to a mass-delete,
     // they may need to be merged too (but only the oldLength-1 and its
@@ -997,27 +784,8 @@ class BNodeInternal<K, V> extends BNode<K, V> {
   }
 }
 
-// Optimization: this array of `undefined`s is used instead of a normal
-// array of values in nodes where `undefined` is the only value.
-// Its length is extended to max node size on first use; since it can
-// be shared between trees with different maximums, its length can only
-// increase, never decrease. Its type should be undefined[] but strangely
-// TypeScript won't allow the comparison V[] === undefined[]. To prevent
-// users from making this array too large, BTree has a maximum node size.
-//
-// FAQ: undefVals[i] is already undefined, so why increase the array size?
-// Reading outside the bounds of an array is relatively slow because it
-// has the side effect of scanning the prototype chain.
-const undefVals: Array<any> = []
-
 const Delete = { delete: true },
   DeleteRange = () => Delete
-const EmptyLeaf = (function () {
-  const n = new BNode<any, any>()
-  n.isShared = true
-  return n
-})()
-const ReusedArray: Array<any> = [] // assumed thread-local
 
 function check(fact: boolean, ...args: Array<any>) {
   if (!fact) {

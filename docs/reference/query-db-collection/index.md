@@ -10,6 +10,7 @@ title: "@tanstack/query-db-collection"
 - [DeleteOperationItemNotFoundError](classes/DeleteOperationItemNotFoundError.md)
 - [DuplicateKeyInBatchError](classes/DuplicateKeyInBatchError.md)
 - [GetKeyRequiredError](classes/GetKeyRequiredError.md)
+- [InitialDataInOnDemandModeError](classes/InitialDataInOnDemandModeError.md)
 - [InvalidItemStructureError](classes/InvalidItemStructureError.md)
 - [InvalidSyncOperationError](classes/InvalidSyncOperationError.md)
 - [ItemNotFoundError](classes/ItemNotFoundError.md)

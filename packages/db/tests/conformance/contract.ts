@@ -74,6 +74,12 @@ export interface DbOps {
 export interface ConformanceResult {
   /** Array for list queries; a single row (or undefined) for `findOne`. */
   data: any
+  /**
+   * The keyed result map (`undefined` when disabled). Exposed so scenarios can
+   * assert the granular map stays in sync with `data` — e.g. that stale keys
+   * from a previous collection don't linger after a recompile.
+   */
+  state: ReadonlyMap<any, any> | undefined
   status: string
   isReady: boolean
   isError: boolean

@@ -17,6 +17,7 @@ Defined in: [packages/query-db-collection/src/errors.ts:4](https://github.com/Ta
 - [`QueryFnRequiredError`](QueryFnRequiredError.md)
 - [`QueryClientRequiredError`](QueryClientRequiredError.md)
 - [`GetKeyRequiredError`](GetKeyRequiredError.md)
+- [`InitialDataInOnDemandModeError`](InitialDataInOnDemandModeError.md)
 - [`SyncNotInitializedError`](SyncNotInitializedError.md)
 - [`InvalidItemStructureError`](InvalidItemStructureError.md)
 - [`ItemNotFoundError`](ItemNotFoundError.md)

@@ -2,8 +2,6 @@
 title: TrailBase Collection
 ---
 
-# TrailBase Collection
-
 TrailBase collections provide seamless integration between TanStack DB and [TrailBase](https://trailbase.io), enabling real-time data synchronization with TrailBase's self-hosted application backend.
 
 ## Overview
@@ -194,11 +192,13 @@ export const todosCollection = createCollection<SelectTodo, Todo>(
 
 // Use in component
 function TodoList() {
-  const { data: todos } = useLiveQuery((q) =>
-    q.from({ todo: todosCollection })
-      .where(({ todo }) => not(todo.completed))
-      .orderBy(({ todo }) => todo.created_at, 'desc')
-  )
+  const { data: todos } = useLiveQuery({
+    query: (q) =>
+      q
+        .from({ todo: todosCollection })
+        .where(({ todo }) => not(todo.completed))
+        .orderBy(({ todo }) => todo.created_at, 'desc'),
+  })
 
   const addTodo = (text: string) => {
     todosCollection.insert({

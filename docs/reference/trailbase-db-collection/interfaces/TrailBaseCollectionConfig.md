@@ -5,7 +5,7 @@ title: TrailBaseCollectionConfig
 
 # Interface: TrailBaseCollectionConfig\<TItem, TRecord, TKey\>
 
-Defined in: [packages/trailbase-db-collection/src/trailbase.ts:92](https://github.com/TanStack/db/blob/main/packages/trailbase-db-collection/src/trailbase.ts#L92)
+Defined in: [packages/trailbase-db-collection/src/trailbase.ts:93](https://github.com/TanStack/db/blob/main/packages/trailbase-db-collection/src/trailbase.ts#L93)
 
 Configuration interface for Trailbase Collection
 
@@ -35,7 +35,7 @@ Configuration interface for Trailbase Collection
 parse: Conversions<TRecord, TItem>;
 ```
 
-Defined in: [packages/trailbase-db-collection/src/trailbase.ts:111](https://github.com/TanStack/db/blob/main/packages/trailbase-db-collection/src/trailbase.ts#L111)
+Defined in: [packages/trailbase-db-collection/src/trailbase.ts:112](https://github.com/TanStack/db/blob/main/packages/trailbase-db-collection/src/trailbase.ts#L112)
 
 ***
 
@@ -45,7 +45,7 @@ Defined in: [packages/trailbase-db-collection/src/trailbase.ts:111](https://gith
 recordApi: RecordApi<TRecord>;
 ```
 
-Defined in: [packages/trailbase-db-collection/src/trailbase.ts:103](https://github.com/TanStack/db/blob/main/packages/trailbase-db-collection/src/trailbase.ts#L103)
+Defined in: [packages/trailbase-db-collection/src/trailbase.ts:104](https://github.com/TanStack/db/blob/main/packages/trailbase-db-collection/src/trailbase.ts#L104)
 
 Record API name
 
@@ -57,7 +57,7 @@ Record API name
 serialize: Conversions<TItem, TRecord>;
 ```
 
-Defined in: [packages/trailbase-db-collection/src/trailbase.ts:112](https://github.com/TanStack/db/blob/main/packages/trailbase-db-collection/src/trailbase.ts#L112)
+Defined in: [packages/trailbase-db-collection/src/trailbase.ts:113](https://github.com/TanStack/db/blob/main/packages/trailbase-db-collection/src/trailbase.ts#L113)
 
 ***
 
@@ -67,7 +67,7 @@ Defined in: [packages/trailbase-db-collection/src/trailbase.ts:112](https://gith
 optional syncMode: SyncMode;
 ```
 
-Defined in: [packages/trailbase-db-collection/src/trailbase.ts:109](https://github.com/TanStack/db/blob/main/packages/trailbase-db-collection/src/trailbase.ts#L109)
+Defined in: [packages/trailbase-db-collection/src/trailbase.ts:110](https://github.com/TanStack/db/blob/main/packages/trailbase-db-collection/src/trailbase.ts#L110)
 
 The mode of sync to use for the collection.
 

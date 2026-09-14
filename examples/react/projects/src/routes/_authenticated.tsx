@@ -20,7 +20,9 @@ function AuthenticatedLayout() {
   const [showNewProjectForm, setShowNewProjectForm] = useState(false)
   const [newProjectName, setNewProjectName] = useState(``)
 
-  const { data: projects } = useLiveQuery((q) => q.from({ projectCollection }))
+  const { data: projects } = useLiveQuery({
+    query: (q) => q.from({ projectCollection }),
+  })
 
   const handleLogout = async () => {
     await authClient.signOut()

@@ -18,6 +18,7 @@ import {
 } from '../utils.js'
 import { OnlyOneSourceAllowedError } from '../../src/errors.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
+import type { BasicExpression } from '../../src/query/ir.js'
 
 type Message = {
   id: number
@@ -32,6 +33,18 @@ type ToolCall = {
   name: string
   timestamp: number
   userId: number
+}
+
+function referencesField(
+  expression: BasicExpression | undefined,
+  field: string,
+): boolean {
+  if (!expression) return false
+  if (expression.type === `ref`) return expression.path.includes(field)
+  if (expression.type !== `func`) return false
+  return expression.args.some((argument) =>
+    referencesField(argument as BasicExpression, field),
+  )
 }
 
 type Chunk = {
@@ -1234,7 +1247,9 @@ describe(`unionAll`, () => {
     expect(messageLoadSubsetCalls.length).toBeGreaterThan(0)
     expect(toolLoadSubsetCalls.length).toBeGreaterThan(0)
     expect(
-      messageLoadSubsetCalls.every((call) => call.where === undefined),
+      messageLoadSubsetCalls.every(
+        (call) => !referencesField(call.where, `userId`),
+      ),
     ).toBe(true)
     expect(toolLoadSubsetCalls.every((call) => call.where === undefined)).toBe(
       true,
@@ -1291,7 +1306,9 @@ describe(`unionAll`, () => {
     expect(messageLoadSubsetCalls.length).toBeGreaterThan(0)
     expect(toolLoadSubsetCalls.length).toBeGreaterThan(0)
     expect(
-      messageLoadSubsetCalls.every((call) => call.where === undefined),
+      messageLoadSubsetCalls.every(
+        (call) => !referencesField(call.where, `userId`),
+      ),
     ).toBe(true)
     expect(toolLoadSubsetCalls.some((call) => call.where)).toBe(true)
   })

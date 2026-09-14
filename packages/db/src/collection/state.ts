@@ -1,6 +1,7 @@
 import { deepEquals } from '../utils'
 import { SortedMap } from '../SortedMap'
 import { enrichRowWithVirtualProps } from '../virtual-props.js'
+import { SyncTransactionAbortedError } from '../errors.js'
 import { DIRECT_TRANSACTION_METADATA_KEY } from './transaction-metadata.js'
 import type {
   VirtualOrigin,
@@ -13,27 +14,34 @@ import type {
   ChangeMessage,
   CollectionConfig,
   OptimisticChangeMessage,
+  PendingMutation,
 } from '../types'
 import type { CollectionImpl } from './index.js'
 import type { CollectionLifecycleManager } from './lifecycle'
 import type { CollectionChangesManager } from './changes'
 import type { CollectionIndexesManager } from './indexes'
 import type { CollectionEventsManager } from './events'
+import type { Deferred } from '../deferred'
 
 interface PendingSyncedTransaction<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
 > {
   committed: boolean
+  applicationStarted: boolean
+  layoutChanged: boolean
   operations: Array<OptimisticChangeMessage<T>>
   truncate?: boolean
   deletedKeys: Set<string | number>
   rowMetadataWrites: Map<TKey, PendingMetadataWrite>
   collectionMetadataWrites: Map<string, PendingMetadataWrite>
+  /** Resolves after application and rejects if canceled before application. */
+  applied: Deferred<void>
   optimisticSnapshot?: {
     upserts: Map<TKey, T>
     deletes: Set<TKey>
   }
+  preserveHydrationSeedKeys?: boolean
   /**
    * When true, this transaction should be processed immediately even if there
    * are persisting user transactions. Used by manual write operations (writeInsert,
@@ -43,6 +51,11 @@ interface PendingSyncedTransaction<
 }
 
 type PendingMetadataWrite = { type: `set`; value: unknown } | { type: `delete` }
+
+type OptimisticUpsert<T extends object> = Pick<
+  PendingMutation<T>,
+  `key` | `modified`
+> & { insert?: object }
 
 type InternalChangeMessage<
   T extends object = Record<string, unknown>,
@@ -75,14 +88,18 @@ export class CollectionStateManager<
   public syncedData: SortedMap<TKey, TOutput>
   public syncedMetadata = new Map<TKey, unknown>()
   public syncedCollectionMetadata = new Map<string, unknown>()
+  public hydrationSeedKeys = new Set<TKey>()
+  public hydratedKeys = new Set<TKey>()
 
   // Optimistic state tracking - make public for testing
   public optimisticUpserts = new Map<TKey, TOutput>()
   public optimisticDeletes = new Set<TKey>()
-  public pendingOptimisticUpserts = new Map<TKey, TOutput>()
+
+  public pendingOptimisticUpserts = new Map<TKey, OptimisticUpsert<TOutput>>()
   public pendingOptimisticDeletes = new Set<TKey>()
   public pendingOptimisticDirectUpserts = new Set<TKey>()
   public pendingOptimisticDirectDeletes = new Set<TKey>()
+  private acknowledgedInserts = new WeakSet<object>()
 
   /**
    * Tracks the origin of confirmed changes for each row.
@@ -101,6 +118,8 @@ export class CollectionStateManager<
    * When sync confirms data for a key with pending local changes, it keeps 'local' origin.
    */
   public pendingLocalChanges = new Set<TKey>()
+  // Successful mutations retain attribution until sync applies. Active or
+  // failed mutations must not add to, or erase a sibling's entry in, this set.
   public pendingLocalOrigins = new Set<TKey>()
 
   private virtualPropsCache = new WeakMap<
@@ -118,11 +137,13 @@ export class CollectionStateManager<
   public size = 0
 
   // State used for computing the change events
-  public syncedKeys = new Set<TKey>()
   public preSyncVisibleState = new Map<TKey, TOutput>()
+  public preSyncVirtualState = new Map<TKey, VirtualRowProps<TKey>>()
   public recentlySyncedKeys = new Set<TKey>()
   public hasReceivedFirstCommit = false
   public isCommittingSyncTransactions = false
+  private isDrainingSyncTransactions = false
+  private syncSessionGeneration = 0
   public isLocalOnly = false
 
   /**
@@ -498,7 +519,10 @@ export class CollectionStateManager<
     const previousDeletes = new Set(this.optimisticDeletes)
     const previousRowOrigins = this.rowOrigins
 
-    // Update pending optimistic state for completed/failed transactions
+    // A retained update can depend on an unconfirmed insert, not just its key.
+    // Keep that exact dependency so settlement and key reuse cannot conflate rows.
+    const pendingInserts = new Map<TKey, object>()
+    // Retain successful contributions; failed/active work is recomputed below.
     for (const transaction of this.transactions.values()) {
       const isDirectTransaction =
         transaction.metadata[DIRECT_TRANSACTION_METADATA_KEY] === true
@@ -507,17 +531,37 @@ export class CollectionStateManager<
           if (!this.isThisCollection(mutation.collection)) {
             continue
           }
+          // Only a sync write during this insertion acknowledges it. A stale
+          // base row can also exist after an optimistic delete and reinsert.
+          if (
+            isDirectTransaction &&
+            mutation.type === `insert` &&
+            this.acknowledgedInserts.has(mutation)
+          ) {
+            continue
+          }
           this.pendingLocalOrigins.add(mutation.key)
           if (!mutation.optimistic) {
             continue
           }
           switch (mutation.type) {
             case `insert`:
-            case `update`:
-              this.pendingOptimisticUpserts.set(
-                mutation.key,
-                mutation.modified as TOutput,
-              )
+            case `update`: {
+              // Retain whole snapshots, not fields rebased over newer synced
+              // values. A slow insert must not replace its accepted dependent
+              // update with the older insertion snapshot.
+              const previous = this.pendingOptimisticUpserts.get(mutation.key)
+              const confirmsInsert = previous?.insert === mutation
+              this.pendingOptimisticUpserts.set(mutation.key, {
+                key: mutation.key,
+                modified: confirmsInsert
+                  ? previous.modified
+                  : mutation.modified,
+                insert:
+                  mutation.type === `update`
+                    ? (previous?.insert ?? pendingInserts.get(mutation.key))
+                    : undefined,
+              })
               this.pendingOptimisticDeletes.delete(mutation.key)
               if (isDirectTransaction) {
                 this.pendingOptimisticDirectUpserts.add(mutation.key)
@@ -527,6 +571,7 @@ export class CollectionStateManager<
                 this.pendingOptimisticDirectDeletes.delete(mutation.key)
               }
               break
+            }
             case `delete`:
               this.pendingOptimisticUpserts.delete(mutation.key)
               this.pendingOptimisticDeletes.add(mutation.key)
@@ -540,17 +585,26 @@ export class CollectionStateManager<
               break
           }
         }
-      } else if (transaction.state === `failed`) {
+      } else {
         for (const mutation of transaction.mutations) {
-          if (!this.isThisCollection(mutation.collection)) {
+          if (
+            !this.isThisCollection(mutation.collection) ||
+            mutation.type !== `insert` ||
+            !mutation.optimistic
+          )
             continue
-          }
-          this.pendingLocalOrigins.delete(mutation.key)
-          if (mutation.optimistic) {
+          if (
+            transaction.state !== `failed` &&
+            !this.acknowledgedInserts.has(mutation)
+          ) {
+            pendingInserts.set(mutation.key, mutation)
+          } else if (
+            this.pendingOptimisticUpserts.get(mutation.key)?.insert === mutation
+          ) {
+            // Drop only the dependent row, never a later same-key insertion or
+            // successful sibling attribution. Failed transactions remain listed.
             this.pendingOptimisticUpserts.delete(mutation.key)
-            this.pendingOptimisticDeletes.delete(mutation.key)
             this.pendingOptimisticDirectUpserts.delete(mutation.key)
-            this.pendingOptimisticDirectDeletes.delete(mutation.key)
           }
         }
       }
@@ -574,7 +628,7 @@ export class CollectionStateManager<
         pendingSyncKeys.has(key) ||
         this.pendingOptimisticDirectUpserts.has(key)
       ) {
-        this.optimisticUpserts.set(key, value)
+        this.optimisticUpserts.set(key, this.resolveOptimisticUpsert(value))
       } else {
         staleOptimisticUpserts.push(key)
       }
@@ -623,7 +677,7 @@ export class CollectionStateManager<
             case `update`:
               this.optimisticUpserts.set(
                 mutation.key,
-                mutation.modified as TOutput,
+                this.resolveOptimisticUpsert(mutation),
               )
               this.optimisticDeletes.delete(mutation.key)
               break
@@ -668,7 +722,7 @@ export class CollectionStateManager<
     // Filter out redundant delete events if there are pending sync transactions
     // that will immediately restore the same data, but only for completed transactions
     // IMPORTANT: Skip complex filtering for user-triggered actions to prevent UI blocking
-    if (this.pendingSyncedTransactions.length > 0 && !triggeredByUserAction) {
+    if (this.changes.shouldBatchEvents && !triggeredByUserAction) {
       const pendingSyncKeysForFilter = new Set<TKey>()
 
       // Collect keys from pending sync operations
@@ -782,7 +836,9 @@ export class CollectionStateManager<
       } else if (
         previousValue !== undefined &&
         currentValue !== undefined &&
-        previousValue !== currentValue
+        (!deepEquals(previousValue, currentValue) ||
+          previousVirtualProps.$origin !== nextVirtualProps.$origin ||
+          previousVirtualProps.$synced !== nextVirtualProps.$synced)
       ) {
         events.push({
           type: `update`,
@@ -796,6 +852,37 @@ export class CollectionStateManager<
         })
       }
     }
+  }
+
+  // Optimistic mutations keep their full validated snapshot. Mixing in newer
+  // synced fields could produce a row neither the user nor the server created.
+  private resolveOptimisticUpsert(
+    mutation: OptimisticUpsert<TOutput>,
+  ): TOutput {
+    const key = mutation.key as TKey
+    const dependent = this.pendingOptimisticUpserts.get(key)
+    return dependent?.insert === mutation
+      ? dependent.modified
+      : mutation.modified
+  }
+
+  /** Build once per output flush; queued membership excludes optimistic edits. */
+  createSyncedKeyLookup(): (key: TKey) => boolean {
+    if (this.pendingSyncedTransactions.length === 0)
+      return (key) => this.syncedData.has(key)
+    const queued = new Map<TKey, boolean>()
+    let truncated = false
+    for (const transaction of this.pendingSyncedTransactions) {
+      if (!transaction.committed) continue
+      if (transaction.truncate) {
+        queued.clear()
+        truncated = true
+      }
+      for (const operation of transaction.operations) {
+        queued.set(operation.key as TKey, operation.type !== `delete`)
+      }
+    }
+    return (key) => queued.get(key) ?? (!truncated && this.syncedData.has(key))
   }
 
   /**
@@ -820,6 +907,30 @@ export class CollectionStateManager<
    * This method processes operations from pending transactions and applies them to the synced data
    */
   commitPendingTransactions = () => {
+    if (this.isDrainingSyncTransactions) return
+    this.isDrainingSyncTransactions = true
+    let failed = false
+    let firstError: unknown
+    try {
+      let result: { processed: boolean; failure?: { error: unknown } }
+      do {
+        result = this.commitNextPendingTransactionBatch()
+        if (result.failure && !failed) {
+          failed = true
+          firstError = result.failure.error
+        }
+      } while (result.processed)
+    } finally {
+      this.isDrainingSyncTransactions = false
+    }
+    if (failed) throw firstError
+  }
+
+  private commitNextPendingTransactionBatch(): {
+    processed: boolean
+    failure?: { error: unknown }
+  } {
+    const syncSessionGeneration = this.syncSessionGeneration
     // Check if there are any persisting transaction
     let hasPersistingTransaction = false
     for (const transaction of this.transactions.values()) {
@@ -836,10 +947,12 @@ export class CollectionStateManager<
       uncommittedSyncedTransactions,
       hasTruncateSync,
       hasImmediateSync,
+      layoutChanged,
     } = this.pendingSyncedTransactions.reduce(
       (acc, t) => {
         if (t.committed) {
           acc.committedSyncedTransactions.push(t)
+          acc.layoutChanged ||= t.layoutChanged
           if (t.truncate) {
             acc.hasTruncateSync = true
           }
@@ -860,8 +973,13 @@ export class CollectionStateManager<
         >,
         hasTruncateSync: false,
         hasImmediateSync: false,
+        layoutChanged: false,
       },
     )
+
+    if (committedSyncedTransactions.length === 0) {
+      return { processed: false }
+    }
 
     // Process committed transactions if:
     // 1. No persisting user transaction (normal sync flow), OR
@@ -874,6 +992,16 @@ export class CollectionStateManager<
     // non-immediate transactions would be applied later and could overwrite newer state.
     // Processing all committed transactions together preserves causal ordering.
     if (!hasPersistingTransaction || hasTruncateSync || hasImmediateSync) {
+      const previousLayout = layoutChanged ? [...this.keys()] : undefined
+      this.pendingSyncedTransactions = uncommittedSyncedTransactions
+
+      // Application is now the point of no return. Event listeners run before
+      // the receipts resolve, so a signal aborted from one of those listeners
+      // must not cancel writes that are already becoming visible.
+      for (const transaction of committedSyncedTransactions) {
+        transaction.applicationStarted = true
+      }
+
       // Set flag to prevent redundant optimistic state recalculations
       this.isCommittingSyncTransactions = true
 
@@ -887,9 +1015,12 @@ export class CollectionStateManager<
 
       // First collect all keys that will be affected by sync operations
       const changedKeys = new Set<TKey>()
+      const syncedInsertedOrUpdatedKeys = new Set<TKey>()
       for (const transaction of committedSyncedTransactions) {
         for (const operation of transaction.operations) {
           changedKeys.add(operation.key as TKey)
+          if (operation.type !== `delete`)
+            syncedInsertedOrUpdatedKeys.add(operation.key as TKey)
         }
         for (const [key] of transaction.rowMetadataWrites) {
           changedKeys.add(key)
@@ -907,6 +1038,12 @@ export class CollectionStateManager<
         this.snapshotRowOriginsForKeys(virtualSnapshotKeys)
       const previousOptimisticUpserts = new Map(this.optimisticUpserts)
       const previousOptimisticDeletes = new Set(this.optimisticDeletes)
+      const completedDirectUpserts = new Set(
+        this.pendingOptimisticDirectUpserts,
+      )
+      const completedDirectDeletes = new Set(
+        this.pendingOptimisticDirectDeletes,
+      )
 
       // Use pre-captured state if available (from optimistic scenarios),
       // otherwise capture current state (for pure sync scenarios)
@@ -974,7 +1111,8 @@ export class CollectionStateManager<
           truncatePendingLocalOrigins = new Set(this.pendingLocalOrigins)
           this.syncedData.clear()
           this.syncedMetadata.clear()
-          this.syncedKeys.clear()
+          this.hydrationSeedKeys.clear()
+          this.hydratedKeys.clear()
           this.clearOriginTrackingState()
 
           // 3) Clear currentVisibleState for truncated keys to ensure subsequent operations
@@ -991,19 +1129,27 @@ export class CollectionStateManager<
           })
         }
 
+        // Attribution belongs to the whole atomic batch. A repeated write must
+        // not forget the local acknowledgement consumed by its first operation.
+        const localKeys = new Set<TKey>()
         for (const operation of transaction.operations) {
           const key = operation.key as TKey
-          this.syncedKeys.add(key)
 
           // Determine origin: 'local' for local-only collections or pending local changes
+          const retainedLocalOrigin =
+            truncatePendingLocalChanges?.has(key) === true ||
+            (truncatePendingLocalOrigins?.has(key) === true &&
+              !completedDirectUpserts.has(key) &&
+              !completedDirectDeletes.has(key))
           const origin: VirtualOrigin =
             this.isLocalOnly ||
             this.pendingLocalChanges.has(key) ||
             this.pendingLocalOrigins.has(key) ||
-            truncatePendingLocalChanges?.has(key) === true ||
-            truncatePendingLocalOrigins?.has(key) === true
+            localKeys.has(key) ||
+            retainedLocalOrigin
               ? 'local'
               : 'remote'
+          if (origin === `local`) localKeys.add(key)
 
           // Update synced data
           switch (operation.type) {
@@ -1052,6 +1198,10 @@ export class CollectionStateManager<
               this.pendingOptimisticDirectDeletes.delete(key)
               break
           }
+          if (!transaction.preserveHydrationSeedKeys) {
+            this.hydrationSeedKeys.delete(key)
+            this.hydratedKeys.delete(key)
+          }
         }
 
         for (const [key, metadataWrite] of transaction.rowMetadataWrites) {
@@ -1074,29 +1224,116 @@ export class CollectionStateManager<
         }
       }
 
+      // A completed optimistic insert may have used a temporary client key while
+      // the sync confirmation used a different server-generated key. Once a
+      // sync commit has been applied, stop retaining completed optimistic keys
+      // that were not confirmed by this commit so the temporary row is removed.
+      for (const key of this.pendingOptimisticDirectUpserts) {
+        // Truncate republishes this captured snapshot. Keep its existing
+        // retention marker so the next sync can also publish its removal.
+        if (
+          hasTruncateSync &&
+          truncateOptimisticSnapshot?.upserts.has(key) &&
+          !changedKeys.has(key)
+        )
+          continue
+        if (!changedKeys.has(key)) {
+          changedKeys.add(key)
+          if (!currentVisibleState.has(key)) {
+            const previousValue = previousOptimisticUpserts.get(key)
+            if (previousValue !== undefined) {
+              currentVisibleState.set(key, previousValue)
+            }
+          }
+          this.pendingOptimisticUpserts.delete(key)
+          this.pendingLocalOrigins.delete(key)
+        }
+        this.pendingOptimisticDirectUpserts.delete(key)
+      }
+      for (const key of this.pendingOptimisticDirectDeletes) {
+        if (
+          hasTruncateSync &&
+          truncateOptimisticSnapshot?.deletes.has(key) &&
+          !changedKeys.has(key)
+        )
+          continue
+        if (!changedKeys.has(key)) {
+          changedKeys.add(key)
+        }
+        this.pendingOptimisticDeletes.delete(key)
+        this.pendingLocalOrigins.delete(key)
+        this.pendingOptimisticDirectDeletes.delete(key)
+      }
+
+      // Maintain optimistic state appropriately
+      // Clear optimistic state since sync operations will now provide the authoritative data.
+      // Any still-active user transactions will be re-applied below in recompute.
+      this.optimisticUpserts.clear()
+      this.optimisticDeletes.clear()
+
+      // Reset flag and recompute optimistic state for any remaining active transactions
+      this.isCommittingSyncTransactions = false
+
+      // If we had a truncate, restore the preserved optimistic state from the snapshot
+      // This includes items from transactions that may have completed during processing
+      if (hasTruncateSync && truncateOptimisticSnapshot) {
+        for (const [key, value] of truncateOptimisticSnapshot.upserts) {
+          if (completedDirectUpserts.has(key) && changedKeys.has(key)) continue
+          this.optimisticUpserts.set(key, value)
+        }
+        for (const key of truncateOptimisticSnapshot.deletes) {
+          if (completedDirectDeletes.has(key) && changedKeys.has(key)) continue
+          this.optimisticDeletes.add(key)
+        }
+      }
+
+      // Always overlay any still-active optimistic transactions so mutations that started
+      // after the truncate snapshot are preserved.
+      for (const transaction of this.transactions.values()) {
+        if (![`completed`, `failed`].includes(transaction.state)) {
+          for (const mutation of transaction.mutations) {
+            // Truncate clears attribution with the old base, not the still-live
+            // local requests. Preserve them for later source acknowledgements.
+            if (this.isThisCollection(mutation.collection))
+              this.pendingLocalChanges.add(mutation.key)
+            if (
+              this.isThisCollection(mutation.collection) &&
+              mutation.type === `insert` &&
+              syncedInsertedOrUpdatedKeys.has(mutation.key)
+            ) {
+              this.acknowledgedInserts.add(mutation)
+            }
+            if (
+              this.isThisCollection(mutation.collection) &&
+              mutation.optimistic
+            ) {
+              switch (mutation.type) {
+                case `insert`:
+                case `update`:
+                  this.optimisticUpserts.set(
+                    mutation.key,
+                    this.resolveOptimisticUpsert(mutation),
+                  )
+                  this.optimisticDeletes.delete(mutation.key)
+                  break
+                case `delete`:
+                  this.optimisticUpserts.delete(mutation.key)
+                  this.optimisticDeletes.add(mutation.key)
+                  break
+              }
+            }
+          }
+        }
+      }
+
       // After applying synced operations, if this commit included a truncate,
       // re-apply optimistic mutations on top of the fresh synced base. This ensures
       // the UI preserves local intent while respecting server rebuild semantics.
       // Ordering: deletes (above) -> server ops (just applied) -> optimistic upserts.
       if (hasTruncateSync) {
-        // Avoid duplicating keys that were inserted/updated by synced operations in this commit
-        const syncedInsertedOrUpdatedKeys = new Set<TKey>()
-        for (const t of committedSyncedTransactions) {
-          for (const op of t.operations) {
-            if (op.type === `insert` || op.type === `update`) {
-              syncedInsertedOrUpdatedKeys.add(op.key as TKey)
-            }
-          }
-        }
-
-        // Build re-apply sets from the snapshot taken at the start of this function.
-        // This prevents losing optimistic state if transactions complete during truncate processing.
-        const reapplyUpserts = new Map<TKey, TOutput>(
-          truncateOptimisticSnapshot!.upserts,
-        )
-        const reapplyDeletes = new Set<TKey>(
-          truncateOptimisticSnapshot!.deletes,
-        )
+        // Events use the same rebuilt overlay as synchronous reads.
+        const reapplyUpserts = this.optimisticUpserts
+        const reapplyDeletes = this.optimisticDeletes
 
         // Emit inserts for re-applied upserts, skipping any keys that have an optimistic delete.
         // If the server also inserted/updated the same key in this batch, override that value
@@ -1140,91 +1377,18 @@ export class CollectionStateManager<
         }
       }
 
-      // Maintain optimistic state appropriately
-      // Clear optimistic state since sync operations will now provide the authoritative data.
-      // Any still-active user transactions will be re-applied below in recompute.
-      this.optimisticUpserts.clear()
-      this.optimisticDeletes.clear()
-
-      // Reset flag and recompute optimistic state for any remaining active transactions
-      this.isCommittingSyncTransactions = false
-
-      // If we had a truncate, restore the preserved optimistic state from the snapshot
-      // This includes items from transactions that may have completed during processing
-      if (hasTruncateSync && truncateOptimisticSnapshot) {
-        for (const [key, value] of truncateOptimisticSnapshot.upserts) {
-          this.optimisticUpserts.set(key, value)
-        }
-        for (const key of truncateOptimisticSnapshot.deletes) {
-          this.optimisticDeletes.add(key)
-        }
-      }
-
-      // Always overlay any still-active optimistic transactions so mutations that started
-      // after the truncate snapshot are preserved.
-      for (const transaction of this.transactions.values()) {
-        if (![`completed`, `failed`].includes(transaction.state)) {
-          for (const mutation of transaction.mutations) {
-            if (
-              this.isThisCollection(mutation.collection) &&
-              mutation.optimistic
-            ) {
-              switch (mutation.type) {
-                case `insert`:
-                case `update`:
-                  this.optimisticUpserts.set(
-                    mutation.key,
-                    mutation.modified as TOutput,
-                  )
-                  this.optimisticDeletes.delete(mutation.key)
-                  break
-                case `delete`:
-                  this.optimisticUpserts.delete(mutation.key)
-                  this.optimisticDeletes.add(mutation.key)
-                  break
-              }
-            }
-          }
-        }
-      }
-
-      // A completed optimistic insert may have used a temporary client key while
-      // the sync confirmation used a different server-generated key. Once a
-      // sync commit has been applied, stop retaining completed optimistic keys
-      // that were not confirmed by this commit so the temporary row is removed.
-      for (const key of this.pendingOptimisticDirectUpserts) {
-        if (!changedKeys.has(key)) {
-          changedKeys.add(key)
-          if (!currentVisibleState.has(key)) {
-            const previousValue = previousOptimisticUpserts.get(key)
-            if (previousValue !== undefined) {
-              currentVisibleState.set(key, previousValue)
-            }
-          }
-          this.pendingOptimisticUpserts.delete(key)
-          this.pendingLocalOrigins.delete(key)
-        }
-      }
-      for (const key of this.pendingOptimisticDirectDeletes) {
-        if (!changedKeys.has(key)) {
-          changedKeys.add(key)
-        }
-        this.pendingOptimisticDeletes.delete(key)
-        this.pendingLocalOrigins.delete(key)
-      }
-      this.pendingOptimisticDirectUpserts.clear()
-      this.pendingOptimisticDirectDeletes.clear()
-
       // Now check what actually changed in the final visible state
       for (const key of changedKeys) {
         const previousVisibleValue = currentVisibleState.get(key)
         const newVisibleValue = this.get(key) // This returns the new derived state
-        const previousVirtualProps = this.getVirtualPropsSnapshotForState(key, {
-          rowOrigins: previousRowOrigins,
-          optimisticUpserts: previousOptimisticUpserts,
-          optimisticDeletes: previousOptimisticDeletes,
-          completedOptimisticKeys: completedOptimisticOps,
-        })
+        const previousVirtualProps =
+          this.preSyncVirtualState.get(key) ??
+          this.getVirtualPropsSnapshotForState(key, {
+            rowOrigins: previousRowOrigins,
+            optimisticUpserts: previousOptimisticUpserts,
+            optimisticDeletes: previousOptimisticDeletes,
+            completedOptimisticKeys: completedOptimisticOps,
+          })
         const nextVirtualProps = this.getVirtualPropsSnapshotForState(key)
         const virtualChanged =
           previousVirtualProps.$synced !== nextVirtualProps.$synced ||
@@ -1240,35 +1404,11 @@ export class CollectionStateManager<
               )
             : undefined
 
-        // Check if this sync operation is redundant with a completed optimistic operation
-        const completedOp = completedOptimisticOps.get(key)
-        let isRedundantSync = false
-
-        if (completedOp) {
-          if (
-            completedOp.type === `delete` &&
-            previousVisibleValue !== undefined &&
-            newVisibleValue === undefined &&
-            deepEquals(completedOp.value, previousVisibleValue)
-          ) {
-            isRedundantSync = true
-          } else if (
-            newVisibleValue !== undefined &&
-            deepEquals(completedOp.value, newVisibleValue)
-          ) {
-            isRedundantSync = true
-          }
-        }
-
         const shouldEmitVirtualUpdate =
           virtualChanged &&
           previousVisibleValue !== undefined &&
           newVisibleValue !== undefined &&
           deepEquals(previousVisibleValue, newVisibleValue)
-
-        if (isRedundantSync && !shouldEmitVirtualUpdate) {
-          continue
-        }
 
         if (
           previousVisibleValue === undefined &&
@@ -1331,22 +1471,76 @@ export class CollectionStateManager<
       }
 
       // End batching and emit all events (combines any batched events with sync events)
-      this.changes.emitEvents(events, true)
-
-      this.pendingSyncedTransactions = uncommittedSyncedTransactions
-
-      // Clear the pre-sync state since sync operations are complete
-      this.preSyncVisibleState.clear()
-
-      // Clear recently synced keys after a microtask to allow recomputeOptimisticState to see them
-      Promise.resolve().then(() => {
-        this.recentlySyncedKeys.clear()
-      })
-
-      // Mark that we've received the first commit (for tracking purposes)
-      if (!this.hasReceivedFirstCommit) {
-        this.hasReceivedFirstCommit = true
+      let failure: { error: unknown } | undefined
+      try {
+        const visibleLayoutChanged =
+          previousLayout !== undefined &&
+          (previousLayout.length !== this.size ||
+            [...this.keys()].some(
+              (key, index) => key !== previousLayout[index],
+            ))
+        this.changes.emitEvents(events, true, visibleLayoutChanged)
+      } catch (error) {
+        failure = { error }
       }
+
+      if (this.syncSessionGeneration === syncSessionGeneration) {
+        this.preSyncVisibleState.clear()
+        this.preSyncVirtualState.clear()
+        Promise.resolve().then(() => {
+          if (this.syncSessionGeneration === syncSessionGeneration) {
+            this.recentlySyncedKeys.clear()
+          }
+        })
+        if (!this.hasReceivedFirstCommit) this.hasReceivedFirstCommit = true
+      }
+
+      for (const transaction of committedSyncedTransactions) {
+        transaction.applied.resolve()
+      }
+
+      return { processed: true, failure }
+    }
+
+    return { processed: false }
+  }
+
+  /** Abandons one committed transaction before it becomes visible. */
+  public cancelPendingSyncedTransaction(
+    transaction: PendingSyncedTransaction<TOutput, TKey>,
+  ): void {
+    if (transaction.applicationStarted) return
+
+    const index = this.pendingSyncedTransactions.indexOf(transaction)
+    if (index === -1) return
+
+    this.pendingSyncedTransactions.splice(index, 1)
+    transaction.applied.reject(new SyncTransactionAbortedError())
+
+    const remainingPendingKeys = new Set<TKey>()
+    for (const pending of this.pendingSyncedTransactions) {
+      for (const operation of pending.operations) {
+        remainingPendingKeys.add(operation.key as TKey)
+      }
+    }
+    for (const operation of transaction.operations) {
+      const key = operation.key as TKey
+      if (!remainingPendingKeys.has(key)) {
+        this.recentlySyncedKeys.delete(key)
+        this.preSyncVisibleState.delete(key)
+        this.preSyncVirtualState.delete(key)
+      }
+    }
+
+    if (this.pendingSyncedTransactions.length === 0) {
+      this.preSyncVisibleState.clear()
+      this.preSyncVirtualState.clear()
+      this.recentlySyncedKeys.clear()
+      this.changes.emitEvents([], true)
+    } else {
+      // Recompute after removing the canceled keys so optimistic cleanup is
+      // no longer suppressed by a sync transaction that will never publish.
+      this.recomputeOptimisticState(false)
     }
   }
 
@@ -1401,6 +1595,10 @@ export class CollectionStateManager<
         const currentValue = this.get(key)
         if (currentValue !== undefined) {
           this.preSyncVisibleState.set(key, currentValue)
+          this.preSyncVirtualState.set(
+            key,
+            this.getVirtualPropsSnapshotForState(key),
+          )
         }
       }
     }
@@ -1411,12 +1609,21 @@ export class CollectionStateManager<
    * This method should be called by the Transaction class when state changes
    */
   public onTransactionStateChange(): void {
-    // Check if commitPendingTransactions will be called after this
-    // by checking if there are pending sync transactions (same logic as in transactions.ts)
-    this.changes.shouldBatchEvents = this.pendingSyncedTransactions.length > 0
+    // Batch only when the next sync drain can actually publish. A persisting
+    // sibling can keep normal sync queued; it must not hide this rollback.
+    const hasPersistingTransaction = [...this.transactions.values()].some(
+      (transaction) => transaction.state === `persisting`,
+    )
+    this.changes.shouldBatchEvents = this.pendingSyncedTransactions.some(
+      (transaction) =>
+        transaction.committed &&
+        (!hasPersistingTransaction ||
+          transaction.immediate ||
+          transaction.truncate),
+    )
 
     // CRITICAL: Capture visible state BEFORE clearing optimistic state
-    this.capturePreSyncVisibleState()
+    if (this.changes.shouldBatchEvents) this.capturePreSyncVisibleState()
 
     this.recomputeOptimisticState(false)
   }
@@ -1426,6 +1633,10 @@ export class CollectionStateManager<
    * This can be called manually or automatically by garbage collection
    */
   public cleanup(): void {
+    this.syncSessionGeneration++
+    for (const transaction of this.pendingSyncedTransactions) {
+      transaction.applied.reject(new SyncTransactionAbortedError())
+    }
     this.syncedData.clear()
     this.syncedMetadata.clear()
     this.syncedCollectionMetadata.clear()
@@ -1435,11 +1646,15 @@ export class CollectionStateManager<
     this.pendingOptimisticDeletes.clear()
     this.pendingOptimisticDirectUpserts.clear()
     this.pendingOptimisticDirectDeletes.clear()
+    this.hydrationSeedKeys.clear()
+    this.hydratedKeys.clear()
     this.clearOriginTrackingState()
     this.isLocalOnly = false
     this.size = 0
     this.pendingSyncedTransactions = []
-    this.syncedKeys.clear()
+    this.preSyncVisibleState.clear()
+    this.preSyncVirtualState.clear()
+    this.recentlySyncedKeys.clear()
     this.hasReceivedFirstCommit = false
   }
 }

@@ -169,6 +169,7 @@ function makeHandle(hook: RenderHookResult<any, any>) {
       const r: any = hook.result.current
       return {
         data: r?.data,
+        state: r?.state,
         status: r?.status ?? `idle`,
         isReady: Boolean(r?.isReady),
         isError: Boolean(r?.isError),

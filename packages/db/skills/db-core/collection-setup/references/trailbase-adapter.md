@@ -17,27 +17,27 @@ const trailBaseClient = initClient('https://your-trailbase-instance.com')
 
 const todosCollection = createCollection(
   trailBaseCollectionOptions({
-    id: 'todos',
     recordApi: trailBaseClient.records('todos'),
     getKey: (item) => item.id,
+    parse: {},
+    serialize: {},
   }),
 )
 ```
 
-- `id` -- unique collection identifier
 - `recordApi` -- TrailBase Record API instance from `trailBaseClient.records(tableName)`
 - `getKey` -- extracts unique key from each item
+- `parse` -- field conversions from TrailBase records to collection rows
+- `serialize` -- field conversions from collection rows to TrailBase records
+
+Use empty objects for `parse` and `serialize` when both shapes are identical.
 
 ## Optional Config
 
-| Option      | Default | Description                                                                       |
-| ----------- | ------- | --------------------------------------------------------------------------------- |
-| `schema`    | (none)  | StandardSchema validator                                                          |
-| `parse`     | (none)  | Object mapping field names to functions that transform data coming FROM TrailBase |
-| `serialize` | (none)  | Object mapping field names to functions that transform data going TO TrailBase    |
-| `onInsert`  | (none)  | Handler called on insert                                                          |
-| `onUpdate`  | (none)  | Handler called on update                                                          |
-| `onDelete`  | (none)  | Handler called on delete                                                          |
+| Option     | Default | Description                  |
+| ---------- | ------- | ---------------------------- |
+| `id`       | (none)  | Unique collection identifier |
+| `syncMode` | `eager` | `eager` or `on-demand`       |
 
 ## Conversions (parse/serialize)
 
@@ -58,8 +58,8 @@ type Todo = {
   completed: boolean
 }
 
-const collection = createCollection<SelectTodo, Todo>(
-  trailBaseCollectionOptions({
+const collection = createCollection(
+  trailBaseCollectionOptions<Todo, SelectTodo>({
     id: 'todos',
     recordApi: trailBaseClient.records('todos'),
     getKey: (item) => item.id,
@@ -79,36 +79,28 @@ Automatic when `enable_subscriptions` is enabled on the TrailBase server. No add
 
 ## Persistence Handlers
 
-```typescript
-onInsert: async ({ transaction }) => {
-  const newItem = transaction.mutations[0].modified
-},
-onUpdate: async ({ transaction }) => {
-  const { original, modified } = transaction.mutations[0]
-},
-onDelete: async ({ transaction }) => {
-  const deletedItem = transaction.mutations[0].original
-},
-```
+TrailBase owns `onInsert`, `onUpdate`, and `onDelete`. The adapter writes
+through the Record API and waits until subscription events confirm the affected
+IDs before removing the optimistic overlay. Custom mutation handlers and
+`schema` are not part of `TrailBaseCollectionConfig`.
 
-TrailBase handles persistence through the Record API automatically. Custom handlers are for additional logic only.
+Call `collection.utils.cancel()` to cancel the active TrailBase event reader.
 
 ## Complete Example
 
 ```typescript
-import { createCollection } from '@tanstack/react-db'
+import { createCollection, safeRandomUUID } from '@tanstack/react-db'
 import { trailBaseCollectionOptions } from '@tanstack/trailbase-db-collection'
 import { initClient } from 'trailbase'
-import { z } from 'zod'
 
 const trailBaseClient = initClient('https://your-trailbase-instance.com')
 
-const todoSchema = z.object({
-  id: z.string(),
-  text: z.string(),
-  completed: z.boolean(),
-  created_at: z.date(),
-})
+type Todo = {
+  id: string
+  text: string
+  completed: boolean
+  created_at: Date
+}
 
 type SelectTodo = {
   id: string
@@ -117,29 +109,23 @@ type SelectTodo = {
   created_at: number
 }
 
-type Todo = z.infer<typeof todoSchema>
-
-const todosCollection = createCollection<SelectTodo, Todo>(
-  trailBaseCollectionOptions({
+const todosCollection = createCollection(
+  trailBaseCollectionOptions<Todo, SelectTodo>({
     id: 'todos',
     recordApi: trailBaseClient.records('todos'),
     getKey: (item) => item.id,
-    schema: todoSchema,
     parse: {
       created_at: (ts) => new Date(ts * 1000),
     },
     serialize: {
       created_at: (date) => Math.floor(date.valueOf() / 1000),
     },
-    onInsert: async ({ transaction }) => {
-      console.log('Created:', transaction.mutations[0].modified)
-    },
   }),
 )
 
 // Usage
 todosCollection.insert({
-  id: crypto.randomUUID(),
+  id: safeRandomUUID(),
   text: 'Review PR',
   completed: false,
   created_at: new Date(),

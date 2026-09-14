@@ -5,7 +5,7 @@ title: SyncConfig
 
 # Interface: SyncConfig\<T, TKey\>
 
-Defined in: [packages/db/src/types.ts:327](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L327)
+Defined in: [packages/db/src/types.ts:387](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L387)
 
 ## Type Parameters
 
@@ -19,13 +19,30 @@ Defined in: [packages/db/src/types.ts:327](https://github.com/TanStack/db/blob/m
 
 ## Properties
 
+### exportSyncMeta()?
+
+```ts
+optional exportSyncMeta: () => unknown;
+```
+
+Defined in: [packages/db/src/types.ts:431](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L431)
+
+Export adapter-specific metadata that lets hydration/persistence resume sync.
+The payload shape is owned by the adapter.
+
+#### Returns
+
+`unknown`
+
+***
+
 ### getSyncMetadata()?
 
 ```ts
 optional getSyncMetadata: () => Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/types.ts:350](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L350)
+Defined in: [packages/db/src/types.ts:425](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L425)
 
 Get the sync metadata for insert operations
 
@@ -37,13 +54,61 @@ Record containing relation information
 
 ***
 
+### importSyncMeta()?
+
+```ts
+optional importSyncMeta: (meta) => void;
+```
+
+Defined in: [packages/db/src/types.ts:436](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L436)
+
+Import adapter-specific metadata produced by exportSyncMeta.
+
+#### Parameters
+
+##### meta
+
+`unknown`
+
+#### Returns
+
+`void`
+
+***
+
+### mergeSyncMeta()?
+
+```ts
+optional mergeSyncMeta: (current, incoming) => unknown;
+```
+
+Defined in: [packages/db/src/types.ts:441](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L441)
+
+Merge two adapter-specific metadata payloads during hydration.
+
+#### Parameters
+
+##### current
+
+`unknown`
+
+##### incoming
+
+`unknown`
+
+#### Returns
+
+`unknown`
+
+***
+
 ### rowUpdateMode?
 
 ```ts
 optional rowUpdateMode: "full" | "partial";
 ```
 
-Defined in: [packages/db/src/types.ts:359](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L359)
+Defined in: [packages/db/src/types.ts:450](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L450)
 
 The row update mode used to sync to the collection.
 
@@ -67,7 +132,7 @@ sync: (params) =>
   | SyncConfigRes;
 ```
 
-Defined in: [packages/db/src/types.ts:331](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L331)
+Defined in: [packages/db/src/types.ts:391](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L391)
 
 #### Parameters
 
@@ -85,11 +150,28 @@ Begin a new sync transaction.
 
 ###### commit
 
-() => `void`
+(`signal?`) => [`SyncAppliedReceipt`](../type-aliases/SyncAppliedReceipt.md)
+
+Commit the active sync transaction in FIFO order.
+Returns `true` when the writes and events are already visible. Otherwise
+returns a receipt that resolves after they become visible. If collection
+cleanup or an optional request abort abandons the transaction first, the
+receipt rejects with an error named `AbortError`.
+Pass a signal only for request-scoped work that must not publish after
+cancellation. Aborting after application has no effect.
+
+###### markError
+
+(`error?`) => `void`
+
+Signal that initial sync failed before producing a usable snapshot.
+When supplied, `error` is preserved as the rejection reason from `preload()`.
 
 ###### markReady
 
 () => `void`
+
+Signal that a usable initial or recovered snapshot is available.
 
 ###### metadata?
 

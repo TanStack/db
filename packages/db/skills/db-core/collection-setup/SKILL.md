@@ -4,16 +4,17 @@ description: >
   Creating typed collections with createCollection. Adapter selection:
   queryCollectionOptions (REST/TanStack Query), electricCollectionOptions
   (ElectricSQL real-time sync), powerSyncCollectionOptions (PowerSync SQLite),
-  rxdbCollectionOptions (RxDB), trailbaseCollectionOptions (TrailBase),
+  rxdbCollectionOptions (RxDB), trailBaseCollectionOptions (TrailBase),
   localOnlyCollectionOptions, localStorageCollectionOptions. CollectionConfig
   options: getKey, schema, sync, gcTime, autoIndex (default off), defaultIndexType,
   syncMode (eager/on-demand, plus progressive for Electric). StandardSchema validation
   with Zod/Valibot/ArkType. Collection lifecycle (idle/loading/ready/error).
   Adapter-specific sync patterns including Electric txid tracking, Query direct
-  writes, and PowerSync query-driven sync with onLoad/onLoadSubset hooks.
+  writes, Query initial data and scoped factories, and PowerSync query-driven
+  sync with onLoad/onLoadSubset hooks.
 type: sub-skill
 library: db
-library_version: '0.6.0'
+library_version: '0.6.17'
 sources:
   - 'TanStack/db:docs/overview.md'
   - 'TanStack/db:docs/guides/schemas.md'
@@ -51,8 +52,8 @@ const todoSchema = z.object({
 const todoCollection = createCollection(
   queryCollectionOptions({
     queryKey: ['todos'],
-    queryFn: async () => {
-      const res = await fetch('/api/todos')
+    queryFn: async (ctx) => {
+      const res = await fetch('/api/todos', { signal: ctx.signal })
       return res.json()
     },
     queryClient,
@@ -60,16 +61,13 @@ const todoCollection = createCollection(
     schema: todoSchema,
     onInsert: async ({ transaction }) => {
       await api.todos.create(transaction.mutations[0].modified)
-      await todoCollection.utils.refetch()
     },
     onUpdate: async ({ transaction }) => {
       const mut = transaction.mutations[0]
       await api.todos.update(mut.key, mut.changes)
-      await todoCollection.utils.refetch()
     },
     onDelete: async ({ transaction }) => {
       await api.todos.delete(transaction.mutations[0].key)
-      await todoCollection.utils.refetch()
     },
   }),
 )
@@ -83,7 +81,7 @@ const todoCollection = createCollection(
 | ElectricSQL (real-time Postgres) | `electricCollectionOptions`     | `@tanstack/electric-db-collection`  |
 | PowerSync (SQLite offline)       | `powerSyncCollectionOptions`    | `@tanstack/powersync-db-collection` |
 | RxDB (reactive database)         | `rxdbCollectionOptions`         | `@tanstack/rxdb-db-collection`      |
-| TrailBase (event streaming)      | `trailbaseCollectionOptions`    | `@tanstack/trailbase-db-collection` |
+| TrailBase (event streaming)      | `trailBaseCollectionOptions`    | `@tanstack/trailbase-db-collection` |
 | No backend (UI state)            | `localOnlyCollectionOptions`    | `@tanstack/db`                      |
 | Browser localStorage             | `localStorageCollectionOptions` | `@tanstack/db`                      |
 
@@ -104,6 +102,13 @@ queryCollectionOptions({
 | `eager`       | Mostly-static datasets                                         | <10k rows |
 | `on-demand`   | Search, catalogs, large tables                                 | >50k rows |
 | `progressive` | Collaborative apps needing instant first paint (Electric only) | Any       |
+
+Calling `collection.preload()` on an on-demand collection is a no-op. Create
+the live query for the required subset and call `liveQuery.preload()` instead.
+
+For Query Collection request cancellation, cleanup boundaries, and shared
+`QueryClient` behavior, read
+[the Query adapter reference](references/query-adapter.md#request-cancellation-and-cleanup).
 
 ## Indexing
 
@@ -214,7 +219,10 @@ queryCollectionOptions({
 })
 ```
 
-`queryFn` result is treated as complete server state. Returning `[]` means "server has no items", deleting all existing collection data.
+In eager mode, `queryFn` is complete collection state. Returning `[]` means
+"the server has no items" and removes all rows. In on-demand mode, a result is
+complete only for that exact subset/Query key; an empty result releases that
+subset's ownership, while overlapping subsets can keep shared rows.
 
 Source: docs/collections/query-collection.md
 
@@ -305,7 +313,9 @@ queryCollectionOptions({
 })
 ```
 
-`queryFn` result replaces all collection data. For incremental fetches, merge with existing data.
+An eager `queryFn` result replaces all collection data. For incremental eager
+fetches, merge with existing data. In on-demand mode, return the complete state
+for the requested subset instead.
 
 Source: docs/collections/query-collection.md
 
@@ -386,11 +396,20 @@ When a schema transforms types, `TInput` must accept both the pre-transform and 
 
 Source: docs/guides/schemas.md
 
-### HIGH React Native missing crypto.randomUUID polyfill
+### HIGH Runtime has no secure random number generator
 
-TanStack DB uses `crypto.randomUUID()` internally. React Native doesn't provide this. Install `react-native-random-uuid` and import it at your app entry point.
+TanStack DB's `safeRandomUUID()` uses `crypto.randomUUID()` when available and
+falls back to `crypto.getRandomValues()`, including on non-secure HTTP origins.
+Add a Web Crypto polyfill only in runtimes, including some React Native
+versions, that provide neither API.
 
-Source: docs/overview.md
+```ts
+import { safeRandomUUID } from '@tanstack/db'
+
+collection.insert({ id: safeRandomUUID(), text: 'New item' })
+```
+
+Source: packages/db/src/utils/uuid.ts, packages/db/tests/uuid.test.ts
 
 ### MEDIUM Providing both explicit type parameter and schema
 

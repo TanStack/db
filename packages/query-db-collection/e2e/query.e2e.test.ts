@@ -5,7 +5,7 @@
  */
 
 import { afterAll, afterEach, beforeAll, describe } from 'vitest'
-import { createCollection, BTreeIndex } from '@tanstack/db'
+import { BTreeIndex, createCollection } from '@tanstack/db'
 import { QueryClient } from '@tanstack/query-core'
 import { queryCollectionOptions } from '../src/query'
 import {

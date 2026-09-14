@@ -3,14 +3,14 @@ name: db-core
 description: >
   TanStack DB core concepts: createCollection with queryCollectionOptions,
   electricCollectionOptions, powerSyncCollectionOptions, rxdbCollectionOptions,
-  trailbaseCollectionOptions, localOnlyCollectionOptions. Live queries via
+  trailBaseCollectionOptions, localOnlyCollectionOptions. Live queries via
   query builder (from, where, join, select, groupBy, orderBy, limit). Optimistic
   mutations with draft proxy (collection.insert, collection.update,
   collection.delete). createOptimisticAction, createTransaction,
   createPacedMutations. Entry point for all TanStack DB skills.
 type: core
 library: db
-library_version: '0.6.0'
+library_version: '0.6.17'
 ---
 
 # TanStack DB — Core Concepts
@@ -60,4 +60,4 @@ For framework-specific hooks:
 
 ## Version
 
-Targets @tanstack/db v0.6.0.
+Targets @tanstack/db v0.6.17.

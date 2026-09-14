@@ -99,6 +99,27 @@ async function waitFor(fn: () => void, timeout = 2000, interval = 20) {
 }
 
 describe(`Query Collections`, () => {
+  it(`keeps data and keyed state aligned after collection cleanup`, async () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `cleanup-alignment-vue`,
+        getKey: (person) => person.id,
+        initialData: initialPersons,
+      }),
+    )
+    const result = useLiveQuery(collection)
+
+    await waitForVueUpdate()
+    expect(result.data.value).toHaveLength(3)
+    expect(result.state.value.size).toBe(3)
+
+    await collection.cleanup()
+    await nextTick()
+
+    expect(result.data.value).toHaveLength(0)
+    expect(result.state.value.size).toBe(0)
+  })
+
   it(`should work with basic collection and select`, async () => {
     const collection = createCollection(
       mockSyncCollectionOptions<Person>({

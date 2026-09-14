@@ -23,15 +23,15 @@ const todosCollection = createCollection(
 
 ## Optional Config (with defaults)
 
-| Option          | Default                 | Description                                                                                        |
-| --------------- | ----------------------- | -------------------------------------------------------------------------------------------------- |
-| `id`            | (none)                  | Unique collection identifier                                                                       |
-| `schema`        | (none)                  | StandardSchema validator (RxDB has its own validation; this adds TanStack DB-side validation)      |
-| `startSync`     | `true`                  | Start ingesting RxDB data immediately                                                              |
-| `syncBatchSize` | `1000`                  | Max documents per batch during initial sync from RxDB; only affects initial load, not live updates |
-| `onInsert`      | (default: `bulkUpsert`) | Override default insert persistence                                                                |
-| `onUpdate`      | (default: `patch`)      | Override default update persistence                                                                |
-| `onDelete`      | (default: `bulkRemove`) | Override default delete persistence                                                                |
+| Option          | Default | Description                                                                                        |
+| --------------- | ------- | -------------------------------------------------------------------------------------------------- |
+| `id`            | (none)  | Unique collection identifier                                                                       |
+| `schema`        | (none)  | StandardSchema validator (RxDB has its own validation; this adds TanStack DB-side validation)      |
+| `startSync`     | `false` | Start ingesting RxDB data immediately                                                              |
+| `syncBatchSize` | `1000`  | Max documents per batch during initial sync from RxDB; only affects initial load, not live updates |
+
+The adapter owns `onInsert`, `onUpdate`, and `onDelete` so writes persist to
+RxDB. Those handlers cannot be overridden in `RxDBCollectionConfig`.
 
 ## Key Behavior: String Keys
 
@@ -96,7 +96,7 @@ RxDB schema indexes do not affect TanStack DB query performance (queries run in-
 ```typescript
 import { createRxDatabase } from 'rxdb/plugins/core'
 import { getRxStorageLocalstorage } from 'rxdb/plugins/storage-localstorage'
-import { createCollection } from '@tanstack/react-db'
+import { createCollection, safeRandomUUID } from '@tanstack/react-db'
 import { rxdbCollectionOptions } from '@tanstack/rxdb-db-collection'
 import { z } from 'zod'
 
@@ -141,7 +141,7 @@ const todosCollection = createCollection(
 
 // Usage
 todosCollection.insert({
-  id: crypto.randomUUID(),
+  id: safeRandomUUID(),
   text: 'Buy milk',
   completed: false,
 })
