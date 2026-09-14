@@ -3,14 +3,15 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { parse } from '@babel/parser'
 import traverseModule from '@babel/traverse'
-import { endpointsProbe } from '../transform.mjs'
+import { endpoints } from '../transform.mjs'
+const compilerPlugin = () => endpoints().find((plugin) => plugin.transform)
 const traverse = traverseModule.default ?? traverseModule
 const source = readFileSync(
   new URL('../src/endpoint.tsx', import.meta.url),
   'utf8',
 )
 const compile = (code) =>
-  endpointsProbe().transform(code, '/test/endpoint.tsx').code
+  compilerPlugin().transform(code, '/test/endpoint.tsx').code
 function order(code) {
   const ast = parse(compile(code), {
     sourceType: 'module',
@@ -147,7 +148,7 @@ test('non-endpoint instrumentation does not change declaration identities', () =
 })
 
 test('build-time schema dependencies never become client module dependencies', () => {
-  const plugin = endpointsProbe()
+  const plugin = compilerPlugin()
   const clientDependencies = []
   plugin.transform.call(
     {

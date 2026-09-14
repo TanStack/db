@@ -7,13 +7,14 @@ import { SchemaReference } from './schema-reference.mjs'
 import { renderSchemaProgram, renderSchemaDatabase } from './schema-program.mjs'
 import { schemaScenario, controls } from './schema-cases.mjs'
 import { SqlManifest } from './sql-manifest.mjs'
-import { endpointsProbe } from '../../transform.mjs'
+import { endpoints } from '../../transform.mjs'
 import {
   effectControls,
   effectScenario,
   renderEffectDatabase,
 } from './effect-program.mjs'
 import { EffectReference } from './effect-reference.mjs'
+const compilerPlugin = () => endpoints().find((plugin) => plugin.transform)
 const effects = process.env.ENDPOINT_ORACLE_EFFECTS === '1'
 const positive = (name, fallback) => {
   const n = Number(process.env[name] ?? fallback)
@@ -89,7 +90,7 @@ try {
   ]) {
     assert.throws(
       () =>
-        endpointsProbe().transform(
+        compilerPlugin().transform(
           source.replace(before, after),
           '/test/endpoint.tsx',
         ),

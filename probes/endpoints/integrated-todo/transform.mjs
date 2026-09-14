@@ -15,9 +15,14 @@ function unsupported(message, node) {
   throw new Error(`ENDPOINT_UNSUPPORTED_GRAMMAR ${message} at ${node.loc.start.line}:${node.loc.start.column + 1}`)
 }
 
+// One public entry point installs compilation and server protection together.
+export function endpoints(options = {}) {
+  return [serverBoundary(options), endpointCompiler()]
+}
+
 // Explicit module policy, not inferred server secrecy. Reject client loads
 // before source is read: transform-hook errors can echo source into dev responses.
-export function serverBoundary({ serverModules = [] } = {}) {
+function serverBoundary({ serverModules = [] } = {}) {
   let serverFiles = new Set()
   return {
     name: 'endpoints-server-boundary',
@@ -64,7 +69,7 @@ export function serverBoundary({ serverModules = [] } = {}) {
       if (/[\\/]\.endpoints[\\/]schema\.json$/.test(file)) this.error('ENDPOINT_SERVER_IMPORT_IN_CLIENT compilation schema snapshot')
       // Validate authored endpoint syntax while still in the load hook. Vite
       // transform errors otherwise include its entire active source in dev.
-      if (isEndpointModule(file)) endpointsProbe().transform(readFileSync(file, 'utf8'), id)
+      if (isEndpointModule(file)) endpointCompiler().transform(readFileSync(file, 'utf8'), id)
       if (serverFiles.has(file) || /\.server\.[cm]?[jt]sx?$/.test(file)) {
         this.error(`ENDPOINT_SERVER_IMPORT_IN_CLIENT ${file}: a server-only module remains reachable in the client after endpoint extraction`)
       }
@@ -72,7 +77,7 @@ export function serverBoundary({ serverModules = [] } = {}) {
   }
 }
 
-export function endpointsProbe() {
+function endpointCompiler() {
   const context = { root: process.cwd(), dependencies: new Set() }
   return {
     ...queryRegistry(context),

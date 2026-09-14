@@ -1,9 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { z } from 'zod'
-import { endpointsProbe } from '../transform.mjs'
+import { endpoints } from '../transform.mjs'
 import { specimen } from './fixtures/scalar-specimen.mjs'
 import { validateMutationRequest } from '../src/validate-mutation.server.ts'
+const compilerPlugin = () => endpoints().find((plugin) => plugin.transform)
 
 test('mutation validation reports structured issues and passes parsed values exactly once', () => {
   let parses = 0
@@ -48,7 +49,7 @@ test('mutation validation reports structured issues and passes parsed values exa
 })
 
 test('endpoint modules compile independently of the original filename', () => {
-  const result = endpointsProbe().transform(
+  const result = compilerPlugin().transform(
     specimen,
     '/test/projects.endpoint.tsx',
   )
@@ -64,7 +65,7 @@ test('query parameters reach the server and instantiate client membership', () =
       'or(gt(items.score,0),isNull(items.score))',
       'eq(items.completed,req.body.completed)',
     )
-  const result = endpointsProbe().transform(source, '/test/endpoint.tsx')
+  const result = compilerPlugin().transform(source, '/test/endpoint.tsx')
   assert.match(result.code, /"parameter":"completed"/)
   assert.match(result.code, /completed:false/)
 })
@@ -137,7 +138,7 @@ test('server registry discovers query modules absent from the current import gra
   try {
     await mkdir(join(dir, 'src'))
     await writeFile(join(dir, 'src/lazy.endpoint.tsx'), specimen)
-    const plugin = endpointsProbe()
+    const plugin = compilerPlugin()
     plugin.configResolved({ root: dir })
     const id = plugin.resolveId('virtual:endpoints-registry.server.ts')
     const code = await plugin.load.call(
@@ -173,7 +174,7 @@ test('only declared scalar parameters enter the optimistic predicate', () => {
       )
       .replace('or(gt(items.score,0),isNull(items.score))', predicate)
     assert.match(
-      endpointsProbe().transform(source, '/test/endpoint.tsx').code,
+      compilerPlugin().transform(source, '/test/endpoint.tsx').code,
       /"parameter":/,
     )
   }
@@ -189,7 +190,7 @@ test('only declared scalar parameters enter the optimistic predicate', () => {
       )
       .replace('or(gt(items.score,0),isNull(items.score))', predicate)
     assert.throws(
-      () => endpointsProbe().transform(source, '/test/endpoint.tsx'),
+      () => compilerPlugin().transform(source, '/test/endpoint.tsx'),
       /ENDPOINT_BOUND_UNSUPPORTED/,
     )
   }
@@ -199,11 +200,11 @@ test('nested query modules resolve shared runtime and relation bindings', () => 
   const nested = specimen
     .replace("from './runtime'", "from '../runtime'")
     .replace("from './database.server'", "from '../database.server'")
-  const parent = endpointsProbe().transform(
+  const parent = compilerPlugin().transform(
     specimen,
     '/test/src/endpoint.tsx',
   ).code
-  const child = endpointsProbe().transform(
+  const child = compilerPlugin().transform(
     nested,
     '/test/src/lazy/items.endpoint.ts',
   ).code

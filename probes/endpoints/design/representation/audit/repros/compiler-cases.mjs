@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { writeFileSync } from 'node:fs'
-import { endpointsProbe } from '../../../../integrated-todo/transform.mjs'
+import { endpoints } from '../../../../integrated-todo/transform.mjs'
 
 const query = completed => `const rows = query({input:z.object({}),async handler(req,res){
   const user=await requireUser(req)
@@ -19,7 +19,7 @@ export function makeCompletedComponent(){
   function TodoApp(dbClient){const {query,mutation}=endpoints(dbClient);${query(true)};return rows}
   return TodoApp
 }`
-const compiled = endpointsProbe().transform(source, '/fixture/endpoint.tsx').code
+const compiled = endpoints().find((plugin) => plugin.transform).transform(source, '/fixture/endpoint.tsx').code
 const keys = [...compiled.matchAll(/__boundQuery\(dbClient,"([^"]+)"/g)].map(match => match[1])
 assert.equal(keys.length, 2)
 assert.equal(new Set(keys).size, 1, 'Two distinct declarations received the same runtime key')

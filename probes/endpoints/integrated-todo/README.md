@@ -6,6 +6,15 @@ TodoMVC parity. The [generated E2E oracle](./tests/oracles/README.md) checks
 active collections against independent PGlite and records known failures. [Earlier development notes](./HISTORY.md) preserve historical
 experiments and receipts rather than describing the current app.
 
+Vite setup uses one plugin entry point. It installs compilation and server-code
+protection together, before TanStack Start:
+
+```ts
+import { endpoints } from './transform.mjs'
+
+plugins: [endpoints(), tanstackStart(), react()]
+```
+
 The [first coherence draft](../design/representation/implementation-draft.md) adds cross-query optimism and inline authoritative results, with measured costs and explicit scope limits.
 
 The [authority coordinator](../design/authority-coordinator/README.md) extends it

@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import fc from 'fast-check'
 import postgres from 'postgres'
 import { postgresAdapter } from '../integrated-todo/src/postgres-adapter.server.ts'
-import { serverBoundary } from '../integrated-todo/transform.mjs'
+import { endpoints } from '../integrated-todo/transform.mjs'
 
 test('preparation preserves parameter identity, query options and the pending query object', () => {
   fc.assert(
@@ -103,13 +103,13 @@ test('the adapter is allowed in the server build and rejected in the client buil
   const config = {
     configFile: false,
     logLevel: 'silent',
-    plugins: [serverBoundary()],
+    plugins: [endpoints()],
     build: { write: false, lib: { entry, formats: ['es'] } },
   }
   await assert.rejects(build(config), /ENDPOINT_SERVER_IMPORT_IN_CLIENT/)
   const result = await build({
     ...config,
-    plugins: [serverBoundary()],
+    plugins: [endpoints()],
     build: { ...config.build, ssr: entry },
   })
   const outputs = Array.isArray(result) ? result : [result]

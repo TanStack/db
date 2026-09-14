@@ -1,10 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { endpointsProbe } from '../transform.mjs'
+import { endpoints } from '../transform.mjs'
+const compilerPlugin = () => endpoints().find((plugin) => plugin.transform)
 
-import {specimen} from './fixtures/scalar-specimen.mjs'
+import { specimen } from './fixtures/scalar-specimen.mjs'
 const compile = (source) =>
-  endpointsProbe().transform(source, '/test/endpoint.tsx').code
+  compilerPlugin().transform(source, '/test/endpoint.tsx').code
 
 test('scalar queries retain relation identity and nullable predicate structure', () => {
   const result = compile(specimen)
