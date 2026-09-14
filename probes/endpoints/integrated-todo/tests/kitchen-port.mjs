@@ -180,14 +180,14 @@ try {
     if (!expectedFailure) {
       // SQL paths and FK effects in Kitchen, independent of compiler diagnostics.
       const retainedAffected = {
-        saveIngredient: 1,
+        updateIngredient: 1,
         addToShoppingList: 1,
-        saveComment: 1,
+        updateComment: 1,
         deleteComment: 1,
         insertComment: 1,
-        createIngredientAction: 3,
-        createRecipeAction: 4,
-        changeTagAssignmentsAction: 3,
+        insertIngredient: 3,
+        insertRecipe: 4,
+        updateTagAssignments: 3,
         deleteRecipe: 4,
         deleteIngredient: 2,
       }
@@ -200,7 +200,7 @@ try {
     tag = randomUUID(),
     link = randomUUID(),
     comment = randomUUID()
-  await action('createIngredientAction', {
+  await action('insertIngredient', {
     ingredient: {
       id: ingredient,
       name: 'Oracle ingredient',
@@ -220,14 +220,14 @@ try {
     new_tags: [],
     links: [],
   })
-  await action('saveIngredient', { id: ingredient, data: { count: 4 } })
+  await action('updateIngredient', { id: ingredient, data: { count: 4 } })
   await action('addToShoppingList', {
     recipeName: 'Fixture',
     checklists: { Pantry: ['Flour'] },
     ingredientIds: [ingredient],
   })
   assert.equal(app.ingredientsCollection.get(ingredient).trello_add_count, 1)
-  await action('createRecipeAction', {
+  await action('insertRecipe', {
     id: recipe,
     url: '',
     pastedText: 'Fixture text',
@@ -254,7 +254,7 @@ try {
   assert.equal(app.recipeCommentsCollection.get(comment).user_id, user)
   assert.ok(app.recipeCommentsCollection.get(comment).created_at.getTime() > 0)
   const commentCreatedAt = app.recipeCommentsCollection.get(comment).created_at
-  await action('saveComment', {
+  await action('updateComment', {
     id: comment,
     data: { comment: 'edited', user_id: other, created_at: new Date(0) },
   })
@@ -263,7 +263,7 @@ try {
     app.recipeCommentsCollection.get(comment).created_at,
     commentCreatedAt,
   )
-  await action('changeTagAssignmentsAction', {
+  await action('updateTagAssignments', {
     target: { entity: 'recipe', entity_id: recipe },
     new_tags: [
       { id: tag, name: `  ${tag}  `, user_id: other, created_at: new Date(0) },
@@ -276,7 +276,7 @@ try {
   assert.ok(app.tagsCollection.get(tag).created_at.getTime() > 0)
   assert.ok(app.recipeTagsCollection.get(link).created_at.getTime() > 0)
   loaded.setActor(other)
-  await action('saveIngredient', { id: ingredient, data: { count: 99 } }, true)
+  await action('updateIngredient', { id: ingredient, data: { count: 99 } }, true)
   loaded.setActor(user)
   await action('deleteComment', comment)
   await action('deleteRecipe', recipe)
