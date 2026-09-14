@@ -82,6 +82,11 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `exact-retractions disjoint-commutation`,
   ],
   [
+    `db/tests/live-query-observer-history.property.test.ts`,
+    `live-query-observer`,
+    `granular-history wholesale-history`,
+  ],
+  [
     `db/tests/query/derived-delete-reconciliation.test.ts`,
     `derived-publication`,
     `membership-work`,

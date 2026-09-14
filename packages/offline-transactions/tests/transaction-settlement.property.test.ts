@@ -6,7 +6,6 @@ import { OutboxManager } from '../src/outbox/OutboxManager'
 import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
 import { atOracleCheckpoint, cleanupOfflineOracle } from './oracle-lifecycle'
 import type { TestItem } from './harness'
-import type { PendingMutation } from '@tanstack/db'
 
 function gate() {
   let resolve!: () => void
@@ -67,7 +66,10 @@ it.each([20260913, undefined])(
               ),
             )
           }
-          const calls: Array<{ id: string; rows: Array<TestItem> }> = []
+          const calls: Array<{
+            id: string
+            rows: Array<Record<string, unknown>>
+          }> = []
           const expectedRows = succeeds.map((_, index) =>
             Array.from({ length: width }, (_unused, column) => ({
               id: `${sharedKeys ? 0 : index}:${column}`,
@@ -79,8 +81,7 @@ it.each([20260913, undefined])(
           const env = createTestOfflineEnvironment({
             mutationFn: async (params) => {
               const index = calls.length
-              const mutations = params.transaction
-                .mutations as unknown as Array<PendingMutation<TestItem>>
+              const mutations = params.transaction.mutations
               calls.push({
                 id: params.transaction.id,
                 rows: mutations.map((mutation) =>
@@ -303,14 +304,12 @@ it.each([
     const failure = new NonRetriableError(`restored permanent failure`)
     const outcomes: Array<unknown> = rows.map(() => `pending`)
     const waits: Array<Promise<void>> = []
-    const calls: Array<{ id: string; rows: Array<TestItem> }> = []
+    const calls: Array<{ id: string; rows: Array<Record<string, unknown>> }> = []
     const env = createTestOfflineEnvironment({
       storage,
       mutationFn: async (params) => {
         const index = calls.length
-        const mutations = params.transaction.mutations as unknown as Array<
-          PendingMutation<TestItem>
-        >
+        const mutations = params.transaction.mutations
         calls.push({
           id: params.transaction.id,
           rows: mutations.map((mutation) => structuredClone(mutation.modified)),
@@ -435,11 +434,7 @@ it(`keeps admitted transactions pending when a peer's retry record cannot be upd
             await release.promise
             throw new Error(`temporary provider failure`)
           }
-          env.applyMutations(
-            params.transaction.mutations as unknown as Array<
-              PendingMutation<TestItem>
-            >,
-          )
+          env.applyMutations(params.transaction.mutations)
         },
       })
       let hasPrimaryFailure = false
@@ -538,11 +533,7 @@ it(`rejects only the transaction whose durable admission fails`, async () => {
         storage: new Storage(),
         mutationFn: async (params) => {
           await release.promise
-          env.applyMutations(
-            params.transaction.mutations as unknown as Array<
-              PendingMutation<TestItem>
-            >,
-          )
+          env.applyMutations(params.transaction.mutations)
         },
       })
       const ids: Array<string> = []

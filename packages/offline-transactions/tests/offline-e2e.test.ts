@@ -2,9 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { NonRetriableError } from '../src/types'
 import { DefaultRetryPolicy } from '../src/retry/RetryPolicy'
 import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
-import type { TestItem } from './harness'
 import type { OfflineMutationFnParams, OnlineDetector } from '../src/types'
-import type { PendingMutation } from '@tanstack/db'
 
 const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -108,9 +106,7 @@ describe(`offline executor end-to-end`, () => {
     const env = createTestOfflineEnvironment({
       mutationFn: (params) => {
         const runtimeOnline = online
-        const mutations = params.transaction.mutations as Array<
-          PendingMutation<TestItem>
-        >
+        const mutations = params.transaction.mutations
         if (!runtimeOnline) {
           throw new Error(`offline`)
         }
@@ -148,7 +144,7 @@ describe(`offline executor end-to-end`, () => {
     // Check that the transaction is in the outbox (persisted for retry)
     let outboxEntries = await env.executor.peekOutbox()
     expect(outboxEntries.length).toBe(1)
-    expect(outboxEntries[0].id).toBe(offlineTx.id)
+    expect(outboxEntries[0]!.id).toBe(offlineTx.id)
 
     // Now bring the system back online
     online = true
@@ -300,16 +296,14 @@ describe(`offline executor end-to-end`, () => {
     // Verify it's in the outbox
     const outboxEntries = await offlineErrorEnv.executor.peekOutbox()
     expect(outboxEntries.length).toBe(1)
-    expect(outboxEntries[0].id).toBe(offlineTx.id)
+    expect(outboxEntries[0]!.id).toBe(offlineTx.id)
 
     offlineErrorEnv.executor.dispose()
 
     const replayEnv = createTestOfflineEnvironment({
       storage,
       mutationFn: (params: OfflineMutationFnParams & { attempt: number }) => {
-        const mutations = params.transaction.mutations as Array<
-          PendingMutation<TestItem>
-        >
+        const mutations = params.transaction.mutations
         replayEnv.applyMutations(mutations)
         return { ok: true, mutations }
       },
@@ -340,9 +334,7 @@ describe(`offline executor end-to-end`, () => {
         throw new Error(`env not initialized`)
       }
 
-      const mutations = params.transaction.mutations as Array<
-        PendingMutation<TestItem>
-      >
+      const mutations = params.transaction.mutations
 
       await new Promise<void>((resolve) => {
         pendingResolvers.push(() => {
@@ -520,11 +512,11 @@ describe(`offline executor end-to-end`, () => {
     // Verify it's in the outbox
     const outboxEntries = await firstEnv.executor.peekOutbox()
     expect(outboxEntries.length).toBe(1)
-    expect(outboxEntries[0].id).toBe(offlineTx.id)
+    expect(outboxEntries[0]!.id).toBe(offlineTx.id)
 
     // Verify the mutation data is properly serialized
-    expect(outboxEntries[0].mutations.length).toBe(1)
-    expect(outboxEntries[0].mutations[0].type).toBe(`insert`)
+    expect(outboxEntries[0]!.mutations.length).toBe(1)
+    expect(outboxEntries[0]!.mutations[0]!.type).toBe(`insert`)
 
     // Dispose first environment (simulating page refresh)
     firstEnv.executor.dispose()
@@ -541,9 +533,7 @@ describe(`offline executor end-to-end`, () => {
       mutationFn: async (params) => {
         // Wait for explicit resolution
         await secondEnvMutationPromise()
-        const mutations = params.transaction.mutations as Array<
-          PendingMutation<TestItem>
-        >
+        const mutations = params.transaction.mutations
         secondEnv.applyMutations(mutations)
         return { ok: true, mutations }
       },
@@ -562,7 +552,7 @@ describe(`offline executor end-to-end`, () => {
     // Verify the transaction IS still in the outbox (data was persisted correctly)
     const secondEnvOutbox = await secondEnv.executor.peekOutbox()
     expect(secondEnvOutbox.length).toBe(1)
-    expect(secondEnvOutbox[0].mutations[0].type).toBe(`insert`)
+    expect(secondEnvOutbox[0]!.mutations[0]!.type).toBe(`insert`)
 
     // Now complete the mutation to verify the data eventually syncs
     secondEnvResolveMutation!()

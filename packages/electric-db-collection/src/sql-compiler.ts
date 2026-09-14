@@ -194,9 +194,12 @@ function compileFunction(
     }
   }
 
-  const compiledArgs = args.map((arg: IR.BasicExpression) =>
-    compileBasicExpression(arg, params, encodeColumnName),
-  )
+  const compiledArgs = args.map((arg: IR.BasicExpression) => {
+    const compiled = compileBasicExpression(arg, params, encodeColumnName)
+    return arg.type === `func` && (arg.name === `and` || arg.name === `or`)
+      ? `(${compiled})`
+      : compiled
+  })
 
   // Special case for IS NULL / IS NOT NULL - these are postfix operators
   if (name === `isNull` || name === `isUndefined`) {
@@ -238,6 +241,10 @@ function compileFunction(
       throw new Error(`Binary operator ${name} expects 2 arguments`)
     }
     const [lhs, rhs] = compiledArgs
+
+    if (name === `and` || name === `or`) {
+      return compiledArgs.join(` ${opName} `)
+    }
 
     // Special case for comparison operators with boolean values
     // PostgreSQL doesn't support < > <= >= on booleans

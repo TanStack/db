@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
-import type { TestItem } from './harness'
-import type { PendingMutation } from '@tanstack/db'
 
 const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -62,15 +60,13 @@ describe(`leader failover`, () => {
     // Verify A has the transaction in outbox
     const outboxA = await envA.executor.peekOutbox()
     expect(outboxA).toHaveLength(1)
-    expect(outboxA[0].id).toBe(txA.id)
+    expect(outboxA[0]!.id).toBe(txA.id)
 
     // Now create executor B with same storage, starts as non-leader
     const envB = createTestOfflineEnvironment({
       storage: sharedStorage,
       mutationFn: (params) => {
-        const mutations = params.transaction.mutations as Array<
-          PendingMutation<TestItem>
-        >
+        const mutations = params.transaction.mutations
         envB.applyMutations(mutations)
         return { ok: true, mutations }
       },
@@ -128,9 +124,7 @@ describe(`leader failover`, () => {
     const envB = createTestOfflineEnvironment({
       storage: sharedStorage,
       mutationFn: (params) => {
-        const mutations = params.transaction.mutations as Array<
-          PendingMutation<TestItem>
-        >
+        const mutations = params.transaction.mutations
         envB.applyMutations(mutations)
         return { ok: true, mutations }
       },
@@ -229,9 +223,7 @@ describe(`leader failover`, () => {
     const envC = createTestOfflineEnvironment({
       storage: sharedStorage,
       mutationFn: (params) => {
-        const mutations = params.transaction.mutations as Array<
-          PendingMutation<TestItem>
-        >
+        const mutations = params.transaction.mutations
         envC.applyMutations(mutations)
         return { ok: true, mutations }
       },

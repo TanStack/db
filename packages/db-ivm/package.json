@@ -23,6 +23,8 @@
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
     "test": "vitest --run",
+    "test:incrementalization": "vitest --run tests/incrementalization-law.property.test.ts",
+    "typecheck": "tsc --noEmit",
     "bench:hash": "vitest bench --run tests/hash.bench.ts --coverage.enabled=false"
   },
   "type": "module",

@@ -85,10 +85,12 @@ export class DistinctOperator<
 export function distinct<T extends KeyValue<any, any>>(
   by: (value: T) => any = (value: T) => value,
 ) {
-  return (stream: IStreamBuilder<T>): IStreamBuilder<T> => {
-    const output = new StreamBuilder<T>(
+  return (
+    stream: IStreamBuilder<T>,
+  ): IStreamBuilder<KeyValue<number, GetValue<T>>> => {
+    const output = new StreamBuilder<KeyValue<number, GetValue<T>>>(
       stream.graph,
-      new DifferenceStreamWriter<T>(),
+      new DifferenceStreamWriter<KeyValue<number, GetValue<T>>>(),
     )
     const operator = new DistinctOperator<T>(
       stream.graph.getNextOperatorId(),
