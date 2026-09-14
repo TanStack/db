@@ -21,7 +21,7 @@ Endpoint declarations can also live at module scope. See the
 ```ts
 // todos.endpoint.ts
 import { dbClient } from './db-client'
-import { endpoints } from './runtime'
+import { endpoints } from '@tanstack/db-endpoints'
 
 const { query, mutation } = endpoints(dbClient)
 export const listTodos = query({ /* input, schema, handler */ })
@@ -32,6 +32,11 @@ import { listTodos, updateTodo } from './todos.endpoint'
 useLiveQuery(listTodos)
 updateTodo({ id, text }) // synchronous Transaction
 ```
+
+The Vite plugin resolves this public entry to the local framework prototype.
+Generated code imports server helpers from the framework itself; applications
+need no `runtime.ts` or `registry.server.ts` re-export files. The prototype still
+needs a TypeScript path mapping until it is packaged.
 
 Imports create stable collections without dispatching reads. Preloading,
 subscribing, or mutation reconciliation starts data loading. Lazy route modules

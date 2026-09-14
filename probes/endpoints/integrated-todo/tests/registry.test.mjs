@@ -210,7 +210,11 @@ test('nested query modules resolve shared runtime and relation bindings', () => 
   ).code
   const relation = (code) => code.match(/"relation":"([^"]+)"/)[1]
   assert.equal(relation(parent), relation(child))
-  assert.match(child, /\/test\/src\/registry\.server\.ts/)
+  assert.ok(
+    child.includes(
+      new URL('../src/registry.server.ts', import.meta.url).pathname,
+    ),
+  )
 })
 
 test('module exports bind real query collections without a component factory', () => {
@@ -228,4 +232,23 @@ test('module exports bind real query collections without a component factory', (
       ),
     /ENDPOINT_BOUND_UNSUPPORTED/,
   )
+})
+
+test('the public entry resolves framework helpers without application shims', () => {
+  const source = specimen.replace(
+    "from './runtime'",
+    "from '@tanstack/db-endpoints'",
+  )
+  const plugin = compilerPlugin()
+  const result = plugin.transform(
+    source,
+    '/test/src/features/items.endpoint.ts',
+  )
+  const runtime = new URL('../src/runtime.ts', import.meta.url).pathname
+  const registry = new URL('../src/registry.server.ts', import.meta.url)
+    .pathname
+  assert.equal(plugin.resolveId('@tanstack/db-endpoints'), runtime)
+  assert.ok(result.code.includes(registry))
+  assert.match(result.code, /__boundQuery/)
+  assert.doesNotMatch(result.code, /features\/registry\.server/)
 })

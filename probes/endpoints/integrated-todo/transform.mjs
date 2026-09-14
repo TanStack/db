@@ -79,8 +79,13 @@ function serverBoundary({ serverModules = [] } = {}) {
 
 function endpointCompiler() {
   const context = { root: process.cwd(), dependencies: new Set() }
+  const registry = queryRegistry(context)
   return {
-    ...queryRegistry(context),
+    ...registry,
+    resolveId(id) {
+      if (id === '@tanstack/db-endpoints') return resolve(import.meta.dirname, 'src/runtime.ts')
+      return registry.resolveId(id)
+    },
     name: 'endpoints-probe',
     enforce: 'pre',
     transform(code, id) {

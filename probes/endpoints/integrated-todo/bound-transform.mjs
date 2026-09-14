@@ -60,14 +60,15 @@ export function transformBoundEndpoints(
   const runtimeImport = ast.program.body.find(
     (node) =>
       node.type === 'ImportDeclaration' &&
-      /^\.\.?\/(?:.*\/)?runtime(?:\.ts)?$/.test(node.source.value) &&
+      (node.source.value === '@tanstack/db-endpoints' ||
+        /^\.\.?\/(?:.*\/)?runtime(?:\.ts)?$/.test(node.source.value)) &&
       node.specifiers.some(
         (s) => s.type === 'ImportSpecifier' && s.imported.name === 'endpoints',
       ),
   )
   if (!runtimeImport) return
   const runtimeSource = runtimeImport.source.value
-  const runtimeDirectory = dirname(resolve(dirname(id), runtimeSource))
+  const registrySource = resolve(import.meta.dirname, 'src/registry.server.ts')
   if (
     !ast.program.body.some(
       (node) =>
@@ -403,7 +404,7 @@ export function transformBoundEndpoints(
     .slice(0, 12)
   append(
     `import {refreshRegisteredMutation as __boundRefresh,validateMutationRequest as __boundValidate} from ${JSON.stringify(
-      resolve(runtimeDirectory, 'registry.server.ts'),
+      registrySource,
     )};\nimport {createServerFn as __boundServerFn} from '@tanstack/react-start';\nimport {bindQuery as __boundQuery,bindMutation as __boundMutation} from ${JSON.stringify(
       runtimeSource,
     )};\n`,
@@ -532,7 +533,7 @@ export function transformBoundEndpoints(
   const registryCode =
     imports +
     `\nimport {registerQuery} from ${JSON.stringify(
-      resolve(runtimeDirectory, 'registry.server.ts'),
+      registrySource,
     )};\nexport const definitions={` +
     definitions
       .map((entry) => {

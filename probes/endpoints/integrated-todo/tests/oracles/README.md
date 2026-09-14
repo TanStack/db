@@ -5,7 +5,8 @@ assertion to its owner. General parsed-input checks now run in the generated
 compiled oracle; the remaining app smoke test lives in Kitchen itself.
 
 The compiled browser campaign exercises both component-bound declarations and
-module-level collection/action exports. The latter use an imported shared client
+module-level collection/action exports imported through `@tanstack/db-endpoints`.
+The latter use an imported shared client
 with a deferred scope getter. Both shapes pass through Start RPC and the same
 optimistic/settled PGlite comparisons, including strict/strip/passthrough inputs.
 Production assets and source maps are scanned for server code in each program.
