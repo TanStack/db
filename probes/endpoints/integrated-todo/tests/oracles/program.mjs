@@ -114,6 +114,9 @@ export function TodoApp(){
 export const browserProbe = `import {useEffect} from 'react'
 import {useDbClient} from '@tanstack/react-db'
 import {endpointRuntime} from './runtime'
+const receipts=[],faults=[]
+globalThis.__endpointOracleReceipt=token=>receipts.push(token)
+globalThis.__endpointOracleFault=point=>faults.push({point})
 export function useOracleProbe(collections,actions,gced=[]){
  const runtime=endpointRuntime(useDbClient())
  useEffect(()=>{
@@ -130,7 +133,7 @@ export function useOracleProbe(collections,actions,gced=[]){
     outcomes[input.token]={state:tx.state,result:'pending'}
     void tx.isPersisted.promise.then(()=>{outcomes[input.token]={state:tx.state,result:'fulfilled',elapsedMs:performance.now()-started}},e=>{outcomes[input.token]={state:tx.state,result:'rejected',error:String(e)}})
     return {isPromise:typeof tx.then==='function',hasPersistence:!!tx.isPersisted?.promise,rows:snapshot()}
-   },outcomes,refresh:()=>Promise.all(collections.filter((_,i)=>!gced.includes(i)).map(c=>c.utils.refetch({throwOnError:true}))),errors:()=>[...runtime.readErrors.values()],subscriberCounts:()=>collections.map(c=>c.subscriberCount),
+   },outcomes,receipts,drainFaults:()=>faults.splice(0),refresh:()=>Promise.all(collections.filter((_,i)=>!gced.includes(i)).map(c=>c.utils.refetch({throwOnError:true}))),errors:()=>[...runtime.readErrors.values()],subscriberCounts:()=>collections.map(c=>c.subscriberCount),
    observe(){collections.forEach((c,index)=>observers.push(c.subscribeChanges(changes=>events.push({index,changes:changes.map(change=>({type:change.type,key:change.key,value:plain(change.value)})),rows:snapshot()}),{includeInitialState:false})))},
    drainEvents(){return events.splice(0)},
   }

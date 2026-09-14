@@ -62,7 +62,10 @@ async function execute(program, histories) {
   program = { helpers: false, helperFanout: false, ...program }
   const dir = await mkdtemp(join(tmpdir(), 'compiled-dependency-oracle-'))
   const pg = new PGlite()
-  let compiled, loaded
+  let compiled,
+    loaded,
+    alteredTrigger = false,
+    alteredHelper = false
   try {
     await mkdir(join(dir, 'src'))
     await symlink(join(base, 'node_modules'), join(dir, 'node_modules'), 'dir')
@@ -84,7 +87,12 @@ async function execute(program, histories) {
       'src/database.server.ts',
     )
     if (process.env.ENDPOINT_COMPILED_MUTANT === 'ignore-triggers') {
-      for (const table of snapshot.tables) table.writable = true
+      for (const table of snapshot.tables) {
+        if (!table.writable) alteredTrigger = true
+        table.writable = true
+      }
+      if (alteredTrigger)
+        evidence.fault('ignore-triggers', { stage: 'applied' })
     }
     const code = endpointSource(program)
     compiled = transformBoundEndpoints(
@@ -97,6 +105,7 @@ async function execute(program, histories) {
       process.env.ENDPOINT_FUNCTION_MUTANT === 'omit-helper' &&
       program.helperFanout
     ) {
+      const before = compiled.code
       compiled.code = compiled.code.replace(
         /,\{scope:data.scope\},\(\)=>(\[[^\n]*?\])\)/g,
         (_, json) =>
@@ -104,7 +113,9 @@ async function execute(program, histories) {
             JSON.parse(json).slice(0, 1),
           )})`,
       )
+      alteredHelper = compiled.code !== before
     }
+    if (alteredHelper) evidence.fault('omit-helper', { stage: 'applied' })
     assert.doesNotMatch(
       compiled.code + compiled.registryCode,
       /pg_catalog|LOCK TABLE|inspectSchema/,
@@ -150,6 +161,10 @@ async function execute(program, histories) {
         },
       ],
     })
+    evidence.artifact(
+      'compiled-bundle:' + report.compilations,
+      await readFile(bundle),
+    )
     const module = await import(pathToFileURL(bundle).href)
     loaded = module
     // The real bundled database module owns the SUT PGlite instance. Export it
@@ -158,6 +173,7 @@ async function execute(program, histories) {
     for (const history of histories) {
       const core = new module.DbClient({ endpointScope: 'oracle' })
       try {
+        evidence.at({})
         const app = module.App(core)
         await Promise.all(app.collections.map((c) => c.preload()))
         if (process.env.ENDPOINT_ORACLE_TEST_FAULT === 'bad-baseline') {
@@ -183,7 +199,9 @@ async function execute(program, histories) {
           admitted,
           { checkpoint: 'preload' },
         )
-        for (const step of history) {
+        for (const [stepIndex, step] of history.entries()) {
+          evidence.at({ operation: step.kind, step: stepIndex })
+          evidence.record({ type: 'operation', step })
           const target = step.table % program.count
           const before = structuredClone(admitted)
           const action = app.actions[step.kind + target]
@@ -217,17 +235,21 @@ async function execute(program, histories) {
           } catch {
             rejected = true
           }
+          if (alteredTrigger && target === 0 && program.trigger)
+            evidence.fault('ignore-triggers', { operation: step.kind })
+          if (alteredHelper && target === 0 && step.kind === 'update')
+            evidence.fault('omit-helper', { operation: step.kind })
           const tx = action(step.kind === 'delete' ? {} : { value: step.value })
           const expectedOptimism = before.map((rows, i) =>
             i !== target
               ? rows
               : step.kind === 'delete'
-              ? []
-              : step.kind === 'insert' && rows.length === 0
-              ? [{ id: 'row', value: step.value }]
-              : step.kind === 'update'
-              ? rows.map((row) => ({ ...row, value: step.value }))
-              : rows,
+                ? []
+                : step.kind === 'insert' && rows.length === 0
+                  ? [{ id: 'row', value: step.value }]
+                  : step.kind === 'update'
+                    ? rows.map((row) => ({ ...row, value: step.value }))
+                    : rows,
           )
           evidence.check(
             'optimistic-rows',
@@ -275,11 +297,9 @@ async function execute(program, histories) {
             admitted[i] = structuredClone(expected)
             report.authorityChecks++
           }
-          assert.equal(
-            reads,
-            expectedReads,
-            `compiled read count ${JSON.stringify({ program, step })}`,
-          )
+          evidence.check('read-obligation', reads, expectedReads, {
+            checkpoint: 'settled',
+          })
           report.resultReads += reads
           report.skippedReads += program.count - reads
           report.operations++

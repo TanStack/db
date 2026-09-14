@@ -190,3 +190,148 @@ test('a requested fault that survives or is never reached cannot report a passin
     await rm(output, { recursive: true, force: true })
   }
 })
+
+test('generated row-field failures retain their semantic distinction through shrinking and replay', async () => {
+  await fc.assert(
+    fc.asyncProperty(
+      fc.constantFrom('id', 'text', 'completed'),
+      fc.integer({ min: 1, max: 20 }),
+      async (field, value) => {
+        const expected = [[{ id: 'r', text: 'ok', completed: false }]]
+        const first = new Evidence('field-identity')
+        await assert.rejects(
+          first.run({}, () =>
+            first.check(
+              'rows',
+              [[{ ...expected[0][0], [field]: value }]],
+              expected,
+              { checkpoint: 'same-turn', operation: 'edit' },
+            ),
+          ),
+        )
+        const other = field === 'text' ? 'id' : 'text'
+        const next = new Evidence('field-identity')
+        await assert.rejects(
+          next.replay({ original: first.original }, (input) =>
+            next.run(input, () =>
+              next.check(
+                'rows',
+                [[{ ...expected[0][0], [other]: value }]],
+                expected,
+                { checkpoint: 'same-turn', operation: 'edit' },
+              ),
+            ),
+          ),
+        )
+        assert.equal(next.replayVerdict, 'different-failure')
+      },
+    ),
+    { numRuns: 30 },
+  )
+})
+
+test('legacy mutation-control namespaces cannot report an ordinary green', async () => {
+  const output = await mkdtemp(join(tmpdir(), 'oracle-namespace-'))
+  const priorExit = process.exitCode
+  try {
+    for (const variable of [
+      'ENDPOINT_ORACLE_MUTANT',
+      'ENDPOINT_COMPILED_MUTANT',
+      'ENDPOINT_FUNCTION_MUTANT',
+      'ENDPOINT_DEPENDENCY_MUTANT',
+      'ENDPOINT_EFFECT_MUTANT',
+    ]) {
+      const previous = process.env[variable]
+      try {
+        process.env[variable] = 'unreached-control'
+        const e = new Evidence('namespace'),
+          report = { ok: true }
+        await e.finish(report, output)
+        assert.equal(report.ok, false, variable)
+        assert.equal(report.outcome, 'fault-unreached')
+      } finally {
+        if (previous === undefined) delete process.env[variable]
+        else process.env[variable] = previous
+      }
+    }
+  } finally {
+    process.exitCode = priorExit
+    await rm(output, { recursive: true, force: true })
+  }
+})
+
+test('a changed executable reference is represented in startup provenance', () => {
+  const e = new Evidence('reference-provenance')
+  for (const path of [
+    'reference.mjs',
+    'compiled-program.mjs',
+    'schema-reference.mjs',
+    'schema-program.mjs',
+    'effect-reference.mjs',
+  ]) {
+    assert.equal(typeof e.provenance.sources[path], 'string', path)
+  }
+})
+
+test('row ordering and membership remain different accusations when both first differ at id', async () => {
+  await fc.assert(
+    fc.asyncProperty(fc.integer({ min: 2, max: 8 }), async (size) => {
+      const expected = [
+        Array.from({ length: size }, (_, id) => ({
+          id: String(id),
+          text: 'same',
+        })),
+      ]
+      const e = new Evidence('row-meaning')
+      await assert.rejects(
+        e.run({}, () =>
+          e.check(
+            'rows',
+            [[expected[0][1], expected[0][0], ...expected[0].slice(2)]],
+            expected,
+            { checkpoint: 'settled' },
+          ),
+        ),
+      )
+      const replay = new Evidence('row-meaning')
+      await assert.rejects(
+        replay.replay({ original: e.original }, (input) =>
+          replay.run(input, () =>
+            replay.check(
+              'rows',
+              [[{ id: 'missing', text: 'same' }, ...expected[0].slice(1)]],
+              expected,
+              { checkpoint: 'settled' },
+            ),
+          ),
+        ),
+      )
+      assert.equal(replay.replayVerdict, 'different-failure')
+    }),
+    { numRuns: 15 },
+  )
+})
+
+test('a fault reached in a different case cannot claim an earlier unrelated rejection', async () => {
+  const previous = process.env.ENDPOINT_ORACLE_TEST_FAULT,
+    exit = process.exitCode,
+    output = await mkdtemp(join(tmpdir(), 'oracle-collateral-'))
+  process.env.ENDPOINT_ORACLE_TEST_FAULT = 'bad-baseline'
+  try {
+    const e = new Evidence('collateral')
+    await assert.rejects(
+      e.run({ case: 'first' }, () =>
+        e.check('reference-baseline', [9], [1], { checkpoint: 'preload' }),
+      ),
+    )
+    await e.run({ case: 'later' }, () => e.fault('bad-baseline'))
+    const report = { ok: false }
+    await e.finish(report, output)
+    assert.equal(report.controls[0].outcome, 'collateral-failure')
+  } finally {
+    if (previous === undefined) delete process.env.ENDPOINT_ORACLE_TEST_FAULT
+    else process.env.ENDPOINT_ORACLE_TEST_FAULT = previous
+    process.exitCode = exit
+    await rm(output, { recursive: true, force: true })
+  }
+})

@@ -1,4 +1,5 @@
 import { Evidence } from './evidence.mjs'
+import { applyRuntimeMutant } from './faults.mjs'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import {
@@ -38,9 +39,7 @@ async function freePort() {
 async function files(dir) {
   return (
     await Promise.all(
-      (
-        await readdir(dir, { withFileTypes: true })
-      ).map((entry) =>
+      (await readdir(dir, { withFileTypes: true })).map((entry) =>
         entry.isDirectory()
           ? files(join(dir, entry.name))
           : [join(dir, entry.name)],
@@ -122,6 +121,18 @@ export class Driver {
           )
         : browserProbe,
     )
+    {
+      const path = join(this.dir, 'src/runtime.ts')
+      const source = await readFile(path, 'utf8')
+      await writeFile(
+        path,
+        replaceOnce(
+          source,
+          '    if (\n      operation.alone &&',
+          '    globalThis.__endpointOracleReceipt?.(input.token)\n    if (\n      operation.alone &&',
+        ),
+      )
+    }
     if (process.env.ENDPOINT_ORACLE_STRATEGY === 'client-refetch') {
       const path = join(this.dir, 'src/runtime.ts')
       let source = await readFile(path, 'utf8')
@@ -151,49 +162,11 @@ export class Driver {
     }
     const mutant = process.env.ENDPOINT_ORACLE_MUTANT
     if (mutant) {
-      const edits = {
-        'accept-overlapping-inline': [
-          'operation.alone &&',
-          'true || operation.alone &&',
-        ],
-        'omit-publication-batch': [
-          'this.core._batch(() => {\n      this.invalidateReads()\n      this.wake()',
-          ';((publish: () => void) => publish())(() => {\n      this.invalidateReads()\n      this.wake()',
-        ],
-        'optimistic-recipients-only': [
-          'const targets = retained\n',
-          'const targets = retained.filter(([,c])=>transaction.mutations.some(m=>m.collection.id===c.id))\n',
-        ],
-        'misroute-relations': [
-          'model.relation !== sourceModel.relation ||',
-          'false ||',
-        ],
-        'omit-fanout': [
-          'if (endpoint.inline) this.propagate(transaction)',
-          'if (false) this.propagate(transaction)',
-        ],
-        'omit-order': [
-          'return this.collection(makeQuery(id, rpc), model.order)',
-          'return this.collection(makeQuery(id, rpc), [])',
-        ],
-        'early-settlement': [
-          'await this.persist(endpoint, input, transaction, retained)',
-          'void this.persist(endpoint, input, transaction, retained)',
-        ],
-      }
-      assert.ok(
-        Object.hasOwn(edits, mutant),
-        `Unknown oracle mutant: ${mutant}`,
-      )
-      const path = join(this.dir, 'src/runtime.ts'),
-        source = await readFile(path, 'utf8')
-      const [before, after] = edits[mutant]
-      assert.equal(
-        source.split(before).length,
-        2,
-        'Mutant must replace exactly one runtime expression',
-      )
-      await writeFile(path, source.replace(before, after))
+      const path = join(this.dir, 'src/runtime.ts')
+      const edited = applyRuntimeMutant(await readFile(path, 'utf8'), mutant)
+      const { before, after } = edited
+      await writeFile(path, edited.source)
+      this.evidence.fault(mutant, { stage: 'applied', before, after })
     }
     this.port = await freePort()
     this.url = `http://127.0.0.1:${this.port}`
@@ -235,7 +208,7 @@ export class Driver {
         'Render fault must change the generated component',
       )
       source = source.replaceAll('{row.text}', '{"__wrong_render__"+row.text}')
-      this.evidence.fault('rendered-text')
+      this.evidence.fault('rendered-text', { stage: 'applied' })
     }
     const database = this.adapter.renderDatabase?.(program) ?? databaseFixture
     const schemaSnapshot = await this.adapter.schemaSnapshot?.(program)
@@ -248,6 +221,18 @@ export class Driver {
         /^(?:[a-z0-9-]+\/)*[a-z0-9-]+\.(?:endpoint|server)\.tsx?$/i,
       )
     this.lastSource = source
+    this.evidence.artifact(
+      'generated-endpoint:' + source.length + ':' + this.counts.programsBuilt,
+      source,
+    )
+    this.evidence.artifact(
+      'generated-database:' + this.counts.programsBuilt,
+      database,
+    )
+    this.evidence.artifact(
+      'executed-runtime:' + this.counts.programsBuilt,
+      await readFile(join(this.dir, 'src/runtime.ts')),
+    )
     const key = createHash('sha256')
       .update(source)
       .update(database)
@@ -292,6 +277,7 @@ export class Driver {
       for (const path of clientFiles) {
         if (!/\.(js|map|html)$/.test(path)) continue
         const body = await readFile(path, 'utf8')
+        this.evidence.artifact(key + ':' + path.slice(this.dir.length), body)
         this.assertNoServer(body, `client artifact ${path}`)
         if (path.endsWith('.map')) {
           const map = JSON.parse(body)
@@ -316,6 +302,7 @@ export class Driver {
             .map((p) => readFile(p, 'utf8')),
         )
       ).join('\n')
+      this.evidence.artifact(key + ':server-build', bodies)
       for (const marker of markers)
         assert.ok(
           bodies.includes(marker),
@@ -403,14 +390,19 @@ export class Driver {
   async checkpoint(page, program, label, immediate) {
     this.evidence.phase = 'execution'
     const expected = await this.reference.expected(program)
+    const faults = await page.evaluate(() =>
+      window.endpointOracle.drainFaults(),
+    )
+    for (const fault of faults)
+      this.evidence.fault(fault.point, { checkpoint: label })
     const actual =
       immediate ?? (await page.evaluate(() => window.endpointOracle.snapshot()))
     this.counts.checkpoints++
     const checkpoint = immediate
       ? 'same-turn'
       : label === 'initial'
-      ? 'baseline'
-      : label.replace(/\d+/g, '#')
+        ? 'baseline'
+        : label.replace(/\d+/g, '#')
     if (
       immediate &&
       process.env.ENDPOINT_ORACLE_TEST_FAULT === 'immediate-snapshot'
@@ -434,6 +426,13 @@ export class Driver {
           })),
         ),
       )
+    if (
+      process.env.ENDPOINT_ORACLE_TEST_FAULT === 'rendered-text' &&
+      consumers.some((rows) =>
+        rows.some((row) => row.text.includes('__wrong_render__')),
+      )
+    )
+      this.evidence.fault('rendered-text', { checkpoint: label })
     this.evidence.check(
       'rendered-values',
       consumers,
@@ -451,6 +450,7 @@ export class Driver {
     )
   }
   async runSequence(program, steps) {
+    this.evidence.at({})
     if (process.env.ENDPOINT_ORACLE_DEBUG)
       console.log('sequence', JSON.stringify({ program, steps }))
     this.counts.sequences++
@@ -458,7 +458,8 @@ export class Driver {
     await this.reference.reset(program.initial)
     const context = await this.browser.newContext()
     const responses = [],
-      wirePending = []
+      wirePending = [],
+      errors = []
     let armed
     try {
       const page = await context.newPage()
@@ -480,7 +481,6 @@ export class Driver {
           await route.continue()
         })
       page.setDefaultTimeout(10000)
-      const errors = []
       const wire = []
       page.on('response', (response) => {
         if (
@@ -495,8 +495,7 @@ export class Driver {
               ),
             }),
           )
-          wirePending.push(work)
-          work.catch(() => {}) // Retain the original rejection for teardown diagnostics.
+          this.evidence.track(work, wirePending)
         }
       })
       page.on('pageerror', (error) => errors.push(error.message))
@@ -505,13 +504,13 @@ export class Driver {
           ['script', 'document'].includes(response.request().resourceType()) &&
           !(response.status() >= 300 && response.status() < 400)
         )
-          responses.push(
+          this.evidence.track(
             response
               .text()
               .then((body) =>
                 this.assertNoServer(body, `dev response ${response.url()}`),
-              )
-              .catch((error) => errors.push(error.message)),
+              ),
+            responses,
           )
       })
       await page.goto(this.url + `/?scope=${program.scope}`)
@@ -542,6 +541,8 @@ export class Driver {
           console.log('operation', index, step.kind)
         const operation = await this.reference.operation(program, step, index)
         const { kind, input, target, outcome } = operation
+        this.evidence.at({ operation: kind, step: index })
+        this.evidence.record({ type: 'operation', operation })
         await Promise.all(wirePending)
         const wireStart = wire.length
         const started = performance.now()
@@ -586,10 +587,11 @@ export class Driver {
             (token) => window.endpointOracle.outcomes[token],
             armed,
           )
-          assert.equal(
+          this.evidence.check(
+            'persistence-pending',
             pending.result,
             'pending',
-            'persistence cannot settle before held reconciliation',
+            { checkpoint: 'read-held' },
           )
           await this.checkpoint(
             page,
@@ -600,8 +602,8 @@ export class Driver {
             outcome === 'read-failure'
               ? 4
               : outcome === 'read-retry'
-              ? step.retryFailures ?? 1
-              : 0
+                ? (step.retryFailures ?? 1)
+                : 0
           for (let attempt = 0; attempt < failures; attempt++) {
             const willRetry = attempt < 3
             const released = Date.now()
@@ -611,23 +613,26 @@ export class Driver {
               next: willRetry,
             })
             if (willRetry) {
-              await this.until(async () => {
-                const result = await page.evaluate(
-                  (token) => window.endpointOracle.outcomes[token],
-                  armed,
-                )
-                assert.equal(
-                  result.result,
-                  'pending',
-                  'transient read failure must preserve the pending transaction',
-                )
-                return (
-                  (await this.control({})).events.filter(
-                    (event) => event === 'read:waiting',
-                  ).length ===
-                  attempt + 2
-                )
-              }, `read retry ${attempt + 1}`)
+              await this.until(
+                async () => {
+                  const result = await page.evaluate(
+                    (token) => window.endpointOracle.outcomes[token],
+                    armed,
+                  )
+                  assert.equal(
+                    result.result,
+                    'pending',
+                    'transient read failure must preserve the pending transaction',
+                  )
+                  return (
+                    (await this.control({})).events.filter(
+                      (event) => event === 'read:waiting',
+                    ).length ===
+                    attempt + 2
+                  )
+                },
+                `read retry ${attempt + 1}`,
+              )
               assert.ok(
                 Date.now() - released >= 900 * 2 ** attempt,
                 'read retry must use exponential backoff',
@@ -782,6 +787,9 @@ export class Driver {
       await this.evidence.cleanup('browser-context', () => context.close())
       await this.evidence.settled('responses', responses)
       await this.evidence.settled('wire', wirePending)
+      await this.evidence.cleanup('browser-errors', () =>
+        assert.deepEqual(errors, []),
+      )
     }
   }
   async negativeBoundary(program) {

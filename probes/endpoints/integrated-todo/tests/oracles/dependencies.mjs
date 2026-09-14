@@ -133,10 +133,16 @@ function sutRead(query, tables) {
   }
 }
 
+async function scenario(program, histories) {
+  return evidence.run({ program, histories }, async () => {
+    for (const history of histories) await run(program, history)
+  })
+}
 async function run(program, steps) {
   return evidence.run({ program, steps }, () => execute(program, steps))
 }
 async function execute(program, steps) {
+  evidence.at({})
   const { count, trigger } = program
   await pg.exec(
     'DROP SCHEMA IF EXISTS "left" CASCADE; DROP SCHEMA IF EXISTS "right" CASCADE; CREATE SCHEMA "left"; CREATE SCHEMA "right"',
@@ -223,14 +229,16 @@ async function execute(program, steps) {
       admitted,
       { checkpoint: 'preload' },
     )
-    for (const step of steps) {
+    for (const [stepIndex, step] of steps.entries()) {
+      evidence.at({ operation: 'mutation', step: stepIndex })
+      evidence.record({ type: 'operation', step })
       const target = step.target % count
       const actual = step.actual % count
       const destinations = step.noop
         ? []
         : step.cross
-        ? [...new Set([actual, (actual + 1) % count])]
-        : [actual]
+          ? [...new Set([actual, (actual + 1) % count])]
+          : [actual]
       // This oracle closure follows fixture SQL semantics, independently of the
       // manifest delivered to the matcher. A missing-trigger mutant must fail.
       const changedTables = [...destinations]
@@ -284,8 +292,11 @@ async function execute(program, steps) {
               if (step.unknown) return null
               const inferenceSnapshot = structuredClone(snapshot)
               if (process.env.ENDPOINT_DEPENDENCY_MUTANT === 'omit-trigger') {
-                for (const table of inferenceSnapshot.tables)
+                for (const table of inferenceSnapshot.tables) {
+                  if (!table.writable)
+                    evidence.fault('omit-trigger', { table: table.name })
                   table.writable = true
+                }
               }
               const manifests = destinations.map(
                 (index) =>
@@ -301,7 +312,7 @@ async function execute(program, steps) {
               if (manifests.some((manifest) => manifest === null)) return null
               const writes = [...new Set(manifests.flat())]
               return process.env.ENDPOINT_DEPENDENCY_MUTANT === 'omit-write'
-                ? []
+                ? (writes.length && evidence.fault('omit-write'), [])
                 : writes
             },
           )
@@ -335,10 +346,11 @@ async function execute(program, steps) {
           { checkpoint: 'settled', collection: i },
         )
         admitted[i] = structuredClone(expected)
-        assert.equal(
+        evidence.check(
+          'read-obligation',
           reads[i] - countsBefore[i],
           selected[i] ? 1 : 0,
-          `read obligation q${i}`,
+          { checkpoint: 'settled', collection: i },
         )
         report.authorityChecks++
         if (selected[i]) report.resultReads++
@@ -436,7 +448,7 @@ async function foreignKeyControl() {
           { scope: data.scope },
           () =>
             process.env.ENDPOINT_DEPENDENCY_MUTANT === 'omit-fk'
-              ? ['["fk","parent"]']
+              ? (evidence.fault('omit-fk'), ['["fk","parent"]'])
               : analyzeSqlDependencies(
                   db.delete(parent).where(eq(parent.id, 'row')).toSQL().sql,
                   snapshot,
@@ -454,13 +466,15 @@ async function foreignKeyControl() {
       plain([...collections[0].values()]),
       (await pg.query('SELECT id,value FROM fk.parent')).rows,
     )
-    assert.deepEqual(
+    evidence.check(
+      'settled-rows',
       plain([...collections[1].values()]),
       (
         await pg.query(
           'SELECT id,value FROM fk.child WHERE parent_id IS NOT NULL',
         )
       ).rows,
+      { checkpoint: 'foreign-key-settled' },
     )
     assert.deepEqual((await pg.query('SELECT parent_id FROM fk.child')).rows, [
       { parent_id: null },
@@ -490,10 +504,13 @@ try {
   if (replay !== -1)
     await evidence.replay(
       JSON.parse(await readFile(process.argv[replay + 1], 'utf8')),
-      (value) => run(value.program, value.steps),
+      (value) =>
+        value.control === 'foreign-key'
+          ? evidence.run(value, foreignKeyControl)
+          : scenario(value.program, value.histories ?? [value.steps]),
     )
   else {
-    await foreignKeyControl()
+    await evidence.run({ control: 'foreign-key' }, foreignKeyControl)
     await run({ count: 3, trigger: false }, [
       {
         target: 0,
@@ -532,9 +549,7 @@ try {
               minLength: sequences,
               maxLength: sequences,
             }),
-            async (program, histories) => {
-              for (const history of histories) await run(program, history)
-            },
+            scenario,
           ),
           {
             seed,

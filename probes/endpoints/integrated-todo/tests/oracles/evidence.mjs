@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { writeFile, mkdir } from 'node:fs/promises'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { readFileSync, readdirSync } from 'node:fs'
+import { resolve, relative, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 function frozen(value) {
   try {
@@ -30,57 +31,131 @@ function difference(actual, expected, path = []) {
   }
   return path
 }
-function signature(failure) {
+export function failureIdentity(failure) {
+  const path =
+    failure.difference ?? difference(failure.actual, failure.expected)
+  const nested =
+    Array.isArray(failure.actual?.[0]) || Array.isArray(failure.expected?.[0])
+  const actual = nested ? failure.actual?.[path?.[0]] : failure.actual
+  const expected = nested ? failure.expected?.[path?.[0]] : failure.expected
+  let rowMeaning
+  if (
+    Array.isArray(actual) &&
+    Array.isArray(expected) &&
+    [...actual, ...expected].every(
+      (row) => row && typeof row === 'object' && Object.hasOwn(row, 'id'),
+    )
+  ) {
+    const a = actual.map((row) => row.id),
+      b = expected.map((row) => row.id)
+    rowMeaning =
+      a.length !== b.length ||
+      a.some((id) => !b.includes(id)) ||
+      b.some((id) => !a.includes(id))
+        ? 'membership'
+        : a.some((id, i) => id !== b[i])
+          ? 'order'
+          : 'fields'
+  }
+  const vector =
+    Array.isArray(actual) &&
+    Array.isArray(expected) &&
+    [...actual, ...expected].every(
+      (value) => value === null || typeof value !== 'object',
+    )
   return JSON.stringify([
     failure.law,
     failure.checkpoint,
-    failure.operation,
-    failure.collection,
-    failure.difference?.slice(0, 2),
+    failure.operation ?? failure.step?.kind,
+    failure.collection ?? (nested || vector ? path?.[0] : undefined),
+    rowMeaning,
+    // Keep semantic fields, not row positions that change during legal shrinking.
+    path?.map((part, index) =>
+      /^\d+$/.test(part) ? (nested && index === 0 ? part : '[]') : part,
+    ),
   ])
 }
 
+const controlVariables = [
+  'ENDPOINT_ORACLE_TEST_FAULT',
+  'ENDPOINT_ORACLE_MUTANT',
+  'ENDPOINT_COMPILED_MUTANT',
+  'ENDPOINT_FUNCTION_MUTANT',
+  'ENDPOINT_DEPENDENCY_MUTANT',
+  'ENDPOINT_EFFECT_MUTANT',
+]
+const expectedLaws = {
+  'compiled-row': ['settled-rows'],
+  'preload-cold': ['cold-baseline'],
+  'bad-baseline': ['reference-baseline'],
+  'immediate-snapshot': ['collection-rows'],
+  'rendered-text': ['rendered-values'],
+  'omit-order': ['collection-rows'],
+  'early-settlement': ['persistence-pending'],
+  'omit-fanout': ['collection-rows'],
+  'optimistic-recipients-only': ['collection-rows'],
+  'misroute-relations': ['collection-rows'],
+  'accept-overlapping-inline': [
+    'notification-rows',
+    'collection-rows',
+    'persistence-pending',
+  ],
+  'omit-publication-batch': ['notification-rows', 'event-materialization'],
+  'ignore-triggers': ['settled-rows', 'read-obligation'],
+  'omit-helper': ['settled-rows', 'read-obligation'],
+  'omit-fk': ['settled-rows'],
+  'omit-trigger': ['settled-rows', 'read-obligation'],
+  'omit-write': ['settled-rows', 'values', 'read-obligation'],
+  'omit-body-read': ['values'],
+  'needless-index-fallback': ['read-obligation'],
+}
 function provenance() {
-  const names = [
-    'evidence.mjs',
-    'driver.mjs',
-    'program.mjs',
-    'compiled-dependencies.mjs',
-    'dependencies.mjs',
-    'concurrent.mjs',
-    'sql.mjs',
-    'e2e.mjs',
-    'registry.mjs',
-    'loading.mjs',
-    'compiled-browser.mjs',
-    '../../src/runtime.ts',
-    '../../src/registry.server.ts',
-    '../../src/dependencies.server.ts',
-    '../../bound-transform.mjs',
-  ]
+  const base = fileURLToPath(new URL('.', import.meta.url)),
+    app = resolve(base, '../..'),
+    repo = resolve(app, '../../..')
+  const paths = []
+  function walk(dir, recursive = true) {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name)
+      if (entry.isDirectory() && recursive) walk(path)
+      else if (entry.isFile() && /\.(mjs|ts|tsx|json)$/.test(entry.name))
+        paths.push(path)
+    }
+  }
+  walk(base)
+  walk(app, false)
+  walk(join(app, 'src'))
+  walk(join(app, 'tests/fixtures'))
+  for (const name of ['db', 'db-ivm', 'query-db-collection', 'react-db']) {
+    walk(join(repo, 'packages', name, 'src'))
+    paths.push(join(repo, 'packages', name, 'package.json'))
+  }
+  paths.push(join(repo, 'packages/db/tests/oracle-config.ts'))
   const sources = Object.fromEntries(
-    names.map((name) => [
-      name,
-      createHash('sha256')
-        .update(readFileSync(new URL(name, import.meta.url)))
-        .digest('hex'),
+    paths.map((path) => [
+      relative(base, path),
+      createHash('sha256').update(readFileSync(path)).digest('hex'),
     ]),
   )
   const versions = Object.fromEntries(
-    ['fast-check', '@electric-sql/pglite', 'drizzle-orm', 'playwright'].map(
-      (name) => [
-        name,
-        JSON.parse(
-          readFileSync(
-            new URL(
-              '../../node_modules/' + name + '/package.json',
-              import.meta.url,
-            ),
-            'utf8',
-          ),
-        ).version,
-      ],
-    ),
+    [
+      'fast-check',
+      '@electric-sql/pglite',
+      'drizzle-orm',
+      'playwright',
+      'react',
+      'react-dom',
+      '@tanstack/react-start',
+      '@tanstack/query-core',
+      'vite',
+      '@babel/parser',
+      'pgsql-ast-parser',
+    ].map((name) => [
+      name,
+      JSON.parse(
+        readFileSync(join(app, 'node_modules', name, 'package.json'), 'utf8'),
+      ).version,
+    ]),
   )
   return { sources, versions }
 }
@@ -91,6 +166,9 @@ export class Evidence {
   constructor(name) {
     this.name = name
     this.provenance = provenance()
+    this.requestedFaults = controlVariables.flatMap((variable) =>
+      process.env[variable] ? [{ variable, point: process.env[variable] }] : [],
+    )
   }
   witnesses = {}
   faults = []
@@ -99,7 +177,25 @@ export class Evidence {
   cases = 0
   depth = 0
   phase = 'setup'
+  context = {}
+  trace = []
+  artifacts = {}
+  at(context) {
+    this.context = frozen(context)
+  }
+  record(event) {
+    this.trace.push(frozen(event))
+  }
+  artifact(name, contents) {
+    this.artifacts[name] = createHash('sha256').update(contents).digest('hex')
+  }
+  track(work, pending) {
+    pending.push(work)
+    work.catch(() => {})
+    return work
+  }
   check(law, actual, expected, context = {}) {
+    context = { ...this.context, ...context }
     const key = JSON.stringify([law, context.checkpoint, context.operation])
     this.witnesses[key] = (this.witnesses[key] ?? 0) + 1
     try {
@@ -111,12 +207,16 @@ export class Evidence {
         actual,
         expected,
         difference: difference(actual, expected),
+        trace: this.trace,
+        faults: this.faults.filter((event) => event.case === this.cases),
       })
       throw error
     }
   }
   fault(point, detail = {}) {
-    this.faults.push(frozen({ point, ...detail }))
+    this.faults.push(
+      frozen({ point, stage: 'reached', case: this.cases, ...detail }),
+    )
   }
   async cleanup(name, release) {
     try {
@@ -149,6 +249,8 @@ export class Evidence {
     this.depth++
     this.cases++
     this.phase = 'setup'
+    this.context = {}
+    this.trace = []
     try {
       return await execute()
     } catch (error) {
@@ -160,16 +262,21 @@ export class Evidence {
         law: /deadline|timeout/i.test(error.message)
           ? 'progress-timeout'
           : error.code === 'ERR_ASSERTION' && this.phase === 'execution'
-          ? `legacy-assertion:${site}`
-          : 'infrastructure',
+            ? `legacy-assertion:${site}`
+            : 'infrastructure',
         checkpoint: error.oracle ? undefined : site,
         actual: frozen(error.actual),
         expected: frozen(error.expected),
         message: String(error.stack ?? error),
+        ...this.context,
+        trace: frozen(this.trace),
+        faults: frozen(
+          this.faults.filter((event) => event.case === this.cases),
+        ),
       }
       const record = frozen({ input, failure })
       this.original ??= record
-      if (signature(failure) !== signature(this.original.failure)) {
+      if (failureIdentity(failure) !== failureIdentity(this.original.failure)) {
         this.rejectedShrinks.push(record)
         return
       }
@@ -199,7 +306,8 @@ export class Evidence {
       this.replayVerdict = 'passes'
     } catch (error) {
       this.replayVerdict =
-        signature(this.reduced?.failure ?? {}) === signature(record.failure)
+        failureIdentity(this.reduced?.failure ?? {}) ===
+        failureIdentity(record.failure)
           ? 'same-violation'
           : 'different-failure'
       throw error
@@ -218,27 +326,51 @@ export class Evidence {
       generation: this.generation,
       replay: this.replayVerdict,
       sources,
+      artifacts: this.artifacts,
+      requestedFaults: this.requestedFaults,
       node: process.version,
       fault: process.env.ENDPOINT_ORACLE_TEST_FAULT ?? null,
     }
     const passed = ok && this.cleanupErrors.length === 0
-    const fault = process.env.ENDPOINT_ORACLE_TEST_FAULT
+    const fault = this.requestedFaults.length > 0
     report.ok = passed && !fault
     report.outcome = passed
       ? fault
-        ? this.faults.length
+        ? this.faults.some((event) => event.stage === 'reached')
           ? 'fault-survived'
           : 'fault-unreached'
         : 'passed'
       : this.original
-      ? ['infrastructure', 'progress-timeout'].includes(
-          this.original.failure.law,
-        )
-        ? this.original.failure.law
-        : 'semantic-rejection'
-      : this.cleanupErrors.length
-      ? 'cleanup-failure'
-      : 'unclassified-failure'
+        ? ['infrastructure', 'progress-timeout'].includes(
+            this.original.failure.law,
+          )
+          ? this.original.failure.law
+          : 'semantic-rejection'
+        : this.cleanupErrors.length
+          ? 'cleanup-failure'
+          : 'unclassified-failure'
+    report.controls = this.requestedFaults.map((control) => {
+      const events = this.faults.filter(
+        (event) => event.point === control.point,
+      )
+      const reached = events.some((event) => event.stage === 'reached')
+      const intended =
+        this.original?.failure.faults?.some(
+          (event) => event.point === control.point && event.stage === 'reached',
+        ) && expectedLaws[control.point]?.includes(this.original?.failure.law)
+      return {
+        ...control,
+        applied: events.length > 0,
+        reached,
+        outcome: !reached
+          ? 'unreached'
+          : passed
+            ? 'survived-or-equivalent'
+            : intended
+              ? 'intended-rejection'
+              : 'collateral-failure',
+      }
+    })
     await mkdir(output, { recursive: true })
     if (this.original)
       await writeFile(

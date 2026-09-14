@@ -13,7 +13,7 @@
     "preview": "node node_modules/vite/bin/vite.js preview --host 127.0.0.1 --port 4192",
     "test:oracles": "node tests/oracles/e2e.mjs",
     "test:oracles:concurrent": "node --experimental-strip-types tests/oracles/concurrent.mjs",
-    "test:contracts": "node --experimental-strip-types --test tests/server-order.test.mjs tests/refresh.test.mjs tests/registry.test.mjs tests/runtime.test.mjs tests/scalar-query.test.mjs tests/scalar-membership.test.mjs tests/snapshot-encoding.test.mjs tests/pruning.test.mjs tests/dependencies.test.mjs tests/handler-dependencies.test.mjs tests/function-dependencies.test.mjs tests/compiled-dependencies.test.mjs tests/schema-snapshot.test.mjs tests/sql-effects.test.mjs tests/oracle-evidence.test.mjs",
+    "test:contracts": "node --experimental-strip-types --test tests/server-order.test.mjs tests/refresh.test.mjs tests/registry.test.mjs tests/runtime.test.mjs tests/scalar-query.test.mjs tests/scalar-membership.test.mjs tests/snapshot-encoding.test.mjs tests/pruning.test.mjs tests/dependencies.test.mjs tests/handler-dependencies.test.mjs tests/function-dependencies.test.mjs tests/compiled-dependencies.test.mjs tests/schema-snapshot.test.mjs tests/sql-effects.test.mjs tests/oracle-evidence.test.mjs tests/oracle-boundaries.test.mjs",
     "test:oracles:compiled": "node tests/oracles/compiled-dependencies.mjs",
     "test:oracles:compiled-browser": "node tests/oracles/compiled-browser.mjs",
     "test:oracles:dependencies": "node tests/oracles/dependencies.mjs",

@@ -72,6 +72,7 @@ const report = {
 }
 
 async function run(program, sequence) {
+  evidence.at({})
   await driver.control({ command: 'reset', rows: program.initial })
   await driver.reference.reset(program.initial)
   const context = await driver.browser.newContext()
@@ -115,6 +116,7 @@ async function run(program, sequence) {
       const events = await page.evaluate(() =>
         window.endpointOracle.drainEvents(),
       )
+      evidence.record({ type: 'publications', checkpoint: label, events })
       for (const event of events) {
         evidence.check('notification-rows', event.rows, expected, {
           checkpoint: label.replace(/\d+/g, '#'),
@@ -151,6 +153,8 @@ async function run(program, sequence) {
       const operation = await driver.reference.operation(program, step, index)
       operation.input.token = `wave-token-${index}-end`
       operations.push(operation)
+      evidence.at({ operation: operation.kind, step: index })
+      evidence.record({ type: 'invocation', operation })
       heldResponses.set(operation.input.token, {
         arrived: false,
         release: deferred(),
@@ -170,9 +174,9 @@ async function run(program, sequence) {
       await checkpoint(`optimistic ${index}`, result.rows)
       await driver.until(
         async () =>
-          (
-            await driver.control({ command: 'status' })
-          ).events.includes('write:waiting:' + operation.input.token),
+          (await driver.control({ command: 'status' })).events.includes(
+            'write:waiting:' + operation.input.token,
+          ),
         `write ${index} dispatched without a queue`,
       )
     }
@@ -199,20 +203,34 @@ async function run(program, sequence) {
       )
       await checkpoint(`server closed ${index}, response held`)
     }
+    evidence.at({ operation: 'cohort' })
     const delivery = ordered(sequence.deliveryOrder)
     for (const [position, index] of delivery.entries()) {
       const operation = operations[index]
       heldResponses.get(operation.input.token).release.resolve()
       if (position < delivery.length - 1) {
-        await page.waitForTimeout(30)
+        await driver.until(
+          () =>
+            page.evaluate(
+              (token) => window.endpointOracle.receipts.includes(token),
+              operation.input.token,
+            ),
+          `client processed response ${index}`,
+        )
+        evidence.record({
+          type: 'client-receipt',
+          token: operation.input.token,
+        })
         const outcomes = await page.evaluate(
           () => window.endpointOracle.outcomes,
         )
-        assert.ok(
+        evidence.check(
+          'persistence-pending',
           Object.values(outcomes).every(
             (outcome) => outcome.result === 'pending',
           ),
-          'overlap cannot settle from inline response order',
+          true,
+          { checkpoint: 'sibling-response-held' },
         )
         await checkpoint(`delivered ${index}, sibling outcome pending`)
       }
@@ -235,6 +253,12 @@ async function run(program, sequence) {
           ? 'rejected'
           : 'fulfilled',
       )
+    evidence.check(
+      'receipt-order',
+      await page.evaluate(() => window.endpointOracle.receipts),
+      delivery.map((index) => operations[index].input.token),
+      { checkpoint: 'confirmed' },
+    )
     await checkpoint('confirmed after all responses')
     assert.deepEqual(
       await page.evaluate(() => window.endpointOracle.errors()),
