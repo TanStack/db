@@ -1,3 +1,4 @@
+import { setImmediate } from 'node:timers/promises'
 import { fc } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import {
@@ -222,11 +223,14 @@ function firstTwoPerParity(input: Weighted<Keyed>): Weighted<Keyed> {
 }
 
 describe(`DBSP incrementalization laws`, () => {
-  it(`checks consolidate, reduce, and grouped top-K against full recomputation`, () => {
-    fc.assert(
-      fc.property(
+  it(`checks consolidate, reduce, and grouped top-K against full recomputation`, async () => {
+    await fc.assert(
+      fc.asyncProperty(
         fc.array(weightedWorld, { minLength: 2, maxLength: 7 }),
-        (worlds) => {
+        async (worlds) => {
+          // Yield between complete histories so stress runs can report progress.
+          // Graph delivery and every observation within a history stay synchronous.
+          await setImmediate()
           const batches = transitions(worlds)
           assertUnaryIncrementalization({
             name: `consolidate`,
@@ -290,14 +294,15 @@ describe(`DBSP incrementalization laws`, () => {
     )
   })
 
-  it(`checks simultaneous binary join deltas and split delivery`, () => {
-    fc.assert(
-      fc.property(
+  it(`checks simultaneous binary join deltas and split delivery`, async () => {
+    await fc.assert(
+      fc.asyncProperty(
         fc.array(fc.tuple(weightedWorld, weightedWorld), {
           minLength: 2,
           maxLength: 7,
         }),
-        (generated) => {
+        async (generated) => {
+          await setImmediate()
           const worlds = generated.map(([left, right]) => ({ left, right }))
           const batches = worlds.slice(1).map((next, index) => ({
             left: weightedDifference(
@@ -393,11 +398,12 @@ describe(`DBSP incrementalization laws`, () => {
     )
   })
 
-  it(`checks global ordering and window membership`, () => {
-    fc.assert(
-      fc.property(
+  it(`checks global ordering and window membership`, async () => {
+    await fc.assert(
+      fc.asyncProperty(
         fc.array(orderedWorld, { minLength: 2, maxLength: 7 }),
-        (worlds) => {
+        async (worlds) => {
+          await setImmediate()
           assertUnaryIncrementalization({
             name: `orderBy`,
             initial: worlds[0]!,

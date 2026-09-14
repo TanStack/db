@@ -46,6 +46,66 @@ async function withSpaceFixture(
 }
 
 describe(`nested Collection materialization space oracle`, () => {
+  // Exhaust the setup ownership boundary: four sources, every distinct
+  // failing/held pair, and both synchronous and asynchronous failures.
+  for (const failed of [0, 1, 2, 3]) {
+    for (const held of [0, 1, 2, 3].filter((index) => index !== failed)) {
+      it.each([`throw`, `reject`] as const)(
+        `settles held source ${held} before cleanup after source ${failed} %s`,
+        async (mode) => {
+          const primary = new Error(`first preload failure`)
+          let release!: () => void
+          const gate = new Promise<void>((resolve) => {
+            release = resolve
+          })
+          const original = CollectionImpl.prototype.preload
+          let started = 0
+          const preload = vi
+            .spyOn(CollectionImpl.prototype, `preload`)
+            .mockImplementation(function (this: CollectionImpl) {
+              const index = started++
+              if (index === held) return gate
+              if (index === failed) {
+                if (mode === `throw`) throw primary
+                return Promise.reject(primary)
+              }
+              return original.call(this)
+            })
+          const cleanup = vi.spyOn(CollectionImpl.prototype, `cleanup`)
+          let settled = false
+          const result = createNestedCollectionFixture(1).then(
+            async (fixture) => {
+              settled = true
+              await fixture.cleanup()
+              return undefined
+            },
+            (error: unknown) => {
+              settled = true
+              return error
+            },
+          )
+          try {
+            // Let every runnable preload and failure continuation run, without
+            // releasing the held source. This is a host cut, not a sleep budget.
+            await new Promise<void>((resolve) => setTimeout(resolve, 0))
+            expect(started).toBe(4)
+            expect(settled).toBe(false)
+            expect(cleanup).not.toHaveBeenCalled()
+            release()
+            expect(await result).toBe(primary)
+            expect(cleanup).toHaveBeenCalledTimes(4)
+            expect(new Set(cleanup.mock.contexts).size).toBe(4)
+          } finally {
+            release()
+            await result
+            preload.mockRestore()
+            cleanup.mockRestore()
+          }
+        },
+      )
+    }
+  }
+
   it(`constructs exactly one facade per reachable bucket`, async () => {
     await withSpaceFixture(20, async (fixture, entries) => {
       await fixture.live.preload()

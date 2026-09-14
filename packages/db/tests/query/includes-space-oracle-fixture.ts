@@ -69,9 +69,19 @@ export async function createNestedCollectionFixture(rootCount: number) {
         leaves: source(`leaves`, rows.leaves, cleanups),
       }
 
+      // Settle every setup participant before cleanup can retire its source.
+      // Preserve the first observed failure, not source-array failure order.
+      let failure: { error: unknown } | undefined
       await Promise.all(
-        Object.values(sources).map((collection) => collection.preload()),
+        Object.values(sources).map(async (collection) => {
+          try {
+            await collection.preload()
+          } catch (error) {
+            failure ??= { error }
+          }
+        }),
       )
+      if (failure) throw failure.error
       sources.branches.createIndex((row) => row.rootId, {
         indexType: BTreeIndex,
       })
