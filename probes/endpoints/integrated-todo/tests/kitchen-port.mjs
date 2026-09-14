@@ -49,7 +49,7 @@ try {
     stdin: {
       contents:
         compiled.code +
-        '\nexport {DbClient} from "@tanstack/db"; export {pool,trace,setActor,responses} from "./database.server";',
+        '\nexport {DbClient} from "@tanstack/db"; export {pool,trace,setActor,responses,extractStarts} from "./database.server";',
       resolveDir: join(kitchen, 'src/endpoints'),
       loader: 'ts',
     },
@@ -93,11 +93,11 @@ try {
                 : path === 'transport'
                   ? `import {responses} from './database.server';export function createServerFn(){return {inputValidator(schema){return {handler(fn){return async({data})=>{const result=await fn({data:schema.parse(data)});responses.push(result);return result}}}}}}`
                   : path === 'database'
-                    ? `import pg from 'pg';import {drizzle} from 'drizzle-orm/node-postgres';export * from '${kitchen}/src/db/schema';export const pool=new pg.Pool({connectionString:'postgresql://postgres@127.0.0.1:55480/kitchen_endpoints'});export const trace=[],responses=[];export const db=drizzle(pool,{casing:'snake_case',logger:{logQuery(sql){trace.push(sql)}}});let actor;export const setActor=(id)=>actor=id;export async function requireUser(req){if(!actor||req.scope!==actor)throw Error('Unauthorized');return {id:actor}}`
+                    ? `import pg from 'pg';import {drizzle} from 'drizzle-orm/node-postgres';export * from '${kitchen}/src/db/schema';export const pool=new pg.Pool({connectionString:'postgresql://postgres@127.0.0.1:55480/kitchen_endpoints'});export const trace=[],responses=[],extractStarts=[];export const db=drizzle(pool,{casing:'snake_case',logger:{logQuery(sql){trace.push(sql)}}});let actor;export const setActor=(id)=>actor=id;export async function requireUser(req){if(!actor||req.scope!==actor)throw Error('Unauthorized');return {id:actor}}`
                     : path === 'ingredients.server'
                       ? `export async function describeIngredient(){return {parsed:{description:'Fixture ingredient',grocery_section:'Pantry'},embedding:[0,1]}}`
                       : path === 'ai.server'
-                        ? `export async function extractRecipe(){return {name:'Fixture recipe',description:'Fixture extraction',ingredients:[{listing:'1 cup flour',extracted_name:'flour',embedding:'[0,1]',grocery_section:'Pantry'}]}}`
+                        ? `import {trace,extractStarts} from './database.server';export async function extractRecipe(pastedText){extractStarts.push(trace.length);if(pastedText==='reject-extraction')throw Error('Fixture extraction failed');return {name:'Fixture recipe',description:'Fixture extraction',ingredients:[{listing:'1 cup flour',extracted_name:'flour',embedding:'[0,1]',grocery_section:'Pantry'}]}}`
                         : `export async function addShoppingCard(){return {id:'fixture-card',name:'Fixture shopping'}}`,
           }))
         },
@@ -194,6 +194,7 @@ try {
       assert.equal(snapshots, retainedAffected[name], name)
       assert.equal(unaffected, 8 - retainedAffected[name], name)
     }
+    return response
   }
   const ingredient = randomUUID(),
     recipe = randomUUID(),
@@ -227,7 +228,8 @@ try {
     ingredientIds: [ingredient],
   })
   assert.equal(app.ingredientsCollection.get(ingredient).trello_add_count, 1)
-  await action('insertRecipe', {
+  const recipeStart = loaded.trace.length
+  const insertedRecipe = await action('insertRecipe', {
     id: recipe,
     url: '',
     pastedText: 'Fixture text',
@@ -235,12 +237,67 @@ try {
     new_tags: [],
     links: [],
   })
+  assert.equal(insertedRecipe.handler.result.recipe.name, 'Fixture recipe')
+  assert.equal(
+    insertedRecipe.handler.result.recipe.description,
+    'Fixture extraction',
+  )
+  assert.equal(
+    loaded.extractStarts.at(-1),
+    recipeStart,
+    'extract before opening the write transaction',
+  )
+  const recipeWrites = loaded.trace.slice(recipeStart)
+  assert.equal(
+    recipeWrites.filter((sql) => /^insert into "recipes"/i.test(sql)).length,
+    1,
+  )
+  assert.equal(
+    recipeWrites.filter((sql) => /^update "recipes"/i.test(sql)).length,
+    0,
+  )
   assert.equal(app.recipesCollection.get(recipe).name, 'Fixture recipe')
   assert.ok(
     [...app.recipeIngredientsCollection.values()].some(
       (row) => row.recipe_id === recipe,
     ),
   )
+  for (const failure of ['extraction', 'related-row']) {
+    const failedRecipe = randomUUID()
+    const start = loaded.trace.length
+    await action(
+      'insertRecipe',
+      {
+        id: failedRecipe,
+        url: '',
+        pastedText:
+          failure === 'extraction' ? 'reject-extraction' : 'Fixture text',
+        created_at: now,
+        new_tags: [],
+        links:
+          failure === 'related-row'
+            ? [{ id: randomUUID(), tag_id: randomUUID(), created_at: now }]
+            : [],
+      },
+      true,
+    )
+    assert.equal(app.recipesCollection.has(failedRecipe), false)
+    assert.equal(
+      [...app.recipeIngredientsCollection.values()].some(
+        (row) => row.recipe_id === failedRecipe,
+      ),
+      false,
+    )
+    if (failure === 'extraction') {
+      assert.equal(loaded.extractStarts.at(-1), start)
+      assert.equal(
+        loaded.trace
+          .slice(start)
+          .some((sql) => /^(begin|insert|update|delete)\b/i.test(sql)),
+        false,
+      )
+    }
+  }
   await action('insertComment', {
     id: comment,
     recipe_id: recipe,
