@@ -3,8 +3,6 @@ id: rxdbCollectionOptions
 title: rxdbCollectionOptions
 ---
 
-# Function: rxdbCollectionOptions()
-
 ## Call Signature
 
 ```ts

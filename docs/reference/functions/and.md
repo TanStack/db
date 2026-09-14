@@ -3,8 +3,6 @@ id: and
 title: and
 ---
 
-# Function: and()
-
 ## Call Signature
 
 ```ts

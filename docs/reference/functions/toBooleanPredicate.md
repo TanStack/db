@@ -3,8 +3,6 @@ id: toBooleanPredicate
 title: toBooleanPredicate
 ---
 
-# Function: toBooleanPredicate()
-
 ```ts
 function toBooleanPredicate(result): boolean;
 ```

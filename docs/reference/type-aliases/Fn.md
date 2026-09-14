@@ -3,8 +3,6 @@ id: Fn
 title: Fn
 ---
 
-# Type Alias: Fn()
-
 ```ts
 type Fn = (...args) => any;
 ```

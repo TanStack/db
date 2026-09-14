@@ -3,8 +3,6 @@ id: InvalidJoinCondition
 title: InvalidJoinCondition
 ---
 
-# Class: InvalidJoinCondition
-
 Defined in: [packages/db/src/errors.ts:627](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L627)
 
 ## Extends

@@ -3,8 +3,6 @@ id: UpdateMutationFn
 title: UpdateMutationFn
 ---
 
-# Type Alias: UpdateMutationFn()\<T, TKey, TUtils, TReturn\>
-
 ```ts
 type UpdateMutationFn<T, TKey, TUtils, TReturn> = (params) => Promise<TReturn>;
 ```

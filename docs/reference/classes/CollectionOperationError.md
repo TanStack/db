@@ -3,8 +3,6 @@ id: CollectionOperationError
 title: CollectionOperationError
 ---
 
-# Class: CollectionOperationError
-
 Defined in: [packages/db/src/errors.ts:151](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L151)
 
 ## Extends

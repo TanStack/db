@@ -3,8 +3,6 @@ id: UpdateOperationItemNotFoundError
 title: UpdateOperationItemNotFoundError
 ---
 
-# Class: UpdateOperationItemNotFoundError
-
 Defined in: [packages/query-db-collection/src/errors.ts:78](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L78)
 
 ## Extends

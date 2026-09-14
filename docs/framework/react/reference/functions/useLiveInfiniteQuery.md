@@ -3,15 +3,13 @@ id: useLiveInfiniteQuery
 title: useLiveInfiniteQuery
 ---
 
-# Function: useLiveInfiniteQuery()
-
 ## Call Signature
 
 ```ts
 function useLiveInfiniteQuery<TResult, TKey, TUtils>(liveQueryCollection, config): UseLiveInfiniteQueryReturn<any>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:116](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L116)
+Defined in: [useLiveInfiniteQuery.ts:107](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L107)
 
 Create an infinite query using a query function with live updates.
 
@@ -42,7 +40,7 @@ without recreating the live query collection on each page change.
 
 [`UseLiveInfiniteQueryConfig`](../type-aliases/UseLiveInfiniteQueryConfig.md)\<`any`\>
 
-Configuration including pageSize and getNextPageParam
+Configuration including pageSize and an optional initial page label
 
 ### Returns
 
@@ -59,7 +57,7 @@ function useLiveInfiniteQuery<TContext>(
 deps?): UseLiveInfiniteQueryReturn<TContext>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:126](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L126)
+Defined in: [useLiveInfiniteQuery.ts:117](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L117)
 
 Create an infinite query using a query function with live updates.
 
@@ -84,7 +82,7 @@ Query function that defines what data to fetch. Must include `.orderBy()` for se
 
 [`UseLiveInfiniteQueryConfig`](../type-aliases/UseLiveInfiniteQueryConfig.md)\<`TContext`\>
 
-Configuration including pageSize and getNextPageParam
+Configuration including pageSize and an optional initial page label
 
 #### deps?
 

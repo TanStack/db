@@ -3,8 +3,6 @@ id: "@tanstack/db"
 title: "@tanstack/db"
 ---
 
-# @tanstack/db
-
 ## Namespaces
 
 - [IR](@tanstack/namespaces/IR/index.md)
@@ -403,3 +401,5 @@ title: "@tanstack/db"
 - [withArrayChangeTracking](functions/withArrayChangeTracking.md)
 - [withChangeTracking](functions/withChangeTracking.md)
 - [withCollectionConfigFactory](functions/withCollectionConfigFactory.md)
+- [withCollectionSyncConfigCleanup](functions/withCollectionSyncConfigCleanup.md)
+- [withCollectionSyncConfigFactory](functions/withCollectionSyncConfigFactory.md)

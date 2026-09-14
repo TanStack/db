@@ -3,8 +3,6 @@ id: compileQuery
 title: compileQuery
 ---
 
-# Function: compileQuery()
-
 ```ts
 function compileQuery(
    rawQuery, 

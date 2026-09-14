@@ -3,8 +3,6 @@ id: QueryOptimizerError
 title: QueryOptimizerError
 ---
 
-# Class: QueryOptimizerError
-
 Defined in: [packages/db/src/errors.ts:757](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L757)
 
 ## Extends

@@ -3,8 +3,6 @@ id: powerSyncCollectionOptions
 title: powerSyncCollectionOptions
 ---
 
-# Function: powerSyncCollectionOptions()
-
 Implementation of powerSyncCollectionOptions that handles both schema and non-schema configurations.
 
 ## Call Signature

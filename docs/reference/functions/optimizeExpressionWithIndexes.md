@@ -3,8 +3,6 @@ id: optimizeExpressionWithIndexes
 title: optimizeExpressionWithIndexes
 ---
 
-# Function: optimizeExpressionWithIndexes()
-
 ```ts
 function optimizeExpressionWithIndexes<T, TKey>(expression, collection): OptimizationResult<TKey>;
 ```

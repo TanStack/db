@@ -3,8 +3,6 @@ id: localStorageCollectionOptions
 title: localStorageCollectionOptions
 ---
 
-# Function: localStorageCollectionOptions()
-
 ## Call Signature
 
 ```ts

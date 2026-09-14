@@ -3,8 +3,6 @@ id: QueryCollectionError
 title: QueryCollectionError
 ---
 
-# Class: QueryCollectionError
-
 Defined in: [packages/query-db-collection/src/errors.ts:4](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L4)
 
 ## Extends

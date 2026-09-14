@@ -3,8 +3,6 @@ id: UnsupportedRootScalarSelectError
 title: UnsupportedRootScalarSelectError
 ---
 
-# Class: UnsupportedRootScalarSelectError
-
 Defined in: [packages/db/src/errors.ts:494](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L494)
 
 ## Extends

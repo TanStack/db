@@ -3,8 +3,6 @@ id: UseLiveQueryConfig
 title: UseLiveQueryConfig
 ---
 
-# Type Alias: UseLiveQueryConfig\<TContext\>
-
 ```ts
 type UseLiveQueryConfig<TContext> = UseLiveQueryConfigOptions<TContext> & Pick<LiveQueryCollectionConfig<TContext>, "query">;
 ```

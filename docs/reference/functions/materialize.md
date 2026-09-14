@@ -3,8 +3,6 @@ id: materialize
 title: materialize
 ---
 
-# Function: materialize()
-
 ```ts
 function materialize<TContext>(query): MaterializeWrapper<GetRawResult<TContext>, TContext extends SingleResult ? true : false>;
 ```

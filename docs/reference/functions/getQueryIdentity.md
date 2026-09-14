@@ -3,8 +3,6 @@ id: getQueryIdentity
 title: getQueryIdentity
 ---
 
-# Function: getQueryIdentity()
-
 ```ts
 function getQueryIdentity(query): QueryIdentity;
 ```

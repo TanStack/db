@@ -3,8 +3,6 @@ id: ExpectedUpdateTypeError
 title: ExpectedUpdateTypeError
 ---
 
-# Class: ExpectedUpdateTypeError
-
 Defined in: [packages/trailbase-db-collection/src/errors.ts:25](https://github.com/TanStack/db/blob/main/packages/trailbase-db-collection/src/errors.ts#L25)
 
 ## Extends

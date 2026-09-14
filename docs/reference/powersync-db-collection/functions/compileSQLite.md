@@ -3,8 +3,6 @@ id: compileSQLite
 title: compileSQLite
 ---
 
-# Function: compileSQLite()
-
 ```ts
 function compileSQLite(options, compileOptions?): SQLiteCompiledQuery;
 ```

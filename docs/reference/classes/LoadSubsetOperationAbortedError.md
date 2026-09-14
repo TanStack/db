@@ -3,8 +3,6 @@ id: LoadSubsetOperationAbortedError
 title: LoadSubsetOperationAbortedError
 ---
 
-# Class: LoadSubsetOperationAbortedError
-
 Defined in: [packages/db/src/errors.ts:749](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L749)
 
 A subset operation was canceled before its result became visible.

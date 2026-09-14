@@ -3,8 +3,6 @@ id: getStableQueryIRHash
 title: getStableQueryIRHash
 ---
 
-# Function: getStableQueryIRHash()
-
 ```ts
 function getStableQueryIRHash(query): string;
 ```

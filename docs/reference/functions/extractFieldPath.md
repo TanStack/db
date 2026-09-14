@@ -3,8 +3,6 @@ id: extractFieldPath
 title: extractFieldPath
 ---
 
-# Function: extractFieldPath()
-
 ```ts
 function extractFieldPath(expr): FieldPath | null;
 ```

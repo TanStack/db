@@ -3,8 +3,6 @@ id: LiveQueryObserver
 title: LiveQueryObserver
 ---
 
-# Interface: LiveQueryObserver\<T, TKey\>
-
 Defined in: [packages/db/src/live-query-observer.ts:72](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L72)
 
 **`Internal`**

@@ -3,8 +3,6 @@ id: Transaction
 title: Transaction
 ---
 
-# Interface: Transaction\<T\>
-
 Defined in: [packages/db/src/transactions.ts:305](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L305)
 
 ## Type Parameters
@@ -239,7 +237,7 @@ console.log(tx.state) // "completed" or "failed"
 compareCreatedAt(other): number;
 ```
 
-Defined in: [packages/db/src/transactions.ts:675](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L675)
+Defined in: [packages/db/src/transactions.ts:679](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L679)
 
 Compare two transactions by their createdAt time and sequence number in order
 to sort them in the order they were created.

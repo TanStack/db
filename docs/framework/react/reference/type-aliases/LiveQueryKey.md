@@ -3,8 +3,6 @@ id: LiveQueryKey
 title: LiveQueryKey
 ---
 
-# Type Alias: LiveQueryKey
-
 ```ts
 type LiveQueryKey = ReadonlyArray<unknown>;
 ```

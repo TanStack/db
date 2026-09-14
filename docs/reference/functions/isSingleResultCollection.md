@@ -3,8 +3,6 @@ id: isSingleResultCollection
 title: isSingleResultCollection
 ---
 
-# Function: isSingleResultCollection()
-
 ```ts
 function isSingleResultCollection(collection): boolean;
 ```

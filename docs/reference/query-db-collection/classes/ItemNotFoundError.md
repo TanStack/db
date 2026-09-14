@@ -3,8 +3,6 @@ id: ItemNotFoundError
 title: ItemNotFoundError
 ---
 
-# Class: ItemNotFoundError
-
 Defined in: [packages/query-db-collection/src/errors.ts:64](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L64)
 
 ## Extends

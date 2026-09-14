@@ -3,8 +3,6 @@ id: Effect
 title: Effect
 ---
 
-# Interface: Effect
-
 Defined in: [packages/db/src/query/effect.ts:141](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L141)
 
 Handle returned by createEffect

@@ -3,8 +3,6 @@ id: TransactionWithMutations
 title: TransactionWithMutations
 ---
 
-# Type Alias: TransactionWithMutations\<T, TOperation\>
-
 ```ts
 type TransactionWithMutations<T, TOperation> = Omit<Transaction<T>, "mutations"> & object;
 ```

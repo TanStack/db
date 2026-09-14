@@ -3,8 +3,6 @@ id: IndexOptions
 title: IndexOptions
 ---
 
-# Interface: IndexOptions\<TIndexType\>
-
 Defined in: [packages/db/src/indexes/index-options.ts:6](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-options.ts#L6)
 
 Options for creating an index

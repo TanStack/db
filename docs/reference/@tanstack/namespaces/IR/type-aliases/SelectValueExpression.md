@@ -3,8 +3,6 @@ id: SelectValueExpression
 title: SelectValueExpression
 ---
 
-# Type Alias: SelectValueExpression
-
 ```ts
 type SelectValueExpression = 
   | BasicExpression

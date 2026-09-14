@@ -3,8 +3,6 @@ id: OperationConfig
 title: OperationConfig
 ---
 
-# Interface: OperationConfig
-
 Defined in: [packages/db/src/types.ts:524](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L524)
 
 ## Properties

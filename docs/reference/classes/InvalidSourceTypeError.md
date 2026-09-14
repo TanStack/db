@@ -3,8 +3,6 @@ id: InvalidSourceTypeError
 title: InvalidSourceTypeError
 ---
 
-# Class: InvalidSourceTypeError
-
 Defined in: [packages/db/src/errors.ts:405](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L405)
 
 ## Extends

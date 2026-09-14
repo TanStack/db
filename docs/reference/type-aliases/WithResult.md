@@ -3,8 +3,6 @@ id: WithResult
 title: WithResult
 ---
 
-# Type Alias: WithResult\<TContext, TResult\>
-
 ```ts
 type WithResult<TContext, TResult> = Prettify<Omit<TContext, "result" | "hasResult"> & object>;
 ```
