@@ -1,0 +1,81 @@
+✔ shrinking retains the same law, checkpoint, operation and differing collection (5.901417ms)
+✔ cleanup preserves the frozen mismatch and attempts every release after failures (2.076375ms)
+✔ replay distinguishes the original violation, a different failure and a repaired history (2.946125ms)
+✔ fast-check cannot shrink a row failure into a build failure (2.758ms)
+✔ the persisted final verdict includes teardown failures after successful comparisons (4.814625ms)
+✔ a nested runner cannot hide an earlier different failure and accept a later matching failure (1.49075ms)
+✔ a requested fault that survives or is never reached cannot report a passing control (5.942833ms)
+✖ generated row-field failures retain their semantic distinction through shrinking and replay (5.94225ms)
+✖ legacy mutation-control namespaces cannot report an ordinary green (2.44025ms)
+✖ a changed executable reference is represented in startup provenance (1.303125ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 7
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 141.529041
+
+✖ failing tests:
+
+test at tests/oracle-evidence.test.mjs:194:1
+✖ generated row-field failures retain their semantic distinction through shrinking and replay (5.94225ms)
+  Error: Property failed after 1 tests
+  { seed: 542763419, path: "0:0", endOnFailure: true }
+  Counterexample: ["id",1]
+  Shrunk 1 time(s)
+  Got AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'same-violation'
+  - 'different-failure'
+  
+      at file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracle-evidence.test.mjs:202:12
+      at async AsyncProperty.run (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)
+      at async asyncRunIt (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)
+      at async TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracle-evidence.test.mjs:195:3)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7)
+  
+  Hint: Enable verbose mode in order to have the list of all failing values encountered during the run
+      at buildError (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/utils/RunDetailsFormatter.js:126:15)
+      at asyncThrowIfFailed (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/utils/RunDetailsFormatter.js:143:11)
+
+test at tests/oracle-evidence.test.mjs:206:1
+✖ legacy mutation-control namespaces cannot report an ordinary green (2.44025ms)
+  AssertionError [ERR_ASSERTION]: ENDPOINT_ORACLE_MUTANT
+  
+  true !== false
+  
+      at TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracle-evidence.test.mjs:216:16)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual'
+  }
+
+test at tests/oracle-evidence.test.mjs:229:1
+✖ a changed executable reference is represented in startup provenance (1.303125ms)
+  AssertionError [ERR_ASSERTION]: reference.mjs
+  + actual - expected
+  
+  + 'undefined'
+  - 'string'
+  
+      at TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracle-evidence.test.mjs:232:12)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1081:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:763:18)
+      at Test.postRun (node:internal/test_runner/test:1210:19)
+      at Test.run (node:internal/test_runner/test:1138:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'string',
+    operator: 'strictEqual'
+  }

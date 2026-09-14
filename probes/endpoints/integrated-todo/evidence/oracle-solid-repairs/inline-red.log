@@ -1,0 +1,38 @@
+✔ the dependency property rejects an earlier different failure before visiting later histories (120.900209ms)
+✔ the concurrent checkpoint preserves the complete drained publication batch before a mismatch (81.328375ms)
+✔ response observation failures remain secondary evidence when a row assertion fails first (15.946416ms)
+✔ a delivery checkpoint cannot complete while client receipt processing is held (10.279792ms)
+✔ every runtime mutant applies once to current source and retains valid TypeScript (44.442167ms)
+✖ the live source-map boundary accepts empty client maps and rejects server source graphs (296.283625ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 5
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 758.462083
+
+✖ failing tests:
+
+test at probes/endpoints/integrated-todo/tests/oracle-boundaries.test.mjs:245:1
+✖ the live source-map boundary accepts empty client maps and rejects server source graphs (296.283625ms)
+  AssertionError [ERR_ASSERTION]: Got unwanted exception.
+  Actual message: "Cannot read properties of undefined (reading 'artifact')"
+      at TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracle-boundaries.test.mjs:248:10)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: TypeError: Cannot read properties of undefined (reading 'artifact')
+        at Object.assertNoServer (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/driver.mjs:353:21)
+        at check (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracle-boundaries.test.mjs:247:56)
+        at file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracle-boundaries.test.mjs:248:29
+        at getActual (node:assert:530:5)
+        at strict.doesNotThrow (node:assert:696:32)
+        at TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracle-boundaries.test.mjs:248:10)
+        at async Test.run (node:internal/test_runner/test:1088:7)
+        at async Test.processPendingSubtests (node:internal/test_runner/test:763:7),
+    expected: undefined,
+    operator: 'doesNotThrow'
+  }

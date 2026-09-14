@@ -1,0 +1,63 @@
+✔ shrinking retains the same law, checkpoint, operation and differing collection (21.3995ms)
+✔ cleanup preserves the frozen mismatch and attempts every release after failures (8.586625ms)
+✔ replay distinguishes the original violation, a different failure and a repaired history (20.818625ms)
+✔ fast-check cannot shrink a row failure into a build failure (8.18075ms)
+✔ the persisted final verdict includes teardown failures after successful comparisons (13.534916ms)
+✔ a nested runner cannot hide an earlier different failure and accept a later matching failure (8.0995ms)
+✔ a requested fault that survives or is never reached cannot report a passing control (14.250209ms)
+✔ generated row-field failures retain their semantic distinction through shrinking and replay (364.372666ms)
+✔ legacy mutation-control namespaces cannot report an ordinary green (30.949042ms)
+✔ a changed executable reference is represented in startup provenance (7.127208ms)
+✖ row ordering and membership remain different accusations when both first differ at id (13.343292ms)
+✖ a fault reached in a different case cannot claim an earlier unrelated rejection (7.889667ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 10
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 628.080291
+
+✖ failing tests:
+
+test at probes/endpoints/integrated-todo/tests/oracle-evidence.test.mjs:276:1
+✖ row ordering and membership remain different accusations when both first differ at id (13.343292ms)
+  Error: Property failed after 1 tests
+  { seed: 2018828409, path: "0", endOnFailure: true }
+  Counterexample: [2]
+  Shrunk 0 time(s)
+  Got AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'same-violation'
+  - 'different-failure'
+  
+      at file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracle-evidence.test.mjs:283:12
+      at async AsyncProperty.run (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)
+      at async asyncRunIt (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)
+      at async TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracle-evidence.test.mjs:277:3)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7)
+  
+  Hint: Enable verbose mode in order to have the list of all failing values encountered during the run
+      at buildError (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/utils/RunDetailsFormatter.js:126:15)
+      at asyncThrowIfFailed (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/utils/RunDetailsFormatter.js:143:11)
+
+test at probes/endpoints/integrated-todo/tests/oracle-evidence.test.mjs:287:1
+✖ a fault reached in a different case cannot claim an earlier unrelated rejection (7.889667ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'intended-rejection'
+  - 'collateral-failure'
+  
+      at TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracle-evidence.test.mjs:296:12)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'intended-rejection',
+    expected: 'collateral-failure',
+    operator: 'strictEqual'
+  }

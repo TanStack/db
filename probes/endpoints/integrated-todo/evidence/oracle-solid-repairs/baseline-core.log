@@ -1,0 +1,80 @@
+
+ RUN  v3.2.4 /Users/kylemathews/.codex/worktrees/e079/tanstack-db
+
+ ✓ packages/db/tests/coordinated-publication.test.ts (3 tests) 9ms
+ ✓ packages/db/tests/transactions.test.ts (35 tests) 22ms
+ ✓ packages/query-db-collection/tests/authority-permit.test.ts (1 test) 10ms
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > runs the live query graph once per transaction that touches multiple collections
+[TanStack DB] [single-batch-tasks] Join requires an index on "userId" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.userId) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > handles nested transactions without emitting duplicate batches
+[TanStack DB] [nested-tasks] Join requires an index on "userId" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.userId) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > clears pending jobs when a transaction rolls back due to an error
+[TanStack DB] [rollback-tasks] Join requires an index on "userId" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.userId) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > dedupes batches across multiple subscribers
+[TanStack DB] [multi-subscriber-tasks] Join requires an index on "userId" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.userId) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'collection' shared=false derivedRight=false reverse=false
+[TanStack DB] [live-query-1] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'collection' shared=false derivedRight=false reverse=true
+[TanStack DB] [live-query-3] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'collection' shared=false derivedRight=true reverse=false
+[TanStack DB] [live-query-5] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'collection' shared=false derivedRight=true reverse=true
+[TanStack DB] [live-query-8] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'collection' shared=true derivedRight=false reverse=false
+[TanStack DB] [live-query-11] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'collection' shared=true derivedRight=false reverse=true
+[TanStack DB] [live-query-13] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'collection' shared=true derivedRight=true reverse=false
+[TanStack DB] [live-query-15] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'collection' shared=true derivedRight=true reverse=true
+[TanStack DB] [live-query-18] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'effect' shared=false derivedRight=false reverse=false
+[TanStack DB] [live-query-21] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'effect' shared=false derivedRight=false reverse=true
+[TanStack DB] [live-query-22] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'effect' shared=false derivedRight=true reverse=false
+[TanStack DB] [live-query-23] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'effect' shared=false derivedRight=true reverse=true
+[TanStack DB] [live-query-25] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'effect' shared=true derivedRight=false reverse=false
+[TanStack DB] [live-query-27] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'effect' shared=true derivedRight=false reverse=true
+[TanStack DB] [live-query-28] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'effect' shared=true derivedRight=true reverse=false
+[TanStack DB] [live-query-29] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'effect' shared=true derivedRight=true reverse=true
+[TanStack DB] [live-query-31] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > should handle optimistic mutations with nested left joins without scheduler errors
+[TanStack DB] [left-join-bug-users] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+[TanStack DB] [left-join-bug-active-teams] Join requires an index on "team.account_id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.team.account_id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > should prevent stale data when lazy source also depends on modified collection
+[TanStack DB] [race-queryB] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+ ✓ packages/db/tests/query/scheduler.test.ts (86 tests) 167ms
+
+ Test Files  4 passed (4)
+      Tests  125 passed (125)
+   Start at  11:17:36
+   Duration  1.21s (transform 1.16s, setup 0ms, collect 3.42s, tests 209ms, environment 0ms, prepare 176ms)
+

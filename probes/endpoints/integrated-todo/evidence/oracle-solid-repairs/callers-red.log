@@ -1,0 +1,86 @@
+✖ the dependency property rejects an earlier different failure before visiting later histories (62.48475ms)
+✖ the concurrent checkpoint preserves the complete drained publication batch before a mismatch (31.206417ms)
+✖ response observation failures remain secondary evidence when a row assertion fails first (24.600125ms)
+✖ a delivery checkpoint cannot complete while client receipt processing is held (19.703417ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 0
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 297.697417
+
+✖ failing tests:
+
+test at probes/endpoints/integrated-todo/tests/oracle-boundaries.test.mjs:35:1
+✖ the dependency property rejects an earlier different failure before visiting later histories (62.48475ms)
+  Error: Property failed after 1 tests
+  { seed: -1568084757, path: "0:0", endOnFailure: true }
+  Counterexample: [1]
+  Shrunk 1 time(s)
+  Got AssertionError [ERR_ASSERTION]: Got unwanted rejection.
+  Actual message: "rows
+  
+  1 !== 0
+  "
+      at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracle-boundaries.test.mjs:47:5
+      at async AsyncProperty.run (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)
+      at async asyncRunIt (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)
+      at async TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracle-boundaries.test.mjs:39:3)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:332:3)
+  
+  Hint: Enable verbose mode in order to have the list of all failing values encountered during the run
+      at buildError (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/utils/RunDetailsFormatter.js:126:15)
+      at asyncThrowIfFailed (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/utils/RunDetailsFormatter.js:143:11)
+
+test at probes/endpoints/integrated-todo/tests/oracle-boundaries.test.mjs:52:1
+✖ the concurrent checkpoint preserves the complete drained publication batch before a mismatch (31.206417ms)
+  Error: Property failed after 1 tests
+  { seed: -183726427, path: "0:0", endOnFailure: true }
+  Counterexample: [1]
+  Shrunk 1 time(s)
+  Got TypeError: Cannot read properties of undefined (reading 'events')
+      at file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracle-boundaries.test.mjs:60:57
+      at async AsyncProperty.run (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)
+      at async asyncRunIt (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)
+      at async TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracle-boundaries.test.mjs:54:3)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7)
+  
+  Hint: Enable verbose mode in order to have the list of all failing values encountered during the run
+      at buildError (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/utils/RunDetailsFormatter.js:126:15)
+      at asyncThrowIfFailed (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/utils/RunDetailsFormatter.js:143:11)
+
+test at probes/endpoints/integrated-todo/tests/oracle-boundaries.test.mjs:66:1
+✖ response observation failures remain secondary evidence when a row assertion fails first (24.600125ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /secondary response failure/. Input:
+  
+  ''
+  
+      at TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracle-boundaries.test.mjs:81:10)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '',
+    expected: /secondary response failure/,
+    operator: 'match'
+  }
+
+test at probes/endpoints/integrated-todo/tests/oracle-boundaries.test.mjs:84:1
+✖ a delivery checkpoint cannot complete while client receipt processing is held (19.703417ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  true !== false
+  
+      at TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracle-boundaries.test.mjs:95:12)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual'
+  }
