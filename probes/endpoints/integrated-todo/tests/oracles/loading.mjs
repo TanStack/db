@@ -1,6 +1,6 @@
 import { Evidence } from './evidence.mjs'
 import assert from 'node:assert/strict'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, writeFile, readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { gzipSync } from 'node:zlib'
 import { Driver } from './driver.mjs'
@@ -14,7 +14,7 @@ const output = resolve(
     new URL('../../evidence/loading-comparison', import.meta.url).pathname,
 )
 await mkdir(output, { recursive: true })
-const samples = Number(process.env.ENDPOINT_LOADING_SAMPLES ?? 8)
+let samples = Number(process.env.ENDPOINT_LOADING_SAMPLES ?? 8)
 assert.ok(Number.isSafeInteger(samples) && samples >= 2)
 function payload(seed) {
   let state = seed + 12345
@@ -58,29 +58,29 @@ function fixture(kind) {
     kind === 'small'
       ? [{ table: 0, predicate: null }]
       : kind === 'disjoint'
-      ? [
-          { table: 0, predicate: null },
-          { table: 1, predicate: null },
-        ]
-      : kind === 'same-table-disjoint'
-      ? [
-          {
-            table: 0,
-            predicate: { op: 'eq', column: 'completed', value: false },
-          },
-          {
-            table: 0,
-            predicate: { op: 'eq', column: 'completed', value: true },
-          },
-        ]
-      : [
-          { table: 0, predicate: null },
-          { table: 0, predicate: null },
-          {
-            table: 0,
-            predicate: { op: 'eq', column: 'completed', value: false },
-          },
-        ]
+        ? [
+            { table: 0, predicate: null },
+            { table: 1, predicate: null },
+          ]
+        : kind === 'same-table-disjoint'
+          ? [
+              {
+                table: 0,
+                predicate: { op: 'eq', column: 'completed', value: false },
+              },
+              {
+                table: 0,
+                predicate: { op: 'eq', column: 'completed', value: true },
+              },
+            ]
+          : [
+              { table: 0, predicate: null },
+              { table: 0, predicate: null },
+              {
+                table: 0,
+                predicate: { op: 'eq', column: 'completed', value: false },
+              },
+            ]
   if (kind === 'overlap-two') program.queries.splice(1, 1)
   program.orders = program.queries.map(() => ['createdAt', 'id'])
   return program
@@ -100,224 +100,250 @@ const report = {
   ],
 }
 let failed = false
-try {
-  const available = [
-    'small',
-    'disjoint',
-    'overlap',
-    'overlap-two',
-    'same-table-disjoint',
-  ]
-  const selected = process.env.ENDPOINT_LOADING_CASES?.split(',') ?? available
-  assert.ok(
-    selected.length > 0 && selected.every((kind) => available.includes(kind)),
-  )
-  for (const [caseIndex, kind] of selected.entries()) {
-    const program = fixture(kind),
-      entry = {
-        kind,
-        rows: program.initial.length,
-        queries: program.queries.length,
-        strategies: {},
-      }
-    for (const encoding of caseIndex % 2
-      ? ['adaptive', 'full']
-      : ['full', 'adaptive']) {
-      const reference = new SchemaReference(),
-        driver = new Driver({
-          evidence,
-          reference,
-          renderProgram: renderSchemaProgram,
-          renderDatabase: renderSchemaDatabase,
-          snapshotEncoding: encoding,
-        })
-      try {
-        await driver.init()
-        report.engine = reference.engine
-        await reference.configure(program)
-        await driver.prepare(program)
-        await driver.control({ command: 'reset', rows: program.initial })
-        await reference.reset(program.initial)
-        const context = await driver.browser.newContext(),
-          page = await context.newPage()
-        const pending = [],
-          wire = []
-        page.on('response', (response) => {
-          if (
-            response.request().method() === 'POST' &&
-            response.request().resourceType() === 'fetch'
-          )
-            pending.push(
-              response.body().then((body) =>
-                wire.push({
-                  responseBytes: body.length,
-                  gzipBytes: gzipSync(body).length,
-                  requestBytes: Buffer.byteLength(
-                    response.request().postData() ?? '',
-                  ),
-                }),
-              ),
-            )
-        })
+async function execute(input) {
+  return evidence.run(input, async () => {
+    samples = input.samples
+    const available = [
+      'small',
+      'disjoint',
+      'overlap',
+      'overlap-two',
+      'same-table-disjoint',
+    ]
+    const selected = input.cases ?? available
+    assert.ok(
+      selected.length > 0 && selected.every((kind) => available.includes(kind)),
+    )
+    for (const [caseIndex, kind] of selected.entries()) {
+      evidence.at({ case: kind })
+      const program = fixture(kind),
+        entry = {
+          kind,
+          rows: program.initial.length,
+          queries: program.queries.length,
+          strategies: {},
+        }
+      for (const encoding of caseIndex % 2
+        ? ['adaptive', 'full']
+        : ['full', 'adaptive']) {
+        evidence.at({ case: kind, encoding })
+        const reference = new SchemaReference(),
+          driver = new Driver({
+            evidence,
+            reference,
+            renderProgram: renderSchemaProgram,
+            renderDatabase: renderSchemaDatabase,
+            snapshotEncoding: encoding,
+          })
         try {
-          await page.goto(driver.url + '/?scope=alice')
-          await page.waitForFunction(() => window.endpointOracle)
-          await page.evaluate(() => window.endpointOracle.ready())
-          await driver.checkpoint(page, program, 'initial')
-          const times = [],
-            measurements = []
-          for (let i = 0; i <= samples; i++) {
-            let operation
-            if (kind === 'same-table-disjoint') {
-              const rows = await reference.query({
-                ...program.queries[0],
-                order: ['id'],
+          await driver.init()
+          report.engine = reference.engine
+          await reference.configure(program)
+          await driver.prepare(program)
+          await driver.control({ command: 'reset', rows: program.initial })
+          await reference.reset(program.initial)
+          const context = await driver.browser.newContext(),
+            page = await context.newPage()
+          const pending = [],
+            wire = []
+          page.on('response', (response) => {
+            if (
+              response.request().method() === 'POST' &&
+              response.request().resourceType() === 'fetch'
+            )
+              evidence.track(
+                response.body().then((body) =>
+                  wire.push({
+                    responseBytes: body.length,
+                    gzipBytes: gzipSync(body).length,
+                    requestBytes: Buffer.byteLength(
+                      response.request().postData() ?? '',
+                    ),
+                  }),
+                ),
+                pending,
+              )
+          })
+          try {
+            await page.goto(driver.url + '/?scope=alice')
+            await page.waitForFunction(() => window.endpointOracle)
+            await page.evaluate(() => window.endpointOracle.ready())
+            await driver.checkpoint(page, program, 'initial')
+            const times = [],
+              measurements = []
+            for (let i = 0; i <= samples; i++) {
+              evidence.at({
+                case: kind,
+                encoding,
+                operation: 'complete',
+                step: i,
               })
-              const row = rows[i % rows.length]
-              operation = {
-                kind: 'complete',
-                target: 0,
-                table: 0,
-                next: 1,
-                scope: program.scope,
-                outcome: 'success',
-                input: {
-                  id: row.id,
-                  text: 'toggle',
-                  completed: !row.completed,
-                  createdAt: row.createdAt,
-                  extra: { field_0_integer: row.field_0_integer },
-                  token: `operation-${i}`,
-                  cross: false,
-                  otherId: null,
-                  failAfterCommit: false,
-                },
-              }
-            } else
-              operation = await reference.operation(
-                program,
-                {
+              let operation
+              if (kind === 'same-table-disjoint') {
+                const rows = await reference.query({
+                  ...program.queries[0],
+                  order: ['id'],
+                })
+                const row = rows[i % rows.length]
+                operation = {
                   kind: 'complete',
                   target: 0,
-                  slot: i,
-                  text: 'toggle',
-                  rank: 1,
+                  table: 0,
+                  next: 1,
+                  scope: program.scope,
                   outcome: 'success',
+                  input: {
+                    id: row.id,
+                    text: 'toggle',
+                    completed: !row.completed,
+                    createdAt: row.createdAt,
+                    extra: { field_0_integer: row.field_0_integer },
+                    token: `operation-${i}`,
+                    cross: false,
+                    otherId: null,
+                    failAfterCommit: false,
+                  },
+                }
+              } else
+                operation = await reference.operation(
+                  program,
+                  {
+                    kind: 'complete',
+                    target: 0,
+                    slot: i,
+                    text: 'toggle',
+                    rank: 1,
+                    outcome: 'success',
+                  },
+                  i,
+                )
+              await driver.control({
+                command: 'arm',
+                token: operation.input.token,
+              })
+              await driver.control({
+                command: 'write',
+                token: operation.input.token,
+              })
+              await driver.control({ command: 'read' })
+              await Promise.all(pending)
+              const start = wire.length
+              await page.evaluate(
+                ({ name, input }) => window.endpointOracle.invoke(name, input),
+                {
+                  name: operation.kind + operation.target,
+                  input: operation.input,
                 },
-                i,
               )
-            await driver.control({
-              command: 'arm',
-              token: operation.input.token,
-            })
-            await driver.control({
-              command: 'write',
-              token: operation.input.token,
-            })
-            await driver.control({ command: 'read' })
-            await Promise.all(pending)
-            const start = wire.length
-            await page.evaluate(
-              ({ name, input }) => window.endpointOracle.invoke(name, input),
-              {
-                name: operation.kind + operation.target,
-                input: operation.input,
-              },
-            )
-            await page.waitForFunction(
-              (token) =>
-                window.endpointOracle.outcomes[token]?.result !== 'pending',
-              operation.input.token,
-            )
-            const outcome = await page.evaluate(
-              (token) => window.endpointOracle.outcomes[token],
-              operation.input.token,
-            )
-            assert.equal(outcome.result, 'fulfilled')
-            await reference.apply('confirmed', operation)
-            await reference.restore()
-            await driver.checkpoint(page, program, 'confirmed ' + i)
-            await Promise.all(pending)
-            const requests = wire.slice(start)
-            assert.equal(
-              requests.length,
-              1,
-              'response sharing must preserve the one-RPC path',
-            )
-            if (i > 0) {
-              times.push(outcome.elapsedMs)
-              measurements.push(requests[0])
+              await page.waitForFunction(
+                (token) =>
+                  window.endpointOracle.outcomes[token]?.result !== 'pending',
+                operation.input.token,
+              )
+              const outcome = await page.evaluate(
+                (token) => window.endpointOracle.outcomes[token],
+                operation.input.token,
+              )
+              assert.equal(outcome.result, 'fulfilled')
+              await reference.apply('confirmed', operation)
+              await reference.restore()
+              await driver.checkpoint(page, program, 'confirmed ' + i)
+              await Promise.all(pending)
+              const requests = wire.slice(start)
+              assert.equal(
+                requests.length,
+                1,
+                'response sharing must preserve the one-RPC path',
+              )
+              if (i > 0) {
+                times.push(outcome.elapsedMs)
+                measurements.push(requests[0])
+              }
             }
-          }
-          const snapshots = (await reference.expected(program)).map(
-            (rows, i) => ({
-              id: 'query-' + i,
-              rows: rows.map((row) => ({
-                ...row,
-                createdAt: new Date(row.createdAt),
-              })),
-            }),
-          )
-          const cpu = []
-          for (let i = 0; i < 50; i++) {
-            const start = performance.now()
-            JSON.stringify(
-              encodeSnapshots(
-                snapshots,
-                encoding,
-                Object.fromEntries(
-                  program.queries.map((query, i) => [
-                    'query-' + i,
-                    'relation-' + query.table,
-                  ]),
-                ),
-              ),
-            )
-            cpu.push(performance.now() - start)
-          }
-          entry.strategies[encoding] = {
-            clientMs: {
-              p50: percentile(times, 0.5),
-              p95: percentile(times, 0.95),
-              samples: times,
-            },
-            encodeAndJsonMs: {
-              p50: percentile(cpu, 0.5),
-              p95: percentile(cpu, 0.95),
-            },
-            posts: measurements.length,
-            ...measurements.reduce(
-              (sum, item) => ({
-                responseBytes: sum.responseBytes + item.responseBytes,
-                gzipBytes: sum.gzipBytes + item.gzipBytes,
-                requestBytes: sum.requestBytes + item.requestBytes,
+            const snapshots = (await reference.expected(program)).map(
+              (rows, i) => ({
+                id: 'query-' + i,
+                rows: rows.map((row) => ({
+                  ...row,
+                  createdAt: new Date(row.createdAt),
+                })),
               }),
-              { responseBytes: 0, gzipBytes: 0, requestBytes: 0 },
-            ),
-            productionClientArtifacts: driver.counts.clientArtifacts,
+            )
+            const cpu = []
+            for (let i = 0; i < 50; i++) {
+              const start = performance.now()
+              JSON.stringify(
+                encodeSnapshots(
+                  snapshots,
+                  encoding,
+                  Object.fromEntries(
+                    program.queries.map((query, i) => [
+                      'query-' + i,
+                      'relation-' + query.table,
+                    ]),
+                  ),
+                ),
+              )
+              cpu.push(performance.now() - start)
+            }
+            entry.strategies[encoding] = {
+              clientMs: {
+                p50: percentile(times, 0.5),
+                p95: percentile(times, 0.95),
+                samples: times,
+              },
+              encodeAndJsonMs: {
+                p50: percentile(cpu, 0.5),
+                p95: percentile(cpu, 0.95),
+              },
+              posts: measurements.length,
+              ...measurements.reduce(
+                (sum, item) => ({
+                  responseBytes: sum.responseBytes + item.responseBytes,
+                  gzipBytes: sum.gzipBytes + item.gzipBytes,
+                  requestBytes: sum.requestBytes + item.requestBytes,
+                }),
+                { responseBytes: 0, gzipBytes: 0, requestBytes: 0 },
+              ),
+              productionClientArtifacts: driver.counts.clientArtifacts,
+            }
+          } finally {
+            await evidence.cleanup('context', () => context.close())
+            await evidence.settled('response-bodies', pending)
           }
         } finally {
-          await evidence.cleanup('context', () => context.close())
+          await driver.close()
         }
-      } finally {
-        await driver.close()
       }
+      const { full, adaptive } = entry.strategies
+      entry.responseSavings = 1 - adaptive.responseBytes / full.responseBytes
+      entry.gzipSavings = 1 - adaptive.gzipBytes / full.gzipBytes
+      if (kind.startsWith('overlap'))
+        assert.ok(
+          entry.responseSavings > 0.2,
+          'sharing must measurably reduce real serialized response bodies',
+        )
+      else
+        assert.ok(
+          adaptive.responseBytes <= full.responseBytes + samples * 20,
+          'adaptive fallback must avoid material expansion',
+        )
+      report.cases.push(entry)
     }
-    const { full, adaptive } = entry.strategies
-    entry.responseSavings = 1 - adaptive.responseBytes / full.responseBytes
-    entry.gzipSavings = 1 - adaptive.gzipBytes / full.gzipBytes
-    if (kind.startsWith('overlap'))
-      assert.ok(
-        entry.responseSavings > 0.2,
-        'sharing must measurably reduce real serialized response bodies',
-      )
-    else
-      assert.ok(
-        adaptive.responseBytes <= full.responseBytes + samples * 20,
-        'adaptive fallback must avoid material expansion',
-      )
-    report.cases.push(entry)
-  }
+  })
+}
+try {
+  const replay = process.argv.indexOf('--replay')
+  if (replay >= 0)
+    await evidence.replay(
+      JSON.parse(await readFile(process.argv[replay + 1], 'utf8')),
+      execute,
+    )
+  else
+    await execute({
+      cases: process.env.ENDPOINT_LOADING_CASES?.split(','),
+      samples,
+    })
   report.ok = true
 } catch (error) {
   failed = true

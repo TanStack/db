@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, writeFile, readFile } from 'node:fs/promises'
 import { resolve, join } from 'node:path'
 import { PGlite } from '@electric-sql/pglite'
 import { Driver } from './driver.mjs'
@@ -32,92 +32,125 @@ const report = {
   skippedReads: 0,
   runtimeCatalogQueries: 0,
 }
-try {
-  await driver.init()
-  for (const program of [
+const evidence = driver.evidence
+const input = {
+  programs: [
     { helpers: true, count: 3, trigger: false, foreignKey: true },
     { helpers: true, count: 3, trigger: true, foreignKey: false },
-  ]) {
-    await pg.exec(
-      'DROP SCHEMA IF EXISTS alpha CASCADE;DROP SCHEMA IF EXISTS beta CASCADE',
-    )
-    await pg.exec(ddl(program))
-    snapshot = await inspectSchema(
-      (statement) => pg.query(statement),
-      'src/database.server.ts',
-    )
-    await driver.prepare(program)
-    report.programs++
-    const page = await driver.browser.newPage()
-    const errors = []
-    page.on('pageerror', (error) => errors.push(String(error)))
-    try {
-      await page.goto(driver.url)
-      await page.waitForFunction(() => !!window.compiledOracle)
-      await page.evaluate(() =>
-        Promise.all(window.compiledOracle.collections.map((c) => c.preload())),
+  ],
+  operations: [
+    { kind: 'update', table: 0, value: 7 },
+    { kind: 'update', table: 2, value: 9 },
+    { kind: 'delete', table: 0 },
+  ],
+}
+async function execute(input) {
+  return evidence.run(input, async () => {
+    await driver.init()
+    for (const program of input.programs) {
+      evidence.at({ program })
+      await pg.exec(
+        'DROP SCHEMA IF EXISTS alpha CASCADE;DROP SCHEMA IF EXISTS beta CASCADE',
       )
-      for (const operation of [
-        { kind: 'update', table: 0, value: 7 },
-        { kind: 'update', table: 2, value: 9 },
-        { kind: 'delete', table: 0 },
-      ]) {
-        await driver.control({ command: 'clearTrace' })
-        if (operation.kind === 'delete')
-          await pg.exec(
-            `DELETE FROM ${tableName(operation.table)} WHERE id='row'`,
-          )
-        else
-          await pg.query(
-            `UPDATE ${tableName(operation.table)} SET value=$1 WHERE id='row'`,
-            [operation.value],
-          )
-        const actual = await page.evaluate(async (operation) => {
-          const app = window.compiledOracle
-          const tx = app.actions[operation.kind + operation.table](
-            operation.kind === 'delete' ? {} : { value: operation.value },
-          )
-          await tx.isPersisted.promise
-          return app.collections.map((c) =>
-            [...c.values()].map(({ id, value }) => ({ id, value })),
-          )
-        }, operation)
-        const expected = await Promise.all(
-          Array.from({ length: program.count }, (_, i) =>
-            pg
-              .query(`SELECT id,value FROM ${tableName(i)} ORDER BY id`)
-              .then((r) => r.rows),
+      await pg.exec(ddl(program))
+      snapshot = await inspectSchema(
+        (statement) => pg.query(statement),
+        'src/database.server.ts',
+      )
+      await driver.prepare(program)
+      report.programs++
+      const page = await driver.browser.newPage()
+      const errors = []
+      page.on('pageerror', (error) => errors.push(String(error)))
+      try {
+        await page.goto(driver.url)
+        await page.waitForFunction(() => !!window.compiledOracle)
+        await page.evaluate(() =>
+          Promise.all(
+            window.compiledOracle.collections.map((c) => c.preload()),
           ),
         )
-        assert.deepEqual(actual, expected)
-        const { trace } = await driver.control({})
-        assert.ok(
-          trace.every(
-            (statement) => !/pg_catalog|lock table|^begin/i.test(statement),
-          ),
-        )
-        const reads = trace.filter((statement) =>
-          /^select /i.test(statement),
-        ).length
-        const wanted =
-          program.trigger && operation.table === 0
-            ? 3
-            : program.foreignKey &&
-              operation.kind === 'delete' &&
-              operation.table === 0
-            ? 2
-            : 1
-        assert.equal(reads, wanted)
-        report.operations++
-        report.comparisons += actual.length
-        report.reads += reads
-        report.skippedReads += actual.length - reads
+        for (const [step, operation] of input.operations.entries()) {
+          evidence.phase = 'execution'
+          evidence.at({ program, operation: operation.kind, step })
+          evidence.record({ type: 'operation', operation })
+          await driver.control({ command: 'clearTrace' })
+          if (operation.kind === 'delete')
+            await pg.exec(
+              `DELETE FROM ${tableName(operation.table)} WHERE id='row'`,
+            )
+          else
+            await pg.query(
+              `UPDATE ${tableName(operation.table)} SET value=$1 WHERE id='row'`,
+              [operation.value],
+            )
+          const actual = await page.evaluate(async (operation) => {
+            const app = window.compiledOracle
+            const tx = app.actions[operation.kind + operation.table](
+              operation.kind === 'delete' ? {} : { value: operation.value },
+            )
+            await tx.isPersisted.promise
+            return app.collections.map((c) =>
+              [...c.values()].map(({ id, value }) => ({ id, value })),
+            )
+          }, operation)
+          const expected = await Promise.all(
+            Array.from({ length: program.count }, (_, i) =>
+              pg
+                .query(`SELECT id,value FROM ${tableName(i)} ORDER BY id`)
+                .then((r) => r.rows),
+            ),
+          )
+          if (
+            process.env.ENDPOINT_ORACLE_TEST_FAULT === 'compiled-row' &&
+            actual[0]?.length
+          ) {
+            actual[0][0].value++
+            evidence.fault('compiled-row')
+          }
+          evidence.check('settled-rows', actual, expected, {
+            checkpoint: 'settled',
+          })
+          const { trace } = await driver.control({})
+          assert.ok(
+            trace.every(
+              (statement) => !/pg_catalog|lock table|^begin/i.test(statement),
+            ),
+          )
+          const reads = trace.filter((statement) =>
+            /^select /i.test(statement),
+          ).length
+          const wanted =
+            program.trigger && operation.table === 0
+              ? 3
+              : program.foreignKey &&
+                  operation.kind === 'delete' &&
+                  operation.table === 0
+                ? 2
+                : 1
+          evidence.check('read-obligation', reads, wanted, {
+            checkpoint: 'settled',
+          })
+          report.operations++
+          report.comparisons += actual.length
+          report.reads += reads
+          report.skippedReads += actual.length - reads
+        }
+        assert.deepEqual(errors, [])
+      } finally {
+        await driver.evidence.cleanup('page', () => page.close())
       }
-      assert.deepEqual(errors, [])
-    } finally {
-      await driver.evidence.cleanup('page', () => page.close())
     }
-  }
+  })
+}
+try {
+  const replay = process.argv.indexOf('--replay')
+  if (replay >= 0)
+    await evidence.replay(
+      JSON.parse(await readFile(process.argv[replay + 1], 'utf8')),
+      execute,
+    )
+  else await execute(input)
   report.ok = true
 } catch (error) {
   report.error = String(error.stack ?? error)
