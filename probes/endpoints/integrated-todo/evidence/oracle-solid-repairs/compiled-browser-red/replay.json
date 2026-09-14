@@ -1,0 +1,205 @@
+{
+  "property": "endpoints.browser",
+  "original": {
+    "input": {
+      "programs": [
+        {
+          "helpers": true,
+          "count": 3,
+          "trigger": false,
+          "foreignKey": true
+        },
+        {
+          "helpers": true,
+          "count": 3,
+          "trigger": true,
+          "foreignKey": false
+        }
+      ],
+      "operations": [
+        {
+          "kind": "update",
+          "table": 0,
+          "value": 7
+        },
+        {
+          "kind": "update",
+          "table": 2,
+          "value": 9
+        },
+        {
+          "kind": "delete",
+          "table": 0
+        }
+      ]
+    },
+    "failure": {
+      "law": "settled-rows",
+      "program": {
+        "helpers": true,
+        "count": 3,
+        "trigger": false,
+        "foreignKey": true
+      },
+      "operation": "update",
+      "step": 0,
+      "checkpoint": "settled",
+      "actual": [
+        [
+          {
+            "id": "row",
+            "value": 8
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 2
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 3
+          }
+        ]
+      ],
+      "expected": [
+        [
+          {
+            "id": "row",
+            "value": 7
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 2
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 3
+          }
+        ]
+      ],
+      "difference": [
+        "0",
+        "0",
+        "value"
+      ],
+      "trace": [
+        {
+          "type": "operation",
+          "operation": {
+            "kind": "update",
+            "table": 0,
+            "value": 7
+          }
+        }
+      ]
+    }
+  },
+  "reduced": {
+    "input": {
+      "programs": [
+        {
+          "helpers": true,
+          "count": 3,
+          "trigger": false,
+          "foreignKey": true
+        },
+        {
+          "helpers": true,
+          "count": 3,
+          "trigger": true,
+          "foreignKey": false
+        }
+      ],
+      "operations": [
+        {
+          "kind": "update",
+          "table": 0,
+          "value": 7
+        },
+        {
+          "kind": "update",
+          "table": 2,
+          "value": 9
+        },
+        {
+          "kind": "delete",
+          "table": 0
+        }
+      ]
+    },
+    "failure": {
+      "law": "settled-rows",
+      "program": {
+        "helpers": true,
+        "count": 3,
+        "trigger": false,
+        "foreignKey": true
+      },
+      "operation": "update",
+      "step": 0,
+      "checkpoint": "settled",
+      "actual": [
+        [
+          {
+            "id": "row",
+            "value": 8
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 2
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 3
+          }
+        ]
+      ],
+      "expected": [
+        [
+          {
+            "id": "row",
+            "value": 7
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 2
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 3
+          }
+        ]
+      ],
+      "difference": [
+        "0",
+        "0",
+        "value"
+      ],
+      "trace": [
+        {
+          "type": "operation",
+          "operation": {
+            "kind": "update",
+            "table": 0,
+            "value": 7
+          }
+        }
+      ]
+    }
+  }
+}

@@ -2,10 +2,10 @@
 type: field-log
 format: field-log/v1
 event-stream: ./field_log.jsonl
-generated-through: 424
+generated-through: 425
 title: "Endpoints: optimistic coherence and update delivery"
 opened-at: 2026-09-11T16:54:36.780Z
-updated-at: 2026-09-14T17:15:14.602Z
+updated-at: 2026-09-14T17:51:09.566Z
 ---
 
 # Endpoints: optimistic coherence and update delivery
@@ -1748,3 +1748,15 @@ The evaluate-review skill confirms eight harness/reporting gaps and one missing 
 Six retained probe scripts demonstrate the exact bounded gaps, and all seven existing helper tests still pass. The real SQL-effect replay also shows a selected conditional mutant can yield an ordinary green despite not applying. Other probes use real helper or extracted caller code with controlled I/O; they do not claim new browser or Endpoints data bugs.
 
 Recommended next repair order: preserve first failure/trace and all async diagnostics across real callers; unify mutant evidence and executable provenance; then add witnessed client receipt processing and a cold retained collection history. No implementation changes, commit, or push in this evaluation.
+
+### Oracle audit repairs validated and committed
+
+_2026-09-14T17:51:09.566Z_
+
+Nine confirmed audit findings are repaired in commits 55736a650, 7d8a93ff0 and edddfd4f6. See [results and limits](../../integrated-todo/ORACLE-SOLIDITY-RESULTS.md), [receipt manifest](../../integrated-todo/evidence/oracle-solid-repairs/MANIFEST.json), and the append-only [evaluation ledger](oracle-guidance-reaudit/EVALUATION-LEDGER.jsonl). OG-01 and all prior scope limits remain deferred or preserved as recorded.
+
+The repairs preserve first failures, full publication traces and secondary diagnostics; require client receipt-processing witnesses; attribute fault controls to actual reach; record executable provenance; capture fixed experiment replay; and add real retained cold-collection mutation histories. Validation: 88 contract tests, typecheck, 125 related DB tests, 145 operations across six final campaigns, and six fixed compiled-browser replay operations. Seven SQL-effect histories include a cold retained peer. Ordering/compiled replay reproduce the same violation and pass without their injected faults.
+
+A combined browser run failed retrieving Chrome response bodies and remains classified as infrastructure failure. An isolated Todo rerun passed without secondary errors; parallel-load causation is unproved. The cold fixture and a source-map edit needed repair during this work; these are harness mistakes, not production data bugs. No new production data bug was established.
+
+Earlier production/compiler/oracle/design work is now preserved in five granular commits, 64899b9b4 through 66f9a61a6. New repair commits are separate. Push follows the documentation commit; this note does not claim it has already succeeded.

@@ -1,0 +1,131 @@
+{
+  "property": "endpoints.compiled-dependencies",
+  "original": {
+    "input": {
+      "program": {
+        "count": 3,
+        "trigger": true,
+        "foreignKey": false
+      },
+      "histories": [
+        [
+          {
+            "kind": "update",
+            "table": 0,
+            "value": 7
+          }
+        ]
+      ]
+    },
+    "failure": {
+      "law": "settled-rows",
+      "operation": "update",
+      "step": 0,
+      "checkpoint": "settled",
+      "collection": 1,
+      "actual": [
+        {
+          "id": "row",
+          "value": 2
+        }
+      ],
+      "expected": [
+        {
+          "id": "row",
+          "value": 8
+        }
+      ],
+      "difference": [
+        "0",
+        "value"
+      ],
+      "trace": [
+        {
+          "type": "operation",
+          "step": {
+            "kind": "update",
+            "table": 0,
+            "value": 7
+          }
+        }
+      ],
+      "faults": [
+        {
+          "point": "ignore-triggers",
+          "stage": "applied",
+          "case": 3
+        },
+        {
+          "point": "ignore-triggers",
+          "stage": "reached",
+          "case": 3,
+          "operation": "update"
+        }
+      ]
+    }
+  },
+  "reduced": {
+    "input": {
+      "program": {
+        "count": 3,
+        "trigger": true,
+        "foreignKey": false
+      },
+      "histories": [
+        [
+          {
+            "kind": "update",
+            "table": 0,
+            "value": 7
+          }
+        ]
+      ]
+    },
+    "failure": {
+      "law": "settled-rows",
+      "operation": "update",
+      "step": 0,
+      "checkpoint": "settled",
+      "collection": 1,
+      "actual": [
+        {
+          "id": "row",
+          "value": 2
+        }
+      ],
+      "expected": [
+        {
+          "id": "row",
+          "value": 8
+        }
+      ],
+      "difference": [
+        "0",
+        "value"
+      ],
+      "trace": [
+        {
+          "type": "operation",
+          "step": {
+            "kind": "update",
+            "table": 0,
+            "value": 7
+          }
+        }
+      ],
+      "faults": [
+        {
+          "point": "ignore-triggers",
+          "stage": "applied",
+          "case": 3
+        },
+        {
+          "point": "ignore-triggers",
+          "stage": "reached",
+          "case": 3,
+          "operation": "update"
+        }
+      ]
+    }
+  }
+}

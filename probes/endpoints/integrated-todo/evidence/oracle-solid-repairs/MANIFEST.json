@@ -1,0 +1,245 @@
+[
+  {
+    "receipt": "e2e-isolated",
+    "outcome": "passed",
+    "ok": true,
+    "cleanupErrors": 0,
+    "replay": null,
+    "controls": [],
+    "reportSha256": "93e5f79a1caf788b5b0ae0fac66d3ceb3e7a70eade657feedfccbf68c56cdb7d"
+  },
+  {
+    "receipt": "sql-final",
+    "outcome": "passed",
+    "ok": true,
+    "cleanupErrors": 0,
+    "replay": null,
+    "controls": [],
+    "reportSha256": "395dd0b46cf71ea3e0363d876bdbd6b50f6b15c2327cdd6dcbfeb75e30f939f2"
+  },
+  {
+    "receipt": "concurrent-final",
+    "outcome": "passed",
+    "ok": true,
+    "cleanupErrors": 0,
+    "replay": null,
+    "controls": [],
+    "reportSha256": "f258667c198b61bfde3cafdf73fe9f6b8a9c25e57ae08aaf99256c840d511a4a"
+  },
+  {
+    "receipt": "effects-final",
+    "outcome": "passed",
+    "ok": true,
+    "cleanupErrors": 0,
+    "replay": null,
+    "controls": [],
+    "reportSha256": "c0748bac5adda9a4dc549c2f9e95f188c433551a2b6e4cd7fce6e6b98cf4e98a"
+  },
+  {
+    "receipt": "dependencies-final",
+    "outcome": "passed",
+    "ok": true,
+    "cleanupErrors": 0,
+    "replay": null,
+    "controls": [],
+    "reportSha256": "56978056e5698e3bd9211deb87694331d8b7b8120ef4f226be2aa7573368e4ae"
+  },
+  {
+    "receipt": "compiled-final",
+    "outcome": "passed",
+    "ok": true,
+    "cleanupErrors": 0,
+    "replay": null,
+    "controls": [],
+    "reportSha256": "393991e9aba8d5fdaac9d487e911d604bfe93cb42c387204f0bdce73984342af"
+  },
+  {
+    "receipt": "compiled-browser-red",
+    "outcome": "semantic-rejection",
+    "ok": false,
+    "cleanupErrors": 0,
+    "replay": null,
+    "controls": [
+      {
+        "variable": "ENDPOINT_ORACLE_TEST_FAULT",
+        "point": "compiled-row",
+        "applied": true,
+        "reached": true,
+        "outcome": "intended-rejection"
+      }
+    ],
+    "reportSha256": "f56512f9946e2af005a8cb82426cecdbd01ef6ba549123c30546630e81f97af8"
+  },
+  {
+    "receipt": "loading-red",
+    "outcome": "semantic-rejection",
+    "ok": false,
+    "cleanupErrors": 0,
+    "replay": null,
+    "controls": [
+      {
+        "variable": "ENDPOINT_ORACLE_TEST_FAULT",
+        "point": "rendered-text",
+        "applied": true,
+        "reached": true,
+        "outcome": "intended-rejection"
+      }
+    ],
+    "reportSha256": "ed33b69ce6f7e6c6aefcb7d523a85abe2def1d45de6e9fc5b6a7d45e6eafe093"
+  },
+  {
+    "receipt": "compiled-replay-red",
+    "outcome": "semantic-rejection",
+    "ok": false,
+    "cleanupErrors": 0,
+    "replay": "same-violation",
+    "controls": [
+      {
+        "variable": "ENDPOINT_ORACLE_TEST_FAULT",
+        "point": "compiled-row",
+        "applied": true,
+        "reached": true,
+        "outcome": "intended-rejection"
+      }
+    ],
+    "reportSha256": "a1a8a067e70d4a4b978a7358658a5ab4f1e15fd97f8799f0ff73df9fbc8a3df9"
+  },
+  {
+    "receipt": "compiled-replay-green",
+    "outcome": "passed",
+    "ok": true,
+    "cleanupErrors": 0,
+    "replay": "passes",
+    "controls": [],
+    "reportSha256": "4232513af5c417316c20ef2c310c6438c34b7b7556b95ba58e86df934161b911"
+  },
+  {
+    "receipt": "loading-replay-green",
+    "outcome": "passed",
+    "ok": true,
+    "cleanupErrors": 0,
+    "replay": "passes",
+    "controls": [],
+    "reportSha256": "eef420d187be321f5fa6fb5775f1bc5a56c42e6794617790dcce364c778fcc97"
+  },
+  {
+    "receipt": "cold-red",
+    "outcome": "semantic-rejection",
+    "ok": false,
+    "cleanupErrors": 0,
+    "replay": null,
+    "controls": [
+      {
+        "variable": "ENDPOINT_ORACLE_TEST_FAULT",
+        "point": "preload-cold",
+        "applied": true,
+        "reached": true,
+        "outcome": "intended-rejection"
+      }
+    ],
+    "reportSha256": "c717d7f1319030554ba344e61f4077b2f5c170006501f054174326797a1f9109"
+  },
+  {
+    "receipt": "effect-unreached",
+    "outcome": "fault-unreached",
+    "ok": false,
+    "cleanupErrors": 0,
+    "replay": "passes",
+    "controls": [
+      {
+        "variable": "ENDPOINT_EFFECT_MUTANT",
+        "point": "needless-index-fallback",
+        "applied": false,
+        "reached": false,
+        "outcome": "unreached"
+      }
+    ],
+    "reportSha256": "24d3c0697e9f7d9d6266b167209afbe73ac48d9308f3eebe30ac81380451c18d"
+  },
+  {
+    "receipt": "effect-mutant",
+    "outcome": "semantic-rejection",
+    "ok": false,
+    "cleanupErrors": 0,
+    "replay": null,
+    "controls": [
+      {
+        "variable": "ENDPOINT_EFFECT_MUTANT",
+        "point": "needless-index-fallback",
+        "applied": true,
+        "reached": true,
+        "outcome": "intended-rejection"
+      }
+    ],
+    "reportSha256": "5c22add2708e5417e22debec9614180702535f7d8440b024298da78bf0b12e22"
+  },
+  {
+    "receipt": "compiled-mutant",
+    "outcome": "semantic-rejection",
+    "ok": false,
+    "cleanupErrors": 0,
+    "replay": null,
+    "controls": [
+      {
+        "variable": "ENDPOINT_COMPILED_MUTANT",
+        "point": "ignore-triggers",
+        "applied": true,
+        "reached": true,
+        "outcome": "intended-rejection"
+      }
+    ],
+    "reportSha256": "698e56f248db50855290a0c6059bdff9111cfc404b2c49529f9f142e2c79dd53"
+  },
+  {
+    "receipt": "dependency-mutant",
+    "outcome": "semantic-rejection",
+    "ok": false,
+    "cleanupErrors": 0,
+    "replay": null,
+    "controls": [
+      {
+        "variable": "ENDPOINT_DEPENDENCY_MUTANT",
+        "point": "omit-fk",
+        "applied": true,
+        "reached": true,
+        "outcome": "intended-rejection"
+      }
+    ],
+    "reportSha256": "bcfa1340e5c71fde5bc10e905a90cf087e7322668f0adaf1053e1c38ccdb618b"
+  },
+  {
+    "receipt": "order-replay-red",
+    "outcome": "semantic-rejection",
+    "ok": false,
+    "cleanupErrors": 0,
+    "replay": "same-violation",
+    "controls": [
+      {
+        "variable": "ENDPOINT_ORACLE_MUTANT",
+        "point": "omit-order",
+        "applied": true,
+        "reached": true,
+        "outcome": "intended-rejection"
+      }
+    ],
+    "reportSha256": "17d067b27410adb2c077157e93a7771996ccaae9082cd3e325da967a5ad24177"
+  },
+  {
+    "receipt": "e2e-final",
+    "outcome": "infrastructure",
+    "ok": false,
+    "cleanupErrors": 15,
+    "replay": null,
+    "controls": [],
+    "reportSha256": "4629b5b40dd0853a3e0ecac5238262953cad488c0e84467c3aaf9a2569db8337"
+  },
+  {
+    "receipt": "order-replay-green",
+    "outcome": "passed",
+    "ok": true,
+    "cleanupErrors": 0,
+    "replay": "passes",
+    "controls": [],
+    "reportSha256": "ad65df5b47b53b534806881e0c04f4a4d23045ae3eb6910054b15296507c34f5"
+  }
+]

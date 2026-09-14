@@ -1,0 +1,117 @@
+{
+  "property": "endpoints.sql-effect-rules",
+  "original": {
+    "input": {
+      "program": {
+        "index": "none",
+        "volatility": "VOLATILE",
+        "depth": 2,
+        "cold": true
+      },
+      "histories": [
+        [
+          {
+            "kind": "direct",
+            "value": 7,
+            "optimistic": 0
+          },
+          {
+            "kind": "function",
+            "value": -3,
+            "optimistic": 3
+          },
+          {
+            "kind": "read-write",
+            "value": 4,
+            "optimistic": 2
+          },
+          {
+            "kind": "noop",
+            "value": 8,
+            "optimistic": 1
+          }
+        ]
+      ]
+    },
+    "failure": {
+      "law": "cold-baseline",
+      "cell": "none/VOLATILE/depth-2/cold-true",
+      "checkpoint": "before-mutation",
+      "actual": [
+        {
+          "id": "row",
+          "value": 3
+        }
+      ],
+      "expected": [],
+      "difference": [
+        "0"
+      ],
+      "trace": [],
+      "faults": [
+        {
+          "point": "preload-cold",
+          "stage": "reached",
+          "case": 1
+        }
+      ]
+    }
+  },
+  "reduced": {
+    "input": {
+      "program": {
+        "index": "none",
+        "volatility": "VOLATILE",
+        "depth": 2,
+        "cold": true
+      },
+      "histories": [
+        [
+          {
+            "kind": "direct",
+            "value": 7,
+            "optimistic": 0
+          },
+          {
+            "kind": "function",
+            "value": -3,
+            "optimistic": 3
+          },
+          {
+            "kind": "read-write",
+            "value": 4,
+            "optimistic": 2
+          },
+          {
+            "kind": "noop",
+            "value": 8,
+            "optimistic": 1
+          }
+        ]
+      ]
+    },
+    "failure": {
+      "law": "cold-baseline",
+      "cell": "none/VOLATILE/depth-2/cold-true",
+      "checkpoint": "before-mutation",
+      "actual": [
+        {
+          "id": "row",
+          "value": 3
+        }
+      ],
+      "expected": [],
+      "difference": [
+        "0"
+      ],
+      "trace": [],
+      "faults": [
+        {
+          "point": "preload-cold",
+          "stage": "reached",
+          "case": 1
+        }
+      ]
+    }
+  }
+}

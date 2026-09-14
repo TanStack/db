@@ -1,0 +1,747 @@
+{
+  "property": "endpoints.sql-effect-rules",
+  "original": {
+    "input": {
+      "program": {
+        "index": "expression",
+        "volatility": "VOLATILE",
+        "depth": 2,
+        "cold": false
+      },
+      "histories": [
+        [
+          {
+            "kind": "direct",
+            "value": 7,
+            "optimistic": 0
+          },
+          {
+            "kind": "function",
+            "value": -3,
+            "optimistic": 3
+          },
+          {
+            "kind": "read-write",
+            "value": 4,
+            "optimistic": 2
+          },
+          {
+            "kind": "noop",
+            "value": 8,
+            "optimistic": 1
+          }
+        ]
+      ]
+    },
+    "failure": {
+      "law": "read-obligation",
+      "operation": "direct",
+      "step": {
+        "kind": "direct",
+        "value": 7,
+        "optimistic": 0
+      },
+      "cell": "expression/VOLATILE/depth-2/cold-false",
+      "checkpoint": "settled",
+      "summaries": [
+        {
+          "reads": [
+            "[\"app\",\"t0\"]"
+          ],
+          "writes": [],
+          "unknown": [],
+          "derivation": [
+            {
+              "rule": "relation-event",
+              "source": "endpoint",
+              "target": "[\"app\",\"t0\"]",
+              "operation": "select",
+              "details": {}
+            },
+            {
+              "rule": "routine-call",
+              "source": "[\"app\",\"t0\"]:index:1",
+              "target": "routine:870"
+            },
+            {
+              "rule": "native-scalar-contract",
+              "source": "routine:870"
+            },
+            {
+              "rule": "routine-call",
+              "source": "[\"app\",\"t0\"]:index:1",
+              "target": "routine:3848"
+            },
+            {
+              "rule": "native-scalar-contract",
+              "source": "routine:3848"
+            },
+            {
+              "rule": "routine-call",
+              "source": "[\"app\",\"t0\"]:index:1",
+              "target": "routine:4235"
+            },
+            {
+              "rule": "native-scalar-contract",
+              "source": "routine:4235"
+            }
+          ],
+          "artifact": "a6f10fb919bbe39dc311cd38a4ea59a67bb33ee3cfb6641293581ffceedd4163",
+          "statement": "653a38b61621ded3b1226c8e2a49ab72149db7ee50fa7c979bdf5108aced7af1"
+        },
+        {
+          "reads": [
+            "[\"app\",\"t0\"]",
+            "[\"app\",\"t1\"]"
+          ],
+          "writes": [],
+          "unknown": [],
+          "derivation": [
+            {
+              "rule": "relation-event",
+              "source": "endpoint",
+              "target": "[\"app\",\"t0\"]",
+              "operation": "select",
+              "details": {}
+            },
+            {
+              "rule": "routine-call",
+              "source": "endpoint",
+              "target": "routine:16411"
+            },
+            {
+              "rule": "routine-call",
+              "source": "routine:16411",
+              "target": "routine:16410"
+            },
+            {
+              "rule": "routine-call",
+              "source": "routine:16410",
+              "target": "routine:16409"
+            },
+            {
+              "rule": "routine-call",
+              "source": "routine:16409",
+              "target": "routine:16407"
+            },
+            {
+              "rule": "relation-event",
+              "source": "routine:16407",
+              "target": "[\"app\",\"t1\"]",
+              "operation": "select",
+              "details": {}
+            },
+            {
+              "rule": "routine-call",
+              "source": "[\"app\",\"t0\"]:index:1",
+              "target": "routine:870"
+            },
+            {
+              "rule": "native-scalar-contract",
+              "source": "routine:870"
+            },
+            {
+              "rule": "routine-call",
+              "source": "[\"app\",\"t0\"]:index:1",
+              "target": "routine:3848"
+            },
+            {
+              "rule": "native-scalar-contract",
+              "source": "routine:3848"
+            },
+            {
+              "rule": "routine-call",
+              "source": "[\"app\",\"t0\"]:index:1",
+              "target": "routine:4235"
+            },
+            {
+              "rule": "native-scalar-contract",
+              "source": "routine:4235"
+            }
+          ],
+          "artifact": "a6f10fb919bbe39dc311cd38a4ea59a67bb33ee3cfb6641293581ffceedd4163",
+          "statement": "7c130505f07cf352978523001c025232bc2e6948b6c8766671c742ae8757ffe4"
+        },
+        {
+          "reads": [
+            "[\"app\",\"t1\"]"
+          ],
+          "writes": [],
+          "unknown": [],
+          "derivation": [
+            {
+              "rule": "relation-event",
+              "source": "endpoint",
+              "target": "[\"app\",\"t1\"]",
+              "operation": "select",
+              "details": {}
+            }
+          ],
+          "artifact": "a6f10fb919bbe39dc311cd38a4ea59a67bb33ee3cfb6641293581ffceedd4163",
+          "statement": "37a4e79d427aab129d3d894451593047df6be8b4b723a5c9b75505a79903954c"
+        },
+        {
+          "reads": [
+            "[\"app\",\"t2\"]"
+          ],
+          "writes": [],
+          "unknown": [],
+          "derivation": [
+            {
+              "rule": "relation-event",
+              "source": "endpoint",
+              "target": "[\"app\",\"t2\"]",
+              "operation": "select",
+              "details": {}
+            }
+          ],
+          "artifact": "a6f10fb919bbe39dc311cd38a4ea59a67bb33ee3cfb6641293581ffceedd4163",
+          "statement": "ca5906c9c171e0ef27ac438b974d7899e3bb68c8389b171cbdd205f1a4babe52"
+        },
+        {
+          "reads": [
+            "[\"app\",\"t0\"]"
+          ],
+          "writes": [],
+          "unknown": [],
+          "derivation": [
+            {
+              "rule": "relation-event",
+              "source": "endpoint",
+              "target": "[\"app\",\"t0\"]",
+              "operation": "select",
+              "details": {}
+            },
+            {
+              "rule": "routine-call",
+              "source": "endpoint",
+              "target": "routine:16406"
+            },
+            {
+              "rule": "routine-call",
+              "source": "[\"app\",\"t0\"]:index:1",
+              "target": "routine:870"
+            },
+            {
+              "rule": "native-scalar-contract",
+              "source": "routine:870"
+            },
+            {
+              "rule": "routine-call",
+              "source": "[\"app\",\"t0\"]:index:1",
+              "target": "routine:3848"
+            },
+            {
+              "rule": "native-scalar-contract",
+              "source": "routine:3848"
+            },
+            {
+              "rule": "routine-call",
+              "source": "[\"app\",\"t0\"]:index:1",
+              "target": "routine:4235"
+            },
+            {
+              "rule": "native-scalar-contract",
+              "source": "routine:4235"
+            }
+          ],
+          "artifact": "a6f10fb919bbe39dc311cd38a4ea59a67bb33ee3cfb6641293581ffceedd4163",
+          "statement": "e3eea7bca0faa9519cd62fd496536f29a822c888778519186dd1d61a1d6120c2"
+        }
+      ],
+      "summary": {
+        "reads": [
+          "[\"app\",\"t0\"]"
+        ],
+        "writes": [
+          "[\"app\",\"t0\"]"
+        ],
+        "unknown": [],
+        "derivation": [
+          {
+            "rule": "relation-event",
+            "source": "endpoint",
+            "target": "[\"app\",\"t0\"]",
+            "operation": "update",
+            "details": {
+              "columns": [
+                "value"
+              ],
+              "defaults": []
+            }
+          },
+          {
+            "rule": "relation-event",
+            "source": "endpoint",
+            "target": "[\"app\",\"t0\"]",
+            "operation": "select",
+            "details": {}
+          },
+          {
+            "rule": "routine-call",
+            "source": "[\"app\",\"t0\"]:index:1",
+            "target": "routine:870"
+          },
+          {
+            "rule": "native-scalar-contract",
+            "source": "routine:870"
+          },
+          {
+            "rule": "routine-call",
+            "source": "[\"app\",\"t0\"]:index:1",
+            "target": "routine:3848"
+          },
+          {
+            "rule": "native-scalar-contract",
+            "source": "routine:3848"
+          },
+          {
+            "rule": "routine-call",
+            "source": "[\"app\",\"t0\"]:index:1",
+            "target": "routine:4235"
+          },
+          {
+            "rule": "native-scalar-contract",
+            "source": "routine:4235"
+          },
+          {
+            "rule": "routine-call",
+            "source": "[\"app\",\"t0\"]:index:1",
+            "target": "routine:870"
+          },
+          {
+            "rule": "routine-call",
+            "source": "[\"app\",\"t0\"]:index:1",
+            "target": "routine:3848"
+          },
+          {
+            "rule": "routine-call",
+            "source": "[\"app\",\"t0\"]:index:1",
+            "target": "routine:4235"
+          }
+        ],
+        "artifact": "a6f10fb919bbe39dc311cd38a4ea59a67bb33ee3cfb6641293581ffceedd4163",
+        "statement": "085800835e204c8bbdc3174c3add3f7dd0cf72601fcfc0c7c1bb6875bc24d9aa"
+      },
+      "actual": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "expected": [
+        1,
+        1,
+        0,
+        0,
+        1
+      ],
+      "difference": [
+        "2"
+      ],
+      "trace": [
+        {
+          "type": "operation",
+          "step": {
+            "kind": "direct",
+            "value": 7,
+            "optimistic": 0
+          },
+          "baselines": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ]
+        }
+      ],
+      "faults": [
+        {
+          "point": "needless-index-fallback",
+          "stage": "reached",
+          "case": 2,
+          "cell": "expression/VOLATILE/depth-2/cold-false",
+          "step": {
+            "kind": "direct",
+            "value": 7,
+            "optimistic": 0
+          }
+        }
+      ]
+    }
+  },
+  "reduced": {
+    "input": {
+      "program": {
+        "index": "expression",
+        "volatility": "VOLATILE",
+        "depth": 2,
+        "cold": false
+      },
+      "histories": [
+        [
+          {
+            "kind": "direct",
+            "value": 7,
+            "optimistic": 0
+          },
+          {
+            "kind": "function",
+            "value": -3,
+            "optimistic": 3
+          },
+          {
+            "kind": "read-write",
+            "value": 4,
+            "optimistic": 2
+          },
+          {
+            "kind": "noop",
+            "value": 8,
+            "optimistic": 1
+          }
+        ]
+      ]
+    },
+    "failure": {
+      "law": "read-obligation",
+      "operation": "direct",
+      "step": {
+        "kind": "direct",
+        "value": 7,
+        "optimistic": 0
+      },
+      "cell": "expression/VOLATILE/depth-2/cold-false",
+      "checkpoint": "settled",
+      "summaries": [
+        {
+          "reads": [
+            "[\"app\",\"t0\"]"
+          ],
+          "writes": [],
+          "unknown": [],
+          "derivation": [
+            {
+              "rule": "relation-event",
+              "source": "endpoint",
+              "target": "[\"app\",\"t0\"]",
+              "operation": "select",
+              "details": {}
+            },
+            {
+              "rule": "routine-call",
+              "source": "[\"app\",\"t0\"]:index:1",
+              "target": "routine:870"
+            },
+            {
+              "rule": "native-scalar-contract",
+              "source": "routine:870"
+            },
+            {
+              "rule": "routine-call",
+              "source": "[\"app\",\"t0\"]:index:1",
+              "target": "routine:3848"
+            },
+            {
+              "rule": "native-scalar-contract",
+              "source": "routine:3848"
+            },
+            {
+              "rule": "routine-call",
+              "source": "[\"app\",\"t0\"]:index:1",
+              "target": "routine:4235"
+            },
+            {
+              "rule": "native-scalar-contract",
+              "source": "routine:4235"
+            }
+          ],
+          "artifact": "a6f10fb919bbe39dc311cd38a4ea59a67bb33ee3cfb6641293581ffceedd4163",
+          "statement": "653a38b61621ded3b1226c8e2a49ab72149db7ee50fa7c979bdf5108aced7af1"
+        },
+        {
+          "reads": [
+            "[\"app\",\"t0\"]",
+            "[\"app\",\"t1\"]"
+          ],
+          "writes": [],
+          "unknown": [],
+          "derivation": [
+            {
+              "rule": "relation-event",
+              "source": "endpoint",
+              "target": "[\"app\",\"t0\"]",
+              "operation": "select",
+              "details": {}
+            },
+            {
+              "rule": "routine-call",
+              "source": "endpoint",
+              "target": "routine:16411"
+            },
+            {
+              "rule": "routine-call",
+              "source": "routine:16411",
+              "target": "routine:16410"
+            },
+            {
+              "rule": "routine-call",
+              "source": "routine:16410",
+              "target": "routine:16409"
+            },
+            {
+              "rule": "routine-call",
+              "source": "routine:16409",
+              "target": "routine:16407"
+            },
+            {
+              "rule": "relation-event",
+              "source": "routine:16407",
+              "target": "[\"app\",\"t1\"]",
+              "operation": "select",
+              "details": {}
+            },
+            {
+              "rule": "routine-call",
+              "source": "[\"app\",\"t0\"]:index:1",
+              "target": "routine:870"
+            },
+            {
+              "rule": "native-scalar-contract",
+              "source": "routine:870"
+            },
+            {
+              "rule": "routine-call",
+              "source": "[\"app\",\"t0\"]:index:1",
+              "target": "routine:3848"
+            },
+            {
+              "rule": "native-scalar-contract",
+              "source": "routine:3848"
+            },
+            {
+              "rule": "routine-call",
+              "source": "[\"app\",\"t0\"]:index:1",
+              "target": "routine:4235"
+            },
+            {
+              "rule": "native-scalar-contract",
+              "source": "routine:4235"
+            }
+          ],
+          "artifact": "a6f10fb919bbe39dc311cd38a4ea59a67bb33ee3cfb6641293581ffceedd4163",
+          "statement": "7c130505f07cf352978523001c025232bc2e6948b6c8766671c742ae8757ffe4"
+        },
+        {
+          "reads": [
+            "[\"app\",\"t1\"]"
+          ],
+          "writes": [],
+          "unknown": [],
+          "derivation": [
+            {
+              "rule": "relation-event",
+              "source": "endpoint",
+              "target": "[\"app\",\"t1\"]",
+              "operation": "select",
+              "details": {}
+            }
+          ],
+          "artifact": "a6f10fb919bbe39dc311cd38a4ea59a67bb33ee3cfb6641293581ffceedd4163",
+          "statement": "37a4e79d427aab129d3d894451593047df6be8b4b723a5c9b75505a79903954c"
+        },
+        {
+          "reads": [
+            "[\"app\",\"t2\"]"
+          ],
+          "writes": [],
+          "unknown": [],
+          "derivation": [
+            {
+              "rule": "relation-event",
+              "source": "endpoint",
+              "target": "[\"app\",\"t2\"]",
+              "operation": "select",
+              "details": {}
+            }
+          ],
+          "artifact": "a6f10fb919bbe39dc311cd38a4ea59a67bb33ee3cfb6641293581ffceedd4163",
+          "statement": "ca5906c9c171e0ef27ac438b974d7899e3bb68c8389b171cbdd205f1a4babe52"
+        },
+        {
+          "reads": [
+            "[\"app\",\"t0\"]"
+          ],
+          "writes": [],
+          "unknown": [],
+          "derivation": [
+            {
+              "rule": "relation-event",
+              "source": "endpoint",
+              "target": "[\"app\",\"t0\"]",
+              "operation": "select",
+              "details": {}
+            },
+            {
+              "rule": "routine-call",
+              "source": "endpoint",
+              "target": "routine:16406"
+            },
+            {
+              "rule": "routine-call",
+              "source": "[\"app\",\"t0\"]:index:1",
+              "target": "routine:870"
+            },
+            {
+              "rule": "native-scalar-contract",
+              "source": "routine:870"
+            },
+            {
+              "rule": "routine-call",
+              "source": "[\"app\",\"t0\"]:index:1",
+              "target": "routine:3848"
+            },
+            {
+              "rule": "native-scalar-contract",
+              "source": "routine:3848"
+            },
+            {
+              "rule": "routine-call",
+              "source": "[\"app\",\"t0\"]:index:1",
+              "target": "routine:4235"
+            },
+            {
+              "rule": "native-scalar-contract",
+              "source": "routine:4235"
+            }
+          ],
+          "artifact": "a6f10fb919bbe39dc311cd38a4ea59a67bb33ee3cfb6641293581ffceedd4163",
+          "statement": "e3eea7bca0faa9519cd62fd496536f29a822c888778519186dd1d61a1d6120c2"
+        }
+      ],
+      "summary": {
+        "reads": [
+          "[\"app\",\"t0\"]"
+        ],
+        "writes": [
+          "[\"app\",\"t0\"]"
+        ],
+        "unknown": [],
+        "derivation": [
+          {
+            "rule": "relation-event",
+            "source": "endpoint",
+            "target": "[\"app\",\"t0\"]",
+            "operation": "update",
+            "details": {
+              "columns": [
+                "value"
+              ],
+              "defaults": []
+            }
+          },
+          {
+            "rule": "relation-event",
+            "source": "endpoint",
+            "target": "[\"app\",\"t0\"]",
+            "operation": "select",
+            "details": {}
+          },
+          {
+            "rule": "routine-call",
+            "source": "[\"app\",\"t0\"]:index:1",
+            "target": "routine:870"
+          },
+          {
+            "rule": "native-scalar-contract",
+            "source": "routine:870"
+          },
+          {
+            "rule": "routine-call",
+            "source": "[\"app\",\"t0\"]:index:1",
+            "target": "routine:3848"
+          },
+          {
+            "rule": "native-scalar-contract",
+            "source": "routine:3848"
+          },
+          {
+            "rule": "routine-call",
+            "source": "[\"app\",\"t0\"]:index:1",
+            "target": "routine:4235"
+          },
+          {
+            "rule": "native-scalar-contract",
+            "source": "routine:4235"
+          },
+          {
+            "rule": "routine-call",
+            "source": "[\"app\",\"t0\"]:index:1",
+            "target": "routine:870"
+          },
+          {
+            "rule": "routine-call",
+            "source": "[\"app\",\"t0\"]:index:1",
+            "target": "routine:3848"
+          },
+          {
+            "rule": "routine-call",
+            "source": "[\"app\",\"t0\"]:index:1",
+            "target": "routine:4235"
+          }
+        ],
+        "artifact": "a6f10fb919bbe39dc311cd38a4ea59a67bb33ee3cfb6641293581ffceedd4163",
+        "statement": "085800835e204c8bbdc3174c3add3f7dd0cf72601fcfc0c7c1bb6875bc24d9aa"
+      },
+      "actual": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "expected": [
+        1,
+        1,
+        0,
+        0,
+        1
+      ],
+      "difference": [
+        "2"
+      ],
+      "trace": [
+        {
+          "type": "operation",
+          "step": {
+            "kind": "direct",
+            "value": 7,
+            "optimistic": 0
+          },
+          "baselines": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ]
+        }
+      ],
+      "faults": [
+        {
+          "point": "needless-index-fallback",
+          "stage": "reached",
+          "case": 2,
+          "cell": "expression/VOLATILE/depth-2/cold-false",
+          "step": {
+            "kind": "direct",
+            "value": 7,
+            "optimistic": 0
+          }
+        }
+      ]
+    }
+  }
+}

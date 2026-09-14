@@ -1,0 +1,57 @@
+{
+  "property": "endpoints.dependencies",
+  "original": {
+    "input": {
+      "control": "foreign-key"
+    },
+    "failure": {
+      "law": "settled-rows",
+      "checkpoint": "foreign-key-settled",
+      "actual": [
+        {
+          "id": "row",
+          "value": 2
+        }
+      ],
+      "expected": [],
+      "difference": [
+        "0"
+      ],
+      "trace": [],
+      "faults": [
+        {
+          "point": "omit-fk",
+          "stage": "reached",
+          "case": 1
+        }
+      ]
+    }
+  },
+  "reduced": {
+    "input": {
+      "control": "foreign-key"
+    },
+    "failure": {
+      "law": "settled-rows",
+      "checkpoint": "foreign-key-settled",
+      "actual": [
+        {
+          "id": "row",
+          "value": 2
+        }
+      ],
+      "expected": [],
+      "difference": [
+        "0"
+      ],
+      "trace": [],
+      "faults": [
+        {
+          "point": "omit-fk",
+          "stage": "reached",
+          "case": 1
+        }
+      ]
+    }
+  }
+}

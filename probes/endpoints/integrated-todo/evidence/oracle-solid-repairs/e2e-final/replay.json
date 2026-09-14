@@ -1,0 +1,451 @@
+{
+  "property": "endpoints.e2e",
+  "original": {
+    "input": {
+      "program": {
+        "orders": [
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "id",
+            "createdAt"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "id",
+            "createdAt"
+          ]
+        ],
+        "scope": "alice",
+        "initial": [
+          {
+            "id": "seed-1",
+            "text": "seed",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:02.000Z",
+            "scope": "alice"
+          },
+          {
+            "id": "",
+            "text": "private",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice"
+          },
+          {
+            "id": "𐀀",
+            "text": "astral",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice"
+          }
+        ],
+        "filters": [
+          null,
+          false,
+          true,
+          null
+        ],
+        "unsubscribed": [
+          1,
+          2,
+          3
+        ],
+        "gced": [
+          3
+        ],
+        "canonicalize": true,
+        "repeatedNames": true
+      },
+      "sequences": [
+        [
+          {
+            "slot": 0,
+            "rank": 0,
+            "target": 1,
+            "text": "independent effect",
+            "outcome": "success",
+            "kind": "insert",
+            "actualEffect": "flip"
+          },
+          {
+            "slot": 0,
+            "rank": 0,
+            "target": 1,
+            "text": "independent effect",
+            "outcome": "success",
+            "kind": "edit",
+            "actualEffect": "other"
+          },
+          {
+            "slot": 0,
+            "rank": 0,
+            "target": 1,
+            "text": "independent effect",
+            "outcome": "success",
+            "kind": "delete",
+            "actualEffect": "noop"
+          },
+          {
+            "slot": 0,
+            "rank": 0,
+            "target": 1,
+            "text": "independent effect",
+            "outcome": "success",
+            "kind": "insert",
+            "actualEffect": "flip",
+            "failAfterCommit": true
+          },
+          {
+            "slot": 0,
+            "rank": 0,
+            "target": 1,
+            "text": "independent effect",
+            "outcome": "success",
+            "kind": "complete",
+            "actualEffect": "other",
+            "failAfterCommit": true
+          }
+        ]
+      ]
+    },
+    "failure": {
+      "law": "infrastructure",
+      "message": "response.text: Protocol error (Network.getResponseBody): No resource with given identifier found\n    at _Page.<anonymous> (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/driver.mjs:509:16)",
+      "operation": "complete",
+      "step": 4,
+      "trace": [
+        {
+          "type": "operation",
+          "operation": {
+            "kind": "insert",
+            "input": {
+              "id": "new-new-0",
+              "text": "independent effect",
+              "completed": false,
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "token": "operation-0",
+              "actualEffect": "flip",
+              "otherId": "",
+              "failAfterCommit": false
+            },
+            "scope": "alice",
+            "canonicalize": true,
+            "target": 1,
+            "outcome": "success"
+          }
+        },
+        {
+          "type": "operation",
+          "operation": {
+            "kind": "edit",
+            "input": {
+              "id": "seed-1",
+              "text": "independent effect",
+              "completed": true,
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "token": "operation-1",
+              "actualEffect": "other",
+              "otherId": "new-new-0",
+              "failAfterCommit": false
+            },
+            "scope": "alice",
+            "canonicalize": true,
+            "target": 1,
+            "outcome": "success"
+          }
+        },
+        {
+          "type": "operation",
+          "operation": {
+            "kind": "delete",
+            "input": {
+              "id": "seed-1",
+              "text": "independent effect",
+              "completed": true,
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "token": "operation-2",
+              "actualEffect": "noop",
+              "otherId": "new-new-0",
+              "failAfterCommit": false
+            },
+            "scope": "alice",
+            "canonicalize": true,
+            "target": 1,
+            "outcome": "success"
+          }
+        },
+        {
+          "type": "operation",
+          "operation": {
+            "kind": "insert",
+            "input": {
+              "id": "new-new-3",
+              "text": "independent effect",
+              "completed": false,
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "token": "operation-3",
+              "actualEffect": "flip",
+              "otherId": "new-new-0",
+              "failAfterCommit": true
+            },
+            "scope": "alice",
+            "canonicalize": true,
+            "target": 1,
+            "outcome": "success"
+          }
+        },
+        {
+          "type": "operation",
+          "operation": {
+            "kind": "complete",
+            "input": {
+              "id": "seed-1",
+              "text": "independent effect",
+              "completed": true,
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "token": "operation-4",
+              "actualEffect": "other",
+              "otherId": "new-new-0",
+              "failAfterCommit": true
+            },
+            "scope": "alice",
+            "canonicalize": true,
+            "target": 1,
+            "outcome": "success"
+          }
+        }
+      ],
+      "faults": []
+    }
+  },
+  "reduced": {
+    "input": {
+      "program": {
+        "orders": [
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "id",
+            "createdAt"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "id",
+            "createdAt"
+          ]
+        ],
+        "scope": "alice",
+        "initial": [
+          {
+            "id": "seed-1",
+            "text": "seed",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:02.000Z",
+            "scope": "alice"
+          },
+          {
+            "id": "",
+            "text": "private",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice"
+          },
+          {
+            "id": "𐀀",
+            "text": "astral",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice"
+          }
+        ],
+        "filters": [
+          null,
+          false,
+          true,
+          null
+        ],
+        "unsubscribed": [
+          1,
+          2,
+          3
+        ],
+        "gced": [
+          3
+        ],
+        "canonicalize": true,
+        "repeatedNames": true
+      },
+      "sequences": [
+        [
+          {
+            "slot": 0,
+            "rank": 0,
+            "target": 1,
+            "text": "independent effect",
+            "outcome": "success",
+            "kind": "insert",
+            "actualEffect": "flip"
+          },
+          {
+            "slot": 0,
+            "rank": 0,
+            "target": 1,
+            "text": "independent effect",
+            "outcome": "success",
+            "kind": "edit",
+            "actualEffect": "other"
+          },
+          {
+            "slot": 0,
+            "rank": 0,
+            "target": 1,
+            "text": "independent effect",
+            "outcome": "success",
+            "kind": "delete",
+            "actualEffect": "noop"
+          },
+          {
+            "slot": 0,
+            "rank": 0,
+            "target": 1,
+            "text": "independent effect",
+            "outcome": "success",
+            "kind": "insert",
+            "actualEffect": "flip",
+            "failAfterCommit": true
+          },
+          {
+            "slot": 0,
+            "rank": 0,
+            "target": 1,
+            "text": "independent effect",
+            "outcome": "success",
+            "kind": "complete",
+            "actualEffect": "other",
+            "failAfterCommit": true
+          }
+        ]
+      ]
+    },
+    "failure": {
+      "law": "infrastructure",
+      "message": "response.text: Protocol error (Network.getResponseBody): No resource with given identifier found\n    at _Page.<anonymous> (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/driver.mjs:509:16)",
+      "operation": "complete",
+      "step": 4,
+      "trace": [
+        {
+          "type": "operation",
+          "operation": {
+            "kind": "insert",
+            "input": {
+              "id": "new-new-0",
+              "text": "independent effect",
+              "completed": false,
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "token": "operation-0",
+              "actualEffect": "flip",
+              "otherId": "",
+              "failAfterCommit": false
+            },
+            "scope": "alice",
+            "canonicalize": true,
+            "target": 1,
+            "outcome": "success"
+          }
+        },
+        {
+          "type": "operation",
+          "operation": {
+            "kind": "edit",
+            "input": {
+              "id": "seed-1",
+              "text": "independent effect",
+              "completed": true,
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "token": "operation-1",
+              "actualEffect": "other",
+              "otherId": "new-new-0",
+              "failAfterCommit": false
+            },
+            "scope": "alice",
+            "canonicalize": true,
+            "target": 1,
+            "outcome": "success"
+          }
+        },
+        {
+          "type": "operation",
+          "operation": {
+            "kind": "delete",
+            "input": {
+              "id": "seed-1",
+              "text": "independent effect",
+              "completed": true,
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "token": "operation-2",
+              "actualEffect": "noop",
+              "otherId": "new-new-0",
+              "failAfterCommit": false
+            },
+            "scope": "alice",
+            "canonicalize": true,
+            "target": 1,
+            "outcome": "success"
+          }
+        },
+        {
+          "type": "operation",
+          "operation": {
+            "kind": "insert",
+            "input": {
+              "id": "new-new-3",
+              "text": "independent effect",
+              "completed": false,
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "token": "operation-3",
+              "actualEffect": "flip",
+              "otherId": "new-new-0",
+              "failAfterCommit": true
+            },
+            "scope": "alice",
+            "canonicalize": true,
+            "target": 1,
+            "outcome": "success"
+          }
+        },
+        {
+          "type": "operation",
+          "operation": {
+            "kind": "complete",
+            "input": {
+              "id": "seed-1",
+              "text": "independent effect",
+              "completed": true,
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "token": "operation-4",
+              "actualEffect": "other",
+              "otherId": "new-new-0",
+              "failAfterCommit": true
+            },
+            "scope": "alice",
+            "canonicalize": true,
+            "target": 1,
+            "outcome": "success"
+          }
+        }
+      ],
+      "faults": []
+    }
+  }
+}

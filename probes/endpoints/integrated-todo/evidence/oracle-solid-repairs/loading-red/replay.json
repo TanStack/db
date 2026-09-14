@@ -1,0 +1,75 @@
+{
+  "property": "endpoints.loading",
+  "original": {
+    "input": {
+      "cases": [
+        "small"
+      ],
+      "samples": 2
+    },
+    "failure": {
+      "law": "rendered-values",
+      "case": "small",
+      "encoding": "full",
+      "checkpoint": "baseline",
+      "actual": [
+        [
+          {
+            "id": "row-000",
+            "text": "__wrong_render__short"
+          }
+        ]
+      ],
+      "expected": [
+        [
+          {
+            "id": "row-000",
+            "text": "short"
+          }
+        ]
+      ],
+      "difference": [
+        "0",
+        "0",
+        "text"
+      ],
+      "trace": []
+    }
+  },
+  "reduced": {
+    "input": {
+      "cases": [
+        "small"
+      ],
+      "samples": 2
+    },
+    "failure": {
+      "law": "rendered-values",
+      "case": "small",
+      "encoding": "full",
+      "checkpoint": "baseline",
+      "actual": [
+        [
+          {
+            "id": "row-000",
+            "text": "__wrong_render__short"
+          }
+        ]
+      ],
+      "expected": [
+        [
+          {
+            "id": "row-000",
+            "text": "short"
+          }
+        ]
+      ],
+      "difference": [
+        "0",
+        "0",
+        "text"
+      ],
+      "trace": []
+    }
+  }
+}

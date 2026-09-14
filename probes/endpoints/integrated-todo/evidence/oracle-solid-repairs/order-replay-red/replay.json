@@ -1,0 +1,323 @@
+{
+  "property": "endpoints.e2e",
+  "original": {
+    "input": {
+      "program": {
+        "orders": [
+          [
+            "createdAt",
+            "id"
+          ]
+        ],
+        "scope": "alice",
+        "initial": [
+          {
+            "id": "seed-1",
+            "text": "seed",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:02.000Z",
+            "scope": "alice"
+          }
+        ]
+      },
+      "sequences": [
+        [
+          {
+            "kind": "insert",
+            "slot": 0,
+            "text": "witness-0",
+            "rank": 0,
+            "target": 0,
+            "outcome": "success"
+          },
+          {
+            "kind": "edit",
+            "slot": 0,
+            "text": "witness-1",
+            "rank": 0,
+            "target": 0,
+            "outcome": "success"
+          },
+          {
+            "kind": "complete",
+            "slot": 0,
+            "text": "witness-2",
+            "rank": 0,
+            "target": 0,
+            "outcome": "reject"
+          },
+          {
+            "kind": "delete",
+            "slot": 0,
+            "text": "witness-3",
+            "rank": 0,
+            "target": 0,
+            "outcome": "success"
+          }
+        ]
+      ]
+    },
+    "failure": {
+      "law": "collection-rows",
+      "operation": "insert",
+      "step": 0,
+      "checkpoint": "same-turn",
+      "actual": [
+        [
+          {
+            "id": "seed-1",
+            "text": "seed",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:02.000Z"
+          },
+          {
+            "id": "new-new-0",
+            "text": "witness-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z"
+          }
+        ]
+      ],
+      "expected": [
+        [
+          {
+            "id": "new-new-0",
+            "text": "witness-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z"
+          },
+          {
+            "id": "seed-1",
+            "text": "seed",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:02.000Z"
+          }
+        ]
+      ],
+      "difference": [
+        "0",
+        "0",
+        "id"
+      ],
+      "trace": [
+        {
+          "type": "operation",
+          "operation": {
+            "kind": "insert",
+            "input": {
+              "id": "new-new-0",
+              "text": "witness-0",
+              "completed": false,
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "token": "operation-0",
+              "actualEffect": "same",
+              "otherId": null,
+              "failAfterCommit": false
+            },
+            "scope": "alice",
+            "target": 0,
+            "outcome": "success"
+          }
+        }
+      ],
+      "faults": [
+        {
+          "point": "omit-order",
+          "stage": "reached",
+          "case": 1,
+          "checkpoint": "initial"
+        },
+        {
+          "point": "omit-order",
+          "stage": "reached",
+          "case": 1,
+          "checkpoint": "initial"
+        },
+        {
+          "point": "omit-order",
+          "stage": "reached",
+          "case": 1,
+          "checkpoint": "initial"
+        },
+        {
+          "point": "omit-order",
+          "stage": "reached",
+          "case": 1,
+          "checkpoint": "initial"
+        },
+        {
+          "point": "omit-order",
+          "stage": "reached",
+          "case": 1,
+          "checkpoint": "operation 0 insert: optimistic"
+        },
+        {
+          "point": "omit-order",
+          "stage": "reached",
+          "case": 1,
+          "checkpoint": "operation 0 insert: optimistic"
+        }
+      ]
+    }
+  },
+  "reduced": {
+    "input": {
+      "program": {
+        "orders": [
+          [
+            "createdAt",
+            "id"
+          ]
+        ],
+        "scope": "alice",
+        "initial": [
+          {
+            "id": "seed-1",
+            "text": "seed",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:02.000Z",
+            "scope": "alice"
+          }
+        ]
+      },
+      "sequences": [
+        [
+          {
+            "kind": "insert",
+            "slot": 0,
+            "text": "witness-0",
+            "rank": 0,
+            "target": 0,
+            "outcome": "success"
+          },
+          {
+            "kind": "edit",
+            "slot": 0,
+            "text": "witness-1",
+            "rank": 0,
+            "target": 0,
+            "outcome": "success"
+          },
+          {
+            "kind": "complete",
+            "slot": 0,
+            "text": "witness-2",
+            "rank": 0,
+            "target": 0,
+            "outcome": "reject"
+          },
+          {
+            "kind": "delete",
+            "slot": 0,
+            "text": "witness-3",
+            "rank": 0,
+            "target": 0,
+            "outcome": "success"
+          }
+        ]
+      ]
+    },
+    "failure": {
+      "law": "collection-rows",
+      "operation": "insert",
+      "step": 0,
+      "checkpoint": "same-turn",
+      "actual": [
+        [
+          {
+            "id": "seed-1",
+            "text": "seed",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:02.000Z"
+          },
+          {
+            "id": "new-new-0",
+            "text": "witness-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z"
+          }
+        ]
+      ],
+      "expected": [
+        [
+          {
+            "id": "new-new-0",
+            "text": "witness-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z"
+          },
+          {
+            "id": "seed-1",
+            "text": "seed",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:02.000Z"
+          }
+        ]
+      ],
+      "difference": [
+        "0",
+        "0",
+        "id"
+      ],
+      "trace": [
+        {
+          "type": "operation",
+          "operation": {
+            "kind": "insert",
+            "input": {
+              "id": "new-new-0",
+              "text": "witness-0",
+              "completed": false,
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "token": "operation-0",
+              "actualEffect": "same",
+              "otherId": null,
+              "failAfterCommit": false
+            },
+            "scope": "alice",
+            "target": 0,
+            "outcome": "success"
+          }
+        }
+      ],
+      "faults": [
+        {
+          "point": "omit-order",
+          "stage": "reached",
+          "case": 1,
+          "checkpoint": "initial"
+        },
+        {
+          "point": "omit-order",
+          "stage": "reached",
+          "case": 1,
+          "checkpoint": "initial"
+        },
+        {
+          "point": "omit-order",
+          "stage": "reached",
+          "case": 1,
+          "checkpoint": "initial"
+        },
+        {
+          "point": "omit-order",
+          "stage": "reached",
+          "case": 1,
+          "checkpoint": "initial"
+        },
+        {
+          "point": "omit-order",
+          "stage": "reached",
+          "case": 1,
+          "checkpoint": "operation 0 insert: optimistic"
+        },
+        {
+          "point": "omit-order",
+          "stage": "reached",
+          "case": 1,
+          "checkpoint": "operation 0 insert: optimistic"
+        }
+      ]
+    }
+  }
+}
