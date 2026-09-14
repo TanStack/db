@@ -1,0 +1,237 @@
+{
+  "property": "endpoints.compiled-dependencies",
+  "original": {
+    "input": {
+      "program": {
+        "count": 2,
+        "inputContract": {
+          "unknown": "strip",
+          "offset": 3,
+          "defaultWeight": 7,
+          "extraKey": "user_id"
+        }
+      },
+      "histories": [
+        [
+          {
+            "kind": "update",
+            "table": 0,
+            "value": 4,
+            "extraAt": "root"
+          },
+          {
+            "kind": "update",
+            "table": 0,
+            "value": 5,
+            "extraAt": "object"
+          },
+          {
+            "kind": "update",
+            "table": 0,
+            "value": 6,
+            "extraAt": "array"
+          },
+          {
+            "kind": "update",
+            "table": 0,
+            "value": 7,
+            "labels": [
+              "valid",
+              "  "
+            ]
+          },
+          {
+            "kind": "delete",
+            "table": 0,
+            "extraAt": "none"
+          },
+          {
+            "kind": "insert",
+            "table": 0,
+            "value": 8,
+            "extraAt": "none"
+          }
+        ]
+      ]
+    },
+    "failure": {
+      "law": "parsed-handler-input",
+      "operation": "update",
+      "step": 0,
+      "actual": [
+        {
+          "value": 4,
+          "details": {
+            "label": "  detail  "
+          },
+          "entries": [
+            {
+              "label": "  entry  "
+            }
+          ],
+          "user_id": "caller supplied"
+        }
+      ],
+      "expected": [
+        {
+          "value": 7,
+          "details": {
+            "label": "detail",
+            "weight": 7
+          },
+          "entries": [
+            {
+              "label": "entry",
+              "weight": 7
+            }
+          ]
+        }
+      ],
+      "difference": [
+        "0",
+        "value"
+      ],
+      "trace": [
+        {
+          "type": "operation",
+          "step": {
+            "kind": "update",
+            "table": 0,
+            "value": 4,
+            "extraAt": "root"
+          }
+        }
+      ],
+      "faults": [
+        {
+          "point": "raw-handler-input",
+          "stage": "applied",
+          "case": 1
+        },
+        {
+          "point": "raw-handler-input",
+          "stage": "reached",
+          "case": 1,
+          "operation": "update"
+        }
+      ]
+    }
+  },
+  "reduced": {
+    "input": {
+      "program": {
+        "count": 2,
+        "inputContract": {
+          "unknown": "strip",
+          "offset": 3,
+          "defaultWeight": 7,
+          "extraKey": "user_id"
+        }
+      },
+      "histories": [
+        [
+          {
+            "kind": "update",
+            "table": 0,
+            "value": 4,
+            "extraAt": "root"
+          },
+          {
+            "kind": "update",
+            "table": 0,
+            "value": 5,
+            "extraAt": "object"
+          },
+          {
+            "kind": "update",
+            "table": 0,
+            "value": 6,
+            "extraAt": "array"
+          },
+          {
+            "kind": "update",
+            "table": 0,
+            "value": 7,
+            "labels": [
+              "valid",
+              "  "
+            ]
+          },
+          {
+            "kind": "delete",
+            "table": 0,
+            "extraAt": "none"
+          },
+          {
+            "kind": "insert",
+            "table": 0,
+            "value": 8,
+            "extraAt": "none"
+          }
+        ]
+      ]
+    },
+    "failure": {
+      "law": "parsed-handler-input",
+      "operation": "update",
+      "step": 0,
+      "actual": [
+        {
+          "value": 4,
+          "details": {
+            "label": "  detail  "
+          },
+          "entries": [
+            {
+              "label": "  entry  "
+            }
+          ],
+          "user_id": "caller supplied"
+        }
+      ],
+      "expected": [
+        {
+          "value": 7,
+          "details": {
+            "label": "detail",
+            "weight": 7
+          },
+          "entries": [
+            {
+              "label": "entry",
+              "weight": 7
+            }
+          ]
+        }
+      ],
+      "difference": [
+        "0",
+        "value"
+      ],
+      "trace": [
+        {
+          "type": "operation",
+          "step": {
+            "kind": "update",
+            "table": 0,
+            "value": 4,
+            "extraAt": "root"
+          }
+        }
+      ],
+      "faults": [
+        {
+          "point": "raw-handler-input",
+          "stage": "applied",
+          "case": 1
+        },
+        {
+          "point": "raw-handler-input",
+          "stage": "reached",
+          "case": 1,
+          "operation": "update"
+        }
+      ]
+    }
+  }
+}

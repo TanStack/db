@@ -1,5 +1,9 @@
 # Endpoints full-stack oracle
 
+The [Kitchen test audit](../KITCHEN-TEST-AUDIT.md) maps each former app-specific
+assertion to its owner. General parsed-input checks now run in the generated
+compiled oracle; the remaining app smoke test lives in Kitchen itself.
+
 The [SQL coverage and loading report](../../../SQL-COVERAGE-RESULTS.md) describes
 the new schema-first campaign. It generates 2–3 tables, nullable scalar columns,
 foreign keys, predicates and mutations. The same full-stack driver runs against

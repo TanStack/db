@@ -1,3 +1,4 @@
+import { mutationInputSchema } from './compiled-input.mjs'
 import { markers } from './program.mjs'
 export const tableName = (i) =>
   i === 0
@@ -37,12 +38,12 @@ export function ddl(program) {
 }
 export function databaseSource(program) {
   return `import {PGlite} from '@electric-sql/pglite';import {drizzle} from 'drizzle-orm/pglite';import {pgSchema,text,integer,pgEnum,jsonb,timestamp,uuid,boolean} from 'drizzle-orm/pg-core';
-export const pg=new PGlite();export const trace=[];export const db=drizzle(pg,{logger:{logQuery(sql){trace.push(sql)}}});
+export const pg=new PGlite();export const trace=[],handlerInputs=[];export const db=drizzle(pg,{logger:{logQuery(sql){trace.push(sql)}}});
 const alpha=pgSchema('alpha'),beta=pgSchema('beta');
 ${program.nativeDefaults ? "const state=pgEnum('state',['ready','done']);" : ''}
 ${Array.from({ length: program.count }, (_, i) => `export const t${i}=${i === 1 ? 'beta' : 'alpha'}.table('${i <= 1 ? 'items' : `items${i}`}',{id:text('id').primaryKey(),value:integer('value').notNull()${program.nativeDefaults ? ",state:state('state'),payload:jsonb('payload'),createdAt:timestamp('created_at').defaultNow(),token:uuid('token').defaultRandom(),enabled:boolean('enabled').default(false)" : ''}${program.foreignKey && i === 1 ? ',parentId:text("parent_id")' : ''}});`).join('\n')}
 const ready=pg.exec(${JSON.stringify(ddl(program))});
-export async function control(input){await ready;if(input.command==='clearTrace')trace.length=0;return {trace,rows:await Promise.all([${Array.from({ length: program.count }, (_, i) => `pg.query('SELECT id,value FROM ${tableName(i)} ORDER BY id').then(r=>r.rows)`).join(',')}])}}
+export async function control(input){await ready;if(input.command==='clearTrace')trace.length=0;return {trace,handlerInputs,rows:await Promise.all([${Array.from({ length: program.count }, (_, i) => `pg.query('SELECT id,value FROM ${tableName(i)} ORDER BY id').then(r=>r.rows)`).join(',')}])}}
 export async function evidence(){await ready;return {ready:true}}
 `
 }
@@ -51,9 +52,9 @@ export function endpointSource(program, browser = false) {
     { length: program.count },
     (_, i) => `
 const q${i}=query({input:z.object({}),schema:z.object({id:z.string(),value:z.number()}),async handler(req,res){return res.json(await db.select({id:t${i}.id,value:t${i}.value}).from(t${i}))}});
-const update${i}=mutation({input:z.object({value:z.number().int()}),onMutate({input}){if(q${i}.has('row'))q${i}.update('row',d=>{d.value=input.value})},async handler(req,res){await db.update(t${i}).set({value:req.body.value}).where(eq(t${i}.id,'row'));return res.json({marker:${JSON.stringify(markers.join('|'))}})}});
-const delete${i}=mutation({input:z.object({}),onMutate(){if(q${i}.has('row'))q${i}.delete('row')},async handler(req,res){await db.delete(t${i}).where(eq(t${i}.id,'row'));return res.json({ok:true})}});
-const insert${i}=mutation({input:z.object({value:z.number().int()}),onMutate({input}){if(!q${i}.has('row'))q${i}.insert({id:'row',value:input.value})},async handler(req,res){await db.insert(t${i}).values({id:'row',value:req.body.value});return res.json({ok:true})}});`,
+const update${i}=mutation({input:${mutationInputSchema(program, true)},onMutate({input}){if(q${i}.has('row'))q${i}.update('row',d=>{d.value=input.value})},async handler(req,res){await db.update(t${i}).set({value:req.body.value}).where(eq(t${i}.id,'row'));return res.json({marker:${JSON.stringify(markers.join('|'))}})}});
+const delete${i}=mutation({input:${mutationInputSchema(program, false)},onMutate(){if(q${i}.has('row'))q${i}.delete('row')},async handler(req,res){await db.delete(t${i}).where(eq(t${i}.id,'row'));return res.json({ok:true})}});
+const insert${i}=mutation({input:${mutationInputSchema(program, true)},onMutate({input}){if(!q${i}.has('row'))q${i}.insert({id:'row',value:input.value})},async handler(req,res){await db.insert(t${i}).values({id:'row',value:req.body.value});return res.json({ok:true})}});`,
   ).join('\n')
   if (program.inlineSql) {
     declarations = declarations.replaceAll(
@@ -105,7 +106,7 @@ const insert${i}=mutation({input:z.object({value:z.number().int()}),onMutate({in
       )
   }
   const result = `{collections:[${Array.from({ length: program.count }, (_, i) => `q${i}`).join(',')}],actions:{${Array.from({ length: program.count }, (_, i) => `update${i},delete${i},insert${i}`).join(',')}}}`
-  return `${program.inlineSql ? "import {authorize} from './guard.server';" : ''}${program.helpers ? "import {service} from './service.server';" : ''}import {z} from 'zod';import {endpoints} from './runtime';import {db,${Array.from({ length: program.count }, (_, i) => `t${i}`).join(',')}} from './database.server';import {eq,sql} from 'drizzle-orm';
+  return `${program.inlineSql ? "import {authorize} from './guard.server';" : ''}${program.helpers ? "import {service} from './service.server';" : ''}import {z} from 'zod';import {endpoints} from './runtime';import {db,handlerInputs,${Array.from({ length: program.count }, (_, i) => `t${i}`).join(',')}} from './database.server';import {eq,sql} from 'drizzle-orm';
 ${browser ? "import {useEffect} from 'react';import {useDbClient,useLiveQuery} from '@tanstack/react-db';" : ''}
 export function ${browser ? 'TodoApp()' : 'App(dbClient)'} {${browser ? 'const dbClient=useDbClient();' : ''}const {query,mutation}=endpoints(dbClient);${declarations}
 ${browser ? `const result=useLiveQuery(q0);useEffect(()=>{window.compiledOracle=${result}},[${Array.from({ length: program.count }, (_, i) => `q${i},update${i},delete${i},insert${i}`).join(',')}]);return <main>{result.data.map(row=><p key={row.id}>{row.value}</p>)}</main>` : `return ${result}`}}

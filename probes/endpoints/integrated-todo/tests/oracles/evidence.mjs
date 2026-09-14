@@ -87,6 +87,7 @@ const controlVariables = [
 const expectedLaws = {
   'omit-plan-relation': ['planned-relations-covered'],
   'compiled-row': ['settled-rows'],
+  'raw-handler-input': ['parsed-handler-input'],
   'preload-cold': ['cold-baseline'],
   'bad-baseline': ['reference-baseline'],
   'immediate-snapshot': ['collection-rows'],

@@ -1,3 +1,4 @@
+import { mutationInput, expectedInput } from './compiled-input.mjs'
 import assert from 'node:assert/strict'
 import { mkdir, writeFile, readFile } from 'node:fs/promises'
 import { resolve, join } from 'node:path'
@@ -38,13 +39,42 @@ const input = {
     { helpers: true, count: 3, trigger: false, foreignKey: true },
     { helpers: true, count: 3, trigger: true, foreignKey: false },
     { count: 3, pgFunctions: true, expressionIndex: true, opaqueIndex: true },
+    ...['strip', 'passthrough', 'strict'].map((unknown) => ({
+      count: 3,
+      inputContract: {
+        unknown,
+        offset: 3,
+        defaultWeight: 7,
+        extraKey: 'user_id',
+      },
+    })),
   ],
   operations: [
     { kind: 'invalid', table: 0, value: 0.5 },
-    { kind: 'update', table: 0, value: 7 },
+    { kind: 'update', table: 0, value: 7, extraAt: 'root' },
+    { kind: 'update', table: 0, value: 8, extraAt: 'object' },
+    { kind: 'update', table: 0, value: 9, extraAt: 'array' },
+    { kind: 'update', table: 0, value: 10, labels: ['valid', '  '] },
     { kind: 'update', table: 2, value: 9 },
     { kind: 'delete', table: 0 },
   ],
+}
+async function referenceRows(program) {
+  return Promise.all(
+    Array.from({ length: program.count }, (_, i) =>
+      pg
+        .query(
+          program.pgFunctions && i === 0
+            ? `SELECT a.id,a.value + coalesce((SELECT b.value FROM ${tableName(
+                1,
+              )} b WHERE b.id='row'),0) AS value FROM ${tableName(
+                0,
+              )} a ORDER BY a.id`
+            : `SELECT id,value FROM ${tableName(i)} ORDER BY id`,
+        )
+        .then((r) => r.rows),
+    ),
+  )
 }
 async function execute(input) {
   return evidence.run(input, async () => {
@@ -77,17 +107,27 @@ async function execute(input) {
           evidence.at({ program, operation: operation.kind, step })
           evidence.record({ type: 'operation', operation })
           await driver.control({ command: 'clearTrace' })
-          if (operation.kind === 'invalid') {
-            const actual = await page.evaluate(async (operation) => {
+          const before = await referenceRows(program)
+          // Browser replay values are the literal caller values (including
+          // fractional invalid inputs), unlike generated integer step seeds.
+          const payload = mutationInput(program, {
+            ...operation,
+            kind: operation.kind === 'invalid' ? 'update' : operation.kind,
+          })
+          const parsed = expectedInput(program, payload)
+          const actual = await page.evaluate(
+            async ({ operation, payload }) => {
               const app = window.compiledOracle
               const rows = () =>
                 app.collections.map((c) =>
                   [...c.values()].map(({ id, value }) => ({ id, value })),
                 )
               const before = rows()
-              const tx = app.actions['update' + operation.table]({
-                value: operation.value,
-              })
+              const tx =
+                app.actions[
+                  (operation.kind === 'invalid' ? 'update' : operation.kind) +
+                    operation.table
+                ](payload)
               const optimistic = rows()
               let error
               try {
@@ -96,7 +136,24 @@ async function execute(input) {
                 error = { code: failure.code, issues: failure.issues }
               }
               return { before, optimistic, settled: rows(), error }
-            }, operation)
+            },
+            { operation, payload },
+          )
+          evidence.check('reference-baseline', actual.before, before, {
+            checkpoint: 'pre-action',
+          })
+          const optimistic = before.map((rows, i) =>
+            i !== operation.table
+              ? rows
+              : operation.kind === 'delete'
+                ? []
+                : rows.map((row) => ({ ...row, value: payload.value })),
+          )
+          evidence.check('optimistic-rows', actual.optimistic, optimistic, {
+            checkpoint: 'same-turn',
+          })
+          const observed = await driver.control({})
+          if (!parsed.valid) {
             evidence.check(
               'validation-error-code',
               actual.error?.code,
@@ -105,22 +162,14 @@ async function execute(input) {
             evidence.check(
               'validation-error-path',
               actual.error?.issues[0].path,
-              ['input', 'value'],
+              parsed.path,
             )
-            evidence.check(
-              'validation-optimism',
-              actual.optimistic[operation.table][0].value,
-              operation.value,
-            )
-            evidence.check('validation-rollback', actual.settled, actual.before)
-            evidence.check(
-              'validation-no-sql',
-              (await driver.control({})).trace,
-              [],
-            )
+            evidence.check('validation-rollback', actual.settled, before)
+            evidence.check('validation-no-sql', observed.trace, [])
             report.operations++
             continue
           }
+          evidence.check('handler-success', actual.error, undefined)
           if (operation.kind === 'delete')
             await pg.exec(
               `DELETE FROM ${tableName(operation.table)} WHERE id='row'`,
@@ -130,7 +179,7 @@ async function execute(input) {
               `UPDATE ${tableName(
                 operation.table,
               )} SET value=$1 WHERE id='row'`,
-              [operation.value],
+              [parsed.value.value],
             )
           if (
             program.pgFunctions &&
@@ -139,41 +188,17 @@ async function execute(input) {
           )
             await pg.query(
               `UPDATE ${tableName(1)} SET value=$1 WHERE id='row'`,
-              [operation.value + 1],
+              [parsed.value.value + 1],
             )
-          const actual = await page.evaluate(async (operation) => {
-            const app = window.compiledOracle
-            const tx = app.actions[operation.kind + operation.table](
-              operation.kind === 'delete' ? {} : { value: operation.value },
-            )
-            await tx.isPersisted.promise
-            return app.collections.map((c) =>
-              [...c.values()].map(({ id, value }) => ({ id, value })),
-            )
-          }, operation)
-          const expected = await Promise.all(
-            Array.from({ length: program.count }, (_, i) =>
-              pg
-                .query(
-                  program.pgFunctions && i === 0
-                    ? `SELECT a.id,a.value + coalesce((SELECT b.value FROM ${tableName(
-                        1,
-                      )} b WHERE b.id='row'),0) AS value FROM ${tableName(
-                        0,
-                      )} a ORDER BY a.id`
-                    : `SELECT id,value FROM ${tableName(i)} ORDER BY id`,
-                )
-                .then((r) => r.rows),
-            ),
-          )
+          const expected = await referenceRows(program)
           if (
             process.env.ENDPOINT_ORACLE_TEST_FAULT === 'compiled-row' &&
-            actual[0]?.length
+            actual.settled[0]?.length
           ) {
-            actual[0][0].value++
+            actual.settled[0][0].value++
             evidence.fault('compiled-row')
           }
-          evidence.check('settled-rows', actual, expected, {
+          evidence.check('settled-rows', actual.settled, expected, {
             checkpoint: 'settled',
           })
           const { trace } = await driver.control({})
@@ -207,9 +232,9 @@ async function execute(input) {
             checkpoint: 'settled',
           })
           report.operations++
-          report.comparisons += actual.length
+          report.comparisons += actual.settled.length
           report.reads += reads
-          report.skippedReads += actual.length - reads
+          report.skippedReads += actual.settled.length - reads
         }
         assert.deepEqual(errors, [])
       } finally {

@@ -1,3 +1,4 @@
+import { mutationInput, expectedInput } from './compiled-input.mjs'
 import { Evidence } from './evidence.mjs'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
@@ -49,6 +50,8 @@ const report = {
   resultReads: 0,
   skippedReads: 0,
   runtimeCatalogQueries: 0,
+  parsedInputs: 0,
+  rejectedInputs: 0,
 }
 // Independent expected query: expand the routine mathematically rather than
 // reusing its body or asking the compiler which relations it reads.
@@ -143,6 +146,23 @@ async function execute(program, histories) {
       alteredHelper = compiled.code !== before
     }
     if (alteredHelper) evidence.fault('omit-helper', { stage: 'applied' })
+    // Observe real handler entry after dependency analysis; the observer must
+    // not become an apparent application effect and force fallback refreshes.
+    const handlerEntry = 'async function(req,res){'
+    assert.equal(
+      compiled.code.split(handlerEntry).length - 1,
+      program.count * 4,
+    )
+    compiled.code = compiled.code.replaceAll(
+      handlerEntry,
+      handlerEntry + "if(req.kind==='mutation')handlerInputs.push(req.body);",
+    )
+    if (process.env.ENDPOINT_COMPILED_MUTANT === 'raw-handler-input') {
+      const needle = 'const data=parsed.data;'
+      assert.equal(compiled.code.split(needle).length - 1, program.count * 3)
+      compiled.code = compiled.code.replaceAll(needle, 'const data=raw;')
+      evidence.fault('raw-handler-input', { stage: 'applied' })
+    }
     assert.doesNotMatch(
       compiled.code + compiled.registryCode,
       /pg_catalog|LOCK TABLE|inspectSchema/,
@@ -152,7 +172,7 @@ async function execute(program, histories) {
       stdin: {
         contents:
           compiled.code +
-          "\nexport {DbClient} from '@tanstack/db';export {pg as sutPg,trace as sutTrace} from './database.server';",
+          "\nexport {DbClient} from '@tanstack/db';export {pg as sutPg,trace as sutTrace,handlerInputs} from './database.server';",
         resolveDir: join(dir, 'src'),
         loader: 'ts',
       },
@@ -231,17 +251,24 @@ async function execute(program, histories) {
               (step.kind === 'invalid' ? 'update' : step.kind) + target
             ]
           const start = module.sutTrace.length
-          if (step.kind === 'invalid') {
-            // A fractional number is valid collection data but invalid endpoint
-            // input. No statement should reach either database for this step.
-            const tx = action({ value: step.value + 0.5 })
+          const input = mutationInput(program, step)
+          const parsed = expectedInput(program, input)
+          const inputStart = module.handlerInputs.length
+          if (!parsed.valid) {
+            const tx = action(input)
             evidence.check(
               'invalid-input-optimism',
               app.collections.map((c) => plain([...c.values()])),
               before.map((rows, i) =>
-                i === target
-                  ? rows.map((row) => ({ ...row, value: step.value + 0.5 }))
-                  : rows,
+                i !== target
+                  ? rows
+                  : step.kind === 'delete'
+                    ? []
+                    : step.kind === 'insert'
+                      ? rows.length
+                        ? rows
+                        : [{ id: 'row', value: input.value }]
+                      : rows.map((row) => ({ ...row, value: input.value })),
               ),
               { checkpoint: 'same-turn' },
             )
@@ -251,10 +278,11 @@ async function execute(program, histories) {
                 error.code,
                 'INVALID_INPUT',
               )
-              evidence.check('validation-error-path', error.issues[0].path, [
-                'input',
-                'value',
-              ])
+              evidence.check(
+                'validation-error-path',
+                error.issues[0].path,
+                parsed.path,
+              )
               return true
             })
             evidence.check(
@@ -267,6 +295,12 @@ async function execute(program, histories) {
               app.collections.map((c) => plain([...c.values()])),
               before,
             )
+            evidence.check(
+              'validation-no-handler',
+              module.handlerInputs.length,
+              inputStart,
+            )
+            report.rejectedInputs++
             report.operations++
             continue
           }
@@ -279,11 +313,11 @@ async function execute(program, histories) {
             else if (step.kind === 'insert')
               await pg.query(
                 `INSERT INTO ${table}(id,value) VALUES ('row',$1)`,
-                [step.value],
+                [parsed.value.value],
               )
             else
               await pg.query(`UPDATE ${table} SET value=$1 WHERE id='row'`, [
-                step.value,
+                parsed.value.value,
               ])
             if (
               (program.pgFunctions ||
@@ -295,7 +329,7 @@ async function execute(program, histories) {
             )
               await pg.query(
                 `UPDATE ${tableName(1)} SET value=$1 WHERE id='row'`,
-                [step.value + 1],
+                [parsed.value.value + 1],
               )
           } catch {
             rejected = true
@@ -306,7 +340,7 @@ async function execute(program, histories) {
             evidence.fault('omit-routine-body', { operation: step.kind })
           if (alteredHelper && target === 0 && step.kind === 'update')
             evidence.fault('omit-helper', { operation: step.kind })
-          const tx = action(step.kind === 'delete' ? {} : { value: step.value })
+          const tx = action(input)
           const expectedOptimism = before.map((rows, i) =>
             i !== target
               ? rows
@@ -326,6 +360,17 @@ async function execute(program, histories) {
           )
           if (rejected) await assert.rejects(tx.isPersisted.promise)
           else await tx.isPersisted.promise
+          if (
+            process.env.ENDPOINT_COMPILED_MUTANT === 'raw-handler-input' &&
+            module.handlerInputs.length > inputStart
+          )
+            evidence.fault('raw-handler-input', { operation: step.kind })
+          evidence.check(
+            'parsed-handler-input',
+            module.handlerInputs.slice(inputStart),
+            [parsed.value],
+          )
+          report.parsedInputs++
           const trace = module.sutTrace.slice(start)
           assert.ok(
             trace.every(
@@ -351,7 +396,11 @@ async function execute(program, histories) {
           )
             changed.add(1)
           const expectedReads =
-            program.trigger && target === 0 && step.kind === 'update'
+            // Raw-SQL parameter proofs do not admit transformed input yet.
+            // Check its conservative fallback as well as supported pruning.
+            target === 0 &&
+            step.kind === 'update' &&
+            (program.trigger || (program.pgFunctions && program.inputContract))
               ? program.count
               : Array.from(
                   { length: program.count },
@@ -397,6 +446,10 @@ const step = fc.record({
   table: fc.nat(20),
   kind: fc.constantFrom('update', 'insert', 'delete', 'invalid'),
   value: fc.integer({ min: -20, max: 20 }),
+  label: fc.string({ maxLength: 12 }),
+  labels: fc.array(fc.string({ maxLength: 12 }), { maxLength: 3 }),
+  weight: fc.option(fc.integer({ min: -5, max: 5 }), { nil: undefined }),
+  extraAt: fc.constantFrom('none', 'root', 'object', 'array'),
 })
 try {
   const replay = process.argv.indexOf('--replay')
@@ -406,6 +459,42 @@ try {
       (value) => scenario(value.program, value.histories),
     )
   else {
+    for (const unknown of ['strip', 'passthrough', 'strict']) {
+      await scenario(
+        {
+          count: 2,
+          inputContract: {
+            unknown,
+            offset: 3,
+            defaultWeight: 7,
+            extraKey: 'user_id',
+          },
+        },
+        [
+          [
+            { kind: 'update', table: 0, value: 4, extraAt: 'root' },
+            { kind: 'update', table: 0, value: 5, extraAt: 'object' },
+            { kind: 'update', table: 0, value: 6, extraAt: 'array' },
+            { kind: 'update', table: 0, value: 7, labels: ['valid', '  '] },
+            { kind: 'delete', table: 0, extraAt: 'none' },
+            { kind: 'insert', table: 0, value: 8, extraAt: 'none' },
+          ],
+        ],
+      )
+    }
+    await scenario(
+      {
+        count: 3,
+        pgFunctions: true,
+        inputContract: {
+          unknown: 'strip',
+          offset: 1,
+          defaultWeight: 0,
+          extraKey: 'extra',
+        },
+      },
+      [[{ kind: 'update', table: 0, value: 4 }]],
+    )
     await scenario({ count: 2 }, [
       [
         { kind: 'invalid', table: 0, value: 3 },
@@ -452,18 +541,36 @@ try {
       evidence.property(
         await fc.check(
           fc.asyncProperty(
-            fc.record({
-              pgFunctions: fc.boolean(),
-              opaqueIndex: fc.boolean(),
-              expressionIndex: fc.boolean(),
-              nativeDefaults: fc.boolean(),
-              inlineSql: fc.boolean(),
-              helpers: fc.boolean(),
-              helperFanout: fc.boolean(),
-              count: fc.integer({ min: 2, max: 4 }),
-              trigger: fc.boolean(),
-              foreignKey: fc.boolean(),
-            }),
+            fc.oneof(
+              fc.record({
+                pgFunctions: fc.boolean(),
+                opaqueIndex: fc.boolean(),
+                expressionIndex: fc.boolean(),
+                nativeDefaults: fc.boolean(),
+                inlineSql: fc.boolean(),
+                helpers: fc.boolean(),
+                helperFanout: fc.boolean(),
+                count: fc.integer({ min: 2, max: 4 }),
+                trigger: fc.boolean(),
+                foreignKey: fc.boolean(),
+              }),
+              fc.record({
+                inputContract: fc.record({
+                  unknown: fc.constantFrom('strip', 'passthrough', 'strict'),
+                  offset: fc.integer({ min: 1, max: 5 }),
+                  defaultWeight: fc.integer({ min: -5, max: 5 }),
+                  extraKey: fc.constantFrom(
+                    'user_id',
+                    'created_at',
+                    'extra',
+                    'customField',
+                  ),
+                }),
+                count: fc.integer({ min: 2, max: 4 }),
+                trigger: fc.boolean(),
+                foreignKey: fc.boolean(),
+              }),
+            ),
             fc.array(fc.array(step, { minLength: 2, maxLength: 8 }), {
               minLength: sequences,
               maxLength: sequences,
