@@ -142,7 +142,16 @@ try {
     for (const [name, table] of Object.entries(tables))
       assert.deepEqual(
         plain([...app[name].values()]),
-        plain((await loaded.pool.query(`SELECT * FROM ${table}`)).rows),
+        plain(
+          (
+            await loaded.pool.query(
+              table === 'users'
+                ? `SELECT id, name, email, email_verified AS "emailVerified", image,
+                    created_at AS "createdAt", updated_at AS "updatedAt" FROM users`
+                : `SELECT * FROM ${table}`,
+            )
+          ).rows,
+        ),
         name,
       )
   }
