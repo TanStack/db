@@ -1,3 +1,4 @@
+import { Evidence } from './evidence.mjs'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import {
@@ -42,11 +43,15 @@ const report = {
   mutant,
   checker: legacy ? 'legacy' : 'effects',
   histories: 0,
+  coldHistories: 0,
   operations: 0,
   comparisons: {},
   writesExecuted: 0,
   envelopesDelivered: 0,
   resultReads: 0,
+  backgroundReads: 0,
+  readScope:
+    'resultReads/skippedReads count mutation refresh decisions; startup and coordinated background reads are separate',
   skippedReads: 0,
   buildCatalogCalls: 0,
   runtimeCatalogCalls: 0,
@@ -57,7 +62,9 @@ const report = {
   cleanupErrors: [],
   node: process.version,
 }
-let runtime, original, reduced, primary
+const evidence = new Evidence('endpoints.sql-effect-rules')
+report.cleanupErrors = evidence.cleanupErrors
+let runtime, primary
 const id = (i) => JSON.stringify(['app', `t${i}`])
 const sqlQueries = [
   'SELECT id,value FROM app.t0 ORDER BY id',
@@ -77,10 +84,10 @@ const mutationSql = (step) =>
   step.kind === 'function'
     ? 'SELECT app.write_value($1)'
     : step.kind === 'read-write'
-    ? "UPDATE app.t0 SET value=(SELECT value FROM app.t2 WHERE id='row')+$1 WHERE id='row'"
-    : step.kind === 'noop'
-    ? 'SELECT app.pure($1)'
-    : "UPDATE app.t0 SET value=$1 WHERE id='row'"
+      ? "UPDATE app.t0 SET value=(SELECT value FROM app.t2 WHERE id='row')+$1 WHERE id='row'"
+      : step.kind === 'noop'
+        ? 'SELECT app.pure($1)'
+        : "UPDATE app.t0 SET value=$1 WHERE id='row'"
 
 function compare(law, checkpoint, actual, expected, detail = {}) {
   const key = `${law}/${checkpoint}`
@@ -89,26 +96,14 @@ function compare(law, checkpoint, actual, expected, detail = {}) {
     detail.step?.kind ?? 'initial'
   }/${key}`
   report.witnesses[witness] = (report.witnesses[witness] ?? 0) + 1
-  try {
-    assert.deepEqual(actual, expected, key)
-  } catch (error) {
-    // Freeze distinguishing evidence before any teardown or shrinking.
-    error.oracle = structuredClone({
-      law,
-      checkpoint,
-      actual,
-      expected,
-      ...detail,
-    })
-    throw error
-  }
+  evidence.check(law, actual, expected, {
+    checkpoint,
+    operation: detail.step?.kind,
+    ...detail,
+  })
 }
 async function release(name, fn) {
-  try {
-    await fn()
-  } catch (error) {
-    report.cleanupErrors.push({ name, error: String(error.stack ?? error) })
-  }
+  await evidence.cleanup(name, fn)
 }
 
 async function run(program, histories) {
@@ -155,23 +150,26 @@ async function run(program, histories) {
     if (program.index === 'gin')
       await sut.exec('CREATE INDEX extra ON app.t0 USING gin(meta)')
     phase = 'build'
-    const snapshot = await (legacy
-      ? inspectSchema
-      : candidate.inspectSqlEffects)(query, 'oracle')
+    const snapshot = await (
+      legacy ? inspectSchema : candidate.inspectSqlEffects
+    )(query, 'oracle')
     const analyze = (sql) =>
       legacy
         ? analyzeSqlDependencies(sql, snapshot)
         : candidate.analyzeSqlEffects(sql, snapshot)
     const summaries = sqlQueries.map(analyze)
+    let changedFootprint = false
     const footprints = summaries.map((summary, i) => {
       const reads = legacy
         ? summary.reads
         : candidate.queryDependencies(summary)
-      return mutant === 'omit-body-read' && i === 1
-        ? reads?.filter((x) => x !== id(1))
-        : reads
+      if (mutant === 'omit-body-read' && i === 1 && reads?.includes(id(1))) {
+        changedFootprint = true
+        return reads.filter((x) => x !== id(1))
+      }
+      return reads
     })
-    const cell = `${program.index}/${program.volatility}/depth-${program.depth}`
+    const cell = `${program.index}/${program.volatility}/depth-${program.depth}/cold-${!!program.cold}`
     report.cells[cell] = (report.cells[cell] ?? 0) + 1
     for (const steps of histories) {
       for (let i = 0; i < 3; i++) {
@@ -179,35 +177,51 @@ async function run(program, histories) {
         await reference.query(`UPDATE app.t${i} SET value=$1`, [i + 1])
       }
       phase = 'runtime'
+      evidence.phase = 'execution'
+      evidence.at({ cell })
       core = new runtime.DbClient({ endpointScope: 'oracle' })
       const client = runtime.endpointRuntime(core),
         counts = [0, 0, 0, 0, 0],
+        mutationReads = [0, 0, 0, 0, 0],
         registry = {}
-      const collections = sqlQueries.map((sql, i) => {
+      const baselines = sqlQueries.map((_, i) => !(program.cold && i === 3))
+      const factories = sqlQueries.map((sql, i) => {
         const read = async () => {
           counts[i]++
-          return (await query(sql)).rows
+          const rows = (await query(sql)).rows
+          return rows
         }
         registry[`q${i}`] = runtime.registerQuery(
           'v1',
           `q${i}`,
           (x) => x,
-          read,
+          async () => {
+            mutationReads[i]++
+            return read()
+          },
           undefined,
           footprints[i],
         )
-        return client.bindQuery(
-          `q${i}`,
-          read,
-          { relation: `opaque:q${i}`, membership: { kind: 'all' }, order: [] },
-          {},
-          'v1',
-          runtime.z.object({
-            id: runtime.z.string(),
-            value: runtime.z.number(),
-          }),
-        )
+        return () =>
+          client.bindQuery(
+            `q${i}`,
+            read,
+            {
+              relation: `opaque:q${i}`,
+              membership: { kind: 'all' },
+              order: [],
+            },
+            {},
+            'v1',
+            runtime.z.object({
+              id: runtime.z.string(),
+              value: runtime.z.number(),
+            }),
+          )
       })
+      const collections = factories.map((bind, i) =>
+        baselines[i] ? bind() : undefined,
+      )
       const actual = () =>
         collections.map((c) =>
           [...c.values()].map(({ id, value }) => ({ id, value })),
@@ -218,20 +232,43 @@ async function run(program, histories) {
             async (sql) => (await reference.query(sql)).rows,
           ),
         )
-      await Promise.all(collections.map((c) => c.preload()))
-      let expected = await expectedRows()
+      await Promise.all(collections.filter(Boolean).map((c) => c.preload()))
+      let expected = (await expectedRows()).map((rows, i) =>
+        baselines[i] ? rows : [],
+      )
+      if (program.cold) {
+        // Register the cold peer only after the warm peers have established their
+        // baselines. Invoke the mutation in this same turn, before initial demand.
+        collections[3] = factories[3]()
+        if (process.env.ENDPOINT_ORACLE_TEST_FAULT === 'preload-cold') {
+          evidence.fault('preload-cold')
+          await collections[3].preload()
+        }
+        compare('cold-baseline', 'before-mutation', actual()[3], [], { cell })
+        report.coldHistories++
+      }
       compare('values', 'baseline', actual(), expected, { cell })
       report.histories++
-      for (const step of steps) {
+      for (const [stepIndex, step] of steps.entries()) {
+        evidence.at({ operation: step.kind, step: stepIndex, cell })
+        evidence.record({ type: 'operation', step, baselines })
         const sql = mutationSql(step),
           summary = analyze(sql)
         let writes = legacy
           ? summary.writes
           : candidate.mutationDependencies(summary)
-        if (mutant === 'omit-write') writes = []
-        if (mutant === 'needless-index-fallback' && program.index !== 'none')
+        let faultApplied = changedFootprint
+        if (mutant === 'omit-write' && writes?.length) {
+          writes = []
+          faultApplied = true
+        }
+        if (mutant === 'needless-index-fallback' && program.index !== 'none') {
           writes = null
-        const target = step.optimistic
+          faultApplied = true
+        }
+        const target = baselines[step.optimistic]
+          ? step.optimistic
+          : (step.optimistic + 1) % collections.length
         const guessed = structuredClone(expected)
         const optimistic = guessed[target][0].value !== step.value
         guessed[target][0].value = step.value
@@ -239,6 +276,7 @@ async function run(program, histories) {
           step.kind === 'noop' ? [] : step.kind === 'function' ? [1] : [0]
         const selected = sources.map(
           (tables, i) =>
+            !baselines[i] ||
             (i === target && optimistic) ||
             tables.some((t) => changed.includes(t)),
         )
@@ -249,7 +287,7 @@ async function run(program, histories) {
             summaries.map(
               (query, i) =>
                 candidate.canSkipRefetch(query, summary, {
-                  hasBaseline: true,
+                  hasBaseline: baselines[i],
                   optimistic: i === target && optimistic,
                   needsRepair: false,
                 }).verdict,
@@ -273,27 +311,33 @@ async function run(program, histories) {
             )
           }
         }
-        const before = [...counts]
+        const before = [...mutationReads]
         const action = client.bindMutation(
           'write',
           async ({ data }) => {
+            if (program.cold && !baselines[3])
+              compare(
+                'cold-request',
+                'mutation-dispatch',
+                data.reads.find((read) => read.id === 'q3')?.hasBaseline,
+                false,
+                { cell, step },
+              )
             const response = await runtime.refreshRegisteredMutation(
               data.reads,
               registry,
               async () => {
                 report.writesExecuted++
-                if (mutant)
-                  report.faultEvents.push({
-                    mutant,
-                    cell,
-                    step,
-                    writes,
-                    footprints,
-                  })
                 await query(sql, [step.value])
               },
               { scope: data.scope },
-              () => writes,
+              () => {
+                if (faultApplied) {
+                  evidence.fault(mutant, { cell, step })
+                  report.faultEvents.push({ mutant, cell, step })
+                }
+                return writes
+              },
             )
             report.envelopesDelivered++
             return JSON.parse(JSON.stringify(response))
@@ -331,15 +375,20 @@ async function run(program, histories) {
         compare(
           'read-obligation',
           'settled',
-          counts.map((n, i) => n - before[i]),
+          mutationReads.map((n, i) => n - before[i]),
           selected.map(Number),
           { cell, step, summaries, summary },
         )
+        baselines.fill(true)
         report.operations++
         report.resultReads += selected.filter(Boolean).length
         report.skippedReads += selected.filter((x) => !x).length
       }
       await release('client', () => core.cleanup())
+      report.backgroundReads += counts.reduce(
+        (sum, count, i) => sum + count - mutationReads[i],
+        0,
+      )
       core = undefined
     }
   } finally {
@@ -349,40 +398,8 @@ async function run(program, histories) {
   }
 }
 
-// The failure identity includes the first differing collection and operation
-// family. A setup failure cannot replace a reached semantic counterexample.
-function identity(failure) {
-  const f = failure.failure
-  return JSON.stringify([
-    f.law,
-    f.checkpoint,
-    f.step?.kind,
-    f.actual?.findIndex(
-      (value, i) => JSON.stringify(value) !== JSON.stringify(f.expected[i]),
-    ),
-  ])
-}
 async function check(program, histories) {
-  try {
-    await run(program, histories)
-  } catch (error) {
-    const failure = structuredClone({
-      program,
-      histories,
-      failure: error.oracle ?? {
-        law: 'infrastructure',
-        checkpoint: 'execution',
-        message: String(error.stack ?? error),
-      },
-    })
-    original ??= failure
-    if (identity(failure) !== identity(original)) {
-      report.rejectedShrinkFailures.push(failure)
-      return
-    }
-    reduced = failure
-    throw error
-  }
+  return evidence.run({ program, histories }, () => run(program, histories))
 }
 const step = fc.record({
   kind: fc.constantFrom('direct', 'function', 'read-write', 'noop'),
@@ -434,23 +451,29 @@ try {
     outfile: bundle,
     logLevel: 'silent',
   })
+  evidence.artifact('runtime-bundle', await readFile(bundle))
   runtime = await import(pathToFileURL(bundle).href)
   const replayPath = process.argv.indexOf('--replay')
   if (replayPath !== -1) {
     const replay = JSON.parse(
       await readFile(process.argv[replayPath + 1], 'utf8'),
     )
-    const recorded = replay.reduced ?? replay.original
-    try {
-      await check(recorded.program, recorded.histories)
-    } catch (error) {
-      report.replay =
-        identity(reduced) === identity(recorded)
-          ? 'same-violation'
-          : 'different-failure'
-      throw error
-    }
-    report.replay = 'passes'
+    const normalize = (record) =>
+      record &&
+      (record.input
+        ? record
+        : {
+            input: { program: record.program, histories: record.histories },
+            failure: record.failure,
+          })
+    await evidence.replay(
+      {
+        ...replay,
+        original: normalize(replay.original),
+        reduced: normalize(replay.reduced),
+      },
+      (input) => check(input.program, input.histories),
+    )
   } else {
     const history = [
       { kind: 'direct', value: 7, optimistic: 0 },
@@ -460,13 +483,17 @@ try {
     ]
     if (!process.argv.includes('--generated-only'))
       for (const index of ['none', 'expression', 'partial', 'gin'])
-        await check({ index, volatility: 'VOLATILE', depth: 2 }, [history])
+        await check(
+          { index, volatility: 'VOLATILE', depth: 2, cold: index === 'none' },
+          [history],
+        )
     const result = await fc.check(
       fc.asyncProperty(
         fc.record({
           index: fc.constantFrom('none', 'expression', 'partial', 'gin'),
           volatility: fc.constantFrom('IMMUTABLE', 'STABLE', 'VOLATILE'),
           depth: fc.integer({ min: 0, max: 3 }),
+          cold: fc.boolean(),
         }),
         fc.array(fc.array(step, { minLength: 2, maxLength: 5 }), {
           minLength: sequences,
@@ -482,7 +509,7 @@ try {
       seed: result.seed,
       path: result.counterexamplePath,
     }
-    if (result.failed) throw result.errorInstance ?? Error(result.error)
+    evidence.property(result)
   }
   compare(
     'reach',
@@ -497,32 +524,19 @@ try {
 } catch (error) {
   primary = error
   report.error = String(error.stack ?? error)
-  report.outcome =
-    reduced?.failure.law === 'infrastructure'
-      ? 'infrastructure-failure'
-      : reduced
-      ? 'semantic-rejection'
-      : 'setup-failure'
 } finally {
   await release('bundle', () => rm(dir, { recursive: true, force: true }))
   if (report.cleanupErrors.length) report.ok = false
-  if (original)
-    await writeFile(
-      join(output, 'replay.json'),
-      JSON.stringify({ seed, mutant, original, reduced }, null, 2) + '\n',
-    )
-  await writeFile(
-    join(output, 'report.json'),
-    JSON.stringify(report, null, 2) + '\n',
-  )
+  await evidence.finish(report, output)
 }
 console.log(
   JSON.stringify({
     ...report,
-    rejectedShrinkFailures: report.rejectedShrinkFailures.length,
+    rejectedShrinkFailures: evidence.rejectedShrinks.length,
     witnesses: Object.keys(report.witnesses).length,
     faultEvents: report.faultEvents.length,
     sources: undefined,
+    evidence: undefined,
     error: report.error?.split('\n')[0],
     cells: Object.keys(report.cells).length,
   }),
