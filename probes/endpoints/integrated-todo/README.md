@@ -93,3 +93,31 @@ The normal component/build has no test globals. Vite and TypeScript resolve DB,
 DB IVM, React DB, and Query Collection directly to this checkout's sources.
 The cached dependency setup helper and its historical receipts are described
 in HISTORY.md; they do not depend on ~/node_modules.
+
+## Mutation input errors
+
+The bound Endpoints API validates a mutation request before loading its query
+registry or entering the application handler. A schema rejection returns a
+`not-started` response with code `INVALID_INPUT` and structured Zod issue codes,
+paths and messages. Paths are request-relative, for example
+`['input', 'new_tags', 0, 'name']`. Parsed values, including transforms and
+coercions, reach `req.body` without a second parse.
+
+The action’s `tx.isPersisted.promise` rejects with `InvalidInputError`, exported
+from the runtime. Callers can inspect `error.code` and `error.issues` to show
+field errors. The client drops only that action’s optimistic overlay and remote
+obligation, preserving confirmed data and sibling actions. The rejection starts
+no write retry or reconciliation and does not set collection read errors.
+Overlapping valid writes still use the normal conservative authority repair.
+
+A thrown transport error, even one carrying the same code, is not proof that
+execution stopped. Malformed validation envelopes likewise retain the unknown
+outcome policy. Errors thrown after application code starts still reconcile,
+since the handler may have written before failing.
+
+Validation was red/green verified with the compiled PGlite oracle. Generated
+histories include fractional values rejected by integer input schemas, both
+with and without an optimistic row, followed by valid writes. The real-browser
+companion checks typed errors, immediate optimism, rollback and zero SQL across
+three compiled app setups. Runtime tests cover repeated rejection, both orders
+of overlapping responses, malformed envelopes and explicit refetch afterward.

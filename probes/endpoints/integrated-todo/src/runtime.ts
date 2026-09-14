@@ -10,6 +10,7 @@ import {
 } from '@tanstack/query-db-collection'
 import { QueryClient } from '@tanstack/query-core'
 import { z } from 'zod'
+import { invalidInputResponse, InvalidInputError } from './mutation-errors'
 import {
   compileMembership,
   instantiateQueryModel,
@@ -20,6 +21,8 @@ import {
   type QueryParams,
   type QueryInstance,
 } from './query-instance'
+export { InvalidInputError } from './mutation-errors'
+export type { InputValidationIssue } from './mutation-errors'
 export type Todo = {
   [column: string]: unknown
   id: string
@@ -658,6 +661,18 @@ class EndpointRuntime {
         [operation],
         error instanceof Error ? error : Error(String(error)),
       )
+      return operation.done.promise
+    }
+    const invalidInput = invalidInputResponse.safeParse(value)
+    if (invalidInput.success) {
+      const { message, issues } = invalidInput.data
+      // There was no handler execution. Drop only this overlay and obligation;
+      // keep confirmed rows, read errors, and any overlapping actions intact.
+      this.core._batch(() => {
+        this.operations.delete(transaction)
+        this.settle([operation], new InvalidInputError(message, issues))
+      })
+      this.wake()
       return operation.done.promise
     }
     const notStarted = z

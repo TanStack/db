@@ -1,4 +1,5 @@
 import { refreshAfterMutation } from './refresh.server.ts'
+export { validateMutationRequest } from './validate-mutation.server.ts'
 import { randomUUID } from 'node:crypto'
 import { intersects, type Dependencies } from './dependencies.server.ts'
 export type QueryInstance = {

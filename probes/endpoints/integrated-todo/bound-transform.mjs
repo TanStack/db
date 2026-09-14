@@ -394,7 +394,7 @@ export function transformBoundEndpoints(
     .digest('hex')
     .slice(0, 12)
   append(
-    `import {refreshRegisteredMutation as __boundRefresh} from ${JSON.stringify(
+    `import {refreshRegisteredMutation as __boundRefresh,validateMutationRequest as __boundValidate} from ${JSON.stringify(
       resolve(runtimeDirectory, 'registry.server.ts'),
     )};\nimport {createServerFn as __boundServerFn} from '@tanstack/react-start';\nimport {bindQuery as __boundQuery,bindMutation as __boundMutation} from ${JSON.stringify(
       runtimeSource,
@@ -417,8 +417,13 @@ export function transformBoundEndpoints(
   for (const [index, entry] of declarations.entries()) {
     entry.rpc = `__boundRpc${index}`
     append(
-      `const ${entry.rpc}=__boundServerFn({method:'POST'}).inputValidator(z.object({scope:z.string().min(1),`,
+      `const ${entry.rpc}=__boundServerFn({method:'POST'}).inputValidator(`,
     )
+    if (entry.kind === 'mutation')
+      append(
+        'z.unknown()).handler(async ({data:raw})=>{const parsed=__boundValidate(',
+      )
+    append('z.object({scope:z.string().min(1),')
     if (entry.kind === 'mutation')
       append(
         'reads:z.array(z.object({id:z.string(),definition:z.string(),version:z.string(),params:z.unknown(),certificate:z.string().max(100).optional(),hasBaseline:z.boolean().optional(),optimistic:z.boolean().optional()}).strict()).max(100),',
@@ -429,7 +434,11 @@ export function transformBoundEndpoints(
       entry.values.input.node.value.end,
     )
     if (entry.kind === 'query') append('.strict()')
-    append('})).handler(async ({data})=>')
+    if (entry.kind === 'mutation')
+      append(
+        '}),raw);if(!parsed.success)return parsed.response;const data=parsed.data;return ',
+      )
+    else append('})).handler(async ({data})=>')
     const invoke = (declaration, input) => {
       append('(')
       method(declaration.values.handler.node)
@@ -446,7 +455,7 @@ export function transformBoundEndpoints(
         `,{scope:data.scope},()=>${JSON.stringify(entry.proof.dependencies)})`,
       )
     } else invoke(entry, 'data.input')
-    append(');\n')
+    append(entry.kind === 'mutation' ? '});\n' : ');\n')
   }
   let cursor = 0
   for (const entry of declarations.sort(
@@ -531,7 +540,9 @@ export function transformBoundEndpoints(
           handler.end,
         )})({body:input,scope:context.scope,kind:'query',endpointSourceHash:${JSON.stringify(
           sourceHash,
-        )}},{json:value=>value}),undefined,${JSON.stringify(entry.proof.dependencies)})`
+        )}},{json:value=>value}),undefined,${JSON.stringify(
+          entry.proof.dependencies,
+        )})`
       })
       .join(',') +
     '};'

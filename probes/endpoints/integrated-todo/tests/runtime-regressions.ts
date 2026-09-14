@@ -6,6 +6,7 @@ import { endpointRuntime, type Todo } from '../src/runtime'
 import { refreshAfterMutation } from '../src/refresh.server'
 import './authority-regressions'
 import './dependency-regressions'
+import './validation-regressions'
 const model = {
   relation: 'todo',
   order: ['id'] as const,
@@ -33,10 +34,14 @@ test('endpoint refetch discovers external writes without a mutation', async () =
   const client = runtime()
   let server = [row('original')]
   let reads = 0
-  const collection = client.bindQuery('external', async () => {
-    reads++
-    return server.map((item) => ({ ...item }))
-  }, model)
+  const collection = client.bindQuery(
+    'external',
+    async () => {
+      reads++
+      return server.map((item) => ({ ...item }))
+    },
+    model,
+  )
   await collection.preload()
   try {
     const initialReads = reads

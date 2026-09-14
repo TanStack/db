@@ -3,6 +3,49 @@ import assert from 'node:assert/strict'
 import { z } from 'zod'
 import { endpointsProbe } from '../transform.mjs'
 import { specimen } from './fixtures/scalar-specimen.mjs'
+import { validateMutationRequest } from '../src/validate-mutation.server.ts'
+
+test('mutation validation reports structured issues and passes parsed values exactly once', () => {
+  let parses = 0
+  const schema = z.object({
+    input: z.object({
+      items: z.array(z.object({ name: z.string().trim().min(1) })),
+      count: z.preprocess((value) => {
+        parses++
+        return Number(value)
+      }, z.number().int()),
+    }),
+  })
+  const valid = validateMutationRequest(schema, {
+    input: { items: [{ name: '  tag  ' }], count: '2' },
+  })
+  assert.deepEqual(valid, {
+    success: true,
+    data: { input: { items: [{ name: 'tag' }], count: 2 } },
+  })
+  assert.equal(parses, 1)
+  const invalid = validateMutationRequest(schema, {
+    input: { items: [{ name: ' ' }], count: 0.5 },
+  })
+  assert.equal(invalid.success, false)
+  assert.equal(invalid.response.kind, 'not-started')
+  assert.equal(invalid.response.code, 'INVALID_INPUT')
+  assert.deepEqual(
+    invalid.response.issues.map((issue) => issue.path),
+    [
+      ['input', 'items', 0, 'name'],
+      ['input', 'count'],
+    ],
+  )
+  assert.ok(
+    invalid.response.issues.every(
+      (issue) =>
+        typeof issue.code === 'string' && typeof issue.message === 'string',
+    ),
+  )
+  assert.deepEqual(JSON.parse(JSON.stringify(invalid)), invalid)
+  assert.equal(parses, 2)
+})
 
 test('endpoint modules compile independently of the original filename', () => {
   const result = endpointsProbe().transform(
