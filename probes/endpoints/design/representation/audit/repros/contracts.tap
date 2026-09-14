@@ -1,0 +1,79 @@
+TAP version 13
+# (node:31002) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: unknown and duplicate read identities reject before the write
+ok 1 - unknown and duplicate read identities reject before the write
+  ---
+  duration_ms: 1.126916
+  ...
+# Subtest: opaque writes still refresh every requested read after the handler completes
+ok 2 - opaque writes still refresh every requested read after the handler completes
+  ---
+  duration_ms: 0.907792
+  ...
+# Subtest: a rejected write is neither retried nor followed by reads
+ok 3 - a rejected write is neither retried nor followed by reads
+  ---
+  duration_ms: 0.126916
+  ...
+# (node:31003) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: component declarations carry server order in priority order
+ok 4 - component declarations carry server order in priority order
+  ---
+  duration_ms: 87.5465
+  ...
+# Subtest: sort columns must be selected
+ok 5 - sort columns must be selected
+  ---
+  duration_ms: 7.63725
+  ...
+# Subtest: unsupported direction cannot silently lose client ordering
+ok 6 - unsupported direction cannot silently lose client ordering
+  ---
+  duration_ms: 5.872042
+  ...
+# Subtest: transformed responses cannot borrow intermediate query ordering
+ok 7 - transformed responses cannot borrow intermediate query ordering
+  ---
+  duration_ms: 9.124375
+  ...
+# Subtest: server handler cannot capture the bound client
+ok 8 - server handler cannot capture the bound client
+  ---
+  duration_ms: 4.682791
+  ...
+# Subtest: server handler cannot capture component state
+ok 9 - server handler cannot capture component state
+  ---
+  duration_ms: 6.283917
+  ...
+# Subtest: input validator cannot capture component state
+ok 10 - input validator cannot capture component state
+  ---
+  duration_ms: 8.268417
+  ...
+# Subtest: optimistic callback stays within the component while RPCs move to module scope
+ok 11 - optimistic callback stays within the component while RPCs move to module scope
+  ---
+  duration_ms: 7.425833
+  ...
+# Subtest: a row predicate is carried as data without the server auth expression
+ok 12 - a row predicate is carried as data without the server auth expression
+  ---
+  duration_ms: 11.539875
+  ...
+# Subtest: unsupported query arguments fail before generating an incorrectly scoped request
+ok 13 - unsupported query arguments fail before generating an incorrectly scoped request
+  ---
+  duration_ms: 5.295208
+  ...
+1..13
+# tests 13
+# suites 0
+# pass 13
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 400.72125

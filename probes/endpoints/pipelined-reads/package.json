@@ -1,0 +1,17 @@
+{
+  "name": "endpoints-pipelined-reads-probe",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --experimental-strip-types oracle.mjs",
+    "test:adapter": "node --experimental-strip-types --test adapter-contracts.test.mjs",
+    "typecheck": "node ../integrated-todo/node_modules/typescript/bin/tsc -p tsconfig.json",
+    "bench": "node --experimental-strip-types benchmark.mjs"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "0.3.14",
+    "drizzle-orm": "0.45.1",
+    "fast-check": "3.23.2",
+    "postgres": "3.4.9"
+  }
+}

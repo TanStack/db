@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "mode": "exploratory; provisional preservation contract",
+  "source": "Current Endpoints retained-query authoritative response path; related ground-condition witnesses are extraction inputs, not independent range cases.",
+  "target": "Inter-response result reconstruction with server-retained bases, client-supplied bases or compact summaries; preserve separate authority publication.",
+  "authorization": "Ok go",
+  "frozenAt": "2026-09-12T04:32:19.615156+00:00",
+  "files": [
+    {
+      "path": "probes/endpoints/integrated-todo/src/runtime.ts",
+      "sha256": "6b9b6020930614018ad610602fafc343b932a1f2065df377dcbaab8e1e433737"
+    },
+    {
+      "path": "probes/endpoints/integrated-todo/src/registry.server.ts",
+      "sha256": "106be1130417be41380347525db4a45c52e83997a62c42423d0832eb4312fc15"
+    },
+    {
+      "path": "probes/endpoints/integrated-todo/src/refresh.server.ts",
+      "sha256": "7909698c071afa4349f3bad5b3c3ed4e8e77ab1f7375ba29d2d8413d99b1e025"
+    },
+    {
+      "path": "probes/endpoints/integrated-todo/src/snapshot-encoding.server.ts",
+      "sha256": "4f54b48b8d3136ab5274bac33e43871f4620fdda3817a93b041ca56732c0f250"
+    },
+    {
+      "path": "probes/endpoints/integrated-todo/bound-transform.mjs",
+      "sha256": "175d4ef3ca9a8951cd90c1ec54f4087972a24b458b7b5db2fd1f22d1bcffb3ca"
+    },
+    {
+      "path": "probes/endpoints/design/optimization-ground-condition.md",
+      "sha256": "ec7d9114709f1a89fd6ae6db7c217de1138641bc2dfd091972b5ef3ba59795b4"
+    },
+    {
+      "path": "probes/endpoints/design/optimization-ground-condition-evidence.json",
+      "sha256": "bc4b5814d872e6762dcbdf9b5956f4d1f3ec130fdec6788f36dc3967d88144be"
+    },
+    {
+      "path": "probes/endpoints/RELATIONAL-ALGEBRA-SURVEY.md",
+      "sha256": "e4c6ff8553a009b3e2208ace063f03a30872f47bdaab67e26a1e9080078ce222"
+    }
+  ]
+}

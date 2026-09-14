@@ -1,0 +1,23 @@
+{
+  "ok": false,
+  "seed": 911052,
+  "N": 1,
+  "X": 1,
+  "samples": 2,
+  "cases": [
+    {
+      "tables": 2,
+      "queries": 6,
+      "rows": 8,
+      "strategies": {}
+    }
+  ],
+  "limits": [
+    "Local Vite dev server and PGlite. Latency includes SQL/observer costs but does not establish WAN or multi-connection contention gains.",
+    "First operation of each history establishes certificates and is excluded from timing summaries.",
+    "Schemas are fixed while each history runs. Production auth, DDL and untracked dependencies are excluded.",
+    "Gzip is an offline estimate; response bytes are observed Start bodies."
+  ],
+  "serverLog": "8:06:29 PM [vite] (client) Re-optimizing dependencies because vite config has changed\n\n  VITE v7.3.2  ready in 478 ms\n\n  ➜  Local:   http://127.0.0.1:59857/\n[vite] connected.\nWarning: A notFoundError was encountered on the route with ID \"__root__\", but a notFoundComponent option was not configured, nor was a router level defaultNotFoundComponent configured. Consider configuring at least one of these to avoid TanStack Router's overly generic defaultNotFoundComponent (<p>Not Found</p>)\n",
+  "error": "AssertionError [ERR_ASSERTION]: {\"strategy\":\"selective\",\"sequence\":0,\"step\":0,\"outcome\":{\"state\":\"failed\",\"result\":\"rejected\",\"error\":\"Error: Invalid or incomplete authoritative endpoint response\"},\"errors\":[\"Invalid or incomplete authoritative endpoint response\",\"Invalid or incomplete authoritative endpoint response\",\"Invalid or incomplete authoritative endpoint response\",\"Invalid or incomplete authoritative endpoint response\",\"Invalid or incomplete authoritative endpoint response\",\"Invalid or incomplete authoritative endpoint response\"]}\n+ actual - expected\n\n+ 'rejected'\n- 'fulfilled'\n\n    at file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/pruning.mjs:70:22"
+}

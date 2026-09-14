@@ -1,0 +1,81 @@
+{
+  "ok": false,
+  "seed": 9142601,
+  "runs": 12,
+  "sequences": 3,
+  "mutant": "omit-body-read",
+  "checker": "effects",
+  "histories": 1,
+  "operations": 0,
+  "comparisons": {
+    "values/baseline": 1,
+    "independence/compiled-judgment": 1,
+    "authority/compiled-judgment": 2,
+    "values/same-turn-optimism": 1,
+    "values/settled": 1
+  },
+  "writesExecuted": 1,
+  "envelopesDelivered": 1,
+  "resultReads": 0,
+  "skippedReads": 0,
+  "buildCatalogCalls": 1,
+  "runtimeCatalogCalls": 0,
+  "cells": {
+    "none/IMMUTABLE/depth-0": 1
+  },
+  "witnesses": {
+    "none/IMMUTABLE/depth-0/initial/values/baseline": 1,
+    "none/IMMUTABLE/depth-0/function/independence/compiled-judgment": 1,
+    "none/IMMUTABLE/depth-0/function/authority/compiled-judgment": 2,
+    "none/IMMUTABLE/depth-0/function/values/same-turn-optimism": 1,
+    "none/IMMUTABLE/depth-0/function/values/settled": 1
+  },
+  "faultEvents": [
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "function",
+        "value": 0,
+        "optimistic": 0
+      },
+      "writes": [
+        "[\"app\",\"t1\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    }
+  ],
+  "rejectedShrinkFailures": [],
+  "cleanupErrors": [],
+  "node": "v24.5.0",
+  "sources": {
+    "sql-effects.mjs": "81ffd261251f0712be8402798223651dde8631eaead4e59f10756834fde5ac59",
+    "sql-dependencies.mjs": "2042ed6619dc59c8aac20e9f642a07c2a27b0bbbe54f32db53025455ec28317b",
+    "src/runtime.ts": "1c9924886ee269769b39d6049416bd09b16662bf4ef2c5e81a7fb0a492081bc3",
+    "src/registry.server.ts": "b11b621be9349d0260750eb16a571acd8248136351e246d2404dd9ee058059d2",
+    "tests/oracles/sql-effect-rules.mjs": "b4c996c5b6df0f28d5aa2ea00a1d45c0119e1b2cffdecfd84bc4027e5743607d"
+  },
+  "versions": {
+    "fast-check": "3.23.2",
+    "@electric-sql/pglite": "0.3.14"
+  },
+  "replay": "same-violation",
+  "error": "AssertionError [ERR_ASSERTION]: values/settled\n+ actual - expected\n... Skipped lines\n\n  [\n    [\n      {\n        id: 'row',\n        value: 1\n...\n        id: 'row',\n+       value: 3\n-       value: 1\n      }\n    ],\n    [\n      {\n        id: 'row',\n\n    at compare (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:54:16)\n    at run (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:155:9)\n    at async check (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:179:9)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:203:11",
+  "outcome": "semantic-rejection"
+}

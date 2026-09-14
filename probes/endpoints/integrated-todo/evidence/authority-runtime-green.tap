@@ -1,0 +1,26 @@
+✔ overlapping actions use authority read after both handlers close (14.695708ms)
+✔ a held ordinary read cannot replace authority after its action retires (4.789417ms)
+✔ optimistic fanout publishes both collections before either subscriber runs (2.457542ms)
+✔ a collection created during a write joins authoritative coverage (1.380833ms)
+✔ reentrant actions preserve event order for every subscriber (2.110375ms)
+✔ authority is installed before a post-commit handler error retires the overlay (1.545084ms)
+✔ client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs (1.288916ms)
+✔ malformed authority rejects before installing any collection snapshot (5.79525ms)
+✔ generated invalid snapshots cannot partly replace the confirmed baseline (92.241583ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 130.552167
+✔ actual collection runtime regressions against PostgreSQL order (1099.010084ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1179.240417

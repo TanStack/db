@@ -1,0 +1,767 @@
+{
+  "settings": {
+    "N": 2,
+    "X": 2,
+    "steps": 5,
+    "seed": 911027
+  },
+  "limits": [
+    "Generated scalar columns extend required id/text/completed/createdAt/scope fields; not arbitrary PostgreSQL schemas.",
+    "Fixed text primary keys; nullable foreign keys use ON DELETE SET NULL.",
+    "Ascending timestamp/id ordering; predicates use scalar comparisons and NULL logic.",
+    "Sequential mutation sequences here; concurrent waves retain their separate campaign.",
+    "Auth and imported table/type bindings are trusted fixture assumptions.",
+    "No schema/type proof for arbitrary application modules, no subset loading, no LSN manifests."
+  ],
+  "engine": {
+    "version": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit",
+    "version_num": "170005"
+  },
+  "property": {
+    "seed": 911027,
+    "path": null,
+    "runs": 2,
+    "shrinks": 0
+  },
+  "ok": true,
+  "coverage": [
+    {
+      "feature": "schema.multiple-tables",
+      "description": "Several independent relation identities",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/sequence-0",
+        "scenario-1/sequence-0",
+        "scenario-1/sequence-1",
+        "scenario-2/sequence-0",
+        "scenario-2/sequence-1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "schema.foreign-key-set-null",
+      "description": "Server-only ON DELETE SET NULL effects",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/sequence-0",
+        "scenario-1/sequence-0",
+        "scenario-1/sequence-1",
+        "scenario-2/sequence-0",
+        "scenario-2/sequence-1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "type.integer",
+      "description": "int4 values",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/sequence-0",
+        "scenario-1/sequence-0",
+        "scenario-1/sequence-1",
+        "scenario-2/sequence-0",
+        "scenario-2/sequence-1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "type.text",
+      "description": "Text and Unicode values",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/sequence-0",
+        "scenario-1/sequence-0",
+        "scenario-1/sequence-1",
+        "scenario-2/sequence-0",
+        "scenario-2/sequence-1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "type.boolean",
+      "description": "Boolean values",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/sequence-0",
+        "scenario-1/sequence-0",
+        "scenario-1/sequence-1",
+        "scenario-2/sequence-0",
+        "scenario-2/sequence-1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "type.timestamp",
+      "description": "Timestamp transport and total createdAt/id order",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/sequence-0",
+        "scenario-1/sequence-0",
+        "scenario-1/sequence-1",
+        "scenario-2/sequence-0",
+        "scenario-2/sequence-1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "schema.nullable",
+      "description": "Nullable generated scalar columns",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/sequence-0",
+        "scenario-1/sequence-0",
+        "scenario-1/sequence-1",
+        "scenario-2/sequence-0",
+        "scenario-2/sequence-1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "schema.not-null",
+      "description": "NOT NULL generated scalar columns",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/sequence-0",
+        "scenario-1/sequence-0",
+        "scenario-1/sequence-1",
+        "scenario-2/sequence-0",
+        "scenario-2/sequence-1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "predicate.eq",
+      "description": "Scalar equality",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/sequence-0",
+        "scenario-1/sequence-0",
+        "scenario-1/sequence-1",
+        "scenario-2/sequence-0",
+        "scenario-2/sequence-1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "predicate.ne",
+      "description": "Scalar inequality",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.gt",
+      "description": "Integer greater-than",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/sequence-0",
+        "scenario-1/sequence-0",
+        "scenario-1/sequence-1",
+        "scenario-2/sequence-0",
+        "scenario-2/sequence-1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "predicate.gte",
+      "description": "Integer greater-than-or-equal",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.lt",
+      "description": "Integer less-than",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.lte",
+      "description": "Integer less-than-or-equal",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.and",
+      "description": "Predicate conjunction",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.or",
+      "description": "Predicate disjunction",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/sequence-0",
+        "scenario-1/sequence-0",
+        "scenario-1/sequence-1",
+        "scenario-2/sequence-0",
+        "scenario-2/sequence-1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "predicate.isNull",
+      "description": "SQL NULL membership",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/sequence-0",
+        "scenario-1/sequence-0",
+        "scenario-1/sequence-1",
+        "scenario-2/sequence-0",
+        "scenario-2/sequence-1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "predicate.isNotNull",
+      "description": "SQL non-NULL membership",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "mutation.insert",
+      "description": "Insert",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/sequence-0",
+        "scenario-1/sequence-1",
+        "scenario-2/sequence-1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "mutation.edit",
+      "description": "Column updates",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/sequence-0",
+        "scenario-1/sequence-0",
+        "scenario-1/sequence-1",
+        "scenario-2/sequence-0",
+        "scenario-2/sequence-1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "mutation.complete",
+      "description": "Boolean updates",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/sequence-0",
+        "scenario-1/sequence-0",
+        "scenario-1/sequence-1",
+        "scenario-2/sequence-0",
+        "scenario-2/sequence-1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "mutation.delete",
+      "description": "Delete",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/sequence-0",
+        "scenario-1/sequence-0",
+        "scenario-1/sequence-1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "mutation.cross-table",
+      "description": "An opaque handler also changes another table",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/sequence-0",
+        "scenario-1/sequence-0",
+        "scenario-1/sequence-1",
+        "scenario-2/sequence-0"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "mutation.post-commit-error",
+      "description": "A handler errors after committed writes",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/sequence-0",
+        "scenario-1/sequence-0",
+        "scenario-1/sequence-1",
+        "scenario-2/sequence-0"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "mutation.rejected",
+      "description": "Rejected write restores optimistic state",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/sequence-0",
+        "scenario-1/sequence-0",
+        "scenario-1/sequence-1",
+        "scenario-2/sequence-0",
+        "scenario-2/sequence-1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "query.limit",
+      "description": "Finite result windows",
+      "status": "explicitly-rejected",
+      "witnesses": [],
+      "rejection": "Generated compiler rejection control"
+    },
+    {
+      "feature": "query.join",
+      "description": "Joins and relationship projection",
+      "status": "explicitly-rejected",
+      "witnesses": [],
+      "rejection": "Generated compiler rejection control"
+    },
+    {
+      "feature": "query.aggregate",
+      "description": "Grouping and aggregates",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.cte",
+      "description": "CTEs and recursive queries",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.window",
+      "description": "Window functions",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.set-operation",
+      "description": "UNION/INTERSECT/EXCEPT",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "type.numeric",
+      "description": "Exact numeric and bigint transport",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "type.json-array",
+      "description": "JSON and array expressions",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "schema.trigger",
+      "description": "User-defined trigger effects",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "authority.external-writer",
+      "description": "External writers and replica visibility",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "demand.subset",
+      "description": "On-demand subset transport and refill",
+      "status": "not-tested",
+      "witnesses": []
+    }
+  ],
+  "executed": {
+    "programsBuilt": 3,
+    "sequences": 5,
+    "operations": 25,
+    "checkpoints": 80,
+    "clientArtifacts": 12,
+    "transitions": {
+      "4 queries / edit / success": 4,
+      "4 queries / delete / success": 2,
+      "4 queries / insert / success": 2,
+      "4 queries / complete / reject": 4,
+      "4 queries / edit / reject": 1,
+      "4 queries / complete / success": 1,
+      "4 queries / delete / reject": 1,
+      "6 queries / edit / success": 1,
+      "6 queries / edit / reject": 3,
+      "6 queries / complete / reject": 3,
+      "6 queries / complete / success": 2,
+      "6 queries / insert / success": 1
+    },
+    "wire": [
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1006,
+        "responseBytes": 3669,
+        "elapsedMs": 386.217584
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "delete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1007,
+        "responseBytes": 3387,
+        "elapsedMs": 155.62179099999958
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "insert",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 981,
+        "responseBytes": 3927,
+        "elapsedMs": 146.65012500000012
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 997,
+        "responseBytes": 3650,
+        "elapsedMs": 115.21316699999988
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "complete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 997,
+        "responseBytes": 3645,
+        "elapsedMs": 98.86104100000011
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "delete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1025,
+        "responseBytes": 2895,
+        "elapsedMs": 127.20545800000036
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "complete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1015,
+        "responseBytes": 2871,
+        "elapsedMs": 98.03312500000175
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "edit",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1010,
+        "responseBytes": 2871,
+        "elapsedMs": 100.21979199999987
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 983,
+        "responseBytes": 2618,
+        "elapsedMs": 98.35941599999933
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "complete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1025,
+        "responseBytes": 2613,
+        "elapsedMs": 97.77287499999875
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "insert",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1021,
+        "responseBytes": 4106,
+        "elapsedMs": 96.02683400000024
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "complete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1019,
+        "responseBytes": 4101,
+        "elapsedMs": 98.89154200000121
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "complete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1007,
+        "responseBytes": 4101,
+        "elapsedMs": 98.72808300000179
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1016,
+        "responseBytes": 4172,
+        "elapsedMs": 99.10399999999936
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "delete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1045,
+        "responseBytes": 4148,
+        "elapsedMs": 98.33387500000026
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1201,
+        "responseBytes": 4235,
+        "elapsedMs": 130.11979200000133
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "edit",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1207,
+        "responseBytes": 4230,
+        "elapsedMs": 114.68816700000025
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "edit",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1178,
+        "responseBytes": 4230,
+        "elapsedMs": 115.93779200000063
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "complete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1211,
+        "responseBytes": 4230,
+        "elapsedMs": 98.56941700000243
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "complete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1104,
+        "responseBytes": 4254,
+        "elapsedMs": 98.74762499999997
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "edit",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1104,
+        "responseBytes": 4549,
+        "elapsedMs": 112.53125
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "complete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1201,
+        "responseBytes": 4549,
+        "elapsedMs": 98.72395899999901
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "insert",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1225,
+        "responseBytes": 4898,
+        "elapsedMs": 115.8383329999997
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "complete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1207,
+        "responseBytes": 4898,
+        "elapsedMs": 98.81695799999943
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "complete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1169,
+        "responseBytes": 4874,
+        "elapsedMs": 98.68924999999945
+      }
+    ]
+  }
+}

@@ -1,0 +1,28 @@
+✖ same table name in another schema cannot borrow a public-table proof (598.558958ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 967.512166
+
+✖ failing tests:
+
+test at tests/pg-revision.test.mjs:189:1
+✖ same table name in another schema cannot borrow a public-table proof (598.558958ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + [AsyncFunction (anonymous)]
+  - undefined
+  
+      at TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/pg-revision.test.mjs:197:12)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:332:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    expected: undefined,
+    operator: 'strictEqual'
+  }

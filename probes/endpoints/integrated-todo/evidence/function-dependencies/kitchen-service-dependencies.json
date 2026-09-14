@@ -1,0 +1,123 @@
+{
+  "diagnostics": [
+    {
+      "name": "usersCollection",
+      "kind": "query",
+      "dependencies": null,
+      "reason": "External call: better-auth.betterAuth"
+    },
+    {
+      "name": "ingredientsCollection",
+      "kind": "query",
+      "dependencies": null,
+      "reason": "External call: better-auth.betterAuth"
+    },
+    {
+      "name": "recipesCollection",
+      "kind": "query",
+      "dependencies": null,
+      "reason": "External call: better-auth.betterAuth"
+    },
+    {
+      "name": "recipeIngredientsCollection",
+      "kind": "query",
+      "dependencies": null,
+      "reason": "External call: better-auth.betterAuth"
+    },
+    {
+      "name": "recipeCommentsCollection",
+      "kind": "query",
+      "dependencies": null,
+      "reason": "External call: better-auth.betterAuth"
+    },
+    {
+      "name": "tagsCollection",
+      "kind": "query",
+      "dependencies": null,
+      "reason": "External call: better-auth.betterAuth"
+    },
+    {
+      "name": "recipeTagsCollection",
+      "kind": "query",
+      "dependencies": null,
+      "reason": "External call: better-auth.betterAuth"
+    },
+    {
+      "name": "ingredientTagsCollection",
+      "kind": "query",
+      "dependencies": null,
+      "reason": "External call: better-auth.betterAuth"
+    },
+    {
+      "name": "saveIngredient",
+      "kind": "mutation",
+      "dependencies": null,
+      "reason": "External call: better-auth.betterAuth"
+    },
+    {
+      "name": "saveComment",
+      "kind": "mutation",
+      "dependencies": null,
+      "reason": "External call: better-auth.betterAuth"
+    },
+    {
+      "name": "deleteIngredient",
+      "kind": "mutation",
+      "dependencies": null,
+      "reason": "External call: better-auth.betterAuth"
+    },
+    {
+      "name": "deleteRecipe",
+      "kind": "mutation",
+      "dependencies": null,
+      "reason": "External call: better-auth.betterAuth"
+    },
+    {
+      "name": "deleteComment",
+      "kind": "mutation",
+      "dependencies": null,
+      "reason": "External call: better-auth.betterAuth"
+    },
+    {
+      "name": "insertComment",
+      "kind": "mutation",
+      "dependencies": null,
+      "reason": "External call: better-auth.betterAuth"
+    },
+    {
+      "name": "createIngredientAction",
+      "kind": "mutation",
+      "dependencies": null,
+      "reason": "External call: drizzle-orm/pg-core.pgEnum"
+    },
+    {
+      "name": "createRecipeAction",
+      "kind": "mutation",
+      "dependencies": null,
+      "reason": "External call: better-auth.betterAuth"
+    },
+    {
+      "name": "changeTagAssignmentsAction",
+      "kind": "mutation",
+      "dependencies": null,
+      "reason": "External call: better-auth.betterAuth"
+    },
+    {
+      "name": "addToShoppingList",
+      "kind": "mutation",
+      "dependencies": null,
+      "reason": "External call: better-auth.betterAuth"
+    }
+  ],
+  "schemaRelations": [
+    "__drizzle_migrations",
+    "accounts",
+    "ingredient_tags",
+    "recipe_comments",
+    "recipe_tags",
+    "recipes",
+    "sessions",
+    "users",
+    "verifications"
+  ]
+}

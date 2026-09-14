@@ -1,0 +1,26 @@
+{
+  "settings": {
+    "N": 1,
+    "X": 1,
+    "maxSteps": 5,
+    "mutant": "early-settlement"
+  },
+  "campaigns": [],
+  "limits": [
+    "Todo schema, scoped full-row queries, ascending createdAt/id order only",
+    "Sequential operations within each sequence; no same-row concurrent scheduling contract",
+    "Dev browser execution with production client artifact inspection; no production browser execution yet",
+    "Server exclusion: live canaries, client dependency maps, raw/module request rejection and retained-server-import rejection; not proof against all possible leakage"
+  ],
+  "harnessError": "AssertionError [ERR_ASSERTION]: persistence cannot settle before held reconciliation\n+ actual - expected\n\n+ 'fulfilled'\n- 'pending'\n\n    at Driver.run (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/driver.mjs:142:18)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/e2e.mjs:32:4",
+  "executed": {
+    "programsBuilt": 1,
+    "sequences": 1,
+    "operations": 1,
+    "checkpoints": 2,
+    "clientArtifacts": 4,
+    "transitions": {
+      "1 queries / insert / success": 1
+    }
+  }
+}

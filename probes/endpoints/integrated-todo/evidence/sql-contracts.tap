@@ -1,0 +1,57 @@
+✔ unknown and duplicate read identities reject before the write (1.996208ms)
+✔ opaque writes still refresh every requested read after the handler completes (0.807875ms)
+✔ a rejected handler is not retried and still reconciles reads (0.163375ms)
+✔ a later SQL failure preserves committed effects in the reconciliation response (1787.594416ms)
+✔ exhausted reads retain handler success or failure without repeating the handler (7014.464875ms)
+✔ overlapping actions use authority read after both handlers close (17.392834ms)
+✔ a held ordinary read cannot replace authority after its action retires (4.968209ms)
+✔ optimistic fanout publishes both collections before either subscriber runs (2.870583ms)
+✔ a collection created during a write joins authoritative coverage (1.859167ms)
+✔ reentrant actions preserve event order for every subscriber (2.53525ms)
+✔ local rollback publishes every recipient together and does not cancel remote coverage (4.088875ms)
+✔ a retired read cannot block initial coverage of the restarted collection (4.455417ms)
+✔ an unsent authored failure does not leave a remote obligation (1.508917ms)
+✔ a known read failure recovers without repeating its write (3.5115ms)
+✔ a later healthy response cannot discharge an unknown remote write (1.371542ms)
+✔ a new action invalidates an in-flight repair without waiting for its obsolete read (4.09925ms)
+✔ shared snapshots preserve extra columns and collection-local optimistic ownership (3.026334ms)
+✔ malformed shared indexes reject before installing any authority (3.0055ms)
+✔ authority is installed before a post-commit handler error retires the overlay (2.635917ms)
+✔ client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs (1.6735ms)
+✔ malformed authority rejects before installing any collection snapshot (4.324125ms)
+✔ generated invalid snapshots cannot partly replace the confirmed baseline (106.815583ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 175.317792
+✔ actual collection runtime regressions against PostgreSQL order (2052.02175ms)
+✔ DB scalar membership agrees with PostgreSQL three-valued predicates (1827.269416ms)
+✔ scalar queries retain relation identity and nullable predicate structure (38.833208ms)
+✔ unsupported SQL and untrusted operators remain explicit rejections (17.064708ms)
+✔ incompatible row projections on the same relation cannot share optimism (27.909917ms)
+✔ component declarations carry server order in priority order (182.079917ms)
+✔ sort columns must be selected (20.808333ms)
+✔ unsupported direction cannot silently lose client ordering (9.666959ms)
+✔ transformed responses cannot borrow intermediate query ordering (8.125666ms)
+✔ server handler cannot capture the bound client (12.432375ms)
+✔ server handler cannot capture component state (5.821709ms)
+✔ input validator cannot capture component state (4.467583ms)
+✔ optimistic callback stays within the component while RPCs move to module scope (9.51175ms)
+✔ a row predicate is carried as data without the server auth expression (11.016834ms)
+✔ unsupported query arguments fail before generating an incorrectly scoped request (4.270083ms)
+✔ same local names in separate lexical scopes have distinct stable identities (12.235792ms)
+✔ non-endpoint instrumentation does not change declaration identities (30.694333ms)
+✔ shared encoding preserves differing rows with the same key, types, order and empty results (4.497125ms)
+✔ adaptive encoding keeps full snapshots when sharing adds bytes or values are unsupported (0.140167ms)
+ℹ tests 24
+ℹ suites 0
+ℹ pass 24
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 8926.235041

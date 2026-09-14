@@ -1,0 +1,18 @@
+✔ only a server-issued baseline with unchanged complete dependencies skips a read (1.669166ms)
+✔ unknown, cross-scope, cross-instance and expired baselines refresh (0.503541ms)
+✔ unknown dependencies refresh and cannot reuse an older certificate (0.209708ms)
+✔ a revision is captured before its rows, never after them (0.218666ms)
+✔ endpoint modules compile independently of the original filename (14.907375ms)
+✔ query parameters reach the server and instantiate client membership (5.206625ms)
+✔ registered query instances validate before a mutation starts (37.319334ms)
+✔ server registry discovers query modules absent from the current import graph (8.728375ms)
+✔ only declared scalar parameters enter the optimistic predicate (5.465417ms)
+✔ nested query modules resolve shared runtime and relation bindings (2.788708ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 334.280584

@@ -1,0 +1,48 @@
+✔ unknown and duplicate read identities reject before the write (0.717375ms)
+✔ opaque writes still refresh every requested read after the handler completes (0.515208ms)
+✔ a rejected handler is not retried and still reconciles reads (0.132083ms)
+✔ a later SQL failure preserves committed effects in the reconciliation response (1209.421083ms)
+✔ exhausted reads retain handler success or failure without repeating the handler (7009.527875ms)
+✔ overlapping actions use authority read after both handlers close (20.454792ms)
+✔ a held ordinary read cannot replace authority after its action retires (5.657459ms)
+✔ optimistic fanout publishes both collections before either subscriber runs (2.528ms)
+✔ a collection created during a write joins authoritative coverage (1.36225ms)
+✔ reentrant actions preserve event order for every subscriber (2.167458ms)
+✔ local rollback publishes every recipient together and does not cancel remote coverage (3.279042ms)
+✔ a retired read cannot block initial coverage of the restarted collection (3.629583ms)
+✔ an unsent authored failure does not leave a remote obligation (1.348416ms)
+✔ a known read failure recovers without repeating its write (2.531167ms)
+✔ a later healthy response cannot discharge an unknown remote write (0.938334ms)
+✔ authority is installed before a post-commit handler error retires the overlay (1.054458ms)
+✔ client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs (0.938292ms)
+✔ malformed authority rejects before installing any collection snapshot (5.026875ms)
+✔ generated invalid snapshots cannot partly replace the confirmed baseline (90.807584ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 146.734667
+✔ actual collection runtime regressions against PostgreSQL order (1516.671708ms)
+✔ component declarations carry server order in priority order (120.943375ms)
+✔ sort columns must be selected (6.098542ms)
+✔ unsupported direction cannot silently lose client ordering (7.843458ms)
+✔ transformed responses cannot borrow intermediate query ordering (7.273417ms)
+✔ server handler cannot capture the bound client (29.461584ms)
+✔ server handler cannot capture component state (4.8615ms)
+✔ input validator cannot capture component state (4.486292ms)
+✔ optimistic callback stays within the component while RPCs move to module scope (12.874875ms)
+✔ a row predicate is carried as data without the server auth expression (8.690416ms)
+✔ unsupported query arguments fail before generating an incorrectly scoped request (4.804708ms)
+✔ same local names in separate lexical scopes have distinct stable identities (7.1085ms)
+✔ non-endpoint instrumentation does not change declaration identities (18.286708ms)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 8340.392291

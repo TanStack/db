@@ -1,0 +1,57 @@
+{
+  "recordedAt": "2026-09-12T05:21:26.355843+00:00",
+  "oraclePassed": true,
+  "responseChecks": 1200,
+  "controls": 17,
+  "droppedResultMutantRejected": true,
+  "benchmarkCases": 13,
+  "warmSamplesPerModePerCase": 20,
+  "allWarmSamplesExcludePreparation": true,
+  "existingContracts": {
+    "passed": 21,
+    "failed": 0,
+    "command": "node --experimental-strip-types --test tests/refresh.test.mjs tests/server-order.test.mjs tests/snapshot-encoding.test.mjs",
+    "workingDirectory": "../integrated-todo",
+    "evidence": "Observed completed command output in this task"
+  },
+  "runtimeAndCompilerSourceHashesUnchangedFrom": "../design/result-diff-grammar/source-freeze.json",
+  "disposableContainer": "stopped and removed",
+  "sourceHashes": [
+    {
+      "path": "adapter.mjs",
+      "sha256": "4cf960cac728b30c95baa3a37a55702c6989a95f763dad01d4391cb0dc9a1eeb"
+    },
+    {
+      "path": "benchmark.mjs",
+      "sha256": "c888ffc48002d4869a2490340ee0171266c8c4437a5b69755a30b73a07df4b48"
+    },
+    {
+      "path": "drizzle.mjs",
+      "sha256": "2d0020c4608a8e4efee55044ac78207d8a0e72470c7aaf241cf38cc31d4ab374"
+    },
+    {
+      "path": "fixture.mjs",
+      "sha256": "41466dda27bca685eb47311809a6c562d1b8384f7f90b561303d4db5cc4b5eb7"
+    },
+    {
+      "path": "oracle.mjs",
+      "sha256": "43929b4b790bba05d254e8358c53661e67dc32e7b076fb5117c6a43289bd3afa"
+    },
+    {
+      "path": "wire.mjs",
+      "sha256": "b22c4024f7139eda962cb1d6133c012c32534236079c50cc86b3bb7fa9507e5f"
+    },
+    {
+      "path": "package.json",
+      "sha256": "4046817c73dd72f3b622aaeef6e74fc4e43aee69305f32039f5b506fb4bb8052"
+    },
+    {
+      "path": "package-lock.json",
+      "sha256": "c6ebf4241bed4faa978861380b64be78c2a5e7530b23e2941c0ef6ca4a35accf"
+    },
+    {
+      "path": "replays.json",
+      "sha256": "b1a1abac14aad64a42c8d20dc16fa238a897ab1be1e033fee4601c1c68395476"
+    }
+  ]
+}

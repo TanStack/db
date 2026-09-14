@@ -1,0 +1,71 @@
+{
+  "program": {
+    "scope": "alice",
+    "orders": [
+      [
+        "id",
+        "createdAt"
+      ],
+      [
+        "createdAt",
+        "id"
+      ]
+    ],
+    "filters": [
+      null,
+      false
+    ],
+    "canonicalize": false,
+    "repeatedNames": true,
+    "initial": [
+      {
+        "id": "seed-0",
+        "text": "initial",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "alice"
+      },
+      {
+        "id": "seed-1",
+        "text": "initial",
+        "completed": true,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "alice"
+      }
+    ]
+  },
+  "sequences": [
+    {
+      "steps": [
+        {
+          "kind": "delete",
+          "target": 1,
+          "slot": 1,
+          "text": "ébébaaéa",
+          "rank": 2,
+          "outcome": "reject",
+          "actualEffect": "other",
+          "failAfterCommit": true
+        },
+        {
+          "kind": "insert",
+          "target": 1,
+          "slot": 0,
+          "text": "bb aaé ",
+          "rank": 3,
+          "outcome": "success",
+          "actualEffect": "same",
+          "failAfterCommit": false
+        }
+      ],
+      "writeOrder": [
+        15,
+        11
+      ],
+      "deliveryOrder": [
+        3,
+        18
+      ]
+    }
+  ]
+}

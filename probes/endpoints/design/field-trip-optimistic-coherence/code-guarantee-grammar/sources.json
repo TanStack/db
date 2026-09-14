@@ -1,0 +1,74 @@
+[
+  {
+    "id": "S1",
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/function-dependencies.mjs",
+    "sha256": "50d1c236c971889aca8dd83e0e5c042251142c0139e8939c69c7ded703f7677e",
+    "coverage": "1\u201376,245\u2013305,696\u2013738: abstract interpretation, union, unknown and effectful-query exits"
+  },
+  {
+    "id": "S2",
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/compiled-dependencies.mjs",
+    "sha256": "2125033316f03cdd4781d6541a08f53bbf197bbbe32f89ae2446c86db36adb00",
+    "coverage": "215\u2013267: bound database/schema evidence and fingerprints"
+  },
+  {
+    "id": "S3",
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/bound-transform.mjs",
+    "sha256": "590ca103ac00f0a290b7137c0d3845c3492cc70906daf341f7102438c205474a",
+    "coverage": "272\u2013318,396\u2013435,504\u2013540: proof derivation, original-handler emission, diagnostics and registry metadata"
+  },
+  {
+    "id": "S4",
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/registry.server.ts",
+    "sha256": "b11b621be9349d0260750eb16a571acd8248136351e246d2404dd9ee058059d2",
+    "coverage": "105\u2013182: revision reuse and mutation recipient selection"
+  },
+  {
+    "id": "S5",
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/dependencies.server.ts",
+    "sha256": "2a2345d1fc6e1148ce12212f9bbc3643d3bcc2f9dd32ec041d745b0c92b56f3c",
+    "coverage": "Entire: relation intersection and unknown handling"
+  },
+  {
+    "id": "S6",
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/function-dependencies.test.mjs",
+    "sha256": "5eca4f2b3777edcfd7fbc0409f55c0fc1605c1b3e2e986ae3a7d2c8f3e91c9b8",
+    "coverage": "Entire: helper/transaction/unknown/mutable/validator tests and fixture"
+  },
+  {
+    "id": "S7",
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/COMPILED-DEPENDENCIES.md",
+    "sha256": "48eb71a2a05650534dcc0797117785355065662f454ea02bfd9457f8f34fb8a7",
+    "coverage": "1\u2013115: supported assumptions, build contract, Kitchen limitations, oracle scope"
+  },
+  {
+    "id": "S8",
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/fixtures/compiler-source.mjs",
+    "sha256": "226d4594d6b500fdc4c5829de7061f0dc09c779550db2f1160c790cc9734fced",
+    "coverage": "Imported databaseSource in controls; fixture-only generated schema module"
+  },
+  {
+    "id": "S9",
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/schema-snapshot.mjs",
+    "sha256": "a946376ee3a6bcfc27752524487fe00c91b0cf855ab836f266fb398e0e27f6ce",
+    "coverage": "inspectSchema invoked through existing fixture path; implementation not re-examined in this run"
+  },
+  {
+    "id": "S10",
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/field-trip-optimistic-coherence/code-guarantee-grammar/extraction-controls.mjs",
+    "sha256": "da2ba753ac660cf013eeb3b3c43e1b1ec8997c0811d949ae9922e07102694280",
+    "coverage": "Entire"
+  },
+  {
+    "id": "S11",
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/field-trip-optimistic-coherence/code-guarantee-grammar/control-results.json",
+    "sha256": "a7df6b69674734ae916e3b089db38822031e35de9a180357b1281781f7f7ca69",
+    "coverage": "Entire"
+  },
+  {
+    "id": "S12",
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/field-trip-optimistic-coherence/code-guarantee-grammar/PRESERVATION.md",
+    "sha256": "6a0b057286850aaa9a171e7bc4f17f61119585dd3eb8a9d8ac9c0feb1f1a685b",
+    "coverage": "Entire"
+  }
+]

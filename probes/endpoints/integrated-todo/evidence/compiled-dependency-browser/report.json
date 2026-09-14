@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "programs": 2,
+  "operations": 6,
+  "comparisons": 18,
+  "reads": 11,
+  "skippedReads": 7,
+  "runtimeCatalogQueries": 0,
+  "clientArtifacts": 8
+}

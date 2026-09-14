@@ -1,0 +1,91 @@
+{
+  "ok": true,
+  "scope": "Compiled cross-module parameterized collections through real browser/server and independent PG",
+  "limits": [
+    "Two sibling endpoint modules; boolean filter instances.",
+    "String/integer input validation has focused contracts; no arbitrary nested/optional parameter grammar.",
+    "Scope authorization remains the existing Alice/Bob test fixture, not production authentication."
+  ],
+  "executed": {
+    "programsBuilt": 1,
+    "sequences": 1,
+    "operations": 6,
+    "checkpoints": 19,
+    "clientArtifacts": 4,
+    "transitions": {
+      "6 queries / edit / success": 2,
+      "6 queries / delete / success": 1,
+      "6 queries / insert / success": 1,
+      "6 queries / complete / reject": 1,
+      "6 queries / complete / success": 1
+    },
+    "wire": [
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 2620,
+        "responseBytes": 3163,
+        "elapsedMs": 127.92312500000116
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "delete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 2621,
+        "responseBytes": 2854,
+        "elapsedMs": 98.10012499999903
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "insert",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 2595,
+        "responseBytes": 3152,
+        "elapsedMs": 99.15500000000065
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 2611,
+        "responseBytes": 3147,
+        "elapsedMs": 100.29441600000064
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "complete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 2611,
+        "responseBytes": 3142,
+        "elapsedMs": 116.88112499999988
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "complete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 2595,
+        "responseBytes": 3165,
+        "elapsedMs": 97.41075000000092
+      }
+    ]
+  }
+}

@@ -1,0 +1,117 @@
+{
+  "seed": 911026,
+  "N": 2,
+  "X": 3,
+  "effects": false,
+  "registry": false,
+  "programs": 1,
+  "sequences": 1,
+  "operations": 2,
+  "notifications": 3,
+  "checkpoints": 7,
+  "wire": [
+    {
+      "operations": 2,
+      "queries": 1,
+      "posts": 3,
+      "requestBytes": 1838,
+      "responseBytes": 1673
+    }
+  ],
+  "scope": "Generated compiled endpoints, concurrent waves of 2–4 optimistic actions, independent server execution and response delivery order, PostgreSQL confirmed/tentative rows, every source notification, React consumers, production client source exclusion.",
+  "limits": [
+    "Each wave settles as one cohort; no mixed-wave overlay retirement in this generator.",
+    "Lifecycle, local rollback, unknown transport and reentrant callbacks have separate actual-runtime regressions.",
+    "Wire bytes are decoded bodies; elapsed time includes gates and oracle work."
+  ],
+  "engine": {
+    "version": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit",
+    "version_num": "170005"
+  },
+  "sqlCoverage": {
+    "schemaGeneration": "fixed Todo schema; tables and column types are not generated",
+    "columnTypes": [
+      "text",
+      "boolean",
+      "timestamp without time zone"
+    ],
+    "constraints": [
+      "text primary key",
+      "not-null columns"
+    ],
+    "queryShapes": [
+      "one table with fixture scope predicate",
+      "full-row projection",
+      "optional equality on completed",
+      "ascending createdAt/id order"
+    ],
+    "mutationShapes": [
+      "insert",
+      "update",
+      "delete",
+      "multiple statements",
+      "partial commit then handler error"
+    ],
+    "demandMode": "eager full results",
+    "notGenerated": [
+      "related tables, foreign keys, cascades, triggers, defaults and generated columns",
+      "nullable columns and other PostgreSQL type families",
+      "joins, aggregates, distinct, windows, set operations, subqueries and CTEs",
+      "arbitrary expressions, functions, casts, collation and ordering modes",
+      "upsert, merge, data-modifying CTEs and explicit database transactions",
+      "on-demand predicates, finite windows, continuation, refill and subset ownership",
+      "external writers, RLS, schema changes, extensions and other PostgreSQL versions"
+    ]
+  },
+  "ok": true,
+  "productionClientArtifacts": 4,
+  "evidence": {
+    "versions": {
+      "fast-check": "3.23.2",
+      "@electric-sql/pglite": "0.3.14",
+      "drizzle-orm": "0.45.1",
+      "playwright": "1.60.0"
+    },
+    "name": "endpoints.concurrent",
+    "cases": 1,
+    "witnesses": {
+      "[\"event-materialization\",\"initial\",null]": 1,
+      "[\"collection-rows\",\"baseline\",null]": 1,
+      "[\"rendered-values\",\"baseline\",null]": 1,
+      "[\"notification-rows\",\"optimistic #\",null]": 2,
+      "[\"event-materialization\",\"optimistic #\",null]": 2,
+      "[\"collection-rows\",\"same-turn\",null]": 2,
+      "[\"rendered-values\",\"same-turn\",null]": 2,
+      "[\"event-materialization\",\"server closed #, response held\",null]": 2,
+      "[\"collection-rows\",\"server closed #, response held\",null]": 2,
+      "[\"rendered-values\",\"server closed #, response held\",null]": 2,
+      "[\"event-materialization\",\"delivered #, sibling outcome pending\",null]": 1,
+      "[\"collection-rows\",\"delivered #, sibling outcome pending\",null]": 1,
+      "[\"rendered-values\",\"delivered #, sibling outcome pending\",null]": 1,
+      "[\"notification-rows\",\"confirmed after all responses\",null]": 1,
+      "[\"event-materialization\",\"confirmed after all responses\",null]": 1,
+      "[\"collection-rows\",\"confirmed after all responses\",null]": 1,
+      "[\"rendered-values\",\"confirmed after all responses\",null]": 1
+    },
+    "faults": [],
+    "cleanupErrors": [],
+    "rejectedShrinks": [],
+    "replay": "passes",
+    "sources": {
+      "evidence.mjs": "1dcd6e9aacfef3644b702041ffd9ece1439b2b029252e6bda4d2efb86302acc4",
+      "driver.mjs": "7ea21a8a394653df6d902988aaa3cba8a55f920850f435fa84259163e1ee30c5",
+      "program.mjs": "edbee062750f6e664878b8caad5a916dfdc44cf4ffafe0ff84e6b334e423395a",
+      "compiled-dependencies.mjs": "3123ae89a541adeceb5b9bb11f6f713c7398e3ac4cf3f3faeb52aba0f1e27dd4",
+      "dependencies.mjs": "bd21fb76773d2bf1c16b415a9777ee5c27045e43014f0ca25862d7291a8222cc",
+      "concurrent.mjs": "419790a987fe4016bcff0bf5fdce3dc22a7eda629d9399930dc8481e4c926d7b",
+      "sql.mjs": "c8df01e354190691577d9b55d2d562768b83f78b0449da4217995ba7704fec8e",
+      "e2e.mjs": "d66531af8ac0d5b9c3a3c4c584cb1caf46f9c1a0922bd3647c14ed828fb2a21c",
+      "registry.mjs": "6e3a813ebccb52545de604887a5f1fe9ec5165bd80738177889bc2544580a117",
+      "loading.mjs": "4b0caba1b2dfea24e3952c2a5e4f5f06de8fb6327290e4291c051c457eae52af",
+      "compiled-browser.mjs": "3c53a36b7c56703f34f5d2f84f3458c211fd6fca0c14d185071d8378766c3ffe"
+    },
+    "node": "v24.5.0",
+    "fault": null
+  },
+  "outcome": "passed"
+}

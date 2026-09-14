@@ -1,0 +1,27 @@
+{
+  "settings": {
+    "N": 2,
+    "X": 3,
+    "maxSteps": 5,
+    "mutant": null
+  },
+  "campaigns": [],
+  "limits": [
+    "Todo schema, scoped full-row queries, ascending createdAt/id order only",
+    "Sequential operations within each sequence; no same-row concurrent scheduling contract",
+    "Dev browser execution with production client artifact inspection; no production browser execution yet",
+    "Server exclusion: live canaries, client dependency maps, raw/module request rejection and retained-server-import rejection; not proof against all possible leakage"
+  ],
+  "replay": "evidence/e2e-current/coherence/replay.json",
+  "replayPassed": true,
+  "executed": {
+    "programsBuilt": 1,
+    "sequences": 2,
+    "operations": 2,
+    "checkpoints": 8,
+    "clientArtifacts": 4,
+    "transitions": {
+      "2 queries / insert / success": 2
+    }
+  }
+}

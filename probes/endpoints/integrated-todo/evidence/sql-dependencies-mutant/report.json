@@ -1,0 +1,21 @@
+{
+  "ok": false,
+  "seed": 9122601,
+  "scenarios": 5,
+  "sequences": 2,
+  "histories": 1,
+  "operations": 0,
+  "optimisticChecks": 8,
+  "authorityChecks": 5,
+  "resultReads": 2,
+  "skippedReads": 3,
+  "responseBytes": 0,
+  "foreignKeyControls": 1,
+  "limits": [
+    "Actual SQL footprints exercise discovery and matching; no JavaScript call-graph or library inference.",
+    "Drizzle, registry, serialization and real client collections run in process; the companion browser registry oracle covers the compiled HTTP boundary.",
+    "Joins and aggregates reconcile authoritatively; only full base-table views participate in optimistic propagation.",
+    "Byte counts are JSON response estimates, not compressed HTTP bytes or latency."
+  ],
+  "error": "AssertionError [ERR_ASSERTION]: authority q5, {\"program\":{\"count\":3,\"trigger\":false},\"step\":{\"target\":0,\"actual\":0,\"value\":7,\"cross\":false,\"noop\":false,\"unknown\":false,\"fail\":false,\"external\":false}}\n+ actual - expected\n\n  [\n    {\n      id: 'row',\n+     value: 3\n-     value: 16\n    }\n  ]\n\n    at run (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/dependencies.mjs:295:16)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/dependencies.mjs:451:3"
+}

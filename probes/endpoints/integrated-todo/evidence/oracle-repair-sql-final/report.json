@@ -1,0 +1,668 @@
+{
+  "settings": {
+    "N": 1,
+    "X": 2,
+    "steps": 3,
+    "seed": 911027,
+    "effects": false
+  },
+  "limits": [
+    "Generated scalar columns extend required id/text/completed/createdAt/scope fields; not arbitrary PostgreSQL schemas.",
+    "Fixed text primary keys; nullable foreign keys use ON DELETE SET NULL.",
+    "Ascending timestamp/id ordering; predicates use scalar comparisons and NULL logic.",
+    "Sequential mutation sequences here; concurrent waves retain their separate campaign.",
+    "Auth and imported table/type bindings are trusted fixture assumptions.",
+    "No schema/type proof for arbitrary application modules, no subset loading, no LSN manifests."
+  ],
+  "engine": {
+    "version": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit",
+    "version_num": "170005"
+  },
+  "property": {
+    "seed": 911027,
+    "path": null,
+    "runs": 1,
+    "shrinks": 0
+  },
+  "ok": true,
+  "coverage": [
+    {
+      "feature": "schema.multiple-tables",
+      "description": "Several independent relation identities",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "schema.foreign-key-set-null",
+      "description": "Server-only ON DELETE SET NULL effects",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "type.integer",
+      "description": "int4 values",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "type.text",
+      "description": "Text and Unicode values",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "type.boolean",
+      "description": "Boolean values",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "type.timestamp",
+      "description": "Timestamp transport and total createdAt/id order",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "schema.nullable",
+      "description": "Nullable generated scalar columns",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "schema.not-null",
+      "description": "NOT NULL generated scalar columns",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "predicate.eq",
+      "description": "Scalar equality",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "predicate.ne",
+      "description": "Scalar inequality",
+      "status": "tested",
+      "witnesses": [
+        "scenario-1/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "predicate.gt",
+      "description": "Integer greater-than",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "predicate.gte",
+      "description": "Integer greater-than-or-equal",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.lt",
+      "description": "Integer less-than",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.lte",
+      "description": "Integer less-than-or-equal",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.and",
+      "description": "Predicate conjunction",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.or",
+      "description": "Predicate disjunction",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "predicate.isNull",
+      "description": "SQL NULL membership",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "predicate.isNotNull",
+      "description": "SQL non-NULL membership",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "mutation.insert",
+      "description": "Insert",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "mutation.edit",
+      "description": "Column updates",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "mutation.complete",
+      "description": "Boolean updates",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "mutation.delete",
+      "description": "Delete",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "mutation.cross-table",
+      "description": "An opaque handler also changes another table",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "mutation.post-commit-error",
+      "description": "A handler errors after committed writes",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "mutation.rejected",
+      "description": "Rejected write restores optimistic state",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/0"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "mutation.foreign-key-conflict",
+      "description": "Concurrent parent deletion invalidates a child update",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.limit",
+      "description": "Finite result windows",
+      "status": "explicitly-rejected",
+      "witnesses": [],
+      "rejection": "Generated compiler rejection control"
+    },
+    {
+      "feature": "query.join",
+      "description": "Joins and relationship projection",
+      "status": "explicitly-rejected",
+      "witnesses": [],
+      "rejection": "Generated compiler rejection control"
+    },
+    {
+      "feature": "query.aggregate",
+      "description": "Grouping and aggregates",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.cte",
+      "description": "CTEs and recursive queries",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.window",
+      "description": "Window functions",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.set-operation",
+      "description": "UNION/INTERSECT/EXCEPT",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "type.numeric",
+      "description": "Exact numeric and bigint transport",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "type.json-array",
+      "description": "JSON and array expressions",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "schema.trigger",
+      "description": "User-defined trigger effects",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "effect.rewrite",
+      "description": "BEFORE UPDATE rewrites authored values",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "effect.suppress",
+      "description": "BEFORE UPDATE suppresses a row without an error",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "effect.reject",
+      "description": "Trigger rejects a statement and rolls back its changes",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "effect.fanout",
+      "description": "AFTER UPDATE changes all recipient rows in the caller scope",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "effect.transition",
+      "description": "Statement trigger reads NEW TABLE and changes another table",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "effect.deferred",
+      "description": "Constraint trigger runs at the implicit transaction commit",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "authority.external-writer",
+      "description": "External writers and replica visibility",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "demand.subset",
+      "description": "On-demand subset transport and refill",
+      "status": "not-tested",
+      "witnesses": []
+    }
+  ],
+  "executed": {
+    "programsBuilt": 2,
+    "sequences": 3,
+    "operations": 11,
+    "checkpoints": 36,
+    "clientArtifacts": 8,
+    "transitions": {
+      "4 queries / edit / success": 3,
+      "4 queries / delete / success": 1,
+      "4 queries / insert / success": 1,
+      "4 queries / complete / reject": 2,
+      "4 queries / complete / success": 3,
+      "4 queries / edit / reject": 1
+    },
+    "wire": [
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 2034,
+        "responseBytes": 2743,
+        "elapsedMs": 161.78770799999984
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "delete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 2035,
+        "responseBytes": 2447,
+        "elapsedMs": 98.6893340000006
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "insert",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 2009,
+        "responseBytes": 2745,
+        "elapsedMs": 98.98208299999897
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 2025,
+        "responseBytes": 2726,
+        "elapsedMs": 116.79399999999987
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "complete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 2025,
+        "responseBytes": 2721,
+        "elapsedMs": 97.53345799999988
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "complete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 2023,
+        "responseBytes": 2827,
+        "elapsedMs": 163.99725000000035
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "complete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 2043,
+        "responseBytes": 2803,
+        "elapsedMs": 98.70683300000019
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "edit",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 2038,
+        "responseBytes": 2803,
+        "elapsedMs": 100.9407089999986
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "complete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 2011,
+        "responseBytes": 2823,
+        "elapsedMs": 97.91962499999863
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "complete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 2053,
+        "responseBytes": 2818,
+        "elapsedMs": 99.1037920000017
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 2059,
+        "responseBytes": 2831,
+        "elapsedMs": 105.12425000000076
+      }
+    ]
+  },
+  "evidence": {
+    "versions": {
+      "fast-check": "3.23.2",
+      "@electric-sql/pglite": "0.3.14",
+      "drizzle-orm": "0.45.1",
+      "playwright": "1.60.0"
+    },
+    "name": "endpoints.sql",
+    "cases": 2,
+    "witnesses": {
+      "[\"collection-rows\",\"baseline\",null]": 3,
+      "[\"rendered-values\",\"baseline\",null]": 3,
+      "[\"collection-rows\",\"same-turn\",null]": 11,
+      "[\"rendered-values\",\"same-turn\",null]": 11,
+      "[\"collection-rows\",\"operation #: committed, read held\",null]": 11,
+      "[\"rendered-values\",\"operation #: committed, read held\",null]": 11,
+      "[\"collection-rows\",\"operation #: success\",null]": 8,
+      "[\"rendered-values\",\"operation #: success\",null]": 8,
+      "[\"collection-rows\",\"operation #: reject\",null]": 3,
+      "[\"rendered-values\",\"operation #: reject\",null]": 3
+    },
+    "faults": [],
+    "cleanupErrors": [],
+    "rejectedShrinks": [],
+    "generation": {
+      "seed": 911027,
+      "path": null,
+      "runs": 1,
+      "shrinks": 0
+    },
+    "sources": {
+      "evidence.mjs": "b32e25f6b868a5906e8a969c32a5c3f561cd82255a555af1fd3a378193fe3493",
+      "driver.mjs": "7ea21a8a394653df6d902988aaa3cba8a55f920850f435fa84259163e1ee30c5",
+      "program.mjs": "edbee062750f6e664878b8caad5a916dfdc44cf4ffafe0ff84e6b334e423395a",
+      "compiled-dependencies.mjs": "3123ae89a541adeceb5b9bb11f6f713c7398e3ac4cf3f3faeb52aba0f1e27dd4",
+      "dependencies.mjs": "bd21fb76773d2bf1c16b415a9777ee5c27045e43014f0ca25862d7291a8222cc",
+      "concurrent.mjs": "419790a987fe4016bcff0bf5fdce3dc22a7eda629d9399930dc8481e4c926d7b",
+      "sql.mjs": "c8df01e354190691577d9b55d2d562768b83f78b0449da4217995ba7704fec8e",
+      "e2e.mjs": "d66531af8ac0d5b9c3a3c4c584cb1caf46f9c1a0922bd3647c14ed828fb2a21c",
+      "registry.mjs": "6e3a813ebccb52545de604887a5f1fe9ec5165bd80738177889bc2544580a117",
+      "loading.mjs": "4b0caba1b2dfea24e3952c2a5e4f5f06de8fb6327290e4291c051c457eae52af",
+      "compiled-browser.mjs": "3c53a36b7c56703f34f5d2f84f3458c211fd6fca0c14d185071d8378766c3ffe",
+      "../../src/runtime.ts": "1c9924886ee269769b39d6049416bd09b16662bf4ef2c5e81a7fb0a492081bc3",
+      "../../src/registry.server.ts": "b11b621be9349d0260750eb16a571acd8248136351e246d2404dd9ee058059d2",
+      "../../src/dependencies.server.ts": "2a2345d1fc6e1148ce12212f9bbc3643d3bcc2f9dd32ec041d745b0c92b56f3c",
+      "../../bound-transform.mjs": "b57630ea8447142510adab49a7bdf26a5ba70acb0e8f145d36b7897a19f14093"
+    },
+    "node": "v24.5.0",
+    "fault": null
+  },
+  "outcome": "passed"
+}

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "frozenAt": "2026-09-12T17:17:12.510557+00:00",
+  "files": {
+    "grammar-model.md": "9364632f9f63ad6c1e82c547d70c6bfd79e53fa24b3b93617761825371a35fc8",
+    "grammar-evidence.md": "037f42e2f916054eaa57079d4bddc89bd7e74d95168de64bf46a6ce056257643",
+    "grammar-process.md": "5e9566aa5c7d0ace170b2c2c57f6d9309c75a1ff2a9f6f575288d0a687b2f283",
+    "audit-candidate.md": "8feb6854bb085aec0beea19901f75928cd676e8281a2af31ec2d8a37ef818245"
+  }
+}

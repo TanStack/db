@@ -1,0 +1,522 @@
+
+> test:contracts
+> node --experimental-strip-types --test tests/server-order.test.mjs tests/refresh.test.mjs tests/registry.test.mjs tests/runtime.test.mjs tests/scalar-query.test.mjs tests/scalar-membership.test.mjs tests/snapshot-encoding.test.mjs tests/pruning.test.mjs tests/dependencies.test.mjs tests/handler-dependencies.test.mjs tests/function-dependencies.test.mjs tests/compiled-dependencies.test.mjs tests/schema-snapshot.test.mjs
+
+(node:565) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+TAP version 13
+# (node:566) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: compilation emits inspected read and write footprints, without catalog code
+ok 1 - compilation emits inspected read and write footprints, without catalog code
+  ---
+  duration_ms: 1959.197958
+  ...
+# Subtest: absent connection configuration removes stale compilation evidence
+ok 2 - absent connection configuration removes stale compilation evidence
+  ---
+  duration_ms: 52.207958
+  ...
+# (node:568) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: disjoint complete dependencies skip reads after the handler closes
+ok 3 - disjoint complete dependencies skip reads after the handler closes
+  ---
+  duration_ms: 1.4755
+  ...
+# Subtest: optimistic targets and missing baselines require authority even for disjoint writes
+ok 4 - optimistic targets and missing baselines require authority even for disjoint writes
+  ---
+  duration_ms: 1.694
+  ...
+# Subtest: unknown read or write effects cannot establish disjointness
+ok 5 - unknown read or write effects cannot establish disjointness
+  ---
+  duration_ms: 0.874375
+  ...
+# Subtest: admission includes skipped instances and runs before writes
+ok 6 - admission includes skipped instances and runs before writes
+  ---
+  duration_ms: 0.112792
+  ...
+# Subtest: partial commit errors still reconcile the complete write set
+ok 7 - partial commit errors still reconcile the complete write set
+  ---
+  duration_ms: 0.236916
+  ...
+# Subtest: multi-relation queries include auth dependencies and distinguish schema and authority
+ok 8 - multi-relation queries include auth dependencies and distinguish schema and authority
+  ---
+  duration_ms: 0.197583
+  ...
+# Subtest: parameterized unaffected identities survive the application transport serializer
+ok 9 - parameterized unaffected identities survive the application transport serializer
+  ---
+  duration_ms: 6.364625
+  ...
+# (node:569) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: follows aliased reexports, local helpers and transaction parameters
+ok 10 - follows aliased reexports, local helpers and transaction parameters
+  ---
+  duration_ms: 1957.592625
+  ...
+# Subtest: unions writes through branches and callbacks, including writes before failure
+ok 11 - unions writes through branches and callbacks, including writes before failure
+  ---
+  duration_ms: 409.81675
+  ...
+# Subtest: follows returned service objects and query transforms
+ok 12 - follows returned service objects and query transforms
+  ---
+  duration_ms: 374.0445
+  ...
+# Subtest: unknown effects, recursive calls and raw SQL cannot yield partial proofs
+ok 13 - unknown effects, recursive calls and raw SQL cannot yield partial proofs
+  ---
+  duration_ms: 393.628958
+  ...
+# Subtest: helper source changes invalidate endpoint versions
+ok 14 - helper source changes invalidate endpoint versions
+  ---
+  duration_ms: 375.543958
+  ...
+# Subtest: driver coercions cannot hide writes in SQL argument objects
+ok 15 - driver coercions cannot hide writes in SQL argument objects
+  ---
+  duration_ms: 367.414292
+  ...
+# Subtest: function parameters preserve callbacks and namespace aliases
+ok 16 - function parameters preserve callbacks and namespace aliases
+  ---
+  duration_ms: 361.437458
+  ...
+# Subtest: reassigned exported functions keep unknown effects
+ok 17 - reassigned exported functions keep unknown effects
+  ---
+  duration_ms: 392.451958
+  ...
+# Subtest: ordinary validation and transforms in service functions preserve write discovery
+ok 18 - ordinary validation and transforms in service functions preserve write discovery
+  ---
+  duration_ms: 376.855666
+  ...
+# Subtest: validator callbacks with database effects remain unknown
+ok 19 - validator callbacks with database effects remain unknown
+  ---
+  duration_ms: 386.329708
+  ...
+# (node:573) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: direct read dependencies come from the actual Drizzle table binding
+ok 20 - direct read dependencies come from the actual Drizzle table binding
+  ---
+  duration_ms: 8.169292
+  ...
+# Subtest: one direct insert, update or delete yields a bounded write candidate
+ok 21 - one direct insert, update or delete yields a bounded write candidate
+  ---
+  duration_ms: 3.887042
+  ...
+# Subtest: opaque calls, additional SQL, raw SQL and validator effects remain unknown
+ok 22 - opaque calls, additional SQL, raw SQL and validator effects remain unknown
+  ---
+  duration_ms: 19.574375
+  ...
+# (node:574) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: only a server-issued baseline with unchanged complete dependencies skips a read
+ok 23 - only a server-issued baseline with unchanged complete dependencies skips a read
+  ---
+  duration_ms: 1.62725
+  ...
+# Subtest: unknown, cross-scope, cross-instance and expired baselines refresh
+ok 24 - unknown, cross-scope, cross-instance and expired baselines refresh
+  ---
+  duration_ms: 2.96075
+  ...
+# Subtest: unknown dependencies refresh and cannot reuse an older certificate
+ok 25 - unknown dependencies refresh and cannot reuse an older certificate
+  ---
+  duration_ms: 0.664125
+  ...
+# Subtest: a revision is captured before its rows, never after them
+ok 26 - a revision is captured before its rows, never after them
+  ---
+  duration_ms: 0.346125
+  ...
+# Subtest: evicting a server baseline only forces a full read
+ok 27 - evicting a server baseline only forces a full read
+  ---
+  duration_ms: 39.980458
+  ...
+# Subtest: parameterized baseline identities survive the actual transport serializer
+ok 28 - parameterized baseline identities survive the actual transport serializer
+  ---
+  duration_ms: 4.347083
+  ...
+# (node:576) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: unknown and duplicate read identities reject before the write
+ok 29 - unknown and duplicate read identities reject before the write
+  ---
+  duration_ms: 0.858458
+  ...
+# Subtest: opaque writes still refresh every requested read after the handler completes
+ok 30 - opaque writes still refresh every requested read after the handler completes
+  ---
+  duration_ms: 0.687708
+  ...
+# Subtest: a rejected handler is not retried and still reconciles reads
+ok 31 - a rejected handler is not retried and still reconciles reads
+  ---
+  duration_ms: 0.144417
+  ...
+# Subtest: a later SQL failure preserves committed effects in the reconciliation response
+ok 32 - a later SQL failure preserves committed effects in the reconciliation response
+  ---
+  duration_ms: 1866.038917
+  ...
+# Subtest: exhausted reads retain handler success or failure without repeating the handler
+ok 33 - exhausted reads retain handler success or failure without repeating the handler
+  ---
+  duration_ms: 7006.493333
+  ...
+# (node:578) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: endpoint modules compile independently of the original filename
+ok 34 - endpoint modules compile independently of the original filename
+  ---
+  duration_ms: 22.845916
+  ...
+# Subtest: query parameters reach the server and instantiate client membership
+ok 35 - query parameters reach the server and instantiate client membership
+  ---
+  duration_ms: 16.034792
+  ...
+# Subtest: registered query instances validate before a mutation starts
+ok 36 - registered query instances validate before a mutation starts
+  ---
+  duration_ms: 92.526458
+  ...
+# Subtest: server registry discovers query modules absent from the current import graph
+ok 37 - server registry discovers query modules absent from the current import graph
+  ---
+  duration_ms: 18.729333
+  ...
+# Subtest: only declared scalar parameters enter the optimistic predicate
+ok 38 - only declared scalar parameters enter the optimistic predicate
+  ---
+  duration_ms: 34.432625
+  ...
+# Subtest: nested query modules resolve shared runtime and relation bindings
+ok 39 - nested query modules resolve shared runtime and relation bindings
+  ---
+  duration_ms: 54.370875
+  ...
+# (node:579) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# TAP version 13
+# \# Subtest: overlapping actions use authority read after both handlers close
+# ok 1 - overlapping actions use authority read after both handlers close
+#   ---
+#   duration_ms: 19.404041
+#   ...
+# \# Subtest: a held ordinary read cannot replace authority after its action retires
+# ok 2 - a held ordinary read cannot replace authority after its action retires
+#   ---
+#   duration_ms: 5.852125
+#   ...
+# \# Subtest: optimistic fanout publishes both collections before either subscriber runs
+# ok 3 - optimistic fanout publishes both collections before either subscriber runs
+#   ---
+#   duration_ms: 4.203
+#   ...
+# \# Subtest: a collection created during a write joins authoritative coverage
+# ok 4 - a collection created during a write joins authoritative coverage
+#   ---
+#   duration_ms: 3.328375
+#   ...
+# \# Subtest: reentrant actions preserve event order for every subscriber
+# ok 5 - reentrant actions preserve event order for every subscriber
+#   ---
+#   duration_ms: 3.309792
+#   ...
+# \# Subtest: local rollback publishes every recipient together and does not cancel remote coverage
+# ok 6 - local rollback publishes every recipient together and does not cancel remote coverage
+#   ---
+#   duration_ms: 4.197834
+#   ...
+# \# Subtest: a retired read cannot block initial coverage of the restarted collection
+# ok 7 - a retired read cannot block initial coverage of the restarted collection
+#   ---
+#   duration_ms: 3.023833
+#   ...
+# \# Subtest: an unsent authored failure does not leave a remote obligation
+# ok 8 - an unsent authored failure does not leave a remote obligation
+#   ---
+#   duration_ms: 2.06625
+#   ...
+# \# Subtest: a known read failure recovers without repeating its write
+# ok 9 - a known read failure recovers without repeating its write
+#   ---
+#   duration_ms: 3.325166
+#   ...
+# \# Subtest: a later healthy response cannot discharge an unknown remote write
+# ok 10 - a later healthy response cannot discharge an unknown remote write
+#   ---
+#   duration_ms: 1.616791
+#   ...
+# \# Subtest: a new action invalidates an in-flight repair without waiting for its obsolete read
+# ok 11 - a new action invalidates an in-flight repair without waiting for its obsolete read
+#   ---
+#   duration_ms: 4.861458
+#   ...
+# \# Subtest: shared snapshots preserve extra columns and collection-local optimistic ownership
+# ok 12 - shared snapshots preserve extra columns and collection-local optimistic ownership
+#   ---
+#   duration_ms: 2.294291
+#   ...
+# \# Subtest: malformed shared indexes reject before installing any authority
+# ok 13 - malformed shared indexes reject before installing any authority
+#   ---
+#   duration_ms: 4.887375
+#   ...
+# \# Subtest: authority cannot silently omit a selected scalar column
+# ok 14 - authority cannot silently omit a selected scalar column
+#   ---
+#   duration_ms: 1.111791
+#   ...
+# \# Subtest: parameterized collections have stable distinct identities and send every retained instance
+# ok 15 - parameterized collections have stable distinct identities and send every retained instance
+#   ---
+#   duration_ms: 3.574125
+#   ...
+# \# Subtest: registry admission rejection closes the operation and permits a later healthy mutation
+# ok 16 - registry admission rejection closes the operation and permits a later healthy mutation
+#   ---
+#   duration_ms: 1.206584
+#   ...
+# \# Subtest: incompatible cross-module projections reject before creating an optimistic recipient
+# ok 17 - incompatible cross-module projections reject before creating an optimistic recipient
+#   ---
+#   duration_ms: 0.528
+#   ...
+# \# Subtest: a parameter instance created during a mutation joins fresh authoritative coverage
+# ok 18 - a parameter instance created during a mutation joins fresh authoritative coverage
+#   ---
+#   duration_ms: 1.347833
+#   ...
+# \# Subtest: unchanged authority preserves confirmed rows and retires a wrong optimistic guess
+# ok 19 - unchanged authority preserves confirmed rows and retires a wrong optimistic guess
+#   ---
+#   duration_ms: 3.5015
+#   ...
+# \# Subtest: unmatched unchanged certificates cannot settle an action
+# ok 20 - unmatched unchanged certificates cannot settle an action
+#   ---
+#   duration_ms: 0.829625
+#   ...
+# \# Subtest: overlapping unchanged responses still require a fresh authority read
+# ok 21 - overlapping unchanged responses still require a fresh authority read
+#   ---
+#   duration_ms: 2.503166
+#   ...
+# \# Subtest: an unchanged optimistic value still executes and reconciles the server mutation
+# ok 22 - an unchanged optimistic value still executes and reconciles the server mutation
+#   ---
+#   duration_ms: 1.898
+#   ...
+# \# Subtest: selective authority retires optimism while leaving unrelated external writes undiscovered
+# ok 23 - selective authority retires optimism while leaving unrelated external writes undiscovered
+#   ---
+#   duration_ms: 1.862292
+#   ...
+# \# Subtest: unaffected responses cannot omit, duplicate, invent, or skip optimistic targets
+# ok 24 - unaffected responses cannot omit, duplicate, invent, or skip optimistic targets
+#   ---
+#   duration_ms: 5.972167
+#   ...
+# \# Subtest: overlapping selective responses still require a fresh read after both handlers close
+# ok 25 - overlapping selective responses still require a fresh read after both handlers close
+#   ---
+#   duration_ms: 4.215333
+#   ...
+# \# Subtest: endpoint refetch discovers external writes without a mutation
+# ok 26 - endpoint refetch discovers external writes without a mutation
+#   ---
+#   duration_ms: 1.626208
+#   ...
+# \# Subtest: authority is installed before a post-commit handler error retires the overlay
+# ok 27 - authority is installed before a post-commit handler error retires the overlay
+#   ---
+#   duration_ms: 1.337958
+#   ...
+# \# Subtest: client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs
+# ok 28 - client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs
+#   ---
+#   duration_ms: 1.636791
+#   ...
+# \# Subtest: malformed authority rejects before installing any collection snapshot
+# ok 29 - malformed authority rejects before installing any collection snapshot
+#   ---
+#   duration_ms: 7.357084
+#   ...
+# \# Subtest: generated invalid snapshots cannot partly replace the confirmed baseline
+# ok 30 - generated invalid snapshots cannot partly replace the confirmed baseline
+#   ---
+#   duration_ms: 120.938834
+#   ...
+# \# Subtest: non-fixture scopes reconcile application rows without Todo fields
+# ok 31 - non-fixture scopes reconcile application rows without Todo fields
+#   ---
+#   duration_ms: 1.284584
+#   ...
+# 1..31
+# \# tests 31
+# \# suites 0
+# \# pass 31
+# \# fail 0
+# \# cancelled 0
+# \# skipped 0
+# \# todo 0
+# \# duration_ms 231.065417
+# Subtest: actual collection runtime regressions against PostgreSQL order
+ok 40 - actual collection runtime regressions against PostgreSQL order
+  ---
+  duration_ms: 2304.920042
+  ...
+# (node:580) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: DB scalar membership agrees with PostgreSQL three-valued predicates
+ok 41 - DB scalar membership agrees with PostgreSQL three-valued predicates
+  ---
+  duration_ms: 1979.345083
+  ...
+# (node:582) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: scalar queries retain relation identity and nullable predicate structure
+ok 42 - scalar queries retain relation identity and nullable predicate structure
+  ---
+  duration_ms: 101.704917
+  ...
+# Subtest: unsupported SQL and untrusted operators remain explicit rejections
+ok 43 - unsupported SQL and untrusted operators remain explicit rejections
+  ---
+  duration_ms: 53.298084
+  ...
+# Subtest: incompatible row projections on the same relation cannot share optimism
+ok 44 - incompatible row projections on the same relation cannot share optimism
+  ---
+  duration_ms: 2.79475
+  ...
+# (node:583) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: catalog footprints follow transitive FK actions and stop at unknown recipients
+ok 45 - catalog footprints follow transitive FK actions and stop at unknown recipients
+  ---
+  duration_ms: 1845.89175
+  ...
+# Subtest: policies, views, custom types, defaults and generated values keep the fallback
+ok 46 - policies, views, custom types, defaults and generated values keep the fallback
+  ---
+  duration_ms: 413.861833
+  ...
+# (node:584) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: component declarations carry server order in priority order
+ok 47 - component declarations carry server order in priority order
+  ---
+  duration_ms: 360.956125
+  ...
+# Subtest: sort columns must be selected
+ok 48 - sort columns must be selected
+  ---
+  duration_ms: 10.339417
+  ...
+# Subtest: unsupported direction cannot silently lose client ordering
+ok 49 - unsupported direction cannot silently lose client ordering
+  ---
+  duration_ms: 131.203458
+  ...
+# Subtest: transformed responses cannot borrow intermediate query ordering
+ok 50 - transformed responses cannot borrow intermediate query ordering
+  ---
+  duration_ms: 39.39825
+  ...
+# Subtest: server handler cannot capture the bound client
+ok 51 - server handler cannot capture the bound client
+  ---
+  duration_ms: 11.417792
+  ...
+# Subtest: server handler cannot capture component state
+ok 52 - server handler cannot capture component state
+  ---
+  duration_ms: 35.11925
+  ...
+# Subtest: input validator cannot capture component state
+ok 53 - input validator cannot capture component state
+  ---
+  duration_ms: 42.750542
+  ...
+# Subtest: optimistic callback stays within the component while RPCs move to module scope
+ok 54 - optimistic callback stays within the component while RPCs move to module scope
+  ---
+  duration_ms: 158.673833
+  ...
+# Subtest: a row predicate is carried as data without the server auth expression
+ok 55 - a row predicate is carried as data without the server auth expression
+  ---
+  duration_ms: 13.185625
+  ...
+# Subtest: unsupported query arguments fail before generating an incorrectly scoped request
+ok 56 - unsupported query arguments fail before generating an incorrectly scoped request
+  ---
+  duration_ms: 29.977083
+  ...
+# Subtest: same local names in separate lexical scopes have distinct stable identities
+ok 57 - same local names in separate lexical scopes have distinct stable identities
+  ---
+  duration_ms: 44.290167
+  ...
+# Subtest: non-endpoint instrumentation does not change declaration identities
+ok 58 - non-endpoint instrumentation does not change declaration identities
+  ---
+  duration_ms: 59.668125
+  ...
+# Subtest: build-time schema dependencies never become client module dependencies
+ok 59 - build-time schema dependencies never become client module dependencies
+  ---
+  duration_ms: 23.52375
+  ...
+# (node:585) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: shared encoding preserves differing rows with the same key, types, order and empty results
+ok 60 - shared encoding preserves differing rows with the same key, types, order and empty results
+  ---
+  duration_ms: 4.158916
+  ...
+# Subtest: adaptive encoding keeps full snapshots when sharing adds bytes or values are unsupported
+ok 61 - adaptive encoding keeps full snapshots when sharing adds bytes or values are unsupported
+  ---
+  duration_ms: 0.288458
+  ...
+# Subtest: distinct compiler relation groups bypass row encoding entirely
+ok 62 - distinct compiler relation groups bypass row encoding entirely
+  ---
+  duration_ms: 0.083208
+  ...
+# Subtest: disjoint row keys bypass payload encoding even within the same relation
+ok 63 - disjoint row keys bypass payload encoding even within the same relation
+  ---
+  duration_ms: 0.205916
+  ...
+1..63
+# tests 63
+# suites 0
+# pass 63
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 9010.371916

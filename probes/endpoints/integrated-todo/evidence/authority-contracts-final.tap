@@ -1,0 +1,193 @@
+(node:22031) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+TAP version 13
+# (node:22036) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: unknown and duplicate read identities reject before the write
+ok 1 - unknown and duplicate read identities reject before the write
+  ---
+  duration_ms: 0.803375
+  ...
+# Subtest: opaque writes still refresh every requested read after the handler completes
+ok 2 - opaque writes still refresh every requested read after the handler completes
+  ---
+  duration_ms: 2.22875
+  ...
+# Subtest: a rejected handler is not retried and still reconciles reads
+ok 3 - a rejected handler is not retried and still reconciles reads
+  ---
+  duration_ms: 0.195125
+  ...
+# Subtest: a later SQL failure preserves committed effects in the reconciliation response
+ok 4 - a later SQL failure preserves committed effects in the reconciliation response
+  ---
+  duration_ms: 1039.647375
+  ...
+# Subtest: exhausted reads retain handler success or failure without repeating the handler
+ok 5 - exhausted reads retain handler success or failure without repeating the handler
+  ---
+  duration_ms: 7010.772958
+  ...
+# (node:22037) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# TAP version 13
+# \# Subtest: overlapping actions use authority read after both handlers close
+# ok 1 - overlapping actions use authority read after both handlers close
+#   ---
+#   duration_ms: 16.8905
+#   ...
+# \# Subtest: a held ordinary read cannot replace authority after its action retires
+# ok 2 - a held ordinary read cannot replace authority after its action retires
+#   ---
+#   duration_ms: 7.376
+#   ...
+# \# Subtest: optimistic fanout publishes both collections before either subscriber runs
+# ok 3 - optimistic fanout publishes both collections before either subscriber runs
+#   ---
+#   duration_ms: 4.857125
+#   ...
+# \# Subtest: a collection created during a write joins authoritative coverage
+# ok 4 - a collection created during a write joins authoritative coverage
+#   ---
+#   duration_ms: 2.279041
+#   ...
+# \# Subtest: reentrant actions preserve event order for every subscriber
+# ok 5 - reentrant actions preserve event order for every subscriber
+#   ---
+#   duration_ms: 3.207208
+#   ...
+# \# Subtest: local rollback publishes every recipient together and does not cancel remote coverage
+# ok 6 - local rollback publishes every recipient together and does not cancel remote coverage
+#   ---
+#   duration_ms: 7.1265
+#   ...
+# \# Subtest: a retired read cannot block initial coverage of the restarted collection
+# ok 7 - a retired read cannot block initial coverage of the restarted collection
+#   ---
+#   duration_ms: 4.545333
+#   ...
+# \# Subtest: an unsent authored failure does not leave a remote obligation
+# ok 8 - an unsent authored failure does not leave a remote obligation
+#   ---
+#   duration_ms: 2.193375
+#   ...
+# \# Subtest: a known read failure recovers without repeating its write
+# ok 9 - a known read failure recovers without repeating its write
+#   ---
+#   duration_ms: 3.742166
+#   ...
+# \# Subtest: a later healthy response cannot discharge an unknown remote write
+# ok 10 - a later healthy response cannot discharge an unknown remote write
+#   ---
+#   duration_ms: 1.739417
+#   ...
+# \# Subtest: a new action invalidates an in-flight repair without waiting for its obsolete read
+# ok 11 - a new action invalidates an in-flight repair without waiting for its obsolete read
+#   ---
+#   duration_ms: 3.196166
+#   ...
+# \# Subtest: authority is installed before a post-commit handler error retires the overlay
+# ok 12 - authority is installed before a post-commit handler error retires the overlay
+#   ---
+#   duration_ms: 1.665542
+#   ...
+# \# Subtest: client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs
+# ok 13 - client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs
+#   ---
+#   duration_ms: 1.241542
+#   ...
+# \# Subtest: malformed authority rejects before installing any collection snapshot
+# ok 14 - malformed authority rejects before installing any collection snapshot
+#   ---
+#   duration_ms: 7.019792
+#   ...
+# \# Subtest: generated invalid snapshots cannot partly replace the confirmed baseline
+# ok 15 - generated invalid snapshots cannot partly replace the confirmed baseline
+#   ---
+#   duration_ms: 108.034625
+#   ...
+# 1..15
+# \# tests 15
+# \# suites 0
+# \# pass 15
+# \# fail 0
+# \# cancelled 0
+# \# skipped 0
+# \# todo 0
+# \# duration_ms 183.521541
+# Subtest: actual collection runtime regressions against PostgreSQL order
+ok 6 - actual collection runtime regressions against PostgreSQL order
+  ---
+  duration_ms: 1382.208166
+  ...
+# (node:22038) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: component declarations carry server order in priority order
+ok 7 - component declarations carry server order in priority order
+  ---
+  duration_ms: 301.394667
+  ...
+# Subtest: sort columns must be selected
+ok 8 - sort columns must be selected
+  ---
+  duration_ms: 22.472708
+  ...
+# Subtest: unsupported direction cannot silently lose client ordering
+ok 9 - unsupported direction cannot silently lose client ordering
+  ---
+  duration_ms: 22.938792
+  ...
+# Subtest: transformed responses cannot borrow intermediate query ordering
+ok 10 - transformed responses cannot borrow intermediate query ordering
+  ---
+  duration_ms: 8.554625
+  ...
+# Subtest: server handler cannot capture the bound client
+ok 11 - server handler cannot capture the bound client
+  ---
+  duration_ms: 19.800709
+  ...
+# Subtest: server handler cannot capture component state
+ok 12 - server handler cannot capture component state
+  ---
+  duration_ms: 34.301959
+  ...
+# Subtest: input validator cannot capture component state
+ok 13 - input validator cannot capture component state
+  ---
+  duration_ms: 24.687083
+  ...
+# Subtest: optimistic callback stays within the component while RPCs move to module scope
+ok 14 - optimistic callback stays within the component while RPCs move to module scope
+  ---
+  duration_ms: 21.522541
+  ...
+# Subtest: a row predicate is carried as data without the server auth expression
+ok 15 - a row predicate is carried as data without the server auth expression
+  ---
+  duration_ms: 15.694167
+  ...
+# Subtest: unsupported query arguments fail before generating an incorrectly scoped request
+ok 16 - unsupported query arguments fail before generating an incorrectly scoped request
+  ---
+  duration_ms: 24.43975
+  ...
+# Subtest: same local names in separate lexical scopes have distinct stable identities
+ok 17 - same local names in separate lexical scopes have distinct stable identities
+  ---
+  duration_ms: 13.619792
+  ...
+# Subtest: non-endpoint instrumentation does not change declaration identities
+ok 18 - non-endpoint instrumentation does not change declaration identities
+  ---
+  duration_ms: 45.158208
+  ...
+1..18
+# tests 18
+# suites 0
+# pass 18
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 8176.749875

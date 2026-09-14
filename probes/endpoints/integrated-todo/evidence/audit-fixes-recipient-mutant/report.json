@@ -1,0 +1,27 @@
+{
+  "settings": {
+    "N": 2,
+    "X": 3,
+    "maxSteps": 5,
+    "mutant": "optimistic-recipients-only"
+  },
+  "campaigns": [],
+  "limits": [
+    "Todo schema, full-row queries with all/completed predicates, ascending createdAt/id order",
+    "Sequential operations within each sequence; no same-row concurrent scheduling contract",
+    "Dev browser execution with production client artifact inspection; no production browser execution yet",
+    "Server exclusion: live canaries, client dependency maps, raw/module request rejection and retained-server-import rejection; not proof against all possible leakage"
+  ],
+  "harnessError": "AssertionError [ERR_ASSERTION]: operation 0: success: every active collection must equal reference PG\n+ actual - expected\n... Skipped lines\n\n  [\n    [\n      {\n        completed: true,\n        createdAt: '2026-01-01T00:00:00.000Z',\n...\n        createdAt: '2026-01-01T00:00:00.000Z',\n-       id: 'new-0',\n-       text: 'independent effect'\n-     },\n-     {\n-       completed: true,\n-       createdAt: '2026-01-01T00:00:00.000Z',\n        id: '',\n        text: 'private'\n      }\n    ],\n    []\n\n    at Driver.checkpoint (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/driver.mjs:310:12)\n    at async Driver.run (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/driver.mjs:580:9)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/e2e.mjs:166:7",
+  "executed": {
+    "programsBuilt": 1,
+    "sequences": 1,
+    "operations": 1,
+    "checkpoints": 4,
+    "clientArtifacts": 4,
+    "transitions": {
+      "4 queries / insert / success": 1
+    },
+    "wire": []
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "ok": false,
+  "seed": 9122602,
+  "scenarios": 1,
+  "sequences": 1,
+  "compilations": 1,
+  "operations": 0,
+  "authorityChecks": 3,
+  "resultReads": 0,
+  "skippedReads": 0,
+  "runtimeCatalogQueries": 0,
+  "error": "AssertionError [ERR_ASSERTION]: compiled read count {\"program\":{\"helpers\":false,\"helperFanout\":false,\"inlineSql\":true,\"nativeDefaults\":true,\"expressionIndex\":true,\"count\":3,\"trigger\":false,\"foreignKey\":false},\"step\":{\"kind\":\"update\",\"table\":0,\"value\":7}}\n\n3 !== 1\n\n    at scenario (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/compiled-dependencies.mjs:240:18)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/compiled-dependencies.mjs:268:3"
+}

@@ -1,0 +1,506 @@
+{
+  "seed": 9142601,
+  "mutant": "omit-body-read",
+  "original": {
+    "program": {
+      "index": "partial",
+      "volatility": "VOLATILE",
+      "depth": 0
+    },
+    "histories": [
+      [
+        {
+          "kind": "function",
+          "value": -2,
+          "optimistic": 3
+        },
+        {
+          "kind": "function",
+          "value": 2,
+          "optimistic": 2
+        },
+        {
+          "kind": "function",
+          "value": 4,
+          "optimistic": 2
+        },
+        {
+          "kind": "direct",
+          "value": 7,
+          "optimistic": 2
+        },
+        {
+          "kind": "read-write",
+          "value": -9,
+          "optimistic": 1
+        }
+      ]
+    ],
+    "failure": {
+      "law": "values",
+      "checkpoint": "settled",
+      "actual": [
+        [
+          {
+            "id": "row",
+            "value": 1
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 3
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": -2
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 3
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 2
+          }
+        ]
+      ],
+      "expected": [
+        [
+          {
+            "id": "row",
+            "value": 1
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": -1
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": -2
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 3
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 2
+          }
+        ]
+      ],
+      "cell": "partial/VOLATILE/depth-0",
+      "step": {
+        "kind": "function",
+        "value": -2,
+        "optimistic": 3
+      },
+      "summaries": [
+        {
+          "reads": [
+            "[\"app\",\"t0\"]"
+          ],
+          "writes": [],
+          "unknown": [],
+          "derivation": [
+            {
+              "rule": "relation-event",
+              "source": "endpoint",
+              "target": "[\"app\",\"t0\"]",
+              "operation": "select",
+              "details": {}
+            }
+          ],
+          "artifact": "f0eece6bef758b7e7407299ce9d4019757122c61fab04555fafd5851bfce29bf"
+        },
+        {
+          "reads": [
+            "[\"app\",\"t0\"]",
+            "[\"app\",\"t1\"]"
+          ],
+          "writes": [],
+          "unknown": [],
+          "derivation": [
+            {
+              "rule": "relation-event",
+              "source": "endpoint",
+              "target": "[\"app\",\"t0\"]",
+              "operation": "select",
+              "details": {}
+            },
+            {
+              "rule": "routine-call",
+              "source": "endpoint",
+              "target": "routine:16409"
+            },
+            {
+              "rule": "routine-call",
+              "source": "routine:16409",
+              "target": "routine:16407"
+            },
+            {
+              "rule": "relation-event",
+              "source": "routine:16407",
+              "target": "[\"app\",\"t1\"]",
+              "operation": "select",
+              "details": {}
+            }
+          ],
+          "artifact": "f0eece6bef758b7e7407299ce9d4019757122c61fab04555fafd5851bfce29bf"
+        },
+        {
+          "reads": [
+            "[\"app\",\"t1\"]"
+          ],
+          "writes": [],
+          "unknown": [],
+          "derivation": [
+            {
+              "rule": "relation-event",
+              "source": "endpoint",
+              "target": "[\"app\",\"t1\"]",
+              "operation": "select",
+              "details": {}
+            }
+          ],
+          "artifact": "f0eece6bef758b7e7407299ce9d4019757122c61fab04555fafd5851bfce29bf"
+        },
+        {
+          "reads": [
+            "[\"app\",\"t2\"]"
+          ],
+          "writes": [],
+          "unknown": [],
+          "derivation": [
+            {
+              "rule": "relation-event",
+              "source": "endpoint",
+              "target": "[\"app\",\"t2\"]",
+              "operation": "select",
+              "details": {}
+            }
+          ],
+          "artifact": "f0eece6bef758b7e7407299ce9d4019757122c61fab04555fafd5851bfce29bf"
+        },
+        {
+          "reads": [
+            "[\"app\",\"t0\"]"
+          ],
+          "writes": [],
+          "unknown": [],
+          "derivation": [
+            {
+              "rule": "relation-event",
+              "source": "endpoint",
+              "target": "[\"app\",\"t0\"]",
+              "operation": "select",
+              "details": {}
+            },
+            {
+              "rule": "routine-call",
+              "source": "endpoint",
+              "target": "routine:16406"
+            }
+          ],
+          "artifact": "f0eece6bef758b7e7407299ce9d4019757122c61fab04555fafd5851bfce29bf"
+        }
+      ],
+      "summary": {
+        "reads": [
+          "[\"app\",\"t1\"]"
+        ],
+        "writes": [
+          "[\"app\",\"t1\"]"
+        ],
+        "unknown": [],
+        "derivation": [
+          {
+            "rule": "routine-call",
+            "source": "endpoint",
+            "target": "routine:16408"
+          },
+          {
+            "rule": "relation-event",
+            "source": "routine:16408",
+            "target": "[\"app\",\"t1\"]",
+            "operation": "update",
+            "details": {
+              "columns": [
+                "value"
+              ],
+              "defaults": []
+            }
+          },
+          {
+            "rule": "relation-event",
+            "source": "routine:16408",
+            "target": "[\"app\",\"t1\"]",
+            "operation": "select",
+            "details": {}
+          }
+        ],
+        "artifact": "f0eece6bef758b7e7407299ce9d4019757122c61fab04555fafd5851bfce29bf"
+      }
+    }
+  },
+  "reduced": {
+    "program": {
+      "index": "none",
+      "volatility": "IMMUTABLE",
+      "depth": 0
+    },
+    "histories": [
+      [
+        {
+          "kind": "function",
+          "value": 0,
+          "optimistic": 0
+        },
+        {
+          "kind": "direct",
+          "value": 0,
+          "optimistic": 0
+        },
+        {
+          "kind": "direct",
+          "value": 0,
+          "optimistic": 0
+        }
+      ]
+    ],
+    "failure": {
+      "law": "values",
+      "checkpoint": "settled",
+      "actual": [
+        [
+          {
+            "id": "row",
+            "value": 1
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 3
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 0
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 3
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 2
+          }
+        ]
+      ],
+      "expected": [
+        [
+          {
+            "id": "row",
+            "value": 1
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 1
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 0
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 3
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 2
+          }
+        ]
+      ],
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "function",
+        "value": 0,
+        "optimistic": 0
+      },
+      "summaries": [
+        {
+          "reads": [
+            "[\"app\",\"t0\"]"
+          ],
+          "writes": [],
+          "unknown": [],
+          "derivation": [
+            {
+              "rule": "relation-event",
+              "source": "endpoint",
+              "target": "[\"app\",\"t0\"]",
+              "operation": "select",
+              "details": {}
+            }
+          ],
+          "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+        },
+        {
+          "reads": [
+            "[\"app\",\"t0\"]",
+            "[\"app\",\"t1\"]"
+          ],
+          "writes": [],
+          "unknown": [],
+          "derivation": [
+            {
+              "rule": "relation-event",
+              "source": "endpoint",
+              "target": "[\"app\",\"t0\"]",
+              "operation": "select",
+              "details": {}
+            },
+            {
+              "rule": "routine-call",
+              "source": "endpoint",
+              "target": "routine:16409"
+            },
+            {
+              "rule": "routine-call",
+              "source": "routine:16409",
+              "target": "routine:16407"
+            },
+            {
+              "rule": "relation-event",
+              "source": "routine:16407",
+              "target": "[\"app\",\"t1\"]",
+              "operation": "select",
+              "details": {}
+            }
+          ],
+          "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+        },
+        {
+          "reads": [
+            "[\"app\",\"t1\"]"
+          ],
+          "writes": [],
+          "unknown": [],
+          "derivation": [
+            {
+              "rule": "relation-event",
+              "source": "endpoint",
+              "target": "[\"app\",\"t1\"]",
+              "operation": "select",
+              "details": {}
+            }
+          ],
+          "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+        },
+        {
+          "reads": [
+            "[\"app\",\"t2\"]"
+          ],
+          "writes": [],
+          "unknown": [],
+          "derivation": [
+            {
+              "rule": "relation-event",
+              "source": "endpoint",
+              "target": "[\"app\",\"t2\"]",
+              "operation": "select",
+              "details": {}
+            }
+          ],
+          "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+        },
+        {
+          "reads": [
+            "[\"app\",\"t0\"]"
+          ],
+          "writes": [],
+          "unknown": [],
+          "derivation": [
+            {
+              "rule": "relation-event",
+              "source": "endpoint",
+              "target": "[\"app\",\"t0\"]",
+              "operation": "select",
+              "details": {}
+            },
+            {
+              "rule": "routine-call",
+              "source": "endpoint",
+              "target": "routine:16406"
+            }
+          ],
+          "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+        }
+      ],
+      "summary": {
+        "reads": [
+          "[\"app\",\"t1\"]"
+        ],
+        "writes": [
+          "[\"app\",\"t1\"]"
+        ],
+        "unknown": [],
+        "derivation": [
+          {
+            "rule": "routine-call",
+            "source": "endpoint",
+            "target": "routine:16408"
+          },
+          {
+            "rule": "relation-event",
+            "source": "routine:16408",
+            "target": "[\"app\",\"t1\"]",
+            "operation": "update",
+            "details": {
+              "columns": [
+                "value"
+              ],
+              "defaults": []
+            }
+          },
+          {
+            "rule": "relation-event",
+            "source": "routine:16408",
+            "target": "[\"app\",\"t1\"]",
+            "operation": "select",
+            "details": {}
+          }
+        ],
+        "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+      }
+    }
+  }
+}

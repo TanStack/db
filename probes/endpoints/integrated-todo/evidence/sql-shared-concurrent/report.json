@@ -1,0 +1,107 @@
+{
+  "seed": 911026,
+  "N": 2,
+  "X": 3,
+  "programs": 2,
+  "sequences": 6,
+  "operations": 14,
+  "notifications": 49,
+  "checkpoints": 48,
+  "wire": [
+    {
+      "operations": 2,
+      "queries": 2,
+      "posts": 4,
+      "requestBytes": 1713,
+      "responseBytes": 3723
+    },
+    {
+      "operations": 2,
+      "queries": 2,
+      "posts": 4,
+      "requestBytes": 1703,
+      "responseBytes": 3511
+    },
+    {
+      "operations": 3,
+      "queries": 2,
+      "posts": 5,
+      "requestBytes": 2369,
+      "responseBytes": 4228
+    },
+    {
+      "operations": 2,
+      "queries": 2,
+      "posts": 4,
+      "requestBytes": 1700,
+      "responseBytes": 2924
+    },
+    {
+      "operations": 3,
+      "queries": 2,
+      "posts": 5,
+      "requestBytes": 2375,
+      "responseBytes": 3991
+    },
+    {
+      "operations": 2,
+      "queries": 2,
+      "posts": 4,
+      "requestBytes": 1710,
+      "responseBytes": 4289
+    }
+  ],
+  "scope": "Generated compiled endpoints, concurrent waves of 2–4 optimistic actions, independent server execution and response delivery order, PostgreSQL confirmed/tentative rows, every source notification, React consumers, production client source exclusion.",
+  "limits": [
+    "Each wave settles as one cohort; no mixed-wave overlay retirement in this generator.",
+    "Lifecycle, local rollback, unknown transport and reentrant callbacks have separate actual-runtime regressions.",
+    "Wire bytes are decoded bodies; elapsed time includes gates and oracle work."
+  ],
+  "engine": {
+    "version": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit",
+    "version_num": "170005"
+  },
+  "sqlCoverage": {
+    "schemaGeneration": "fixed Todo schema; tables and column types are not generated",
+    "columnTypes": [
+      "text",
+      "boolean",
+      "timestamp without time zone"
+    ],
+    "constraints": [
+      "text primary key",
+      "not-null columns"
+    ],
+    "queryShapes": [
+      "one table with fixture scope predicate",
+      "full-row projection",
+      "optional equality on completed",
+      "ascending createdAt/id order"
+    ],
+    "mutationShapes": [
+      "insert",
+      "update",
+      "delete",
+      "multiple statements",
+      "partial commit then handler error"
+    ],
+    "demandMode": "eager full results",
+    "notGenerated": [
+      "related tables, foreign keys, cascades, triggers, defaults and generated columns",
+      "nullable columns and other PostgreSQL type families",
+      "joins, aggregates, distinct, windows, set operations, subqueries and CTEs",
+      "arbitrary expressions, functions, casts, collation and ordering modes",
+      "upsert, merge, data-modifying CTEs and explicit database transactions",
+      "on-demand predicates, finite windows, continuation, refill and subset ownership",
+      "external writers, RLS, schema changes, extensions and other PostgreSQL versions"
+    ]
+  },
+  "property": {
+    "seed": 911026,
+    "path": null,
+    "runs": 2,
+    "shrinks": 0
+  },
+  "ok": true,
+  "productionClientArtifacts": 8
+}

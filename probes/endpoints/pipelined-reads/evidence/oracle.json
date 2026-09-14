@@ -1,0 +1,302 @@
+{
+  "ok": true,
+  "node": "v24.5.0",
+  "adapters": [
+    "serial",
+    "pipeline",
+    "pool",
+    "drizzle-default",
+    "drizzle-prepared",
+    "drizzle-pooled"
+  ],
+  "seed": 20260912,
+  "numRuns": 20,
+  "histories": 3,
+  "strategies": {
+    "serial": {
+      "max": 1,
+      "max_pipeline": 0
+    },
+    "pipeline": {
+      "max": 1,
+      "max_pipeline": 100
+    },
+    "pool": {
+      "max": 3,
+      "max_pipeline": 0
+    }
+  },
+  "layer": "Actual Endpoints refresh helper + PostgreSQL network adapter; independent PGlite SQL reference",
+  "operationsChecked": 240,
+  "responseChecks": 1440,
+  "controls": [
+    {
+      "name": "observed PostgreSQL Execute frames before earlier ReadyForQuery",
+      "strategy": "serial",
+      "wire": {
+        "requestBytes": 132,
+        "responseBytes": 111,
+        "executeMessages": 3,
+        "maxOutstandingPerConnection": 1,
+        "usedConnections": 1,
+        "frontend": {
+          "B": 3,
+          "E": 3,
+          "S": 3
+        },
+        "backend": {
+          "2": 3,
+          "D": 3,
+          "C": 3,
+          "Z": 3
+        }
+      }
+    },
+    {
+      "name": "observed PostgreSQL Execute frames before earlier ReadyForQuery",
+      "strategy": "pipeline",
+      "wire": {
+        "requestBytes": 135,
+        "responseBytes": 111,
+        "executeMessages": 3,
+        "maxOutstandingPerConnection": 3,
+        "usedConnections": 1,
+        "frontend": {
+          "B": 3,
+          "E": 3,
+          "S": 3
+        },
+        "backend": {
+          "2": 3,
+          "D": 3,
+          "C": 3,
+          "Z": 3
+        }
+      }
+    },
+    {
+      "name": "observed PostgreSQL Execute frames before earlier ReadyForQuery",
+      "strategy": "pool",
+      "wire": {
+        "requestBytes": 133,
+        "responseBytes": 111,
+        "executeMessages": 3,
+        "maxOutstandingPerConnection": 1,
+        "usedConnections": 3,
+        "frontend": {
+          "B": 3,
+          "E": 3,
+          "S": 3
+        },
+        "backend": {
+          "2": 3,
+          "D": 3,
+          "C": 3,
+          "Z": 3
+        }
+      }
+    },
+    {
+      "name": "Drizzle parameterized read preparation controls pipelining",
+      "prepared": false,
+      "globalPrepare": true,
+      "ms": 81.26404099999854,
+      "wire": {
+        "requestBytes": 731,
+        "responseBytes": 1730,
+        "executeMessages": 3,
+        "maxOutstandingPerConnection": 1,
+        "usedConnections": 1,
+        "frontend": {
+          "P": 3,
+          "D": 3,
+          "H": 3,
+          "B": 3,
+          "E": 3,
+          "S": 3
+        },
+        "backend": {
+          "1": 3,
+          "2": 3,
+          "t": 3,
+          "T": 3,
+          "D": 9,
+          "C": 3,
+          "Z": 3
+        }
+      }
+    },
+    {
+      "name": "Drizzle parameterized read preparation controls pipelining",
+      "prepared": true,
+      "globalPrepare": true,
+      "ms": 14.64283400000022,
+      "wire": {
+        "requestBytes": 140,
+        "responseBytes": 1187,
+        "executeMessages": 3,
+        "maxOutstandingPerConnection": 3,
+        "usedConnections": 1,
+        "frontend": {
+          "B": 3,
+          "E": 3,
+          "S": 3
+        },
+        "backend": {
+          "2": 3,
+          "D": 9,
+          "C": 3,
+          "Z": 3
+        }
+      }
+    },
+    {
+      "name": "Drizzle parameterized read preparation controls pipelining",
+      "prepared": true,
+      "globalPrepare": false,
+      "ms": 86.63091699999859,
+      "wire": {
+        "requestBytes": 731,
+        "responseBytes": 1730,
+        "executeMessages": 3,
+        "maxOutstandingPerConnection": 1,
+        "usedConnections": 1,
+        "frontend": {
+          "P": 3,
+          "D": 3,
+          "H": 3,
+          "B": 3,
+          "E": 3,
+          "S": 3
+        },
+        "backend": {
+          "1": 3,
+          "2": 3,
+          "t": 3,
+          "T": 3,
+          "D": 9,
+          "C": 3,
+          "Z": 3
+        }
+      }
+    },
+    {
+      "name": "read error retries only failed read; drains protocol; no write replay",
+      "strategy": "pipeline",
+      "failedPosition": 0,
+      "attempts": [
+        4,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "read error retries only failed read; drains protocol; no write replay",
+      "strategy": "pool",
+      "failedPosition": 0,
+      "attempts": [
+        4,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "read error retries only failed read; drains protocol; no write replay",
+      "strategy": "serial",
+      "failedPosition": 0,
+      "attempts": [
+        4,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "read error retries only failed read; drains protocol; no write replay",
+      "strategy": "pipeline",
+      "failedPosition": 1,
+      "attempts": [
+        1,
+        4,
+        1
+      ]
+    },
+    {
+      "name": "read error retries only failed read; drains protocol; no write replay",
+      "strategy": "serial",
+      "failedPosition": 1,
+      "attempts": [
+        1,
+        4,
+        1
+      ]
+    },
+    {
+      "name": "read error retries only failed read; drains protocol; no write replay",
+      "strategy": "pool",
+      "failedPosition": 1,
+      "attempts": [
+        1,
+        4,
+        1
+      ]
+    },
+    {
+      "name": "read error retries only failed read; drains protocol; no write replay",
+      "strategy": "serial",
+      "failedPosition": 2,
+      "attempts": [
+        1,
+        1,
+        4
+      ]
+    },
+    {
+      "name": "read error retries only failed read; drains protocol; no write replay",
+      "strategy": "pool",
+      "failedPosition": 2,
+      "attempts": [
+        1,
+        1,
+        4
+      ]
+    },
+    {
+      "name": "read error retries only failed read; drains protocol; no write replay",
+      "strategy": "pipeline",
+      "failedPosition": 2,
+      "attempts": [
+        1,
+        1,
+        4
+      ]
+    },
+    {
+      "name": "handler error reconciles committed write",
+      "strategy": "serial"
+    },
+    {
+      "name": "handler error reconciles committed write",
+      "strategy": "pool"
+    },
+    {
+      "name": "handler error reconciles committed write",
+      "strategy": "pipeline"
+    }
+  ],
+  "limits": [
+    "Fixed two-table schema; generated rows, query choices/parameters and operation histories, not all PostgreSQL syntax.",
+    "Client optimistic/publication implementation is unchanged and not instantiated by this adapter oracle.",
+    "Ordered external writes are covered; arbitrary concurrent snapshots and production pool contention are not.",
+    "PGlite reference aligns int8/numeric parsers with the tested driver; it does not establish every driver/codec mapping."
+  ],
+  "postgres": "PostgreSQL 17.6 on aarch64-unknown-linux-musl, compiled by gcc (Alpine 14.2.0) 14.2.0, 64-bit",
+  "pglite": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit",
+  "generated": {
+    "failed": false,
+    "numRuns": 20,
+    "numShrinks": 0,
+    "seed": 20260912,
+    "counterexamplePath": null,
+    "counterexample": null
+  }
+}

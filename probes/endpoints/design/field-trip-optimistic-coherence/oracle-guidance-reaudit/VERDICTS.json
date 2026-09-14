@@ -1,0 +1,62 @@
+{
+  "OG-01": [
+    "deferred",
+    "Partly valid; reach claim overstated. Named labels absent, but exact pruning assertion dominates operation increment; rejected mismatch prevents increment.",
+    "Optional reporting labels only; no correctness repair justified.",
+    "Shared witness list was treated as the only possible reach evidence; existing counters and later checkpoints also carry bounded evidence."
+  ],
+  "OG-02": [
+    "confirmed-open",
+    "Exact route and checkpoint blocks credit delivery while route fulfillment remains explicitly held beyond the actual 30ms wait.",
+    "Witness client receipt processing before crediting the intermediate delivery checkpoint.",
+    "No delayed-fulfillment control challenges release-versus-consumption distinction."
+  ],
+  "OG-03": [
+    "confirmed-open",
+    "Real SQL-effect runner exits 0 with ok=true for a selected valid conditional mutant whose condition is absent; faultEvents still increments. Four legacy namespaces also bypass Evidence guard.",
+    "Unify requested/applied/reached/survived outcomes; record conditional fault only where it changes execution.",
+    "Helper fault tests cover TEST_FAULT only; no namespace-wide or conditional non-application control."
+  ],
+  "OG-04": [
+    "confirmed-open",
+    "Actual concurrent checkpoint drains an event and saves only rows, normalized checkpoint, and structural difference; changes/index/history are absent.",
+    "Freeze raw observed publication trace alongside mismatching checkpoint before draining/teardown.",
+    "Tests check row rejection but never assert preservation of a multi-event failure trace."
+  ],
+  "OG-05": [
+    "confirmed-open",
+    "Actual Evidence replay calls differing id and text fields at [0,0] same-violation.",
+    "Define law-specific failure identity that retains semantic field/operation distinctions without freezing incidental row positions or values.",
+    "Existing helper controls vary collections and law, but not fields at one row; browser caller omits operation context."
+  ],
+  "OG-06": [
+    "confirmed-open",
+    "Actual dependency arbitrary callback continues to later history after a different failure; outer guard control stops it.",
+    "Wrap the complete dependency scenario, including every history, once.",
+    "Helper test supplies correct outer wrapper; real dependency caller shape was not tested."
+  ],
+  "OG-07": [
+    "confirmed-open",
+    "Actual compiled-browser control flow with stub I/O and actual loading catch lose replay packet; row failures become unclassified-failure. Loading receives structured error.oracle before discarding it.",
+    "Capture fixed experiment case/encoding/operation and structured failure; replay need not require random shrinking.",
+    "Adopting cleanup/finish was not tested as adoption of full failure lifecycle; no failure-report controls for these callers."
+  ],
+  "OG-08": [
+    "confirmed-open",
+    "Changing a copied reference file leaves all actual Evidence provenance unchanged. Current list also omits renderer and relevant execution identities.",
+    "Capture runner-specific reference/renderer/workspace identities and generated or mutated executable identity.",
+    "Provenance test checks metadata presence/start time, not sensitivity to changes in directly executed reference inputs."
+  ],
+  "OG-09": [
+    "confirmed-open",
+    "Exact driver response handler swallows secondary rejection into local errors while cleanupErrors stays empty; actual loading handler emits unhandledRejection before pending work is collected.",
+    "Retain original observation promises with prompt rejection handling and collect them on all exits, preserving primary error.",
+    "Cleanup controls cover registered resources; they do not inject response observer failures concurrent with a primary mismatch."
+  ],
+  "OG-10": [
+    "confirmed-open",
+    "1000 samples of actual step arbitrary have kind/value/optimistic only; unconditional full preload precedes every operation. Boolean cold gate test does not execute cold retained collection path.",
+    "Add a cold retained collection history to the SQL-effect registry/client oracle; preserve focused tests elsewhere.",
+    "Pure authority argument permutations substitute for the missing runtime lifecycle state."
+  ]
+}

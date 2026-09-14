@@ -1,0 +1,43 @@
+{
+  "checkedAt": "2026-09-12T04:41:55.790168+00:00",
+  "analysisVersion": 1,
+  "frozenHashesMatch": true,
+  "briefWords": 591,
+  "localLinkTargetsExist": true,
+  "localLinksChecked": 23,
+  "semanticCheck": "Manual layer reconstruction; not automated semantic proof",
+  "claimSlots": [
+    "B1",
+    "B2",
+    "B3",
+    "B4",
+    "B5",
+    "B6",
+    "B7"
+  ],
+  "preservationCoverage": {
+    "P1": "paragraph All forms",
+    "P2": "paragraphs Overlapping and All forms",
+    "P3": "paragraph A sent result and All forms",
+    "P4": "opening/table and final codec limit",
+    "P5": "opening and Overlapping",
+    "P6": "All forms",
+    "P7": "table and All forms",
+    "P8": "Overlapping",
+    "P9": "table and Overlapping; final policy limit",
+    "P10": "oracle paragraph and final limits"
+  },
+  "limitsRetained": [
+    "U1",
+    "U2",
+    "U3",
+    "U4",
+    "U5",
+    "D1",
+    "D2",
+    "D3",
+    "D4",
+    "C3 range untested"
+  ],
+  "implementationOrPerformanceClaim": false
+}

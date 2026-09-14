@@ -1,0 +1,71 @@
+✔ overlapping actions use authority read after both handlers close (16.325958ms)
+✔ a held ordinary read cannot replace authority after its action retires (5.503625ms)
+✔ optimistic fanout publishes both collections before either subscriber runs (2.609417ms)
+✔ a collection created during a write joins authoritative coverage (1.426917ms)
+✔ reentrant actions preserve event order for every subscriber (2.137125ms)
+✔ local rollback publishes every recipient together and does not cancel remote coverage (2.544167ms)
+✔ a retired read cannot block initial coverage of the restarted collection (3.735542ms)
+✔ an unsent authored failure does not leave a remote obligation (1.418167ms)
+✔ a known read failure recovers without repeating its write (2.55475ms)
+✔ a later healthy response cannot discharge an unknown remote write (1.228417ms)
+✔ a new action invalidates an in-flight repair without waiting for its obsolete read (3.633834ms)
+✔ shared snapshots preserve extra columns and collection-local optimistic ownership (2.3085ms)
+✔ malformed shared indexes reject before installing any authority (2.519625ms)
+✖ authority cannot silently omit a selected scalar column (0.963708ms)
+✔ authority is installed before a post-commit handler error retires the overlay (1.063875ms)
+✔ client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs (0.8725ms)
+✔ malformed authority rejects before installing any collection snapshot (4.410417ms)
+✔ generated invalid snapshots cannot partly replace the confirmed baseline (95.526417ms)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 17
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 156.324708
+
+✖ failing tests:
+
+test at ../../../../../../../../../private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-9DE0mH/runtime.mjs:54317:1
+✖ authority cannot silently omit a selected scalar column (0.963708ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async TestContext.<anonymous> (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-9DE0mH/runtime.mjs:54325:5)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: /Invalid or incomplete/,
+    operator: 'rejects'
+  }
+✖ actual collection runtime regressions against PostgreSQL order (1281.597583ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1374.041209
+
+✖ failing tests:
+
+test at tests/runtime.test.mjs:13:1
+✖ actual collection runtime regressions against PostgreSQL order (1281.597583ms)
+  Error: Command failed: /opt/homebrew/Cellar/node/24.5.0/bin/node /var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-9DE0mH/runtime.mjs ["a","é","","𐀀","􏿿"]
+      at genericNodeError (node:internal/errors:985:15)
+      at wrappedFn (node:internal/errors:539:14)
+      at checkExecSyncError (node:child_process:924:11)
+      at execFileSync (node:child_process:960:15)
+      at TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/runtime.test.mjs:35:9)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:332:3) {
+    status: 1,
+    signal: null,
+    output: [ null, "✔ overlapping actions use authority read after both handlers close (16.325958ms)\n✔ a held ordinary read cannot replace authority after its action retires (5.503625ms)\n✔ optimistic fanout publishes both collections before either subscriber runs (2.609417ms)\n✔ a collection created during a write joins authoritative coverage (1.426917ms)\n✔ reentrant actions preserve event order for every subscriber (2.137125ms)\n✔ local rollback publishes every recipient together and does not cancel remote coverage (2.544167ms)\n✔ a retired read cannot block initial coverage of the restarted collection (3.735542ms)\n✔ an unsent authored failure does not leave a remote obligation (1.418167ms)\n✔ a known read failure recovers without repeating its write (2.55475ms)\n✔ a later healthy response cannot discharge an unknown remote write (1.228417ms)\n✔ a new action invalidates an in-flight repair without waiting for its obsolete read (3.633834ms)\n✔ shared snapshots preserve extra columns and collection-local optimistic ownership (2.3085ms)\n✔ malformed shared indexes reject before installing any authority (2.519625ms)\n✖ authority cannot silently omit a selected scalar column (0.963708ms)\n✔ authority is installed before a post-commit handler error retires the overlay (1.063875ms)\n✔ client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs (0.8725ms)\n✔ malformed authority rejects before installing any collection snapshot (4.410417ms)\n✔ generated invalid snapshots cannot partly replace the confirmed baseline (95.526417ms)\nℹ tests 18\nℹ suites 0\nℹ pass 17\nℹ fail 1\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 156.324708\n\n✖ failing tests:\n\ntest at ../../../../../../../../../private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-9DE0mH/runtime.mjs:54317:1\n✖ authority cannot silently omit a selected scalar column (0.963708ms)\n  AssertionError [ERR_ASSERTION]: Missing expected rejection.\n      at async TestContext.<anonymous> (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-9DE0mH/runtime.mjs:54325:5)\n      at async Test.run (node:internal/test_runner/test:1088:7)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: undefined,\n    expected: /Invalid or incomplete/,\n    operator: 'rejects'\n  }\n", '' ],
+    pid: 30383,
+    stdout: "✔ overlapping actions use authority read after both handlers close (16.325958ms)\n✔ a held ordinary read cannot replace authority after its action retires (5.503625ms)\n✔ optimistic fanout publishes both collections before either subscriber runs (2.609417ms)\n✔ a collection created during a write joins authoritative coverage (1.426917ms)\n✔ reentrant actions preserve event order for every subscriber (2.137125ms)\n✔ local rollback publishes every recipient together and does not cancel remote coverage (2.544167ms)\n✔ a retired read cannot block initial coverage of the restarted collection (3.735542ms)\n✔ an unsent authored failure does not leave a remote obligation (1.418167ms)\n✔ a known read failure recovers without repeating its write (2.55475ms)\n✔ a later healthy response cannot discharge an unknown remote write (1.228417ms)\n✔ a new action invalidates an in-flight repair without waiting for its obsolete read (3.633834ms)\n✔ shared snapshots preserve extra columns and collection-local optimistic ownership (2.3085ms)\n✔ malformed shared indexes reject before installing any authority (2.519625ms)\n✖ authority cannot silently omit a selected scalar column (0.963708ms)\n✔ authority is installed before a post-commit handler error retires the overlay (1.063875ms)\n✔ client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs (0.8725ms)\n✔ malformed authority rejects before installing any collection snapshot (4.410417ms)\n✔ generated invalid snapshots cannot partly replace the confirmed baseline (95.526417ms)\nℹ tests 18\nℹ suites 0\nℹ pass 17\nℹ fail 1\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 156.324708\n\n✖ failing tests:\n\ntest at ../../../../../../../../../private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-9DE0mH/runtime.mjs:54317:1\n✖ authority cannot silently omit a selected scalar column (0.963708ms)\n  AssertionError [ERR_ASSERTION]: Missing expected rejection.\n      at async TestContext.<anonymous> (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-9DE0mH/runtime.mjs:54325:5)\n      at async Test.run (node:internal/test_runner/test:1088:7)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: undefined,\n    expected: /Invalid or incomplete/,\n    operator: 'rejects'\n  }\n",
+    stderr: ''
+  }

@@ -1,0 +1,217 @@
+{
+  "samples": 12,
+  "method": "Same generated schema, rows and mutations under full/adaptive encoding. Browser action-to-persistence time excludes oracle work and gate setup. First mutation is a warmup. Alternate strategy order between fixtures. Gzip sizes are offline estimates of individual Start response bodies, not observed compressed transfers.",
+  "cases": [
+    {
+      "kind": "small",
+      "rows": 2,
+      "queries": 1,
+      "strategies": {
+        "full": {
+          "clientMs": {
+            "p50": 5,
+            "p95": 6.3999998569488525,
+            "samples": [
+              4.8999998569488525,
+              5.099999904632568,
+              5.6000001430511475,
+              6.1000001430511475,
+              5.3999998569488525,
+              6.3999998569488525,
+              4.900000095367432,
+              5,
+              4.599999904632568,
+              5,
+              4.8999998569488525,
+              7.299999952316284
+            ]
+          },
+          "encodeAndJsonMs": {
+            "p50": 0.002500000000509317,
+            "p95": 0.005957999999736785
+          },
+          "posts": 12,
+          "responseBytes": 8484,
+          "gzipBytes": 3570,
+          "requestBytes": 7731,
+          "productionClientArtifacts": 4
+        },
+        "adaptive": {
+          "clientMs": {
+            "p50": 5.199999809265137,
+            "p95": 5.700000047683716,
+            "samples": [
+              5.700000047683716,
+              5.199999809265137,
+              5.200000047683716,
+              5.200000047683716,
+              5.599999904632568,
+              5.200000047683716,
+              5.099999904632568,
+              4.799999952316284,
+              4.700000047683716,
+              4.200000047683716,
+              4.5,
+              7.700000047683716
+            ]
+          },
+          "encodeAndJsonMs": {
+            "p50": 0.0022079999980633147,
+            "p95": 0.0026670000006561168
+          },
+          "posts": 12,
+          "responseBytes": 8484,
+          "gzipBytes": 3594,
+          "requestBytes": 7731,
+          "productionClientArtifacts": 4
+        }
+      },
+      "responseSavings": 0,
+      "gzipSavings": -0.006722689075630228
+    },
+    {
+      "kind": "disjoint",
+      "rows": 160,
+      "queries": 2,
+      "strategies": {
+        "adaptive": {
+          "clientMs": {
+            "p50": 15,
+            "p95": 21.899999856948853,
+            "samples": [
+              17.5,
+              21.899999856948853,
+              18.800000190734863,
+              16.59999990463257,
+              25.90000009536743,
+              14.200000047683716,
+              15.100000143051147,
+              15,
+              14.599999904632568,
+              14.800000190734863,
+              14.799999952316284,
+              14
+            ]
+          },
+          "encodeAndJsonMs": {
+            "p50": 0.3393750000032014,
+            "p95": 0.4009169999990263
+          },
+          "posts": 12,
+          "responseBytes": 2588712,
+          "gzipBytes": 1725786,
+          "requestBytes": 8847,
+          "productionClientArtifacts": 4
+        },
+        "full": {
+          "clientMs": {
+            "p50": 16.40000009536743,
+            "p95": 18.299999952316284,
+            "samples": [
+              21.799999952316284,
+              18.299999952316284,
+              16,
+              15.800000190734863,
+              17.100000143051147,
+              16.899999856948853,
+              16.300000190734863,
+              16.40000009536743,
+              17,
+              16,
+              18.299999952316284,
+              14.899999856948853
+            ]
+          },
+          "encodeAndJsonMs": {
+            "p50": 0.34916599999996834,
+            "p95": 0.5203330000003916
+          },
+          "posts": 12,
+          "responseBytes": 2588712,
+          "gzipBytes": 1725794,
+          "requestBytes": 8847,
+          "productionClientArtifacts": 4
+        }
+      },
+      "responseSavings": 0,
+      "gzipSavings": 0.000004635547463993639
+    },
+    {
+      "kind": "overlap",
+      "rows": 160,
+      "queries": 3,
+      "strategies": {
+        "full": {
+          "clientMs": {
+            "p50": 19.299999952316284,
+            "p95": 22,
+            "samples": [
+              22,
+              19.299999952316284,
+              20.200000047683716,
+              20.59999990463257,
+              18.90000009536743,
+              18.59999990463257,
+              18.799999952316284,
+              20.100000143051147,
+              24.200000047683716,
+              17.800000190734863,
+              21.299999952316284,
+              17.299999952316284
+            ]
+          },
+          "encodeAndJsonMs": {
+            "p50": 0.4217080000016722,
+            "p95": 0.5042919999978039
+          },
+          "posts": 12,
+          "responseBytes": 3246436,
+          "gzipBytes": 2162616,
+          "requestBytes": 9963,
+          "productionClientArtifacts": 4
+        },
+        "adaptive": {
+          "clientMs": {
+            "p50": 18.299999952316284,
+            "p95": 21.300000190734863,
+            "samples": [
+              21.300000190734863,
+              19.09999990463257,
+              18.399999856948853,
+              18.300000190734863,
+              18.299999952316284,
+              17.90000009536743,
+              18.799999952316284,
+              18.200000047683716,
+              17.799999952316284,
+              17.09999990463257,
+              17.100000143051147,
+              35.299999952316284
+            ]
+          },
+          "encodeAndJsonMs": {
+            "p50": 2.4720000000015716,
+            "p95": 3.0120830000014394
+          },
+          "posts": 12,
+          "responseBytes": 1335806,
+          "gzipBytes": 870283,
+          "requestBytes": 9963,
+          "productionClientArtifacts": 4
+        }
+      },
+      "responseSavings": 0.5885315465944808,
+      "gzipSavings": 0.5975785807558993
+    }
+  ],
+  "limits": [
+    "Dev server and local PGlite; loopback timings do not establish WAN latency gains.",
+    "All server queries still execute; this experiment reduces response duplication only.",
+    "No LSN, row patches, invalidation pruning, or subset loading."
+  ],
+  "engine": {
+    "version": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit",
+    "version_num": "170005"
+  },
+  "ok": true
+}

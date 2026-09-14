@@ -1,0 +1,20 @@
+{
+  "seed": 911026,
+  "N": 1,
+  "X": 1,
+  "programs": 1,
+  "sequences": 0,
+  "operations": 0,
+  "notifications": 0,
+  "checkpoints": 1,
+  "wire": [],
+  "scope": "Generated compiled endpoints, concurrent waves of 2–4 optimistic actions, independent server execution and response delivery order, PostgreSQL confirmed/tentative rows, every source notification, React consumers, production client source exclusion.",
+  "limits": [
+    "Each wave settles as one cohort; no mixed-wave overlay retirement in this generator.",
+    "Lifecycle, local rollback, unknown transport and reentrant callbacks have separate actual-runtime regressions.",
+    "Wire bytes are decoded bodies; elapsed time includes gates and oracle work."
+  ],
+  "ok": false,
+  "error": "Error: Property failed after 1 tests\n{ seed: 911026, path: \"0\", endOnFailure: true }\nCounterexample: [{\"program\":{\"scope\":\"alice\",\"orders\":[[\"id\",\"createdAt\"],[\"createdAt\",\"id\"]],\"filters\":[null,false],\"canonicalize\":false,\"repeatedNames\":true,\"initial\":[{\"id\":\"seed-0\",\"text\":\"initial\",\"completed\":false,\"createdAt\":\"2026-01-01T00:00:00.000Z\",\"scope\":\"alice\"},{\"id\":\"seed-1\",\"text\":\"initial\",\"completed\":true,\"createdAt\":\"2026-01-01T00:00:00.000Z\",\"scope\":\"alice\"}]},\"sequences\":[{\"steps\":[{\"kind\":\"delete\",\"target\":1,\"slot\":1,\"text\":\"ébébaaéa\",\"rank\":2,\"outcome\":\"reject\",\"actualEffect\":\"other\",\"failAfterCommit\":true},{\"kind\":\"insert\",\"target\":1,\"slot\":0,\"text\":\"bb aaé \",\"rank\":3,\"outcome\":\"success\",\"actualEffect\":\"same\",\"failAfterCommit\":false}],\"writeOrder\":[15,11],\"deliveryOrder\":[3,18]}]}]\nShrunk 0 time(s)\nGot AssertionError [ERR_ASSERTION]: optimistic 0: every notification sees coherent current collections\n+ actual - expected\n\n  [\n    [\n      {\n+       completed: false,\n+       createdAt: '2026-01-01T00:00:00.000Z',\n+       id: 'seed-0',\n+       text: 'initial'\n+     },\n+     {\n        completed: true,\n        createdAt: '2026-01-01T00:00:00.000Z',\n        id: 'seed-1',\n        text: 'initial'\n      }\n\n    at checkpoint (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/concurrent.mjs:80:14)\n    at runNextTicks (node:internal/process/task_queues:65:5)\n    at process.processImmediate (node:internal/timers:473:9)\n    at async run (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/concurrent.mjs:133:7)\n    at async execute (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/concurrent.mjs:293:45)\n    at async AsyncProperty.run (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)\n    at async asyncRunIt (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/concurrent.mjs:299:5\n\nHint: Enable verbose mode in order to have the list of all failing values encountered during the run\n    at buildError (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/utils/RunDetailsFormatter.js:126:15)\n    at asyncThrowIfFailed (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/utils/RunDetailsFormatter.js:143:11)",
+  "productionClientArtifacts": 4
+}

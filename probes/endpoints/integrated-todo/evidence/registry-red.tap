@@ -1,0 +1,67 @@
+✔ scalar queries retain relation identity and nullable predicate structure (14.625ms)
+✔ unsupported SQL and untrusted operators remain explicit rejections (12.375958ms)
+✔ incompatible row projections on the same relation cannot share optimism (1.362667ms)
+✖ endpoint modules compile independently of the original filename (7.372708ms)
+✖ query parameters reach the server and instantiate client membership (0.956542ms)
+✖ registered query instances validate before a mutation starts (0.761791ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 3
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 288.013292
+
+✖ failing tests:
+
+test at tests/registry.test.mjs:7:1
+✖ endpoint modules compile independently of the original filename (7.372708ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+  
+    assert.ok(result?.code.includes('__boundQuery'))
+  
+      at TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/registry.test.mjs:9:9)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1081:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:763:18)
+      at Test.postRun (node:internal/test_runner/test:1210:19)
+      at Test.run (node:internal/test_runner/test:1138:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: true,
+    operator: '=='
+  }
+
+test at tests/registry.test.mjs:11:1
+✖ query parameters reach the server and instantiate client membership (0.956542ms)
+  Error: ENDPOINT_BOUND_UNSUPPORTED use input, async handler and synchronous onMutate at 7:13
+      at fail (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/bound-transform.mjs:8:9)
+      at VariableDeclarator (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/bound-transform.mjs:167:13)
+      at NodePath._call (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+traverse@7.29.0/node_modules/@babel/traverse/lib/path/context.js:50:20)
+      at NodePath.call (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+traverse@7.29.0/node_modules/@babel/traverse/lib/path/context.js:40:18)
+      at NodePath.visit (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+traverse@7.29.0/node_modules/@babel/traverse/lib/path/context.js:87:31)
+      at TraversalContext.visitQueue (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+traverse@7.29.0/node_modules/@babel/traverse/lib/context.js:96:16)
+      at TraversalContext.visitMultiple (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+traverse@7.29.0/node_modules/@babel/traverse/lib/context.js:68:17)
+      at TraversalContext.visit (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+traverse@7.29.0/node_modules/@babel/traverse/lib/context.js:117:19)
+      at traverseNode (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+traverse@7.29.0/node_modules/@babel/traverse/lib/traverse-node.js:130:17)
+      at NodePath.visit (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+traverse@7.29.0/node_modules/@babel/traverse/lib/path/context.js:93:52)
+
+test at tests/registry.test.mjs:17:1
+✖ registered query instances validate before a mutation starts (0.761791ms)
+  Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/registry.server.ts' imported from /Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/registry.test.mjs
+      at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+      at moduleResolve (node:internal/modules/esm/resolve:864:10)
+      at defaultResolve (node:internal/modules/esm/resolve:990:11)
+      at #cachedDefaultResolve (node:internal/modules/esm/loader:735:20)
+      at ModuleLoader.resolve (node:internal/modules/esm/loader:712:38)
+      at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:310:38)
+      at onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:663:36)
+      at TracingChannel.tracePromise (node:diagnostics_channel:344:14)
+      at ModuleLoader.import (node:internal/modules/esm/loader:662:21)
+      at defaultImportModuleDynamicallyForModule (node:internal/modules/esm/utils:229:31) {
+    code: 'ERR_MODULE_NOT_FOUND',
+    url: 'file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/registry.server.ts'
+  }

@@ -1,0 +1,76 @@
+{
+  "scenario": {
+    "program": {
+      "orders": [
+        [
+          "id",
+          "createdAt"
+        ],
+        [
+          "createdAt",
+          "id"
+        ],
+        [
+          "createdAt",
+          "id"
+        ]
+      ],
+      "scope": "bob",
+      "filters": [
+        true,
+        true,
+        null
+      ],
+      "retainWithoutSubscriber": true,
+      "canonicalize": true,
+      "repeatedNames": false,
+      "initial": [
+        {
+          "id": "𐀀-0",
+          "text": "cc",
+          "completed": false,
+          "createdAt": "2026-01-01T00:00:01.000Z",
+          "scope": "bob"
+        },
+        {
+          "id": "-1",
+          "text": "bééé",
+          "completed": false,
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "scope": "bob"
+        }
+      ],
+      "unsubscribed": [
+        2
+      ]
+    },
+    "sequences": [
+      [
+        {
+          "kind": "delete",
+          "slot": 0,
+          "text": "é \"b\"",
+          "rank": 0,
+          "target": 0,
+          "outcome": "success",
+          "actualEffect": "noop",
+          "failAfterCommit": false,
+          "idPrefix": "𐀀",
+          "retryFailures": 1
+        },
+        {
+          "kind": "complete",
+          "slot": 1,
+          "text": "\"",
+          "rank": 1,
+          "target": 2,
+          "outcome": "reject",
+          "actualEffect": "flip",
+          "failAfterCommit": false,
+          "idPrefix": "",
+          "retryFailures": 2
+        }
+      ]
+    ]
+  }
+}

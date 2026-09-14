@@ -1,0 +1,15 @@
+{
+  "analysisVersion": 1,
+  "frozenAt": "2026-09-14T15:54:32.277954+00:00",
+  "files": {
+    "SOURCE.md": "f676687cac908edc6013241fc8255719c460e8fab6901a8a1b6b7707fcdd3fd5",
+    "source-manifest.json": "920c7a19bdd1b4f4d8dc3a68d6ee0de46097988e5556a62ff4b3b81bf5d1d5c9",
+    "PRESERVATION.md": "27f77aee4e5605058eb2eb0b394f1c16cab7cf891d0878cb634e4544286ad4ef",
+    "MODEL.md": "b7779b72a843e948a69ae89e9a75ec3516bccbe8695e11c7fa02ed7d37ce5dfe",
+    "EVIDENCE.md": "20ffb1534fdb09361e67acd7e8f64b004cf94fd5140840dd8538b03e1d35c947",
+    "PROCESS.md": "5aa888d4e45ef558e7761ad8e050b4a533f534afa59e1bd45d91638104904d3a"
+  },
+  "range": "untested",
+  "controls": "analytical, not executable",
+  "projection": "BRIEF.md to be generated after this freeze"
+}

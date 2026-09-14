@@ -1,0 +1,14 @@
+{
+  "partial": {
+    "state": "failed",
+    "retained": false,
+    "called": false,
+    "error": "Callback failed"
+  },
+  "empty": {
+    "state": "failed",
+    "called": false,
+    "error": "This prototype requires an optimistic target mutation"
+  },
+  "status": "PASS"
+}

@@ -1,0 +1,83 @@
+{
+  "seed": 911026,
+  "N": 3,
+  "X": 3,
+  "programs": 3,
+  "sequences": 9,
+  "operations": 25,
+  "notifications": 81,
+  "checkpoints": 84,
+  "wire": [
+    {
+      "operations": 2,
+      "queries": 2,
+      "posts": 4,
+      "requestBytes": 1713,
+      "responseBytes": 4213
+    },
+    {
+      "operations": 2,
+      "queries": 2,
+      "posts": 4,
+      "requestBytes": 1703,
+      "responseBytes": 3663
+    },
+    {
+      "operations": 3,
+      "queries": 2,
+      "posts": 5,
+      "requestBytes": 2369,
+      "responseBytes": 4993
+    },
+    {
+      "operations": 2,
+      "queries": 2,
+      "posts": 4,
+      "requestBytes": 1700,
+      "responseBytes": 3104
+    },
+    {
+      "operations": 3,
+      "queries": 2,
+      "posts": 5,
+      "requestBytes": 2375,
+      "responseBytes": 4261
+    },
+    {
+      "operations": 2,
+      "queries": 2,
+      "posts": 4,
+      "requestBytes": 1710,
+      "responseBytes": 4929
+    },
+    {
+      "operations": 3,
+      "queries": 2,
+      "posts": 5,
+      "requestBytes": 2371,
+      "responseBytes": 4255
+    },
+    {
+      "operations": 4,
+      "queries": 2,
+      "posts": 6,
+      "requestBytes": 3036,
+      "responseBytes": 5218
+    },
+    {
+      "operations": 4,
+      "queries": 2,
+      "posts": 6,
+      "requestBytes": 3056,
+      "responseBytes": 8456
+    }
+  ],
+  "scope": "Generated compiled endpoints, concurrent waves of 2–4 optimistic actions, independent server execution and response delivery order, PostgreSQL confirmed/tentative rows, every source notification, React consumers, production client source exclusion.",
+  "limits": [
+    "Each wave settles as one cohort; no mixed-wave overlay retirement in this generator.",
+    "Lifecycle, local rollback, unknown transport and reentrant callbacks have separate actual-runtime regressions.",
+    "Wire bytes are decoded bodies; elapsed time includes gates and oracle work."
+  ],
+  "ok": true,
+  "productionClientArtifacts": 12
+}

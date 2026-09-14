@@ -1,0 +1,26 @@
+{
+  "seed": 911026,
+  "N": 1,
+  "X": 1,
+  "programs": 19,
+  "sequences": 0,
+  "operations": 0,
+  "notifications": 76,
+  "checkpoints": 95,
+  "wire": [],
+  "scope": "Generated compiled endpoints, concurrent waves of 2–4 optimistic actions, independent server execution and response delivery order, PostgreSQL confirmed/tentative rows, every source notification, React consumers, production client source exclusion.",
+  "limits": [
+    "Each wave settles as one cohort; no mixed-wave overlay retirement in this generator.",
+    "Lifecycle, local rollback, unknown transport and reentrant callbacks have separate actual-runtime regressions.",
+    "Wire bytes are decoded bodies; elapsed time includes gates and oracle work."
+  ],
+  "property": {
+    "seed": 911026,
+    "path": "0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0",
+    "runs": 1,
+    "shrinks": 18
+  },
+  "ok": false,
+  "error": "AssertionError [ERR_ASSERTION]: overlap cannot settle from inline response order\n    at run (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/concurrent.mjs:174:16)\n    at async execute (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/concurrent.mjs:293:45)\n    at async AsyncProperty.run (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)\n    at async asyncRunIt (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/concurrent.mjs:299:20",
+  "productionClientArtifacts": 12
+}

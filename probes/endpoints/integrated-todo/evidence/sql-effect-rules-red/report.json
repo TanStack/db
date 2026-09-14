@@ -1,0 +1,51 @@
+{
+  "ok": false,
+  "seed": 9142601,
+  "runs": 12,
+  "sequences": 3,
+  "mutant": null,
+  "checker": "legacy",
+  "histories": 1,
+  "operations": 1,
+  "comparisons": {
+    "values/baseline": 1,
+    "values/same-turn-optimism": 2,
+    "values/settled": 2,
+    "read-obligation/settled": 2
+  },
+  "writesExecuted": 2,
+  "envelopesDelivered": 2,
+  "resultReads": 3,
+  "skippedReads": 2,
+  "buildCatalogCalls": 1,
+  "runtimeCatalogCalls": 0,
+  "cells": {
+    "none/VOLATILE/depth-2": 1
+  },
+  "witnesses": {
+    "none/VOLATILE/depth-2/initial/values/baseline": 1,
+    "none/VOLATILE/depth-2/direct/values/same-turn-optimism": 1,
+    "none/VOLATILE/depth-2/direct/values/settled": 1,
+    "none/VOLATILE/depth-2/direct/read-obligation/settled": 1,
+    "none/VOLATILE/depth-2/function/values/same-turn-optimism": 1,
+    "none/VOLATILE/depth-2/function/values/settled": 1,
+    "none/VOLATILE/depth-2/function/read-obligation/settled": 1
+  },
+  "faultEvents": [],
+  "rejectedShrinkFailures": [],
+  "cleanupErrors": [],
+  "node": "v24.5.0",
+  "sources": {
+    "sql-effects.mjs": "09a291872dc60470e3f090ebe373571001b08b4a299dae290353455f7f33afb0",
+    "sql-dependencies.mjs": "bc8037570534be1da47a4b84c8e250e84dcaa0ee1e4d27e1ae4a19b4328bd79b",
+    "src/runtime.ts": "1c9924886ee269769b39d6049416bd09b16662bf4ef2c5e81a7fb0a492081bc3",
+    "src/registry.server.ts": "b11b621be9349d0260750eb16a571acd8248136351e246d2404dd9ee058059d2",
+    "tests/oracles/sql-effect-rules.mjs": "76807f1ae6ccab48509156460c07a235ae4e70c2098ff5839a62418cc09e1d1d"
+  },
+  "versions": {
+    "fast-check": "3.23.2",
+    "@electric-sql/pglite": "0.3.14"
+  },
+  "error": "AssertionError [ERR_ASSERTION]: read-obligation/settled\n+ actual - expected\n\n  [\n-   0,\n    1,\n    1,\n    1,\n+   1,\n+   1\n-   0\n  ]\n\n    at compare (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:93:12)\n    at run (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:331:9)\n    at async check (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:367:5)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:463:9",
+  "outcome": "semantic-rejection"
+}

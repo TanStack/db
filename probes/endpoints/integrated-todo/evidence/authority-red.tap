@@ -1,0 +1,104 @@
+✖ overlapping actions use authority read after both handlers close (13.674958ms)
+✖ a held ordinary read cannot replace authority after its action retires (4.073167ms)
+✖ optimistic fanout publishes both collections before either subscriber runs (2.194541ms)
+✖ a collection created during a write joins authoritative coverage (0.964459ms)
+✔ authority is installed before a post-commit handler error retires the overlay (2.23975ms)
+✔ client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs (1.230916ms)
+✔ malformed authority rejects before installing any collection snapshot (4.036625ms)
+✔ generated invalid snapshots cannot partly replace the confirmed baseline (58.228291ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 4
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 96.362417
+
+✖ failing tests:
+
+test at ../../../../../../../../../private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-2rR4dG/runtime.mjs:53473:1
+✖ overlapping actions use authority read after both handlers close (13.674958ms)
+  AssertionError [ERR_ASSERTION]: overlap cannot settle from an unqualified inline snapshot
+  + actual - expected
+  
+  + 'completed'
+  - 'persisting'
+  
+      at TestContext.<anonymous> (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-2rR4dG/runtime.mjs:53495:13)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:332:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'completed',
+    expected: 'persisting',
+    operator: 'strictEqual'
+  }
+
+test at ../../../../../../../../../private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-2rR4dG/runtime.mjs:53507:1
+✖ a held ordinary read cannot replace authority after its action retires (4.073167ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  '0' !== '10'
+  
+      at TestContext.<anonymous> (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-2rR4dG/runtime.mjs:53529:13)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '0',
+    expected: '10',
+    operator: 'strictEqual'
+  }
+
+test at ../../../../../../../../../private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-2rR4dG/runtime.mjs:53536:1
+✖ optimistic fanout publishes both collections before either subscriber runs (2.194541ms)
+  AssertionError [ERR_ASSERTION]: [["1","0"],["1","1"]]
+      at TestContext.<anonymous> (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-2rR4dG/runtime.mjs:53550:13)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '=='
+  }
+
+test at ../../../../../../../../../private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-2rR4dG/runtime.mjs:53558:1
+✖ a collection created during a write joins authoritative coverage (0.964459ms)
+  Error: Draft does not support creating a query during a pending mutation
+      at EndpointRuntime.collection (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-2rR4dG/runtime.mjs:53228:13)
+      at EndpointRuntime.bindQuery (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-2rR4dG/runtime.mjs:53239:17)
+      at TestContext.<anonymous> (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-2rR4dG/runtime.mjs:53568:22)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7)
+✖ actual collection runtime regressions against PostgreSQL order (1015.043375ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1114.048958
+
+✖ failing tests:
+
+test at tests/runtime.test.mjs:13:1
+✖ actual collection runtime regressions against PostgreSQL order (1015.043375ms)
+  Error: Command failed: /opt/homebrew/Cellar/node/24.5.0/bin/node /var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-2rR4dG/runtime.mjs ["a","é","","𐀀","􏿿"]
+      at genericNodeError (node:internal/errors:985:15)
+      at wrappedFn (node:internal/errors:539:14)
+      at checkExecSyncError (node:child_process:924:11)
+      at execFileSync (node:child_process:960:15)
+      at TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/runtime.test.mjs:35:9)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:332:3) {
+    status: 1,
+    signal: null,
+    output: [ null, `✖ overlapping actions use authority read after both handlers close (13.674958ms)\n✖ a held ordinary read cannot replace authority after its action retires (4.073167ms)\n✖ optimistic fanout publishes both collections before either subscriber runs (2.194541ms)\n✖ a collection created during a write joins authoritative coverage (0.964459ms)\n✔ authority is installed before a post-commit handler error retires the overlay (2.23975ms)\n✔ client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs (1.230916ms)\n✔ malformed authority rejects before installing any collection snapshot (4.036625ms)\n✔ generated invalid snapshots cannot partly replace the confirmed baseline (58.228291ms)\nℹ tests 8\nℹ suites 0\nℹ pass 4\nℹ fail 4\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 96.362417\n\n✖ failing tests:\n\ntest at ../../../../../../../../../private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-2rR4dG/runtime.mjs:53473:1\n✖ overlapping actions use authority read after both handlers close (13.674958ms)\n  AssertionError [ERR_ASSERTION]: overlap cannot settle from an unqualified inline snapshot\n  + actual - expected\n  \n  + 'completed'\n  - 'persisting'\n  \n      at TestContext.<anonymous> (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-2rR4dG/runtime.mjs:53495:13)\n      at async Test.run (node:internal/test_runner/test:1088:7)\n      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:332:3) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: 'completed',\n    expected: 'persisting',\n    operator: 'strictEqual'\n  }\n\ntest at ../../../../../../../../../private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-2rR4dG/runtime.mjs:53507:1\n✖ a held ordinary read cannot replace authority after its action retires (4.073167ms)\n  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n  \n  '0' !== '10'\n  \n      at TestContext.<anonymous> (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-2rR4dG/runtime.mjs:53529:13)\n      at async Test.run (node:internal/test_runner/test:1088:7)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: '0',\n    expected: '10',\n    operator: 'strictEqual'\n  }\n\ntest at ../../../../../../../../../private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-2rR4dG/runtime.mjs:53536:1\n✖ optimistic fanout publishes both collections before either subscriber runs (2.194541ms)\n  AssertionError [ERR_ASSERTION]: [["1","0"],["1","1"]]\n      at TestContext.<anonymous> (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-2rR4dG/runtime.mjs:53550:13)\n      at async Test.run (node:internal/test_runner/test:1088:7)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: false,\n    expected: true,\n    operator: '=='\n  }\n\ntest at ../../../../../../../../../private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-2rR4dG/runtime.mjs:53558:1\n✖ a collection created during a write joins authoritative coverage (0.964459ms)\n  Error: Draft does not support creating a query during a pending mutation\n      at EndpointRuntime.collection (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-2rR4dG/runtime.mjs:53228:13)\n      at EndpointRuntime.bindQuery (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-2rR4dG/runtime.mjs:53239:17)\n      at TestContext.<anonymous> (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-2rR4dG/runtime.mjs:53568:22)\n      at async Test.run (node:internal/test_runner/test:1088:7)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7)\n`, '' ],
+    pid: 97488,
+    stdout: `✖ overlapping actions use authority read after both handlers close (13.674958ms)\n✖ a held ordinary read cannot replace authority after its action retires (4.073167ms)\n✖ optimistic fanout publishes both collections before either subscriber runs (2.194541ms)\n✖ a collection created during a write joins authoritative coverage (0.964459ms)\n✔ authority is installed before a post-commit handler error retires the overlay (2.23975ms)\n✔ client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs (1.230916ms)\n✔ malformed authority rejects before installing any collection snapshot (4.036625ms)\n✔ generated invalid snapshots cannot partly replace the confirmed baseline (58.228291ms)\nℹ tests 8\nℹ suites 0\nℹ pass 4\nℹ fail 4\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 96.362417\n\n✖ failing tests:\n\ntest at ../../../../../../../../../private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-2rR4dG/runtime.mjs:53473:1\n✖ overlapping actions use authority read after both handlers close (13.674958ms)\n  AssertionError [ERR_ASSERTION]: overlap cannot settle from an unqualified inline snapshot\n  + actual - expected\n  \n  + 'completed'\n  - 'persisting'\n  \n      at TestContext.<anonymous> (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-2rR4dG/runtime.mjs:53495:13)\n      at async Test.run (node:internal/test_runner/test:1088:7)\n      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:332:3) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: 'completed',\n    expected: 'persisting',\n    operator: 'strictEqual'\n  }\n\ntest at ../../../../../../../../../private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-2rR4dG/runtime.mjs:53507:1\n✖ a held ordinary read cannot replace authority after its action retires (4.073167ms)\n  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n  \n  '0' !== '10'\n  \n      at TestContext.<anonymous> (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-2rR4dG/runtime.mjs:53529:13)\n      at async Test.run (node:internal/test_runner/test:1088:7)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: '0',\n    expected: '10',\n    operator: 'strictEqual'\n  }\n\ntest at ../../../../../../../../../private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-2rR4dG/runtime.mjs:53536:1\n✖ optimistic fanout publishes both collections before either subscriber runs (2.194541ms)\n  AssertionError [ERR_ASSERTION]: [["1","0"],["1","1"]]\n      at TestContext.<anonymous> (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-2rR4dG/runtime.mjs:53550:13)\n      at async Test.run (node:internal/test_runner/test:1088:7)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: false,\n    expected: true,\n    operator: '=='\n  }\n\ntest at ../../../../../../../../../private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-2rR4dG/runtime.mjs:53558:1\n✖ a collection created during a write joins authoritative coverage (0.964459ms)\n  Error: Draft does not support creating a query during a pending mutation\n      at EndpointRuntime.collection (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-2rR4dG/runtime.mjs:53228:13)\n      at EndpointRuntime.bindQuery (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-2rR4dG/runtime.mjs:53239:17)\n      at TestContext.<anonymous> (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-2rR4dG/runtime.mjs:53568:22)\n      at async Test.run (node:internal/test_runner/test:1088:7)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7)\n`,
+    stderr: ''
+  }

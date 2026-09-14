@@ -1,0 +1,25 @@
+{
+  "gist": "https://gist.github.com/KyleAMathews/8377b37ce4a949fc4e27c05b7a37a4a1",
+  "revision": "5d9c035943dea8063b140267ef4206f46c28f102",
+  "guideSha256": "8460ba74a3eddbef29ba2a37a21b1716b63c1fae3f346b4bb5d1d6a191a69b0f",
+  "files": {
+    "probes/endpoints/ORACLE-PLAN.md": "c53513d32d19e5885b87f1df4a113d21131e6296b3e984aebf4690af278d10f8",
+    "probes/endpoints/SQL-EFFECT-RULES-PLAN.md": "17c3874ff2b3c91cec3bd0f0a2fe09173854998daf5b91df4245e09d0bce08ed",
+    "probes/endpoints/SQL-COVERAGE-PLAN.md": "ca8e7da6632c83dd2027bb7b6c10f48ee3342a14a82056f89a412947b48d8cf4",
+    "probes/endpoints/integrated-todo/tests/oracles/README.md": "2a08588d40d0c0537c4dfc6bf59d826fcd0a1439d07a89a8c2c045acbfc06da6",
+    "probes/endpoints/integrated-todo/tests/oracles/compiled-dependencies.mjs": "a20dec6c4e358f8fa48b57fe1cc6a19339dea5b9a205919b1c155e4b72ec3d0b",
+    "probes/endpoints/integrated-todo/tests/oracles/compiled-program.mjs": "d5b45964d04f81e1536abe998b835591901b512708f470826d522e501c4b9c5a",
+    "probes/endpoints/integrated-todo/tests/oracles/dependencies.mjs": "ae8203647d98381ebf593580b88093324936db0c13898f13a79ff89382e3348b",
+    "probes/endpoints/integrated-todo/tests/oracles/driver.mjs": "8f0938a77b7905ba99ebb8dd92ac4438a676a95ae9ba2055a11c3a8fc881f639",
+    "probes/endpoints/integrated-todo/tests/oracles/reference.mjs": "2f3734b88cd1a98e558cb89d58d70d36f7c18de990b3423fe1a75c8513d4d4e6",
+    "probes/endpoints/integrated-todo/tests/oracles/sql.mjs": "d11d520919cc95dd68407cae20cae8c60519e4a8cc93c6d242c3133ae9bcde64",
+    "probes/endpoints/integrated-todo/tests/oracles/concurrent.mjs": "f42bc3ad3c4ce21808cdd2b53e8b729401c79f4d08682ad729e26def0da54070",
+    "probes/endpoints/integrated-todo/tests/oracles/program.mjs": "edbee062750f6e664878b8caad5a916dfdc44cf4ffafe0ff84e6b334e423395a",
+    "probes/endpoints/integrated-todo/tests/oracles/effect-reference.mjs": "264578b0e4ae92da31c741fc79ef664887beb2c1075cb86dffbd01140a7bf936",
+    "probes/endpoints/integrated-todo/tests/oracles/coverage.mjs": "9b3d6f1d195a0ed6ad2909a9c50167e01670527f28e8482b6997c04743b57d84",
+    "probes/endpoints/design/field-trip-optimistic-coherence/sql-effects-grammar/MODEL.md": "b7779b72a843e948a69ae89e9a75ec3516bccbe8695e11c7fa02ed7d37ce5dfe",
+    "probes/endpoints/design/field-trip-optimistic-coherence/sql-effects-grammar/EVIDENCE.md": "20ffb1534fdb09361e67acd7e8f64b004cf94fd5140840dd8538b03e1d35c947",
+    "probes/endpoints/design/field-trip-optimistic-coherence/sql-effects-grammar/PRESERVATION.md": "27f77aee4e5605058eb2eb0b394f1c16cab7cf891d0878cb634e4544286ad4ef",
+    "probes/endpoints/design/field-trip-optimistic-coherence/sql-effects-grammar/BRIEF.md": "8dcbf7a369d5ac115eae6e1d7b270238865cd2230a63aa555589e51d7a13a6cd"
+  }
+}

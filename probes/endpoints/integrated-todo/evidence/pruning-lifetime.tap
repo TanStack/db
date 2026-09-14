@@ -1,0 +1,47 @@
+✔ only a server-issued baseline with unchanged complete dependencies skips a read (1.50725ms)
+✔ unknown, cross-scope, cross-instance and expired baselines refresh (0.405083ms)
+✔ unknown dependencies refresh and cannot reuse an older certificate (0.18375ms)
+✔ a revision is captured before its rows, never after them (0.19525ms)
+✔ evicting a server baseline only forces a full read (16.128ms)
+✔ overlapping actions use authority read after both handlers close (16.632833ms)
+✔ a held ordinary read cannot replace authority after its action retires (4.275334ms)
+✔ optimistic fanout publishes both collections before either subscriber runs (3.348459ms)
+✔ a collection created during a write joins authoritative coverage (1.9985ms)
+✔ reentrant actions preserve event order for every subscriber (2.530666ms)
+✔ local rollback publishes every recipient together and does not cancel remote coverage (3.431709ms)
+✔ a retired read cannot block initial coverage of the restarted collection (3.924792ms)
+✔ an unsent authored failure does not leave a remote obligation (1.53525ms)
+✔ a known read failure recovers without repeating its write (2.830916ms)
+✔ a later healthy response cannot discharge an unknown remote write (1.0945ms)
+✔ a new action invalidates an in-flight repair without waiting for its obsolete read (3.37025ms)
+✔ shared snapshots preserve extra columns and collection-local optimistic ownership (2.066167ms)
+✔ malformed shared indexes reject before installing any authority (4.045625ms)
+✔ authority cannot silently omit a selected scalar column (1.087083ms)
+✔ parameterized collections have stable distinct identities and send every retained instance (7.37225ms)
+✔ registry admission rejection closes the operation and permits a later healthy mutation (3.264333ms)
+✔ incompatible cross-module projections reject before creating an optimistic recipient (0.650708ms)
+✔ a parameter instance created during a mutation joins fresh authoritative coverage (3.3665ms)
+✔ unchanged authority preserves confirmed rows and retires a wrong optimistic guess (2.353125ms)
+✔ unmatched unchanged certificates cannot settle an action (0.722667ms)
+✔ overlapping unchanged responses still require a fresh authority read (9.775ms)
+✔ authority is installed before a post-commit handler error retires the overlay (1.084708ms)
+✔ client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs (1.047125ms)
+✔ malformed authority rejects before installing any collection snapshot (10.508875ms)
+✔ generated invalid snapshots cannot partly replace the confirmed baseline (123.698084ms)
+ℹ tests 25
+ℹ suites 0
+ℹ pass 25
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 220.902916
+✔ actual collection runtime regressions against PostgreSQL order (1024.408125ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1105.656458

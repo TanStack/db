@@ -1,0 +1,90 @@
+{
+  "seed": 911026,
+  "N": 2,
+  "X": 3,
+  "effects": false,
+  "registry": false,
+  "programs": 1,
+  "sequences": 0,
+  "operations": 0,
+  "notifications": 0,
+  "checkpoints": 0,
+  "wire": [],
+  "scope": "Generated compiled endpoints, concurrent waves of 2–4 optimistic actions, independent server execution and response delivery order, PostgreSQL confirmed/tentative rows, every source notification, React consumers, production client source exclusion.",
+  "limits": [
+    "Each wave settles as one cohort; no mixed-wave overlay retirement in this generator.",
+    "Lifecycle, local rollback, unknown transport and reentrant callbacks have separate actual-runtime regressions.",
+    "Wire bytes are decoded bodies; elapsed time includes gates and oracle work."
+  ],
+  "engine": {
+    "version": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit",
+    "version_num": "170005"
+  },
+  "sqlCoverage": {
+    "schemaGeneration": "fixed Todo schema; tables and column types are not generated",
+    "columnTypes": [
+      "text",
+      "boolean",
+      "timestamp without time zone"
+    ],
+    "constraints": [
+      "text primary key",
+      "not-null columns"
+    ],
+    "queryShapes": [
+      "one table with fixture scope predicate",
+      "full-row projection",
+      "optional equality on completed",
+      "ascending createdAt/id order"
+    ],
+    "mutationShapes": [
+      "insert",
+      "update",
+      "delete",
+      "multiple statements",
+      "partial commit then handler error"
+    ],
+    "demandMode": "eager full results",
+    "notGenerated": [
+      "related tables, foreign keys, cascades, triggers, defaults and generated columns",
+      "nullable columns and other PostgreSQL type families",
+      "joins, aggregates, distinct, windows, set operations, subqueries and CTEs",
+      "arbitrary expressions, functions, casts, collation and ordering modes",
+      "upsert, merge, data-modifying CTEs and explicit database transactions",
+      "on-demand predicates, finite windows, continuation, refill and subset ownership",
+      "external writers, RLS, schema changes, extensions and other PostgreSQL versions"
+    ]
+  },
+  "ok": false,
+  "error": "AssertionError [ERR_ASSERTION]: rendered-values\n+ actual - expected\n\n  [\n    [\n      {\n        id: 'seed-0',\n+       text: '__wrong_render__initial'\n-       text: 'initial'\n      }\n    ]\n  ]\n\n    at Evidence.check (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/evidence.mjs:38:18)\n    at Driver.checkpoint (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/driver.mjs:409:19)\n    at async checkpoint (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/concurrent.mjs:132:5)\n    at async run (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/concurrent.mjs:144:5)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/concurrent.mjs:354:45\n    at async Evidence.run (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/evidence.mjs:59:18)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/concurrent.mjs:358:5",
+  "productionClientArtifacts": 4,
+  "evidence": {
+    "name": "endpoints.concurrent",
+    "cases": 1,
+    "witnesses": {
+      "[\"collection-rows\",\"baseline\",null]": 1,
+      "[\"rendered-values\",\"baseline\",null]": 1
+    },
+    "faults": [
+      {
+        "point": "rendered-text"
+      }
+    ],
+    "cleanupErrors": [],
+    "rejectedShrinks": [],
+    "replay": "legacy-input-without-failure-identity",
+    "sources": {
+      "evidence.mjs": "8a7f32a5a13b13632bfac55fe216366e0d0e241928881ef0b8d2444ecf30d405",
+      "driver.mjs": "ce176d3c73dc50075650c0659219e0d4f7082d7a381de57a8ed21d050e61a3d8",
+      "program.mjs": "edbee062750f6e664878b8caad5a916dfdc44cf4ffafe0ff84e6b334e423395a",
+      "compiled-dependencies.mjs": "caf03fda60b9687c7f34dbaed9828116ac67dcdd6d45628586b7eb330452a247",
+      "dependencies.mjs": "686e5e1e833705cb780e6da04d23c403e0261f3cd92fcf404faff0cccacdf19f",
+      "concurrent.mjs": "f0a8469a6a2fda874678fa77f8b104c258aa3d5e195892e46a325cc87e4f0cb0",
+      "sql.mjs": "6224e6bf7378078c6bb8463b7074ac48a364b30f4a02c40dc612073ef28b9320",
+      "e2e.mjs": "3855eff505d20ee684aa5ed197cee962b73b3edf3f1da0fea21459e01d2f5f2e"
+    },
+    "node": "v24.5.0",
+    "fault": "rendered-text"
+  },
+  "outcome": "semantic-rejection"
+}

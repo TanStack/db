@@ -1,0 +1,67 @@
+✖ direct read dependencies come from the actual Drizzle table binding (7.480333ms)
+✖ one direct insert, update or delete yields a bounded write candidate (1.57525ms)
+✔ opaque calls, additional SQL, raw SQL and validator effects remain unknown (6.178416ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 1
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 204.313208
+
+✖ failing tests:
+
+test at tests/handler-dependencies.test.mjs:17:1
+✖ direct read dependencies come from the actual Drizzle table binding (7.480333ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + null
+  - {
+  -   database: 'db',
+  -   operation: 'select',
+  -   tables: [
+  -     'items'
+  -   ]
+  - }
+  
+      at TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/handler-dependencies.test.mjs:18:10)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1081:25)
+      at Test.start (node:internal/test_runner/test:978:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:332:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: { database: 'db', tables: [ 'items' ], operation: 'select' },
+    operator: 'deepStrictEqual'
+  }
+
+test at tests/handler-dependencies.test.mjs:20:1
+✖ one direct insert, update or delete yields a bounded write candidate (1.57525ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + null
+  - {
+  -   database: 'db',
+  -   operation: 'insert',
+  -   tables: [
+  -     'items'
+  -   ]
+  - }
+  
+      at TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/handler-dependencies.test.mjs:25:13)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1081:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:763:18)
+      at Test.postRun (node:internal/test_runner/test:1210:19)
+      at Test.run (node:internal/test_runner/test:1138:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:332:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: { database: 'db', tables: [ 'items' ], operation: 'insert' },
+    operator: 'deepStrictEqual'
+  }

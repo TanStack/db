@@ -1,0 +1,694 @@
+{
+  "seed": 911026,
+  "N": 2,
+  "X": 3,
+  "effects": true,
+  "registry": true,
+  "pruning": true,
+  "programs": 1,
+  "sequences": 1,
+  "operations": 3,
+  "notifications": 16,
+  "checkpoints": 10,
+  "wire": [
+    {
+      "operations": 3,
+      "queries": 6,
+      "posts": 9,
+      "requestBytes": 8999,
+      "responseBytes": 17089
+    }
+  ],
+  "scope": "Generated compiled endpoints, concurrent waves of 2–4 optimistic actions, independent server execution and response delivery order, PostgreSQL confirmed/tentative rows, every source notification, React consumers, production client source exclusion.",
+  "limits": [
+    "Each wave settles as one cohort; no mixed-wave overlay retirement in this generator.",
+    "Lifecycle, local rollback, unknown transport and reentrant callbacks have separate actual-runtime regressions.",
+    "Wire bytes are decoded bodies; elapsed time includes gates and oracle work."
+  ],
+  "engine": {
+    "version": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit",
+    "version_num": "170005"
+  },
+  "sqlCoverage": {
+    "mode": "generated scalar schemas; see coverage cells",
+    "limits": [
+      "Three actions per concurrent wave; no interleaved cohort retirement",
+      "Required base row shape and trusted fixture types"
+    ]
+  },
+  "successfulSequences": [
+    {
+      "program": {
+        "tables": [
+          {
+            "name": "relation_0_0",
+            "columns": [
+              {
+                "type": "integer",
+                "nullable": true,
+                "name": "field_0_integer"
+              },
+              {
+                "type": "text",
+                "nullable": true,
+                "name": "field_1_text"
+              },
+              {
+                "type": "boolean",
+                "nullable": false,
+                "name": "field_2_boolean"
+              }
+            ],
+            "parent": null
+          },
+          {
+            "name": "relation_1_1",
+            "columns": [
+              {
+                "type": "boolean",
+                "nullable": true,
+                "name": "field_0_boolean"
+              },
+              {
+                "type": "integer",
+                "nullable": false,
+                "name": "field_1_integer"
+              }
+            ],
+            "parent": 0
+          }
+        ],
+        "queries": [
+          {
+            "table": 0,
+            "predicate": null
+          },
+          {
+            "table": 1,
+            "predicate": null
+          },
+          {
+            "table": 0,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": false
+            }
+          },
+          {
+            "table": 0,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": true
+            }
+          },
+          {
+            "table": 1,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": false
+            }
+          },
+          {
+            "table": 1,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": true
+            }
+          }
+        ],
+        "scope": "alice",
+        "orders": [
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ]
+        ],
+        "initial": [
+          {
+            "table": "relation_0_0",
+            "id": "alice-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_integer": null,
+            "field_1_text": null,
+            "field_2_boolean": true
+          },
+          {
+            "table": "relation_0_0",
+            "id": "alice-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "alice",
+            "field_0_integer": -1,
+            "field_1_text": "b",
+            "field_2_boolean": false
+          },
+          {
+            "table": "relation_0_0",
+            "id": "alice-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_integer": 2,
+            "field_1_text": "é",
+            "field_2_boolean": true
+          },
+          {
+            "table": "relation_0_0",
+            "id": "bob-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_integer": null,
+            "field_1_text": null,
+            "field_2_boolean": true
+          },
+          {
+            "table": "relation_0_0",
+            "id": "bob-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "bob",
+            "field_0_integer": -1,
+            "field_1_text": "b",
+            "field_2_boolean": false
+          },
+          {
+            "table": "relation_0_0",
+            "id": "bob-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_integer": 2,
+            "field_1_text": "é",
+            "field_2_boolean": true
+          },
+          {
+            "table": "relation_1_1",
+            "id": "alice-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_boolean": null,
+            "field_1_integer": 0,
+            "parentId": "alice-0"
+          },
+          {
+            "table": "relation_1_1",
+            "id": "alice-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "alice",
+            "field_0_boolean": false,
+            "field_1_integer": -1,
+            "parentId": "alice-1"
+          },
+          {
+            "table": "relation_1_1",
+            "id": "alice-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_boolean": true,
+            "field_1_integer": 2,
+            "parentId": "alice-2"
+          },
+          {
+            "table": "relation_1_1",
+            "id": "bob-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_boolean": null,
+            "field_1_integer": 0,
+            "parentId": "bob-0"
+          },
+          {
+            "table": "relation_1_1",
+            "id": "bob-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "bob",
+            "field_0_boolean": false,
+            "field_1_integer": -1,
+            "parentId": "bob-1"
+          },
+          {
+            "table": "relation_1_1",
+            "id": "bob-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_boolean": true,
+            "field_1_integer": 2,
+            "parentId": "bob-2"
+          }
+        ],
+        "effect": "fanout",
+        "externalWrite": true,
+        "nested": false
+      },
+      "sequence": {
+        "steps": [
+          {
+            "kind": "edit",
+            "target": 0,
+            "slot": 0,
+            "text": "changed",
+            "rank": 4,
+            "outcome": "success"
+          },
+          {
+            "kind": "edit",
+            "target": 1,
+            "slot": 0,
+            "text": "peer",
+            "rank": 2,
+            "outcome": "success"
+          },
+          {
+            "kind": "complete",
+            "target": 0,
+            "slot": 1,
+            "text": "",
+            "rank": 1,
+            "outcome": "success"
+          }
+        ],
+        "writeOrder": [
+          2,
+          0,
+          1
+        ],
+        "deliveryOrder": [
+          0,
+          2,
+          1
+        ]
+      }
+    }
+  ],
+  "ok": true,
+  "coverage": [
+    {
+      "feature": "schema.multiple-tables",
+      "description": "Several independent relation identities",
+      "status": "tested",
+      "witnesses": [
+        "report.json#/successfulSequences/0"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "schema.foreign-key-set-null",
+      "description": "Server-only ON DELETE SET NULL effects",
+      "status": "tested",
+      "witnesses": [
+        "report.json#/successfulSequences/0"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "type.integer",
+      "description": "int4 values",
+      "status": "tested",
+      "witnesses": [
+        "report.json#/successfulSequences/0"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "type.text",
+      "description": "Text and Unicode values",
+      "status": "tested",
+      "witnesses": [
+        "report.json#/successfulSequences/0"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "type.boolean",
+      "description": "Boolean values",
+      "status": "tested",
+      "witnesses": [
+        "report.json#/successfulSequences/0"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "type.timestamp",
+      "description": "Timestamp transport and total createdAt/id order",
+      "status": "tested",
+      "witnesses": [
+        "report.json#/successfulSequences/0"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "schema.nullable",
+      "description": "Nullable generated scalar columns",
+      "status": "tested",
+      "witnesses": [
+        "report.json#/successfulSequences/0"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "schema.not-null",
+      "description": "NOT NULL generated scalar columns",
+      "status": "tested",
+      "witnesses": [
+        "report.json#/successfulSequences/0"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "predicate.eq",
+      "description": "Scalar equality",
+      "status": "tested",
+      "witnesses": [
+        "report.json#/successfulSequences/0"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "predicate.ne",
+      "description": "Scalar inequality",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.gt",
+      "description": "Integer greater-than",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.gte",
+      "description": "Integer greater-than-or-equal",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.lt",
+      "description": "Integer less-than",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.lte",
+      "description": "Integer less-than-or-equal",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.and",
+      "description": "Predicate conjunction",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.or",
+      "description": "Predicate disjunction",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.isNull",
+      "description": "SQL NULL membership",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.isNotNull",
+      "description": "SQL non-NULL membership",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "mutation.insert",
+      "description": "Insert",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "mutation.edit",
+      "description": "Column updates",
+      "status": "tested",
+      "witnesses": [
+        "report.json#/successfulSequences/0"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "mutation.complete",
+      "description": "Boolean updates",
+      "status": "tested",
+      "witnesses": [
+        "report.json#/successfulSequences/0"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "mutation.delete",
+      "description": "Delete",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "mutation.cross-table",
+      "description": "An opaque handler also changes another table",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "mutation.post-commit-error",
+      "description": "A handler errors after committed writes",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "mutation.rejected",
+      "description": "Rejected write restores optimistic state",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "mutation.foreign-key-conflict",
+      "description": "Concurrent parent deletion invalidates a child update",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.limit",
+      "description": "Finite result windows",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.join",
+      "description": "Joins and relationship projection",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.aggregate",
+      "description": "Grouping and aggregates",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.cte",
+      "description": "CTEs and recursive queries",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.window",
+      "description": "Window functions",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.set-operation",
+      "description": "UNION/INTERSECT/EXCEPT",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "type.numeric",
+      "description": "Exact numeric and bigint transport",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "type.json-array",
+      "description": "JSON and array expressions",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "schema.trigger",
+      "description": "User-defined trigger effects",
+      "status": "tested",
+      "witnesses": [
+        "report.json#/successfulSequences/0"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "effect.rewrite",
+      "description": "BEFORE UPDATE rewrites authored values",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "effect.suppress",
+      "description": "BEFORE UPDATE suppresses a row without an error",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "effect.reject",
+      "description": "Trigger rejects a statement and rolls back its changes",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "effect.fanout",
+      "description": "AFTER UPDATE changes all recipient rows in the caller scope",
+      "status": "tested",
+      "witnesses": [
+        "report.json#/successfulSequences/0"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "effect.transition",
+      "description": "Statement trigger reads NEW TABLE and changes another table",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "effect.deferred",
+      "description": "Constraint trigger runs at the implicit transaction commit",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "authority.external-writer",
+      "description": "External writers and replica visibility",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "demand.subset",
+      "description": "On-demand subset transport and refill",
+      "status": "not-tested",
+      "witnesses": []
+    }
+  ],
+  "productionClientArtifacts": 4
+}

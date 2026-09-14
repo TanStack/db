@@ -1,0 +1,255 @@
+{
+  "seed": 911026,
+  "N": 2,
+  "X": 3,
+  "programs": 1,
+  "sequences": 0,
+  "operations": 0,
+  "notifications": 0,
+  "checkpoints": 0,
+  "wire": [],
+  "scope": "Generated compiled endpoints, concurrent waves of 2–4 optimistic actions, independent server execution and response delivery order, PostgreSQL confirmed/tentative rows, every source notification, React consumers, production client source exclusion.",
+  "limits": [
+    "Each wave settles as one cohort; no mixed-wave overlay retirement in this generator.",
+    "Lifecycle, local rollback, unknown transport and reentrant callbacks have separate actual-runtime regressions.",
+    "Wire bytes are decoded bodies; elapsed time includes gates and oracle work."
+  ],
+  "engine": {
+    "version": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit",
+    "version_num": "170005"
+  },
+  "sqlCoverage": {
+    "mode": "generated scalar schemas; see coverage cells",
+    "limits": [
+      "Three actions per concurrent wave; no interleaved cohort retirement",
+      "Required base row shape and trusted fixture types"
+    ]
+  },
+  "ok": false,
+  "error": "page.waitForFunction: Timeout 30000ms exceeded.\n    at run (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/concurrent.mjs:119:16)\n    at async execute (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/concurrent.mjs:328:45)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/concurrent.mjs:332:5",
+  "coverage": [
+    {
+      "feature": "schema.multiple-tables",
+      "description": "Several independent relation identities",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "schema.foreign-key-set-null",
+      "description": "Server-only ON DELETE SET NULL effects",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "type.integer",
+      "description": "int4 values",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "type.text",
+      "description": "Text and Unicode values",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "type.boolean",
+      "description": "Boolean values",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "type.timestamp",
+      "description": "Timestamp transport and total createdAt/id order",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "schema.nullable",
+      "description": "Nullable generated scalar columns",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "schema.not-null",
+      "description": "NOT NULL generated scalar columns",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.eq",
+      "description": "Scalar equality",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.ne",
+      "description": "Scalar inequality",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.gt",
+      "description": "Integer greater-than",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.gte",
+      "description": "Integer greater-than-or-equal",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.lt",
+      "description": "Integer less-than",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.lte",
+      "description": "Integer less-than-or-equal",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.and",
+      "description": "Predicate conjunction",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.or",
+      "description": "Predicate disjunction",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.isNull",
+      "description": "SQL NULL membership",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.isNotNull",
+      "description": "SQL non-NULL membership",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "mutation.insert",
+      "description": "Insert",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "mutation.edit",
+      "description": "Column updates",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "mutation.complete",
+      "description": "Boolean updates",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "mutation.delete",
+      "description": "Delete",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "mutation.cross-table",
+      "description": "An opaque handler also changes another table",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "mutation.post-commit-error",
+      "description": "A handler errors after committed writes",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "mutation.rejected",
+      "description": "Rejected write restores optimistic state",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "mutation.foreign-key-conflict",
+      "description": "Concurrent parent deletion invalidates a child update",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.limit",
+      "description": "Finite result windows",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.join",
+      "description": "Joins and relationship projection",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.aggregate",
+      "description": "Grouping and aggregates",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.cte",
+      "description": "CTEs and recursive queries",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.window",
+      "description": "Window functions",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.set-operation",
+      "description": "UNION/INTERSECT/EXCEPT",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "type.numeric",
+      "description": "Exact numeric and bigint transport",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "type.json-array",
+      "description": "JSON and array expressions",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "schema.trigger",
+      "description": "User-defined trigger effects",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "authority.external-writer",
+      "description": "External writers and replica visibility",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "demand.subset",
+      "description": "On-demand subset transport and refill",
+      "status": "not-tested",
+      "witnesses": []
+    }
+  ],
+  "productionClientArtifacts": 4
+}

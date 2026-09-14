@@ -1,0 +1,77 @@
+TAP version 13
+# Subtest: compilation emits inspected read and write footprints, without catalog code
+ok 1 - compilation emits inspected read and write footprints, without catalog code
+  ---
+  duration_ms: 613.74625
+  ...
+# Subtest: absent connection configuration removes stale compilation evidence
+ok 2 - absent connection configuration removes stale compilation evidence
+  ---
+  duration_ms: 43.386958
+  ...
+# Subtest: follows aliased reexports, local helpers and transaction parameters
+ok 3 - follows aliased reexports, local helpers and transaction parameters
+  ---
+  duration_ms: 411.998583
+  ...
+# Subtest: unions writes through branches and callbacks, including writes before failure
+ok 4 - unions writes through branches and callbacks, including writes before failure
+  ---
+  duration_ms: 436.906708
+  ...
+# Subtest: follows returned service objects and query transforms
+ok 5 - follows returned service objects and query transforms
+  ---
+  duration_ms: 391.54125
+  ...
+# Subtest: unknown effects, recursive calls and raw SQL cannot yield partial proofs
+ok 6 - unknown effects, recursive calls and raw SQL cannot yield partial proofs
+  ---
+  duration_ms: 379.168792
+  ...
+# Subtest: helper source changes invalidate endpoint versions
+ok 7 - helper source changes invalidate endpoint versions
+  ---
+  duration_ms: 372.281625
+  ...
+# Subtest: driver coercions cannot hide writes in SQL argument objects
+not ok 8 - driver coercions cannot hide writes in SQL argument objects
+  ---
+  duration_ms: 372.584083
+  location: '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/function-dependencies.test.mjs:65:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + [
+    +   '7feb3db3c4cd:["public","a"]'
+    + ]
+    - null
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: ~
+  actual:
+    0: '7feb3db3c4cd:["public","a"]'
+  operator: 'strictEqual'
+  stack: |-
+    file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/function-dependencies.test.mjs:67:10
+    async fixture (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/function-dependencies.test.mjs:26:5)
+    async Test.run (node:internal/test_runner/test:932:9)
+    async Test.processPendingSubtests (node:internal/test_runner/test:629:7)
+  ...
+# Subtest: function parameters preserve callbacks and namespace aliases
+ok 9 - function parameters preserve callbacks and namespace aliases
+  ---
+  duration_ms: 375.699084
+  ...
+1..9
+# tests 9
+# suites 0
+# pass 8
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3562.71875

@@ -1,0 +1,16 @@
+{
+  "clientFiles": 34,
+  "serverMarkers": [
+    "createRecipeCommentsService",
+    "createIngredientsService",
+    "kitchenServices",
+    "getOpenAIClient",
+    "processRecipeWithAI",
+    "POSTGRES_HOST",
+    "postgresql://",
+    "ServiceError",
+    "drizzleAdapter"
+  ],
+  "hits": [],
+  "ok": true
+}

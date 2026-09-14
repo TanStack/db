@@ -1,0 +1,87 @@
+✔ overlapping actions use authority read after both handlers close (15.360292ms)
+✔ a held ordinary read cannot replace authority after its action retires (3.723333ms)
+✔ optimistic fanout publishes both collections before either subscriber runs (2.768959ms)
+✔ a collection created during a write joins authoritative coverage (1.663667ms)
+✔ reentrant actions preserve event order for every subscriber (6.157375ms)
+✔ local rollback publishes every recipient together and does not cancel remote coverage (2.568125ms)
+✔ a retired read cannot block initial coverage of the restarted collection (3.89625ms)
+✔ an unsent authored failure does not leave a remote obligation (1.411625ms)
+✔ a known read failure recovers without repeating its write (2.713166ms)
+✔ a later healthy response cannot discharge an unknown remote write (1.246708ms)
+✔ a new action invalidates an in-flight repair without waiting for its obsolete read (3.916167ms)
+✔ shared snapshots preserve extra columns and collection-local optimistic ownership (2.194542ms)
+✔ malformed shared indexes reject before installing any authority (2.965417ms)
+✔ authority cannot silently omit a selected scalar column (0.795916ms)
+✔ parameterized collections have stable distinct identities and send every retained instance (4.3405ms)
+✔ registry admission rejection closes the operation and permits a later healthy mutation (1.097333ms)
+✔ incompatible cross-module projections reject before creating an optimistic recipient (0.435417ms)
+✔ a parameter instance created during a mutation joins fresh authoritative coverage (1.196667ms)
+✔ unchanged authority preserves confirmed rows and retires a wrong optimistic guess (1.718458ms)
+✔ unmatched unchanged certificates cannot settle an action (0.821459ms)
+✔ overlapping unchanged responses still require a fresh authority read (3.572458ms)
+✔ an unchanged optimistic value still executes and reconciles the server mutation (0.782083ms)
+✖ selective authority retires optimism while leaving unrelated external writes undiscovered (1.710958ms)
+✔ unaffected responses cannot omit, duplicate, invent, or skip optimistic targets (3.872833ms)
+✔ overlapping selective responses still require a fresh read after both handlers close (3.288083ms)
+✔ endpoint refetch discovers external writes without a mutation (1.075791ms)
+✔ authority is installed before a post-commit handler error retires the overlay (0.993458ms)
+✔ client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs (1.1095ms)
+✔ malformed authority rejects before installing any collection snapshot (6.310041ms)
+✔ generated invalid snapshots cannot partly replace the confirmed baseline (111.387125ms)
+✔ non-fixture scopes reconcile application rows without Todo fields (1.4415ms)
+ℹ tests 31
+ℹ suites 0
+ℹ pass 30
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 201.48775
+
+✖ failing tests:
+
+test at ../../../../../../../../../private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-Q84MRH/runtime.mjs:55125:1
+✖ selective authority retires optimism while leaving unrelated external writes undiscovered (1.710958ms)
+  AssertionError [ERR_ASSERTION]: unaffected rows are not reinstalled
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-Q84MRH/runtime.mjs:55174:13)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual'
+  }
+✖ actual collection runtime regressions against PostgreSQL order (1104.584917ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1183.820084
+
+✖ failing tests:
+
+test at tests/runtime.test.mjs:13:1
+✖ actual collection runtime regressions against PostgreSQL order (1104.584917ms)
+  Error: Command failed: /opt/homebrew/Cellar/node/24.5.0/bin/node /var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-Q84MRH/runtime.mjs ["a","é","","𐀀","􏿿"]
+      at genericNodeError (node:internal/errors:985:15)
+      at wrappedFn (node:internal/errors:539:14)
+      at checkExecSyncError (node:child_process:924:11)
+      at execFileSync (node:child_process:960:15)
+      at TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/runtime.test.mjs:35:9)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:332:3) {
+    status: 1,
+    signal: null,
+    output: [ null, "✔ overlapping actions use authority read after both handlers close (15.360292ms)\n✔ a held ordinary read cannot replace authority after its action retires (3.723333ms)\n✔ optimistic fanout publishes both collections before either subscriber runs (2.768959ms)\n✔ a collection created during a write joins authoritative coverage (1.663667ms)\n✔ reentrant actions preserve event order for every subscriber (6.157375ms)\n✔ local rollback publishes every recipient together and does not cancel remote coverage (2.568125ms)\n✔ a retired read cannot block initial coverage of the restarted collection (3.89625ms)\n✔ an unsent authored failure does not leave a remote obligation (1.411625ms)\n✔ a known read failure recovers without repeating its write (2.713166ms)\n✔ a later healthy response cannot discharge an unknown remote write (1.246708ms)\n✔ a new action invalidates an in-flight repair without waiting for its obsolete read (3.916167ms)\n✔ shared snapshots preserve extra columns and collection-local optimistic ownership (2.194542ms)\n✔ malformed shared indexes reject before installing any authority (2.965417ms)\n✔ authority cannot silently omit a selected scalar column (0.795916ms)\n✔ parameterized collections have stable distinct identities and send every retained instance (4.3405ms)\n✔ registry admission rejection closes the operation and permits a later healthy mutation (1.097333ms)\n✔ incompatible cross-module projections reject before creating an optimistic recipient (0.435417ms)\n✔ a parameter instance created during a mutation joins fresh authoritative coverage (1.196667ms)\n✔ unchanged authority preserves confirmed rows and retires a wrong optimistic guess (1.718458ms)\n✔ unmatched unchanged certificates cannot settle an action (0.821459ms)\n✔ overlapping unchanged responses still require a fresh authority read (3.572458ms)\n✔ an unchanged optimistic value still executes and reconciles the server mutation (0.782083ms)\n✖ selective authority retires optimism while leaving unrelated external writes undiscovered (1.710958ms)\n✔ unaffected responses cannot omit, duplicate, invent, or skip optimistic targets (3.872833ms)\n✔ overlapping selective responses still require a fresh read after both handlers close (3.288083ms)\n✔ endpoint refetch discovers external writes without a mutation (1.075791ms)\n✔ authority is installed before a post-commit handler error retires the overlay (0.993458ms)\n✔ client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs (1.1095ms)\n✔ malformed authority rejects before installing any collection snapshot (6.310041ms)\n✔ generated invalid snapshots cannot partly replace the confirmed baseline (111.387125ms)\n✔ non-fixture scopes reconcile application rows without Todo fields (1.4415ms)\nℹ tests 31\nℹ suites 0\nℹ pass 30\nℹ fail 1\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 201.48775\n\n✖ failing tests:\n\ntest at ../../../../../../../../../private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-Q84MRH/runtime.mjs:55125:1\n✖ selective authority retires optimism while leaving unrelated external writes undiscovered (1.710958ms)\n  AssertionError [ERR_ASSERTION]: unaffected rows are not reinstalled\n  \n  1 !== 0\n  \n      at TestContext.<anonymous> (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-Q84MRH/runtime.mjs:55174:13)\n      at async Test.run (node:internal/test_runner/test:1088:7)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: 1,\n    expected: 0,\n    operator: 'strictEqual'\n  }\n", '' ],
+    pid: 29306,
+    stdout: "✔ overlapping actions use authority read after both handlers close (15.360292ms)\n✔ a held ordinary read cannot replace authority after its action retires (3.723333ms)\n✔ optimistic fanout publishes both collections before either subscriber runs (2.768959ms)\n✔ a collection created during a write joins authoritative coverage (1.663667ms)\n✔ reentrant actions preserve event order for every subscriber (6.157375ms)\n✔ local rollback publishes every recipient together and does not cancel remote coverage (2.568125ms)\n✔ a retired read cannot block initial coverage of the restarted collection (3.89625ms)\n✔ an unsent authored failure does not leave a remote obligation (1.411625ms)\n✔ a known read failure recovers without repeating its write (2.713166ms)\n✔ a later healthy response cannot discharge an unknown remote write (1.246708ms)\n✔ a new action invalidates an in-flight repair without waiting for its obsolete read (3.916167ms)\n✔ shared snapshots preserve extra columns and collection-local optimistic ownership (2.194542ms)\n✔ malformed shared indexes reject before installing any authority (2.965417ms)\n✔ authority cannot silently omit a selected scalar column (0.795916ms)\n✔ parameterized collections have stable distinct identities and send every retained instance (4.3405ms)\n✔ registry admission rejection closes the operation and permits a later healthy mutation (1.097333ms)\n✔ incompatible cross-module projections reject before creating an optimistic recipient (0.435417ms)\n✔ a parameter instance created during a mutation joins fresh authoritative coverage (1.196667ms)\n✔ unchanged authority preserves confirmed rows and retires a wrong optimistic guess (1.718458ms)\n✔ unmatched unchanged certificates cannot settle an action (0.821459ms)\n✔ overlapping unchanged responses still require a fresh authority read (3.572458ms)\n✔ an unchanged optimistic value still executes and reconciles the server mutation (0.782083ms)\n✖ selective authority retires optimism while leaving unrelated external writes undiscovered (1.710958ms)\n✔ unaffected responses cannot omit, duplicate, invent, or skip optimistic targets (3.872833ms)\n✔ overlapping selective responses still require a fresh read after both handlers close (3.288083ms)\n✔ endpoint refetch discovers external writes without a mutation (1.075791ms)\n✔ authority is installed before a post-commit handler error retires the overlay (0.993458ms)\n✔ client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs (1.1095ms)\n✔ malformed authority rejects before installing any collection snapshot (6.310041ms)\n✔ generated invalid snapshots cannot partly replace the confirmed baseline (111.387125ms)\n✔ non-fixture scopes reconcile application rows without Todo fields (1.4415ms)\nℹ tests 31\nℹ suites 0\nℹ pass 30\nℹ fail 1\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 201.48775\n\n✖ failing tests:\n\ntest at ../../../../../../../../../private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-Q84MRH/runtime.mjs:55125:1\n✖ selective authority retires optimism while leaving unrelated external writes undiscovered (1.710958ms)\n  AssertionError [ERR_ASSERTION]: unaffected rows are not reinstalled\n  \n  1 !== 0\n  \n      at TestContext.<anonymous> (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-Q84MRH/runtime.mjs:55174:13)\n      at async Test.run (node:internal/test_runner/test:1088:7)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: 1,\n    expected: 0,\n    operator: 'strictEqual'\n  }\n",
+    stderr: ''
+  }

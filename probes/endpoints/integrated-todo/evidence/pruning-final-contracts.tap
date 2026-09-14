@@ -1,0 +1,88 @@
+
+> test:contracts
+> node --experimental-strip-types --test tests/server-order.test.mjs tests/refresh.test.mjs tests/registry.test.mjs tests/runtime.test.mjs tests/scalar-query.test.mjs tests/scalar-membership.test.mjs tests/snapshot-encoding.test.mjs tests/pruning.test.mjs tests/pg-revision.test.mjs
+
+{"checked":276,"skipped":483}
+✔ generated SQL effects preserve every retained result with selective reads (3322.438334ms)
+✔ FK cascades and deferred triggers advance the recipient revision at commit (409.529917ms)
+✔ unknown policy dependencies and disabled observation exclude optimization (383.010125ms)
+✔ same table name in another schema cannot borrow a public-table proof (353.90525ms)
+✔ only a server-issued baseline with unchanged complete dependencies skips a read (2.168875ms)
+✔ unknown, cross-scope, cross-instance and expired baselines refresh (0.446ms)
+✔ unknown dependencies refresh and cannot reuse an older certificate (0.215084ms)
+✔ a revision is captured before its rows, never after them (0.229333ms)
+✔ evicting a server baseline only forces a full read (27.225875ms)
+✔ parameterized baseline identities survive the actual transport serializer (11.903583ms)
+✔ unknown and duplicate read identities reject before the write (0.802667ms)
+✔ opaque writes still refresh every requested read after the handler completes (0.724541ms)
+✔ a rejected handler is not retried and still reconciles reads (0.146458ms)
+✔ a later SQL failure preserves committed effects in the reconciliation response (1505.368083ms)
+✔ exhausted reads retain handler success or failure without repeating the handler (7004.088333ms)
+✔ endpoint modules compile independently of the original filename (19.18825ms)
+✔ query parameters reach the server and instantiate client membership (3.348916ms)
+✔ registered query instances validate before a mutation starts (57.639542ms)
+✔ server registry discovers query modules absent from the current import graph (61.515709ms)
+✔ only declared scalar parameters enter the optimistic predicate (14.70525ms)
+✔ nested query modules resolve shared runtime and relation bindings (5.5075ms)
+✔ overlapping actions use authority read after both handlers close (17.301333ms)
+✔ a held ordinary read cannot replace authority after its action retires (4.303333ms)
+✔ optimistic fanout publishes both collections before either subscriber runs (3.12025ms)
+✔ a collection created during a write joins authoritative coverage (2.007583ms)
+✔ reentrant actions preserve event order for every subscriber (2.777541ms)
+✔ local rollback publishes every recipient together and does not cancel remote coverage (3.425291ms)
+✔ a retired read cannot block initial coverage of the restarted collection (4.383458ms)
+✔ an unsent authored failure does not leave a remote obligation (2.458375ms)
+✔ a known read failure recovers without repeating its write (1.560542ms)
+✔ a later healthy response cannot discharge an unknown remote write (1.281291ms)
+✔ a new action invalidates an in-flight repair without waiting for its obsolete read (4.137917ms)
+✔ shared snapshots preserve extra columns and collection-local optimistic ownership (2.408375ms)
+✔ malformed shared indexes reject before installing any authority (3.269958ms)
+✔ authority cannot silently omit a selected scalar column (0.940875ms)
+✔ parameterized collections have stable distinct identities and send every retained instance (5.163833ms)
+✔ registry admission rejection closes the operation and permits a later healthy mutation (1.135625ms)
+✔ incompatible cross-module projections reject before creating an optimistic recipient (0.424709ms)
+✔ a parameter instance created during a mutation joins fresh authoritative coverage (1.170833ms)
+✔ unchanged authority preserves confirmed rows and retires a wrong optimistic guess (1.606625ms)
+✔ unmatched unchanged certificates cannot settle an action (0.697375ms)
+✔ overlapping unchanged responses still require a fresh authority read (3.171833ms)
+✔ authority is installed before a post-commit handler error retires the overlay (0.881959ms)
+✔ client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs (1.047542ms)
+✔ malformed authority rejects before installing any collection snapshot (4.521334ms)
+✔ generated invalid snapshots cannot partly replace the confirmed baseline (114.896666ms)
+ℹ tests 25
+ℹ suites 0
+ℹ pass 25
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 192.927042
+✔ actual collection runtime regressions against PostgreSQL order (1760.911291ms)
+✔ DB scalar membership agrees with PostgreSQL three-valued predicates (1436.763583ms)
+✔ scalar queries retain relation identity and nullable predicate structure (41.815667ms)
+✔ unsupported SQL and untrusted operators remain explicit rejections (36.30275ms)
+✔ incompatible row projections on the same relation cannot share optimism (19.467792ms)
+✔ component declarations carry server order in priority order (116.419375ms)
+✔ sort columns must be selected (10.561875ms)
+✔ unsupported direction cannot silently lose client ordering (25.451209ms)
+✔ transformed responses cannot borrow intermediate query ordering (10.319916ms)
+✔ server handler cannot capture the bound client (4.408125ms)
+✔ server handler cannot capture component state (13.691125ms)
+✔ input validator cannot capture component state (3.997583ms)
+✔ optimistic callback stays within the component while RPCs move to module scope (7.752ms)
+✔ a row predicate is carried as data without the server auth expression (7.982959ms)
+✔ unsupported query arguments fail before generating an incorrectly scoped request (4.273875ms)
+✔ same local names in separate lexical scopes have distinct stable identities (18.502042ms)
+✔ non-endpoint instrumentation does not change declaration identities (26.944208ms)
+✔ shared encoding preserves differing rows with the same key, types, order and empty results (3.641583ms)
+✔ adaptive encoding keeps full snapshots when sharing adds bytes or values are unsupported (0.127583ms)
+✔ distinct compiler relation groups bypass row encoding entirely (0.0795ms)
+✔ disjoint row keys bypass payload encoding even within the same relation (0.07725ms)
+ℹ tests 42
+ℹ suites 0
+ℹ pass 42
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 8615.534667

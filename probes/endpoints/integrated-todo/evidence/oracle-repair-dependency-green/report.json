@@ -1,0 +1,51 @@
+{
+  "ok": true,
+  "seed": 9122601,
+  "scenarios": 10,
+  "sequences": 3,
+  "histories": 32,
+  "operations": 149,
+  "optimisticChecks": 1115,
+  "authorityChecks": 1115,
+  "resultReads": 897,
+  "skippedReads": 218,
+  "responseBytes": 54896,
+  "foreignKeyControls": 1,
+  "limits": [
+    "Actual SQL footprints exercise discovery and matching; no JavaScript call-graph or library inference.",
+    "Drizzle, registry, serialization and real client collections run in process; the companion browser registry oracle covers the compiled HTTP boundary.",
+    "Joins and aggregates reconcile authoritatively; only full base-table views participate in optimistic propagation.",
+    "Byte counts are JSON response estimates, not compressed HTTP bytes or latency."
+  ],
+  "evidence": {
+    "name": "endpoints.dependencies",
+    "cases": 32,
+    "witnesses": {
+      "[\"reference-baseline\",\"preload\",null]": 32,
+      "[\"optimistic-rows\",\"same-turn\",null]": 1115,
+      "[\"settled-rows\",\"settled\",null]": 1115
+    },
+    "faults": [],
+    "cleanupErrors": [],
+    "rejectedShrinks": [],
+    "generation": {
+      "seed": 9122601,
+      "path": null,
+      "runs": 10,
+      "shrinks": 0
+    },
+    "sources": {
+      "evidence.mjs": "a14089e766bbc4139b617d109ae18f1f45c2789aa77200b42350d8bf47b53e96",
+      "driver.mjs": "7fa2c624a237e45a3a34c0309d1cc17cc8128fe6398603d59fcda35ae7b01c0b",
+      "program.mjs": "edbee062750f6e664878b8caad5a916dfdc44cf4ffafe0ff84e6b334e423395a",
+      "compiled-dependencies.mjs": "5ef09e4c57a749d9091102054c8422ce640de48588f89ebf83fb3653db3b46c3",
+      "dependencies.mjs": "686e5e1e833705cb780e6da04d23c403e0261f3cd92fcf404faff0cccacdf19f",
+      "concurrent.mjs": "f0a8469a6a2fda874678fa77f8b104c258aa3d5e195892e46a325cc87e4f0cb0",
+      "sql.mjs": "d11d520919cc95dd68407cae20cae8c60519e4a8cc93c6d242c3133ae9bcde64",
+      "e2e.mjs": "7052e4fa8e9a272bb204e1386ad5b28401db15d13b52d8f1fdbde9563cdd1352"
+    },
+    "node": "v24.5.0",
+    "fault": null
+  },
+  "outcome": "passed"
+}

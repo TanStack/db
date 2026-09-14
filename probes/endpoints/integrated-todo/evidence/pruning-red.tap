@@ -1,0 +1,75 @@
+(node:60367) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+TAP version 13
+# (node:60368) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: only a server-issued baseline with unchanged complete dependencies skips a read
+not ok 1 - only a server-issued baseline with unchanged complete dependencies skips a read
+  ---
+  duration_ms: 2.152917
+  location: '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/pruning.test.mjs:16:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    0 !== 2
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 2
+  actual: 0
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/pruning.test.mjs:19:10)
+    async Test.run (node:internal/test_runner/test:932:9)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+# Subtest: unknown, cross-scope, cross-instance and expired baselines refresh
+not ok 2 - unknown, cross-scope, cross-instance and expired baselines refresh
+  ---
+  duration_ms: 1.782
+  location: '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/pruning.test.mjs:28:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly deep-equal:
+    + actual - expected
+    
+      {
+    +   a: 3,
+    -   a: 2,
+        b: 3
+      }
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    a: 2
+    b: 3
+  actual:
+    a: 3
+    b: 3
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/pruning.test.mjs:34:10)
+    async Test.run (node:internal/test_runner/test:932:9)
+    async Test.processPendingSubtests (node:internal/test_runner/test:629:7)
+  ...
+# Subtest: unknown dependencies refresh and cannot reuse an older certificate
+ok 3 - unknown dependencies refresh and cannot reuse an older certificate
+  ---
+  duration_ms: 0.311166
+  ...
+# Subtest: a revision is captured before its rows, never after them
+ok 4 - a revision is captured before its rows, never after them
+  ---
+  duration_ms: 0.168791
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 2
+# fail 2
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 121.962708

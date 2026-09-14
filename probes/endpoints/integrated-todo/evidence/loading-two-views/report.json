@@ -1,0 +1,83 @@
+{
+  "samples": 12,
+  "method": "Same generated schema, rows and mutations under full/adaptive encoding. Browser action-to-persistence time excludes oracle work and gate setup. First mutation is a warmup. Alternate strategy order between fixtures. Gzip sizes are offline estimates of individual Start response bodies, not observed compressed transfers.",
+  "cases": [
+    {
+      "kind": "overlap-two",
+      "rows": 160,
+      "queries": 2,
+      "strategies": {
+        "full": {
+          "clientMs": {
+            "p50": 13.700000047683716,
+            "p95": 14.799999952316284,
+            "samples": [
+              16.399999856948853,
+              14.799999952316284,
+              14.400000095367432,
+              13.800000190734863,
+              13,
+              13.700000047683716,
+              14,
+              13.5,
+              13.599999904632568,
+              13.899999856948853,
+              13.5,
+              13.5
+            ]
+          },
+          "encodeAndJsonMs": {
+            "p50": 0.2625000000007276,
+            "p95": 0.3300419999995938
+          },
+          "posts": 12,
+          "responseBytes": 1953448,
+          "gzipBytes": 1301735,
+          "requestBytes": 8847,
+          "productionClientArtifacts": 4
+        },
+        "adaptive": {
+          "clientMs": {
+            "p50": 13.700000047683716,
+            "p95": 15.800000190734863,
+            "samples": [
+              16.399999856948853,
+              15.800000190734863,
+              13.700000047683716,
+              13.899999856948853,
+              13.200000047683716,
+              13.400000095367432,
+              12.700000047683716,
+              14.299999952316284,
+              13.900000095367432,
+              13.100000143051147,
+              12.799999952316284,
+              14
+            ]
+          },
+          "encodeAndJsonMs": {
+            "p50": 1.678791000002093,
+            "p95": 2.286667000000307
+          },
+          "posts": 12,
+          "responseBytes": 1319930,
+          "gzipBytes": 869903,
+          "requestBytes": 8847,
+          "productionClientArtifacts": 4
+        }
+      },
+      "responseSavings": 0.3243075833091027,
+      "gzipSavings": 0.3317357219403335
+    }
+  ],
+  "limits": [
+    "Dev server and local PGlite; loopback timings do not establish WAN latency gains.",
+    "All server queries still execute; this experiment reduces response duplication only.",
+    "No LSN, row patches, invalidation pruning, or subset loading."
+  ],
+  "engine": {
+    "version": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit",
+    "version_num": "170005"
+  },
+  "ok": true
+}

@@ -1,0 +1,270 @@
+{
+  "program": {
+    "tables": [
+      {
+        "name": "relation_0_0",
+        "columns": [
+          {
+            "type": "integer",
+            "nullable": true,
+            "name": "field_0_integer"
+          },
+          {
+            "type": "text",
+            "nullable": true,
+            "name": "field_1_text"
+          },
+          {
+            "type": "boolean",
+            "nullable": false,
+            "name": "field_2_boolean"
+          }
+        ],
+        "parent": null
+      },
+      {
+        "name": "relation_1_1",
+        "columns": [
+          {
+            "type": "boolean",
+            "nullable": true,
+            "name": "field_0_boolean"
+          },
+          {
+            "type": "integer",
+            "nullable": false,
+            "name": "field_1_integer"
+          }
+        ],
+        "parent": 0
+      }
+    ],
+    "queries": [
+      {
+        "table": 0,
+        "predicate": null
+      },
+      {
+        "table": 0,
+        "predicate": {
+          "op": "or",
+          "args": [
+            {
+              "op": "gt",
+              "column": "field_0_integer",
+              "value": 0
+            },
+            {
+              "op": "isNull",
+              "column": "field_0_integer"
+            }
+          ]
+        }
+      },
+      {
+        "table": 1,
+        "predicate": null
+      },
+      {
+        "table": 1,
+        "predicate": {
+          "op": "or",
+          "args": [
+            {
+              "op": "eq",
+              "column": "field_0_boolean",
+              "value": true
+            },
+            {
+              "op": "isNull",
+              "column": "field_0_boolean"
+            }
+          ]
+        }
+      }
+    ],
+    "scope": "alice",
+    "orders": [
+      [
+        "createdAt",
+        "id"
+      ],
+      [
+        "id",
+        "createdAt"
+      ],
+      [
+        "createdAt",
+        "id"
+      ],
+      [
+        "id",
+        "createdAt"
+      ]
+    ],
+    "initial": [
+      {
+        "table": "relation_0_0",
+        "id": "alice-0",
+        "text": "row-0",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "alice",
+        "field_0_integer": null,
+        "field_1_text": null,
+        "field_2_boolean": true
+      },
+      {
+        "table": "relation_0_0",
+        "id": "alice-1",
+        "text": "row-1",
+        "completed": true,
+        "createdAt": "2026-01-01T00:00:01.000Z",
+        "scope": "alice",
+        "field_0_integer": -1,
+        "field_1_text": "b",
+        "field_2_boolean": false
+      },
+      {
+        "table": "relation_0_0",
+        "id": "alice-2",
+        "text": "row-2",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "alice",
+        "field_0_integer": 2,
+        "field_1_text": "é",
+        "field_2_boolean": true
+      },
+      {
+        "table": "relation_0_0",
+        "id": "bob-0",
+        "text": "row-0",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "bob",
+        "field_0_integer": null,
+        "field_1_text": null,
+        "field_2_boolean": true
+      },
+      {
+        "table": "relation_0_0",
+        "id": "bob-1",
+        "text": "row-1",
+        "completed": true,
+        "createdAt": "2026-01-01T00:00:01.000Z",
+        "scope": "bob",
+        "field_0_integer": -1,
+        "field_1_text": "b",
+        "field_2_boolean": false
+      },
+      {
+        "table": "relation_0_0",
+        "id": "bob-2",
+        "text": "row-2",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "bob",
+        "field_0_integer": 2,
+        "field_1_text": "é",
+        "field_2_boolean": true
+      },
+      {
+        "table": "relation_1_1",
+        "id": "alice-0",
+        "text": "row-0",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "alice",
+        "field_0_boolean": null,
+        "field_1_integer": 0,
+        "parentId": "alice-0"
+      },
+      {
+        "table": "relation_1_1",
+        "id": "alice-1",
+        "text": "row-1",
+        "completed": true,
+        "createdAt": "2026-01-01T00:00:01.000Z",
+        "scope": "alice",
+        "field_0_boolean": false,
+        "field_1_integer": -1,
+        "parentId": "alice-1"
+      },
+      {
+        "table": "relation_1_1",
+        "id": "alice-2",
+        "text": "row-2",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "alice",
+        "field_0_boolean": true,
+        "field_1_integer": 2,
+        "parentId": "alice-2"
+      },
+      {
+        "table": "relation_1_1",
+        "id": "bob-0",
+        "text": "row-0",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "bob",
+        "field_0_boolean": null,
+        "field_1_integer": 0,
+        "parentId": "bob-0"
+      },
+      {
+        "table": "relation_1_1",
+        "id": "bob-1",
+        "text": "row-1",
+        "completed": true,
+        "createdAt": "2026-01-01T00:00:01.000Z",
+        "scope": "bob",
+        "field_0_boolean": false,
+        "field_1_integer": -1,
+        "parentId": "bob-1"
+      },
+      {
+        "table": "relation_1_1",
+        "id": "bob-2",
+        "text": "row-2",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "bob",
+        "field_0_boolean": true,
+        "field_1_integer": 2,
+        "parentId": "bob-2"
+      }
+    ],
+    "effect": "reject",
+    "externalWrite": false
+  },
+  "sequences": [
+    [
+      {
+        "kind": "edit",
+        "target": 0,
+        "slot": 0,
+        "text": "changed",
+        "rank": 4,
+        "outcome": "success"
+      },
+      {
+        "kind": "complete",
+        "target": 0,
+        "slot": 1,
+        "text": "",
+        "rank": 1,
+        "outcome": "success"
+      },
+      {
+        "kind": "edit",
+        "target": 1,
+        "slot": 0,
+        "text": "peer",
+        "rank": 2,
+        "outcome": "success"
+      }
+    ]
+  ]
+}

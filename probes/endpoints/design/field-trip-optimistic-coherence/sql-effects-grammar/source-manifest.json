@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "source": "probes/endpoints/SQL-EFFECT-RULES-PLAN.md",
+  "sha256": "f676687cac908edc6013241fc8255719c460e8fab6901a8a1b6b7707fcdd3fd5",
+  "target": "Explain whether a SQL query/mutation pair permits skipping a mutation-triggered refetch; preserve the user-defined runtime authority obligations.",
+  "source_kind": "Proposed checker, not a claim that the current prototype implements its laws",
+  "evidence": "probes/endpoints/SQL-EFFECTS-SURVEY.md",
+  "precedence": "Latest user correction requires analysis of PostgreSQL function bodies; the copied proposal\u2019s trust-of-declarations premise is not adopted."
+}

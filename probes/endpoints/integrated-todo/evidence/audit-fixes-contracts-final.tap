@@ -1,0 +1,138 @@
+(node:44412) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+TAP version 13
+# (node:44420) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: unknown and duplicate read identities reject before the write
+ok 1 - unknown and duplicate read identities reject before the write
+  ---
+  duration_ms: 0.754667
+  ...
+# Subtest: opaque writes still refresh every requested read after the handler completes
+ok 2 - opaque writes still refresh every requested read after the handler completes
+  ---
+  duration_ms: 0.893666
+  ...
+# Subtest: a rejected handler is not retried and still reconciles reads
+ok 3 - a rejected handler is not retried and still reconciles reads
+  ---
+  duration_ms: 0.28325
+  ...
+# Subtest: a later SQL failure preserves committed effects in the reconciliation response
+ok 4 - a later SQL failure preserves committed effects in the reconciliation response
+  ---
+  duration_ms: 1291.732959
+  ...
+# Subtest: exhausted reads retain handler success or failure without repeating the handler
+ok 5 - exhausted reads retain handler success or failure without repeating the handler
+  ---
+  duration_ms: 7008.5805
+  ...
+# (node:44421) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# TAP version 13
+# \# Subtest: authority is installed before a post-commit handler error retires the overlay
+# ok 1 - authority is installed before a post-commit handler error retires the overlay
+#   ---
+#   duration_ms: 15.626917
+#   ...
+# \# Subtest: client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs
+# ok 2 - client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs
+#   ---
+#   duration_ms: 4.998166
+#   ...
+# \# Subtest: malformed authority rejects before installing any collection snapshot
+# ok 3 - malformed authority rejects before installing any collection snapshot
+#   ---
+#   duration_ms: 18.693208
+#   ...
+# \# Subtest: generated invalid snapshots cannot partly replace the confirmed baseline
+# ok 4 - generated invalid snapshots cannot partly replace the confirmed baseline
+#   ---
+#   duration_ms: 83.295917
+#   ...
+# 1..4
+# \# tests 4
+# \# suites 0
+# \# pass 4
+# \# fail 0
+# \# cancelled 0
+# \# skipped 0
+# \# todo 0
+# \# duration_ms 134.583958
+# Subtest: actual collection runtime regressions against PostgreSQL order
+ok 6 - actual collection runtime regressions against PostgreSQL order
+  ---
+  duration_ms: 1595.49425
+  ...
+# (node:44422) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: component declarations carry server order in priority order
+ok 7 - component declarations carry server order in priority order
+  ---
+  duration_ms: 324.02225
+  ...
+# Subtest: sort columns must be selected
+ok 8 - sort columns must be selected
+  ---
+  duration_ms: 20.947625
+  ...
+# Subtest: unsupported direction cannot silently lose client ordering
+ok 9 - unsupported direction cannot silently lose client ordering
+  ---
+  duration_ms: 6.557541
+  ...
+# Subtest: transformed responses cannot borrow intermediate query ordering
+ok 10 - transformed responses cannot borrow intermediate query ordering
+  ---
+  duration_ms: 18.364084
+  ...
+# Subtest: server handler cannot capture the bound client
+ok 11 - server handler cannot capture the bound client
+  ---
+  duration_ms: 11.605
+  ...
+# Subtest: server handler cannot capture component state
+ok 12 - server handler cannot capture component state
+  ---
+  duration_ms: 34.006959
+  ...
+# Subtest: input validator cannot capture component state
+ok 13 - input validator cannot capture component state
+  ---
+  duration_ms: 10.009333
+  ...
+# Subtest: optimistic callback stays within the component while RPCs move to module scope
+ok 14 - optimistic callback stays within the component while RPCs move to module scope
+  ---
+  duration_ms: 33.629
+  ...
+# Subtest: a row predicate is carried as data without the server auth expression
+ok 15 - a row predicate is carried as data without the server auth expression
+  ---
+  duration_ms: 48.081709
+  ...
+# Subtest: unsupported query arguments fail before generating an incorrectly scoped request
+ok 16 - unsupported query arguments fail before generating an incorrectly scoped request
+  ---
+  duration_ms: 16.473791
+  ...
+# Subtest: same local names in separate lexical scopes have distinct stable identities
+ok 17 - same local names in separate lexical scopes have distinct stable identities
+  ---
+  duration_ms: 20.81475
+  ...
+# Subtest: non-endpoint instrumentation does not change declaration identities
+ok 18 - non-endpoint instrumentation does not change declaration identities
+  ---
+  duration_ms: 68.955083
+  ...
+1..18
+# tests 18
+# suites 0
+# pass 18
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 8414.264125

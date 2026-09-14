@@ -1,0 +1,179 @@
+{
+  "property": "endpoints.concurrent",
+  "original": {
+    "input": {
+      "program": {
+        "scope": "alice",
+        "orders": [
+          [
+            "createdAt",
+            "id"
+          ]
+        ],
+        "filters": [
+          null
+        ],
+        "initial": [
+          {
+            "id": "seed-0",
+            "text": "initial",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice"
+          }
+        ]
+      },
+      "sequences": [
+        {
+          "steps": [
+            {
+              "kind": "edit",
+              "target": 0,
+              "slot": 0,
+              "text": "changed",
+              "rank": 0,
+              "outcome": "success",
+              "actualEffect": "same",
+              "failAfterCommit": false
+            },
+            {
+              "kind": "edit",
+              "target": 0,
+              "slot": 0,
+              "text": "second",
+              "rank": 0,
+              "outcome": "success",
+              "actualEffect": "same",
+              "failAfterCommit": false
+            }
+          ],
+          "writeOrder": [
+            0,
+            1
+          ],
+          "deliveryOrder": [
+            1,
+            0
+          ]
+        }
+      ]
+    },
+    "failure": {
+      "law": "collection-rows",
+      "checkpoint": "same-turn",
+      "actual": [
+        [
+          {
+            "id": "seed-0",
+            "text": "changed__wrong_immediate__",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z"
+          }
+        ]
+      ],
+      "expected": [
+        [
+          {
+            "id": "seed-0",
+            "text": "changed",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z"
+          }
+        ]
+      ],
+      "difference": [
+        "0",
+        "0",
+        "text"
+      ]
+    }
+  },
+  "reduced": {
+    "input": {
+      "program": {
+        "scope": "alice",
+        "orders": [
+          [
+            "createdAt",
+            "id"
+          ]
+        ],
+        "filters": [
+          null
+        ],
+        "initial": [
+          {
+            "id": "seed-0",
+            "text": "initial",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice"
+          }
+        ]
+      },
+      "sequences": [
+        {
+          "steps": [
+            {
+              "kind": "edit",
+              "target": 0,
+              "slot": 0,
+              "text": "changed",
+              "rank": 0,
+              "outcome": "success",
+              "actualEffect": "same",
+              "failAfterCommit": false
+            },
+            {
+              "kind": "edit",
+              "target": 0,
+              "slot": 0,
+              "text": "second",
+              "rank": 0,
+              "outcome": "success",
+              "actualEffect": "same",
+              "failAfterCommit": false
+            }
+          ],
+          "writeOrder": [
+            0,
+            1
+          ],
+          "deliveryOrder": [
+            1,
+            0
+          ]
+        }
+      ]
+    },
+    "failure": {
+      "law": "collection-rows",
+      "checkpoint": "same-turn",
+      "actual": [
+        [
+          {
+            "id": "seed-0",
+            "text": "changed__wrong_immediate__",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z"
+          }
+        ]
+      ],
+      "expected": [
+        [
+          {
+            "id": "seed-0",
+            "text": "changed",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z"
+          }
+        ]
+      ],
+      "difference": [
+        "0",
+        "0",
+        "text"
+      ]
+    }
+  }
+}

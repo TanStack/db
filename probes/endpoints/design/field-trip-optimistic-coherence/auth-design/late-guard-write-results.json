@@ -1,0 +1,23 @@
+{
+  "claim": "Every retained payload equals authority after covered request effects",
+  "mode": "Actual refreshAfterMutation fallback plus constructed effectful guard fixture on PGlite",
+  "lawHolds": false,
+  "trace": [
+    "mutation completed",
+    "pure sampled value 0",
+    "opaque guard wrote value 1"
+  ],
+  "snapshot": [
+    {
+      "id": 1,
+      "value": 0
+    }
+  ],
+  "authoritative": [
+    {
+      "id": 1,
+      "value": 1
+    }
+  ],
+  "limit": "No candidate compiler or client publication is implemented; this establishes an admissible unsafe fallback schedule, not observed Kitchen data corruption."
+}

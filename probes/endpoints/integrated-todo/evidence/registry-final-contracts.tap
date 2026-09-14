@@ -1,0 +1,74 @@
+
+> test:contracts
+> node --experimental-strip-types --test tests/server-order.test.mjs tests/refresh.test.mjs tests/registry.test.mjs tests/runtime.test.mjs tests/scalar-query.test.mjs tests/scalar-membership.test.mjs tests/snapshot-encoding.test.mjs
+
+✔ unknown and duplicate read identities reject before the write (1.676791ms)
+✔ opaque writes still refresh every requested read after the handler completes (2.100459ms)
+✔ a rejected handler is not retried and still reconciles reads (0.4005ms)
+✔ a later SQL failure preserves committed effects in the reconciliation response (1494.100291ms)
+✔ exhausted reads retain handler success or failure without repeating the handler (7007.18ms)
+✔ endpoint modules compile independently of the original filename (33.32325ms)
+✔ query parameters reach the server and instantiate client membership (10.163584ms)
+✔ registered query instances validate before a mutation starts (58.966625ms)
+✔ server registry discovers query modules absent from the current import graph (26.979667ms)
+✔ only declared scalar parameters enter the optimistic predicate (7.590833ms)
+✔ nested query modules resolve shared runtime and relation bindings (3.475291ms)
+✔ overlapping actions use authority read after both handlers close (18.133417ms)
+✔ a held ordinary read cannot replace authority after its action retires (4.406708ms)
+✔ optimistic fanout publishes both collections before either subscriber runs (2.956417ms)
+✔ a collection created during a write joins authoritative coverage (1.848417ms)
+✔ reentrant actions preserve event order for every subscriber (2.736125ms)
+✔ local rollback publishes every recipient together and does not cancel remote coverage (2.87425ms)
+✔ a retired read cannot block initial coverage of the restarted collection (3.98325ms)
+✔ an unsent authored failure does not leave a remote obligation (1.488583ms)
+✔ a known read failure recovers without repeating its write (2.684292ms)
+✔ a later healthy response cannot discharge an unknown remote write (1.047375ms)
+✔ a new action invalidates an in-flight repair without waiting for its obsolete read (3.091375ms)
+✔ shared snapshots preserve extra columns and collection-local optimistic ownership (2.13525ms)
+✔ malformed shared indexes reject before installing any authority (3.36675ms)
+✔ authority cannot silently omit a selected scalar column (0.719583ms)
+✔ parameterized collections have stable distinct identities and send every retained instance (2.876375ms)
+✔ registry admission rejection closes the operation and permits a later healthy mutation (1.163709ms)
+✔ incompatible cross-module projections reject before creating an optimistic recipient (0.453375ms)
+✔ a parameter instance created during a mutation joins fresh authoritative coverage (2.005125ms)
+✔ authority is installed before a post-commit handler error retires the overlay (0.853792ms)
+✔ client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs (1.048083ms)
+✔ malformed authority rejects before installing any collection snapshot (6.562458ms)
+✔ generated invalid snapshots cannot partly replace the confirmed baseline (116.93775ms)
+ℹ tests 22
+ℹ suites 0
+ℹ pass 22
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 187.946666
+✔ actual collection runtime regressions against PostgreSQL order (1790.914417ms)
+✔ DB scalar membership agrees with PostgreSQL three-valued predicates (1575.672292ms)
+✔ scalar queries retain relation identity and nullable predicate structure (32.501333ms)
+✔ unsupported SQL and untrusted operators remain explicit rejections (35.569084ms)
+✔ incompatible row projections on the same relation cannot share optimism (8.444208ms)
+✔ component declarations carry server order in priority order (130.495667ms)
+✔ sort columns must be selected (6.20075ms)
+✔ unsupported direction cannot silently lose client ordering (18.032417ms)
+✔ transformed responses cannot borrow intermediate query ordering (4.15075ms)
+✔ server handler cannot capture the bound client (7.202625ms)
+✔ server handler cannot capture component state (10.603166ms)
+✔ input validator cannot capture component state (5.162375ms)
+✔ optimistic callback stays within the component while RPCs move to module scope (18.573958ms)
+✔ a row predicate is carried as data without the server auth expression (34.15075ms)
+✔ unsupported query arguments fail before generating an incorrectly scoped request (11.012208ms)
+✔ same local names in separate lexical scopes have distinct stable identities (17.51875ms)
+✔ non-endpoint instrumentation does not change declaration identities (81.562167ms)
+✔ shared encoding preserves differing rows with the same key, types, order and empty results (3.866875ms)
+✔ adaptive encoding keeps full snapshots when sharing adds bytes or values are unsupported (0.188ms)
+✔ distinct compiler relation groups bypass row encoding entirely (0.249375ms)
+✔ disjoint row keys bypass payload encoding even within the same relation (0.284333ms)
+ℹ tests 32
+ℹ suites 0
+ℹ pass 32
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 8659.852458

@@ -1,0 +1,526 @@
+{
+  "seed": 9142601,
+  "mutant": null,
+  "original": {
+    "program": {
+      "index": "none",
+      "volatility": "VOLATILE",
+      "depth": 2
+    },
+    "histories": [
+      [
+        {
+          "kind": "direct",
+          "value": 7,
+          "optimistic": 0
+        },
+        {
+          "kind": "function",
+          "value": -3,
+          "optimistic": 3
+        },
+        {
+          "kind": "read-write",
+          "value": 4,
+          "optimistic": 2
+        },
+        {
+          "kind": "noop",
+          "value": 8,
+          "optimistic": 1
+        }
+      ]
+    ],
+    "failure": {
+      "law": "read-obligation",
+      "checkpoint": "settled",
+      "actual": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "expected": [
+        1,
+        1,
+        0,
+        0,
+        1
+      ],
+      "cell": "none/VOLATILE/depth-2",
+      "step": {
+        "kind": "direct",
+        "value": 7,
+        "optimistic": 0
+      },
+      "summaries": [
+        {
+          "reads": [
+            "[\"app\",\"t0\"]"
+          ],
+          "writes": [],
+          "unknown": [
+            {
+              "source": "[\"app\",\"t0\"]",
+              "reason": "Unsupported type or virtual generated expression",
+              "dimensions": [
+                "reads",
+                "writes"
+              ]
+            }
+          ],
+          "derivation": [
+            {
+              "rule": "relation-event",
+              "source": "endpoint",
+              "target": "[\"app\",\"t0\"]",
+              "operation": "select",
+              "details": {}
+            }
+          ],
+          "artifact": "f670d8ddb516f6ed4c77d545f4ca2c1f2821d8c029391455c1a76f3b7aa45ebb"
+        },
+        {
+          "reads": [
+            "[\"app\",\"t0\"]"
+          ],
+          "writes": [],
+          "unknown": [
+            {
+              "source": "[\"app\",\"t0\"]",
+              "reason": "Unsupported type or virtual generated expression",
+              "dimensions": [
+                "reads",
+                "writes"
+              ]
+            },
+            {
+              "source": "routine:16411",
+              "reason": "Unsupported routine body, signature, or execution context",
+              "dimensions": [
+                "reads",
+                "writes"
+              ]
+            }
+          ],
+          "derivation": [
+            {
+              "rule": "relation-event",
+              "source": "endpoint",
+              "target": "[\"app\",\"t0\"]",
+              "operation": "select",
+              "details": {}
+            },
+            {
+              "rule": "routine-call",
+              "source": "endpoint",
+              "target": "routine:16411"
+            }
+          ],
+          "artifact": "f670d8ddb516f6ed4c77d545f4ca2c1f2821d8c029391455c1a76f3b7aa45ebb"
+        },
+        {
+          "reads": [
+            "[\"app\",\"t1\"]"
+          ],
+          "writes": [],
+          "unknown": [
+            {
+              "source": "[\"app\",\"t1\"]",
+              "reason": "Unsupported type or virtual generated expression",
+              "dimensions": [
+                "reads",
+                "writes"
+              ]
+            }
+          ],
+          "derivation": [
+            {
+              "rule": "relation-event",
+              "source": "endpoint",
+              "target": "[\"app\",\"t1\"]",
+              "operation": "select",
+              "details": {}
+            }
+          ],
+          "artifact": "f670d8ddb516f6ed4c77d545f4ca2c1f2821d8c029391455c1a76f3b7aa45ebb"
+        },
+        {
+          "reads": [
+            "[\"app\",\"t2\"]"
+          ],
+          "writes": [],
+          "unknown": [
+            {
+              "source": "[\"app\",\"t2\"]",
+              "reason": "Unsupported type or virtual generated expression",
+              "dimensions": [
+                "reads",
+                "writes"
+              ]
+            }
+          ],
+          "derivation": [
+            {
+              "rule": "relation-event",
+              "source": "endpoint",
+              "target": "[\"app\",\"t2\"]",
+              "operation": "select",
+              "details": {}
+            }
+          ],
+          "artifact": "f670d8ddb516f6ed4c77d545f4ca2c1f2821d8c029391455c1a76f3b7aa45ebb"
+        },
+        {
+          "reads": [
+            "[\"app\",\"t0\"]"
+          ],
+          "writes": [],
+          "unknown": [
+            {
+              "source": "[\"app\",\"t0\"]",
+              "reason": "Unsupported type or virtual generated expression",
+              "dimensions": [
+                "reads",
+                "writes"
+              ]
+            },
+            {
+              "source": "routine:16406",
+              "reason": "Unsupported routine body, signature, or execution context",
+              "dimensions": [
+                "reads",
+                "writes"
+              ]
+            }
+          ],
+          "derivation": [
+            {
+              "rule": "relation-event",
+              "source": "endpoint",
+              "target": "[\"app\",\"t0\"]",
+              "operation": "select",
+              "details": {}
+            },
+            {
+              "rule": "routine-call",
+              "source": "endpoint",
+              "target": "routine:16406"
+            }
+          ],
+          "artifact": "f670d8ddb516f6ed4c77d545f4ca2c1f2821d8c029391455c1a76f3b7aa45ebb"
+        }
+      ],
+      "summary": {
+        "reads": [
+          "[\"app\",\"t0\"]"
+        ],
+        "writes": [
+          "[\"app\",\"t0\"]"
+        ],
+        "unknown": [
+          {
+            "source": "[\"app\",\"t0\"]",
+            "reason": "Unsupported type or virtual generated expression",
+            "dimensions": [
+              "reads",
+              "writes"
+            ]
+          },
+          {
+            "source": "[\"app\",\"t0\"]",
+            "reason": "Unsupported type or virtual generated expression",
+            "dimensions": [
+              "reads",
+              "writes"
+            ]
+          }
+        ],
+        "derivation": [
+          {
+            "rule": "relation-event",
+            "source": "endpoint",
+            "target": "[\"app\",\"t0\"]",
+            "operation": "update",
+            "details": {
+              "columns": [
+                "value"
+              ],
+              "defaults": []
+            }
+          },
+          {
+            "rule": "relation-event",
+            "source": "endpoint",
+            "target": "[\"app\",\"t0\"]",
+            "operation": "select",
+            "details": {}
+          }
+        ],
+        "artifact": "f670d8ddb516f6ed4c77d545f4ca2c1f2821d8c029391455c1a76f3b7aa45ebb"
+      }
+    }
+  },
+  "reduced": {
+    "program": {
+      "index": "none",
+      "volatility": "VOLATILE",
+      "depth": 2
+    },
+    "histories": [
+      [
+        {
+          "kind": "direct",
+          "value": 7,
+          "optimistic": 0
+        },
+        {
+          "kind": "function",
+          "value": -3,
+          "optimistic": 3
+        },
+        {
+          "kind": "read-write",
+          "value": 4,
+          "optimistic": 2
+        },
+        {
+          "kind": "noop",
+          "value": 8,
+          "optimistic": 1
+        }
+      ]
+    ],
+    "failure": {
+      "law": "read-obligation",
+      "checkpoint": "settled",
+      "actual": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "expected": [
+        1,
+        1,
+        0,
+        0,
+        1
+      ],
+      "cell": "none/VOLATILE/depth-2",
+      "step": {
+        "kind": "direct",
+        "value": 7,
+        "optimistic": 0
+      },
+      "summaries": [
+        {
+          "reads": [
+            "[\"app\",\"t0\"]"
+          ],
+          "writes": [],
+          "unknown": [
+            {
+              "source": "[\"app\",\"t0\"]",
+              "reason": "Unsupported type or virtual generated expression",
+              "dimensions": [
+                "reads",
+                "writes"
+              ]
+            }
+          ],
+          "derivation": [
+            {
+              "rule": "relation-event",
+              "source": "endpoint",
+              "target": "[\"app\",\"t0\"]",
+              "operation": "select",
+              "details": {}
+            }
+          ],
+          "artifact": "f670d8ddb516f6ed4c77d545f4ca2c1f2821d8c029391455c1a76f3b7aa45ebb"
+        },
+        {
+          "reads": [
+            "[\"app\",\"t0\"]"
+          ],
+          "writes": [],
+          "unknown": [
+            {
+              "source": "[\"app\",\"t0\"]",
+              "reason": "Unsupported type or virtual generated expression",
+              "dimensions": [
+                "reads",
+                "writes"
+              ]
+            },
+            {
+              "source": "routine:16411",
+              "reason": "Unsupported routine body, signature, or execution context",
+              "dimensions": [
+                "reads",
+                "writes"
+              ]
+            }
+          ],
+          "derivation": [
+            {
+              "rule": "relation-event",
+              "source": "endpoint",
+              "target": "[\"app\",\"t0\"]",
+              "operation": "select",
+              "details": {}
+            },
+            {
+              "rule": "routine-call",
+              "source": "endpoint",
+              "target": "routine:16411"
+            }
+          ],
+          "artifact": "f670d8ddb516f6ed4c77d545f4ca2c1f2821d8c029391455c1a76f3b7aa45ebb"
+        },
+        {
+          "reads": [
+            "[\"app\",\"t1\"]"
+          ],
+          "writes": [],
+          "unknown": [
+            {
+              "source": "[\"app\",\"t1\"]",
+              "reason": "Unsupported type or virtual generated expression",
+              "dimensions": [
+                "reads",
+                "writes"
+              ]
+            }
+          ],
+          "derivation": [
+            {
+              "rule": "relation-event",
+              "source": "endpoint",
+              "target": "[\"app\",\"t1\"]",
+              "operation": "select",
+              "details": {}
+            }
+          ],
+          "artifact": "f670d8ddb516f6ed4c77d545f4ca2c1f2821d8c029391455c1a76f3b7aa45ebb"
+        },
+        {
+          "reads": [
+            "[\"app\",\"t2\"]"
+          ],
+          "writes": [],
+          "unknown": [
+            {
+              "source": "[\"app\",\"t2\"]",
+              "reason": "Unsupported type or virtual generated expression",
+              "dimensions": [
+                "reads",
+                "writes"
+              ]
+            }
+          ],
+          "derivation": [
+            {
+              "rule": "relation-event",
+              "source": "endpoint",
+              "target": "[\"app\",\"t2\"]",
+              "operation": "select",
+              "details": {}
+            }
+          ],
+          "artifact": "f670d8ddb516f6ed4c77d545f4ca2c1f2821d8c029391455c1a76f3b7aa45ebb"
+        },
+        {
+          "reads": [
+            "[\"app\",\"t0\"]"
+          ],
+          "writes": [],
+          "unknown": [
+            {
+              "source": "[\"app\",\"t0\"]",
+              "reason": "Unsupported type or virtual generated expression",
+              "dimensions": [
+                "reads",
+                "writes"
+              ]
+            },
+            {
+              "source": "routine:16406",
+              "reason": "Unsupported routine body, signature, or execution context",
+              "dimensions": [
+                "reads",
+                "writes"
+              ]
+            }
+          ],
+          "derivation": [
+            {
+              "rule": "relation-event",
+              "source": "endpoint",
+              "target": "[\"app\",\"t0\"]",
+              "operation": "select",
+              "details": {}
+            },
+            {
+              "rule": "routine-call",
+              "source": "endpoint",
+              "target": "routine:16406"
+            }
+          ],
+          "artifact": "f670d8ddb516f6ed4c77d545f4ca2c1f2821d8c029391455c1a76f3b7aa45ebb"
+        }
+      ],
+      "summary": {
+        "reads": [
+          "[\"app\",\"t0\"]"
+        ],
+        "writes": [
+          "[\"app\",\"t0\"]"
+        ],
+        "unknown": [
+          {
+            "source": "[\"app\",\"t0\"]",
+            "reason": "Unsupported type or virtual generated expression",
+            "dimensions": [
+              "reads",
+              "writes"
+            ]
+          },
+          {
+            "source": "[\"app\",\"t0\"]",
+            "reason": "Unsupported type or virtual generated expression",
+            "dimensions": [
+              "reads",
+              "writes"
+            ]
+          }
+        ],
+        "derivation": [
+          {
+            "rule": "relation-event",
+            "source": "endpoint",
+            "target": "[\"app\",\"t0\"]",
+            "operation": "update",
+            "details": {
+              "columns": [
+                "value"
+              ],
+              "defaults": []
+            }
+          },
+          {
+            "rule": "relation-event",
+            "source": "endpoint",
+            "target": "[\"app\",\"t0\"]",
+            "operation": "select",
+            "details": {}
+          }
+        ],
+        "artifact": "f670d8ddb516f6ed4c77d545f4ca2c1f2821d8c029391455c1a76f3b7aa45ebb"
+      }
+    }
+  }
+}

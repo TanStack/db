@@ -1,0 +1,297 @@
+{
+  "settings": {
+    "N": 2,
+    "X": 2,
+    "steps": 5,
+    "seed": 911027,
+    "effects": true
+  },
+  "limits": [
+    "Generated scalar columns extend required id/text/completed/createdAt/scope fields; not arbitrary PostgreSQL schemas.",
+    "Fixed text primary keys; nullable foreign keys use ON DELETE SET NULL.",
+    "Ascending timestamp/id ordering; predicates use scalar comparisons and NULL logic.",
+    "Sequential mutation sequences here; concurrent waves retain their separate campaign.",
+    "Auth and imported table/type bindings are trusted fixture assumptions.",
+    "No schema/type proof for arbitrary application modules, no subset loading, no LSN manifests."
+  ],
+  "engine": {
+    "version": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit",
+    "version_num": "170005"
+  },
+  "ok": false,
+  "error": "AssertionError [ERR_ASSERTION]: operation 0: success: every active collection must equal reference PG\n+ actual - expected\n... Skipped lines\n\n  [\n    [\n      {\n        completed: false,\n        createdAt: '2026-01-01T00:00:00.000Z',\n...\n      {\n+       completed: false,\n-       completed: true,\n        createdAt: '2026-01-01T00:00:00.000Z',\n        field_0_boolean: null,\n        field_1_integer: 0,\n        id: 'alice-0',\n        parentId: 'alice-0',\n+       text: 'row-0'\n-       text: 'trigger:changed'\n      },\n      {\n+       completed: false,\n-       completed: true,\n        createdAt: '2026-01-01T00:00:00.000Z',\n        field_0_boolean: true,\n        field_1_integer: 2,\n        id: 'alice-2',\n        parentId: 'alice-2',\n+       text: 'row-2'\n-       text: 'trigger:changed'\n      },\n      {\n+       completed: true,\n-       completed: false,\n        createdAt: '2026-01-01T00:00:01.000Z',\n        field_0_boolean: false,\n        field_1_integer: -1,\n        id: 'alice-1',\n        parentId: 'alice-1',\n+       text: 'row-1'\n-       text: 'trigger:changed'\n      }\n    ],\n    [\n      {\n+       completed: false,\n-       completed: true,\n        createdAt: '2026-01-01T00:00:00.000Z',\n        field_0_boolean: null,\n        field_1_integer: 0,\n        id: 'alice-0',\n        parentId: 'alice-0',\n+       text: 'row-0'\n-       text: 'trigger:changed'\n      },\n      {\n+       completed: false,\n-       completed: true,\n        createdAt: '2026-01-01T00:00:00.000Z',\n        field_0_boolean: true,\n        field_1_integer: 2,\n        id: 'alice-2',\n        parentId: 'alice-2',\n+       text: 'row-2'\n-       text: 'trigger:changed'\n      }\n    ]\n  ]\n\n    at Driver.checkpoint (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/driver.mjs:351:12)\n    at async Driver.run (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/driver.mjs:623:9)\n    at async execute (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql.mjs:65:5)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql.mjs:98:5",
+  "serverLog": "4:37:25 PM [vite] (client) Re-optimizing dependencies because vite config has changed\n\n  VITE v7.3.2  ready in 504 ms\n\n  ➜  Local:   http://127.0.0.1:51160/\n[vite] connected.\nWarning: A notFoundError was encountered on the route with ID \"__root__\", but a notFoundComponent option was not configured, nor was a router level defaultNotFoundComponent configured. Consider configuring at least one of these to avoid TanStack Router's overly generic defaultNotFoundComponent (<p>Not Found</p>)\n",
+  "coverage": [
+    {
+      "feature": "schema.multiple-tables",
+      "description": "Several independent relation identities",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "schema.foreign-key-set-null",
+      "description": "Server-only ON DELETE SET NULL effects",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "type.integer",
+      "description": "int4 values",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "type.text",
+      "description": "Text and Unicode values",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "type.boolean",
+      "description": "Boolean values",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "type.timestamp",
+      "description": "Timestamp transport and total createdAt/id order",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "schema.nullable",
+      "description": "Nullable generated scalar columns",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "schema.not-null",
+      "description": "NOT NULL generated scalar columns",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.eq",
+      "description": "Scalar equality",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.ne",
+      "description": "Scalar inequality",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.gt",
+      "description": "Integer greater-than",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.gte",
+      "description": "Integer greater-than-or-equal",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.lt",
+      "description": "Integer less-than",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.lte",
+      "description": "Integer less-than-or-equal",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.and",
+      "description": "Predicate conjunction",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.or",
+      "description": "Predicate disjunction",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.isNull",
+      "description": "SQL NULL membership",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.isNotNull",
+      "description": "SQL non-NULL membership",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "mutation.insert",
+      "description": "Insert",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "mutation.edit",
+      "description": "Column updates",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "mutation.complete",
+      "description": "Boolean updates",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "mutation.delete",
+      "description": "Delete",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "mutation.cross-table",
+      "description": "An opaque handler also changes another table",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "mutation.post-commit-error",
+      "description": "A handler errors after committed writes",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "mutation.rejected",
+      "description": "Rejected write restores optimistic state",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "mutation.foreign-key-conflict",
+      "description": "Concurrent parent deletion invalidates a child update",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.limit",
+      "description": "Finite result windows",
+      "status": "explicitly-rejected",
+      "witnesses": [],
+      "rejection": "Generated compiler rejection control"
+    },
+    {
+      "feature": "query.join",
+      "description": "Joins and relationship projection",
+      "status": "explicitly-rejected",
+      "witnesses": [],
+      "rejection": "Generated compiler rejection control"
+    },
+    {
+      "feature": "query.aggregate",
+      "description": "Grouping and aggregates",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.cte",
+      "description": "CTEs and recursive queries",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.window",
+      "description": "Window functions",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.set-operation",
+      "description": "UNION/INTERSECT/EXCEPT",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "type.numeric",
+      "description": "Exact numeric and bigint transport",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "type.json-array",
+      "description": "JSON and array expressions",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "schema.trigger",
+      "description": "User-defined trigger effects",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "effect.rewrite",
+      "description": "BEFORE UPDATE rewrites authored values",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "effect.suppress",
+      "description": "BEFORE UPDATE suppresses a row without an error",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "effect.reject",
+      "description": "Trigger rejects a statement and rolls back its changes",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "effect.fanout",
+      "description": "AFTER UPDATE changes all recipient rows in the caller scope",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "effect.transition",
+      "description": "Statement trigger reads NEW TABLE and changes another table",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "effect.deferred",
+      "description": "Constraint trigger runs at the implicit transaction commit",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "authority.external-writer",
+      "description": "External writers and replica visibility",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "demand.subset",
+      "description": "On-demand subset transport and refill",
+      "status": "not-tested",
+      "witnesses": []
+    }
+  ],
+  "executed": {
+    "programsBuilt": 1,
+    "sequences": 1,
+    "operations": 1,
+    "checkpoints": 4,
+    "clientArtifacts": 4,
+    "transitions": {
+      "4 queries / edit / success": 1
+    },
+    "wire": []
+  }
+}

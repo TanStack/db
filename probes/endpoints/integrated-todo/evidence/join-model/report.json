@@ -1,0 +1,21 @@
+{
+  "ok": true,
+  "layer": "DB relational model experiment, not compiled Endpoints",
+  "seed": 911031,
+  "operations": 500,
+  "checkpoints": 1025,
+  "limits": [
+    "Complete input relations supplied explicitly; no source-coverage inference.",
+    "No endpoint joined write mapping or network/authority lifecycle coverage.",
+    "Integer identities; nullable equality joins; two scopes; parent key unique."
+  ],
+  "engine": {
+    "version": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit"
+  },
+  "property": {
+    "runs": 25,
+    "shrinks": 0,
+    "path": null
+  },
+  "coverageBoundary": "An empty inner result cannot distinguish missing child inputs from children waiting for a parent."
+}

@@ -1,0 +1,79 @@
+[
+  {
+    "probe": "og01",
+    "command": [
+      "/opt/homebrew/bin/node",
+      "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/field-trip-optimistic-coherence/oracle-guidance-reaudit/probes/og01.mjs"
+    ],
+    "cwd": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db",
+    "exitCode": 0,
+    "stdout": "{\"id\":\"OG-01\",\"seam\":\"exact compiled-runner pruning assertion through operation counter\",\"reads\":1,\"operations\":1,\"comparisonHadToPassBeforeCounter\":true}\n{\"id\":\"OG-01\",\"seam\":\"exact compiled-runner pruning assertion through operation counter\",\"reads\":0,\"operations\":0,\"comparisonHadToPassBeforeCounter\":true}\n",
+    "stderr": ""
+  },
+  {
+    "probe": "og03",
+    "command": [
+      "/opt/homebrew/bin/node",
+      "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/field-trip-optimistic-coherence/oracle-guidance-reaudit/probes/og03.mjs"
+    ],
+    "cwd": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db",
+    "exitCode": 0,
+    "stdout": "{\"id\":\"OG-03\",\"variable\":\"ENDPOINT_ORACLE_MUTANT\",\"ok\":true,\"outcome\":\"passed\",\"recordedFault\":null}\n{\"id\":\"OG-03\",\"variable\":\"ENDPOINT_COMPILED_MUTANT\",\"ok\":true,\"outcome\":\"passed\",\"recordedFault\":null}\n{\"id\":\"OG-03\",\"variable\":\"ENDPOINT_FUNCTION_MUTANT\",\"ok\":true,\"outcome\":\"passed\",\"recordedFault\":null}\n{\"id\":\"OG-03\",\"variable\":\"ENDPOINT_DEPENDENCY_MUTANT\",\"ok\":true,\"outcome\":\"passed\",\"recordedFault\":null}\n{\"id\":\"OG-03\",\"variable\":\"ENDPOINT_ORACLE_TEST_FAULT\",\"ok\":false,\"outcome\":\"fault-unreached\",\"recordedFault\":\"control\"}\n",
+    "stderr": ""
+  },
+  {
+    "probe": "og05",
+    "command": [
+      "/opt/homebrew/bin/node",
+      "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/field-trip-optimistic-coherence/oracle-guidance-reaudit/probes/og05.mjs"
+    ],
+    "cwd": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db",
+    "exitCode": 0,
+    "stdout": "{\"id\":\"OG-05\",\"originalDifference\":[\"0\",\"0\",\"id\"],\"replayDifference\":[\"0\",\"0\",\"text\"],\"verdict\":\"same-violation\",\"law\":\"Distinct contractual fields must not count as same distinguishing evidence\"}\n",
+    "stderr": ""
+  },
+  {
+    "probe": "og06",
+    "command": [
+      "/opt/homebrew/bin/node",
+      "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/field-trip-optimistic-coherence/oracle-guidance-reaudit/probes/og06.mjs"
+    ],
+    "cwd": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db",
+    "exitCode": 0,
+    "stdout": "{\"id\":\"OG-06\",\"control\":\"current runner callback\",\"visited\":[\"original\",\"build\",\"later-rows\"],\"reduced\":{\"program\":{},\"steps\":\"later-rows\"},\"rejected\":1,\"originalPreserved\":false}\n{\"id\":\"OG-06\",\"control\":\"outer-case guard\",\"visited\":[\"original\",\"build\"],\"reduced\":{\"program\":{},\"steps\":\"original\"},\"rejected\":1,\"originalPreserved\":true}\n",
+    "stderr": ""
+  },
+  {
+    "probe": "og07",
+    "command": [
+      "/opt/homebrew/bin/node",
+      "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/field-trip-optimistic-coherence/oracle-guidance-reaudit/probes/og07.mjs"
+    ],
+    "cwd": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db",
+    "exitCode": 0,
+    "stdout": "{\"id\":\"OG-07\",\"seam\":\"actual compiled-browser top-level runner; fake I/O returns a reached row mismatch\",\"assertionReached\":true,\"ok\":false,\"outcome\":\"unclassified-failure\",\"cases\":0,\"replaySaved\":false,\"errorTextSaved\":true}\n{\"id\":\"OG-07\",\"runner\":\"loading actual catch + Evidence.finish\",\"structuredFailureExisted\":true,\"outcome\":\"unclassified-failure\",\"replaySaved\":false,\"errorTextSaved\":true}\n",
+    "stderr": ""
+  },
+  {
+    "probe": "more",
+    "command": [
+      "/opt/homebrew/bin/node",
+      "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/field-trip-optimistic-coherence/oracle-guidance-reaudit/probes/more.mjs"
+    ],
+    "cwd": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db",
+    "exitCode": 0,
+    "stdout": "{\"id\":\"OG-02\",\"checkpointCredited\":true,\"clientConsumed\":false,\"fulfillment\":\"held explicitly beyond the actual 30ms delay\"}\n{\"id\":\"OG-04\",\"drainedEvents\":1,\"failureKeys\":[\"law\",\"checkpoint\",\"actual\",\"expected\",\"difference\"],\"packet\":{\"input\":{\"recipe\":\"generated input\"},\"failure\":{\"law\":\"notification-rows\",\"checkpoint\":\"delivered #, sibling outcome pending\",\"actual\":[[{\"id\":\"r\",\"text\":\"wrong\"}]],\"expected\":[[{\"id\":\"r\",\"text\":\"right\"}]],\"difference\":[\"0\",\"0\",\"text\"]}}}\n{\"id\":\"OG-09\",\"localErrors\":[\"secondary scan failure\"],\"recordedCleanupErrors\":[],\"primary\":\"rows\"}\n{\"id\":\"OG-09\",\"runner\":\"loading\",\"detachedRejection\":\"loading body failed\",\"pending\":1}\n{\"id\":\"OG-01\",\"witnessedLaws\":[\"reference-baseline\",\"optimistic-rows\",\"settled-rows\"],\"operations\":71,\"resultReads\":94,\"pruningWitness\":false,\"settlementWitness\":false}\n{\"id\":\"OG-08\",\"changedFile\":\"reference.mjs (disposable copy)\",\"provenanceUnchanged\":true,\"sourceHashes\":15}\n{\"id\":\"OG-10\",\"samples\":1000,\"fields\":[\"kind\",\"value\",\"optimistic\"],\"coldLifecycleCommands\":0,\"allCollectionsPreloadedBeforeSteps\":true}\n",
+    "stderr": "(node:22896) PromiseRejectionHandledWarning: Promise rejection was handled asynchronously (rejection id: 2)\n(Use `node --trace-warnings ...` to show where the warning was created)\n"
+  },
+  {
+    "probe": "existing-helper-tests",
+    "command": [
+      "/opt/homebrew/bin/node",
+      "--test",
+      "tests/oracle-evidence.test.mjs"
+    ],
+    "exitCode": 0,
+    "stdout": "\u2714 shrinking retains the same law, checkpoint, operation and differing collection (3.815917ms)\n\u2714 cleanup preserves the frozen mismatch and attempts every release after failures (1.933084ms)\n\u2714 replay distinguishes the original violation, a different failure and a repaired history (3.0235ms)\n\u2714 fast-check cannot shrink a row failure into a build failure (2.77175ms)\n\u2714 the persisted final verdict includes teardown failures after successful comparisons (5.215792ms)\n\u2714 a nested runner cannot hide an earlier different failure and accept a later matching failure (1.513083ms)\n\u2714 a requested fault that survives or is never reached cannot report a passing control (3.934ms)\n\u2139 tests 7\n\u2139 suites 0\n\u2139 pass 7\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 103.671\n",
+    "stderr": ""
+  }
+]

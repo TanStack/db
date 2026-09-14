@@ -1,0 +1,149 @@
+{
+  "ok": false,
+  "seed": 911052,
+  "N": 2,
+  "X": 2,
+  "samples": 4,
+  "cases": [
+    {
+      "tables": 2,
+      "queries": 6,
+      "rows": 8,
+      "strategies": {
+        "baseline": {
+          "warmups": [
+            {
+              "elapsedMs": 69.39999985694885,
+              "responseBytes": 5065,
+              "gzipBytes": 1918,
+              "requestBytes": 2533,
+              "sql": 7,
+              "proofReads": 0,
+              "resultReads": 6,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 12.799999952316284,
+              "responseBytes": 5065,
+              "gzipBytes": 1916,
+              "requestBytes": 2533,
+              "sql": 7,
+              "proofReads": 0,
+              "resultReads": 6,
+              "writes": 1
+            }
+          ],
+          "samples": [
+            {
+              "elapsedMs": 11.100000143051147,
+              "responseBytes": 5065,
+              "gzipBytes": 1916,
+              "requestBytes": 2533,
+              "sql": 7,
+              "proofReads": 0,
+              "resultReads": 6,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 13.599999904632568,
+              "responseBytes": 5066,
+              "gzipBytes": 1912,
+              "requestBytes": 2533,
+              "sql": 7,
+              "proofReads": 0,
+              "resultReads": 6,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 11.800000190734863,
+              "responseBytes": 5067,
+              "gzipBytes": 1907,
+              "requestBytes": 2533,
+              "sql": 7,
+              "proofReads": 0,
+              "resultReads": 6,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 9,
+              "responseBytes": 5066,
+              "gzipBytes": 1911,
+              "requestBytes": 2533,
+              "sql": 7,
+              "proofReads": 0,
+              "resultReads": 6,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 9.700000047683716,
+              "responseBytes": 5065,
+              "gzipBytes": 1914,
+              "requestBytes": 2533,
+              "sql": 7,
+              "proofReads": 0,
+              "resultReads": 6,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 10.400000095367432,
+              "responseBytes": 5066,
+              "gzipBytes": 1908,
+              "requestBytes": 2533,
+              "sql": 7,
+              "proofReads": 0,
+              "resultReads": 6,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 8.700000047683716,
+              "responseBytes": 5067,
+              "gzipBytes": 1903,
+              "requestBytes": 2533,
+              "sql": 7,
+              "proofReads": 0,
+              "resultReads": 6,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 8.800000190734863,
+              "responseBytes": 5066,
+              "gzipBytes": 1908,
+              "requestBytes": 2533,
+              "sql": 7,
+              "proofReads": 0,
+              "resultReads": 6,
+              "writes": 1
+            }
+          ],
+          "median": {
+            "elapsedMs": 10.400000095367432,
+            "responseBytes": 5066,
+            "gzipBytes": 1911,
+            "requestBytes": 2533,
+            "sql": 7,
+            "proofReads": 0,
+            "resultReads": 6,
+            "writes": 1
+          },
+          "counts": {
+            "programsBuilt": 1,
+            "sequences": 0,
+            "operations": 0,
+            "checkpoints": 22,
+            "clientArtifacts": 4,
+            "transitions": {},
+            "wire": []
+          }
+        }
+      }
+    }
+  ],
+  "limits": [
+    "Local Vite dev server and PGlite. Latency includes SQL/observer costs but does not establish WAN or multi-connection contention gains.",
+    "First operation of each history establishes certificates and is excluded from timing summaries.",
+    "Schemas are fixed while each history runs. Production auth, DDL and untracked dependencies are excluded.",
+    "Gzip is an offline estimate; response bytes are observed Start bodies."
+  ],
+  "serverLog": "8:05:20 PM [vite] (client) Re-optimizing dependencies because vite config has changed\n\n  VITE v7.3.2  ready in 471 ms\n\n  ➜  Local:   http://127.0.0.1:59495/\n[vite] connected.\nWarning: A notFoundError was encountered on the route with ID \"__root__\", but a notFoundComponent option was not configured, nor was a router level defaultNotFoundComponent configured. Consider configuring at least one of these to avoid TanStack Router's overly generic defaultNotFoundComponent (<p>Not Found</p>)\n",
+  "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ 'rejected'\n- 'fulfilled'\n\n    at file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/pruning.mjs:70:22"
+}

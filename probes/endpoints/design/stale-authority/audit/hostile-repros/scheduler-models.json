@@ -1,0 +1,63 @@
+{
+  "evidence": "constructed scheduler models / unsafe negative controls only",
+  "results": [
+    {
+      "scene": "late ordinary read after retirement",
+      "weakAuthority": 0,
+      "justifiedAuthority": 1,
+      "strongAdmission": false,
+      "events": [
+        "M starts / epoch 1",
+        "ordinary read observes 0 while M runs",
+        "M commits 1 / outcome known",
+        "quiet read observes 1",
+        "install 1 / retire M",
+        "ordinary read returns at epoch 1 / weak rule installs 0"
+      ]
+    },
+    {
+      "scene": "late retained instance",
+      "weakComplete": true,
+      "strongComplete": false,
+      "events": [
+        "M finished",
+        "quiet read captures C1 lifetime 1",
+        "C2 lifetime 1 becomes retained / its initial read held",
+        "quiet read returns only C1 / no mutation epoch changed",
+        "weak rule retires M while C2 has no authoritative coverage"
+      ]
+    },
+    {
+      "scene": "disclosed non-atomic publication and retirement",
+      "observations": [
+        {
+          "all": true,
+          "completedContains": false
+        },
+        {
+          "all": true,
+          "completedContains": true
+        }
+      ],
+      "retirementVisibleRows": [
+        2,
+        1,
+        20
+      ],
+      "authorityNeverRegressed": 20,
+      "note": "Not a candidate safety refutation: intermediate rows remain owned guesses."
+    },
+    {
+      "scene": "unknown handler cannot be closed by a fresh read",
+      "observationsBeforeRelease": {
+        "transport": "rejected",
+        "readRows": 0
+      },
+      "worlds": {
+        "A": "handler already stopped without writing",
+        "B": "handler still running; commits 1 after fresh read"
+      },
+      "requirement": "keep closure unknown until evidence exists; a retry of the read is not closure evidence"
+    }
+  ]
+}

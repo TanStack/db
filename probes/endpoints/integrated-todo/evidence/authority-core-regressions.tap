@@ -1,0 +1,10 @@
+
+ RUN  v3.2.4 /Users/kylemathews/.codex/worktrees/e079/tanstack-db
+
+ ✓ packages/db/tests/coordinated-publication.test.ts (3 tests) 11ms
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  14:53:04
+   Duration  782ms (transform 398ms, setup 0ms, collect 530ms, tests 11ms, environment 0ms, prepare 45ms)
+

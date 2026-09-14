@@ -1,0 +1,41 @@
+{
+  "ok": true,
+  "seed": 9142601,
+  "runs": 2,
+  "sequences": 3,
+  "mutant": null,
+  "checker": "effects",
+  "histories": 10,
+  "operations": 40,
+  "comparisons": {
+    "values/baseline": 10,
+    "values/same-turn-optimism": 40,
+    "values/settled": 40,
+    "read-obligation/settled": 40,
+    "reach/campaign": 1,
+    "catalog-boundary/campaign": 1
+  },
+  "writesExecuted": 40,
+  "envelopesDelivered": 40,
+  "resultReads": 106,
+  "skippedReads": 94,
+  "buildCatalogCalls": 6,
+  "runtimeCatalogCalls": 0,
+  "cells": {
+    "none/VOLATILE/depth-2": 1,
+    "expression/VOLATILE/depth-2": 1,
+    "partial/VOLATILE/depth-2": 1,
+    "gin/VOLATILE/depth-2": 1,
+    "partial/VOLATILE/depth-0": 1,
+    "expression/STABLE/depth-0": 1
+  },
+  "rejectedShrinkFailures": [],
+  "cleanupErrors": [],
+  "node": "v24.5.0",
+  "fastCheck": {
+    "runs": 2,
+    "shrinks": 0,
+    "seed": 9142601,
+    "path": null
+  }
+}

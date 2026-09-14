@@ -1,0 +1,25 @@
+import {refreshAfterMutation as __boundRefresh} from './refresh.server';
+import {createServerFn as __boundServerFn} from '@tanstack/react-start';
+import {bindQuery as __boundQuery,bindMutation as __boundMutation} from './runtime';
+const __boundRpc0=__boundServerFn({method:'POST'}).inputValidator(z.object({scope:z.enum(['alice','bob']),input:z.object({})})).handler(async ({data})=>(async function(req,res){
+  const user=await requireUser(req)
+  const todos=await db.select({id:todo.id,text:todo.text,completed:todo.completed,createdAt:todo.createdAt}).from(todo).where(and(eq(todo.userId,user.id),eq(todo.completed,false))).orderBy(asc(todo.id))
+  return res.json(todos)
+})({body:data.input,scope:data.scope,kind:'query',endpointSourceHash:'325b9ae8cf52bdbaa281381445cee12353002557cd06e208988f21b5361f4716'},{json:value=>value}));
+const __boundRpc1=__boundServerFn({method:'POST'}).inputValidator(z.object({scope:z.enum(['alice','bob']),input:z.object({})})).handler(async ({data})=>(async function(req,res){
+  const user=await requireUser(req)
+  const todos=await db.select({id:todo.id,text:todo.text,completed:todo.completed,createdAt:todo.createdAt}).from(todo).where(and(eq(todo.userId,user.id),eq(todo.completed,true))).orderBy(asc(todo.id))
+  return res.json(todos)
+})({body:data.input,scope:data.scope,kind:'query',endpointSourceHash:'325b9ae8cf52bdbaa281381445cee12353002557cd06e208988f21b5361f4716'},{json:value=>value}));
+import {z} from 'zod'
+import {endpoints} from './runtime'
+import {db,todo,requireUser} from './database.server'
+import {asc,eq,and} from 'drizzle-orm'
+export function makeActiveComponent(){
+  function TodoApp(dbClient){const {query,mutation}=endpoints(dbClient);const rows = __boundQuery(dbClient,"6a54ba8dfd34:TodoApp:rows",__boundRpc0,{"relation":"todo","order":["id"],"membership":{"kind":"completed","value":false}});return rows}
+  return TodoApp
+}
+export function makeCompletedComponent(){
+  function TodoApp(dbClient){const {query,mutation}=endpoints(dbClient);const rows = __boundQuery(dbClient,"6a54ba8dfd34:TodoApp:rows",__boundRpc1,{"relation":"todo","order":["id"],"membership":{"kind":"completed","value":true}});return rows}
+  return TodoApp
+}

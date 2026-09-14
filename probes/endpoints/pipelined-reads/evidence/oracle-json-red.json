@@ -1,0 +1,93 @@
+{
+  "ok": false,
+  "seed": 20260912,
+  "numRuns": 20,
+  "histories": 3,
+  "strategies": {
+    "serial": {
+      "max": 1,
+      "max_pipeline": 0
+    },
+    "pipeline": {
+      "max": 1,
+      "max_pipeline": 100
+    },
+    "pool": {
+      "max": 3,
+      "max_pipeline": 0
+    }
+  },
+  "layer": "Actual Endpoints refresh helper + PostgreSQL network adapter; independent PGlite SQL reference",
+  "operationsChecked": 40,
+  "responseChecks": 128,
+  "controls": [],
+  "limits": [
+    "Fixed two-table schema; generated rows, query choices/parameters and operation histories, not all PostgreSQL syntax.",
+    "Client optimistic/publication implementation is unchanged and not instantiated by this adapter oracle.",
+    "Ordered external writes are covered; arbitrary concurrent snapshots and production pool contention are not.",
+    "PGlite reference aligns int8/numeric parsers with the tested driver; it does not establish every driver/codec mapping."
+  ],
+  "postgres": "PostgreSQL 17.6 on aarch64-unknown-linux-musl, compiled by gcc (Alpine 14.2.0) 14.2.0, 64-bit",
+  "pglite": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit",
+  "generated": {
+    "failed": true,
+    "numRuns": 1,
+    "numShrinks": 19,
+    "seed": 20260912,
+    "counterexamplePath": "0:0:0:0:0:1:1:0:0:0:0:0:0:0:0:0:0:0:0:0",
+    "counterexample": [
+      {
+        "initial": [],
+        "config": {
+          "completed": false,
+          "threshold": 0,
+          "limit": 0,
+          "offset": 0,
+          "body": "'; DROP TABLE item; -- 雪\\",
+          "kinds": [
+            0
+          ]
+        },
+        "histories": [
+          [
+            {
+              "kind": "put",
+              "row": {
+                "id": "0",
+                "parent": null,
+                "body": "'; DROP TABLE item; -- 雪\\",
+                "completed": false,
+                "score": null
+              }
+            }
+          ],
+          [
+            {
+              "kind": "put",
+              "row": {
+                "id": "0",
+                "parent": null,
+                "body": "'; DROP TABLE item; -- 雪\\",
+                "completed": false,
+                "score": null
+              }
+            }
+          ],
+          [
+            {
+              "kind": "put",
+              "row": {
+                "id": "0",
+                "parent": null,
+                "body": "'; DROP TABLE item; -- 雪\\",
+                "completed": false,
+                "score": null
+              }
+            }
+          ]
+        ]
+      }
+    ]
+  },
+  "error": "Error: AssertionError [ERR_ASSERTION]: serial: complete typed/ordered result after put\n+ actual - expected\n... Skipped lines\n\n  [\n    {\n      id: 'all',\n      rows: [\n        {\n...\n          id: '0',\n+         info: `{\"body\":\"'; DROP TABLE item; -- 雪\\\\\\\\\",\"tags\":[null,\"雪\",3]}`,\n-         info: {\n-           body: \"'; DROP TABLE item; -- 雪\\\\\",\n-           tags: [\n-             null,\n-             '雪',\n-             3\n-           ]\n-         },\n          parent_id: null,\n          score: null\n        }\n      ]\n    }\n\n    at file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/pipelined-reads/oracle.mjs:88:18\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async AsyncProperty.run (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/pipelined-reads/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)\n    at async asyncRunIt (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/pipelined-reads/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)\n    at async generatedHistories (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/pipelined-reads/oracle.mjs:64:19)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/pipelined-reads/oracle.mjs:174:3\n    at generatedHistories (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/pipelined-reads/oracle.mjs:103:29)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/pipelined-reads/oracle.mjs:174:3"
+}

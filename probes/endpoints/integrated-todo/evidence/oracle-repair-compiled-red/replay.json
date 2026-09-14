@@ -1,0 +1,143 @@
+{
+  "property": "endpoints.compiled-dependencies",
+  "original": {
+    "input": {
+      "program": {
+        "inlineSql": true,
+        "nativeDefaults": true,
+        "expressionIndex": true,
+        "count": 3,
+        "trigger": false,
+        "foreignKey": false
+      },
+      "histories": [
+        [
+          {
+            "kind": "update",
+            "table": 0,
+            "value": 7
+          }
+        ]
+      ]
+    },
+    "failure": {
+      "law": "reference-baseline",
+      "checkpoint": "preload",
+      "actual": [
+        [
+          {
+            "id": "row",
+            "value": 101
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 2
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 3
+          }
+        ]
+      ],
+      "expected": [
+        [
+          {
+            "id": "row",
+            "value": 1
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 2
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 3
+          }
+        ]
+      ],
+      "difference": [
+        "0",
+        "0",
+        "value"
+      ]
+    }
+  },
+  "reduced": {
+    "input": {
+      "program": {
+        "inlineSql": true,
+        "nativeDefaults": true,
+        "expressionIndex": true,
+        "count": 3,
+        "trigger": false,
+        "foreignKey": false
+      },
+      "histories": [
+        [
+          {
+            "kind": "update",
+            "table": 0,
+            "value": 7
+          }
+        ]
+      ]
+    },
+    "failure": {
+      "law": "reference-baseline",
+      "checkpoint": "preload",
+      "actual": [
+        [
+          {
+            "id": "row",
+            "value": 101
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 2
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 3
+          }
+        ]
+      ],
+      "expected": [
+        [
+          {
+            "id": "row",
+            "value": 1
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 2
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 3
+          }
+        ]
+      ],
+      "difference": [
+        "0",
+        "0",
+        "value"
+      ]
+    }
+  }
+}

@@ -1,0 +1,106 @@
+[
+  {
+    "optimisticRecipientsOnly": false,
+    "serverFlipsCompleted": false,
+    "passed": true,
+    "error": null,
+    "counts": {
+      "programsBuilt": 1,
+      "sequences": 1,
+      "operations": 1,
+      "checkpoints": 4,
+      "clientArtifacts": 4,
+      "transitions": {
+        "3 queries / insert / success": 1
+      },
+      "wire": [
+        {
+          "injectedDelayMs": 0,
+          "queries": 3,
+          "kind": "insert",
+          "outcome": "success",
+          "strategy": "inline",
+          "requests": 1,
+          "requestBytes": 637,
+          "responseBytes": 1003,
+          "elapsedMs": 112.83558399999856
+        }
+      ]
+    }
+  },
+  {
+    "optimisticRecipientsOnly": true,
+    "serverFlipsCompleted": false,
+    "passed": true,
+    "error": null,
+    "counts": {
+      "programsBuilt": 1,
+      "sequences": 1,
+      "operations": 1,
+      "checkpoints": 4,
+      "clientArtifacts": 4,
+      "transitions": {
+        "3 queries / insert / success": 1
+      },
+      "wire": [
+        {
+          "injectedDelayMs": 0,
+          "queries": 3,
+          "kind": "insert",
+          "outcome": "success",
+          "strategy": "inline",
+          "requests": 1,
+          "requestBytes": 552,
+          "responseBytes": 882,
+          "elapsedMs": 98.18933399999878
+        }
+      ]
+    }
+  },
+  {
+    "optimisticRecipientsOnly": true,
+    "serverFlipsCompleted": true,
+    "passed": false,
+    "error": "AssertionError [ERR_ASSERTION]: operation 0: success: every active collection must equal reference PG\n+ actual - expected\n... Skipped lines\n\n  [\n    [\n      {\n        completed: true,\n        createdAt: '2026-01-01T00:00:00.000Z',\n...\n    [],\n+   []\n-   [\n-     {\n-       completed: true,\n-       createdAt: '2026-01-01T00:00:00.000Z',\n-       id: 'new-0',\n-       text: 'guess'\n-     }\n-   ]\n  ]\n",
+    "counts": {
+      "programsBuilt": 1,
+      "sequences": 1,
+      "operations": 1,
+      "checkpoints": 4,
+      "clientArtifacts": 4,
+      "transitions": {
+        "3 queries / insert / success": 1
+      },
+      "wire": []
+    }
+  },
+  {
+    "optimisticRecipientsOnly": false,
+    "serverFlipsCompleted": true,
+    "passed": true,
+    "error": null,
+    "counts": {
+      "programsBuilt": 1,
+      "sequences": 1,
+      "operations": 1,
+      "checkpoints": 4,
+      "clientArtifacts": 4,
+      "transitions": {
+        "3 queries / insert / success": 1
+      },
+      "wire": [
+        {
+          "injectedDelayMs": 0,
+          "queries": 3,
+          "kind": "insert",
+          "outcome": "success",
+          "strategy": "inline",
+          "requests": 1,
+          "requestBytes": 637,
+          "responseBytes": 1003,
+          "elapsedMs": 115.32820899999933
+        }
+      ]
+    }
+  }
+]

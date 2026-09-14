@@ -1,0 +1,60 @@
+{
+  "ok": true,
+  "seed": 9122602,
+  "scenarios": 5,
+  "sequences": 3,
+  "compilations": 8,
+  "operations": 71,
+  "authorityChecks": 181,
+  "resultReads": 94,
+  "skippedReads": 87,
+  "runtimeCatalogQueries": 0,
+  "evidence": {
+    "versions": {
+      "fast-check": "3.23.2",
+      "@electric-sql/pglite": "0.3.14",
+      "drizzle-orm": "0.45.1",
+      "playwright": "1.60.0"
+    },
+    "name": "endpoints.compiled-dependencies",
+    "cases": 8,
+    "witnesses": {
+      "[\"reference-baseline\",\"preload\",null]": 18,
+      "[\"optimistic-rows\",\"same-turn\",\"update\"]": 31,
+      "[\"settled-rows\",\"settled\",\"update\"]": 80,
+      "[\"optimistic-rows\",\"same-turn\",\"insert\"]": 25,
+      "[\"settled-rows\",\"settled\",\"insert\"]": 63,
+      "[\"optimistic-rows\",\"same-turn\",\"delete\"]": 15,
+      "[\"settled-rows\",\"settled\",\"delete\"]": 38
+    },
+    "faults": [],
+    "cleanupErrors": [],
+    "rejectedShrinks": [],
+    "generation": {
+      "seed": 9122602,
+      "path": null,
+      "runs": 5,
+      "shrinks": 0
+    },
+    "sources": {
+      "evidence.mjs": "b32e25f6b868a5906e8a969c32a5c3f561cd82255a555af1fd3a378193fe3493",
+      "driver.mjs": "7ea21a8a394653df6d902988aaa3cba8a55f920850f435fa84259163e1ee30c5",
+      "program.mjs": "edbee062750f6e664878b8caad5a916dfdc44cf4ffafe0ff84e6b334e423395a",
+      "compiled-dependencies.mjs": "3123ae89a541adeceb5b9bb11f6f713c7398e3ac4cf3f3faeb52aba0f1e27dd4",
+      "dependencies.mjs": "bd21fb76773d2bf1c16b415a9777ee5c27045e43014f0ca25862d7291a8222cc",
+      "concurrent.mjs": "419790a987fe4016bcff0bf5fdce3dc22a7eda629d9399930dc8481e4c926d7b",
+      "sql.mjs": "c8df01e354190691577d9b55d2d562768b83f78b0449da4217995ba7704fec8e",
+      "e2e.mjs": "d66531af8ac0d5b9c3a3c4c584cb1caf46f9c1a0922bd3647c14ed828fb2a21c",
+      "registry.mjs": "6e3a813ebccb52545de604887a5f1fe9ec5165bd80738177889bc2544580a117",
+      "loading.mjs": "4b0caba1b2dfea24e3952c2a5e4f5f06de8fb6327290e4291c051c457eae52af",
+      "compiled-browser.mjs": "3c53a36b7c56703f34f5d2f84f3458c211fd6fca0c14d185071d8378766c3ffe",
+      "../../src/runtime.ts": "1c9924886ee269769b39d6049416bd09b16662bf4ef2c5e81a7fb0a492081bc3",
+      "../../src/registry.server.ts": "b11b621be9349d0260750eb16a571acd8248136351e246d2404dd9ee058059d2",
+      "../../src/dependencies.server.ts": "2a2345d1fc6e1148ce12212f9bbc3643d3bcc2f9dd32ec041d745b0c92b56f3c",
+      "../../bound-transform.mjs": "b57630ea8447142510adab49a7bdf26a5ba70acb0e8f145d36b7897a19f14093"
+    },
+    "node": "v24.5.0",
+    "fault": null
+  },
+  "outcome": "passed"
+}

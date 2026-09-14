@@ -1,0 +1,70 @@
+TAP version 13
+# Subtest: compilation emits inspected read and write footprints, without catalog code
+ok 1 - compilation emits inspected read and write footprints, without catalog code
+  ---
+  duration_ms: 767.044334
+  ...
+# Subtest: absent connection configuration removes stale compilation evidence
+ok 2 - absent connection configuration removes stale compilation evidence
+  ---
+  duration_ms: 50.990584
+  ...
+# Subtest: follows aliased reexports, local helpers and transaction parameters
+ok 3 - follows aliased reexports, local helpers and transaction parameters
+  ---
+  duration_ms: 422.913458
+  ...
+# Subtest: unions writes through branches and callbacks, including writes before failure
+ok 4 - unions writes through branches and callbacks, including writes before failure
+  ---
+  duration_ms: 379.935917
+  ...
+# Subtest: follows returned service objects and query transforms
+ok 5 - follows returned service objects and query transforms
+  ---
+  duration_ms: 411.14475
+  ...
+# Subtest: unknown effects, recursive calls and raw SQL cannot yield partial proofs
+ok 6 - unknown effects, recursive calls and raw SQL cannot yield partial proofs
+  ---
+  duration_ms: 389.441959
+  ...
+# Subtest: helper source changes invalidate endpoint versions
+ok 7 - helper source changes invalidate endpoint versions
+  ---
+  duration_ms: 386.208042
+  ...
+# Subtest: driver coercions cannot hide writes in SQL argument objects
+ok 8 - driver coercions cannot hide writes in SQL argument objects
+  ---
+  duration_ms: 383.727958
+  ...
+# Subtest: function parameters preserve callbacks and namespace aliases
+ok 9 - function parameters preserve callbacks and namespace aliases
+  ---
+  duration_ms: 372.604167
+  ...
+# Subtest: reassigned exported functions keep unknown effects
+ok 10 - reassigned exported functions keep unknown effects
+  ---
+  duration_ms: 372.088708
+  ...
+# Subtest: ordinary validation and transforms in service functions preserve write discovery
+ok 11 - ordinary validation and transforms in service functions preserve write discovery
+  ---
+  duration_ms: 408.516
+  ...
+# Subtest: validator callbacks with database effects remain unknown
+ok 12 - validator callbacks with database effects remain unknown
+  ---
+  duration_ms: 381.805292
+  ...
+1..12
+# tests 12
+# suites 0
+# pass 12
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 4955.702084

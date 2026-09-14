@@ -1,0 +1,46 @@
+{
+  "settings": {
+    "N": 2,
+    "X": 3,
+    "maxSteps": 5,
+    "mutant": null
+  },
+  "campaigns": [],
+  "measurements": {
+    "requests": "Browser fetch POST count",
+    "requestBytes": "POST body bytes, excluding headers",
+    "responseBytes": "Decoded response body bytes; not compressed transfer bytes",
+    "elapsedMs": "Harness elapsed including oracle, gates and browser checkpoints; not isolated application latency"
+  },
+  "limits": [
+    "Todo schema, full-row queries with all/completed predicates, ascending createdAt/id order",
+    "Sequential operations within each sequence; no same-row concurrent scheduling contract",
+    "Dev browser execution with production client artifact inspection; no production browser execution yet",
+    "Server exclusion: live canaries, client dependency maps, raw/module request rejection and retained-server-import rejection; not proof against all possible leakage"
+  ],
+  "replay": "evidence/audit-fixes-refetch-input.json",
+  "replayPassed": true,
+  "executed": {
+    "programsBuilt": 1,
+    "sequences": 1,
+    "operations": 1,
+    "checkpoints": 4,
+    "clientArtifacts": 4,
+    "transitions": {
+      "2 queries / insert / success": 1
+    },
+    "wire": [
+      {
+        "injectedDelayMs": 0,
+        "queries": 2,
+        "kind": "insert",
+        "outcome": "success",
+        "strategy": "client-refetch",
+        "requests": 3,
+        "requestBytes": 848,
+        "responseBytes": 854,
+        "elapsedMs": 145.65337499999987
+      }
+    ]
+  }
+}

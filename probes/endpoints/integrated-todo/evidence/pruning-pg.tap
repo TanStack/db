@@ -1,0 +1,12 @@
+{"checked":276,"skipped":483}
+✔ generated SQL effects preserve every retained result with selective reads (2912.364333ms)
+✔ FK cascades and deferred triggers advance the recipient revision at commit (416.701791ms)
+✔ unknown policy dependencies and disabled observation exclude optimization (409.054834ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4232.035583

@@ -1,0 +1,240 @@
+{
+  "ok": true,
+  "comparisons": 88,
+  "observations": [
+    {
+      "name": "createIngredientAction",
+      "rejected": false,
+      "unaffected": 5,
+      "snapshots": 3,
+      "sqlStatements": 6
+    },
+    {
+      "name": "saveIngredient",
+      "rejected": false,
+      "unaffected": 7,
+      "snapshots": 1,
+      "sqlStatements": 4
+    },
+    {
+      "name": "addToShoppingList",
+      "rejected": false,
+      "unaffected": 7,
+      "snapshots": 1,
+      "sqlStatements": 2
+    },
+    {
+      "name": "createRecipeAction",
+      "rejected": false,
+      "unaffected": 4,
+      "snapshots": 4,
+      "sqlStatements": 9
+    },
+    {
+      "name": "insertComment",
+      "rejected": false,
+      "unaffected": 7,
+      "snapshots": 1,
+      "sqlStatements": 4
+    },
+    {
+      "name": "saveComment",
+      "rejected": false,
+      "unaffected": 7,
+      "snapshots": 1,
+      "sqlStatements": 5
+    },
+    {
+      "name": "changeTagAssignmentsAction",
+      "rejected": false,
+      "unaffected": 5,
+      "snapshots": 3,
+      "sqlStatements": 8
+    },
+    {
+      "name": "saveIngredient",
+      "rejected": true,
+      "unaffected": 0,
+      "sqlStatements": 0
+    },
+    {
+      "name": "deleteComment",
+      "rejected": false,
+      "unaffected": 7,
+      "snapshots": 1,
+      "sqlStatements": 13
+    },
+    {
+      "name": "deleteRecipe",
+      "rejected": false,
+      "unaffected": 4,
+      "snapshots": 4,
+      "sqlStatements": 7
+    },
+    {
+      "name": "deleteIngredient",
+      "rejected": false,
+      "unaffected": 6,
+      "snapshots": 2,
+      "sqlStatements": 5
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "usersCollection",
+      "kind": "query",
+      "dependencies": [
+        "b314175043d7:[\"public\",\"users\"]"
+      ],
+      "reason": "SQL-only analysis; calls not inspected: requireUser"
+    },
+    {
+      "name": "ingredientsCollection",
+      "kind": "query",
+      "dependencies": [
+        "b314175043d7:[\"public\",\"ingredients\"]"
+      ],
+      "reason": "SQL-only analysis; calls not inspected: requireUser"
+    },
+    {
+      "name": "recipesCollection",
+      "kind": "query",
+      "dependencies": [
+        "b314175043d7:[\"public\",\"recipes\"]"
+      ],
+      "reason": "SQL-only analysis; calls not inspected: requireUser"
+    },
+    {
+      "name": "recipeIngredientsCollection",
+      "kind": "query",
+      "dependencies": [
+        "b314175043d7:[\"public\",\"recipe_ingredients\"]"
+      ],
+      "reason": "SQL-only analysis; calls not inspected: requireUser"
+    },
+    {
+      "name": "recipeCommentsCollection",
+      "kind": "query",
+      "dependencies": [
+        "b314175043d7:[\"public\",\"recipe_comments\"]"
+      ],
+      "reason": "SQL-only analysis; calls not inspected: requireUser"
+    },
+    {
+      "name": "tagsCollection",
+      "kind": "query",
+      "dependencies": [
+        "b314175043d7:[\"public\",\"tags\"]"
+      ],
+      "reason": "SQL-only analysis; calls not inspected: requireUser"
+    },
+    {
+      "name": "recipeTagsCollection",
+      "kind": "query",
+      "dependencies": [
+        "b314175043d7:[\"public\",\"recipe_tags\"]"
+      ],
+      "reason": "SQL-only analysis; calls not inspected: requireUser"
+    },
+    {
+      "name": "ingredientTagsCollection",
+      "kind": "query",
+      "dependencies": [
+        "b314175043d7:[\"public\",\"ingredient_tags\"]"
+      ],
+      "reason": "SQL-only analysis; calls not inspected: requireUser"
+    },
+    {
+      "name": "saveIngredient",
+      "kind": "mutation",
+      "dependencies": [
+        "b314175043d7:[\"public\",\"ingredients\"]"
+      ],
+      "reason": "SQL-only analysis; calls not inspected: requireUser"
+    },
+    {
+      "name": "saveComment",
+      "kind": "mutation",
+      "dependencies": [
+        "b314175043d7:[\"public\",\"recipe_comments\"]"
+      ],
+      "reason": "SQL-only analysis; calls not inspected: requireUser"
+    },
+    {
+      "name": "deleteIngredient",
+      "kind": "mutation",
+      "dependencies": [
+        "b314175043d7:[\"public\",\"ingredient_events\"]",
+        "b314175043d7:[\"public\",\"ingredient_tags\"]",
+        "b314175043d7:[\"public\",\"ingredients\"]"
+      ],
+      "reason": "SQL-only analysis; calls not inspected: requireUser"
+    },
+    {
+      "name": "deleteRecipe",
+      "kind": "mutation",
+      "dependencies": [
+        "b314175043d7:[\"public\",\"recipe_comments\"]",
+        "b314175043d7:[\"public\",\"recipe_ingredients\"]",
+        "b314175043d7:[\"public\",\"recipe_tags\"]",
+        "b314175043d7:[\"public\",\"recipes\"]"
+      ],
+      "reason": "SQL-only analysis; calls not inspected: requireUser"
+    },
+    {
+      "name": "deleteComment",
+      "kind": "mutation",
+      "dependencies": [
+        "b314175043d7:[\"public\",\"recipe_comments\"]"
+      ],
+      "reason": "SQL-only analysis; calls not inspected: requireUser"
+    },
+    {
+      "name": "insertComment",
+      "kind": "mutation",
+      "dependencies": [
+        "b314175043d7:[\"public\",\"recipe_comments\"]"
+      ],
+      "reason": "SQL-only analysis; calls not inspected: requireUser"
+    },
+    {
+      "name": "createIngredientAction",
+      "kind": "mutation",
+      "dependencies": [
+        "b314175043d7:[\"public\",\"ingredient_tags\"]",
+        "b314175043d7:[\"public\",\"ingredients\"]",
+        "b314175043d7:[\"public\",\"tags\"]"
+      ],
+      "reason": "SQL-only analysis; calls not inspected: describeIngredient, requireUser"
+    },
+    {
+      "name": "createRecipeAction",
+      "kind": "mutation",
+      "dependencies": [
+        "b314175043d7:[\"public\",\"recipe_ingredients\"]",
+        "b314175043d7:[\"public\",\"recipe_tags\"]",
+        "b314175043d7:[\"public\",\"recipes\"]",
+        "b314175043d7:[\"public\",\"tags\"]"
+      ],
+      "reason": "SQL-only analysis; calls not inspected: extractRecipe, requireUser"
+    },
+    {
+      "name": "changeTagAssignmentsAction",
+      "kind": "mutation",
+      "dependencies": [
+        "b314175043d7:[\"public\",\"ingredient_tags\"]",
+        "b314175043d7:[\"public\",\"recipe_tags\"]",
+        "b314175043d7:[\"public\",\"tags\"]"
+      ],
+      "reason": "SQL-only analysis; calls not inspected: requireUser"
+    },
+    {
+      "name": "addToShoppingList",
+      "kind": "mutation",
+      "dependencies": [
+        "b314175043d7:[\"public\",\"ingredients\"]"
+      ],
+      "reason": "SQL-only analysis; calls not inspected: addShoppingCard, requireUser"
+    }
+  ]
+}

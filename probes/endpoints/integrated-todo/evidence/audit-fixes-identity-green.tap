@@ -1,0 +1,74 @@
+(node:44243) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+TAP version 13
+# (node:44247) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: component declarations carry server order in priority order
+ok 1 - component declarations carry server order in priority order
+  ---
+  duration_ms: 98.508042
+  ...
+# Subtest: sort columns must be selected
+ok 2 - sort columns must be selected
+  ---
+  duration_ms: 7.944625
+  ...
+# Subtest: unsupported direction cannot silently lose client ordering
+ok 3 - unsupported direction cannot silently lose client ordering
+  ---
+  duration_ms: 6.439917
+  ...
+# Subtest: transformed responses cannot borrow intermediate query ordering
+ok 4 - transformed responses cannot borrow intermediate query ordering
+  ---
+  duration_ms: 10.764625
+  ...
+# Subtest: server handler cannot capture the bound client
+ok 5 - server handler cannot capture the bound client
+  ---
+  duration_ms: 5.3625
+  ...
+# Subtest: server handler cannot capture component state
+ok 6 - server handler cannot capture component state
+  ---
+  duration_ms: 7.145125
+  ...
+# Subtest: input validator cannot capture component state
+ok 7 - input validator cannot capture component state
+  ---
+  duration_ms: 8.863875
+  ...
+# Subtest: optimistic callback stays within the component while RPCs move to module scope
+ok 8 - optimistic callback stays within the component while RPCs move to module scope
+  ---
+  duration_ms: 8.455833
+  ...
+# Subtest: a row predicate is carried as data without the server auth expression
+ok 9 - a row predicate is carried as data without the server auth expression
+  ---
+  duration_ms: 10.975666
+  ...
+# Subtest: unsupported query arguments fail before generating an incorrectly scoped request
+ok 10 - unsupported query arguments fail before generating an incorrectly scoped request
+  ---
+  duration_ms: 4.227
+  ...
+# Subtest: same local names in separate lexical scopes have distinct stable identities
+ok 11 - same local names in separate lexical scopes have distinct stable identities
+  ---
+  duration_ms: 7.418792
+  ...
+# Subtest: non-endpoint instrumentation does not change declaration identities
+ok 12 - non-endpoint instrumentation does not change declaration identities
+  ---
+  duration_ms: 18.906667
+  ...
+1..12
+# tests 12
+# suites 0
+# pass 12
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 565.583166

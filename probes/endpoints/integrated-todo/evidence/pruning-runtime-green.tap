@@ -1,0 +1,149 @@
+(node:61145) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+TAP version 13
+# (node:61146) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# TAP version 13
+# \# Subtest: overlapping actions use authority read after both handlers close
+# ok 1 - overlapping actions use authority read after both handlers close
+#   ---
+#   duration_ms: 416.055625
+#   ...
+# \# Subtest: a held ordinary read cannot replace authority after its action retires
+# ok 2 - a held ordinary read cannot replace authority after its action retires
+#   ---
+#   duration_ms: 56.522792
+#   ...
+# \# Subtest: optimistic fanout publishes both collections before either subscriber runs
+# ok 3 - optimistic fanout publishes both collections before either subscriber runs
+#   ---
+#   duration_ms: 20.516916
+#   ...
+# \# Subtest: a collection created during a write joins authoritative coverage
+# ok 4 - a collection created during a write joins authoritative coverage
+#   ---
+#   duration_ms: 42.709041
+#   ...
+# \# Subtest: reentrant actions preserve event order for every subscriber
+# ok 5 - reentrant actions preserve event order for every subscriber
+#   ---
+#   duration_ms: 73.13475
+#   ...
+# \# Subtest: local rollback publishes every recipient together and does not cancel remote coverage
+# ok 6 - local rollback publishes every recipient together and does not cancel remote coverage
+#   ---
+#   duration_ms: 76.840917
+#   ...
+# \# Subtest: a retired read cannot block initial coverage of the restarted collection
+# ok 7 - a retired read cannot block initial coverage of the restarted collection
+#   ---
+#   duration_ms: 35.574042
+#   ...
+# \# Subtest: an unsent authored failure does not leave a remote obligation
+# ok 8 - an unsent authored failure does not leave a remote obligation
+#   ---
+#   duration_ms: 14.194791
+#   ...
+# \# Subtest: a known read failure recovers without repeating its write
+# ok 9 - a known read failure recovers without repeating its write
+#   ---
+#   duration_ms: 32.498458
+#   ...
+# \# Subtest: a later healthy response cannot discharge an unknown remote write
+# ok 10 - a later healthy response cannot discharge an unknown remote write
+#   ---
+#   duration_ms: 13.069458
+#   ...
+# \# Subtest: a new action invalidates an in-flight repair without waiting for its obsolete read
+# ok 11 - a new action invalidates an in-flight repair without waiting for its obsolete read
+#   ---
+#   duration_ms: 20.055667
+#   ...
+# \# Subtest: shared snapshots preserve extra columns and collection-local optimistic ownership
+# ok 12 - shared snapshots preserve extra columns and collection-local optimistic ownership
+#   ---
+#   duration_ms: 11.122667
+#   ...
+# \# Subtest: malformed shared indexes reject before installing any authority
+# ok 13 - malformed shared indexes reject before installing any authority
+#   ---
+#   duration_ms: 28.006084
+#   ...
+# \# Subtest: authority cannot silently omit a selected scalar column
+# ok 14 - authority cannot silently omit a selected scalar column
+#   ---
+#   duration_ms: 6.568666
+#   ...
+# \# Subtest: parameterized collections have stable distinct identities and send every retained instance
+# ok 15 - parameterized collections have stable distinct identities and send every retained instance
+#   ---
+#   duration_ms: 4.684417
+#   ...
+# \# Subtest: registry admission rejection closes the operation and permits a later healthy mutation
+# ok 16 - registry admission rejection closes the operation and permits a later healthy mutation
+#   ---
+#   duration_ms: 1.221583
+#   ...
+# \# Subtest: incompatible cross-module projections reject before creating an optimistic recipient
+# ok 17 - incompatible cross-module projections reject before creating an optimistic recipient
+#   ---
+#   duration_ms: 0.504458
+#   ...
+# \# Subtest: a parameter instance created during a mutation joins fresh authoritative coverage
+# ok 18 - a parameter instance created during a mutation joins fresh authoritative coverage
+#   ---
+#   duration_ms: 1.258333
+#   ...
+# \# Subtest: unchanged authority preserves confirmed rows and retires a wrong optimistic guess
+# ok 19 - unchanged authority preserves confirmed rows and retires a wrong optimistic guess
+#   ---
+#   duration_ms: 35.828375
+#   ...
+# \# Subtest: unmatched unchanged certificates cannot settle an action
+# ok 20 - unmatched unchanged certificates cannot settle an action
+#   ---
+#   duration_ms: 3.739167
+#   ...
+# \# Subtest: authority is installed before a post-commit handler error retires the overlay
+# ok 21 - authority is installed before a post-commit handler error retires the overlay
+#   ---
+#   duration_ms: 1.23925
+#   ...
+# \# Subtest: client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs
+# ok 22 - client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs
+#   ---
+#   duration_ms: 1.142708
+#   ...
+# \# Subtest: malformed authority rejects before installing any collection snapshot
+# ok 23 - malformed authority rejects before installing any collection snapshot
+#   ---
+#   duration_ms: 126.259833
+#   ...
+# \# Subtest: generated invalid snapshots cannot partly replace the confirmed baseline
+# ok 24 - generated invalid snapshots cannot partly replace the confirmed baseline
+#   ---
+#   duration_ms: 194.330875
+#   ...
+# 1..24
+# \# tests 24
+# \# suites 0
+# \# pass 24
+# \# fail 0
+# \# cancelled 0
+# \# skipped 0
+# \# todo 0
+# \# duration_ms 1237.073416
+# Subtest: actual collection runtime regressions against PostgreSQL order
+ok 1 - actual collection runtime regressions against PostgreSQL order
+  ---
+  duration_ms: 4516.081375
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 4638.471833

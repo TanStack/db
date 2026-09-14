@@ -1,0 +1,36 @@
+✔ unknown and duplicate read identities reject before the write (0.741667ms)
+✔ opaque writes still refresh every requested read after the handler completes (0.548834ms)
+✔ a rejected handler is not retried and still reconciles reads (0.134125ms)
+✔ a later SQL failure preserves committed effects in the reconciliation response (1115.206875ms)
+✔ exhausted reads retain handler success or failure without repeating the handler (7004.201167ms)
+✔ authority is installed before a post-commit handler error retires the overlay (12.96325ms)
+✔ client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs (2.329625ms)
+✔ malformed authority rejects before installing any collection snapshot (11.294291ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 30.870625
+✔ actual collection runtime regressions against PostgreSQL order (1274.450041ms)
+✔ component declarations carry server order in priority order (152.48525ms)
+✔ sort columns must be selected (6.57975ms)
+✔ unsupported direction cannot silently lose client ordering (11.768917ms)
+✔ transformed responses cannot borrow intermediate query ordering (25.142125ms)
+✔ server handler cannot capture the bound client (6.189042ms)
+✔ server handler cannot capture component state (7.059625ms)
+✔ input validator cannot capture component state (5.082083ms)
+✔ optimistic callback stays within the component while RPCs move to module scope (10.264125ms)
+✔ a row predicate is carried as data without the server auth expression (11.099083ms)
+✔ unsupported query arguments fail before generating an incorrectly scoped request (7.373666ms)
+✔ same local names in separate lexical scopes have distinct stable identities (8.305292ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 8213.279375

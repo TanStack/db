@@ -1,0 +1,60 @@
+{
+  "ok": true,
+  "seed": 9142601,
+  "runs": 12,
+  "sequences": 3,
+  "mutant": null,
+  "checker": "effects",
+  "histories": 1,
+  "operations": 3,
+  "comparisons": {
+    "values/baseline": 1,
+    "independence/compiled-judgment": 3,
+    "authority/compiled-judgment": 6,
+    "values/same-turn-optimism": 3,
+    "values/settled": 3,
+    "read-obligation/settled": 3,
+    "reach/campaign": 1,
+    "catalog-boundary/campaign": 1
+  },
+  "writesExecuted": 3,
+  "envelopesDelivered": 3,
+  "resultReads": 9,
+  "skippedReads": 6,
+  "buildCatalogCalls": 1,
+  "runtimeCatalogCalls": 0,
+  "cells": {
+    "none/IMMUTABLE/depth-0": 1
+  },
+  "witnesses": {
+    "none/IMMUTABLE/depth-0/initial/values/baseline": 1,
+    "none/IMMUTABLE/depth-0/function/independence/compiled-judgment": 1,
+    "none/IMMUTABLE/depth-0/function/authority/compiled-judgment": 2,
+    "none/IMMUTABLE/depth-0/function/values/same-turn-optimism": 1,
+    "none/IMMUTABLE/depth-0/function/values/settled": 1,
+    "none/IMMUTABLE/depth-0/function/read-obligation/settled": 1,
+    "none/IMMUTABLE/depth-0/direct/independence/compiled-judgment": 2,
+    "none/IMMUTABLE/depth-0/direct/authority/compiled-judgment": 4,
+    "none/IMMUTABLE/depth-0/direct/values/same-turn-optimism": 2,
+    "none/IMMUTABLE/depth-0/direct/values/settled": 2,
+    "none/IMMUTABLE/depth-0/direct/read-obligation/settled": 2,
+    "campaign/initial/reach/campaign": 1,
+    "campaign/initial/catalog-boundary/campaign": 1
+  },
+  "faultEvents": [],
+  "rejectedShrinkFailures": [],
+  "cleanupErrors": [],
+  "node": "v24.5.0",
+  "sources": {
+    "sql-effects.mjs": "09a291872dc60470e3f090ebe373571001b08b4a299dae290353455f7f33afb0",
+    "sql-dependencies.mjs": "bc8037570534be1da47a4b84c8e250e84dcaa0ee1e4d27e1ae4a19b4328bd79b",
+    "src/runtime.ts": "1c9924886ee269769b39d6049416bd09b16662bf4ef2c5e81a7fb0a492081bc3",
+    "src/registry.server.ts": "b11b621be9349d0260750eb16a571acd8248136351e246d2404dd9ee058059d2",
+    "tests/oracles/sql-effect-rules.mjs": "76807f1ae6ccab48509156460c07a235ae4e70c2098ff5839a62418cc09e1d1d"
+  },
+  "versions": {
+    "fast-check": "3.23.2",
+    "@electric-sql/pglite": "0.3.14"
+  },
+  "replay": "passes"
+}

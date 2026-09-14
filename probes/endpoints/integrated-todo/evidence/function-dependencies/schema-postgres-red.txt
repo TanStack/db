@@ -1,0 +1,41 @@
+node:internal/errors:985
+  const err = new Error(message);
+              ^
+
+Error: Command failed: /opt/homebrew/Cellar/node/24.5.0/bin/node /Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/compile-schema.mjs src/endpoints/database.server.ts
+Endpoints: schema inspection failed; no dependency proof was generated
+
+    at genericNodeError (node:internal/errors:985:15)
+    at wrappedFn (node:internal/errors:539:14)
+    at checkExecSyncError (node:child_process:924:11)
+    at execFileSync (node:child_process:960:15)
+    at file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/schema-postgres.mjs:14:3 {
+  status: 1,
+  signal: null,
+  output: [
+    null,
+    Buffer(0) [Uint8Array] [],
+    Buffer(71) [Uint8Array] [
+       69, 110, 100, 112, 111, 105, 110, 116, 115,  58,  32,
+      115,  99, 104, 101, 109,  97,  32, 105, 110, 115, 112,
+      101,  99, 116, 105, 111, 110,  32, 102,  97, 105, 108,
+      101, 100,  59,  32, 110, 111,  32, 100, 101, 112, 101,
+      110, 100, 101, 110,  99, 121,  32, 112, 114, 111, 111,
+      102,  32, 119,  97, 115,  32, 103, 101, 110, 101, 114,
+       97, 116, 101, 100,  10
+    ]
+  ],
+  pid: 97364,
+  stdout: Buffer(0) [Uint8Array] [],
+  stderr: Buffer(71) [Uint8Array] [
+     69, 110, 100, 112, 111, 105, 110, 116, 115,  58,  32,
+    115,  99, 104, 101, 109,  97,  32, 105, 110, 115, 112,
+    101,  99, 116, 105, 111, 110,  32, 102,  97, 105, 108,
+    101, 100,  59,  32, 110, 111,  32, 100, 101, 112, 101,
+    110, 100, 101, 110,  99, 121,  32, 112, 114, 111, 111,
+    102,  32, 119,  97, 115,  32, 103, 101, 110, 101, 114,
+     97, 116, 101, 100,  10
+  ]
+}
+
+Node.js v24.5.0

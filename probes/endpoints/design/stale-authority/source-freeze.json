@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "scope": "Source frozen before extraction; proposed protocol plus same-system implementation context.",
+  "files": [
+    {
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/stale-authority/source.md",
+      "sha256": "007e84c4095b6bdb7d1d3f51fb0d0cd69037275180dfac7743773aea424978e7"
+    },
+    {
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/stale-authority/grammar/preservation.md",
+      "sha256": "2e96573cbb4331ab071c8fb0d484d1bbb43d2bb1e5255a91ba0ee742c3733f8c"
+    },
+    {
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/representation/audit-fixes.md",
+      "sha256": "1ac05e7a3b660b4b65a31e4184e78f7fa556d6a2a62d48ac2145219b0455f06b"
+    },
+    {
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/runtime.ts",
+      "sha256": "20b8a334955174344be26f65ef918e6eee043e5c52e591e02d8046f0b14d7c7d"
+    },
+    {
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/refresh.server.ts",
+      "sha256": "328fd6daa3f671623a13d38924b53751fe1c030610328c59cf86925e30339c11"
+    },
+    {
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/packages/db/src/transactions.ts",
+      "sha256": "fc43d68ffeabb2f6f4de12849d7d2b18cb865406df3fa528bc5a8055ad507eae"
+    },
+    {
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/representation/grammar/model.md",
+      "sha256": "aa0145f9f887bccaa789799d85b79481fbed110d231f4ae9dfe11e4dcc909ac7"
+    },
+    {
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/driver.mjs",
+      "sha256": "50ba12c84ea4eb7157ab58e15650987de74d20ee26bc6562ec439568dd066275"
+    }
+  ]
+}

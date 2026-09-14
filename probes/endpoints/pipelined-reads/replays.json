@@ -1,0 +1,53 @@
+[
+  [
+    {
+      "initial": [],
+      "config": {
+        "completed": false,
+        "threshold": 0,
+        "limit": 0,
+        "offset": 0,
+        "body": "'; DROP TABLE item; -- 雪\\",
+        "kinds": [0]
+      },
+      "histories": [
+        [
+          {
+            "kind": "put",
+            "row": {
+              "id": "0",
+              "parent": null,
+              "body": "'; DROP TABLE item; -- 雪\\",
+              "completed": false,
+              "score": null
+            }
+          }
+        ],
+        [
+          {
+            "kind": "put",
+            "row": {
+              "id": "0",
+              "parent": null,
+              "body": "'; DROP TABLE item; -- 雪\\",
+              "completed": false,
+              "score": null
+            }
+          }
+        ],
+        [
+          {
+            "kind": "put",
+            "row": {
+              "id": "0",
+              "parent": null,
+              "body": "'; DROP TABLE item; -- 雪\\",
+              "completed": false,
+              "score": null
+            }
+          }
+        ]
+      ]
+    }
+  ]
+]

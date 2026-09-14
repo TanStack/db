@@ -1,0 +1,103 @@
+{
+  "library": "better-auth 1.7.4",
+  "adapter": "memory",
+  "scope": "Installed public API control-flow probe; not Drizzle/PostgreSQL or browser header integration",
+  "results": [
+    {
+      "scenario": "cached",
+      "accepted": true,
+      "error": false,
+      "calls": {
+        "findSession": 0,
+        "updateSession": 0,
+        "deleteSession": 0
+      },
+      "responseCookies": 0,
+      "storedSessions": 1
+    },
+    {
+      "scenario": "revoked-cached",
+      "accepted": true,
+      "error": false,
+      "calls": {
+        "findSession": 0,
+        "updateSession": 0,
+        "deleteSession": 0
+      },
+      "responseCookies": 0,
+      "storedSessions": 0
+    },
+    {
+      "scenario": "revoked-bypass",
+      "accepted": false,
+      "error": false,
+      "calls": {
+        "findSession": 1,
+        "updateSession": 0,
+        "deleteSession": 0
+      },
+      "responseCookies": 4,
+      "storedSessions": 0
+    },
+    {
+      "scenario": "bypass-fresh",
+      "accepted": true,
+      "error": false,
+      "calls": {
+        "findSession": 1,
+        "updateSession": 0,
+        "deleteSession": 0
+      },
+      "responseCookies": 1,
+      "storedSessions": 1
+    },
+    {
+      "scenario": "renewal",
+      "accepted": true,
+      "error": false,
+      "calls": {
+        "findSession": 1,
+        "updateSession": 1,
+        "deleteSession": 0
+      },
+      "responseCookies": 2,
+      "storedSessions": 1
+    },
+    {
+      "scenario": "expired",
+      "accepted": false,
+      "error": false,
+      "calls": {
+        "findSession": 1,
+        "updateSession": 0,
+        "deleteSession": 1
+      },
+      "responseCookies": 4,
+      "storedSessions": 0
+    },
+    {
+      "scenario": "expired-disable-refresh",
+      "accepted": false,
+      "error": false,
+      "calls": {
+        "findSession": 1,
+        "updateSession": 0,
+        "deleteSession": 1
+      },
+      "responseCookies": 4,
+      "storedSessions": 0
+    },
+    {
+      "scenario": "renewal-write-failed",
+      "accepted": false,
+      "error": true,
+      "calls": {
+        "findSession": 1,
+        "updateSession": 1,
+        "deleteSession": 0
+      },
+      "responseCookies": 0,
+      "storedSessions": 1
+    }
+  ]
+}

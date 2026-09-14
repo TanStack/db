@@ -1,0 +1,54 @@
+{
+  "property": "endpoints.e2e.read-retry",
+  "seed": -2093857701,
+  "path": "0",
+  "failedSequence": 0,
+  "scenario": {
+    "program": {
+      "orders": [
+        [
+          "createdAt",
+          "id"
+        ]
+      ],
+      "scope": "bob",
+      "initial": [
+        {
+          "id": "seed-0",
+          "text": "ab",
+          "completed": false,
+          "createdAt": "2026-01-01T00:00:01.000Z",
+          "scope": "bob"
+        },
+        {
+          "id": "seed-1",
+          "text": "c ééé",
+          "completed": false,
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "scope": "bob"
+        },
+        {
+          "id": "seed-2",
+          "text": "\"éa   ",
+          "completed": false,
+          "createdAt": "2026-01-01T00:00:02.000Z",
+          "scope": "bob"
+        }
+      ]
+    },
+    "sequences": [
+      [
+        {
+          "kind": "delete",
+          "slot": 1,
+          "text": "b c",
+          "rank": 2,
+          "target": 0,
+          "outcome": "read-retry",
+          "retryFailures": 3
+        }
+      ]
+    ]
+  },
+  "error": "AssertionError [ERR_ASSERTION]: transient read failure must preserve the pending transaction\n+ actual - expected\n\n+ 'rejected'\n- 'pending'\n\n    at file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/driver.mjs:152:24\n    at async Driver.until (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/driver.mjs:96:51)\n    at async Driver.run (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/driver.mjs:150:15)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/e2e.mjs:42:10\n    at async AsyncProperty.run (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)\n    at async asyncRunIt (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/e2e.mjs:45:17"
+}

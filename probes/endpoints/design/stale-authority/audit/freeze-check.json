@@ -1,0 +1,77 @@
+{
+  "checks": [
+    {
+      "manifest": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/stale-authority/source-freeze.json",
+      "files": [
+        {
+          "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/stale-authority/source.md",
+          "unchanged": true
+        },
+        {
+          "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/stale-authority/grammar/preservation.md",
+          "unchanged": true
+        },
+        {
+          "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/representation/audit-fixes.md",
+          "unchanged": true
+        },
+        {
+          "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/runtime.ts",
+          "unchanged": true
+        },
+        {
+          "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/refresh.server.ts",
+          "unchanged": true
+        },
+        {
+          "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/packages/db/src/transactions.ts",
+          "unchanged": true
+        },
+        {
+          "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/representation/grammar/model.md",
+          "unchanged": true
+        },
+        {
+          "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/driver.mjs",
+          "unchanged": true
+        }
+      ]
+    },
+    {
+      "manifest": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/stale-authority/grammar/analysis-freeze.json",
+      "files": [
+        {
+          "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/stale-authority/grammar/preservation.md",
+          "unchanged": true
+        },
+        {
+          "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/stale-authority/grammar/model.md",
+          "unchanged": true
+        },
+        {
+          "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/stale-authority/grammar/evidence.md",
+          "unchanged": true
+        },
+        {
+          "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/stale-authority/grammar/process.md",
+          "unchanged": true
+        }
+      ]
+    },
+    {
+      "manifest": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/stale-authority/audit/freeze.json",
+      "files": [
+        {
+          "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/stale-authority/audit/candidate.md",
+          "unchanged": true
+        },
+        {
+          "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/stale-authority/grammar/brief.md",
+          "unchanged": true
+        }
+      ]
+    }
+  ],
+  "markdownLocalLinks": "all present after both audits",
+  "implementationFilesUnchanged": true
+}

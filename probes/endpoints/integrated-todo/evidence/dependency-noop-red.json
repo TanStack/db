@@ -1,0 +1,20 @@
+{
+  "ok": false,
+  "seed": 9122601,
+  "scenarios": 30,
+  "sequences": 3,
+  "histories": 92,
+  "operations": 238,
+  "optimisticChecks": 1695,
+  "authorityChecks": 1695,
+  "resultReads": 1369,
+  "skippedReads": 326,
+  "responseBytes": 83996,
+  "limits": [
+    "Trusted fixture footprints exercise matching, not automatic SQL/handler effect discovery.",
+    "Drizzle, registry, serialization and real client collections run in process; the companion browser registry oracle covers the compiled HTTP boundary.",
+    "Joins and aggregates reconcile authoritatively; only full base-table views participate in optimistic propagation.",
+    "Byte counts are JSON response estimates, not compressed HTTP bytes or latency."
+  ],
+  "error": "Error: Property failed after 2 tests\n{ seed: 9122601, path: \"1:1:1:1:1:1:1:1:1:1:1:1:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0\", endOnFailure: true }\nCounterexample: [{\"count\":2,\"trigger\":false},[[{\"target\":0,\"actual\":0,\"value\":0,\"cross\":false,\"noop\":false,\"unknown\":false,\"fail\":false,\"external\":false},{\"target\":0,\"actual\":0,\"value\":0,\"cross\":false,\"noop\":false,\"unknown\":false,\"fail\":false,\"external\":false}],[{\"target\":0,\"actual\":0,\"value\":0,\"cross\":false,\"noop\":false,\"unknown\":false,\"fail\":false,\"external\":false},{\"target\":0,\"actual\":0,\"value\":0,\"cross\":false,\"noop\":false,\"unknown\":false,\"fail\":false,\"external\":false}],[{\"target\":0,\"actual\":0,\"value\":0,\"cross\":false,\"noop\":false,\"unknown\":false,\"fail\":false,\"external\":false},{\"target\":0,\"actual\":0,\"value\":0,\"cross\":false,\"noop\":false,\"unknown\":false,\"fail\":false,\"external\":false}]]]\nShrunk 43 time(s)\nGot error: This prototype requires an optimistic target mutation\n    at file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-dependency-oracle-VmuL5W/runtime.mjs:41539:17\n    at withPublicationContext (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-dependency-oracle-VmuL5W/runtime.mjs:11718:14)\n    at DbClient._batch (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-dependency-oracle-VmuL5W/runtime.mjs:25223:12)\n    at EndpointRuntime.run (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-dependency-oracle-VmuL5W/runtime.mjs:41530:15)\n    at invoke (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-dependency-oracle-VmuL5W/runtime.mjs:41157:33)\n    at run (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/dependencies.mjs:141:18)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/dependencies.mjs:180:70\n    at async AsyncProperty.run (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)\n    at async asyncRunIt (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)\n\nHint: Enable verbose mode in order to have the list of all failing values encountered during the run\n    at buildError (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/utils/RunDetailsFormatter.js:126:15)\n    at asyncThrowIfFailed (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/utils/RunDetailsFormatter.js:143:11)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)"
+}

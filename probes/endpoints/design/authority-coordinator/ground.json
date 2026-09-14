@@ -1,0 +1,46 @@
+{
+  "evidence": "actual DB and Query adapter",
+  "events": [
+    {
+      "boundary": "separate writes",
+      "observations": [
+        [
+          1,
+          0
+        ],
+        [
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "boundary": "deferred subscriber delivery",
+      "observations": [
+        [
+          2,
+          2
+        ],
+        [
+          2,
+          2
+        ]
+      ]
+    },
+    {
+      "boundary": "held read after manual authority",
+      "visible": 0,
+      "cache": [
+        {
+          "id": "row",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "boundary": "cleanup and rebind",
+      "sameObject": true,
+      "status": "ready"
+    }
+  ]
+}

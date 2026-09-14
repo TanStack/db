@@ -1,0 +1,106 @@
+{
+  "property": "endpoints.e2e.controls",
+  "seed": 1777781323,
+  "path": "1",
+  "failedSequence": 2,
+  "scenario": {
+    "program": {
+      "orders": [
+        [
+          "id",
+          "createdAt"
+        ]
+      ],
+      "scope": "alice",
+      "filters": [
+        true,
+        false,
+        false
+      ],
+      "retainWithoutSubscriber": false,
+      "canonicalize": false,
+      "initial": [
+        {
+          "id": "seed-0",
+          "text": "\"cc",
+          "completed": false,
+          "createdAt": "2026-01-01T00:00:01.000Z",
+          "scope": "alice"
+        }
+      ],
+      "unsubscribed": []
+    },
+    "sequences": [
+      [
+        {
+          "kind": "insert",
+          "slot": 3,
+          "text": "é\"b\"a",
+          "rank": 1,
+          "target": 0,
+          "outcome": "success",
+          "retryFailures": 2
+        }
+      ],
+      [
+        {
+          "kind": "complete",
+          "slot": 1,
+          "text": "aaé  ",
+          "rank": 2,
+          "target": 0,
+          "outcome": "success",
+          "retryFailures": 3
+        },
+        {
+          "kind": "edit",
+          "slot": 3,
+          "text": "c",
+          "rank": 1,
+          "target": 1,
+          "outcome": "success",
+          "retryFailures": 2
+        },
+        {
+          "kind": "complete",
+          "slot": 1,
+          "text": "cba\"",
+          "rank": 0,
+          "target": 0,
+          "outcome": "success",
+          "retryFailures": 3
+        }
+      ],
+      [
+        {
+          "kind": "complete",
+          "slot": 0,
+          "text": "\"cba ",
+          "rank": 2,
+          "target": 0,
+          "outcome": "success",
+          "retryFailures": 2
+        },
+        {
+          "kind": "insert",
+          "slot": 1,
+          "text": "écba éc",
+          "rank": 0,
+          "target": 1,
+          "outcome": "success",
+          "retryFailures": 1
+        },
+        {
+          "kind": "delete",
+          "slot": 3,
+          "text": "   é",
+          "rank": 2,
+          "target": 0,
+          "outcome": "reject",
+          "retryFailures": 3
+        }
+      ]
+    ]
+  },
+  "error": "page.evaluate: Error: This prototype requires an optimistic target mutation\n    at EndpointRuntime.run (http://127.0.0.1:49812/src/runtime.ts:165:13)\n    at Object.invoke [as insert0] (http://127.0.0.1:49812/src/runtime.ts:77:62)\n    at Object.invoke (http://127.0.0.1:49812/src/oracle-probe.ts:14:33)\n    at eval (eval at evaluate (:302:30), <anonymous>:1:44)\n    at UtilityScript.evaluate (<anonymous>:304:16)\n    at UtilityScript.<anonymous> (<anonymous>:1:44)\n    at Driver.run (/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/driver.mjs:349:37)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/e2e.mjs:153:15\n    at async AsyncProperty.run (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)\n    at async asyncRunIt (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/e2e.mjs:163:22"
+}

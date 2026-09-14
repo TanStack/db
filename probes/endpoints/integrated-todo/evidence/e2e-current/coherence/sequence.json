@@ -1,0 +1,31 @@
+{
+  "scenario": {
+    "program": {
+      "orders": [
+        [
+          "createdAt",
+          "id"
+        ],
+        [
+          "createdAt",
+          "id"
+        ]
+      ],
+      "scope": "alice",
+      "initial": []
+    },
+    "sequences": [
+      [
+        {
+          "kind": "insert",
+          "slot": 0,
+          "text": "a",
+          "rank": 0,
+          "target": 0,
+          "outcome": "success",
+          "retryFailures": 1
+        }
+      ]
+    ]
+  }
+}

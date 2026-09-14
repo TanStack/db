@@ -1,0 +1,172 @@
+[
+  {
+    "tables": [
+      {
+        "name": "relation_0_0",
+        "columns": [
+          {
+            "type": "integer",
+            "nullable": true,
+            "name": "field_0_integer"
+          }
+        ],
+        "parent": null
+      },
+      {
+        "name": "relation_1_1",
+        "columns": [
+          {
+            "type": "integer",
+            "nullable": true,
+            "name": "field_0_integer"
+          }
+        ],
+        "parent": null
+      }
+    ],
+    "queries": [
+      {
+        "table": 0,
+        "predicate": null
+      },
+      {
+        "table": 1,
+        "predicate": null
+      },
+      {
+        "table": 0,
+        "predicate": {
+          "op": "eq",
+          "column": "completed",
+          "value": false
+        }
+      },
+      {
+        "table": 0,
+        "predicate": {
+          "op": "eq",
+          "column": "completed",
+          "value": true
+        }
+      },
+      {
+        "table": 1,
+        "predicate": {
+          "op": "eq",
+          "column": "completed",
+          "value": false
+        }
+      },
+      {
+        "table": 1,
+        "predicate": {
+          "op": "eq",
+          "column": "completed",
+          "value": true
+        }
+      }
+    ],
+    "scope": "alice",
+    "orders": [
+      [
+        "createdAt",
+        "id"
+      ],
+      [
+        "createdAt",
+        "id"
+      ],
+      [
+        "createdAt",
+        "id"
+      ],
+      [
+        "createdAt",
+        "id"
+      ],
+      [
+        "createdAt",
+        "id"
+      ],
+      [
+        "createdAt",
+        "id"
+      ]
+    ],
+    "initial": [
+      {
+        "table": "relation_0_0",
+        "id": "row-0",
+        "text": "~ &#$$TzN!JE$Y.ely}|#-}l!\"p%z3Nayo?z!4&K}|*y pLE||L!w.;%Mx#q&S_x 'BxQy#~f&!#$~{e\"z4{ 0Z@%D  ma#&{$[3sy|#f%~{&&>&a$!5DHs#\";.%!U~$\\}}!#~J~v%)nxPw{]z]*o&%&y#!k)$#{#T \"Fyn.zR}#&z$~&m,b\"y%|t`K~5H\"#I&%W{yG&",
+        "completed": true,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "alice",
+        "field_0_integer": null
+      },
+      {
+        "table": "relation_0_0",
+        "id": "row-1",
+        "text": "$nM\"x}&f5 y7%N}$p&& sz#*FzzW yKp.q!i6]z}{!~xS !29z&m:&2(\\.N*% i&lZ96%z }\"~%t.{Y &~y|}#l|RyS}B&%.$mwN#!IDzk#{9x\"!h&\"%~H\"oz!\\X#@:u{O|!|von\"?e$!r P#&g~! t#[xS#=$$z&E\" I4~xf\\y{u&\"yx$& #!%lueac$#{#u#x[y\"Qv",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "alice",
+        "field_0_integer": null
+      },
+      {
+        "table": "relation_0_0",
+        "id": "row-2",
+        "text": "y{&&,\"a$F=96%*zz%|x._#x`0%?1{)Dx\"t5&xzC2 ,exHk-%\" 1#: qU\"&\"Kyux{~}\"}~v!&%\"%~V\"$~3${}Tm%`Ts9!n&x&|#<,|z ,*%{xN#w$tyG&!;$|z*m~#&#&#O\"z#e{9]%jNa$\"y`%$#!!$\\xF&$!{\")pzS\"\\$[%@]Ky#z% H%|\"|~y\"~-Z#\"%y xrc$>gLF",
+        "completed": true,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "alice",
+        "field_0_integer": null
+      },
+      {
+        "table": "relation_0_0",
+        "id": "row-3",
+        "text": "9.~W|yzS Hz%\\xNyb0 yxJnO{U]A42kJ#}\\#%% %q$J[#x2\"{\"_4KvFy#{y|Cz\"V#|TrtXEp##>xp~nx$$ h =825v|zz%(E%&& O'#x#  Iz#|~r&?}&!\\!Y:N,y<=2KC\\~q|Y_{Bx?zi${!D;#!W=1!y$KuAvU&|}~N%]1\"ubc-{q^za\"\"<{ -\"%1zTVp[wO_3%r|(",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "alice",
+        "field_0_integer": null
+      },
+      {
+        "table": "relation_1_1",
+        "id": "row-0",
+        "text": "|Iz |\"}$C{O#%amk&x%bRQz]~F$%&Sys% Y{v%{\"H#q` :x%#`uO$}iUa'x}%x#[qR%S!0%P!:z!#%%#z;{!:$S|\"}}\"C%x\",}QSwZfKY~ ]\"}O%&~`h#|z &!~ #!xbS|Fd!_zxx#'!(zEYS%xD|P!#S%! }vG|ui*##O%S[!&_$\"YBQ5\"H#E|I=y%J&~!\"}{f!\"#Dx",
+        "completed": true,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "alice",
+        "field_0_integer": null
+      },
+      {
+        "table": "relation_1_1",
+        "id": "row-1",
+        "text": "=vA\"H&$$! #:rh&%X-Z'}[~#!Y\"&55$%-!c'Oyq$nyk&#q!\" 5\"(&n!z2\" $ {_p\"`NiY==~br=^tlmU\"}#>mZ}#!ub6M\\%$$xu&~HBx:}L b#$x#swu#/\"y~5}mR4$!\"#&!yyLy6 \"y$(z{Cy%\\83}%c#|X!!|z%9VW$kAf{C2z_&%Qd#Jy%!z| &!{z|$z %z[wOqp",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "alice",
+        "field_0_integer": null
+      },
+      {
+        "table": "relation_1_1",
+        "id": "row-2",
+        "text": "8_[4D |z8&#S\"yaL\"y%0$rKyB #+1o{Q\"\"$!#a%;w\"!t&/}M~b '!x!{ cZ}A#&\"m\"mq {y(8[WGZ%&zyba_ %V##xf|#&&~g w\"&L&}p6~~\"!O}z$Q{4\"6 N\"o1}X#L%\"|! }!6!|#!&Y~{,%b~y!v#x&}J%}Tb R\"{$|&&e!.O%~}5!}Z|= #p0&- $yGIg#%&y|\"$",
+        "completed": true,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "alice",
+        "field_0_integer": null
+      },
+      {
+        "table": "relation_1_1",
+        "id": "row-3",
+        "text": "&{!q$'&|&Gr&_7!}s!t$D&V$*~}0)xSWe|\\E~#xB~\"|Bizg_n!&z&xh_xbu~]J|&~&=a  %k{%|y$ywmp!xnk>\"%~&$Z\"Bz~%y$}xq $F-s%x}y%}\"&#`ex~+}u%km],J# I#y1yc\"k[935VX&0\"J W\"##~/zJ}yk~yr~~#0y]J~xSu5% \"2xG#`cA&\"}A#@M7#}lE!x",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "alice",
+        "field_0_integer": null
+      }
+    ],
+    "nested": false
+  }
+]

@@ -1,0 +1,112 @@
+TAP version 13
+# Subtest: compilation emits inspected read and write footprints, without catalog code
+ok 1 - compilation emits inspected read and write footprints, without catalog code
+  ---
+  duration_ms: 1680.6565
+  type: 'test'
+  ...
+# Subtest: absent connection configuration removes stale compilation evidence
+ok 2 - absent connection configuration removes stale compilation evidence
+  ---
+  duration_ms: 85.857292
+  type: 'test'
+  ...
+# Subtest: disjoint complete dependencies skip reads after the handler closes
+ok 3 - disjoint complete dependencies skip reads after the handler closes
+  ---
+  duration_ms: 1.369458
+  type: 'test'
+  ...
+# Subtest: optimistic targets and missing baselines require authority even for disjoint writes
+ok 4 - optimistic targets and missing baselines require authority even for disjoint writes
+  ---
+  duration_ms: 0.249
+  type: 'test'
+  ...
+# Subtest: unknown read or write effects cannot establish disjointness
+ok 5 - unknown read or write effects cannot establish disjointness
+  ---
+  duration_ms: 0.378958
+  type: 'test'
+  ...
+# Subtest: admission includes skipped instances and runs before writes
+ok 6 - admission includes skipped instances and runs before writes
+  ---
+  duration_ms: 0.101542
+  type: 'test'
+  ...
+# Subtest: partial commit errors still reconcile the complete write set
+ok 7 - partial commit errors still reconcile the complete write set
+  ---
+  duration_ms: 0.165333
+  type: 'test'
+  ...
+# Subtest: multi-relation queries include auth dependencies and distinguish schema and authority
+ok 8 - multi-relation queries include auth dependencies and distinguish schema and authority
+  ---
+  duration_ms: 0.162792
+  type: 'test'
+  ...
+# Subtest: parameterized unaffected identities survive the application transport serializer
+ok 9 - parameterized unaffected identities survive the application transport serializer
+  ---
+  duration_ms: 7.044083
+  type: 'test'
+  ...
+# Subtest: catalog footprints follow transitive FK actions and stop at unknown recipients
+ok 10 - catalog footprints follow transitive FK actions and stop at unknown recipients
+  ---
+  duration_ms: 1619.550083
+  type: 'test'
+  ...
+# Subtest: policies, views, custom types, defaults and generated values keep the fallback
+ok 11 - policies, views, custom types, defaults and generated values keep the fallback
+  ---
+  duration_ms: 521.289209
+  type: 'test'
+  ...
+# Subtest: SQL bodies retain hidden reads through recursive calls and misleading volatility labels
+ok 12 - SQL bodies retain hidden reads through recursive calls and misleading volatility labels
+  ---
+  duration_ms: 1722.432375
+  type: 'test'
+  ...
+# Subtest: defaults contribute writes only when selected, including positional omission and upsert DEFAULT
+ok 13 - defaults contribute writes only when selected, including positional omission and upsert DEFAULT
+  ---
+  duration_ms: 522.866833
+  type: 'test'
+  ...
+# Subtest: foreign key effects follow the event and changed key rather than predicate reads
+ok 14 - foreign key effects follow the event and changed key rather than predicate reads
+  ---
+  duration_ms: 1201.027667
+  type: 'test'
+  ...
+# Subtest: unsupported procedural bodies are unknown at the call and trigger event, including zero-row writes
+ok 15 - unsupported procedural bodies are unknown at the call and trigger event, including zero-row writes
+  ---
+  duration_ms: 420.359959
+  type: 'test'
+  ...
+# Subtest: stored generated values, checks, and SQL expression indexes preserve ordinary table effects
+ok 16 - stored generated values, checks, and SQL expression indexes preserve ordinary table effects
+  ---
+  duration_ms: 402.632416
+  type: 'test'
+  ...
+# Subtest: complete overload unions retain every possible body and incompatible artifacts do not prove independence
+ok 17 - complete overload unions retain every possible body and incompatible artifacts do not prove independence
+  ---
+  duration_ms: 397.239167
+  type: 'test'
+  ...
+1..17
+# tests 17
+# suites 0
+# pass 17
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 4773.477375

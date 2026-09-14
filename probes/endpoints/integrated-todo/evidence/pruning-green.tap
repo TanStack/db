@@ -1,0 +1,34 @@
+(node:60620) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+TAP version 13
+# (node:60621) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: only a server-issued baseline with unchanged complete dependencies skips a read
+ok 1 - only a server-issued baseline with unchanged complete dependencies skips a read
+  ---
+  duration_ms: 1.534458
+  ...
+# Subtest: unknown, cross-scope, cross-instance and expired baselines refresh
+ok 2 - unknown, cross-scope, cross-instance and expired baselines refresh
+  ---
+  duration_ms: 1.091292
+  ...
+# Subtest: unknown dependencies refresh and cannot reuse an older certificate
+ok 3 - unknown dependencies refresh and cannot reuse an older certificate
+  ---
+  duration_ms: 0.181833
+  ...
+# Subtest: a revision is captured before its rows, never after them
+ok 4 - a revision is captured before its rows, never after them
+  ---
+  duration_ms: 0.211583
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 92.576208

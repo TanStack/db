@@ -1,0 +1,188 @@
+
+ RUN  v3.2.4 /Users/kylemathews/.codex/worktrees/e079/tanstack-db
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > runs the live query graph once per transaction that touches multiple collections
+[TanStack DB] [single-batch-tasks] Join requires an index on "userId" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.userId) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > handles nested transactions without emitting duplicate batches
+[TanStack DB] [nested-tasks] Join requires an index on "userId" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.userId) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > clears pending jobs when a transaction rolls back due to an error
+[TanStack DB] [rollback-tasks] Join requires an index on "userId" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.userId) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > dedupes batches across multiple subscribers
+[TanStack DB] [multi-subscriber-tasks] Join requires an index on "userId" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.userId) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'collection' shared=false derivedRight=false reverse=false
+[TanStack DB] [live-query-1] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'collection' shared=false derivedRight=false reverse=true
+[TanStack DB] [live-query-3] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'collection' shared=false derivedRight=true reverse=false
+[TanStack DB] [live-query-5] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'collection' shared=false derivedRight=true reverse=true
+[TanStack DB] [live-query-8] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'collection' shared=true derivedRight=false reverse=false
+[TanStack DB] [live-query-11] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'collection' shared=true derivedRight=false reverse=true
+[TanStack DB] [live-query-13] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'collection' shared=true derivedRight=true reverse=false
+[TanStack DB] [live-query-15] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'collection' shared=true derivedRight=true reverse=true
+[TanStack DB] [live-query-18] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'effect' shared=false derivedRight=false reverse=false
+[TanStack DB] [live-query-21] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'effect' shared=false derivedRight=false reverse=true
+[TanStack DB] [live-query-22] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'effect' shared=false derivedRight=true reverse=false
+[TanStack DB] [live-query-23] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'effect' shared=false derivedRight=true reverse=true
+[TanStack DB] [live-query-25] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'effect' shared=true derivedRight=false reverse=false
+[TanStack DB] [live-query-27] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'effect' shared=true derivedRight=false reverse=true
+[TanStack DB] [live-query-28] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'effect' shared=true derivedRight=true reverse=false
+[TanStack DB] [live-query-29] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > publishes settled dependencies once: 'effect' shared=true derivedRight=true reverse=true
+[TanStack DB] [live-query-31] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > should handle optimistic mutations with nested left joins without scheduler errors
+[TanStack DB] [left-join-bug-users] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+[TanStack DB] [left-join-bug-active-teams] Join requires an index on "team.account_id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.team.account_id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+stderr | packages/db/tests/query/scheduler.test.ts > live query scheduler > should prevent stale data when lazy source also depends on modified collection
+[TanStack DB] [race-queryB] Join requires an index on "id" for efficient loading. Falling back to scanning local data. Consider creating an index on the collection with collection.createIndex((row) => row.id) or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.
+
+ ❯ packages/db/tests/query/scheduler.test.ts (86 tests | 1 failed) 149ms
+   ✓ Scheduler dependency reentry > waits for current source work: sourceFirst=false pendingAware=false requeue=false 1ms
+   ✓ Scheduler dependency reentry > waits for current source work: sourceFirst=false pendingAware=false requeue=true 0ms
+   ✓ Scheduler dependency reentry > waits for current source work: sourceFirst=false pendingAware=true requeue=false 0ms
+   ✓ Scheduler dependency reentry > waits for current source work: sourceFirst=false pendingAware=true requeue=true 0ms
+   ✓ Scheduler dependency reentry > waits for current source work: sourceFirst=true pendingAware=false requeue=false 0ms
+   ✓ Scheduler dependency reentry > waits for current source work: sourceFirst=true pendingAware=false requeue=true 0ms
+   ✓ Scheduler dependency reentry > waits for current source work: sourceFirst=true pendingAware=true requeue=false 0ms
+   ✓ Scheduler dependency reentry > waits for current source work: sourceFirst=true pendingAware=true requeue=true 0ms
+   ✓ Collection publication scheduler context > preserves the first listener error when a later graph job fails 1ms
+   ✓ Collection publication scheduler context > shares one context and flushes after the outer publication 0ms
+   ✓ Collection publication scheduler context > clears queued work when publication throws 1ms
+   ✓ Collection publication scheduler context > preserves a falsy graph failure through a publication boundary 0ms
+   ✓ Collection publication scheduler context > attempts every clear listener and preserves its first failure 0ms
+   ✓ Collection publication scheduler context > does not replace a 'Error' 'publication' failure with a clear-listener failure 0ms
+   ✓ Collection publication scheduler context > does not replace a 'undefined' 'publication' failure with a clear-listener failure 0ms
+   ✓ Collection publication scheduler context > does not replace a 'Error' 'graph' failure with a clear-listener failure 0ms
+   ✓ Collection publication scheduler context > does not replace a 'undefined' 'graph' failure with a clear-listener failure 0ms
+   ✓ live query scheduler > does not deliver a source batch after a snapshotted listener unsubscribes 3ms
+   ✓ live query scheduler > delivers a layout-only batch to its frozen listener snapshot 18ms
+   ✓ live query scheduler > settles a dependent live query when an earlier source listener throws 2ms
+   ✓ live query scheduler > preserves an exact 'undefined' row-listener failure after later delivery 3ms
+   ✓ live query scheduler > preserves an exact 'null' row-listener failure after later delivery 1ms
+   ✓ live query scheduler > preserves an exact 'false' row-listener failure after later delivery 1ms
+   ✓ live query scheduler > preserves an exact 'zero' row-listener failure after later delivery 1ms
+   ✓ live query scheduler > preserves an exact 'negative zero' row-listener failure after later delivery 1ms
+   ✓ live query scheduler > preserves an exact 'bigint zero' row-listener failure after later delivery 1ms
+   ✓ live query scheduler > preserves an exact 'empty string' row-listener failure after later delivery 2ms
+   ✓ live query scheduler > preserves an exact 'NaN' row-listener failure after later delivery 1ms
+   ✓ live query scheduler > preserves an exact 'Error' filtered row-listener failure 1ms
+   ✓ live query scheduler > preserves an exact 'undefined' filtered row-listener failure 1ms
+   ✓ live query scheduler > preserves an exact 'null' filtered row-listener failure 1ms
+   ✓ live query scheduler > preserves an exact 'false' filtered row-listener failure 1ms
+   ✓ live query scheduler > preserves an exact 'zero' filtered row-listener failure 1ms
+   ✓ live query scheduler > preserves an exact 'negative zero' filtered row-listener failure 1ms
+   ✓ live query scheduler > preserves an exact 'bigint zero' filtered row-listener failure 1ms
+   ✓ live query scheduler > preserves an exact 'empty string' filtered row-listener failure 1ms
+   ✓ live query scheduler > preserves an exact 'NaN' filtered row-listener failure 1ms
+   × live query scheduler > keeps a nested ready failure when a later outer listener throws 7ms
+     → expected a thrown error to be Error: nested ready listener failed
+   ✓ live query scheduler > settles a dependent live query before a nested ready failure escapes 1ms
+   ✓ live query scheduler > runs the live query graph once per transaction that touches multiple collections 8ms
+   ✓ live query scheduler > handles nested transactions without emitting duplicate batches 2ms
+   ✓ live query scheduler > clears pending jobs when a transaction rolls back due to an error 1ms
+   ✓ live query scheduler > dedupes batches across multiple subscribers 1ms
+   ✓ live query scheduler > publishes settled dependencies once: 'collection' shared=false derivedRight=false reverse=false 3ms
+   ✓ live query scheduler > publishes settled dependencies once: 'collection' shared=false derivedRight=false reverse=true 2ms
+   ✓ live query scheduler > publishes settled dependencies once: 'collection' shared=false derivedRight=true reverse=false 2ms
+   ✓ live query scheduler > publishes settled dependencies once: 'collection' shared=false derivedRight=true reverse=true 2ms
+   ✓ live query scheduler > publishes settled dependencies once: 'collection' shared=true derivedRight=false reverse=false 3ms
+   ✓ live query scheduler > publishes settled dependencies once: 'collection' shared=true derivedRight=false reverse=true 2ms
+   ✓ live query scheduler > publishes settled dependencies once: 'collection' shared=true derivedRight=true reverse=false 2ms
+   ✓ live query scheduler > publishes settled dependencies once: 'collection' shared=true derivedRight=true reverse=true 2ms
+   ✓ live query scheduler > publishes settled dependencies once: 'effect' shared=false derivedRight=false reverse=false 2ms
+   ✓ live query scheduler > publishes settled dependencies once: 'effect' shared=false derivedRight=false reverse=true 1ms
+   ✓ live query scheduler > publishes settled dependencies once: 'effect' shared=false derivedRight=true reverse=false 2ms
+   ✓ live query scheduler > publishes settled dependencies once: 'effect' shared=false derivedRight=true reverse=true 2ms
+   ✓ live query scheduler > publishes settled dependencies once: 'effect' shared=true derivedRight=false reverse=false 3ms
+   ✓ live query scheduler > publishes settled dependencies once: 'effect' shared=true derivedRight=false reverse=true 1ms
+   ✓ live query scheduler > publishes settled dependencies once: 'effect' shared=true derivedRight=true reverse=false 1ms
+   ✓ live query scheduler > publishes settled dependencies once: 'effect' shared=true derivedRight=true reverse=true 1ms
+   ✓ live query scheduler > runs join live queries once after their parent queries settle 2ms
+   ✓ live query scheduler > runs hybrid joins once when they observe both a live query and a collection 1ms
+   ✓ live query scheduler > currently single batch when the join sees right-side data before the left 1ms
+   ✓ live query scheduler > isolates ordered publication participants across restart: 'resolve' replacementSettled=false 3ms
+   ✓ live query scheduler > isolates ordered publication participants across restart: 'resolve' replacementSettled=true 4ms
+   ✓ live query scheduler > isolates ordered publication participants across restart: 'reject' replacementSettled=false 4ms
+   ✓ live query scheduler > isolates ordered publication participants across restart: 'reject' replacementSettled=true 3ms
+   ✓ live query scheduler > coalesces load-more callbacks scheduled within the same context 0ms
+   ✓ live query scheduler > drains loader writes before publication: initial=false return=false 0ms
+   ✓ live query scheduler > drains loader writes before publication: initial=false return=true 0ms
+   ✓ live query scheduler > drains loader writes before publication: initial=true return=false 0ms
+   ✓ live query scheduler > drains loader writes before publication: initial=true return=true 0ms
+   ✓ live query scheduler > preserves the first falsy graph-loader failure: 'undefined' laterFails=false 0ms
+   ✓ live query scheduler > preserves the first falsy graph-loader failure: 'undefined' laterFails=true 0ms
+   ✓ live query scheduler > preserves the first falsy graph-loader failure: 'null' laterFails=false 0ms
+   ✓ live query scheduler > preserves the first falsy graph-loader failure: 'null' laterFails=true 0ms
+   ✓ live query scheduler > preserves the first falsy graph-loader failure: 'false' laterFails=false 0ms
+   ✓ live query scheduler > preserves the first falsy graph-loader failure: 'false' laterFails=true 0ms
+   ✓ live query scheduler > preserves the first falsy graph-loader failure: 'zero' laterFails=false 0ms
+   ✓ live query scheduler > preserves the first falsy graph-loader failure: 'zero' laterFails=true 0ms
+   ✓ live query scheduler > preserves the first falsy graph-loader failure: 'empty string' laterFails=false 0ms
+   ✓ live query scheduler > preserves the first falsy graph-loader failure: 'empty string' laterFails=true 0ms
+   ✓ live query scheduler > preserves the first falsy graph-loader failure: 'NaN' laterFails=false 0ms
+   ✓ live query scheduler > preserves the first falsy graph-loader failure: 'NaN' laterFails=true 0ms
+   ✓ live query scheduler > attempts every repeated-alias source loader and preserves the first failure 2ms
+   ✓ live query scheduler > should handle optimistic mutations with nested left joins without scheduler errors 14ms
+   ✓ live query scheduler > should prevent stale data when lazy source also depends on modified collection 14ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/db/tests/query/scheduler.test.ts > live query scheduler > keeps a nested ready failure when a later outer listener throws
+AssertionError: expected a thrown error to be Error: nested ready listener failed
+
+- Expected
++ Received
+
+  Error {
+-   "message": "nested ready listener failed",
++   "message": "later outer listener failed",
+  }
+
+ ❯ packages/db/tests/query/scheduler.test.ts:869:35
+    867|       beginOuter()
+    868|       writeOuter({ type: `insert`, value: { id: 1, name: `Ada` } })
+    869|       expect(() => commitOuter()).toThrow(readyFailure)
+       |                                   ^
+    870|       expect(scheduledJob).toHaveBeenCalledOnce()
+    871|     } finally {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 85 passed (86)
+   Start at  14:46:23
+   Duration  1.05s (transform 535ms, setup 0ms, collect 731ms, tests 149ms, environment 0ms, prepare 41ms)
+

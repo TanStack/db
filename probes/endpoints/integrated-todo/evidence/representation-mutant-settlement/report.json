@@ -1,0 +1,27 @@
+{
+  "settings": {
+    "N": 2,
+    "X": 3,
+    "maxSteps": 5,
+    "mutant": "early-settlement"
+  },
+  "campaigns": [],
+  "limits": [
+    "Todo schema, full-row queries with all/completed predicates, ascending createdAt/id order",
+    "Sequential operations within each sequence; no same-row concurrent scheduling contract",
+    "Dev browser execution with production client artifact inspection; no production browser execution yet",
+    "Server exclusion: live canaries, client dependency maps, raw/module request rejection and retained-server-import rejection; not proof against all possible leakage"
+  ],
+  "harnessError": "AssertionError [ERR_ASSERTION]: operation 0 insert: optimistic: rendered consumers\n+ actual - expected\n\n  [\n    [\n-     'new-0',\n      'seed-1'\n    ]\n  ]\n\n    at Driver.checkpoint (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/driver.mjs:314:12)\n    at async Driver.run (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/driver.mjs:424:9)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/e2e.mjs:156:7",
+  "executed": {
+    "programsBuilt": 1,
+    "sequences": 1,
+    "operations": 1,
+    "checkpoints": 2,
+    "clientArtifacts": 4,
+    "transitions": {
+      "1 queries / insert / success": 1
+    },
+    "wire": []
+  }
+}

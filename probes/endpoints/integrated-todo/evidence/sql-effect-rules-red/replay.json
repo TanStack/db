@@ -1,0 +1,190 @@
+{
+  "seed": 9142601,
+  "mutant": null,
+  "original": {
+    "program": {
+      "index": "none",
+      "volatility": "VOLATILE",
+      "depth": 2
+    },
+    "histories": [
+      [
+        {
+          "kind": "direct",
+          "value": 7,
+          "optimistic": 0
+        },
+        {
+          "kind": "function",
+          "value": -3,
+          "optimistic": 3
+        },
+        {
+          "kind": "read-write",
+          "value": 4,
+          "optimistic": 2
+        },
+        {
+          "kind": "noop",
+          "value": 8,
+          "optimistic": 1
+        }
+      ]
+    ],
+    "failure": {
+      "law": "read-obligation",
+      "checkpoint": "settled",
+      "actual": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "expected": [
+        0,
+        1,
+        1,
+        1,
+        0
+      ],
+      "cell": "none/VOLATILE/depth-2",
+      "step": {
+        "kind": "function",
+        "value": -3,
+        "optimistic": 3
+      },
+      "summaries": [
+        {
+          "reads": [
+            "[\"app\",\"t0\"]"
+          ],
+          "writes": [],
+          "reason": null
+        },
+        {
+          "reads": null,
+          "writes": null,
+          "reason": "Unsupported SQL function"
+        },
+        {
+          "reads": [
+            "[\"app\",\"t1\"]"
+          ],
+          "writes": [],
+          "reason": null
+        },
+        {
+          "reads": [
+            "[\"app\",\"t2\"]"
+          ],
+          "writes": [],
+          "reason": null
+        },
+        {
+          "reads": null,
+          "writes": null,
+          "reason": "Unsupported SQL function"
+        }
+      ],
+      "summary": {
+        "reads": null,
+        "writes": null,
+        "reason": "Unsupported SQL function"
+      }
+    }
+  },
+  "reduced": {
+    "program": {
+      "index": "none",
+      "volatility": "VOLATILE",
+      "depth": 2
+    },
+    "histories": [
+      [
+        {
+          "kind": "direct",
+          "value": 7,
+          "optimistic": 0
+        },
+        {
+          "kind": "function",
+          "value": -3,
+          "optimistic": 3
+        },
+        {
+          "kind": "read-write",
+          "value": 4,
+          "optimistic": 2
+        },
+        {
+          "kind": "noop",
+          "value": 8,
+          "optimistic": 1
+        }
+      ]
+    ],
+    "failure": {
+      "law": "read-obligation",
+      "checkpoint": "settled",
+      "actual": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "expected": [
+        0,
+        1,
+        1,
+        1,
+        0
+      ],
+      "cell": "none/VOLATILE/depth-2",
+      "step": {
+        "kind": "function",
+        "value": -3,
+        "optimistic": 3
+      },
+      "summaries": [
+        {
+          "reads": [
+            "[\"app\",\"t0\"]"
+          ],
+          "writes": [],
+          "reason": null
+        },
+        {
+          "reads": null,
+          "writes": null,
+          "reason": "Unsupported SQL function"
+        },
+        {
+          "reads": [
+            "[\"app\",\"t1\"]"
+          ],
+          "writes": [],
+          "reason": null
+        },
+        {
+          "reads": [
+            "[\"app\",\"t2\"]"
+          ],
+          "writes": [],
+          "reason": null
+        },
+        {
+          "reads": null,
+          "writes": null,
+          "reason": "Unsupported SQL function"
+        }
+      ],
+      "summary": {
+        "reads": null,
+        "writes": null,
+        "reason": "Unsupported SQL function"
+      }
+    }
+  }
+}

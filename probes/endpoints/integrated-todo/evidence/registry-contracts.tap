@@ -1,0 +1,17 @@
+✔ scalar queries retain relation identity and nullable predicate structure (15.656875ms)
+✔ unsupported SQL and untrusted operators remain explicit rejections (12.339541ms)
+✔ incompatible row projections on the same relation cannot share optimism (1.380583ms)
+✔ endpoint modules compile independently of the original filename (1.552208ms)
+✔ query parameters reach the server and instantiate client membership (1.413ms)
+✔ registered query instances validate before a mutation starts (33.934042ms)
+✔ server registry discovers query modules absent from the current import graph (7.846625ms)
+✔ only declared scalar parameters enter the optimistic predicate (5.225458ms)
+✔ nested query modules resolve shared runtime and relation bindings (2.525333ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 270.072291

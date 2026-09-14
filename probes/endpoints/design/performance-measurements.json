@@ -1,0 +1,280 @@
+{
+  "kind": "local measurement plus network model, not a browser/protocol benchmark",
+  "measuredAt": "2026-09-11T16:36:30.957Z",
+  "node": "v22.13.1",
+  "pglite": "0.3.14",
+  "host": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "cpu": "Apple M1 Pro"
+  },
+  "assumptions": {
+    "rows": [
+      100,
+      1000,
+      10000
+    ],
+    "warmup": 3,
+    "samples": 21,
+    "indexes": [
+      "primary key(id)"
+    ],
+    "text": "12 deterministically chosen words from a 24-word vocabulary; synthetic, compression may be optimistic",
+    "payload": "plain JSON or gzip body only; excludes Start serialization, request bodies, headers and framing",
+    "networkRTTms": [
+      5,
+      50,
+      150
+    ],
+    "bandwidthMbps": [
+      10,
+      100
+    ],
+    "clientApply": "unmeasured; break-even examples initially assume equal client apply costs",
+    "serverTiming": "single local warm in-memory PGlite, includes JS result decoding; not deployed PG, ORM, network or concurrent load"
+  },
+  "measurements": [
+    {
+      "count": 100,
+      "fullQuery": {
+        "medianMs": 0.9818750000000591,
+        "p95Ms": 1.2447499999999536,
+        "samples": 21
+      },
+      "filteredQuery": {
+        "medianMs": 0.7274999999999636,
+        "p95Ms": 1.0721249999999145,
+        "samples": 21
+      },
+      "oneRowUpdateReturning": {
+        "medianMs": 0.37216699999999037,
+        "p95Ms": 0.5788750000000391,
+        "samples": 21
+      },
+      "fullPayload": {
+        "json": 19443,
+        "gzip": 4822
+      },
+      "oneRowPayload": {
+        "json": 271,
+        "gzip": 218
+      }
+    },
+    {
+      "count": 1000,
+      "fullQuery": {
+        "medianMs": 5.285333000000037,
+        "p95Ms": 20.324082999999973,
+        "samples": 21
+      },
+      "filteredQuery": {
+        "medianMs": 3.5311249999999745,
+        "p95Ms": 4.961916999999858,
+        "samples": 21
+      },
+      "oneRowUpdateReturning": {
+        "medianMs": 0.33379200000013043,
+        "p95Ms": 0.7987090000001444,
+        "samples": 21
+      },
+      "fullPayload": {
+        "json": 194604,
+        "gzip": 43096
+      },
+      "oneRowPayload": {
+        "json": 271,
+        "gzip": 218
+      }
+    },
+    {
+      "count": 10000,
+      "fullQuery": {
+        "medianMs": 44.16979100000026,
+        "p95Ms": 55.231500000000096,
+        "samples": 21
+      },
+      "filteredQuery": {
+        "medianMs": 29.20333299999993,
+        "p95Ms": 35.48879100000022,
+        "samples": 21
+      },
+      "oneRowUpdateReturning": {
+        "medianMs": 0.29224999999996726,
+        "p95Ms": 0.5008750000001783,
+        "samples": 21
+      },
+      "fullPayload": {
+        "json": 1945093,
+        "gzip": 423861
+      },
+      "oneRowPayload": {
+        "json": 271,
+        "gzip": 218
+      }
+    }
+  ],
+  "networkBounds": [
+    {
+      "count": 100,
+      "rttMs": 5,
+      "bandwidthMbps": 10,
+      "encoding": "gzip",
+      "savedTransferMs": 3.6832,
+      "extraServerWorkBudgetVsInlineFullMs": 3.6832,
+      "extraServerWorkBudgetVsClientRefetchMs": 8.6832
+    },
+    {
+      "count": 100,
+      "rttMs": 5,
+      "bandwidthMbps": 100,
+      "encoding": "gzip",
+      "savedTransferMs": 0.36832,
+      "extraServerWorkBudgetVsInlineFullMs": 0.36832,
+      "extraServerWorkBudgetVsClientRefetchMs": 5.36832
+    },
+    {
+      "count": 100,
+      "rttMs": 50,
+      "bandwidthMbps": 10,
+      "encoding": "gzip",
+      "savedTransferMs": 3.6832,
+      "extraServerWorkBudgetVsInlineFullMs": 3.6832,
+      "extraServerWorkBudgetVsClientRefetchMs": 53.6832
+    },
+    {
+      "count": 100,
+      "rttMs": 50,
+      "bandwidthMbps": 100,
+      "encoding": "gzip",
+      "savedTransferMs": 0.36832,
+      "extraServerWorkBudgetVsInlineFullMs": 0.36832,
+      "extraServerWorkBudgetVsClientRefetchMs": 50.36832
+    },
+    {
+      "count": 100,
+      "rttMs": 150,
+      "bandwidthMbps": 10,
+      "encoding": "gzip",
+      "savedTransferMs": 3.6832,
+      "extraServerWorkBudgetVsInlineFullMs": 3.6832,
+      "extraServerWorkBudgetVsClientRefetchMs": 153.6832
+    },
+    {
+      "count": 100,
+      "rttMs": 150,
+      "bandwidthMbps": 100,
+      "encoding": "gzip",
+      "savedTransferMs": 0.36832,
+      "extraServerWorkBudgetVsInlineFullMs": 0.36832,
+      "extraServerWorkBudgetVsClientRefetchMs": 150.36832
+    },
+    {
+      "count": 1000,
+      "rttMs": 5,
+      "bandwidthMbps": 10,
+      "encoding": "gzip",
+      "savedTransferMs": 34.3024,
+      "extraServerWorkBudgetVsInlineFullMs": 34.3024,
+      "extraServerWorkBudgetVsClientRefetchMs": 39.3024
+    },
+    {
+      "count": 1000,
+      "rttMs": 5,
+      "bandwidthMbps": 100,
+      "encoding": "gzip",
+      "savedTransferMs": 3.43024,
+      "extraServerWorkBudgetVsInlineFullMs": 3.43024,
+      "extraServerWorkBudgetVsClientRefetchMs": 8.43024
+    },
+    {
+      "count": 1000,
+      "rttMs": 50,
+      "bandwidthMbps": 10,
+      "encoding": "gzip",
+      "savedTransferMs": 34.3024,
+      "extraServerWorkBudgetVsInlineFullMs": 34.3024,
+      "extraServerWorkBudgetVsClientRefetchMs": 84.3024
+    },
+    {
+      "count": 1000,
+      "rttMs": 50,
+      "bandwidthMbps": 100,
+      "encoding": "gzip",
+      "savedTransferMs": 3.43024,
+      "extraServerWorkBudgetVsInlineFullMs": 3.43024,
+      "extraServerWorkBudgetVsClientRefetchMs": 53.43024
+    },
+    {
+      "count": 1000,
+      "rttMs": 150,
+      "bandwidthMbps": 10,
+      "encoding": "gzip",
+      "savedTransferMs": 34.3024,
+      "extraServerWorkBudgetVsInlineFullMs": 34.3024,
+      "extraServerWorkBudgetVsClientRefetchMs": 184.3024
+    },
+    {
+      "count": 1000,
+      "rttMs": 150,
+      "bandwidthMbps": 100,
+      "encoding": "gzip",
+      "savedTransferMs": 3.43024,
+      "extraServerWorkBudgetVsInlineFullMs": 3.43024,
+      "extraServerWorkBudgetVsClientRefetchMs": 153.43024
+    },
+    {
+      "count": 10000,
+      "rttMs": 5,
+      "bandwidthMbps": 10,
+      "encoding": "gzip",
+      "savedTransferMs": 338.9144,
+      "extraServerWorkBudgetVsInlineFullMs": 338.9144,
+      "extraServerWorkBudgetVsClientRefetchMs": 343.9144
+    },
+    {
+      "count": 10000,
+      "rttMs": 5,
+      "bandwidthMbps": 100,
+      "encoding": "gzip",
+      "savedTransferMs": 33.89144,
+      "extraServerWorkBudgetVsInlineFullMs": 33.89144,
+      "extraServerWorkBudgetVsClientRefetchMs": 38.89144
+    },
+    {
+      "count": 10000,
+      "rttMs": 50,
+      "bandwidthMbps": 10,
+      "encoding": "gzip",
+      "savedTransferMs": 338.9144,
+      "extraServerWorkBudgetVsInlineFullMs": 338.9144,
+      "extraServerWorkBudgetVsClientRefetchMs": 388.9144
+    },
+    {
+      "count": 10000,
+      "rttMs": 50,
+      "bandwidthMbps": 100,
+      "encoding": "gzip",
+      "savedTransferMs": 33.89144,
+      "extraServerWorkBudgetVsInlineFullMs": 33.89144,
+      "extraServerWorkBudgetVsClientRefetchMs": 83.89144
+    },
+    {
+      "count": 10000,
+      "rttMs": 150,
+      "bandwidthMbps": 10,
+      "encoding": "gzip",
+      "savedTransferMs": 338.9144,
+      "extraServerWorkBudgetVsInlineFullMs": 338.9144,
+      "extraServerWorkBudgetVsClientRefetchMs": 488.9144
+    },
+    {
+      "count": 10000,
+      "rttMs": 150,
+      "bandwidthMbps": 100,
+      "encoding": "gzip",
+      "savedTransferMs": 33.89144,
+      "extraServerWorkBudgetVsInlineFullMs": 33.89144,
+      "extraServerWorkBudgetVsClientRefetchMs": 183.89144
+    }
+  ]
+}

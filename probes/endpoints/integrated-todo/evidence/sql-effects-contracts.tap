@@ -1,0 +1,64 @@
+
+> test:contracts
+> node --experimental-strip-types --test tests/server-order.test.mjs tests/refresh.test.mjs tests/runtime.test.mjs tests/scalar-query.test.mjs tests/scalar-membership.test.mjs tests/snapshot-encoding.test.mjs
+
+✔ unknown and duplicate read identities reject before the write (0.806125ms)
+✔ opaque writes still refresh every requested read after the handler completes (0.670458ms)
+✔ a rejected handler is not retried and still reconciles reads (0.137458ms)
+✔ a later SQL failure preserves committed effects in the reconciliation response (5242.910792ms)
+✔ exhausted reads retain handler success or failure without repeating the handler (7007.675ms)
+✔ overlapping actions use authority read after both handlers close (29.328625ms)
+✔ a held ordinary read cannot replace authority after its action retires (6.235375ms)
+✔ optimistic fanout publishes both collections before either subscriber runs (7.249208ms)
+✔ a collection created during a write joins authoritative coverage (4.0175ms)
+✔ reentrant actions preserve event order for every subscriber (8.033833ms)
+✔ local rollback publishes every recipient together and does not cancel remote coverage (9.181125ms)
+✔ a retired read cannot block initial coverage of the restarted collection (10.181ms)
+✔ an unsent authored failure does not leave a remote obligation (13.236875ms)
+✔ a known read failure recovers without repeating its write (7.392916ms)
+✔ a later healthy response cannot discharge an unknown remote write (1.390459ms)
+✔ a new action invalidates an in-flight repair without waiting for its obsolete read (4.792875ms)
+✔ shared snapshots preserve extra columns and collection-local optimistic ownership (4.025959ms)
+✔ malformed shared indexes reject before installing any authority (5.814167ms)
+✔ authority cannot silently omit a selected scalar column (0.960916ms)
+✔ authority is installed before a post-commit handler error retires the overlay (8.09725ms)
+✔ client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs (2.913667ms)
+✔ malformed authority rejects before installing any collection snapshot (8.8735ms)
+✔ generated invalid snapshots cannot partly replace the confirmed baseline (153.407166ms)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 291.952166
+✔ actual collection runtime regressions against PostgreSQL order (5698.406208ms)
+✔ DB scalar membership agrees with PostgreSQL three-valued predicates (5466.924125ms)
+✔ scalar queries retain relation identity and nullable predicate structure (93.63625ms)
+✔ unsupported SQL and untrusted operators remain explicit rejections (49.1855ms)
+✔ incompatible row projections on the same relation cannot share optimism (102.260542ms)
+✔ component declarations carry server order in priority order (370.338ms)
+✔ sort columns must be selected (31.439125ms)
+✔ unsupported direction cannot silently lose client ordering (5.116458ms)
+✔ transformed responses cannot borrow intermediate query ordering (45.407292ms)
+✔ server handler cannot capture the bound client (91.371ms)
+✔ server handler cannot capture component state (15.232166ms)
+✔ input validator cannot capture component state (8.483625ms)
+✔ optimistic callback stays within the component while RPCs move to module scope (19.306583ms)
+✔ a row predicate is carried as data without the server auth expression (203.380375ms)
+✔ unsupported query arguments fail before generating an incorrectly scoped request (11.916042ms)
+✔ same local names in separate lexical scopes have distinct stable identities (5.908541ms)
+✔ non-endpoint instrumentation does not change declaration identities (38.385875ms)
+✔ shared encoding preserves differing rows with the same key, types, order and empty results (6.996833ms)
+✔ adaptive encoding keeps full snapshots when sharing adds bytes or values are unsupported (0.179875ms)
+✔ distinct compiler relation groups bypass row encoding entirely (0.090875ms)
+✔ disjoint row keys bypass payload encoding even within the same relation (0.078875ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 12438.429291

@@ -1,0 +1,42 @@
+{
+  "ok": false,
+  "seed": 9122602,
+  "scenarios": 20,
+  "sequences": 3,
+  "compilations": 1,
+  "operations": 0,
+  "authorityChecks": 0,
+  "resultReads": 0,
+  "skippedReads": 0,
+  "runtimeCatalogQueries": 0,
+  "testFaults": 1,
+  "error": "AssertionError [ERR_ASSERTION]: reference-baseline\n+ actual - expected\n\n  [\n    [\n      {\n        id: 'row',\n+       value: 101\n-       value: 1\n      }\n    ],\n    [\n      {\n        id: 'row',\n\n    at Evidence.check (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/evidence.mjs:38:18)\n    at execute (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/compiled-dependencies.mjs:168:18)\n    at async Evidence.run (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/evidence.mjs:59:18)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/compiled-dependencies.mjs:282:3",
+  "evidence": {
+    "name": "endpoints.compiled-dependencies",
+    "cases": 1,
+    "witnesses": {
+      "[\"reference-baseline\",\"preload\",null]": 1
+    },
+    "faults": [
+      {
+        "point": "bad-baseline",
+        "collection": 0
+      }
+    ],
+    "cleanupErrors": [],
+    "rejectedShrinks": [],
+    "sources": {
+      "evidence.mjs": "a14089e766bbc4139b617d109ae18f1f45c2789aa77200b42350d8bf47b53e96",
+      "driver.mjs": "7fa2c624a237e45a3a34c0309d1cc17cc8128fe6398603d59fcda35ae7b01c0b",
+      "program.mjs": "edbee062750f6e664878b8caad5a916dfdc44cf4ffafe0ff84e6b334e423395a",
+      "compiled-dependencies.mjs": "5ef09e4c57a749d9091102054c8422ce640de48588f89ebf83fb3653db3b46c3",
+      "dependencies.mjs": "686e5e1e833705cb780e6da04d23c403e0261f3cd92fcf404faff0cccacdf19f",
+      "concurrent.mjs": "f0a8469a6a2fda874678fa77f8b104c258aa3d5e195892e46a325cc87e4f0cb0",
+      "sql.mjs": "d11d520919cc95dd68407cae20cae8c60519e4a8cc93c6d242c3133ae9bcde64",
+      "e2e.mjs": "7052e4fa8e9a272bb204e1386ad5b28401db15d13b52d8f1fdbde9563cdd1352"
+    },
+    "node": "v24.5.0",
+    "fault": "bad-baseline"
+  },
+  "outcome": "semantic-rejection"
+}

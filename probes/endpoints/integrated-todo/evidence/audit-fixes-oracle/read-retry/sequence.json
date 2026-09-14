@@ -1,0 +1,68 @@
+{
+  "scenario": {
+    "program": {
+      "orders": [
+        [
+          "createdAt",
+          "id"
+        ]
+      ],
+      "scope": "bob",
+      "filters": [
+        false,
+        true,
+        false
+      ],
+      "retainWithoutSubscriber": true,
+      "canonicalize": true,
+      "repeatedNames": false,
+      "initial": [
+        {
+          "id": "seed-0",
+          "text": "\"   \"abb",
+          "completed": false,
+          "createdAt": "2026-01-01T00:00:01.000Z",
+          "scope": "bob"
+        },
+        {
+          "id": "-1",
+          "text": "\"",
+          "completed": false,
+          "createdAt": "2026-01-01T00:00:02.000Z",
+          "scope": "bob"
+        }
+      ],
+      "unsubscribed": [
+        0
+      ]
+    },
+    "sequences": [
+      [
+        {
+          "kind": "delete",
+          "slot": 2,
+          "text": " ",
+          "rank": 2,
+          "target": 2,
+          "outcome": "read-retry",
+          "actualEffect": "other",
+          "failAfterCommit": true,
+          "idPrefix": "new",
+          "retryFailures": 1
+        },
+        {
+          "kind": "insert",
+          "slot": 2,
+          "text": "cécaéé ",
+          "rank": 1,
+          "target": 2,
+          "outcome": "read-retry",
+          "actualEffect": "other",
+          "failAfterCommit": false,
+          "idPrefix": "",
+          "retryFailures": 2
+        }
+      ]
+    ]
+  }
+}

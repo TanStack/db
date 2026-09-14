@@ -1,0 +1,41 @@
+{
+  "property": "endpoints.e2e.read-failure",
+  "seed": -1390734448,
+  "path": "0:0:0:0:0:0:0:0",
+  "failedSequence": 0,
+  "scenario": {
+    "program": {
+      "orders": [
+        [
+          "createdAt",
+          "id"
+        ]
+      ],
+      "scope": "alice",
+      "initial": []
+    },
+    "sequences": [
+      [
+        {
+          "kind": "insert",
+          "slot": 0,
+          "text": "a",
+          "rank": 0,
+          "target": 0,
+          "outcome": "read-failure"
+        }
+      ],
+      [
+        {
+          "kind": "insert",
+          "slot": 0,
+          "text": "a",
+          "rank": 0,
+          "target": 0,
+          "outcome": "read-failure"
+        }
+      ]
+    ]
+  },
+  "error": "AssertionError [ERR_ASSERTION]: operation 0: read-failure: every active collection must equal reference PG\n+ actual - expected\n\n  [\n+   []\n-   [\n-     {\n-       completed: false,\n-       createdAt: '2026-01-01T00:00:00.000Z',\n-       id: 'new-0',\n-       text: 'a'\n-     }\n-   ]\n  ]\n\n    at Driver.checkpoint (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/driver.mjs:78:12)\n    at async Driver.run (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/driver.mjs:125:9)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/e2e.mjs:41:10\n    at async AsyncProperty.run (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)\n    at async asyncRunIt (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/e2e.mjs:44:17"
+}

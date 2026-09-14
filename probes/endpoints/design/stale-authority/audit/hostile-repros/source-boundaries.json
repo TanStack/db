@@ -1,0 +1,50 @@
+{
+  "evidence": "actual source, stub collection; no Endpoints/UI protocol implementation",
+  "events": [
+    {
+      "before": true,
+      "first": "persisting",
+      "manual": "pending",
+      "second": "persisting"
+    },
+    {
+      "authority": "partial commit installed"
+    },
+    {
+      "notification": true,
+      "first": "failed",
+      "manual": "failed",
+      "second": "persisting"
+    },
+    {
+      "notification": true,
+      "first": "failed",
+      "manual": "failed",
+      "second": "persisting"
+    },
+    {
+      "afterFailure": true,
+      "first": "failed",
+      "manual": "failed",
+      "second": "persisting"
+    },
+    {
+      "notification": true,
+      "first": "failed",
+      "manual": "failed",
+      "second": "completed"
+    },
+    {
+      "heldRead": {
+        "serverWriteClosed": true,
+        "envelopeDelivered": false
+      }
+    },
+    {
+      "afterRead": {
+        "envelopeDelivered": true,
+        "handler": "success"
+      }
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "recordedAt": "2026-09-12T14:31:26.293605+00:00",
+  "oraclePassed": true,
+  "responseChecks": 1440,
+  "controls": 18,
+  "adapterContracts": {
+    "passed": 3,
+    "generatedCases": 100,
+    "seed": 20260912,
+    "evidence": "adapter-contracts.tap"
+  },
+  "redControl": {
+    "observed": "Identity adapter failed missing preparation default",
+    "seed": 20260912,
+    "path": "0:0:0:0",
+    "counterexample": [
+      [],
+      null,
+      false
+    ]
+  },
+  "typechecks": [
+    "adapter types",
+    "integrated Todo"
+  ],
+  "benchmark": "Earlier benchmark retained unchanged; no new timing claim",
+  "disposableContainer": "stopped and removed",
+  "sourceHashes": [
+    {
+      "path": "../integrated-todo/src/postgres-adapter.server.ts",
+      "sha256": "59ec9d0d6270205e4a84de669a99eb535010b565e6443231ea9593d06be48148"
+    },
+    {
+      "path": "adapter-contracts.test.mjs",
+      "sha256": "8d56668587d4ceab7ddabb5b23ce1162f010c40d3be4c3d804d3a1a0ae4d647e"
+    },
+    {
+      "path": "types.ts",
+      "sha256": "8f2b4a1612b22e278b1c8f1762926176cb4a7930b16b8b8919c8a7c8c7295a78"
+    },
+    {
+      "path": "adapter.mjs",
+      "sha256": "7df9649de95c6a23377817b12ded6f7e292c8f63488ac900cb89f866b1241f19"
+    },
+    {
+      "path": "drizzle.mjs",
+      "sha256": "4ab09b02f1bbeee5d870f1083fbb6f09cbdb0c6d39598fdb04b001d8fda734ff"
+    },
+    {
+      "path": "oracle.mjs",
+      "sha256": "94f4a58dae97f439a75cfdb7f9009bec537e2f88316b780f438257eb3e1ed977"
+    },
+    {
+      "path": "evidence/oracle.json",
+      "sha256": "a4aa9ee26ab5253d54d99b1d96590d53668fc520458a86aae8ff29d5e1d18924"
+    }
+  ]
+}

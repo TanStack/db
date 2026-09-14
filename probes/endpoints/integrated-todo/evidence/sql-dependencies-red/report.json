@@ -1,0 +1,21 @@
+{
+  "ok": false,
+  "seed": 9122601,
+  "scenarios": 1,
+  "sequences": 1,
+  "histories": 1,
+  "operations": 0,
+  "optimisticChecks": 8,
+  "authorityChecks": 1,
+  "resultReads": 1,
+  "skippedReads": 0,
+  "responseBytes": 0,
+  "foreignKeyControls": 1,
+  "limits": [
+    "Actual SQL footprints exercise discovery and matching; no JavaScript call-graph or library inference.",
+    "Drizzle, registry, serialization and real client collections run in process; the companion browser registry oracle covers the compiled HTTP boundary.",
+    "Joins and aggregates reconcile authoritatively; only full base-table views participate in optimistic propagation.",
+    "Byte counts are JSON response estimates, not compressed HTTP bytes or latency."
+  ],
+  "error": "AssertionError [ERR_ASSERTION]: read obligation q1\n\n1 !== 0\n\n    at run (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/dependencies.mjs:290:16)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/dependencies.mjs:429:3"
+}

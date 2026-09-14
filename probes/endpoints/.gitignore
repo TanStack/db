@@ -1,2 +1,5 @@
 # Preserve standalone probe dependency resolutions despite the root ignore.
 !**/package-lock.json
+
+.oracle-run-*/
+**/.endpoints/

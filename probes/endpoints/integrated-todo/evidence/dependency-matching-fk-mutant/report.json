@@ -1,0 +1,21 @@
+{
+  "ok": false,
+  "seed": 9122601,
+  "scenarios": 30,
+  "sequences": 3,
+  "histories": 0,
+  "operations": 0,
+  "optimisticChecks": 0,
+  "authorityChecks": 0,
+  "resultReads": 0,
+  "skippedReads": 0,
+  "responseBytes": 0,
+  "foreignKeyControls": 0,
+  "limits": [
+    "Trusted fixture footprints exercise matching, not automatic SQL/handler effect discovery.",
+    "Drizzle, registry, serialization and real client collections run in process; the companion browser registry oracle covers the compiled HTTP boundary.",
+    "Joins and aggregates reconcile authoritatively; only full base-table views participate in optimistic propagation.",
+    "Byte counts are JSON response estimates, not compressed HTTP bytes or latency."
+  ],
+  "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n+ [\n+   {\n+     id: 'row',\n+     value: 2\n+   }\n+ ]\n- []\n\n    at foreignKeyControl (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/dependencies.mjs:382:12)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/dependencies.mjs:414:3"
+}

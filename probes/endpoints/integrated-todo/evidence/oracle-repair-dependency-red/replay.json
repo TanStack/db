@@ -1,0 +1,261 @@
+{
+  "property": "endpoints.dependencies",
+  "original": {
+    "input": {
+      "program": {
+        "count": 3,
+        "trigger": false
+      },
+      "steps": [
+        {
+          "target": 0,
+          "actual": 0,
+          "value": 7,
+          "cross": false,
+          "noop": false,
+          "unknown": false,
+          "fail": false,
+          "external": false
+        }
+      ]
+    },
+    "failure": {
+      "law": "reference-baseline",
+      "checkpoint": "preload",
+      "actual": [
+        [
+          {
+            "id": "row",
+            "value": 101
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 2
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 3
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 1
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 2
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 3
+          }
+        ],
+        [
+          {
+            "id": "total",
+            "value": 2
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 3
+          }
+        ]
+      ],
+      "expected": [
+        [
+          {
+            "id": "row",
+            "value": 1
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 2
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 3
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 1
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 2
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 3
+          }
+        ],
+        [
+          {
+            "id": "total",
+            "value": 2
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 3
+          }
+        ]
+      ],
+      "difference": [
+        "0",
+        "0",
+        "value"
+      ]
+    }
+  },
+  "reduced": {
+    "input": {
+      "program": {
+        "count": 3,
+        "trigger": false
+      },
+      "steps": [
+        {
+          "target": 0,
+          "actual": 0,
+          "value": 7,
+          "cross": false,
+          "noop": false,
+          "unknown": false,
+          "fail": false,
+          "external": false
+        }
+      ]
+    },
+    "failure": {
+      "law": "reference-baseline",
+      "checkpoint": "preload",
+      "actual": [
+        [
+          {
+            "id": "row",
+            "value": 101
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 2
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 3
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 1
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 2
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 3
+          }
+        ],
+        [
+          {
+            "id": "total",
+            "value": 2
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 3
+          }
+        ]
+      ],
+      "expected": [
+        [
+          {
+            "id": "row",
+            "value": 1
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 2
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 3
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 1
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 2
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 3
+          }
+        ],
+        [
+          {
+            "id": "total",
+            "value": 2
+          }
+        ],
+        [
+          {
+            "id": "row",
+            "value": 3
+          }
+        ]
+      ],
+      "difference": [
+        "0",
+        "0",
+        "value"
+      ]
+    }
+  }
+}

@@ -1,0 +1,75 @@
+TAP version 13
+# Subtest: component declarations carry server order in priority order
+ok 1 - component declarations carry server order in priority order
+  ---
+  duration_ms: 97.5075
+  ...
+# Subtest: sort columns must be selected
+ok 2 - sort columns must be selected
+  ---
+  duration_ms: 8.9005
+  ...
+# Subtest: unsupported direction cannot silently lose client ordering
+ok 3 - unsupported direction cannot silently lose client ordering
+  ---
+  duration_ms: 10.19125
+  ...
+# Subtest: transformed responses cannot borrow intermediate query ordering
+ok 4 - transformed responses cannot borrow intermediate query ordering
+  ---
+  duration_ms: 4.536625
+  ...
+# Subtest: server handler cannot capture the bound client
+ok 5 - server handler cannot capture the bound client
+  ---
+  duration_ms: 5.498875
+  ...
+# Subtest: server handler cannot capture component state
+ok 6 - server handler cannot capture component state
+  ---
+  duration_ms: 15.749792
+  ...
+# Subtest: input validator cannot capture component state
+ok 7 - input validator cannot capture component state
+  ---
+  duration_ms: 5.60475
+  ...
+# Subtest: optimistic callback stays within the component while RPCs move to module scope
+ok 8 - optimistic callback stays within the component while RPCs move to module scope
+  ---
+  duration_ms: 12.560625
+  ...
+# Subtest: a row predicate is carried as data without the server auth expression
+ok 9 - a row predicate is carried as data without the server auth expression
+  ---
+  duration_ms: 8.272541
+  ...
+# Subtest: unsupported query arguments fail before generating an incorrectly scoped request
+ok 10 - unsupported query arguments fail before generating an incorrectly scoped request
+  ---
+  duration_ms: 7.901625
+  ...
+# Subtest: same local names in separate lexical scopes have distinct stable identities
+ok 11 - same local names in separate lexical scopes have distinct stable identities
+  ---
+  duration_ms: 6.678833
+  ...
+# Subtest: non-endpoint instrumentation does not change declaration identities
+ok 12 - non-endpoint instrumentation does not change declaration identities
+  ---
+  duration_ms: 16.75325
+  ...
+# Subtest: build-time schema dependencies never become client module dependencies
+ok 13 - build-time schema dependencies never become client module dependencies
+  ---
+  duration_ms: 11.163709
+  ...
+1..13
+# tests 13
+# suites 0
+# pass 13
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 428.048708

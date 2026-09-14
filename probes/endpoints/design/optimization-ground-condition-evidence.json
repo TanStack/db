@@ -1,0 +1,319 @@
+{
+  "version": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit",
+  "cases": 9,
+  "evidence": [
+    {
+      "name": "B2-distinct-support",
+      "kind": "executed SQL indistinguishable-input pair",
+      "observations": [
+        {
+          "before": [
+            {
+              "category": "x"
+            }
+          ],
+          "supplied": [
+            {
+              "category": "x"
+            }
+          ],
+          "after": []
+        },
+        {
+          "before": [
+            {
+              "category": "x"
+            }
+          ],
+          "supplied": [
+            {
+              "category": "x"
+            }
+          ],
+          "after": [
+            {
+              "category": "x"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "B3-missing-old-value",
+      "kind": "executed SQL indistinguishable-input pair",
+      "observations": [
+        {
+          "before": [
+            {
+              "total": 10
+            }
+          ],
+          "supplied": [
+            {
+              "id": "a",
+              "value": 8
+            }
+          ],
+          "after": [
+            {
+              "total": 15
+            }
+          ]
+        },
+        {
+          "before": [
+            {
+              "total": 10
+            }
+          ],
+          "supplied": [
+            {
+              "id": "a",
+              "value": 8
+            }
+          ],
+          "after": [
+            {
+              "total": 13
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "B4-hidden-join-partner",
+      "kind": "executed SQL indistinguishable-input pair",
+      "observations": [
+        {
+          "before": [],
+          "supplied": [
+            {
+              "id": "p",
+              "enabled": true
+            }
+          ],
+          "after": [
+            {
+              "id": "a"
+            }
+          ]
+        },
+        {
+          "before": [],
+          "supplied": [
+            {
+              "id": "p",
+              "enabled": true
+            }
+          ],
+          "after": []
+        }
+      ]
+    },
+    {
+      "name": "B5-top-k-refill",
+      "kind": "executed SQL indistinguishable-input pair",
+      "observations": [
+        {
+          "before": [
+            {
+              "id": "a"
+            }
+          ],
+          "supplied": [
+            {
+              "id": "a",
+              "value": 1
+            }
+          ],
+          "after": [
+            {
+              "id": "b"
+            }
+          ]
+        },
+        {
+          "before": [
+            {
+              "id": "a"
+            }
+          ],
+          "supplied": [
+            {
+              "id": "a",
+              "value": 1
+            }
+          ],
+          "after": [
+            {
+              "id": "c"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "B1-baseline-gap",
+      "kind": "executed SQL controlled prior write",
+      "baseline": [
+        {
+          "id": "a",
+          "value": 0
+        },
+        {
+          "id": "b",
+          "value": 0
+        }
+      ],
+      "supplied": [
+        {
+          "id": "a",
+          "value": 1
+        }
+      ],
+      "inferred": [
+        {
+          "id": "a",
+          "value": 1
+        },
+        {
+          "id": "b",
+          "value": 0
+        }
+      ],
+      "fresh": [
+        {
+          "id": "a",
+          "value": 1
+        },
+        {
+          "id": "b",
+          "value": 9
+        }
+      ]
+    },
+    {
+      "name": "B6-old-and-new-regions",
+      "kind": "executed SQL region move",
+      "groupsBefore": [
+        {
+          "category": "A",
+          "count": 1
+        }
+      ],
+      "moved": [
+        {
+          "id": "a",
+          "category": "B"
+        }
+      ],
+      "groupsAfter": [
+        {
+          "category": "B",
+          "count": 1
+        }
+      ],
+      "newKeysOnly": [
+        {
+          "category": "A",
+          "count": 1
+        },
+        {
+          "category": "B",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "name": "B7-exact-base-and-recency",
+      "kind": "executed finite-map model, not production patch code",
+      "old": [
+        {
+          "id": "a",
+          "value": 0
+        }
+      ],
+      "next": [
+        {
+          "id": "a",
+          "value": 1
+        }
+      ],
+      "patch": {
+        "remove": [],
+        "upsert": [
+          {
+            "id": "a",
+            "value": 1
+          }
+        ]
+      },
+      "wrongBase": [
+        {
+          "id": "a",
+          "value": 0
+        },
+        {
+          "id": "b",
+          "value": 9
+        }
+      ],
+      "wrongResult": [
+        {
+          "id": "a",
+          "value": 1
+        },
+        {
+          "id": "b",
+          "value": 9
+        }
+      ],
+      "newer": [
+        {
+          "id": "a",
+          "value": 2
+        }
+      ],
+      "recoveredExternalWrite": [
+        {
+          "id": "a",
+          "value": 1
+        },
+        {
+          "id": "b",
+          "value": 9
+        }
+      ]
+    },
+    {
+      "name": "B8-statement-snapshots",
+      "kind": "executed SQL controlled commit between reads, not multiconnection race",
+      "before": [
+        0,
+        0
+      ],
+      "after": [
+        1,
+        1
+      ],
+      "assembled": [
+        0,
+        1
+      ]
+    },
+    {
+      "name": "B9-dml-cte-snapshot",
+      "kind": "executed SQL",
+      "sibling": [
+        {
+          "value": 0
+        }
+      ],
+      "later": [
+        {
+          "value": 1
+        }
+      ]
+    }
+  ]
+}

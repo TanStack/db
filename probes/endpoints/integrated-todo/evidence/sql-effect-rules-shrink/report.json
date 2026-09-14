@@ -1,0 +1,2811 @@
+{
+  "ok": false,
+  "seed": 9142601,
+  "runs": 3,
+  "sequences": 1,
+  "mutant": "omit-body-read",
+  "checker": "effects",
+  "histories": 30,
+  "operations": 35,
+  "comparisons": {
+    "values/baseline": 30,
+    "independence/compiled-judgment": 52,
+    "authority/compiled-judgment": 104,
+    "values/same-turn-optimism": 52,
+    "values/settled": 52,
+    "read-obligation/settled": 41
+  },
+  "writesExecuted": 52,
+  "envelopesDelivered": 52,
+  "resultReads": 112,
+  "skippedReads": 63,
+  "buildCatalogCalls": 30,
+  "runtimeCatalogCalls": 0,
+  "cells": {
+    "partial/VOLATILE/depth-0": 1,
+    "none/VOLATILE/depth-0": 1,
+    "none/IMMUTABLE/depth-0": 28
+  },
+  "witnesses": {
+    "partial/VOLATILE/depth-0/initial/values/baseline": 1,
+    "partial/VOLATILE/depth-0/function/independence/compiled-judgment": 1,
+    "partial/VOLATILE/depth-0/function/authority/compiled-judgment": 2,
+    "partial/VOLATILE/depth-0/function/values/same-turn-optimism": 1,
+    "partial/VOLATILE/depth-0/function/values/settled": 1,
+    "none/VOLATILE/depth-0/initial/values/baseline": 1,
+    "none/VOLATILE/depth-0/function/independence/compiled-judgment": 1,
+    "none/VOLATILE/depth-0/function/authority/compiled-judgment": 2,
+    "none/VOLATILE/depth-0/function/values/same-turn-optimism": 1,
+    "none/VOLATILE/depth-0/function/values/settled": 1,
+    "none/IMMUTABLE/depth-0/initial/values/baseline": 28,
+    "none/IMMUTABLE/depth-0/function/independence/compiled-judgment": 15,
+    "none/IMMUTABLE/depth-0/function/authority/compiled-judgment": 30,
+    "none/IMMUTABLE/depth-0/function/values/same-turn-optimism": 15,
+    "none/IMMUTABLE/depth-0/function/values/settled": 15,
+    "none/IMMUTABLE/depth-0/direct/independence/compiled-judgment": 28,
+    "none/IMMUTABLE/depth-0/direct/authority/compiled-judgment": 56,
+    "none/IMMUTABLE/depth-0/direct/values/same-turn-optimism": 28,
+    "none/IMMUTABLE/depth-0/direct/values/settled": 28,
+    "none/IMMUTABLE/depth-0/direct/read-obligation/settled": 28,
+    "none/IMMUTABLE/depth-0/read-write/independence/compiled-judgment": 7,
+    "none/IMMUTABLE/depth-0/read-write/authority/compiled-judgment": 14,
+    "none/IMMUTABLE/depth-0/read-write/values/same-turn-optimism": 7,
+    "none/IMMUTABLE/depth-0/read-write/values/settled": 7,
+    "none/IMMUTABLE/depth-0/read-write/read-obligation/settled": 7,
+    "none/IMMUTABLE/depth-0/function/read-obligation/settled": 6
+  },
+  "faultEvents": [
+    {
+      "mutant": "omit-body-read",
+      "cell": "partial/VOLATILE/depth-0",
+      "step": {
+        "kind": "function",
+        "value": -2,
+        "optimistic": 3
+      },
+      "writes": [
+        "[\"app\",\"t1\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/VOLATILE/depth-0",
+      "step": {
+        "kind": "function",
+        "value": -2,
+        "optimistic": 3
+      },
+      "writes": [
+        "[\"app\",\"t1\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "function",
+        "value": -2,
+        "optimistic": 3
+      },
+      "writes": [
+        "[\"app\",\"t1\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "direct",
+        "value": 7,
+        "optimistic": 2
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "read-write",
+        "value": -9,
+        "optimistic": 1
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "function",
+        "value": 2,
+        "optimistic": 2
+      },
+      "writes": [
+        "[\"app\",\"t1\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "direct",
+        "value": -2,
+        "optimistic": 3
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "function",
+        "value": 2,
+        "optimistic": 2
+      },
+      "writes": [
+        "[\"app\",\"t1\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "function",
+        "value": 0,
+        "optimistic": 3
+      },
+      "writes": [
+        "[\"app\",\"t1\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "function",
+        "value": 2,
+        "optimistic": 2
+      },
+      "writes": [
+        "[\"app\",\"t1\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "direct",
+        "value": 0,
+        "optimistic": 3
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "function",
+        "value": 2,
+        "optimistic": 2
+      },
+      "writes": [
+        "[\"app\",\"t1\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "function",
+        "value": 0,
+        "optimistic": 0
+      },
+      "writes": [
+        "[\"app\",\"t1\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "function",
+        "value": 2,
+        "optimistic": 2
+      },
+      "writes": [
+        "[\"app\",\"t1\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "direct",
+        "value": 0,
+        "optimistic": 0
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "function",
+        "value": 2,
+        "optimistic": 2
+      },
+      "writes": [
+        "[\"app\",\"t1\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "function",
+        "value": 0,
+        "optimistic": 0
+      },
+      "writes": [
+        "[\"app\",\"t1\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "direct",
+        "value": 7,
+        "optimistic": 2
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "read-write",
+        "value": -9,
+        "optimistic": 1
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "direct",
+        "value": 0,
+        "optimistic": 0
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "direct",
+        "value": 7,
+        "optimistic": 2
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "read-write",
+        "value": -9,
+        "optimistic": 1
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "function",
+        "value": 0,
+        "optimistic": 0
+      },
+      "writes": [
+        "[\"app\",\"t1\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "direct",
+        "value": 0,
+        "optimistic": 2
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "read-write",
+        "value": -9,
+        "optimistic": 1
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "direct",
+        "value": 0,
+        "optimistic": 0
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "direct",
+        "value": 0,
+        "optimistic": 2
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "read-write",
+        "value": -9,
+        "optimistic": 1
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "function",
+        "value": 0,
+        "optimistic": 0
+      },
+      "writes": [
+        "[\"app\",\"t1\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "direct",
+        "value": 0,
+        "optimistic": 0
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "read-write",
+        "value": -9,
+        "optimistic": 1
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "direct",
+        "value": 0,
+        "optimistic": 0
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "direct",
+        "value": 0,
+        "optimistic": 0
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "read-write",
+        "value": -9,
+        "optimistic": 1
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "function",
+        "value": 0,
+        "optimistic": 0
+      },
+      "writes": [
+        "[\"app\",\"t1\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "direct",
+        "value": 0,
+        "optimistic": 0
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "direct",
+        "value": -9,
+        "optimistic": 1
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "direct",
+        "value": 0,
+        "optimistic": 0
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "direct",
+        "value": 0,
+        "optimistic": 0
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "direct",
+        "value": -9,
+        "optimistic": 1
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "function",
+        "value": 0,
+        "optimistic": 0
+      },
+      "writes": [
+        "[\"app\",\"t1\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "direct",
+        "value": 0,
+        "optimistic": 0
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "direct",
+        "value": 0,
+        "optimistic": 1
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "direct",
+        "value": 0,
+        "optimistic": 0
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "direct",
+        "value": 0,
+        "optimistic": 0
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "direct",
+        "value": 0,
+        "optimistic": 1
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "function",
+        "value": 0,
+        "optimistic": 0
+      },
+      "writes": [
+        "[\"app\",\"t1\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "direct",
+        "value": 0,
+        "optimistic": 0
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "direct",
+        "value": 0,
+        "optimistic": 0
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "direct",
+        "value": 0,
+        "optimistic": 0
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "direct",
+        "value": 0,
+        "optimistic": 0
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    },
+    {
+      "mutant": "omit-body-read",
+      "cell": "none/IMMUTABLE/depth-0",
+      "step": {
+        "kind": "direct",
+        "value": 0,
+        "optimistic": 0
+      },
+      "writes": [
+        "[\"app\",\"t0\"]"
+      ],
+      "footprints": [
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ],
+        [
+          "[\"app\",\"t1\"]"
+        ],
+        [
+          "[\"app\",\"t2\"]"
+        ],
+        [
+          "[\"app\",\"t0\"]"
+        ]
+      ]
+    }
+  ],
+  "rejectedShrinkFailures": [
+    {
+      "program": {
+        "index": "none",
+        "volatility": "IMMUTABLE",
+        "depth": 0
+      },
+      "histories": [
+        [
+          {
+            "kind": "function",
+            "value": 2,
+            "optimistic": 2
+          },
+          {
+            "kind": "function",
+            "value": 4,
+            "optimistic": 2
+          },
+          {
+            "kind": "direct",
+            "value": 7,
+            "optimistic": 2
+          },
+          {
+            "kind": "read-write",
+            "value": -9,
+            "optimistic": 1
+          }
+        ]
+      ],
+      "failure": {
+        "law": "read-obligation",
+        "checkpoint": "settled",
+        "actual": [
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "expected": [
+          0,
+          1,
+          1,
+          0,
+          0
+        ],
+        "cell": "none/IMMUTABLE/depth-0",
+        "step": {
+          "kind": "function",
+          "value": 2,
+          "optimistic": 2
+        },
+        "summaries": [
+          {
+            "reads": [
+              "[\"app\",\"t0\"]"
+            ],
+            "writes": [],
+            "unknown": [],
+            "derivation": [
+              {
+                "rule": "relation-event",
+                "source": "endpoint",
+                "target": "[\"app\",\"t0\"]",
+                "operation": "select",
+                "details": {}
+              }
+            ],
+            "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+          },
+          {
+            "reads": [
+              "[\"app\",\"t0\"]",
+              "[\"app\",\"t1\"]"
+            ],
+            "writes": [],
+            "unknown": [],
+            "derivation": [
+              {
+                "rule": "relation-event",
+                "source": "endpoint",
+                "target": "[\"app\",\"t0\"]",
+                "operation": "select",
+                "details": {}
+              },
+              {
+                "rule": "routine-call",
+                "source": "endpoint",
+                "target": "routine:16409"
+              },
+              {
+                "rule": "routine-call",
+                "source": "routine:16409",
+                "target": "routine:16407"
+              },
+              {
+                "rule": "relation-event",
+                "source": "routine:16407",
+                "target": "[\"app\",\"t1\"]",
+                "operation": "select",
+                "details": {}
+              }
+            ],
+            "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+          },
+          {
+            "reads": [
+              "[\"app\",\"t1\"]"
+            ],
+            "writes": [],
+            "unknown": [],
+            "derivation": [
+              {
+                "rule": "relation-event",
+                "source": "endpoint",
+                "target": "[\"app\",\"t1\"]",
+                "operation": "select",
+                "details": {}
+              }
+            ],
+            "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+          },
+          {
+            "reads": [
+              "[\"app\",\"t2\"]"
+            ],
+            "writes": [],
+            "unknown": [],
+            "derivation": [
+              {
+                "rule": "relation-event",
+                "source": "endpoint",
+                "target": "[\"app\",\"t2\"]",
+                "operation": "select",
+                "details": {}
+              }
+            ],
+            "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+          },
+          {
+            "reads": [
+              "[\"app\",\"t0\"]"
+            ],
+            "writes": [],
+            "unknown": [],
+            "derivation": [
+              {
+                "rule": "relation-event",
+                "source": "endpoint",
+                "target": "[\"app\",\"t0\"]",
+                "operation": "select",
+                "details": {}
+              },
+              {
+                "rule": "routine-call",
+                "source": "endpoint",
+                "target": "routine:16406"
+              }
+            ],
+            "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+          }
+        ],
+        "summary": {
+          "reads": [
+            "[\"app\",\"t1\"]"
+          ],
+          "writes": [
+            "[\"app\",\"t1\"]"
+          ],
+          "unknown": [],
+          "derivation": [
+            {
+              "rule": "routine-call",
+              "source": "endpoint",
+              "target": "routine:16408"
+            },
+            {
+              "rule": "relation-event",
+              "source": "routine:16408",
+              "target": "[\"app\",\"t1\"]",
+              "operation": "update",
+              "details": {
+                "columns": [
+                  "value"
+                ],
+                "defaults": []
+              }
+            },
+            {
+              "rule": "relation-event",
+              "source": "routine:16408",
+              "target": "[\"app\",\"t1\"]",
+              "operation": "select",
+              "details": {}
+            }
+          ],
+          "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+        }
+      }
+    },
+    {
+      "program": {
+        "index": "none",
+        "volatility": "IMMUTABLE",
+        "depth": 0
+      },
+      "histories": [
+        [
+          {
+            "kind": "direct",
+            "value": -2,
+            "optimistic": 3
+          },
+          {
+            "kind": "function",
+            "value": 2,
+            "optimistic": 2
+          },
+          {
+            "kind": "function",
+            "value": 4,
+            "optimistic": 2
+          },
+          {
+            "kind": "direct",
+            "value": 7,
+            "optimistic": 2
+          },
+          {
+            "kind": "read-write",
+            "value": -9,
+            "optimistic": 1
+          }
+        ]
+      ],
+      "failure": {
+        "law": "read-obligation",
+        "checkpoint": "settled",
+        "actual": [
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "expected": [
+          0,
+          1,
+          1,
+          0,
+          0
+        ],
+        "cell": "none/IMMUTABLE/depth-0",
+        "step": {
+          "kind": "function",
+          "value": 2,
+          "optimistic": 2
+        },
+        "summaries": [
+          {
+            "reads": [
+              "[\"app\",\"t0\"]"
+            ],
+            "writes": [],
+            "unknown": [],
+            "derivation": [
+              {
+                "rule": "relation-event",
+                "source": "endpoint",
+                "target": "[\"app\",\"t0\"]",
+                "operation": "select",
+                "details": {}
+              }
+            ],
+            "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+          },
+          {
+            "reads": [
+              "[\"app\",\"t0\"]",
+              "[\"app\",\"t1\"]"
+            ],
+            "writes": [],
+            "unknown": [],
+            "derivation": [
+              {
+                "rule": "relation-event",
+                "source": "endpoint",
+                "target": "[\"app\",\"t0\"]",
+                "operation": "select",
+                "details": {}
+              },
+              {
+                "rule": "routine-call",
+                "source": "endpoint",
+                "target": "routine:16409"
+              },
+              {
+                "rule": "routine-call",
+                "source": "routine:16409",
+                "target": "routine:16407"
+              },
+              {
+                "rule": "relation-event",
+                "source": "routine:16407",
+                "target": "[\"app\",\"t1\"]",
+                "operation": "select",
+                "details": {}
+              }
+            ],
+            "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+          },
+          {
+            "reads": [
+              "[\"app\",\"t1\"]"
+            ],
+            "writes": [],
+            "unknown": [],
+            "derivation": [
+              {
+                "rule": "relation-event",
+                "source": "endpoint",
+                "target": "[\"app\",\"t1\"]",
+                "operation": "select",
+                "details": {}
+              }
+            ],
+            "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+          },
+          {
+            "reads": [
+              "[\"app\",\"t2\"]"
+            ],
+            "writes": [],
+            "unknown": [],
+            "derivation": [
+              {
+                "rule": "relation-event",
+                "source": "endpoint",
+                "target": "[\"app\",\"t2\"]",
+                "operation": "select",
+                "details": {}
+              }
+            ],
+            "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+          },
+          {
+            "reads": [
+              "[\"app\",\"t0\"]"
+            ],
+            "writes": [],
+            "unknown": [],
+            "derivation": [
+              {
+                "rule": "relation-event",
+                "source": "endpoint",
+                "target": "[\"app\",\"t0\"]",
+                "operation": "select",
+                "details": {}
+              },
+              {
+                "rule": "routine-call",
+                "source": "endpoint",
+                "target": "routine:16406"
+              }
+            ],
+            "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+          }
+        ],
+        "summary": {
+          "reads": [
+            "[\"app\",\"t1\"]"
+          ],
+          "writes": [
+            "[\"app\",\"t1\"]"
+          ],
+          "unknown": [],
+          "derivation": [
+            {
+              "rule": "routine-call",
+              "source": "endpoint",
+              "target": "routine:16408"
+            },
+            {
+              "rule": "relation-event",
+              "source": "routine:16408",
+              "target": "[\"app\",\"t1\"]",
+              "operation": "update",
+              "details": {
+                "columns": [
+                  "value"
+                ],
+                "defaults": []
+              }
+            },
+            {
+              "rule": "relation-event",
+              "source": "routine:16408",
+              "target": "[\"app\",\"t1\"]",
+              "operation": "select",
+              "details": {}
+            }
+          ],
+          "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+        }
+      }
+    },
+    {
+      "program": {
+        "index": "none",
+        "volatility": "IMMUTABLE",
+        "depth": 0
+      },
+      "histories": [
+        [
+          {
+            "kind": "function",
+            "value": 2,
+            "optimistic": 2
+          },
+          {
+            "kind": "function",
+            "value": 4,
+            "optimistic": 2
+          },
+          {
+            "kind": "direct",
+            "value": 7,
+            "optimistic": 2
+          },
+          {
+            "kind": "read-write",
+            "value": -9,
+            "optimistic": 1
+          }
+        ]
+      ],
+      "failure": {
+        "law": "read-obligation",
+        "checkpoint": "settled",
+        "actual": [
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "expected": [
+          0,
+          1,
+          1,
+          0,
+          0
+        ],
+        "cell": "none/IMMUTABLE/depth-0",
+        "step": {
+          "kind": "function",
+          "value": 2,
+          "optimistic": 2
+        },
+        "summaries": [
+          {
+            "reads": [
+              "[\"app\",\"t0\"]"
+            ],
+            "writes": [],
+            "unknown": [],
+            "derivation": [
+              {
+                "rule": "relation-event",
+                "source": "endpoint",
+                "target": "[\"app\",\"t0\"]",
+                "operation": "select",
+                "details": {}
+              }
+            ],
+            "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+          },
+          {
+            "reads": [
+              "[\"app\",\"t0\"]",
+              "[\"app\",\"t1\"]"
+            ],
+            "writes": [],
+            "unknown": [],
+            "derivation": [
+              {
+                "rule": "relation-event",
+                "source": "endpoint",
+                "target": "[\"app\",\"t0\"]",
+                "operation": "select",
+                "details": {}
+              },
+              {
+                "rule": "routine-call",
+                "source": "endpoint",
+                "target": "routine:16409"
+              },
+              {
+                "rule": "routine-call",
+                "source": "routine:16409",
+                "target": "routine:16407"
+              },
+              {
+                "rule": "relation-event",
+                "source": "routine:16407",
+                "target": "[\"app\",\"t1\"]",
+                "operation": "select",
+                "details": {}
+              }
+            ],
+            "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+          },
+          {
+            "reads": [
+              "[\"app\",\"t1\"]"
+            ],
+            "writes": [],
+            "unknown": [],
+            "derivation": [
+              {
+                "rule": "relation-event",
+                "source": "endpoint",
+                "target": "[\"app\",\"t1\"]",
+                "operation": "select",
+                "details": {}
+              }
+            ],
+            "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+          },
+          {
+            "reads": [
+              "[\"app\",\"t2\"]"
+            ],
+            "writes": [],
+            "unknown": [],
+            "derivation": [
+              {
+                "rule": "relation-event",
+                "source": "endpoint",
+                "target": "[\"app\",\"t2\"]",
+                "operation": "select",
+                "details": {}
+              }
+            ],
+            "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+          },
+          {
+            "reads": [
+              "[\"app\",\"t0\"]"
+            ],
+            "writes": [],
+            "unknown": [],
+            "derivation": [
+              {
+                "rule": "relation-event",
+                "source": "endpoint",
+                "target": "[\"app\",\"t0\"]",
+                "operation": "select",
+                "details": {}
+              },
+              {
+                "rule": "routine-call",
+                "source": "endpoint",
+                "target": "routine:16406"
+              }
+            ],
+            "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+          }
+        ],
+        "summary": {
+          "reads": [
+            "[\"app\",\"t1\"]"
+          ],
+          "writes": [
+            "[\"app\",\"t1\"]"
+          ],
+          "unknown": [],
+          "derivation": [
+            {
+              "rule": "routine-call",
+              "source": "endpoint",
+              "target": "routine:16408"
+            },
+            {
+              "rule": "relation-event",
+              "source": "routine:16408",
+              "target": "[\"app\",\"t1\"]",
+              "operation": "update",
+              "details": {
+                "columns": [
+                  "value"
+                ],
+                "defaults": []
+              }
+            },
+            {
+              "rule": "relation-event",
+              "source": "routine:16408",
+              "target": "[\"app\",\"t1\"]",
+              "operation": "select",
+              "details": {}
+            }
+          ],
+          "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+        }
+      }
+    },
+    {
+      "program": {
+        "index": "none",
+        "volatility": "IMMUTABLE",
+        "depth": 0
+      },
+      "histories": [
+        [
+          {
+            "kind": "direct",
+            "value": 0,
+            "optimistic": 3
+          },
+          {
+            "kind": "function",
+            "value": 2,
+            "optimistic": 2
+          },
+          {
+            "kind": "function",
+            "value": 4,
+            "optimistic": 2
+          },
+          {
+            "kind": "direct",
+            "value": 7,
+            "optimistic": 2
+          },
+          {
+            "kind": "read-write",
+            "value": -9,
+            "optimistic": 1
+          }
+        ]
+      ],
+      "failure": {
+        "law": "read-obligation",
+        "checkpoint": "settled",
+        "actual": [
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "expected": [
+          0,
+          1,
+          1,
+          0,
+          0
+        ],
+        "cell": "none/IMMUTABLE/depth-0",
+        "step": {
+          "kind": "function",
+          "value": 2,
+          "optimistic": 2
+        },
+        "summaries": [
+          {
+            "reads": [
+              "[\"app\",\"t0\"]"
+            ],
+            "writes": [],
+            "unknown": [],
+            "derivation": [
+              {
+                "rule": "relation-event",
+                "source": "endpoint",
+                "target": "[\"app\",\"t0\"]",
+                "operation": "select",
+                "details": {}
+              }
+            ],
+            "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+          },
+          {
+            "reads": [
+              "[\"app\",\"t0\"]",
+              "[\"app\",\"t1\"]"
+            ],
+            "writes": [],
+            "unknown": [],
+            "derivation": [
+              {
+                "rule": "relation-event",
+                "source": "endpoint",
+                "target": "[\"app\",\"t0\"]",
+                "operation": "select",
+                "details": {}
+              },
+              {
+                "rule": "routine-call",
+                "source": "endpoint",
+                "target": "routine:16409"
+              },
+              {
+                "rule": "routine-call",
+                "source": "routine:16409",
+                "target": "routine:16407"
+              },
+              {
+                "rule": "relation-event",
+                "source": "routine:16407",
+                "target": "[\"app\",\"t1\"]",
+                "operation": "select",
+                "details": {}
+              }
+            ],
+            "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+          },
+          {
+            "reads": [
+              "[\"app\",\"t1\"]"
+            ],
+            "writes": [],
+            "unknown": [],
+            "derivation": [
+              {
+                "rule": "relation-event",
+                "source": "endpoint",
+                "target": "[\"app\",\"t1\"]",
+                "operation": "select",
+                "details": {}
+              }
+            ],
+            "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+          },
+          {
+            "reads": [
+              "[\"app\",\"t2\"]"
+            ],
+            "writes": [],
+            "unknown": [],
+            "derivation": [
+              {
+                "rule": "relation-event",
+                "source": "endpoint",
+                "target": "[\"app\",\"t2\"]",
+                "operation": "select",
+                "details": {}
+              }
+            ],
+            "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+          },
+          {
+            "reads": [
+              "[\"app\",\"t0\"]"
+            ],
+            "writes": [],
+            "unknown": [],
+            "derivation": [
+              {
+                "rule": "relation-event",
+                "source": "endpoint",
+                "target": "[\"app\",\"t0\"]",
+                "operation": "select",
+                "details": {}
+              },
+              {
+                "rule": "routine-call",
+                "source": "endpoint",
+                "target": "routine:16406"
+              }
+            ],
+            "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+          }
+        ],
+        "summary": {
+          "reads": [
+            "[\"app\",\"t1\"]"
+          ],
+          "writes": [
+            "[\"app\",\"t1\"]"
+          ],
+          "unknown": [],
+          "derivation": [
+            {
+              "rule": "routine-call",
+              "source": "endpoint",
+              "target": "routine:16408"
+            },
+            {
+              "rule": "relation-event",
+              "source": "routine:16408",
+              "target": "[\"app\",\"t1\"]",
+              "operation": "update",
+              "details": {
+                "columns": [
+                  "value"
+                ],
+                "defaults": []
+              }
+            },
+            {
+              "rule": "relation-event",
+              "source": "routine:16408",
+              "target": "[\"app\",\"t1\"]",
+              "operation": "select",
+              "details": {}
+            }
+          ],
+          "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+        }
+      }
+    },
+    {
+      "program": {
+        "index": "none",
+        "volatility": "IMMUTABLE",
+        "depth": 0
+      },
+      "histories": [
+        [
+          {
+            "kind": "function",
+            "value": 2,
+            "optimistic": 2
+          },
+          {
+            "kind": "function",
+            "value": 4,
+            "optimistic": 2
+          },
+          {
+            "kind": "direct",
+            "value": 7,
+            "optimistic": 2
+          },
+          {
+            "kind": "read-write",
+            "value": -9,
+            "optimistic": 1
+          }
+        ]
+      ],
+      "failure": {
+        "law": "read-obligation",
+        "checkpoint": "settled",
+        "actual": [
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "expected": [
+          0,
+          1,
+          1,
+          0,
+          0
+        ],
+        "cell": "none/IMMUTABLE/depth-0",
+        "step": {
+          "kind": "function",
+          "value": 2,
+          "optimistic": 2
+        },
+        "summaries": [
+          {
+            "reads": [
+              "[\"app\",\"t0\"]"
+            ],
+            "writes": [],
+            "unknown": [],
+            "derivation": [
+              {
+                "rule": "relation-event",
+                "source": "endpoint",
+                "target": "[\"app\",\"t0\"]",
+                "operation": "select",
+                "details": {}
+              }
+            ],
+            "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+          },
+          {
+            "reads": [
+              "[\"app\",\"t0\"]",
+              "[\"app\",\"t1\"]"
+            ],
+            "writes": [],
+            "unknown": [],
+            "derivation": [
+              {
+                "rule": "relation-event",
+                "source": "endpoint",
+                "target": "[\"app\",\"t0\"]",
+                "operation": "select",
+                "details": {}
+              },
+              {
+                "rule": "routine-call",
+                "source": "endpoint",
+                "target": "routine:16409"
+              },
+              {
+                "rule": "routine-call",
+                "source": "routine:16409",
+                "target": "routine:16407"
+              },
+              {
+                "rule": "relation-event",
+                "source": "routine:16407",
+                "target": "[\"app\",\"t1\"]",
+                "operation": "select",
+                "details": {}
+              }
+            ],
+            "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+          },
+          {
+            "reads": [
+              "[\"app\",\"t1\"]"
+            ],
+            "writes": [],
+            "unknown": [],
+            "derivation": [
+              {
+                "rule": "relation-event",
+                "source": "endpoint",
+                "target": "[\"app\",\"t1\"]",
+                "operation": "select",
+                "details": {}
+              }
+            ],
+            "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+          },
+          {
+            "reads": [
+              "[\"app\",\"t2\"]"
+            ],
+            "writes": [],
+            "unknown": [],
+            "derivation": [
+              {
+                "rule": "relation-event",
+                "source": "endpoint",
+                "target": "[\"app\",\"t2\"]",
+                "operation": "select",
+                "details": {}
+              }
+            ],
+            "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+          },
+          {
+            "reads": [
+              "[\"app\",\"t0\"]"
+            ],
+            "writes": [],
+            "unknown": [],
+            "derivation": [
+              {
+                "rule": "relation-event",
+                "source": "endpoint",
+                "target": "[\"app\",\"t0\"]",
+                "operation": "select",
+                "details": {}
+              },
+              {
+                "rule": "routine-call",
+                "source": "endpoint",
+                "target": "routine:16406"
+              }
+            ],
+            "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+          }
+        ],
+        "summary": {
+          "reads": [
+            "[\"app\",\"t1\"]"
+          ],
+          "writes": [
+            "[\"app\",\"t1\"]"
+          ],
+          "unknown": [],
+          "derivation": [
+            {
+              "rule": "routine-call",
+              "source": "endpoint",
+              "target": "routine:16408"
+            },
+            {
+              "rule": "relation-event",
+              "source": "routine:16408",
+              "target": "[\"app\",\"t1\"]",
+              "operation": "update",
+              "details": {
+                "columns": [
+                  "value"
+                ],
+                "defaults": []
+              }
+            },
+            {
+              "rule": "relation-event",
+              "source": "routine:16408",
+              "target": "[\"app\",\"t1\"]",
+              "operation": "select",
+              "details": {}
+            }
+          ],
+          "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+        }
+      }
+    },
+    {
+      "program": {
+        "index": "none",
+        "volatility": "IMMUTABLE",
+        "depth": 0
+      },
+      "histories": [
+        [
+          {
+            "kind": "direct",
+            "value": 0,
+            "optimistic": 0
+          },
+          {
+            "kind": "function",
+            "value": 2,
+            "optimistic": 2
+          },
+          {
+            "kind": "function",
+            "value": 4,
+            "optimistic": 2
+          },
+          {
+            "kind": "direct",
+            "value": 7,
+            "optimistic": 2
+          },
+          {
+            "kind": "read-write",
+            "value": -9,
+            "optimistic": 1
+          }
+        ]
+      ],
+      "failure": {
+        "law": "read-obligation",
+        "checkpoint": "settled",
+        "actual": [
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "expected": [
+          0,
+          1,
+          1,
+          0,
+          0
+        ],
+        "cell": "none/IMMUTABLE/depth-0",
+        "step": {
+          "kind": "function",
+          "value": 2,
+          "optimistic": 2
+        },
+        "summaries": [
+          {
+            "reads": [
+              "[\"app\",\"t0\"]"
+            ],
+            "writes": [],
+            "unknown": [],
+            "derivation": [
+              {
+                "rule": "relation-event",
+                "source": "endpoint",
+                "target": "[\"app\",\"t0\"]",
+                "operation": "select",
+                "details": {}
+              }
+            ],
+            "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+          },
+          {
+            "reads": [
+              "[\"app\",\"t0\"]",
+              "[\"app\",\"t1\"]"
+            ],
+            "writes": [],
+            "unknown": [],
+            "derivation": [
+              {
+                "rule": "relation-event",
+                "source": "endpoint",
+                "target": "[\"app\",\"t0\"]",
+                "operation": "select",
+                "details": {}
+              },
+              {
+                "rule": "routine-call",
+                "source": "endpoint",
+                "target": "routine:16409"
+              },
+              {
+                "rule": "routine-call",
+                "source": "routine:16409",
+                "target": "routine:16407"
+              },
+              {
+                "rule": "relation-event",
+                "source": "routine:16407",
+                "target": "[\"app\",\"t1\"]",
+                "operation": "select",
+                "details": {}
+              }
+            ],
+            "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+          },
+          {
+            "reads": [
+              "[\"app\",\"t1\"]"
+            ],
+            "writes": [],
+            "unknown": [],
+            "derivation": [
+              {
+                "rule": "relation-event",
+                "source": "endpoint",
+                "target": "[\"app\",\"t1\"]",
+                "operation": "select",
+                "details": {}
+              }
+            ],
+            "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+          },
+          {
+            "reads": [
+              "[\"app\",\"t2\"]"
+            ],
+            "writes": [],
+            "unknown": [],
+            "derivation": [
+              {
+                "rule": "relation-event",
+                "source": "endpoint",
+                "target": "[\"app\",\"t2\"]",
+                "operation": "select",
+                "details": {}
+              }
+            ],
+            "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+          },
+          {
+            "reads": [
+              "[\"app\",\"t0\"]"
+            ],
+            "writes": [],
+            "unknown": [],
+            "derivation": [
+              {
+                "rule": "relation-event",
+                "source": "endpoint",
+                "target": "[\"app\",\"t0\"]",
+                "operation": "select",
+                "details": {}
+              },
+              {
+                "rule": "routine-call",
+                "source": "endpoint",
+                "target": "routine:16406"
+              }
+            ],
+            "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+          }
+        ],
+        "summary": {
+          "reads": [
+            "[\"app\",\"t1\"]"
+          ],
+          "writes": [
+            "[\"app\",\"t1\"]"
+          ],
+          "unknown": [],
+          "derivation": [
+            {
+              "rule": "routine-call",
+              "source": "endpoint",
+              "target": "routine:16408"
+            },
+            {
+              "rule": "relation-event",
+              "source": "routine:16408",
+              "target": "[\"app\",\"t1\"]",
+              "operation": "update",
+              "details": {
+                "columns": [
+                  "value"
+                ],
+                "defaults": []
+              }
+            },
+            {
+              "rule": "relation-event",
+              "source": "routine:16408",
+              "target": "[\"app\",\"t1\"]",
+              "operation": "select",
+              "details": {}
+            }
+          ],
+          "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+        }
+      }
+    }
+  ],
+  "cleanupErrors": [],
+  "node": "v24.5.0",
+  "sources": {
+    "sql-effects.mjs": "853ecbc9bb008de23054c52c42314ea9f24f7591c425c2b75298ce3cd37d7fcf",
+    "sql-dependencies.mjs": "41587af5711a464664ee786c22ae13b000ad5a05d55be485debe045071c7e141",
+    "src/runtime.ts": "1c9924886ee269769b39d6049416bd09b16662bf4ef2c5e81a7fb0a492081bc3",
+    "src/registry.server.ts": "b11b621be9349d0260750eb16a571acd8248136351e246d2404dd9ee058059d2",
+    "tests/oracles/sql-effect-rules.mjs": "313f16c77bdf6337c3fe888ff21e9741b9e2b49ecbb686174280c336fbacb76a"
+  },
+  "versions": {
+    "fast-check": "3.23.2",
+    "@electric-sql/pglite": "0.3.14"
+  },
+  "fastCheck": {
+    "runs": 1,
+    "shrinks": 10,
+    "seed": 9142601,
+    "path": "0:0:0:3:2:2:2:2:2:2:2"
+  },
+  "error": "AssertionError [ERR_ASSERTION]: values/settled\n+ actual - expected\n... Skipped lines\n\n  [\n    [\n      {\n        id: 'row',\n        value: 1\n...\n        id: 'row',\n+       value: 3\n-       value: 1\n      }\n    ],\n    [\n      {\n        id: 'row',\n\n    at compare (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:54:16)\n    at run (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:155:9)\n    at async check (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:179:9)\n    at async AsyncProperty.run (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)\n    at async asyncRunIt (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:214:20",
+  "outcome": "semantic-rejection"
+}

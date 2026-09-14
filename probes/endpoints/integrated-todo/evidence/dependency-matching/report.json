@@ -1,0 +1,20 @@
+{
+  "ok": true,
+  "seed": 9122601,
+  "scenarios": 30,
+  "sequences": 3,
+  "histories": 91,
+  "operations": 494,
+  "optimisticChecks": 3967,
+  "authorityChecks": 3967,
+  "resultReads": 2908,
+  "skippedReads": 1059,
+  "responseBytes": 185136,
+  "foreignKeyControls": 1,
+  "limits": [
+    "Trusted fixture footprints exercise matching, not automatic SQL/handler effect discovery.",
+    "Drizzle, registry, serialization and real client collections run in process; the companion browser registry oracle covers the compiled HTTP boundary.",
+    "Joins and aggregates reconcile authoritatively; only full base-table views participate in optimistic propagation.",
+    "Byte counts are JSON response estimates, not compressed HTTP bytes or latency."
+  ]
+}

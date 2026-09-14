@@ -1,0 +1,81 @@
+{
+  "scenario": {
+    "program": {
+      "orders": [
+        [
+          "id",
+          "createdAt"
+        ]
+      ],
+      "scope": "bob",
+      "filters": [
+        false,
+        true,
+        false
+      ],
+      "retainWithoutSubscriber": true,
+      "canonicalize": false,
+      "initial": [
+        {
+          "id": "seed-0",
+          "text": "  ",
+          "completed": true,
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "scope": "bob"
+        }
+      ],
+      "unsubscribed": [
+        0
+      ]
+    },
+    "sequences": [
+      [
+        {
+          "kind": "insert",
+          "slot": 0,
+          "text": "éc ééa",
+          "rank": 1,
+          "target": 1,
+          "outcome": "read-retry",
+          "retryFailures": 1
+        },
+        {
+          "kind": "insert",
+          "slot": 0,
+          "text": "é cc  ",
+          "rank": 2,
+          "target": 0,
+          "outcome": "read-retry",
+          "retryFailures": 2
+        },
+        {
+          "kind": "insert",
+          "slot": 2,
+          "text": "céc \"c",
+          "rank": 0,
+          "target": 2,
+          "outcome": "read-retry",
+          "retryFailures": 2
+        },
+        {
+          "kind": "insert",
+          "slot": 2,
+          "text": " ",
+          "rank": 0,
+          "target": 1,
+          "outcome": "read-retry",
+          "retryFailures": 3
+        },
+        {
+          "kind": "edit",
+          "slot": 3,
+          "text": "aca  é",
+          "rank": 1,
+          "target": 0,
+          "outcome": "read-retry",
+          "retryFailures": 1
+        }
+      ]
+    ]
+  }
+}

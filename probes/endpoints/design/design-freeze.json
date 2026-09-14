@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "state": "analysis frozen before primary brief projection",
+  "frozenAt": "2026-09-11T16:46:54.356731+00:00",
+  "files": {
+    "design-model.md": "aac91217c95330b69a3bae114c3c5bbff1482c9ee15a5d46699b2401094d1248",
+    "design-evidence.md": "e5f9efe50c03ab6ebd85156c8a4528364346f36fa01b15a15d00a3ebd0b8c319",
+    "design-process.md": "95b2d81360238d16ee31b20ab1a3d5365c163d1fc8813dd645a10cd9b799071d",
+    "local-source-notes.md": "18857c951c2c264c9c1986d68ecb5f6d394084277b0f2159cf4333e389f535e8",
+    "ground-conditions.md": "b18e443de2789fe48733fb7b062acdad3f3142eb8e6bd6dbc28d2b2ceccf5e2e",
+    "optimistic-coherence-research-survey.md": "c8bc3fe3ad656ddb2a4d4dc47ce20351c5b5eb800e971a2c571457e63f727eeb",
+    "performance-measurements.json": "d91ff4df9ea0bbfe4076691a5de8b139a5b79023d98aece7c7bea2d06e5e359a",
+    "performance-bounds.md": "fb054d1dc1bfffda15c9f7cd021d91d3ed06661fd12193280ff523a068a7e7fd"
+  },
+  "range": "untested; no independent case held out",
+  "authority": "exploratory samples and explicitly requested cost calculation; no ranking or implementation"
+}

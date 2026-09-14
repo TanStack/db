@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "frozenAt": "2026-09-12T04:41:09.834481+00:00",
+  "mode": "exploratory; provisional preservation",
+  "controls": "analytical reconstruction/ablation/exclusion complete; independent range untested; generated protocols unimplemented",
+  "files": [
+    {
+      "path": "source-freeze.json",
+      "sha256": "064d623e71a2e5bc88dcc6b7d7d0cf58fdc0ff768040fd9caf1d25e9ba15874e"
+    },
+    {
+      "path": "preservation.md",
+      "sha256": "c770a6ee98846b6e944db243ee4abc338f222431fa3c3441e3622430910cb2c7"
+    },
+    {
+      "path": "model.md",
+      "sha256": "955b070dc3b76df8f23e683bd9508e59e8a7821d4436d5e111cf6b36b4e5af7b"
+    },
+    {
+      "path": "evidence.md",
+      "sha256": "f0ddbeac670d895dd5f2cf4a34c6c2222a04d84ca70f12a8a51e58933e485da2"
+    },
+    {
+      "path": "process.md",
+      "sha256": "548d13fc72ceed05ec6fb60f4f0b74ba04a8e0dd527e3b78de2858336d565fd7"
+    }
+  ]
+}

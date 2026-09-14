@@ -1,0 +1,35 @@
+{
+  "settings": {
+    "N": 1,
+    "X": 1,
+    "maxSteps": 1,
+    "mutant": null
+  },
+  "campaigns": [
+    {
+      "name": "read-retry",
+      "failed": true,
+      "seed": -2093857701,
+      "path": "0",
+      "runs": 1,
+      "shrinks": 0,
+      "error": "AssertionError [ERR_ASSERTION]: transient read failure must preserve the pending transaction\n+ actual - expected\n\n+ 'rejected'\n- 'pending'\n\n    at file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/driver.mjs:152:24\n    at async Driver.until (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/driver.mjs:96:51)\n    at async Driver.run (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/driver.mjs:150:15)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/e2e.mjs:42:10\n    at async AsyncProperty.run (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)\n    at async asyncRunIt (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/e2e.mjs:45:17"
+    }
+  ],
+  "limits": [
+    "Todo schema, scoped full-row queries, ascending createdAt/id order only",
+    "Sequential operations within each sequence; no same-row concurrent scheduling contract",
+    "Dev browser execution with production client artifact inspection; no production browser execution yet",
+    "Server exclusion: live canaries, client dependency maps, raw/module request rejection and retained-server-import rejection; not proof against all possible leakage"
+  ],
+  "executed": {
+    "programsBuilt": 1,
+    "sequences": 1,
+    "operations": 1,
+    "checkpoints": 3,
+    "clientArtifacts": 4,
+    "transitions": {
+      "1 queries / delete / read-retry": 1
+    }
+  }
+}

@@ -1,0 +1,185 @@
+{
+  "property": "endpoints.e2e.read-retry",
+  "seed": 1216034024,
+  "path": "1",
+  "failedSequence": 1,
+  "scenario": {
+    "program": {
+      "orders": [
+        [
+          "createdAt",
+          "id"
+        ]
+      ],
+      "scope": "bob",
+      "filters": [
+        false,
+        true,
+        false
+      ],
+      "retainWithoutSubscriber": true,
+      "canonicalize": true,
+      "repeatedNames": false,
+      "initial": [
+        {
+          "id": "seed-0",
+          "text": "\"   \"abb",
+          "completed": false,
+          "createdAt": "2026-01-01T00:00:01.000Z",
+          "scope": "bob"
+        },
+        {
+          "id": "-1",
+          "text": "\"",
+          "completed": false,
+          "createdAt": "2026-01-01T00:00:02.000Z",
+          "scope": "bob"
+        }
+      ],
+      "unsubscribed": [
+        0
+      ]
+    },
+    "sequences": [
+      [
+        {
+          "kind": "insert",
+          "slot": 2,
+          "text": "c",
+          "rank": 1,
+          "target": 1,
+          "outcome": "read-retry",
+          "actualEffect": "flip",
+          "failAfterCommit": true,
+          "idPrefix": "𐀀",
+          "retryFailures": 2
+        },
+        {
+          "kind": "delete",
+          "slot": 3,
+          "text": "cc",
+          "rank": 1,
+          "target": 1,
+          "outcome": "read-retry",
+          "actualEffect": "flip",
+          "failAfterCommit": false,
+          "idPrefix": "𐀀",
+          "retryFailures": 2
+        },
+        {
+          "kind": "delete",
+          "slot": 1,
+          "text": "éb  ",
+          "rank": 1,
+          "target": 1,
+          "outcome": "read-retry",
+          "actualEffect": "noop",
+          "failAfterCommit": true,
+          "idPrefix": "new",
+          "retryFailures": 3
+        },
+        {
+          "kind": "delete",
+          "slot": 2,
+          "text": "b",
+          "rank": 1,
+          "target": 0,
+          "outcome": "read-retry",
+          "actualEffect": "flip",
+          "failAfterCommit": false,
+          "idPrefix": "é",
+          "retryFailures": 2
+        },
+        {
+          "kind": "insert",
+          "slot": 1,
+          "text": "b",
+          "rank": 1,
+          "target": 2,
+          "outcome": "read-retry",
+          "actualEffect": "flip",
+          "failAfterCommit": false,
+          "idPrefix": "é",
+          "retryFailures": 2
+        }
+      ],
+      [
+        {
+          "kind": "delete",
+          "slot": 2,
+          "text": " ",
+          "rank": 2,
+          "target": 2,
+          "outcome": "read-retry",
+          "actualEffect": "other",
+          "failAfterCommit": true,
+          "idPrefix": "new",
+          "retryFailures": 1
+        },
+        {
+          "kind": "insert",
+          "slot": 2,
+          "text": "cécaéé ",
+          "rank": 1,
+          "target": 2,
+          "outcome": "read-retry",
+          "actualEffect": "other",
+          "failAfterCommit": false,
+          "idPrefix": "",
+          "retryFailures": 2
+        }
+      ],
+      [
+        {
+          "kind": "edit",
+          "slot": 2,
+          "text": "\"",
+          "rank": 0,
+          "target": 2,
+          "outcome": "read-retry",
+          "actualEffect": "same",
+          "failAfterCommit": true,
+          "idPrefix": "new",
+          "retryFailures": 2
+        },
+        {
+          "kind": "complete",
+          "slot": 2,
+          "text": " acéaéc\"",
+          "rank": 2,
+          "target": 1,
+          "outcome": "read-retry",
+          "actualEffect": "noop",
+          "failAfterCommit": true,
+          "idPrefix": "new",
+          "retryFailures": 2
+        },
+        {
+          "kind": "complete",
+          "slot": 1,
+          "text": "c",
+          "rank": 1,
+          "target": 0,
+          "outcome": "read-retry",
+          "actualEffect": "flip",
+          "failAfterCommit": true,
+          "idPrefix": "new",
+          "retryFailures": 3
+        },
+        {
+          "kind": "complete",
+          "slot": 3,
+          "text": "cécé",
+          "rank": 1,
+          "target": 2,
+          "outcome": "read-retry",
+          "actualEffect": "flip",
+          "failAfterCommit": true,
+          "idPrefix": "",
+          "retryFailures": 1
+        }
+      ]
+    ]
+  },
+  "error": "error: duplicate key value violates unique constraint \"visible_pkey\"\n    at ye.Ve (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@electric-sql/pglite/dist/chunk-3WWIVTCY.js:1:17616)\n    at ye.nt (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@electric-sql/pglite/dist/chunk-3WWIVTCY.js:1:15003)\n    at ye.parse (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@electric-sql/pglite/dist/chunk-3WWIVTCY.js:1:13755)\n    at file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@electric-sql/pglite/dist/index.js:3:191801\n    at wasm://wasm/021cbcb2:wasm-function[3707]:0x27cef1\n    at wasm://wasm/021cbcb2:wasm-function[3717]:0x27d268\n    at wasm://wasm/021cbcb2:wasm-function[9494]:0x509d72\n    at wasm://wasm/021cbcb2:wasm-function[175]:0x598a3\n    at invoke_v (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/node_modules/@electric-sql/pglite/dist/index.js:3:176458)\n    at wasm://wasm/021cbcb2:wasm-function[178]:0x5a0e8"
+}

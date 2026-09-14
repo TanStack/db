@@ -1,0 +1,38 @@
+✔ overlapping actions use authority read after both handlers close (15.610958ms)
+✔ a held ordinary read cannot replace authority after its action retires (5.974ms)
+✔ optimistic fanout publishes both collections before either subscriber runs (3.3725ms)
+✔ a collection created during a write joins authoritative coverage (1.863792ms)
+✔ reentrant actions preserve event order for every subscriber (2.6555ms)
+✔ local rollback publishes every recipient together and does not cancel remote coverage (3.110708ms)
+✔ a retired read cannot block initial coverage of the restarted collection (3.863417ms)
+✔ an unsent authored failure does not leave a remote obligation (1.51075ms)
+✔ a known read failure recovers without repeating its write (2.965125ms)
+✔ a later healthy response cannot discharge an unknown remote write (1.387792ms)
+✔ a new action invalidates an in-flight repair without waiting for its obsolete read (5.121292ms)
+✔ shared snapshots preserve extra columns and collection-local optimistic ownership (3.62475ms)
+✔ malformed shared indexes reject before installing any authority (4.991375ms)
+✔ authority cannot silently omit a selected scalar column (0.900125ms)
+✔ parameterized collections have stable distinct identities and send every retained instance (2.821625ms)
+✔ registry admission rejection closes the operation and permits a later healthy mutation (1.024542ms)
+✔ incompatible cross-module projections reject before creating an optimistic recipient (0.428ms)
+✔ authority is installed before a post-commit handler error retires the overlay (2.619875ms)
+✔ client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs (1.463708ms)
+✔ malformed authority rejects before installing any collection snapshot (4.784416ms)
+✔ generated invalid snapshots cannot partly replace the confirmed baseline (130.939583ms)
+ℹ tests 21
+ℹ suites 0
+ℹ pass 21
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 205.908583
+✔ actual collection runtime regressions against PostgreSQL order (1236.937333ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1326.760292

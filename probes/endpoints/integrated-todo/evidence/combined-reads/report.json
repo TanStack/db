@@ -1,0 +1,622 @@
+{
+  "ok": true,
+  "layer": "PostgreSQL read/encoding experiment, not enabled in Endpoints",
+  "cases": [
+    {
+      "rows": 10,
+      "variant": "two-overlapping",
+      "queries": 2,
+      "samples": 30,
+      "medianMs": {
+        "separate": 0.6329579999999169,
+        "combined": 0.6611659999999802
+      },
+      "responseBytes": {
+        "separate": 4392,
+        "combined": 4392
+      },
+      "sqlCalls": {
+        "separate": 2,
+        "combined": 1
+      },
+      "modeledSequentialConnectionBreakEvenRttMs": 0.028208000000063294,
+      "combinedPlan": [
+        {
+          "QUERY PLAN": "Result  (cost=281.04..281.05 rows=1 width=64)"
+        },
+        {
+          "QUERY PLAN": "  InitPlan 1"
+        },
+        {
+          "QUERY PLAN": "    ->  Aggregate  (cost=167.36..167.37 rows=1 width=32)"
+        },
+        {
+          "QUERY PLAN": "          ->  Sort  (cost=155.56..158.51 rows=1180 width=77)"
+        },
+        {
+          "QUERY PLAN": "                Sort Key: ordered.__ordinal"
+        },
+        {
+          "QUERY PLAN": "                ->  Subquery Scan on ordered  (cost=0.22..95.35 rows=1180 width=77)"
+        },
+        {
+          "QUERY PLAN": "                      ->  WindowAgg  (cost=0.22..83.55 rows=1180 width=45)"
+        },
+        {
+          "QUERY PLAN": "                            ->  Index Scan using item_pkey on item  (cost=0.15..65.85 rows=1180 width=37)"
+        },
+        {
+          "QUERY PLAN": "  InitPlan 2"
+        },
+        {
+          "QUERY PLAN": "    ->  Aggregate  (cost=113.66..113.67 rows=1 width=32)"
+        },
+        {
+          "QUERY PLAN": "          ->  Sort  (cost=107.76..109.23 rows=590 width=77)"
+        },
+        {
+          "QUERY PLAN": "                Sort Key: ordered_1.__ordinal"
+        },
+        {
+          "QUERY PLAN": "                ->  Subquery Scan on ordered_1  (cost=0.28..80.60 rows=590 width=77)"
+        },
+        {
+          "QUERY PLAN": "                      ->  WindowAgg  (cost=0.28..74.70 rows=590 width=45)"
+        },
+        {
+          "QUERY PLAN": "                            ->  Index Scan Backward using item_pkey on item item_1  (cost=0.15..65.85 rows=590 width=37)"
+        },
+        {
+          "QUERY PLAN": "                                  Filter: completed"
+        }
+      ]
+    },
+    {
+      "rows": 10,
+      "variant": "three-with-joins",
+      "queries": 3,
+      "samples": 30,
+      "medianMs": {
+        "separate": 0.936916999999994,
+        "combined": 0.8137080000000196
+      },
+      "responseBytes": {
+        "separate": 6749,
+        "combined": 6749
+      },
+      "sqlCalls": {
+        "separate": 3,
+        "combined": 1
+      },
+      "modeledSequentialConnectionBreakEvenRttMs": 0,
+      "combinedPlan": [
+        {
+          "QUERY PLAN": "Result  (cost=747.10..747.11 rows=1 width=96)"
+        },
+        {
+          "QUERY PLAN": "  InitPlan 1"
+        },
+        {
+          "QUERY PLAN": "    ->  Aggregate  (cost=316.71..316.72 rows=1 width=32)"
+        },
+        {
+          "QUERY PLAN": "          ->  Sort  (cost=304.90..307.85 rows=1180 width=108)"
+        },
+        {
+          "QUERY PLAN": "                Sort Key: ordered.__ordinal"
+        },
+        {
+          "QUERY PLAN": "                ->  Subquery Scan on ordered  (cost=212.26..244.70 rows=1180 width=108)"
+        },
+        {
+          "QUERY PLAN": "                      ->  WindowAgg  (cost=212.26..232.90 rows=1180 width=76)"
+        },
+        {
+          "QUERY PLAN": "                            ->  Sort  (cost=212.25..215.20 rows=1180 width=68)"
+        },
+        {
+          "QUERY PLAN": "                                  Sort Key: i.id"
+        },
+        {
+          "QUERY PLAN": "                                  ->  Hash Join  (cost=83.23..152.04 rows=1180 width=68)"
+        },
+        {
+          "QUERY PLAN": "                                        Hash Cond: (i.parent_id = p.id)"
+        },
+        {
+          "QUERY PLAN": "                                        ->  Index Scan using item_pkey on item i  (cost=0.15..65.85 rows=1180 width=40)"
+        },
+        {
+          "QUERY PLAN": "                                        ->  Hash  (cost=67.20..67.20 rows=1270 width=36)"
+        },
+        {
+          "QUERY PLAN": "                                              ->  Index Scan using parent_pkey on parent p  (cost=0.15..67.20 rows=1270 width=36)"
+        },
+        {
+          "QUERY PLAN": "  InitPlan 2"
+        },
+        {
+          "QUERY PLAN": "    ->  Aggregate  (cost=316.71..316.72 rows=1 width=32)"
+        },
+        {
+          "QUERY PLAN": "          ->  Sort  (cost=304.90..307.85 rows=1180 width=108)"
+        },
+        {
+          "QUERY PLAN": "                Sort Key: ordered_1.__ordinal"
+        },
+        {
+          "QUERY PLAN": "                ->  Subquery Scan on ordered_1  (cost=212.26..244.70 rows=1180 width=108)"
+        },
+        {
+          "QUERY PLAN": "                      ->  WindowAgg  (cost=212.26..232.90 rows=1180 width=76)"
+        },
+        {
+          "QUERY PLAN": "                            ->  Sort  (cost=212.25..215.20 rows=1180 width=68)"
+        },
+        {
+          "QUERY PLAN": "                                  Sort Key: i_1.id"
+        },
+        {
+          "QUERY PLAN": "                                  ->  Hash Left Join  (cost=83.23..152.04 rows=1180 width=68)"
+        },
+        {
+          "QUERY PLAN": "                                        Hash Cond: (i_1.parent_id = p_1.id)"
+        },
+        {
+          "QUERY PLAN": "                                        ->  Index Scan using item_pkey on item i_1  (cost=0.15..65.85 rows=1180 width=40)"
+        },
+        {
+          "QUERY PLAN": "                                        ->  Hash  (cost=67.20..67.20 rows=1270 width=36)"
+        },
+        {
+          "QUERY PLAN": "                                              ->  Index Scan using parent_pkey on parent p_1  (cost=0.15..67.20 rows=1270 width=36)"
+        },
+        {
+          "QUERY PLAN": "  InitPlan 3"
+        },
+        {
+          "QUERY PLAN": "    ->  Aggregate  (cost=113.66..113.67 rows=1 width=32)"
+        },
+        {
+          "QUERY PLAN": "          ->  Sort  (cost=107.76..109.23 rows=590 width=77)"
+        },
+        {
+          "QUERY PLAN": "                Sort Key: ordered_2.__ordinal"
+        },
+        {
+          "QUERY PLAN": "                ->  Subquery Scan on ordered_2  (cost=0.28..80.60 rows=590 width=77)"
+        },
+        {
+          "QUERY PLAN": "                      ->  WindowAgg  (cost=0.28..74.70 rows=590 width=45)"
+        },
+        {
+          "QUERY PLAN": "                            ->  Index Scan using item_pkey on item  (cost=0.15..65.85 rows=590 width=37)"
+        },
+        {
+          "QUERY PLAN": "                                  Filter: completed"
+        }
+      ]
+    },
+    {
+      "rows": 10,
+      "variant": "empty-and-disjoint",
+      "queries": 3,
+      "samples": 30,
+      "medianMs": {
+        "separate": 0.6752500000000055,
+        "combined": 0.5425420000000258
+      },
+      "responseBytes": {
+        "separate": 2934,
+        "combined": 2934
+      },
+      "sqlCalls": {
+        "separate": 3,
+        "combined": 1
+      },
+      "modeledSequentialConnectionBreakEvenRttMs": 0,
+      "combinedPlan": [
+        {
+          "QUERY PLAN": "Result  (cost=298.07..298.08 rows=1 width=96)"
+        },
+        {
+          "QUERY PLAN": "  InitPlan 1"
+        },
+        {
+          "QUERY PLAN": "    ->  Aggregate  (cost=70.72..70.73 rows=1 width=32)"
+        },
+        {
+          "QUERY PLAN": "          ->  Sort  (cost=66.79..67.77 rows=393 width=77)"
+        },
+        {
+          "QUERY PLAN": "                Sort Key: ordered.__ordinal"
+        },
+        {
+          "QUERY PLAN": "                ->  Subquery Scan on ordered  (cost=39.06..49.85 rows=393 width=77)"
+        },
+        {
+          "QUERY PLAN": "                      ->  WindowAgg  (cost=39.06..45.92 rows=393 width=45)"
+        },
+        {
+          "QUERY PLAN": "                            ->  Sort  (cost=39.05..40.03 rows=393 width=37)"
+        },
+        {
+          "QUERY PLAN": "                                  Sort Key: item.id"
+        },
+        {
+          "QUERY PLAN": "                                  ->  Bitmap Heap Scan on item  (cost=7.20..22.11 rows=393 width=37)"
+        },
+        {
+          "QUERY PLAN": "                                        Recheck Cond: (id < 0)"
+        },
+        {
+          "QUERY PLAN": "                                        ->  Bitmap Index Scan on item_pkey  (cost=0.00..7.10 rows=393 width=0)"
+        },
+        {
+          "QUERY PLAN": "                                              Index Cond: (id < 0)"
+        },
+        {
+          "QUERY PLAN": "  InitPlan 2"
+        },
+        {
+          "QUERY PLAN": "    ->  Aggregate  (cost=113.66..113.67 rows=1 width=32)"
+        },
+        {
+          "QUERY PLAN": "          ->  Sort  (cost=107.76..109.23 rows=590 width=77)"
+        },
+        {
+          "QUERY PLAN": "                Sort Key: ordered_1.__ordinal"
+        },
+        {
+          "QUERY PLAN": "                ->  Subquery Scan on ordered_1  (cost=0.28..80.60 rows=590 width=77)"
+        },
+        {
+          "QUERY PLAN": "                      ->  WindowAgg  (cost=0.28..74.70 rows=590 width=45)"
+        },
+        {
+          "QUERY PLAN": "                            ->  Index Scan using item_pkey on item item_1  (cost=0.15..65.85 rows=590 width=37)"
+        },
+        {
+          "QUERY PLAN": "                                  Filter: completed"
+        },
+        {
+          "QUERY PLAN": "  InitPlan 3"
+        },
+        {
+          "QUERY PLAN": "    ->  Aggregate  (cost=113.66..113.67 rows=1 width=32)"
+        },
+        {
+          "QUERY PLAN": "          ->  Sort  (cost=107.76..109.23 rows=590 width=77)"
+        },
+        {
+          "QUERY PLAN": "                Sort Key: ordered_2.__ordinal"
+        },
+        {
+          "QUERY PLAN": "                ->  Subquery Scan on ordered_2  (cost=0.28..80.60 rows=590 width=77)"
+        },
+        {
+          "QUERY PLAN": "                      ->  WindowAgg  (cost=0.28..74.70 rows=590 width=45)"
+        },
+        {
+          "QUERY PLAN": "                            ->  Index Scan using item_pkey on item item_2  (cost=0.15..65.85 rows=590 width=37)"
+        },
+        {
+          "QUERY PLAN": "                                  Filter: (NOT completed)"
+        }
+      ]
+    },
+    {
+      "rows": 1000,
+      "variant": "two-overlapping",
+      "queries": 2,
+      "samples": 30,
+      "medianMs": {
+        "separate": 5.751999999999953,
+        "combined": 7.293709000000035
+      },
+      "responseBytes": {
+        "separate": 441346,
+        "combined": 441346
+      },
+      "sqlCalls": {
+        "separate": 2,
+        "combined": 1
+      },
+      "modeledSequentialConnectionBreakEvenRttMs": 1.5417090000000826,
+      "combinedPlan": [
+        {
+          "QUERY PLAN": "Result  (cost=1111.26..1111.27 rows=1 width=64)"
+        },
+        {
+          "QUERY PLAN": "  InitPlan 1"
+        },
+        {
+          "QUERY PLAN": "    ->  Aggregate  (cost=668.45..668.46 rows=1 width=32)"
+        },
+        {
+          "QUERY PLAN": "          ->  Sort  (cost=623.61..634.82 rows=4484 width=77)"
+        },
+        {
+          "QUERY PLAN": "                Sort Key: ordered.__ordinal"
+        },
+        {
+          "QUERY PLAN": "                ->  Subquery Scan on ordered  (cost=0.35..351.64 rows=4484 width=77)"
+        },
+        {
+          "QUERY PLAN": "                      ->  WindowAgg  (cost=0.35..306.80 rows=4484 width=45)"
+        },
+        {
+          "QUERY PLAN": "                            ->  Index Scan using item_pkey on item  (cost=0.28..239.54 rows=4484 width=37)"
+        },
+        {
+          "QUERY PLAN": "  InitPlan 2"
+        },
+        {
+          "QUERY PLAN": "    ->  Aggregate  (cost=442.79..442.80 rows=1 width=32)"
+        },
+        {
+          "QUERY PLAN": "          ->  Sort  (cost=420.37..425.97 rows=2242 width=77)"
+        },
+        {
+          "QUERY PLAN": "                Sort Key: ordered_1.__ordinal"
+        },
+        {
+          "QUERY PLAN": "                ->  Subquery Scan on ordered_1  (cost=0.40..295.59 rows=2242 width=77)"
+        },
+        {
+          "QUERY PLAN": "                      ->  WindowAgg  (cost=0.40..273.17 rows=2242 width=45)"
+        },
+        {
+          "QUERY PLAN": "                            ->  Index Scan Backward using item_pkey on item item_1  (cost=0.28..239.54 rows=2242 width=37)"
+        },
+        {
+          "QUERY PLAN": "                                  Filter: completed"
+        }
+      ]
+    },
+    {
+      "rows": 1000,
+      "variant": "three-with-joins",
+      "queries": 3,
+      "samples": 30,
+      "medianMs": {
+        "separate": 8.769792000000052,
+        "combined": 11.12675000000013
+      },
+      "responseBytes": {
+        "separate": 638339,
+        "combined": 638339
+      },
+      "sqlCalls": {
+        "separate": 3,
+        "combined": 1
+      },
+      "modeledSequentialConnectionBreakEvenRttMs": 1.1784790000000385,
+      "combinedPlan": [
+        {
+          "QUERY PLAN": "Result  (cost=2535.86..2535.87 rows=1 width=96)"
+        },
+        {
+          "QUERY PLAN": "  InitPlan 1"
+        },
+        {
+          "QUERY PLAN": "    ->  Aggregate  (cost=1046.52..1046.53 rows=1 width=32)"
+        },
+        {
+          "QUERY PLAN": "          ->  Sort  (cost=1001.68..1012.89 rows=4484 width=108)"
+        },
+        {
+          "QUERY PLAN": "                Sort Key: ordered.__ordinal"
+        },
+        {
+          "QUERY PLAN": "                ->  Subquery Scan on ordered  (cost=606.42..729.71 rows=4484 width=108)"
+        },
+        {
+          "QUERY PLAN": "                      ->  WindowAgg  (cost=606.42..684.87 rows=4484 width=76)"
+        },
+        {
+          "QUERY PLAN": "                            ->  Sort  (cost=606.40..617.61 rows=4484 width=68)"
+        },
+        {
+          "QUERY PLAN": "                                  Sort Key: i.id"
+        },
+        {
+          "QUERY PLAN": "                                  ->  Hash Join  (cost=83.36..334.44 rows=4484 width=68)"
+        },
+        {
+          "QUERY PLAN": "                                        Hash Cond: (i.parent_id = p.id)"
+        },
+        {
+          "QUERY PLAN": "                                        ->  Index Scan using item_pkey on item i  (cost=0.28..239.54 rows=4484 width=40)"
+        },
+        {
+          "QUERY PLAN": "                                        ->  Hash  (cost=67.20..67.20 rows=1270 width=36)"
+        },
+        {
+          "QUERY PLAN": "                                              ->  Index Scan using parent_pkey on parent p  (cost=0.15..67.20 rows=1270 width=36)"
+        },
+        {
+          "QUERY PLAN": "  InitPlan 2"
+        },
+        {
+          "QUERY PLAN": "    ->  Aggregate  (cost=1046.52..1046.53 rows=1 width=32)"
+        },
+        {
+          "QUERY PLAN": "          ->  Sort  (cost=1001.68..1012.89 rows=4484 width=108)"
+        },
+        {
+          "QUERY PLAN": "                Sort Key: ordered_1.__ordinal"
+        },
+        {
+          "QUERY PLAN": "                ->  Subquery Scan on ordered_1  (cost=606.42..729.71 rows=4484 width=108)"
+        },
+        {
+          "QUERY PLAN": "                      ->  WindowAgg  (cost=606.42..684.87 rows=4484 width=76)"
+        },
+        {
+          "QUERY PLAN": "                            ->  Sort  (cost=606.40..617.61 rows=4484 width=68)"
+        },
+        {
+          "QUERY PLAN": "                                  Sort Key: i_1.id"
+        },
+        {
+          "QUERY PLAN": "                                  ->  Hash Left Join  (cost=83.36..334.44 rows=4484 width=68)"
+        },
+        {
+          "QUERY PLAN": "                                        Hash Cond: (i_1.parent_id = p_1.id)"
+        },
+        {
+          "QUERY PLAN": "                                        ->  Index Scan using item_pkey on item i_1  (cost=0.28..239.54 rows=4484 width=40)"
+        },
+        {
+          "QUERY PLAN": "                                        ->  Hash  (cost=67.20..67.20 rows=1270 width=36)"
+        },
+        {
+          "QUERY PLAN": "                                              ->  Index Scan using parent_pkey on parent p_1  (cost=0.15..67.20 rows=1270 width=36)"
+        },
+        {
+          "QUERY PLAN": "  InitPlan 3"
+        },
+        {
+          "QUERY PLAN": "    ->  Aggregate  (cost=442.79..442.80 rows=1 width=32)"
+        },
+        {
+          "QUERY PLAN": "          ->  Sort  (cost=420.37..425.97 rows=2242 width=77)"
+        },
+        {
+          "QUERY PLAN": "                Sort Key: ordered_2.__ordinal"
+        },
+        {
+          "QUERY PLAN": "                ->  Subquery Scan on ordered_2  (cost=0.40..295.59 rows=2242 width=77)"
+        },
+        {
+          "QUERY PLAN": "                      ->  WindowAgg  (cost=0.40..273.17 rows=2242 width=45)"
+        },
+        {
+          "QUERY PLAN": "                            ->  Index Scan using item_pkey on item  (cost=0.28..239.54 rows=2242 width=37)"
+        },
+        {
+          "QUERY PLAN": "                                  Filter: completed"
+        }
+      ]
+    },
+    {
+      "rows": 1000,
+      "variant": "empty-and-disjoint",
+      "queries": 3,
+      "samples": 30,
+      "medianMs": {
+        "separate": 4.213832999999795,
+        "combined": 5.210959000000003
+      },
+      "responseBytes": {
+        "separate": 294401,
+        "combined": 294401
+      },
+      "sqlCalls": {
+        "separate": 3,
+        "combined": 1
+      },
+      "modeledSequentialConnectionBreakEvenRttMs": 0.4985630000001038,
+      "combinedPlan": [
+        {
+          "QUERY PLAN": "Result  (cost=1175.89..1175.90 rows=1 width=96)"
+        },
+        {
+          "QUERY PLAN": "  InitPlan 1"
+        },
+        {
+          "QUERY PLAN": "    ->  Aggregate  (cost=290.28..290.29 rows=1 width=32)"
+        },
+        {
+          "QUERY PLAN": "          ->  Sort  (cost=275.33..279.07 rows=1495 width=77)"
+        },
+        {
+          "QUERY PLAN": "                Sort Key: ordered.__ordinal"
+        },
+        {
+          "QUERY PLAN": "                ->  Subquery Scan on ordered  (cost=155.40..196.50 rows=1495 width=77)"
+        },
+        {
+          "QUERY PLAN": "                      ->  WindowAgg  (cost=155.40..181.55 rows=1495 width=45)"
+        },
+        {
+          "QUERY PLAN": "                            ->  Sort  (cost=155.39..159.12 rows=1495 width=37)"
+        },
+        {
+          "QUERY PLAN": "                                  Sort Key: item.id"
+        },
+        {
+          "QUERY PLAN": "                                  ->  Bitmap Heap Scan on item  (cost=19.87..76.56 rows=1495 width=37)"
+        },
+        {
+          "QUERY PLAN": "                                        Recheck Cond: (id < 0)"
+        },
+        {
+          "QUERY PLAN": "                                        ->  Bitmap Index Scan on item_pkey  (cost=0.00..19.49 rows=1495 width=0)"
+        },
+        {
+          "QUERY PLAN": "                                              Index Cond: (id < 0)"
+        },
+        {
+          "QUERY PLAN": "  InitPlan 2"
+        },
+        {
+          "QUERY PLAN": "    ->  Aggregate  (cost=442.79..442.80 rows=1 width=32)"
+        },
+        {
+          "QUERY PLAN": "          ->  Sort  (cost=420.37..425.97 rows=2242 width=77)"
+        },
+        {
+          "QUERY PLAN": "                Sort Key: ordered_1.__ordinal"
+        },
+        {
+          "QUERY PLAN": "                ->  Subquery Scan on ordered_1  (cost=0.40..295.59 rows=2242 width=77)"
+        },
+        {
+          "QUERY PLAN": "                      ->  WindowAgg  (cost=0.40..273.17 rows=2242 width=45)"
+        },
+        {
+          "QUERY PLAN": "                            ->  Index Scan using item_pkey on item item_1  (cost=0.28..239.54 rows=2242 width=37)"
+        },
+        {
+          "QUERY PLAN": "                                  Filter: completed"
+        },
+        {
+          "QUERY PLAN": "  InitPlan 3"
+        },
+        {
+          "QUERY PLAN": "    ->  Aggregate  (cost=442.79..442.80 rows=1 width=32)"
+        },
+        {
+          "QUERY PLAN": "          ->  Sort  (cost=420.37..425.97 rows=2242 width=77)"
+        },
+        {
+          "QUERY PLAN": "                Sort Key: ordered_2.__ordinal"
+        },
+        {
+          "QUERY PLAN": "                ->  Subquery Scan on ordered_2  (cost=0.40..295.59 rows=2242 width=77)"
+        },
+        {
+          "QUERY PLAN": "                      ->  WindowAgg  (cost=0.40..273.17 rows=2242 width=45)"
+        },
+        {
+          "QUERY PLAN": "                            ->  Index Scan using item_pkey on item item_2  (cost=0.28..239.54 rows=2242 width=37)"
+        },
+        {
+          "QUERY PLAN": "                                  Filter: (NOT completed)"
+        }
+      ]
+    }
+  ],
+  "limits": [
+    "In-process PGlite; no real PostgreSQL network/pool latency.",
+    "Read-only integer/text/boolean/NULL projections; no typed Date/numeric decoding claim.",
+    "Separate requests use Promise.all, but PGlite has a single connection.",
+    "Combining statements does not prove shared scans or fewer client bytes.",
+    "No concurrent external writer or replica visibility claim."
+  ],
+  "engine": {
+    "version": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit"
+  }
+}

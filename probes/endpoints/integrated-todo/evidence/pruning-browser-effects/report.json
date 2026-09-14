@@ -1,0 +1,24 @@
+{
+  "ok": false,
+  "seed": 911052,
+  "N": 2,
+  "X": 1,
+  "samples": 3,
+  "effects": true,
+  "cases": [
+    {
+      "tables": 2,
+      "queries": 6,
+      "rows": 8,
+      "strategies": {}
+    }
+  ],
+  "limits": [
+    "Local Vite dev server and PGlite. Latency includes SQL/observer costs but does not establish WAN or multi-connection contention gains.",
+    "First operation of each history establishes certificates and is excluded from timing summaries.",
+    "Schemas are fixed while each history runs. Production auth, DDL and untracked dependencies are excluded.",
+    "Gzip is an offline estimate; response bytes are observed Start bodies."
+  ],
+  "serverLog": "8:10:13 PM [vite] (client) Re-optimizing dependencies because vite config has changed\n\n  VITE v7.3.2  ready in 472 ms\n\n  ➜  Local:   http://127.0.0.1:61227/\n[vite] connected.\nWarning: A notFoundError was encountered on the route with ID \"__root__\", but a notFoundComponent option was not configured, nor was a router level defaultNotFoundComponent configured. Consider configuring at least one of these to avoid TanStack Router's overly generic defaultNotFoundComponent (<p>Not Found</p>)\n",
+  "error": "AssertionError [ERR_ASSERTION]: optimistic: rendered consumers\n+ actual - expected\n... Skipped lines\n\n  [\n    [\n      'row-0',\n      'row-1',\n      'row-2',\n...\n    [\n+     'row-3'\n+   ],\n+   [\n      'row-0',\n      'row-1',\n      'row-2'\n    ],\n-   [\n-     'row-3'\n-   ]\n  ]\n\n    at Driver.checkpoint (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/driver.mjs:389:12)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/pruning.mjs:201:15"
+}

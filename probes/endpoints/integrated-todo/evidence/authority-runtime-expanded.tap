@@ -1,0 +1,31 @@
+✔ overlapping actions use authority read after both handlers close (15.457667ms)
+✔ a held ordinary read cannot replace authority after its action retires (4.22225ms)
+✔ optimistic fanout publishes both collections before either subscriber runs (2.738875ms)
+✔ a collection created during a write joins authoritative coverage (1.451333ms)
+✔ reentrant actions preserve event order for every subscriber (2.1075ms)
+✔ local rollback publishes every recipient together and does not cancel remote coverage (3.218667ms)
+✔ a retired read cannot block initial coverage of the restarted collection (2.476375ms)
+✔ an unsent authored failure does not leave a remote obligation (1.361542ms)
+✔ a known read failure recovers without repeating its write (2.671667ms)
+✔ a later healthy response cannot discharge an unknown remote write (1.137042ms)
+✔ authority is installed before a post-commit handler error retires the overlay (1.371083ms)
+✔ client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs (1.121375ms)
+✔ malformed authority rejects before installing any collection snapshot (5.777125ms)
+✔ generated invalid snapshots cannot partly replace the confirmed baseline (96.562208ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 146.412
+✔ actual collection runtime regressions against PostgreSQL order (980.021667ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1065.826084

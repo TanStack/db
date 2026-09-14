@@ -1,0 +1,33 @@
+{
+  "scenario": {
+    "program": {
+      "orders": [
+        [
+          "id"
+        ],
+        [
+          "id"
+        ]
+      ],
+      "filters": [
+        null,
+        false
+      ],
+      "scope": "alice",
+      "initial": []
+    },
+    "sequences": [
+      [
+        {
+          "kind": "insert",
+          "slot": 0,
+          "target": 0,
+          "text": "server differs",
+          "rank": 0,
+          "outcome": "success",
+          "actualEffect": "flip"
+        }
+      ]
+    ]
+  }
+}

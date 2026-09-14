@@ -1,0 +1,76 @@
+TAP version 13
+# Subtest: shrinking retains the same law, checkpoint, operation and differing collection
+ok 1 - shrinking retains the same law, checkpoint, operation and differing collection
+  ---
+  duration_ms: 2.087459
+  type: 'test'
+  ...
+# Subtest: cleanup preserves the frozen mismatch and attempts every release after failures
+ok 2 - cleanup preserves the frozen mismatch and attempts every release after failures
+  ---
+  duration_ms: 0.431584
+  type: 'test'
+  ...
+# Subtest: replay distinguishes the original violation, a different failure and a repaired history
+ok 3 - replay distinguishes the original violation, a different failure and a repaired history
+  ---
+  duration_ms: 0.275833
+  type: 'test'
+  ...
+# Subtest: fast-check cannot shrink a row failure into a build failure
+ok 4 - fast-check cannot shrink a row failure into a build failure
+  ---
+  duration_ms: 1.68625
+  type: 'test'
+  ...
+# Subtest: the persisted final verdict includes teardown failures after successful comparisons
+ok 5 - the persisted final verdict includes teardown failures after successful comparisons
+  ---
+  duration_ms: 7.821333
+  type: 'test'
+  ...
+# Subtest: a nested runner cannot hide an earlier different failure and accept a later matching failure
+not ok 6 - a nested runner cannot hide an earlier different failure and accept a later matching failure
+  ---
+  duration_ms: 0.426084
+  type: 'test'
+  location: '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracle-evidence.test.mjs:148:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Got unwanted rejection.
+    Actual message: "rows
+    
+    5 !== 1
+    "
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  actual:
+  error: |-
+    rows
+    
+    5 !== 1
+    
+  stack: |-
+    Evidence.check (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/evidence.mjs:58:14)
+    file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracle-evidence.test.mjs:155:14
+    async Evidence.run (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/evidence.mjs:101:14)
+    async waitForActual (node:assert:565:5)
+    async strict.doesNotReject (node:assert:706:33)
+    async TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracle-evidence.test.mjs:152:3)
+    async Test.run (node:internal/test_runner/test:1088:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:763:7)
+  operator: 'doesNotReject'
+  stack: |-
+    async TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracle-evidence.test.mjs:152:3)
+    async Test.run (node:internal/test_runner/test:1088:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:763:7)
+  ...
+1..6
+# tests 6
+# suites 0
+# pass 5
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 93.349125

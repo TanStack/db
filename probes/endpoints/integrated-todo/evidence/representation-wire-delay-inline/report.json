@@ -1,0 +1,62 @@
+{
+  "settings": {
+    "N": 2,
+    "X": 3,
+    "maxSteps": 5,
+    "mutant": null
+  },
+  "campaigns": [],
+  "limits": [
+    "Todo schema, full-row queries with all/completed predicates, ascending createdAt/id order",
+    "Sequential operations within each sequence; no same-row concurrent scheduling contract",
+    "Dev browser execution with production client artifact inspection; no production browser execution yet",
+    "Server exclusion: live canaries, client dependency maps, raw/module request rejection and retained-server-import rejection; not proof against all possible leakage"
+  ],
+  "replay": "evidence/representation-wire-input.json",
+  "replayPassed": true,
+  "executed": {
+    "programsBuilt": 1,
+    "sequences": 3,
+    "operations": 3,
+    "checkpoints": 12,
+    "clientArtifacts": 4,
+    "transitions": {
+      "2 queries / edit / success": 3
+    },
+    "wire": [
+      {
+        "injectedDelayMs": 50,
+        "queries": 2,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 562,
+        "responseBytes": 106069,
+        "elapsedMs": 210.97299999999996
+      },
+      {
+        "injectedDelayMs": 50,
+        "queries": 2,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 562,
+        "responseBytes": 106069,
+        "elapsedMs": 180.96470799999952
+      },
+      {
+        "injectedDelayMs": 50,
+        "queries": 2,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 562,
+        "responseBytes": 106069,
+        "elapsedMs": 181.0124169999999
+      }
+    ]
+  }
+}

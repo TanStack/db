@@ -1,0 +1,68 @@
+{
+  "frozenAt": "2026-09-11T18:27:44.401557+00:00",
+  "mode": "exploratory, provisional preservation contract",
+  "source": "Current Endpoints prototype; its existing source traces, test records, and user-selected boundary experiments. Prior survey is context, not multiple extraction donors.",
+  "files": [
+    {
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/runtime.ts",
+      "sha256": "b46e83fbaead55dafd1623c9ee8b5c81db8cbd1d7f3ed2677c7301fe7b2044bd"
+    },
+    {
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/bound-transform.mjs",
+      "sha256": "fb2fc7f288a621ae5c06f363963983ef1fc8b2d568e361a9f944d7cca026158f"
+    },
+    {
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/probe.mjs",
+      "sha256": "428ae5b080c2883c90dbfbd11caa68a88490c57f7fdb0fc6209f7b554b428391"
+    },
+    {
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/program.mjs",
+      "sha256": "c180c1befdf38a59950f748ee1dcc11ee3bc9e561c8309bc898d1a3335dacc88"
+    },
+    {
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/driver.mjs",
+      "sha256": "77761040121b7d91057add71b6f175666ad75f1ac6ed04b958eeaddd6cd41410"
+    },
+    {
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/evidence/e2e-current/coherence/replay.json",
+      "sha256": "92936c9c16e8c6a4a7d415f247d068eac535db80089242249c80905a0045ed82"
+    },
+    {
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/design-model.md",
+      "sha256": "aac91217c95330b69a3bae114c3c5bbff1482c9ee15a5d46699b2401094d1248"
+    },
+    {
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/design-evidence.md",
+      "sha256": "e5f9efe50c03ab6ebd85156c8a4528364346f36fa01b15a15d00a3ebd0b8c319"
+    },
+    {
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/ground-conditions-multitable.md",
+      "sha256": "32e560a717b812a0910c816ea57ecc181e609c1780f06cfca5cdf5f9bb23d591"
+    },
+    {
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/terms-correctness-and-support.md",
+      "sha256": "869b556836535cb7d568e6562607ad799f2c8f42f7736f1afb26b073c18d75e5"
+    },
+    {
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/mutation-information-map.md",
+      "sha256": "db38646bf20b14a5a124ed250196a69ca3e4f3430dd24de93fa15f7fbd66a377"
+    },
+    {
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/ground-conditions-result-sharing.md",
+      "sha256": "24dc2a54189afc28ad4a8330e0d9df8cf398167cd01d6699174c58f5cfe53a25"
+    },
+    {
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/result-sharing-probe.mjs",
+      "sha256": "c4a22b52880e48f336db34c8f11b4ee5c2d48e4fe03c79148b80dab88dbd3eda"
+    },
+    {
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/result-sharing-measurements.json",
+      "sha256": "15d5e0fc290b1c743492ec2561333368a08350952e3784721676674dada5f625"
+    },
+    {
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/local-source-notes.md",
+      "sha256": "18857c951c2c264c9c1986d68ecb5f6d394084277b0f2159cf4333e389f535e8"
+    }
+  ],
+  "range": "No independent case available; all known examples already entered extraction context. Range untested."
+}

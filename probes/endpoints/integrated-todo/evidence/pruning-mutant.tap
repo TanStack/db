@@ -1,0 +1,42 @@
+✖ generated SQL effects preserve every retained result with selective reads (1191.597125ms)
+✔ FK cascades and deferred triggers advance the recipient revision at commit (385.857833ms)
+✔ unknown policy dependencies and disabled observation exclude optimization (369.407ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 2
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2386.42175
+
+✖ failing tests:
+
+test at tests/pg-revision.test.mjs:10:1
+✖ generated SQL effects preserve every retained result with selective reads (1191.597125ms)
+  Error: Property failed after 1 tests
+  { seed: 911051, path: "0:0:0:0:0:0:0:0", endOnFailure: true }
+  Counterexample: [[{"table":0,"id":0,"value":"","kind":"upsert"},{"table":0,"id":0,"value":"","kind":"upsert"}]]
+  Shrunk 7 time(s)
+  Got AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + []
+  - [
+  -   {
+  -     id: '0',
+  -     value: ''
+  -   }
+  - ]
+  
+      at settle (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/pg-revision.test.mjs:39:42)
+      at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/pg-revision.test.mjs:58:9
+      at async AsyncProperty.run (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)
+      at async asyncRunIt (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)
+      at async TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/pg-revision.test.mjs:26:5)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:332:3)
+  
+  Hint: Enable verbose mode in order to have the list of all failing values encountered during the run
+      at buildError (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/utils/RunDetailsFormatter.js:126:15)
+      at asyncThrowIfFailed (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/utils/RunDetailsFormatter.js:143:11)

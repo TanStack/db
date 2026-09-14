@@ -1,0 +1,27 @@
+{
+  "seed": 911026,
+  "N": 1,
+  "X": 1,
+  "programs": 1,
+  "sequences": 1,
+  "operations": 2,
+  "notifications": 4,
+  "checkpoints": 7,
+  "wire": [
+    {
+      "operations": 2,
+      "queries": 1,
+      "posts": 3,
+      "requestBytes": 1348,
+      "responseBytes": 2196
+    }
+  ],
+  "scope": "Generated compiled endpoints, concurrent waves of 2–4 optimistic actions, independent server execution and response delivery order, PostgreSQL confirmed/tentative rows, every source notification, React consumers, production client source exclusion.",
+  "limits": [
+    "Each wave settles as one cohort; no mixed-wave overlay retirement in this generator.",
+    "Lifecycle, local rollback, unknown transport and reentrant callbacks have separate actual-runtime regressions.",
+    "Wire bytes are decoded bodies; elapsed time includes gates and oracle work."
+  ],
+  "ok": true,
+  "productionClientArtifacts": 4
+}

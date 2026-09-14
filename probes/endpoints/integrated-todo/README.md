@@ -2,8 +2,56 @@
 
 See [Taking stock](./IMPLEMENTATION.md) for the API, implemented layers,
 verification, and remaining limits; [the audit](./TODOMVC-AUDIT.md) tracks
-TodoMVC parity. [Earlier development notes](./HISTORY.md) preserve historical
+TodoMVC parity. The [generated E2E oracle](./tests/oracles/README.md) checks
+active collections against independent PGlite and records known failures. [Earlier development notes](./HISTORY.md) preserve historical
 experiments and receipts rather than describing the current app.
+
+The [first coherence draft](../design/representation/implementation-draft.md) adds cross-query optimism and inline authoritative results, with measured costs and explicit scope limits.
+
+The [authority coordinator](../design/authority-coordinator/README.md) extends it
+to overlapping actions, stale reads, and collection restart. It includes the
+Ground Condition, state machine, fresh hostile audit, and concurrent full-stack
+PostgreSQL oracle. Run `npm run test:oracles:concurrent` for that campaign.
+
+The [SQL coverage expansion](../SQL-COVERAGE-RESULTS.md) adds generated scalar
+schemas, foreign-key and concurrent mutation tests, and measured shared-row response
+encoding. Run `npm run test:oracles:sql` and `npm run test:oracles:loading`.
+
+The [query registry](../QUERY-REGISTRY-RESULTS.md) adds cross-module server reads
+and retained parameterized collections. Run `npm run test:oracles:registry`.
+
+The [revision-tracking experiment](../REFRESH-PRUNING.md) is rejected: Endpoints
+must not modify the user's PostgreSQL database. Its trigger/counter adapter and
+compiler integration were removed; results remain as historical evidence.
+
+The [Postgres.js adapter](POSTGRES-ADAPTER.md) defaults to prepared execution
+over the app's existing pool, enabling compatible reads to pipeline. Explicit
+preparation opt-outs remain honored. The demo itself continues to use PGlite.
+
+## External changes and explicit refetch
+
+Query endpoints retain the query collection utilities on the bare collection:
+
+```ts
+await listTodos.utils.refetch({ throwOnError: true })
+```
+
+Apps can invoke this from polling or an external event callback. Query error
+and fetch state, plus `utils.clearError()`, retain their query collection types.
+Endpoints does not promise to discover unrelated external writes after each
+mutation; polling, external events, or a sync engine own that freshness policy.
+Mutation reconciliation must refresh every retained collection the mutation
+can affect, including indirect writes. Unknown effects require a conservative
+fallback.
+
+The [dependency matcher](../DEPENDENCY-MATCHING.md) can narrow mutation reads
+when the server supplies complete read and write footprints. The compiler derives
+these for bounded direct Drizzle handlers from a build-time schema snapshot;
+see [setup and limits](COMPILED-DEPENDENCIES.md). Missing evidence and unsupported
+handlers still refresh all retained collections. Explicit refetch and
+overlapping-action recovery also keep the full-read path. Existing oracle cases
+that require unrelated external changes to appear after a mutation test the
+broader fallback behavior, not the required contract for selective refresh.
 
 ## Run
 

@@ -1,0 +1,50 @@
+{
+  "inline": {
+    "samples": 3,
+    "requestsPerOperation": [
+      1,
+      1,
+      1
+    ],
+    "requestBytes": 562,
+    "responseBytes": 106069,
+    "medianElapsedMs": 146.1,
+    "injectedDelayMs": 0
+  },
+  "refetch": {
+    "samples": 3,
+    "requestsPerOperation": [
+      3,
+      3,
+      3
+    ],
+    "requestBytes": 755,
+    "responseBytes": 106010,
+    "medianElapsedMs": 162.28,
+    "injectedDelayMs": 0
+  },
+  "delay-inline": {
+    "samples": 3,
+    "requestsPerOperation": [
+      1,
+      1,
+      1
+    ],
+    "requestBytes": 562,
+    "responseBytes": 106069,
+    "medianElapsedMs": 181.01,
+    "injectedDelayMs": 50
+  },
+  "delay-refetch": {
+    "samples": 3,
+    "requestsPerOperation": [
+      3,
+      3,
+      3
+    ],
+    "requestBytes": 755,
+    "responseBytes": 106010,
+    "medianElapsedMs": 246.58,
+    "injectedDelayMs": 50
+  }
+}

@@ -1,0 +1,531 @@
+{
+  "ok": true,
+  "seed": 911052,
+  "N": 2,
+  "X": 2,
+  "samples": 4,
+  "effects": false,
+  "simple": true,
+  "cases": [
+    {
+      "tables": 2,
+      "queries": 1,
+      "rows": 8,
+      "strategies": {
+        "baseline": {
+          "warmups": [
+            {
+              "elapsedMs": 21.700000047683716,
+              "responseBytes": 2262,
+              "gzipBytes": 1051,
+              "requestBytes": 841,
+              "sql": 2,
+              "proofReads": 0,
+              "resultReads": 1,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 8.099999904632568,
+              "responseBytes": 2262,
+              "gzipBytes": 1051,
+              "requestBytes": 841,
+              "sql": 2,
+              "proofReads": 0,
+              "resultReads": 1,
+              "writes": 1
+            }
+          ],
+          "samples": [
+            {
+              "elapsedMs": 5.299999952316284,
+              "responseBytes": 2262,
+              "gzipBytes": 1052,
+              "requestBytes": 841,
+              "sql": 2,
+              "proofReads": 0,
+              "resultReads": 1,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 5.700000047683716,
+              "responseBytes": 2262,
+              "gzipBytes": 1051,
+              "requestBytes": 841,
+              "sql": 2,
+              "proofReads": 0,
+              "resultReads": 1,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 5.5,
+              "responseBytes": 2262,
+              "gzipBytes": 1051,
+              "requestBytes": 841,
+              "sql": 2,
+              "proofReads": 0,
+              "resultReads": 1,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 5.6000001430511475,
+              "responseBytes": 2262,
+              "gzipBytes": 1051,
+              "requestBytes": 841,
+              "sql": 2,
+              "proofReads": 0,
+              "resultReads": 1,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 5.400000095367432,
+              "responseBytes": 2262,
+              "gzipBytes": 1052,
+              "requestBytes": 841,
+              "sql": 2,
+              "proofReads": 0,
+              "resultReads": 1,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 5.3999998569488525,
+              "responseBytes": 2262,
+              "gzipBytes": 1051,
+              "requestBytes": 841,
+              "sql": 2,
+              "proofReads": 0,
+              "resultReads": 1,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 5.400000095367432,
+              "responseBytes": 2262,
+              "gzipBytes": 1051,
+              "requestBytes": 841,
+              "sql": 2,
+              "proofReads": 0,
+              "resultReads": 1,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 5.700000047683716,
+              "responseBytes": 2262,
+              "gzipBytes": 1051,
+              "requestBytes": 841,
+              "sql": 2,
+              "proofReads": 0,
+              "resultReads": 1,
+              "writes": 1
+            }
+          ],
+          "median": {
+            "elapsedMs": 5.5,
+            "responseBytes": 2262,
+            "gzipBytes": 1051,
+            "requestBytes": 841,
+            "sql": 2,
+            "proofReads": 0,
+            "resultReads": 1,
+            "writes": 1
+          },
+          "counts": {
+            "programsBuilt": 1,
+            "sequences": 0,
+            "operations": 0,
+            "checkpoints": 22,
+            "clientArtifacts": 4,
+            "transitions": {},
+            "wire": []
+          }
+        },
+        "selective": {
+          "warmups": [
+            {
+              "elapsedMs": 24,
+              "responseBytes": 2463,
+              "gzipBytes": 1120,
+              "requestBytes": 841,
+              "sql": 3,
+              "proofReads": 1,
+              "resultReads": 1,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 9.099999904632568,
+              "responseBytes": 2463,
+              "gzipBytes": 1122,
+              "requestBytes": 841,
+              "sql": 3,
+              "proofReads": 1,
+              "resultReads": 1,
+              "writes": 1
+            }
+          ],
+          "samples": [
+            {
+              "elapsedMs": 6.599999904632568,
+              "responseBytes": 2463,
+              "gzipBytes": 1122,
+              "requestBytes": 906,
+              "sql": 3,
+              "proofReads": 1,
+              "resultReads": 1,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 6.699999809265137,
+              "responseBytes": 2463,
+              "gzipBytes": 1121,
+              "requestBytes": 906,
+              "sql": 3,
+              "proofReads": 1,
+              "resultReads": 1,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 6.700000047683716,
+              "responseBytes": 2463,
+              "gzipBytes": 1120,
+              "requestBytes": 906,
+              "sql": 3,
+              "proofReads": 1,
+              "resultReads": 1,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 6.8999998569488525,
+              "responseBytes": 2463,
+              "gzipBytes": 1122,
+              "requestBytes": 906,
+              "sql": 3,
+              "proofReads": 1,
+              "resultReads": 1,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 7,
+              "responseBytes": 2463,
+              "gzipBytes": 1121,
+              "requestBytes": 906,
+              "sql": 3,
+              "proofReads": 1,
+              "resultReads": 1,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 7,
+              "responseBytes": 2463,
+              "gzipBytes": 1120,
+              "requestBytes": 906,
+              "sql": 3,
+              "proofReads": 1,
+              "resultReads": 1,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 7.1000001430511475,
+              "responseBytes": 2463,
+              "gzipBytes": 1121,
+              "requestBytes": 906,
+              "sql": 3,
+              "proofReads": 1,
+              "resultReads": 1,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 7.1000001430511475,
+              "responseBytes": 2463,
+              "gzipBytes": 1120,
+              "requestBytes": 906,
+              "sql": 3,
+              "proofReads": 1,
+              "resultReads": 1,
+              "writes": 1
+            }
+          ],
+          "median": {
+            "elapsedMs": 7,
+            "responseBytes": 2463,
+            "gzipBytes": 1121,
+            "requestBytes": 906,
+            "sql": 3,
+            "proofReads": 1,
+            "resultReads": 1,
+            "writes": 1
+          },
+          "counts": {
+            "programsBuilt": 1,
+            "sequences": 0,
+            "operations": 0,
+            "checkpoints": 22,
+            "clientArtifacts": 4,
+            "transitions": {},
+            "wire": []
+          }
+        }
+      }
+    },
+    {
+      "tables": 3,
+      "queries": 2,
+      "rows": 180,
+      "strategies": {
+        "selective": {
+          "warmups": [
+            {
+              "elapsedMs": 38.700000047683716,
+              "responseBytes": 54301,
+              "gzipBytes": 21670,
+              "requestBytes": 1133,
+              "sql": 5,
+              "proofReads": 2,
+              "resultReads": 2,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 17.200000047683716,
+              "responseBytes": 54301,
+              "gzipBytes": 21665,
+              "requestBytes": 1133,
+              "sql": 5,
+              "proofReads": 2,
+              "resultReads": 2,
+              "writes": 1
+            }
+          ],
+          "samples": [
+            {
+              "elapsedMs": 14.099999904632568,
+              "responseBytes": 27598,
+              "gzipBytes": 11056,
+              "requestBytes": 1263,
+              "sql": 4,
+              "proofReads": 2,
+              "resultReads": 1,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 12.700000047683716,
+              "responseBytes": 27421,
+              "gzipBytes": 11049,
+              "requestBytes": 1264,
+              "sql": 4,
+              "proofReads": 2,
+              "resultReads": 1,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 12.200000047683716,
+              "responseBytes": 27598,
+              "gzipBytes": 11055,
+              "requestBytes": 1264,
+              "sql": 4,
+              "proofReads": 2,
+              "resultReads": 1,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 12,
+              "responseBytes": 27421,
+              "gzipBytes": 11046,
+              "requestBytes": 1264,
+              "sql": 4,
+              "proofReads": 2,
+              "resultReads": 1,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 12.699999809265137,
+              "responseBytes": 27421,
+              "gzipBytes": 11049,
+              "requestBytes": 1263,
+              "sql": 4,
+              "proofReads": 2,
+              "resultReads": 1,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 11.899999856948853,
+              "responseBytes": 27598,
+              "gzipBytes": 11062,
+              "requestBytes": 1264,
+              "sql": 4,
+              "proofReads": 2,
+              "resultReads": 1,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 11.200000047683716,
+              "responseBytes": 27421,
+              "gzipBytes": 11047,
+              "requestBytes": 1264,
+              "sql": 4,
+              "proofReads": 2,
+              "resultReads": 1,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 11.399999856948853,
+              "responseBytes": 27598,
+              "gzipBytes": 11061,
+              "requestBytes": 1264,
+              "sql": 4,
+              "proofReads": 2,
+              "resultReads": 1,
+              "writes": 1
+            }
+          ],
+          "median": {
+            "elapsedMs": 12.200000047683716,
+            "responseBytes": 27598,
+            "gzipBytes": 11055,
+            "requestBytes": 1264,
+            "sql": 4,
+            "proofReads": 2,
+            "resultReads": 1,
+            "writes": 1
+          },
+          "counts": {
+            "programsBuilt": 1,
+            "sequences": 0,
+            "operations": 0,
+            "checkpoints": 22,
+            "clientArtifacts": 4,
+            "transitions": {},
+            "wire": []
+          }
+        },
+        "baseline": {
+          "warmups": [
+            {
+              "elapsedMs": 36.200000047683716,
+              "responseBytes": 53938,
+              "gzipBytes": 21533,
+              "requestBytes": 1133,
+              "sql": 3,
+              "proofReads": 0,
+              "resultReads": 2,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 14.900000095367432,
+              "responseBytes": 53938,
+              "gzipBytes": 21531,
+              "requestBytes": 1133,
+              "sql": 3,
+              "proofReads": 0,
+              "resultReads": 2,
+              "writes": 1
+            }
+          ],
+          "samples": [
+            {
+              "elapsedMs": 14.199999809265137,
+              "responseBytes": 53938,
+              "gzipBytes": 21533,
+              "requestBytes": 1133,
+              "sql": 3,
+              "proofReads": 0,
+              "resultReads": 2,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 13.299999952316284,
+              "responseBytes": 53938,
+              "gzipBytes": 21533,
+              "requestBytes": 1134,
+              "sql": 3,
+              "proofReads": 0,
+              "resultReads": 2,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 11.799999952316284,
+              "responseBytes": 53938,
+              "gzipBytes": 21533,
+              "requestBytes": 1134,
+              "sql": 3,
+              "proofReads": 0,
+              "resultReads": 2,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 11,
+              "responseBytes": 53938,
+              "gzipBytes": 21532,
+              "requestBytes": 1134,
+              "sql": 3,
+              "proofReads": 0,
+              "resultReads": 2,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 12.799999952316284,
+              "responseBytes": 53938,
+              "gzipBytes": 21529,
+              "requestBytes": 1133,
+              "sql": 3,
+              "proofReads": 0,
+              "resultReads": 2,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 12.399999856948853,
+              "responseBytes": 53938,
+              "gzipBytes": 21532,
+              "requestBytes": 1134,
+              "sql": 3,
+              "proofReads": 0,
+              "resultReads": 2,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 11.100000143051147,
+              "responseBytes": 53938,
+              "gzipBytes": 21532,
+              "requestBytes": 1134,
+              "sql": 3,
+              "proofReads": 0,
+              "resultReads": 2,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 10.700000047683716,
+              "responseBytes": 53938,
+              "gzipBytes": 21531,
+              "requestBytes": 1134,
+              "sql": 3,
+              "proofReads": 0,
+              "resultReads": 2,
+              "writes": 1
+            }
+          ],
+          "median": {
+            "elapsedMs": 12.399999856948853,
+            "responseBytes": 53938,
+            "gzipBytes": 21532,
+            "requestBytes": 1134,
+            "sql": 3,
+            "proofReads": 0,
+            "resultReads": 2,
+            "writes": 1
+          },
+          "counts": {
+            "programsBuilt": 1,
+            "sequences": 0,
+            "operations": 0,
+            "checkpoints": 22,
+            "clientArtifacts": 4,
+            "transitions": {},
+            "wire": []
+          }
+        }
+      }
+    }
+  ],
+  "limits": [
+    "Local Vite dev server and PGlite. Latency includes SQL/observer costs but does not establish WAN or multi-connection contention gains.",
+    "First operation of each history establishes certificates and is excluded from timing summaries.",
+    "Schemas are fixed while each history runs. Production auth, DDL and untracked dependencies are excluded.",
+    "Gzip is an offline estimate; response bytes are observed Start bodies."
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "frozenAt": "2026-09-14T14:48:32.650542+00:00",
+  "files": {
+    "PRESERVATION.md": "6a0b057286850aaa9a171e7bc4f17f61119585dd3eb8a9d8ac9c0feb1f1a685b",
+    "MODEL.md": "8abe4167c6ec990f653a839cf02df6d6558b5d13452831e4fafc111d8a936273",
+    "EVIDENCE.md": "f62be1d4af69e9ae43505e57543aa3b8d94d1406ebf66004c54b739ef8202091",
+    "PROCESS.md": "25f5f6d3edb6da1d2956dce2969c4a877dd52a2f3adc979fd52e922a53226ea2",
+    "sources.json": "2bffd9abe229fade5f3f977c31438cc3ba370c0dec4b07daf61f48dc8e17511b",
+    "extraction-controls.mjs": "da2ba753ac660cf013eeb3b3c43e1b1ec8997c0811d949ae9922e07102694280",
+    "control-results.json": "a7df6b69674734ae916e3b089db38822031e35de9a180357b1281781f7f7ca69"
+  }
+}

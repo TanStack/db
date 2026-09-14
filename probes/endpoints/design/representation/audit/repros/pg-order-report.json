@@ -1,0 +1,20 @@
+{
+  "ids": [
+    "",
+    "𐀀"
+  ],
+  "pgOrder": [
+    "",
+    "𐀀"
+  ],
+  "jsOrder": [
+    "𐀀",
+    ""
+  ],
+  "databaseLocale": [
+    {
+      "datcollate": "C",
+      "datctype": "C.UTF-8"
+    }
+  ]
+}

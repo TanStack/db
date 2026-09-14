@@ -1,0 +1,44 @@
+✔ scalar queries retain relation identity and nullable predicate structure (14.604292ms)
+✔ unsupported SQL and untrusted operators remain explicit rejections (11.702875ms)
+✔ incompatible row projections on the same relation cannot share optimism (1.424ms)
+✔ endpoint modules compile independently of the original filename (1.766375ms)
+✔ query parameters reach the server and instantiate client membership (1.527ms)
+✔ registered query instances validate before a mutation starts (34.113083ms)
+✔ server registry discovers query modules absent from the current import graph (6.671541ms)
+✔ overlapping actions use authority read after both handlers close (16.605792ms)
+✔ a held ordinary read cannot replace authority after its action retires (5.26325ms)
+✔ optimistic fanout publishes both collections before either subscriber runs (2.5535ms)
+✔ a collection created during a write joins authoritative coverage (1.720708ms)
+✔ reentrant actions preserve event order for every subscriber (2.44ms)
+✔ local rollback publishes every recipient together and does not cancel remote coverage (2.641167ms)
+✔ a retired read cannot block initial coverage of the restarted collection (3.516333ms)
+✔ an unsent authored failure does not leave a remote obligation (1.170542ms)
+✔ a known read failure recovers without repeating its write (2.469708ms)
+✔ a later healthy response cannot discharge an unknown remote write (1.067417ms)
+✔ a new action invalidates an in-flight repair without waiting for its obsolete read (3.872333ms)
+✔ shared snapshots preserve extra columns and collection-local optimistic ownership (1.80325ms)
+✔ malformed shared indexes reject before installing any authority (3.522792ms)
+✔ authority cannot silently omit a selected scalar column (0.665375ms)
+✔ parameterized collections have stable distinct identities and send every retained instance (2.50075ms)
+✔ registry admission rejection closes the operation and permits a later healthy mutation (0.870667ms)
+✔ authority is installed before a post-commit handler error retires the overlay (0.784625ms)
+✔ client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs (1.626875ms)
+✔ malformed authority rejects before installing any collection snapshot (4.189958ms)
+✔ generated invalid snapshots cannot partly replace the confirmed baseline (103.575667ms)
+ℹ tests 20
+ℹ suites 0
+ℹ pass 20
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 171.031583
+✔ actual collection runtime regressions against PostgreSQL order (992.812917ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1077.389833

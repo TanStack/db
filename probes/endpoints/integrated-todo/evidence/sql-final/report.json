@@ -1,0 +1,1251 @@
+{
+  "settings": {
+    "N": 3,
+    "X": 3,
+    "steps": 6,
+    "seed": 911027
+  },
+  "limits": [
+    "Generated scalar columns extend required id/text/completed/createdAt/scope fields; not arbitrary PostgreSQL schemas.",
+    "Fixed text primary keys; nullable foreign keys use ON DELETE SET NULL.",
+    "Ascending timestamp/id ordering; predicates use scalar comparisons and NULL logic.",
+    "Sequential mutation sequences here; concurrent waves retain their separate campaign.",
+    "Auth and imported table/type bindings are trusted fixture assumptions.",
+    "No schema/type proof for arbitrary application modules, no subset loading, no LSN manifests."
+  ],
+  "engine": {
+    "version": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit",
+    "version_num": "170005"
+  },
+  "property": {
+    "seed": 911027,
+    "path": null,
+    "runs": 3,
+    "shrinks": 0
+  },
+  "ok": true,
+  "coverage": [
+    {
+      "feature": "schema.multiple-tables",
+      "description": "Several independent relation identities",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1",
+        "scenario-1/program.json#/sequences/2",
+        "scenario-2/program.json#/sequences/0",
+        "scenario-2/program.json#/sequences/1",
+        "scenario-2/program.json#/sequences/2",
+        "scenario-3/program.json#/sequences/0",
+        "scenario-3/program.json#/sequences/1",
+        "scenario-3/program.json#/sequences/2"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "schema.foreign-key-set-null",
+      "description": "Server-only ON DELETE SET NULL effects",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1",
+        "scenario-1/program.json#/sequences/2",
+        "scenario-2/program.json#/sequences/0",
+        "scenario-2/program.json#/sequences/1",
+        "scenario-2/program.json#/sequences/2"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "type.integer",
+      "description": "int4 values",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1",
+        "scenario-1/program.json#/sequences/2",
+        "scenario-2/program.json#/sequences/0",
+        "scenario-2/program.json#/sequences/1",
+        "scenario-2/program.json#/sequences/2",
+        "scenario-3/program.json#/sequences/0",
+        "scenario-3/program.json#/sequences/1",
+        "scenario-3/program.json#/sequences/2"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "type.text",
+      "description": "Text and Unicode values",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1",
+        "scenario-1/program.json#/sequences/2",
+        "scenario-2/program.json#/sequences/0",
+        "scenario-2/program.json#/sequences/1",
+        "scenario-2/program.json#/sequences/2"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "type.boolean",
+      "description": "Boolean values",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1",
+        "scenario-1/program.json#/sequences/2",
+        "scenario-2/program.json#/sequences/0",
+        "scenario-2/program.json#/sequences/1",
+        "scenario-2/program.json#/sequences/2",
+        "scenario-3/program.json#/sequences/0",
+        "scenario-3/program.json#/sequences/1",
+        "scenario-3/program.json#/sequences/2"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "type.timestamp",
+      "description": "Timestamp transport and total createdAt/id order",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1",
+        "scenario-1/program.json#/sequences/2",
+        "scenario-2/program.json#/sequences/0",
+        "scenario-2/program.json#/sequences/1",
+        "scenario-2/program.json#/sequences/2",
+        "scenario-3/program.json#/sequences/0",
+        "scenario-3/program.json#/sequences/1",
+        "scenario-3/program.json#/sequences/2"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "schema.nullable",
+      "description": "Nullable generated scalar columns",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1",
+        "scenario-1/program.json#/sequences/2",
+        "scenario-2/program.json#/sequences/0",
+        "scenario-2/program.json#/sequences/1",
+        "scenario-2/program.json#/sequences/2",
+        "scenario-3/program.json#/sequences/0",
+        "scenario-3/program.json#/sequences/1",
+        "scenario-3/program.json#/sequences/2"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "schema.not-null",
+      "description": "NOT NULL generated scalar columns",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1",
+        "scenario-1/program.json#/sequences/2",
+        "scenario-2/program.json#/sequences/0",
+        "scenario-2/program.json#/sequences/1",
+        "scenario-2/program.json#/sequences/2",
+        "scenario-3/program.json#/sequences/0",
+        "scenario-3/program.json#/sequences/1",
+        "scenario-3/program.json#/sequences/2"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "predicate.eq",
+      "description": "Scalar equality",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-2/program.json#/sequences/0",
+        "scenario-2/program.json#/sequences/1",
+        "scenario-2/program.json#/sequences/2"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "predicate.ne",
+      "description": "Scalar inequality",
+      "status": "tested",
+      "witnesses": [
+        "scenario-1/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1",
+        "scenario-1/program.json#/sequences/2"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "predicate.gt",
+      "description": "Integer greater-than",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-2/program.json#/sequences/0",
+        "scenario-2/program.json#/sequences/1",
+        "scenario-2/program.json#/sequences/2",
+        "scenario-3/program.json#/sequences/0",
+        "scenario-3/program.json#/sequences/1",
+        "scenario-3/program.json#/sequences/2"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "predicate.gte",
+      "description": "Integer greater-than-or-equal",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.lt",
+      "description": "Integer less-than",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.lte",
+      "description": "Integer less-than-or-equal",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.and",
+      "description": "Predicate conjunction",
+      "status": "tested",
+      "witnesses": [
+        "scenario-3/program.json#/sequences/0",
+        "scenario-3/program.json#/sequences/1",
+        "scenario-3/program.json#/sequences/2"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "predicate.or",
+      "description": "Predicate disjunction",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1",
+        "scenario-1/program.json#/sequences/2",
+        "scenario-2/program.json#/sequences/0",
+        "scenario-2/program.json#/sequences/1",
+        "scenario-2/program.json#/sequences/2"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "predicate.isNull",
+      "description": "SQL NULL membership",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1",
+        "scenario-1/program.json#/sequences/2",
+        "scenario-2/program.json#/sequences/0",
+        "scenario-2/program.json#/sequences/1",
+        "scenario-2/program.json#/sequences/2"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "predicate.isNotNull",
+      "description": "SQL non-NULL membership",
+      "status": "tested",
+      "witnesses": [
+        "scenario-3/program.json#/sequences/0",
+        "scenario-3/program.json#/sequences/1",
+        "scenario-3/program.json#/sequences/2"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "mutation.insert",
+      "description": "Insert",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1",
+        "scenario-1/program.json#/sequences/2",
+        "scenario-2/program.json#/sequences/0",
+        "scenario-2/program.json#/sequences/2",
+        "scenario-3/program.json#/sequences/1"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "mutation.edit",
+      "description": "Column updates",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1",
+        "scenario-1/program.json#/sequences/2",
+        "scenario-2/program.json#/sequences/0",
+        "scenario-2/program.json#/sequences/1",
+        "scenario-2/program.json#/sequences/2",
+        "scenario-3/program.json#/sequences/0"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "mutation.complete",
+      "description": "Boolean updates",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1",
+        "scenario-1/program.json#/sequences/2",
+        "scenario-2/program.json#/sequences/0",
+        "scenario-2/program.json#/sequences/1",
+        "scenario-2/program.json#/sequences/2",
+        "scenario-3/program.json#/sequences/0",
+        "scenario-3/program.json#/sequences/1",
+        "scenario-3/program.json#/sequences/2"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "mutation.delete",
+      "description": "Delete",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1",
+        "scenario-1/program.json#/sequences/2",
+        "scenario-2/program.json#/sequences/0",
+        "scenario-2/program.json#/sequences/1",
+        "scenario-2/program.json#/sequences/2",
+        "scenario-3/program.json#/sequences/0",
+        "scenario-3/program.json#/sequences/1",
+        "scenario-3/program.json#/sequences/2"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "mutation.cross-table",
+      "description": "An opaque handler also changes another table",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1",
+        "scenario-1/program.json#/sequences/2",
+        "scenario-2/program.json#/sequences/0",
+        "scenario-2/program.json#/sequences/1",
+        "scenario-3/program.json#/sequences/0",
+        "scenario-3/program.json#/sequences/2"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "mutation.post-commit-error",
+      "description": "A handler errors after committed writes",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1",
+        "scenario-1/program.json#/sequences/2",
+        "scenario-2/program.json#/sequences/0",
+        "scenario-2/program.json#/sequences/1",
+        "scenario-2/program.json#/sequences/2",
+        "scenario-3/program.json#/sequences/0",
+        "scenario-3/program.json#/sequences/1",
+        "scenario-3/program.json#/sequences/2"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "mutation.rejected",
+      "description": "Rejected write restores optimistic state",
+      "status": "tested",
+      "witnesses": [
+        "scenario-0/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/0",
+        "scenario-1/program.json#/sequences/1",
+        "scenario-1/program.json#/sequences/2",
+        "scenario-2/program.json#/sequences/0",
+        "scenario-2/program.json#/sequences/1",
+        "scenario-2/program.json#/sequences/2",
+        "scenario-3/program.json#/sequences/0",
+        "scenario-3/program.json#/sequences/1",
+        "scenario-3/program.json#/sequences/2"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "mutation.foreign-key-conflict",
+      "description": "Concurrent parent deletion invalidates a child update",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.limit",
+      "description": "Finite result windows",
+      "status": "explicitly-rejected",
+      "witnesses": [],
+      "rejection": "Generated compiler rejection control"
+    },
+    {
+      "feature": "query.join",
+      "description": "Joins and relationship projection",
+      "status": "explicitly-rejected",
+      "witnesses": [],
+      "rejection": "Generated compiler rejection control"
+    },
+    {
+      "feature": "query.aggregate",
+      "description": "Grouping and aggregates",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.cte",
+      "description": "CTEs and recursive queries",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.window",
+      "description": "Window functions",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.set-operation",
+      "description": "UNION/INTERSECT/EXCEPT",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "type.numeric",
+      "description": "Exact numeric and bigint transport",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "type.json-array",
+      "description": "JSON and array expressions",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "schema.trigger",
+      "description": "User-defined trigger effects",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "authority.external-writer",
+      "description": "External writers and replica visibility",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "demand.subset",
+      "description": "On-demand subset transport and refill",
+      "status": "not-tested",
+      "witnesses": []
+    }
+  ],
+  "executed": {
+    "programsBuilt": 4,
+    "sequences": 10,
+    "operations": 59,
+    "checkpoints": 187,
+    "clientArtifacts": 16,
+    "transitions": {
+      "4 queries / edit / success": 6,
+      "4 queries / delete / success": 5,
+      "4 queries / insert / success": 5,
+      "4 queries / complete / reject": 7,
+      "4 queries / complete / success": 5,
+      "4 queries / edit / reject": 4,
+      "4 queries / delete / reject": 7,
+      "4 queries / insert / reject": 2,
+      "6 queries / insert / reject": 2,
+      "6 queries / edit / success": 4,
+      "6 queries / complete / reject": 3,
+      "6 queries / complete / success": 3,
+      "6 queries / delete / success": 4,
+      "6 queries / edit / reject": 1,
+      "6 queries / delete / reject": 1
+    },
+    "wire": [
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1006,
+        "responseBytes": 2743,
+        "elapsedMs": 121.17816599999969
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "delete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1007,
+        "responseBytes": 2447,
+        "elapsedMs": 183.47937499999898
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "insert",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 981,
+        "responseBytes": 2745,
+        "elapsedMs": 133.17504200000076
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 997,
+        "responseBytes": 2726,
+        "elapsedMs": 96.42154200000004
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "complete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 997,
+        "responseBytes": 2721,
+        "elapsedMs": 97.00883299999987
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "complete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 995,
+        "responseBytes": 2827,
+        "elapsedMs": 113.79308300000048
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "complete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1015,
+        "responseBytes": 2803,
+        "elapsedMs": 132.1336250000022
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "edit",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1010,
+        "responseBytes": 2803,
+        "elapsedMs": 115.08404100000189
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 983,
+        "responseBytes": 2837,
+        "elapsedMs": 98.01712499999849
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "complete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1025,
+        "responseBytes": 2832,
+        "elapsedMs": 115.70266600000105
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1031,
+        "responseBytes": 2845,
+        "elapsedMs": 101.3171250000014
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "edit",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1051,
+        "responseBytes": 2803,
+        "elapsedMs": 130.69329199999993
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "complete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1041,
+        "responseBytes": 2817,
+        "elapsedMs": 128.2987920000014
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "delete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1001,
+        "responseBytes": 2812,
+        "elapsedMs": 114.49516700000095
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "insert",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1039,
+        "responseBytes": 3192,
+        "elapsedMs": 115.35945899999933
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "delete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1034,
+        "responseBytes": 3168,
+        "elapsedMs": 100.80912499999977
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1049,
+        "responseBytes": 3239,
+        "elapsedMs": 96.45404200000121
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "complete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1004,
+        "responseBytes": 2811,
+        "elapsedMs": 112.69204199999876
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "insert",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1005,
+        "responseBytes": 3133,
+        "elapsedMs": 98.28541699999914
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "delete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1019,
+        "responseBytes": 3128,
+        "elapsedMs": 116.70720799999981
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "complete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 984,
+        "responseBytes": 3128,
+        "elapsedMs": 97.2968329999967
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "insert",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1019,
+        "responseBytes": 3128,
+        "elapsedMs": 150.6517500000009
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "edit",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1039,
+        "responseBytes": 3128,
+        "elapsedMs": 113.85579199999847
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "insert",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1104,
+        "responseBytes": 3727,
+        "elapsedMs": 128.75237500000367
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1118,
+        "responseBytes": 3747,
+        "elapsedMs": 114.6597499999989
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "complete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1104,
+        "responseBytes": 3723,
+        "elapsedMs": 103.80299999999988
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "complete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1211,
+        "responseBytes": 3723,
+        "elapsedMs": 163.1056249999965
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "complete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1104,
+        "responseBytes": 3747,
+        "elapsedMs": 96.87554200000159
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "delete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1138,
+        "responseBytes": 3499,
+        "elapsedMs": 127.4787920000017
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1215,
+        "responseBytes": 3747,
+        "elapsedMs": 125.31441600000107
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "delete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1192,
+        "responseBytes": 3463,
+        "elapsedMs": 116.67466699999932
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "complete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1114,
+        "responseBytes": 3462,
+        "elapsedMs": 147.0694580000054
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1235,
+        "responseBytes": 3477,
+        "elapsedMs": 115.02754199999617
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "edit",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1112,
+        "responseBytes": 3472,
+        "elapsedMs": 114.64129099999991
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "delete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1140,
+        "responseBytes": 3472,
+        "elapsedMs": 116.56845800000156
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "insert",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1194,
+        "responseBytes": 3727,
+        "elapsedMs": 113.46762500000477
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1185,
+        "responseBytes": 3730,
+        "elapsedMs": 99.67937499999971
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "delete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1104,
+        "responseBytes": 3505,
+        "elapsedMs": 98.40858299999672
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "complete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1169,
+        "responseBytes": 3481,
+        "elapsedMs": 98.33545900000172
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "delete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1169,
+        "responseBytes": 3186,
+        "elapsedMs": 134.13395899999887
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "complete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1195,
+        "responseBytes": 3186,
+        "elapsedMs": 97.96558399999776
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "delete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1000,
+        "responseBytes": 2402,
+        "elapsedMs": 113.96754099999816
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 980,
+        "responseBytes": 2427,
+        "elapsedMs": 99.0211249999993
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "complete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 980,
+        "responseBytes": 2403,
+        "elapsedMs": 98.26324999999633
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "edit",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 985,
+        "responseBytes": 2403,
+        "elapsedMs": 115.18308300000353
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "complete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 982,
+        "responseBytes": 2403,
+        "elapsedMs": 99.67558300000383
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "delete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 991,
+        "responseBytes": 2403,
+        "elapsedMs": 98.63883300000452
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "insert",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 984,
+        "responseBytes": 2670,
+        "elapsedMs": 97.88149999999587
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "insert",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 990,
+        "responseBytes": 2967,
+        "elapsedMs": 97.96704200000386
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "delete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 986,
+        "responseBytes": 2962,
+        "elapsedMs": 99.83812499999476
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "complete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1002,
+        "responseBytes": 2962,
+        "elapsedMs": 98.61133300000074
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "delete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 985,
+        "responseBytes": 2962,
+        "elapsedMs": 98.54795799999556
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "insert",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 982,
+        "responseBytes": 3251,
+        "elapsedMs": 98.50754199999938
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "delete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 995,
+        "responseBytes": 2386,
+        "elapsedMs": 96.6138329999958
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "delete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 995,
+        "responseBytes": 2103,
+        "elapsedMs": 116.2208329999994
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "delete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 985,
+        "responseBytes": 2098,
+        "elapsedMs": 99.1553750000021
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "complete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 983,
+        "responseBytes": 2103,
+        "elapsedMs": 98.88133300000482
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "delete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 999,
+        "responseBytes": 1840,
+        "elapsedMs": 98.45920800000022
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "complete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 994,
+        "responseBytes": 1816,
+        "elapsedMs": 99.78183300000092
+      }
+    ]
+  }
+}

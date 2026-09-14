@@ -1,0 +1,35 @@
+✖ compilation emits inspected read and write footprints, without catalog code (717.566958ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 932.5235
+
+✖ failing tests:
+
+test at tests/compiled-dependencies.test.mjs:18:1
+✖ compilation emits inspected read and write footprints, without catalog code (717.566958ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /scope:data.scope},\(\)=>\[/. Input:
+  
+  'import {refreshRegisteredMutation as __boundRefresh} from "/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/compiled-dependencies-Ob3PoS/src/registry.server.ts";\n' +
+    "import {createServerFn as __boundServerFn} from '@tanstack/react-start';\n" +
+    'import {bindQuery as __boundQuery,bindMutation as __boundMutation} from "./runtime";\n' +
+    "const __boundRpc0=__boundServerFn({method:'POST'}).inputValidator(z.object({scope:z.string().min(1),input:z.object({}).strict()})).handler(async ({data})=>(async function(req,res){return res.json(await db.select().from(b))})({body:data.input,scope:data.scope,kind:'query',endpointSourceHash:'8e788677462fa9d45535a31eaaf21c2f5c8c0e9376acd8791cbad8679e1cac26'},{json:value=>value}));\n" +
+    "const __boundRpc1=__boundServerFn({method:'POST'}).inputValidator(z.object({scope:z.string().min(1),reads:z.array(z.object({id:z.string(),definition:z.string(),version:z.string(),params:z.unknown(),certificate:z.string().max(100).optional(),hasBaseline:z.boolean().optional(),optimistic:z.boolean().optional()}).strict()).max(100),input:z.object({value:z.number().int()})})).handler(async ({data})=>__boundRefresh(data.reads,(await import('virtual:endpoints-registry.server.ts')).registry,async()=>(async function(req,res){await db.update(a).set({value:req.body.value}).where(eq(a.id,'row'));return res.json({ok:true})})({body:data.input,scope:data.scope,kind:'mutation',endpointSourceHash:'8e788677462fa9d45535a31eaaf21c2f5c8c0e9376acd8791cbad8679e1cac26'},{json:value=>value}),{scope:data.scope}));\n" +
+    "import {z} from 'zod';import {endpoints} from './runtime';import {db,a,b} from './database.server';import {eq} from 'drizzle-orm';\n" +
+    'export function App(dbClient){const {query,mutation}=endpoints(dbClient);\n' +
+    'const list=__boundQuery(dbClient,"13a952514cb0:App:list:query:0",__boundRpc0,{"relation":"opaque:c175700174f11fe5ad00415d591862fe256650522acb8a829307b078cf571081","order":[],"membership":{"kind":"all"}},z.object({}).strict().parse({}),"8e788677462fa9d45535a31eaaf21c2f5c8c0e9376acd8791cbad8679e1cac26",z.object({id:z.string(),value:z.number()}));\n' +
+    `const change=__boundMutation(dbClient,"13a952514cb0:App:change:mutation:0",__boundRpc1,function({input}){list.update('row',d=>{d.value=input.value})});return {list,change}}`
+  
+      at TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/compiled-dependencies.test.mjs:28:12)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:332:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: `import {refreshRegisteredMutation as __boundRefresh} from "/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/compiled-dependencies-Ob3PoS/src/registry.server.ts";\nimport {createServerFn as __boundServerFn} from '@tanstack/react-start';\nimport {bindQuery as __boundQuery,bindMutation as __boundMutation} from "./runtime";\nconst __boundRpc0=__boundServerFn({method:'POST'}).inputValidator(z.object({scope:z.string().min(1),input:z.object({}).strict()})).handler(async ({data})=>(async function(req,res){return res.json(await db.select().from(b))})({body:data.input,scope:data.scope,kind:'query',endpointSourceHash:'8e788677462fa9d45535a31eaaf21c2f5c8c0e9376acd8791cbad8679e1cac26'},{json:value=>value}));\nconst __boundRpc1=__boundServerFn({method:'POST'}).inputValidator(z.object({scope:z.string().min(1),reads:z.array(z.object({id:z.string(),definition:z.string(),version:z.string(),params:z.unknown(),certificate:z.string().max(100).optional(),hasBaseline:z.boolean().optional(),optimistic:z.boolean().optional()}).strict()).max(100),input:z.object({value:z.number().int()})})).handler(async ({data})=>__boundRefresh(data.reads,(await import('virtual:endpoints-registry.server.ts')).registry,async()=>(async function(req,res){await db.update(a).set({value:req.body.value}).where(eq(a.id,'row'));return res.json({ok:true})})({body:data.input,scope:data.scope,kind:'mutation',endpointSourceHash:'8e788677462fa9d45535a31eaaf21c2f5c8c0e9376acd8791cbad8679e1cac26'},{json:value=>value}),{scope:data.scope}));\nimport {z} from 'zod';import {endpoints} from './runtime';import {db,a,b} from './database.server';import {eq} from 'drizzle-orm';\nexport function App(dbClient){const {query,mutation}=endpoints(dbClient);\nconst list=__boundQuery(dbClient,"13a952514cb0:App:list:query:0",__boundRpc0,{"relation":"opaque:c175700174f11fe5ad00415d591862fe256650522acb8a829307b078cf571081","order":[],"membership":{"kind":"all"}},z.object({}).strict().parse({}),"8e788677462fa9d45535a31eaaf21c2f5c8c0e9376acd8791cbad8679e1cac26",z.object({id:z.string(),value:z.number()}));\nconst change=__boundMutation(dbClient,"13a952514cb0:App:change:mutation:0",__boundRpc1,function({input}){list.update('row',d=>{d.value=input.value})});return {list,change}}`,
+    expected: /scope:data.scope},\(\)=>\[/,
+    operator: 'match'
+  }

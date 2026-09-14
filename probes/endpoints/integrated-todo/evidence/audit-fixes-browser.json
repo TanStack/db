@@ -1,0 +1,11 @@
+{
+  "url": "http://127.0.0.1:4197",
+  "browser": "152.0.7977.83",
+  "checks": [
+    {
+      "name": "action synchronously returns the actual Transaction, not a promise"
+    }
+  ],
+  "status": "FAIL",
+  "error": "Error: Polling deadline"
+}

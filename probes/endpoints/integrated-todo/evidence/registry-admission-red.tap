@@ -1,0 +1,79 @@
+✔ overlapping actions use authority read after both handlers close (14.759458ms)
+✔ a held ordinary read cannot replace authority after its action retires (2.622542ms)
+✔ optimistic fanout publishes both collections before either subscriber runs (2.412792ms)
+✔ a collection created during a write joins authoritative coverage (1.496291ms)
+✔ reentrant actions preserve event order for every subscriber (2.260125ms)
+✔ local rollback publishes every recipient together and does not cancel remote coverage (3.118959ms)
+✔ a retired read cannot block initial coverage of the restarted collection (3.130291ms)
+✔ an unsent authored failure does not leave a remote obligation (1.033084ms)
+✔ a known read failure recovers without repeating its write (2.413ms)
+✔ a later healthy response cannot discharge an unknown remote write (0.831291ms)
+✔ a new action invalidates an in-flight repair without waiting for its obsolete read (3.631042ms)
+✔ shared snapshots preserve extra columns and collection-local optimistic ownership (1.743291ms)
+✔ malformed shared indexes reject before installing any authority (2.6105ms)
+✔ authority cannot silently omit a selected scalar column (1.270084ms)
+✔ parameterized collections have stable distinct identities and send every retained instance (2.407334ms)
+✖ registry admission rejection closes the operation and permits a later healthy mutation (0.949541ms)
+✔ authority is installed before a post-commit handler error retires the overlay (0.782375ms)
+✔ client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs (0.8935ms)
+✔ malformed authority rejects before installing any collection snapshot (4.633709ms)
+✔ generated invalid snapshots cannot partly replace the confirmed baseline (92.401041ms)
+ℹ tests 20
+ℹ suites 0
+ℹ pass 19
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 149.838667
+
+✖ failing tests:
+
+test at ../../../../../../../../../private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-o4MJyk/runtime.mjs:54489:1
+✖ registry admission rejection closes the operation and permits a later healthy mutation (0.949541ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /Stale query definition/. Input:
+  
+  'Error: Invalid or incomplete authoritative endpoint response'
+  
+      at async TestContext.<anonymous> (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-o4MJyk/runtime.mjs:54498:5)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: Error: Invalid or incomplete authoritative endpoint response
+        at EndpointRuntime.persist (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-o4MJyk/runtime.mjs:53793:9)
+        at async Transaction.mutationFn (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-o4MJyk/runtime.mjs:53849:9)
+        at async Transaction.commit (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-o4MJyk/runtime.mjs:28450:7),
+    expected: /Stale query definition/,
+    operator: 'rejects'
+  }
+✖ actual collection runtime regressions against PostgreSQL order (961.558708ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1043.230917
+
+✖ failing tests:
+
+test at tests/runtime.test.mjs:13:1
+✖ actual collection runtime regressions against PostgreSQL order (961.558708ms)
+  Error: Command failed: /opt/homebrew/Cellar/node/24.5.0/bin/node /var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-o4MJyk/runtime.mjs ["a","é","","𐀀","􏿿"]
+      at genericNodeError (node:internal/errors:985:15)
+      at wrappedFn (node:internal/errors:539:14)
+      at checkExecSyncError (node:child_process:924:11)
+      at execFileSync (node:child_process:960:15)
+      at TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/runtime.test.mjs:35:9)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:332:3) {
+    status: 1,
+    signal: null,
+    output: [ null, "✔ overlapping actions use authority read after both handlers close (14.759458ms)\n✔ a held ordinary read cannot replace authority after its action retires (2.622542ms)\n✔ optimistic fanout publishes both collections before either subscriber runs (2.412792ms)\n✔ a collection created during a write joins authoritative coverage (1.496291ms)\n✔ reentrant actions preserve event order for every subscriber (2.260125ms)\n✔ local rollback publishes every recipient together and does not cancel remote coverage (3.118959ms)\n✔ a retired read cannot block initial coverage of the restarted collection (3.130291ms)\n✔ an unsent authored failure does not leave a remote obligation (1.033084ms)\n✔ a known read failure recovers without repeating its write (2.413ms)\n✔ a later healthy response cannot discharge an unknown remote write (0.831291ms)\n✔ a new action invalidates an in-flight repair without waiting for its obsolete read (3.631042ms)\n✔ shared snapshots preserve extra columns and collection-local optimistic ownership (1.743291ms)\n✔ malformed shared indexes reject before installing any authority (2.6105ms)\n✔ authority cannot silently omit a selected scalar column (1.270084ms)\n✔ parameterized collections have stable distinct identities and send every retained instance (2.407334ms)\n✖ registry admission rejection closes the operation and permits a later healthy mutation (0.949541ms)\n✔ authority is installed before a post-commit handler error retires the overlay (0.782375ms)\n✔ client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs (0.8935ms)\n✔ malformed authority rejects before installing any collection snapshot (4.633709ms)\n✔ generated invalid snapshots cannot partly replace the confirmed baseline (92.401041ms)\nℹ tests 20\nℹ suites 0\nℹ pass 19\nℹ fail 1\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 149.838667\n\n✖ failing tests:\n\ntest at ../../../../../../../../../private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-o4MJyk/runtime.mjs:54489:1\n✖ registry admission rejection closes the operation and permits a later healthy mutation (0.949541ms)\n  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /Stale query definition/. Input:\n  \n  'Error: Invalid or incomplete authoritative endpoint response'\n  \n      at async TestContext.<anonymous> (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-o4MJyk/runtime.mjs:54498:5)\n      at async Test.run (node:internal/test_runner/test:1088:7)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: Error: Invalid or incomplete authoritative endpoint response\n        at EndpointRuntime.persist (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-o4MJyk/runtime.mjs:53793:9)\n        at async Transaction.mutationFn (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-o4MJyk/runtime.mjs:53849:9)\n        at async Transaction.commit (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-o4MJyk/runtime.mjs:28450:7),\n    expected: /Stale query definition/,\n    operator: 'rejects'\n  }\n", '' ],
+    pid: 98244,
+    stdout: "✔ overlapping actions use authority read after both handlers close (14.759458ms)\n✔ a held ordinary read cannot replace authority after its action retires (2.622542ms)\n✔ optimistic fanout publishes both collections before either subscriber runs (2.412792ms)\n✔ a collection created during a write joins authoritative coverage (1.496291ms)\n✔ reentrant actions preserve event order for every subscriber (2.260125ms)\n✔ local rollback publishes every recipient together and does not cancel remote coverage (3.118959ms)\n✔ a retired read cannot block initial coverage of the restarted collection (3.130291ms)\n✔ an unsent authored failure does not leave a remote obligation (1.033084ms)\n✔ a known read failure recovers without repeating its write (2.413ms)\n✔ a later healthy response cannot discharge an unknown remote write (0.831291ms)\n✔ a new action invalidates an in-flight repair without waiting for its obsolete read (3.631042ms)\n✔ shared snapshots preserve extra columns and collection-local optimistic ownership (1.743291ms)\n✔ malformed shared indexes reject before installing any authority (2.6105ms)\n✔ authority cannot silently omit a selected scalar column (1.270084ms)\n✔ parameterized collections have stable distinct identities and send every retained instance (2.407334ms)\n✖ registry admission rejection closes the operation and permits a later healthy mutation (0.949541ms)\n✔ authority is installed before a post-commit handler error retires the overlay (0.782375ms)\n✔ client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs (0.8935ms)\n✔ malformed authority rejects before installing any collection snapshot (4.633709ms)\n✔ generated invalid snapshots cannot partly replace the confirmed baseline (92.401041ms)\nℹ tests 20\nℹ suites 0\nℹ pass 19\nℹ fail 1\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 149.838667\n\n✖ failing tests:\n\ntest at ../../../../../../../../../private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-o4MJyk/runtime.mjs:54489:1\n✖ registry admission rejection closes the operation and permits a later healthy mutation (0.949541ms)\n  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /Stale query definition/. Input:\n  \n  'Error: Invalid or incomplete authoritative endpoint response'\n  \n      at async TestContext.<anonymous> (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-o4MJyk/runtime.mjs:54498:5)\n      at async Test.run (node:internal/test_runner/test:1088:7)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: Error: Invalid or incomplete authoritative endpoint response\n        at EndpointRuntime.persist (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-o4MJyk/runtime.mjs:53793:9)\n        at async Transaction.mutationFn (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-o4MJyk/runtime.mjs:53849:9)\n        at async Transaction.commit (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-o4MJyk/runtime.mjs:28450:7),\n    expected: /Stale query definition/,\n    operator: 'rejects'\n  }\n",
+    stderr: ''
+  }

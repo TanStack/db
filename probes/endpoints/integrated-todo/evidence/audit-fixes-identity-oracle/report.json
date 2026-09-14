@@ -1,0 +1,308 @@
+{
+  "settings": {
+    "N": 2,
+    "X": 3,
+    "maxSteps": 3,
+    "mutant": null
+  },
+  "campaigns": [
+    {
+      "name": "coherence",
+      "failed": false,
+      "seed": -1961215247,
+      "path": null,
+      "runs": 2,
+      "shrinks": 0,
+      "error": null
+    }
+  ],
+  "measurements": {
+    "requests": "Browser fetch POST count",
+    "requestBytes": "POST body bytes, excluding headers",
+    "responseBytes": "Decoded response body bytes; not compressed transfer bytes",
+    "elapsedMs": "Harness elapsed including oracle, gates and browser checkpoints; not isolated application latency"
+  },
+  "limits": [
+    "Todo schema, full-row queries with all/completed predicates, ascending createdAt/id order",
+    "Sequential operations within each sequence; no same-row concurrent scheduling contract",
+    "Dev browser execution with production client artifact inspection; no production browser execution yet",
+    "Server exclusion: live canaries, client dependency maps, raw/module request rejection and retained-server-import rejection; not proof against all possible leakage"
+  ],
+  "independentEffectsWitness": "passed server membership changes, other-row writes, no-op, post-commit errors, Unicode IDs and repeated lexical names",
+  "coherenceWitness": "passed filter entry/exit, server correction, rollback, zero-subscriber retention and GC exclusion",
+  "executed": {
+    "programsBuilt": 4,
+    "sequences": 8,
+    "operations": 23,
+    "checkpoints": 77,
+    "clientArtifacts": 16,
+    "transitions": {
+      "4 queries / insert / success": 3,
+      "4 queries / edit / success": 2,
+      "4 queries / delete / success": 2,
+      "4 queries / complete / success": 3,
+      "4 queries / complete / reject": 1,
+      "3 queries / complete / reject": 2,
+      "3 queries / insert / success": 1,
+      "3 queries / delete / success": 2,
+      "2 queries / insert / reject": 5,
+      "2 queries / delete / reject": 1,
+      "2 queries / insert / success": 1
+    },
+    "wire": [
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "insert",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 769,
+        "responseBytes": 2192,
+        "elapsedMs": 95.6650840000002
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 773,
+        "responseBytes": 2220,
+        "elapsedMs": 99.1801660000001
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "delete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 772,
+        "responseBytes": 2220,
+        "elapsedMs": 98.74883299999965
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "insert",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 775,
+        "responseBytes": 2587,
+        "elapsedMs": 99.01366699999926
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "complete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 773,
+        "responseBytes": 2587,
+        "elapsedMs": 98.65029099999992
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "insert",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 766,
+        "responseBytes": 1480,
+        "elapsedMs": 97.42399999999907
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "complete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 763,
+        "responseBytes": 1479,
+        "elapsedMs": 99.09300000000076
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 773,
+        "responseBytes": 1479,
+        "elapsedMs": 99.02479099999982
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "complete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 763,
+        "responseBytes": 1455,
+        "elapsedMs": 98.68391699999847
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "complete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 763,
+        "responseBytes": 1480,
+        "elapsedMs": 99.23141699999906
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "delete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 763,
+        "responseBytes": 1106,
+        "elapsedMs": 98.03062499999942
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 3,
+        "kind": "complete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 752,
+        "responseBytes": 1281,
+        "elapsedMs": 97.85920800000167
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 3,
+        "kind": "complete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 751,
+        "responseBytes": 1281,
+        "elapsedMs": 98.6810000000005
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 3,
+        "kind": "insert",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 749,
+        "responseBytes": 1823,
+        "elapsedMs": 100.35825000000114
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 3,
+        "kind": "delete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 756,
+        "responseBytes": 753,
+        "elapsedMs": 112.04662500000268
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 3,
+        "kind": "delete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 748,
+        "responseBytes": 753,
+        "elapsedMs": 97.68566599999758
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 2,
+        "kind": "insert",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 670,
+        "responseBytes": 783,
+        "elapsedMs": 96.37212500000169
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 2,
+        "kind": "insert",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 670,
+        "responseBytes": 783,
+        "elapsedMs": 98.42587499999354
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 2,
+        "kind": "insert",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 676,
+        "responseBytes": 783,
+        "elapsedMs": 99.31466700000601
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 2,
+        "kind": "delete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 670,
+        "responseBytes": 783,
+        "elapsedMs": 97.61166700000467
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 2,
+        "kind": "insert",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 669,
+        "responseBytes": 783,
+        "elapsedMs": 98.82287499999802
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 2,
+        "kind": "insert",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 670,
+        "responseBytes": 783,
+        "elapsedMs": 97.79412500000035
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 2,
+        "kind": "insert",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 677,
+        "responseBytes": 973,
+        "elapsedMs": 99.20449999999983
+      }
+    ]
+  }
+}

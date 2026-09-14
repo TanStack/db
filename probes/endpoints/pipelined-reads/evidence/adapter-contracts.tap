@@ -1,0 +1,11 @@
+✔ preparation preserves parameter identity, query options and the pending query object (5.402ms)
+✔ facade shares the app pool and delegates lifecycle, transactions and explicit opt-outs (1.648042ms)
+✔ the adapter is allowed in the server build and rejected in the client build (166.781667ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 463.261709

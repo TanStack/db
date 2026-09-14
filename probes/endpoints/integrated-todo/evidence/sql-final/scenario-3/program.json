@@ -1,0 +1,433 @@
+{
+  "program": {
+    "tables": [
+      {
+        "name": "relation_0_3",
+        "columns": [
+          {
+            "type": "integer",
+            "nullable": true,
+            "name": "field_0_integer"
+          },
+          {
+            "type": "boolean",
+            "nullable": true,
+            "name": "field_1_boolean"
+          },
+          {
+            "type": "boolean",
+            "nullable": false,
+            "name": "field_2_boolean"
+          }
+        ],
+        "parent": null
+      },
+      {
+        "name": "relation_1_2",
+        "columns": [
+          {
+            "type": "integer",
+            "nullable": true,
+            "name": "field_0_integer"
+          },
+          {
+            "type": "integer",
+            "nullable": false,
+            "name": "field_1_integer"
+          },
+          {
+            "type": "integer",
+            "nullable": false,
+            "name": "field_2_integer"
+          }
+        ],
+        "parent": null
+      }
+    ],
+    "queries": [
+      {
+        "table": 0,
+        "predicate": null
+      },
+      {
+        "table": 0,
+        "predicate": {
+          "op": "and",
+          "args": [
+            {
+              "op": "gt",
+              "column": "field_0_integer",
+              "value": 0
+            },
+            {
+              "op": "isNotNull",
+              "column": "field_0_integer"
+            }
+          ]
+        }
+      },
+      {
+        "table": 1,
+        "predicate": null
+      },
+      {
+        "table": 1,
+        "predicate": {
+          "op": "and",
+          "args": [
+            {
+              "op": "gt",
+              "column": "field_0_integer",
+              "value": 0
+            },
+            {
+              "op": "isNotNull",
+              "column": "field_0_integer"
+            }
+          ]
+        }
+      }
+    ],
+    "scope": "alice",
+    "orders": [
+      [
+        "createdAt",
+        "id"
+      ],
+      [
+        "id",
+        "createdAt"
+      ],
+      [
+        "createdAt",
+        "id"
+      ],
+      [
+        "id",
+        "createdAt"
+      ]
+    ],
+    "initial": [
+      {
+        "table": "relation_0_3",
+        "id": "alice-0",
+        "text": "row-0",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "alice",
+        "field_0_integer": null,
+        "field_1_boolean": null,
+        "field_2_boolean": true
+      },
+      {
+        "table": "relation_0_3",
+        "id": "alice-1",
+        "text": "row-1",
+        "completed": true,
+        "createdAt": "2026-01-01T00:00:01.000Z",
+        "scope": "alice",
+        "field_0_integer": -1,
+        "field_1_boolean": false,
+        "field_2_boolean": false
+      },
+      {
+        "table": "relation_0_3",
+        "id": "alice-2",
+        "text": "row-2",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "alice",
+        "field_0_integer": 2,
+        "field_1_boolean": true,
+        "field_2_boolean": true
+      },
+      {
+        "table": "relation_0_3",
+        "id": "bob-0",
+        "text": "row-0",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "bob",
+        "field_0_integer": null,
+        "field_1_boolean": null,
+        "field_2_boolean": true
+      },
+      {
+        "table": "relation_0_3",
+        "id": "bob-1",
+        "text": "row-1",
+        "completed": true,
+        "createdAt": "2026-01-01T00:00:01.000Z",
+        "scope": "bob",
+        "field_0_integer": -1,
+        "field_1_boolean": false,
+        "field_2_boolean": false
+      },
+      {
+        "table": "relation_0_3",
+        "id": "bob-2",
+        "text": "row-2",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "bob",
+        "field_0_integer": 2,
+        "field_1_boolean": true,
+        "field_2_boolean": true
+      },
+      {
+        "table": "relation_1_2",
+        "id": "alice-0",
+        "text": "row-0",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "alice",
+        "field_0_integer": null,
+        "field_1_integer": 0,
+        "field_2_integer": 0
+      },
+      {
+        "table": "relation_1_2",
+        "id": "alice-1",
+        "text": "row-1",
+        "completed": true,
+        "createdAt": "2026-01-01T00:00:01.000Z",
+        "scope": "alice",
+        "field_0_integer": -1,
+        "field_1_integer": -1,
+        "field_2_integer": -1
+      },
+      {
+        "table": "relation_1_2",
+        "id": "alice-2",
+        "text": "row-2",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "alice",
+        "field_0_integer": 2,
+        "field_1_integer": 2,
+        "field_2_integer": 2
+      },
+      {
+        "table": "relation_1_2",
+        "id": "bob-0",
+        "text": "row-0",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "bob",
+        "field_0_integer": null,
+        "field_1_integer": 0,
+        "field_2_integer": 0
+      },
+      {
+        "table": "relation_1_2",
+        "id": "bob-1",
+        "text": "row-1",
+        "completed": true,
+        "createdAt": "2026-01-01T00:00:01.000Z",
+        "scope": "bob",
+        "field_0_integer": -1,
+        "field_1_integer": -1,
+        "field_2_integer": -1
+      },
+      {
+        "table": "relation_1_2",
+        "id": "bob-2",
+        "text": "row-2",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "bob",
+        "field_0_integer": 2,
+        "field_1_integer": 2,
+        "field_2_integer": 2
+      }
+    ]
+  },
+  "sequences": [
+    [
+      {
+        "kind": "delete",
+        "target": 2,
+        "slot": 3,
+        "text": "é界a界   界界é",
+        "rank": 0,
+        "outcome": "success",
+        "cross": true,
+        "failAfterCommit": true
+      },
+      {
+        "kind": "edit",
+        "target": 3,
+        "slot": 1,
+        "text": "",
+        "rank": 5,
+        "outcome": "success",
+        "cross": false,
+        "failAfterCommit": false
+      },
+      {
+        "kind": "complete",
+        "target": 5,
+        "slot": 0,
+        "text": "",
+        "rank": 4,
+        "outcome": "reject",
+        "cross": false,
+        "failAfterCommit": false
+      },
+      {
+        "kind": "edit",
+        "target": 2,
+        "slot": 2,
+        "text": "a\"",
+        "rank": 3,
+        "outcome": "reject",
+        "cross": true,
+        "failAfterCommit": true
+      },
+      {
+        "kind": "complete",
+        "target": 3,
+        "slot": 2,
+        "text": "",
+        "rank": 0,
+        "outcome": "reject",
+        "cross": true,
+        "failAfterCommit": true
+      },
+      {
+        "kind": "delete",
+        "target": 5,
+        "slot": 3,
+        "text": "a\"界",
+        "rank": 1,
+        "outcome": "reject",
+        "cross": true,
+        "failAfterCommit": false
+      }
+    ],
+    [
+      {
+        "kind": "insert",
+        "target": 3,
+        "slot": 1,
+        "text": " a ",
+        "rank": 1,
+        "outcome": "reject",
+        "cross": false,
+        "failAfterCommit": true
+      },
+      {
+        "kind": "insert",
+        "target": 0,
+        "slot": 0,
+        "text": "aa éaa界a ",
+        "rank": 0,
+        "outcome": "success",
+        "cross": false,
+        "failAfterCommit": true
+      },
+      {
+        "kind": "delete",
+        "target": 0,
+        "slot": 0,
+        "text": "界é",
+        "rank": 1,
+        "outcome": "reject",
+        "cross": false,
+        "failAfterCommit": false
+      },
+      {
+        "kind": "complete",
+        "target": 0,
+        "slot": 2,
+        "text": "\" a界\" aa\" ",
+        "rank": 1,
+        "outcome": "reject",
+        "cross": true,
+        "failAfterCommit": true
+      },
+      {
+        "kind": "delete",
+        "target": 1,
+        "slot": 3,
+        "text": "  ",
+        "rank": 1,
+        "outcome": "reject",
+        "cross": true,
+        "failAfterCommit": false
+      },
+      {
+        "kind": "insert",
+        "target": 1,
+        "slot": 3,
+        "text": " ",
+        "rank": 1,
+        "outcome": "success",
+        "cross": false,
+        "failAfterCommit": true
+      }
+    ],
+    [
+      {
+        "kind": "delete",
+        "target": 4,
+        "slot": 1,
+        "text": "界界 a界 界",
+        "rank": 3,
+        "outcome": "success",
+        "cross": false,
+        "failAfterCommit": true
+      },
+      {
+        "kind": "delete",
+        "target": 1,
+        "slot": 1,
+        "text": "é\"界aaé",
+        "rank": 0,
+        "outcome": "success",
+        "cross": true,
+        "failAfterCommit": true
+      },
+      {
+        "kind": "delete",
+        "target": 0,
+        "slot": 2,
+        "text": "a界 ",
+        "rank": 4,
+        "outcome": "reject",
+        "cross": false,
+        "failAfterCommit": false
+      },
+      {
+        "kind": "complete",
+        "target": 2,
+        "slot": 2,
+        "text": "aaa",
+        "rank": 4,
+        "outcome": "success",
+        "cross": false,
+        "failAfterCommit": true
+      },
+      {
+        "kind": "delete",
+        "target": 2,
+        "slot": 2,
+        "text": "é\"界界界a é",
+        "rank": 2,
+        "outcome": "success",
+        "cross": true,
+        "failAfterCommit": false
+      },
+      {
+        "kind": "complete",
+        "target": 3,
+        "slot": 2,
+        "text": "a\" 界a\"",
+        "rank": 4,
+        "outcome": "reject",
+        "cross": true,
+        "failAfterCommit": true
+      }
+    ]
+  ]
+}

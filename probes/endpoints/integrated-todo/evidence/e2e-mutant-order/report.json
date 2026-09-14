@@ -1,0 +1,26 @@
+{
+  "settings": {
+    "N": 1,
+    "X": 1,
+    "maxSteps": 5,
+    "mutant": "omit-order"
+  },
+  "campaigns": [],
+  "limits": [
+    "Todo schema, scoped full-row queries, ascending createdAt/id order only",
+    "Sequential operations within each sequence; no same-row concurrent scheduling contract",
+    "Dev browser execution with production client artifact inspection; no production browser execution yet",
+    "Server exclusion: live canaries, client dependency maps, raw/module request rejection and retained-server-import rejection; not proof against all possible leakage"
+  ],
+  "harnessError": "AssertionError [ERR_ASSERTION]: operation 0 insert: optimistic: every active collection must equal reference PG\n+ actual - expected\n\n  [\n    [\n      {\n+       completed: false,\n+       createdAt: '2026-01-01T00:00:02.000Z',\n+       id: 'seed-1',\n+       text: 'seed'\n+     },\n+     {\n        completed: true,\n        createdAt: '2026-01-01T00:00:00.000Z',\n        id: 'new-0',\n        text: 'witness-0'\n      },\n-     {\n-       completed: false,\n-       createdAt: '2026-01-01T00:00:02.000Z',\n-       id: 'seed-1',\n-       text: 'seed'\n-     }\n    ]\n  ]\n\n    at Driver.checkpoint (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/driver.mjs:101:12)\n    at async Driver.run (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/driver.mjs:135:9)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/e2e.mjs:32:4",
+  "executed": {
+    "programsBuilt": 1,
+    "sequences": 1,
+    "operations": 1,
+    "checkpoints": 2,
+    "clientArtifacts": 4,
+    "transitions": {
+      "1 queries / insert / success": 1
+    }
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "settings": {
+    "N": 2,
+    "X": 2,
+    "maxSteps": 2,
+    "mutant": null
+  },
+  "campaigns": [
+    {
+      "name": "controls",
+      "failed": false,
+      "seed": 744148432,
+      "path": null,
+      "runs": 2,
+      "shrinks": 0,
+      "error": null
+    },
+    {
+      "name": "read-retry",
+      "failed": false,
+      "seed": -1747340078,
+      "path": null,
+      "runs": 2,
+      "shrinks": 0,
+      "error": null
+    },
+    {
+      "name": "coherence",
+      "failed": true,
+      "seed": -1834321206,
+      "path": "0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0",
+      "runs": 1,
+      "shrinks": 18,
+      "error": "AssertionError [ERR_ASSERTION]: operation 0 insert: optimistic: every active collection must equal reference PG\n+ actual - expected\n... Skipped lines\n\n  [\n    [\n      {\n        completed: false,\n        createdAt: '2026-01-01T00:00:00.000Z',\n...\n    ],\n+   []\n-   [\n-     {\n-       completed: false,\n-       createdAt: '2026-01-01T00:00:00.000Z',\n-       id: 'new-0',\n-       text: 'a'\n-     }\n-   ]\n  ]\n\n    at Driver.checkpoint (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/driver.mjs:278:12)\n    at runNextTicks (node:internal/process/task_queues:65:5)\n    at process.processImmediate (node:internal/timers:473:9)\n    at async Driver.run (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/driver.mjs:359:9)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/e2e.mjs:147:15\n    at async AsyncProperty.run (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)\n    at async asyncRunIt (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/e2e.mjs:157:22"
+    },
+    {
+      "name": "read-failure",
+      "failed": true,
+      "seed": -782847188,
+      "path": "0:0:0:0:0:0:0:0:0:0:0:0:0",
+      "runs": 1,
+      "shrinks": 12,
+      "error": "AssertionError [ERR_ASSERTION]: operation 0: read-failure: every active collection must equal reference PG\n+ actual - expected\n\n  [\n+   []\n-   [\n-     {\n-       completed: false,\n-       createdAt: '2026-01-01T00:00:00.000Z',\n-       id: 'new-0',\n-       text: 'a'\n-     }\n-   ]\n  ]\n\n    at Driver.checkpoint (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/driver.mjs:278:12)\n    at async Driver.run (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/driver.mjs:468:9)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/e2e.mjs:147:15\n    at async AsyncProperty.run (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)\n    at async asyncRunIt (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/e2e.mjs:157:22"
+    }
+  ],
+  "limits": [
+    "Todo schema, scoped full-row queries, ascending createdAt/id order only",
+    "Sequential operations within each sequence; no same-row concurrent scheduling contract",
+    "Dev browser execution with production client artifact inspection; no production browser execution yet",
+    "Server exclusion: live canaries, client dependency maps, raw/module request rejection and retained-server-import rejection; not proof against all possible leakage"
+  ],
+  "boundary": {
+    "retainedServerImport": "rejected by server boundary"
+  },
+  "fixedWitness": "passed CRUD/rollback/ordering/settlement and server boundary checks",
+  "executed": {
+    "programsBuilt": 5,
+    "sequences": 41,
+    "operations": 46,
+    "checkpoints": 190,
+    "clientArtifacts": 20,
+    "transitions": {
+      "1 queries / insert / success": 3,
+      "1 queries / edit / success": 1,
+      "1 queries / complete / reject": 1,
+      "1 queries / delete / success": 1,
+      "1 queries / insert / reject": 2,
+      "1 queries / insert / read-retry": 2,
+      "1 queries / complete / read-retry": 2,
+      "1 queries / edit / read-retry": 2,
+      "2 queries / insert / reject": 11,
+      "2 queries / insert / success": 8,
+      "1 queries / delete / read-failure": 1,
+      "1 queries / insert / read-failure": 12
+    }
+  }
+}

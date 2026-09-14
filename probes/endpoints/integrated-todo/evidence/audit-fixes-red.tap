@@ -1,0 +1,306 @@
+(node:37926) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+TAP version 13
+# (node:37928) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: unknown and duplicate read identities reject before the write
+ok 1 - unknown and duplicate read identities reject before the write
+  ---
+  duration_ms: 1.54525
+  ...
+# Subtest: opaque writes still refresh every requested read after the handler completes
+not ok 2 - opaque writes still refresh every requested read after the handler completes
+  ---
+  duration_ms: 1.9825
+  location: '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/refresh.test.mjs:19:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly deep-equal:
+    + actual - expected
+    
+      {
+    +   kind: 'confirmed',
+    +   result: {
+    +     affectedRows: 0
+    -   handler: {
+    -     kind: 'success',
+    -     result: {
+    -       affectedRows: 0
+    -     }
+        },
+    -   kind: 'confirmed',
+        snapshots: [
+          {
+            id: 'todo',
+            rows: [
+              {
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    kind: 'confirmed'
+    handler:
+      kind: 'success'
+      result:
+        affectedRows: 0
+    snapshots:
+      0:
+        id: 'todo'
+        rows:
+          0:
+            id: 'a'
+      1:
+        id: 'other-table-view'
+        rows:
+  actual:
+    kind: 'confirmed'
+    result:
+      affectedRows: 0
+    snapshots:
+      0:
+        id: 'todo'
+        rows:
+          0:
+            id: 'a'
+      1:
+        id: 'other-table-view'
+        rows:
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/refresh.test.mjs:42:10)
+    async Test.run (node:internal/test_runner/test:932:9)
+    async Test.processPendingSubtests (node:internal/test_runner/test:629:7)
+  ...
+# Subtest: a rejected handler is not retried and still reconciles reads
+not ok 3 - a rejected handler is not retried and still reconciles reads
+  ---
+  duration_ms: 0.1175
+  location: '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/refresh.test.mjs:52:1'
+  failureType: 'testCodeFailure'
+  error: 'write rejected'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/refresh.test.mjs:56:36
+    refreshAfterMutation (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/refresh.server.ts:17:24)
+    TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/refresh.test.mjs:54:26)
+    Test.runInAsyncScope (node:async_hooks:211:14)
+    Test.run (node:internal/test_runner/test:931:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:629:18)
+    Test.postRun (node:internal/test_runner/test:1042:19)
+    Test.run (node:internal/test_runner/test:970:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:629:7)
+  ...
+# (node:37929) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# TAP version 13
+# \# Subtest: authority is installed before a post-commit handler error retires the overlay
+# not ok 1 - authority is installed before a post-commit handler error retires the overlay
+#   ---
+#   duration_ms: 10.762709
+#   location: '/private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-rwUzKF/runtime.mjs:27373:1'
+#   failureType: 'testCodeFailure'
+#   error: |-
+#     Expected values to be strictly deep-equal:
+#     + actual - expected
+#     
+#     + []
+#     - [
+#     -   {
+#     -     completed: false,
+#     -     createdAt: 2026-01-01T00:00:00.000Z,
+#     -     id: 'committed',
+#     -     text: 'server correction'
+#     -   }
+#     - ]
+#     
+#   code: 'ERR_ASSERTION'
+#   name: 'AssertionError'
+#   expected:
+#     0:
+#       id: 'committed'
+#       text: 'server correction'
+#       completed: false
+#       createdAt: 2026-01-01T00:00:00.000Z
+#   actual:
+#   operator: 'deepStrictEqual'
+#   stack: |-
+#     TestContext.<anonymous> (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-rwUzKF/runtime.mjs:27390:12)
+#     async Test.run (node:internal/test_runner/test:932:9)
+#     async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+#   ...
+# \# Subtest: client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs
+# not ok 2 - client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs
+#   ---
+#   duration_ms: 1.536667
+#   location: '/private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-rwUzKF/runtime.mjs:27397:1'
+#   failureType: 'testCodeFailure'
+#   error: |-
+#     Expected values to be strictly deep-equal:
+#     + actual - expected
+#     
+#       [
+#         'é',
+#     -   '',
+#         '𐀀',
+#         '􏿿',
+#     +   ''
+#       ]
+#     
+#   code: 'ERR_ASSERTION'
+#   name: 'AssertionError'
+#   expected:
+#     0: 'é'
+#     1: ''
+#     2: '𐀀'
+#     3: '􏿿'
+#   actual:
+#     0: 'é'
+#     1: '𐀀'
+#     2: '􏿿'
+#     3: ''
+#   operator: 'deepStrictEqual'
+#   stack: |-
+#     TestContext.<anonymous> (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-rwUzKF/runtime.mjs:27403:12)
+#     async Test.run (node:internal/test_runner/test:932:9)
+#     async Test.processPendingSubtests (node:internal/test_runner/test:629:7)
+#   ...
+# \# Subtest: malformed authority rejects before installing any collection snapshot
+# not ok 3 - malformed authority rejects before installing any collection snapshot
+#   ---
+#   duration_ms: 3.040625
+#   location: '/private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-rwUzKF/runtime.mjs:27421:1'
+#   failureType: 'testCodeFailure'
+#   error: |-
+#     The input did not match the regular expression /authoritative endpoint response/. Input:
+#     
+#     "TypeError: Cannot read properties of null (reading 'kind')"
+#     
+#   code: 'ERR_ASSERTION'
+#   name: 'AssertionError'
+#   expected:
+#   actual:
+#   error: "Cannot read properties of null (reading 'kind')"
+#   name: 'TypeError'
+#   stack: |-
+#     EndpointRuntime.persist (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-rwUzKF/runtime.mjs:27270:18)
+#     async Transaction.mutationFn (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-rwUzKF/runtime.mjs:27293:9)
+#     async Transaction.commit (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-rwUzKF/runtime.mjs:15998:7)
+#   operator: 'rejects'
+#   stack: |-
+#     async TestContext.<anonymous> (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-rwUzKF/runtime.mjs:27437:7)
+#     async Test.run (node:internal/test_runner/test:932:9)
+#     async Test.processPendingSubtests (node:internal/test_runner/test:629:7)
+#   ...
+# 1..3
+# \# tests 3
+# \# suites 0
+# \# pass 0
+# \# fail 3
+# \# cancelled 0
+# \# skipped 0
+# \# todo 0
+# \# duration_ms 20.013083
+# Subtest: actual collection runtime regressions against PostgreSQL order
+not ok 4 - actual collection runtime regressions against PostgreSQL order
+  ---
+  duration_ms: 781.279167
+  location: '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/runtime.test.mjs:11:1'
+  failureType: 'testCodeFailure'
+  error: 'Command failed: /usr/local/bin/node /var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-rwUzKF/runtime.mjs ["a","é","","𐀀","􏿿"]'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    genericNodeError (node:internal/errors:983:15)
+    wrappedFn (node:internal/errors:537:14)
+    checkExecSyncError (node:child_process:882:11)
+    execFileSync (node:child_process:918:15)
+    TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/runtime.test.mjs:19:32)
+    process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    async Test.run (node:internal/test_runner/test:932:9)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+# (node:37930) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: component declarations carry server order in priority order
+ok 5 - component declarations carry server order in priority order
+  ---
+  duration_ms: 123.373958
+  ...
+# Subtest: sort columns must be selected
+ok 6 - sort columns must be selected
+  ---
+  duration_ms: 12.455958
+  ...
+# Subtest: unsupported direction cannot silently lose client ordering
+ok 7 - unsupported direction cannot silently lose client ordering
+  ---
+  duration_ms: 16.404541
+  ...
+# Subtest: transformed responses cannot borrow intermediate query ordering
+ok 8 - transformed responses cannot borrow intermediate query ordering
+  ---
+  duration_ms: 8.505166
+  ...
+# Subtest: server handler cannot capture the bound client
+ok 9 - server handler cannot capture the bound client
+  ---
+  duration_ms: 5.582459
+  ...
+# Subtest: server handler cannot capture component state
+ok 10 - server handler cannot capture component state
+  ---
+  duration_ms: 10.787709
+  ...
+# Subtest: input validator cannot capture component state
+ok 11 - input validator cannot capture component state
+  ---
+  duration_ms: 5.236417
+  ...
+# Subtest: optimistic callback stays within the component while RPCs move to module scope
+ok 12 - optimistic callback stays within the component while RPCs move to module scope
+  ---
+  duration_ms: 13.111959
+  ...
+# Subtest: a row predicate is carried as data without the server auth expression
+ok 13 - a row predicate is carried as data without the server auth expression
+  ---
+  duration_ms: 8.811041
+  ...
+# Subtest: unsupported query arguments fail before generating an incorrectly scoped request
+ok 14 - unsupported query arguments fail before generating an incorrectly scoped request
+  ---
+  duration_ms: 6.566125
+  ...
+# Subtest: same local names in separate lexical scopes have distinct stable identities
+not ok 15 - same local names in separate lexical scopes have distinct stable identities
+  ---
+  duration_ms: 11.32875
+  location: '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/server-order.test.mjs:125:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    1 !== 2
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 2
+  actual: 1
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/server-order.test.mjs:129:10)
+    Test.runInAsyncScope (node:async_hooks:211:14)
+    Test.run (node:internal/test_runner/test:931:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:629:18)
+    Test.postRun (node:internal/test_runner/test:1042:19)
+    Test.run (node:internal/test_runner/test:970:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:629:7)
+  ...
+1..15
+# tests 15
+# suites 0
+# pass 11
+# fail 4
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 866.609916

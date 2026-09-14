@@ -1,0 +1,61 @@
+{
+  "scenario": {
+    "program": {
+      "orders": [
+        [
+          "id",
+          "createdAt"
+        ]
+      ],
+      "scope": "alice",
+      "filters": [
+        true,
+        false,
+        false
+      ],
+      "retainWithoutSubscriber": false,
+      "canonicalize": false,
+      "initial": [
+        {
+          "id": "seed-0",
+          "text": "\"cc",
+          "completed": false,
+          "createdAt": "2026-01-01T00:00:01.000Z",
+          "scope": "alice"
+        }
+      ],
+      "unsubscribed": []
+    },
+    "sequences": [
+      [
+        {
+          "kind": "complete",
+          "slot": 0,
+          "text": "\"cba ",
+          "rank": 2,
+          "target": 0,
+          "outcome": "success",
+          "retryFailures": 2
+        },
+        {
+          "kind": "insert",
+          "slot": 1,
+          "text": "écba éc",
+          "rank": 0,
+          "target": 1,
+          "outcome": "success",
+          "retryFailures": 1
+        },
+        {
+          "kind": "delete",
+          "slot": 3,
+          "text": "   é",
+          "rank": 2,
+          "target": 0,
+          "outcome": "reject",
+          "retryFailures": 3
+        }
+      ]
+    ]
+  }
+}

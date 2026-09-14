@@ -1,0 +1,12 @@
+{
+  "rejection": {
+    "message": "duplicate key value violates unique constraint \"todo_pkey\"",
+    "code": "23505"
+  },
+  "persisted": [
+    {
+      "id": "committed"
+    }
+  ],
+  "refreshReads": 0
+}

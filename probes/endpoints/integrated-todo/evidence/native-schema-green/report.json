@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "seed": 9122602,
+  "scenarios": 4,
+  "sequences": 2,
+  "compilations": 7,
+  "operations": 36,
+  "authorityChecks": 93,
+  "resultReads": 48,
+  "skippedReads": 45,
+  "runtimeCatalogQueries": 0
+}

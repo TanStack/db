@@ -1,0 +1,162 @@
+{
+  "ok": true,
+  "seed": 911052,
+  "N": 2,
+  "X": 1,
+  "samples": 3,
+  "effects": true,
+  "simple": false,
+  "cases": [
+    {
+      "tables": 2,
+      "queries": 6,
+      "rows": 8,
+      "strategies": {
+        "selective": {
+          "warmups": [
+            {
+              "elapsedMs": 77.20000004768372,
+              "responseBytes": 6169,
+              "gzipBytes": 1551,
+              "requestBytes": 2533,
+              "sql": 9,
+              "proofReads": 2,
+              "resultReads": 6,
+              "writes": 1
+            }
+          ],
+          "samples": [
+            {
+              "elapsedMs": 50.799999952316284,
+              "responseBytes": 3873,
+              "gzipBytes": 918,
+              "requestBytes": 2923,
+              "sql": 6,
+              "proofReads": 2,
+              "resultReads": 3,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 55.299999952316284,
+              "responseBytes": 6306,
+              "gzipBytes": 1545,
+              "requestBytes": 2923,
+              "sql": 9,
+              "proofReads": 2,
+              "resultReads": 6,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 34.90000009536743,
+              "responseBytes": 4010,
+              "gzipBytes": 923,
+              "requestBytes": 2923,
+              "sql": 6,
+              "proofReads": 2,
+              "resultReads": 3,
+              "writes": 1
+            }
+          ],
+          "median": {
+            "elapsedMs": 50.799999952316284,
+            "responseBytes": 4010,
+            "gzipBytes": 923,
+            "requestBytes": 2923,
+            "sql": 6,
+            "proofReads": 2,
+            "resultReads": 3,
+            "writes": 1
+          },
+          "counts": {
+            "programsBuilt": 1,
+            "sequences": 0,
+            "operations": 0,
+            "checkpoints": 9,
+            "clientArtifacts": 4,
+            "transitions": {},
+            "wire": []
+          }
+        }
+      }
+    },
+    {
+      "tables": 3,
+      "queries": 9,
+      "rows": 180,
+      "strategies": {
+        "selective": {
+          "warmups": [
+            {
+              "elapsedMs": 136.70000004768372,
+              "responseBytes": 88309,
+              "gzipBytes": 24094,
+              "requestBytes": 3526,
+              "sql": 13,
+              "proofReads": 3,
+              "resultReads": 9,
+              "writes": 1
+            }
+          ],
+          "samples": [
+            {
+              "elapsedMs": 57.90000009536743,
+              "responseBytes": 30369,
+              "gzipBytes": 1954,
+              "requestBytes": 4111,
+              "sql": 7,
+              "proofReads": 3,
+              "resultReads": 3,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 58.299999952316284,
+              "responseBytes": 30958,
+              "gzipBytes": 11829,
+              "requestBytes": 4112,
+              "sql": 7,
+              "proofReads": 3,
+              "resultReads": 3,
+              "writes": 1
+            },
+            {
+              "elapsedMs": 59.59999990463257,
+              "responseBytes": 60546,
+              "gzipBytes": 13111,
+              "requestBytes": 4112,
+              "sql": 10,
+              "proofReads": 3,
+              "resultReads": 6,
+              "writes": 1
+            }
+          ],
+          "median": {
+            "elapsedMs": 58.299999952316284,
+            "responseBytes": 30958,
+            "gzipBytes": 11829,
+            "requestBytes": 4112,
+            "sql": 7,
+            "proofReads": 3,
+            "resultReads": 3,
+            "writes": 1
+          },
+          "counts": {
+            "programsBuilt": 1,
+            "sequences": 0,
+            "operations": 0,
+            "checkpoints": 9,
+            "clientArtifacts": 4,
+            "transitions": {},
+            "wire": []
+          }
+        }
+      }
+    }
+  ],
+  "limits": [
+    "Local Vite dev server and PGlite. Latency includes SQL/observer costs but does not establish WAN or multi-connection contention gains.",
+    "First operation of each history establishes certificates and is excluded from timing summaries.",
+    "Schemas are fixed while each history runs. Production auth, DDL and untracked dependencies are excluded.",
+    "Gzip is an offline estimate; response bytes are observed Start bodies.",
+    "Effect controls hold writes through the optimistic checkpoint; their elapsed times include oracle work and are not benchmarks."
+  ]
+}

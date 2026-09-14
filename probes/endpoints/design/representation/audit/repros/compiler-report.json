@@ -1,0 +1,18 @@
+{
+  "compileAccepted": true,
+  "queryKeys": [
+    "6a54ba8dfd34:TodoApp:rows",
+    "6a54ba8dfd34:TodoApp:rows"
+  ],
+  "distinctKeys": 1,
+  "memberships": [
+    {
+      "kind": "completed",
+      "value": false
+    },
+    {
+      "kind": "completed",
+      "value": true
+    }
+  ]
+}

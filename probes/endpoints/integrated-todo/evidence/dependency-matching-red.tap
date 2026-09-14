@@ -1,0 +1,95 @@
+✖ disjoint complete dependencies skip reads after the handler closes (1.879666ms)
+✖ optimistic targets and missing baselines require authority even for disjoint writes (0.228791ms)
+✖ unknown read or write effects cannot establish disjointness (0.485ms)
+✔ admission includes skipped instances and runs before writes (0.123ms)
+✖ partial commit errors still reconcile the complete write set (0.194375ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 1
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 83.935875
+
+✖ failing tests:
+
+test at tests/dependencies.test.mjs:20:1
+✖ disjoint complete dependencies skip reads after the handler closes (1.879666ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+      'a',
+  +   'b'
+    ]
+  
+      at TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/dependencies.test.mjs:28:10)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:332:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'a', 'b' ],
+    expected: [ 'a' ],
+    operator: 'deepStrictEqual'
+  }
+
+test at tests/dependencies.test.mjs:33:1
+✖ optimistic targets and missing baselines require authority even for disjoint writes (0.228791ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+      'a',
+  +   'b'
+    ]
+  
+      at TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/dependencies.test.mjs:40:12)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'a', 'b' ],
+    expected: [ 'a' ],
+    operator: 'deepStrictEqual'
+  }
+
+test at tests/dependencies.test.mjs:44:1
+✖ unknown read or write effects cannot establish disjointness (0.485ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+      'a',
+  +   'b'
+    ]
+  
+      at TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/dependencies.test.mjs:54:10)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'a', 'b' ],
+    expected: [ 'a' ],
+    operator: 'deepStrictEqual'
+  }
+
+test at tests/dependencies.test.mjs:68:1
+✖ partial commit errors still reconcile the complete write set (0.194375ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+  +   'a',
+      'b'
+    ]
+  
+      at TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/dependencies.test.mjs:75:10)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'a', 'b' ],
+    expected: [ 'b' ],
+    operator: 'deepStrictEqual'
+  }

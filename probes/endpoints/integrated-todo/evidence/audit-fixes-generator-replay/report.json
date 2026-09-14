@@ -1,0 +1,52 @@
+{
+  "settings": {
+    "N": 2,
+    "X": 3,
+    "maxSteps": 5,
+    "mutant": null
+  },
+  "campaigns": [],
+  "limits": [
+    "Todo schema, full-row queries with all/completed predicates, ascending createdAt/id order",
+    "Sequential operations within each sequence; no same-row concurrent scheduling contract",
+    "Dev browser execution with production client artifact inspection; no production browser execution yet",
+    "Server exclusion: live canaries, client dependency maps, raw/module request rejection and retained-server-import rejection; not proof against all possible leakage"
+  ],
+  "replay": "evidence/audit-fixes-oracle/read-retry/sequence.json",
+  "replayPassed": true,
+  "executed": {
+    "programsBuilt": 1,
+    "sequences": 1,
+    "operations": 2,
+    "checkpoints": 10,
+    "clientArtifacts": 4,
+    "transitions": {
+      "1 queries / delete / read-retry": 1,
+      "1 queries / insert / read-retry": 1
+    },
+    "wire": [
+      {
+        "injectedDelayMs": 0,
+        "queries": 1,
+        "kind": "delete",
+        "outcome": "read-retry",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 563,
+        "responseBytes": 478,
+        "elapsedMs": 1127.7577089999995
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 1,
+        "kind": "insert",
+        "outcome": "read-retry",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 575,
+        "responseBytes": 858,
+        "elapsedMs": 3147.82625
+      }
+    ]
+  }
+}

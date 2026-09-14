@@ -1,0 +1,24 @@
+{
+  "analysisVersion": 1,
+  "briefSha256": "1c60e4e0cecf62ed3ad0b3f6f98aadfdca97dd632418268078f143c7c2a3b9f6",
+  "wordCount": 559,
+  "frozenLayersUnchanged": true,
+  "localBriefLinksResolve": true,
+  "manualLayerReconstruction": {
+    "P1": "Ownership forms paragraph: bare writable collections and synchronous Transactions",
+    "P2": "Limits: server boundary; Model R7/R12 scoped identity and validation",
+    "P3": "Read recipients versus optimistic participants; limits on exact optimism and commit/read error",
+    "P4": "Brief explicitly requires checking every active collection including skipped queries; Model R4 and Evidence E3/E6 preserve independent observation.",
+    "P5": "Read/optimistic participant distinction and unchanged join partner example",
+    "P6": "Independent evidence per shortcut and unknown-impact conservative candidates",
+    "P7": "Opening authoritative baseline and caveat that it is not implemented",
+    "P8": "Per-result edits and shared-support replacement limit; exact details Model R7",
+    "P9": "No atomic-publication inference or hidden queue; overlapping-mutation contract open",
+    "P10": "Server active-instance knowledge and preload/late activation remain open",
+    "P11": "Exhausted read error does not undo commit",
+    "P12": "Safety versus cost, measured opposite byte effects, local limitations and no threshold"
+  },
+  "supportMap": "process.md B1\u2013B8",
+  "range": "Untested independently; no held-out case available",
+  "scope": "Documentation/model checks only; no new framework tests or implementation"
+}

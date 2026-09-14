@@ -1,0 +1,117 @@
+{
+  "settings": {
+    "N": 1,
+    "X": 1,
+    "maxSteps": 3,
+    "mutant": null
+  },
+  "campaigns": [
+    {
+      "name": "controls",
+      "failed": false,
+      "seed": 1681808204,
+      "path": null,
+      "runs": 1,
+      "shrinks": 0,
+      "error": null
+    }
+  ],
+  "measurements": {
+    "requests": "Browser fetch POST count",
+    "requestBytes": "POST body bytes, excluding headers",
+    "responseBytes": "Decoded response body bytes; not compressed transfer bytes",
+    "elapsedMs": "Harness elapsed including oracle, gates and browser checkpoints; not isolated application latency"
+  },
+  "limits": [
+    "Todo schema, full-row queries with all/completed predicates, ascending createdAt/id order",
+    "Sequential operations within each sequence; no same-row concurrent scheduling contract",
+    "Dev browser execution with production client artifact inspection; no production browser execution yet",
+    "Server exclusion: live canaries, client dependency maps, raw/module request rejection and retained-server-import rejection; not proof against all possible leakage"
+  ],
+  "boundary": {
+    "retainedServerImport": "rejected by server boundary"
+  },
+  "fixedWitness": "passed CRUD/rollback/ordering/settlement and server boundary checks",
+  "executed": {
+    "programsBuilt": 2,
+    "sequences": 2,
+    "operations": 6,
+    "checkpoints": 20,
+    "clientArtifacts": 8,
+    "transitions": {
+      "1 queries / insert / success": 2,
+      "1 queries / edit / success": 1,
+      "1 queries / complete / reject": 1,
+      "1 queries / delete / success": 1,
+      "1 queries / insert / reject": 1
+    },
+    "wire": [
+      {
+        "injectedDelayMs": 0,
+        "queries": 1,
+        "kind": "insert",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 573,
+        "responseBytes": 857,
+        "elapsedMs": 94.58108400000128
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 1,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 580,
+        "responseBytes": 857,
+        "elapsedMs": 100.92016599999988
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 1,
+        "kind": "complete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 580,
+        "responseBytes": 833,
+        "elapsedMs": 98.58345799999915
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 1,
+        "kind": "delete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 580,
+        "responseBytes": 673,
+        "elapsedMs": 98.32529199999954
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 1,
+        "kind": "insert",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 569,
+        "responseBytes": 477,
+        "elapsedMs": 98.98462500000096
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 1,
+        "kind": "insert",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 577,
+        "responseBytes": 500,
+        "elapsedMs": 97.33929200000057
+      }
+    ]
+  }
+}

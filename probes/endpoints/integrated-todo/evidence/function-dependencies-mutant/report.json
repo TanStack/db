@@ -1,0 +1,13 @@
+{
+  "ok": false,
+  "seed": 9122602,
+  "scenarios": 20,
+  "sequences": 3,
+  "compilations": 1,
+  "operations": 0,
+  "authorityChecks": 1,
+  "resultReads": 0,
+  "skippedReads": 0,
+  "runtimeCatalogQueries": 0,
+  "error": "AssertionError [ERR_ASSERTION]: compiled authority {\"program\":{\"helpers\":true,\"helperFanout\":true,\"count\":3,\"trigger\":false,\"foreignKey\":false},\"step\":{\"kind\":\"update\",\"table\":0,\"value\":7},\"query\":1}\n+ actual - expected\n\n  [\n    {\n      id: 'row',\n+     value: 2\n-     value: 8\n    }\n  ]\n\n    at scenario (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/compiled-dependencies.mjs:208:20)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/compiled-dependencies.mjs:243:3"
+}

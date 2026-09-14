@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "phase": "Analytical state frozen before primary brief and parallel audits",
+  "files": [
+    {
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/stale-authority/grammar/preservation.md",
+      "sha256": "2e96573cbb4331ab071c8fb0d484d1bbb43d2bb1e5255a91ba0ee742c3733f8c"
+    },
+    {
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/stale-authority/grammar/model.md",
+      "sha256": "e35219db5d330bb4093bdb7e39f88d374050440ce18c3f98b243677fea03f0ed"
+    },
+    {
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/stale-authority/grammar/evidence.md",
+      "sha256": "156fa10c3de89e0cf63aa89c6d5f9e9eeee8a75a844e00226e4d25abe9f59fb6"
+    },
+    {
+      "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/stale-authority/grammar/process.md",
+      "sha256": "9863e9085de1d03200dda32517d70f234a6d9c3dd3ba6fa13f1b0d6254033d4d"
+    }
+  ]
+}

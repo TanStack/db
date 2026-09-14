@@ -1,0 +1,407 @@
+{
+  "settings": {
+    "N": 1,
+    "X": 1,
+    "maxSteps": 3,
+    "mutant": null
+  },
+  "campaigns": [
+    {
+      "name": "controls",
+      "failed": false,
+      "seed": 2086495044,
+      "path": null,
+      "runs": 1,
+      "shrinks": 0,
+      "error": null
+    },
+    {
+      "name": "read-retry",
+      "failed": false,
+      "seed": -861948130,
+      "path": null,
+      "runs": 1,
+      "shrinks": 0,
+      "error": null
+    },
+    {
+      "name": "coherence",
+      "failed": false,
+      "seed": -2057327891,
+      "path": null,
+      "runs": 1,
+      "shrinks": 0,
+      "error": null
+    },
+    {
+      "name": "read-failure",
+      "failed": false,
+      "seed": -1703415524,
+      "path": null,
+      "runs": 1,
+      "shrinks": 0,
+      "error": null
+    }
+  ],
+  "measurements": {
+    "requests": "Browser fetch POST count",
+    "requestBytes": "POST body bytes, excluding headers",
+    "responseBytes": "Decoded response body bytes; not compressed transfer bytes",
+    "elapsedMs": "Harness elapsed including oracle, gates and browser checkpoints; not isolated application latency"
+  },
+  "limits": [
+    "Todo schema, full-row queries with all/completed predicates, ascending createdAt/id order",
+    "Sequential operations within each sequence; no same-row concurrent scheduling contract",
+    "Dev browser execution with production client artifact inspection; no production browser execution yet",
+    "Server exclusion: live canaries, client dependency maps, raw/module request rejection and retained-server-import rejection; not proof against all possible leakage"
+  ],
+  "engine": {
+    "version": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit",
+    "version_num": "170005"
+  },
+  "sqlCoverage": {
+    "schemaGeneration": "fixed Todo schema; tables and column types are not generated",
+    "columnTypes": [
+      "text",
+      "boolean",
+      "timestamp without time zone"
+    ],
+    "constraints": [
+      "text primary key",
+      "not-null columns"
+    ],
+    "queryShapes": [
+      "one table with fixture scope predicate",
+      "full-row projection",
+      "optional equality on completed",
+      "ascending createdAt/id order"
+    ],
+    "mutationShapes": [
+      "insert",
+      "update",
+      "delete",
+      "multiple statements",
+      "partial commit then handler error"
+    ],
+    "demandMode": "eager full results",
+    "notGenerated": [
+      "related tables, foreign keys, cascades, triggers, defaults and generated columns",
+      "nullable columns and other PostgreSQL type families",
+      "joins, aggregates, distinct, windows, set operations, subqueries and CTEs",
+      "arbitrary expressions, functions, casts, collation and ordering modes",
+      "upsert, merge, data-modifying CTEs and explicit database transactions",
+      "on-demand predicates, finite windows, continuation, refill and subset ownership",
+      "external writers, RLS, schema changes, extensions and other PostgreSQL versions"
+    ]
+  },
+  "independentEffectsWitness": "passed server membership changes, other-row writes, no-op, post-commit errors, Unicode IDs and repeated lexical names",
+  "coherenceWitness": "passed filter entry/exit, server correction, rollback, zero-subscriber retention and GC exclusion",
+  "boundary": {
+    "retainedServerImport": "rejected by server boundary"
+  },
+  "fixedWitness": "passed CRUD/rollback/ordering/settlement and server boundary checks",
+  "executed": {
+    "programsBuilt": 7,
+    "sequences": 7,
+    "operations": 21,
+    "checkpoints": 77,
+    "clientArtifacts": 28,
+    "transitions": {
+      "4 queries / insert / success": 3,
+      "4 queries / edit / success": 2,
+      "4 queries / delete / success": 2,
+      "4 queries / complete / success": 3,
+      "4 queries / complete / reject": 1,
+      "1 queries / insert / success": 1,
+      "1 queries / edit / success": 1,
+      "1 queries / complete / reject": 1,
+      "1 queries / delete / success": 1,
+      "1 queries / insert / reject": 1,
+      "1 queries / insert / read-retry": 1,
+      "3 queries / delete / reject": 1,
+      "3 queries / insert / reject": 1,
+      "1 queries / insert / read-failure": 2
+    },
+    "wire": [
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "insert",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1535,
+        "responseBytes": 1633,
+        "elapsedMs": 144.25804100000096
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1539,
+        "responseBytes": 1647,
+        "elapsedMs": 100.17608300000029
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "delete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1538,
+        "responseBytes": 1647,
+        "elapsedMs": 98.79808400000002
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "insert",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1541,
+        "responseBytes": 1849,
+        "elapsedMs": 98.99483399999917
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "complete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1539,
+        "responseBytes": 1849,
+        "elapsedMs": 99.38454199999978
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "insert",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1535,
+        "responseBytes": 1223,
+        "elapsedMs": 160.1719580000008
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "complete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1532,
+        "responseBytes": 1222,
+        "elapsedMs": 98.94812499999898
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1542,
+        "responseBytes": 1222,
+        "elapsedMs": 99.39949999999953
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "complete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1532,
+        "responseBytes": 1198,
+        "elapsedMs": 98.83387500000026
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "complete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1532,
+        "responseBytes": 1223,
+        "elapsedMs": 99.28412500000013
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 4,
+        "kind": "delete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1532,
+        "responseBytes": 1008,
+        "elapsedMs": 99.03520899999967
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 1,
+        "kind": "insert",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 829,
+        "responseBytes": 857,
+        "elapsedMs": 98.39870800000062
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 1,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 836,
+        "responseBytes": 857,
+        "elapsedMs": 98.80979099999968
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 1,
+        "kind": "complete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 836,
+        "responseBytes": 833,
+        "elapsedMs": 99.2063339999986
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 1,
+        "kind": "delete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 836,
+        "responseBytes": 673,
+        "elapsedMs": 99.1115000000027
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 1,
+        "kind": "insert",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 831,
+        "responseBytes": 842,
+        "elapsedMs": 97.29541699999754
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 1,
+        "kind": "insert",
+        "outcome": "read-retry",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 830,
+        "responseBytes": 684,
+        "elapsedMs": 1134.6949590000004
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 3,
+        "kind": "delete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1523,
+        "responseBytes": 990,
+        "elapsedMs": 131.18995799999539
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 3,
+        "kind": "insert",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 1534,
+        "responseBytes": 990,
+        "elapsedMs": 99.15258400000312
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 1,
+        "kind": "insert",
+        "outcome": "read-failure",
+        "strategy": "inline",
+        "requests": 2,
+        "requestBytes": 1006,
+        "responseBytes": 570,
+        "elapsedMs": 7331.720916999999
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 1,
+        "kind": "insert",
+        "outcome": "read-failure",
+        "strategy": "inline",
+        "requests": 2,
+        "requestBytes": 1012,
+        "responseBytes": 922,
+        "elapsedMs": 7399.966042
+      }
+    ]
+  },
+  "evidence": {
+    "name": "endpoints.e2e",
+    "cases": 11,
+    "witnesses": {
+      "[\"collection-rows\",\"baseline\",null]": 7,
+      "[\"rendered-values\",\"baseline\",null]": 7,
+      "[\"collection-rows\",\"same-turn\",null]": 21,
+      "[\"rendered-values\",\"same-turn\",null]": 21,
+      "[\"collection-rows\",\"operation #: committed, read held\",null]": 21,
+      "[\"rendered-values\",\"operation #: committed, read held\",null]": 21,
+      "[\"collection-rows\",\"operation #: success\",null]": 13,
+      "[\"rendered-values\",\"operation #: success\",null]": 13,
+      "[\"collection-rows\",\"operation #: reject\",null]": 5,
+      "[\"rendered-values\",\"operation #: reject\",null]": 5,
+      "[\"collection-rows\",\"operation #: retry # held\",null]": 7,
+      "[\"rendered-values\",\"operation #: retry # held\",null]": 7,
+      "[\"collection-rows\",\"operation #: read-retry\",null]": 1,
+      "[\"rendered-values\",\"operation #: read-retry\",null]": 1,
+      "[\"collection-rows\",\"operation #: read-failure\",null]": 2,
+      "[\"rendered-values\",\"operation #: read-failure\",null]": 2
+    },
+    "faults": [],
+    "cleanupErrors": [],
+    "rejectedShrinks": [],
+    "generation": {
+      "name": "read-failure",
+      "failed": false,
+      "seed": -1703415524,
+      "path": null,
+      "runs": 1,
+      "shrinks": 0,
+      "error": null
+    },
+    "sources": {
+      "evidence.mjs": "6da3305d17e59f7b421834724cb56e8025174f007d89b9622c4297b23837b4f8",
+      "driver.mjs": "2c83ba04a6d8e137ac49ef9ee691d595a6bcc7ca8332c24555874185bc33f956",
+      "program.mjs": "edbee062750f6e664878b8caad5a916dfdc44cf4ffafe0ff84e6b334e423395a",
+      "compiled-dependencies.mjs": "3123ae89a541adeceb5b9bb11f6f713c7398e3ac4cf3f3faeb52aba0f1e27dd4",
+      "dependencies.mjs": "bd21fb76773d2bf1c16b415a9777ee5c27045e43014f0ca25862d7291a8222cc",
+      "concurrent.mjs": "419790a987fe4016bcff0bf5fdce3dc22a7eda629d9399930dc8481e4c926d7b",
+      "sql.mjs": "c8df01e354190691577d9b55d2d562768b83f78b0449da4217995ba7704fec8e",
+      "e2e.mjs": "d66531af8ac0d5b9c3a3c4c584cb1caf46f9c1a0922bd3647c14ed828fb2a21c"
+    },
+    "node": "v24.5.0",
+    "fault": null
+  },
+  "ok": true,
+  "outcome": "passed"
+}

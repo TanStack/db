@@ -1,0 +1,63 @@
+{
+  "ok": false,
+  "seed": 9122602,
+  "scenarios": 20,
+  "sequences": 3,
+  "compilations": 3,
+  "operations": 3,
+  "authorityChecks": 9,
+  "resultReads": 6,
+  "skippedReads": 3,
+  "runtimeCatalogQueries": 0,
+  "evidence": {
+    "name": "endpoints.compiled-dependencies",
+    "cases": 3,
+    "witnesses": {
+      "[\"reference-baseline\",\"preload\",null]": 3,
+      "[\"optimistic-rows\",\"same-turn\",\"update\"]": 3,
+      "[\"settled-rows\",\"settled\",\"update\"]": 9
+    },
+    "faults": [
+      {
+        "point": "cleanup",
+        "name": "client"
+      },
+      {
+        "point": "cleanup",
+        "name": "client"
+      },
+      {
+        "point": "cleanup",
+        "name": "client"
+      }
+    ],
+    "cleanupErrors": [
+      {
+        "name": "client",
+        "error": "Error: Injected cleanup failure after release\n    at Evidence.cleanup (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/evidence.mjs:81:15)\n    at async execute (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/compiled-dependencies.mjs:288:9)\n    at async Evidence.run (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/evidence.mjs:101:14)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/compiled-dependencies.mjs:315:5"
+      },
+      {
+        "name": "client",
+        "error": "Error: Injected cleanup failure after release\n    at Evidence.cleanup (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/evidence.mjs:81:15)\n    at async execute (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/compiled-dependencies.mjs:288:9)\n    at async Evidence.run (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/evidence.mjs:101:14)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/compiled-dependencies.mjs:326:5"
+      },
+      {
+        "name": "client",
+        "error": "Error: Injected cleanup failure after release\n    at Evidence.cleanup (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/evidence.mjs:81:15)\n    at async execute (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/compiled-dependencies.mjs:288:9)\n    at async Evidence.run (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/evidence.mjs:101:14)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/compiled-dependencies.mjs:336:5"
+      }
+    ],
+    "rejectedShrinks": [],
+    "sources": {
+      "evidence.mjs": "6da3305d17e59f7b421834724cb56e8025174f007d89b9622c4297b23837b4f8",
+      "driver.mjs": "2c83ba04a6d8e137ac49ef9ee691d595a6bcc7ca8332c24555874185bc33f956",
+      "program.mjs": "edbee062750f6e664878b8caad5a916dfdc44cf4ffafe0ff84e6b334e423395a",
+      "compiled-dependencies.mjs": "3123ae89a541adeceb5b9bb11f6f713c7398e3ac4cf3f3faeb52aba0f1e27dd4",
+      "dependencies.mjs": "bd21fb76773d2bf1c16b415a9777ee5c27045e43014f0ca25862d7291a8222cc",
+      "concurrent.mjs": "419790a987fe4016bcff0bf5fdce3dc22a7eda629d9399930dc8481e4c926d7b",
+      "sql.mjs": "c8df01e354190691577d9b55d2d562768b83f78b0449da4217995ba7704fec8e",
+      "e2e.mjs": "d66531af8ac0d5b9c3a3c4c584cb1caf46f9c1a0922bd3647c14ed828fb2a21c"
+    },
+    "node": "v24.5.0",
+    "fault": "cleanup"
+  },
+  "outcome": "cleanup-failure"
+}

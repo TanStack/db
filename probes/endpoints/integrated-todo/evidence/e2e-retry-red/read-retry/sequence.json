@@ -1,0 +1,49 @@
+{
+  "scenario": {
+    "program": {
+      "orders": [
+        [
+          "createdAt",
+          "id"
+        ]
+      ],
+      "scope": "bob",
+      "initial": [
+        {
+          "id": "seed-0",
+          "text": "ab",
+          "completed": false,
+          "createdAt": "2026-01-01T00:00:01.000Z",
+          "scope": "bob"
+        },
+        {
+          "id": "seed-1",
+          "text": "c ééé",
+          "completed": false,
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "scope": "bob"
+        },
+        {
+          "id": "seed-2",
+          "text": "\"éa   ",
+          "completed": false,
+          "createdAt": "2026-01-01T00:00:02.000Z",
+          "scope": "bob"
+        }
+      ]
+    },
+    "sequences": [
+      [
+        {
+          "kind": "delete",
+          "slot": 1,
+          "text": "b c",
+          "rank": 2,
+          "target": 0,
+          "outcome": "read-retry",
+          "retryFailures": 3
+        }
+      ]
+    ]
+  }
+}

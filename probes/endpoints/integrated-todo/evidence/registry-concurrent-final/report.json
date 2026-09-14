@@ -1,0 +1,3018 @@
+{
+  "seed": 911034,
+  "N": 3,
+  "X": 3,
+  "effects": false,
+  "registry": true,
+  "programs": 3,
+  "sequences": 9,
+  "operations": 27,
+  "notifications": 108,
+  "checkpoints": 90,
+  "wire": [
+    {
+      "operations": 3,
+      "queries": 6,
+      "posts": 9,
+      "requestBytes": 8823,
+      "responseBytes": 10061
+    },
+    {
+      "operations": 3,
+      "queries": 6,
+      "posts": 9,
+      "requestBytes": 8837,
+      "responseBytes": 12067
+    },
+    {
+      "operations": 3,
+      "queries": 6,
+      "posts": 9,
+      "requestBytes": 8811,
+      "responseBytes": 12076
+    },
+    {
+      "operations": 3,
+      "queries": 6,
+      "posts": 9,
+      "requestBytes": 8813,
+      "responseBytes": 11088
+    },
+    {
+      "operations": 3,
+      "queries": 6,
+      "posts": 9,
+      "requestBytes": 8819,
+      "responseBytes": 12026
+    },
+    {
+      "operations": 3,
+      "queries": 6,
+      "posts": 9,
+      "requestBytes": 8844,
+      "responseBytes": 10687
+    },
+    {
+      "operations": 3,
+      "queries": 6,
+      "posts": 9,
+      "requestBytes": 9098,
+      "responseBytes": 13506
+    },
+    {
+      "operations": 3,
+      "queries": 6,
+      "posts": 9,
+      "requestBytes": 8935,
+      "responseBytes": 13659
+    },
+    {
+      "operations": 3,
+      "queries": 6,
+      "posts": 9,
+      "requestBytes": 8966,
+      "responseBytes": 13482
+    }
+  ],
+  "scope": "Generated compiled endpoints, concurrent waves of 2–4 optimistic actions, independent server execution and response delivery order, PostgreSQL confirmed/tentative rows, every source notification, React consumers, production client source exclusion.",
+  "limits": [
+    "Each wave settles as one cohort; no mixed-wave overlay retirement in this generator.",
+    "Lifecycle, local rollback, unknown transport and reentrant callbacks have separate actual-runtime regressions.",
+    "Wire bytes are decoded bodies; elapsed time includes gates and oracle work."
+  ],
+  "engine": {
+    "version": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit",
+    "version_num": "170005"
+  },
+  "sqlCoverage": {
+    "mode": "generated scalar schemas; see coverage cells",
+    "limits": [
+      "Three actions per concurrent wave; no interleaved cohort retirement",
+      "Required base row shape and trusted fixture types"
+    ]
+  },
+  "successfulSequences": [
+    {
+      "program": {
+        "tables": [
+          {
+            "name": "relation_0_9",
+            "columns": [
+              {
+                "type": "integer",
+                "nullable": true,
+                "name": "field_0_integer"
+              },
+              {
+                "type": "text",
+                "nullable": true,
+                "name": "field_1_text"
+              }
+            ],
+            "parent": null
+          },
+          {
+            "name": "relation_1_0",
+            "columns": [
+              {
+                "type": "boolean",
+                "nullable": true,
+                "name": "field_0_boolean"
+              }
+            ],
+            "parent": null
+          }
+        ],
+        "queries": [
+          {
+            "table": 0,
+            "predicate": null
+          },
+          {
+            "table": 1,
+            "predicate": null
+          },
+          {
+            "table": 0,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": false
+            }
+          },
+          {
+            "table": 0,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": true
+            }
+          },
+          {
+            "table": 1,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": false
+            }
+          },
+          {
+            "table": 1,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": true
+            }
+          }
+        ],
+        "scope": "alice",
+        "orders": [
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ]
+        ],
+        "initial": [
+          {
+            "table": "relation_0_9",
+            "id": "alice-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_integer": null,
+            "field_1_text": null
+          },
+          {
+            "table": "relation_0_9",
+            "id": "alice-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "alice",
+            "field_0_integer": -1,
+            "field_1_text": "b"
+          },
+          {
+            "table": "relation_0_9",
+            "id": "alice-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_integer": 2,
+            "field_1_text": "é"
+          },
+          {
+            "table": "relation_0_9",
+            "id": "bob-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_integer": null,
+            "field_1_text": null
+          },
+          {
+            "table": "relation_0_9",
+            "id": "bob-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "bob",
+            "field_0_integer": -1,
+            "field_1_text": "b"
+          },
+          {
+            "table": "relation_0_9",
+            "id": "bob-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_integer": 2,
+            "field_1_text": "é"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "alice-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_boolean": null
+          },
+          {
+            "table": "relation_1_0",
+            "id": "alice-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "alice",
+            "field_0_boolean": false
+          },
+          {
+            "table": "relation_1_0",
+            "id": "alice-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_boolean": true
+          },
+          {
+            "table": "relation_1_0",
+            "id": "bob-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_boolean": null
+          },
+          {
+            "table": "relation_1_0",
+            "id": "bob-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "bob",
+            "field_0_boolean": false
+          },
+          {
+            "table": "relation_1_0",
+            "id": "bob-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_boolean": true
+          }
+        ],
+        "nested": false
+      },
+      "sequence": {
+        "steps": [
+          {
+            "kind": "insert",
+            "target": 2,
+            "slot": 1,
+            "text": "",
+            "rank": 0,
+            "outcome": "reject",
+            "cross": true,
+            "failAfterCommit": false
+          },
+          {
+            "kind": "delete",
+            "target": 3,
+            "slot": 3,
+            "text": "界aé",
+            "rank": 3,
+            "outcome": "success",
+            "cross": true,
+            "failAfterCommit": false
+          },
+          {
+            "kind": "delete",
+            "target": 3,
+            "slot": 0,
+            "text": "界",
+            "rank": 1,
+            "outcome": "success",
+            "cross": false,
+            "failAfterCommit": false
+          }
+        ],
+        "writeOrder": [
+          20,
+          12,
+          3
+        ],
+        "deliveryOrder": [
+          18,
+          8,
+          20
+        ]
+      }
+    },
+    {
+      "program": {
+        "tables": [
+          {
+            "name": "relation_0_9",
+            "columns": [
+              {
+                "type": "integer",
+                "nullable": true,
+                "name": "field_0_integer"
+              },
+              {
+                "type": "text",
+                "nullable": true,
+                "name": "field_1_text"
+              }
+            ],
+            "parent": null
+          },
+          {
+            "name": "relation_1_0",
+            "columns": [
+              {
+                "type": "boolean",
+                "nullable": true,
+                "name": "field_0_boolean"
+              }
+            ],
+            "parent": null
+          }
+        ],
+        "queries": [
+          {
+            "table": 0,
+            "predicate": null
+          },
+          {
+            "table": 1,
+            "predicate": null
+          },
+          {
+            "table": 0,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": false
+            }
+          },
+          {
+            "table": 0,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": true
+            }
+          },
+          {
+            "table": 1,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": false
+            }
+          },
+          {
+            "table": 1,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": true
+            }
+          }
+        ],
+        "scope": "alice",
+        "orders": [
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ]
+        ],
+        "initial": [
+          {
+            "table": "relation_0_9",
+            "id": "alice-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_integer": null,
+            "field_1_text": null
+          },
+          {
+            "table": "relation_0_9",
+            "id": "alice-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "alice",
+            "field_0_integer": -1,
+            "field_1_text": "b"
+          },
+          {
+            "table": "relation_0_9",
+            "id": "alice-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_integer": 2,
+            "field_1_text": "é"
+          },
+          {
+            "table": "relation_0_9",
+            "id": "bob-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_integer": null,
+            "field_1_text": null
+          },
+          {
+            "table": "relation_0_9",
+            "id": "bob-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "bob",
+            "field_0_integer": -1,
+            "field_1_text": "b"
+          },
+          {
+            "table": "relation_0_9",
+            "id": "bob-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_integer": 2,
+            "field_1_text": "é"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "alice-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_boolean": null
+          },
+          {
+            "table": "relation_1_0",
+            "id": "alice-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "alice",
+            "field_0_boolean": false
+          },
+          {
+            "table": "relation_1_0",
+            "id": "alice-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_boolean": true
+          },
+          {
+            "table": "relation_1_0",
+            "id": "bob-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_boolean": null
+          },
+          {
+            "table": "relation_1_0",
+            "id": "bob-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "bob",
+            "field_0_boolean": false
+          },
+          {
+            "table": "relation_1_0",
+            "id": "bob-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_boolean": true
+          }
+        ],
+        "nested": false
+      },
+      "sequence": {
+        "steps": [
+          {
+            "kind": "insert",
+            "target": 2,
+            "slot": 0,
+            "text": "\"",
+            "rank": 4,
+            "outcome": "reject",
+            "cross": false,
+            "failAfterCommit": true
+          },
+          {
+            "kind": "edit",
+            "target": 1,
+            "slot": 0,
+            "text": "",
+            "rank": 1,
+            "outcome": "reject",
+            "cross": false,
+            "failAfterCommit": true
+          },
+          {
+            "kind": "edit",
+            "target": 1,
+            "slot": 3,
+            "text": "ééé\"é",
+            "rank": 4,
+            "outcome": "success",
+            "cross": false,
+            "failAfterCommit": true
+          }
+        ],
+        "writeOrder": [
+          3,
+          3,
+          1
+        ],
+        "deliveryOrder": [
+          10,
+          3,
+          0
+        ]
+      }
+    },
+    {
+      "program": {
+        "tables": [
+          {
+            "name": "relation_0_9",
+            "columns": [
+              {
+                "type": "integer",
+                "nullable": true,
+                "name": "field_0_integer"
+              },
+              {
+                "type": "text",
+                "nullable": true,
+                "name": "field_1_text"
+              }
+            ],
+            "parent": null
+          },
+          {
+            "name": "relation_1_0",
+            "columns": [
+              {
+                "type": "boolean",
+                "nullable": true,
+                "name": "field_0_boolean"
+              }
+            ],
+            "parent": null
+          }
+        ],
+        "queries": [
+          {
+            "table": 0,
+            "predicate": null
+          },
+          {
+            "table": 1,
+            "predicate": null
+          },
+          {
+            "table": 0,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": false
+            }
+          },
+          {
+            "table": 0,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": true
+            }
+          },
+          {
+            "table": 1,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": false
+            }
+          },
+          {
+            "table": 1,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": true
+            }
+          }
+        ],
+        "scope": "alice",
+        "orders": [
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ]
+        ],
+        "initial": [
+          {
+            "table": "relation_0_9",
+            "id": "alice-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_integer": null,
+            "field_1_text": null
+          },
+          {
+            "table": "relation_0_9",
+            "id": "alice-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "alice",
+            "field_0_integer": -1,
+            "field_1_text": "b"
+          },
+          {
+            "table": "relation_0_9",
+            "id": "alice-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_integer": 2,
+            "field_1_text": "é"
+          },
+          {
+            "table": "relation_0_9",
+            "id": "bob-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_integer": null,
+            "field_1_text": null
+          },
+          {
+            "table": "relation_0_9",
+            "id": "bob-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "bob",
+            "field_0_integer": -1,
+            "field_1_text": "b"
+          },
+          {
+            "table": "relation_0_9",
+            "id": "bob-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_integer": 2,
+            "field_1_text": "é"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "alice-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_boolean": null
+          },
+          {
+            "table": "relation_1_0",
+            "id": "alice-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "alice",
+            "field_0_boolean": false
+          },
+          {
+            "table": "relation_1_0",
+            "id": "alice-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_boolean": true
+          },
+          {
+            "table": "relation_1_0",
+            "id": "bob-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_boolean": null
+          },
+          {
+            "table": "relation_1_0",
+            "id": "bob-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "bob",
+            "field_0_boolean": false
+          },
+          {
+            "table": "relation_1_0",
+            "id": "bob-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_boolean": true
+          }
+        ],
+        "nested": false
+      },
+      "sequence": {
+        "steps": [
+          {
+            "kind": "delete",
+            "target": 3,
+            "slot": 0,
+            "text": "",
+            "rank": 3,
+            "outcome": "reject",
+            "cross": true,
+            "failAfterCommit": true
+          },
+          {
+            "kind": "edit",
+            "target": 3,
+            "slot": 2,
+            "text": "a\"界 界\"",
+            "rank": 2,
+            "outcome": "success",
+            "cross": false,
+            "failAfterCommit": true
+          },
+          {
+            "kind": "insert",
+            "target": 3,
+            "slot": 0,
+            "text": "\"界界",
+            "rank": 3,
+            "outcome": "reject",
+            "cross": true,
+            "failAfterCommit": false
+          }
+        ],
+        "writeOrder": [
+          19,
+          5,
+          1
+        ],
+        "deliveryOrder": [
+          18,
+          1,
+          17
+        ]
+      }
+    },
+    {
+      "program": {
+        "tables": [
+          {
+            "name": "relation_0_7",
+            "columns": [
+              {
+                "type": "boolean",
+                "nullable": false,
+                "name": "field_0_boolean"
+              }
+            ],
+            "parent": null
+          },
+          {
+            "name": "relation_1_0",
+            "columns": [
+              {
+                "type": "integer",
+                "nullable": true,
+                "name": "field_0_integer"
+              }
+            ],
+            "parent": 0
+          }
+        ],
+        "queries": [
+          {
+            "table": 0,
+            "predicate": null
+          },
+          {
+            "table": 1,
+            "predicate": null
+          },
+          {
+            "table": 0,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": false
+            }
+          },
+          {
+            "table": 0,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": true
+            }
+          },
+          {
+            "table": 1,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": false
+            }
+          },
+          {
+            "table": 1,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": true
+            }
+          }
+        ],
+        "scope": "bob",
+        "orders": [
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ]
+        ],
+        "initial": [
+          {
+            "table": "relation_0_7",
+            "id": "alice-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_boolean": true
+          },
+          {
+            "table": "relation_0_7",
+            "id": "alice-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "alice",
+            "field_0_boolean": false
+          },
+          {
+            "table": "relation_0_7",
+            "id": "alice-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_boolean": true
+          },
+          {
+            "table": "relation_0_7",
+            "id": "bob-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_boolean": true
+          },
+          {
+            "table": "relation_0_7",
+            "id": "bob-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "bob",
+            "field_0_boolean": false
+          },
+          {
+            "table": "relation_0_7",
+            "id": "bob-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_boolean": true
+          },
+          {
+            "table": "relation_1_0",
+            "id": "alice-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_integer": null,
+            "parentId": "alice-0"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "alice-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "alice",
+            "field_0_integer": -1,
+            "parentId": "alice-1"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "alice-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_integer": 2,
+            "parentId": "alice-2"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "bob-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_integer": null,
+            "parentId": "bob-0"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "bob-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "bob",
+            "field_0_integer": -1,
+            "parentId": "bob-1"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "bob-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_integer": 2,
+            "parentId": "bob-2"
+          }
+        ],
+        "nested": true
+      },
+      "sequence": {
+        "steps": [
+          {
+            "kind": "delete",
+            "target": 4,
+            "slot": 2,
+            "text": "é\" 界",
+            "rank": 1,
+            "outcome": "reject",
+            "cross": true,
+            "failAfterCommit": false
+          },
+          {
+            "kind": "edit",
+            "target": 1,
+            "slot": 1,
+            "text": "aa\"é  aa",
+            "rank": 5,
+            "outcome": "reject",
+            "cross": true,
+            "failAfterCommit": true
+          },
+          {
+            "kind": "delete",
+            "target": 2,
+            "slot": 0,
+            "text": "aé",
+            "rank": 0,
+            "outcome": "success",
+            "cross": false,
+            "failAfterCommit": false
+          }
+        ],
+        "writeOrder": [
+          18,
+          0,
+          1
+        ],
+        "deliveryOrder": [
+          17,
+          10,
+          12
+        ]
+      }
+    },
+    {
+      "program": {
+        "tables": [
+          {
+            "name": "relation_0_7",
+            "columns": [
+              {
+                "type": "boolean",
+                "nullable": false,
+                "name": "field_0_boolean"
+              }
+            ],
+            "parent": null
+          },
+          {
+            "name": "relation_1_0",
+            "columns": [
+              {
+                "type": "integer",
+                "nullable": true,
+                "name": "field_0_integer"
+              }
+            ],
+            "parent": 0
+          }
+        ],
+        "queries": [
+          {
+            "table": 0,
+            "predicate": null
+          },
+          {
+            "table": 1,
+            "predicate": null
+          },
+          {
+            "table": 0,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": false
+            }
+          },
+          {
+            "table": 0,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": true
+            }
+          },
+          {
+            "table": 1,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": false
+            }
+          },
+          {
+            "table": 1,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": true
+            }
+          }
+        ],
+        "scope": "bob",
+        "orders": [
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ]
+        ],
+        "initial": [
+          {
+            "table": "relation_0_7",
+            "id": "alice-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_boolean": true
+          },
+          {
+            "table": "relation_0_7",
+            "id": "alice-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "alice",
+            "field_0_boolean": false
+          },
+          {
+            "table": "relation_0_7",
+            "id": "alice-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_boolean": true
+          },
+          {
+            "table": "relation_0_7",
+            "id": "bob-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_boolean": true
+          },
+          {
+            "table": "relation_0_7",
+            "id": "bob-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "bob",
+            "field_0_boolean": false
+          },
+          {
+            "table": "relation_0_7",
+            "id": "bob-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_boolean": true
+          },
+          {
+            "table": "relation_1_0",
+            "id": "alice-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_integer": null,
+            "parentId": "alice-0"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "alice-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "alice",
+            "field_0_integer": -1,
+            "parentId": "alice-1"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "alice-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_integer": 2,
+            "parentId": "alice-2"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "bob-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_integer": null,
+            "parentId": "bob-0"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "bob-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "bob",
+            "field_0_integer": -1,
+            "parentId": "bob-1"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "bob-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_integer": 2,
+            "parentId": "bob-2"
+          }
+        ],
+        "nested": true
+      },
+      "sequence": {
+        "steps": [
+          {
+            "kind": "edit",
+            "target": 3,
+            "slot": 3,
+            "text": "a é界éa",
+            "rank": 1,
+            "outcome": "success",
+            "cross": false,
+            "failAfterCommit": false
+          },
+          {
+            "kind": "delete",
+            "target": 2,
+            "slot": 3,
+            "text": "  界 a",
+            "rank": 1,
+            "outcome": "reject",
+            "cross": false,
+            "failAfterCommit": false
+          },
+          {
+            "kind": "edit",
+            "target": 0,
+            "slot": 2,
+            "text": "\"\"\" ",
+            "rank": 5,
+            "outcome": "reject",
+            "cross": true,
+            "failAfterCommit": false
+          }
+        ],
+        "writeOrder": [
+          2,
+          16,
+          13
+        ],
+        "deliveryOrder": [
+          1,
+          7,
+          2
+        ]
+      }
+    },
+    {
+      "program": {
+        "tables": [
+          {
+            "name": "relation_0_7",
+            "columns": [
+              {
+                "type": "boolean",
+                "nullable": false,
+                "name": "field_0_boolean"
+              }
+            ],
+            "parent": null
+          },
+          {
+            "name": "relation_1_0",
+            "columns": [
+              {
+                "type": "integer",
+                "nullable": true,
+                "name": "field_0_integer"
+              }
+            ],
+            "parent": 0
+          }
+        ],
+        "queries": [
+          {
+            "table": 0,
+            "predicate": null
+          },
+          {
+            "table": 1,
+            "predicate": null
+          },
+          {
+            "table": 0,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": false
+            }
+          },
+          {
+            "table": 0,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": true
+            }
+          },
+          {
+            "table": 1,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": false
+            }
+          },
+          {
+            "table": 1,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": true
+            }
+          }
+        ],
+        "scope": "bob",
+        "orders": [
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ]
+        ],
+        "initial": [
+          {
+            "table": "relation_0_7",
+            "id": "alice-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_boolean": true
+          },
+          {
+            "table": "relation_0_7",
+            "id": "alice-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "alice",
+            "field_0_boolean": false
+          },
+          {
+            "table": "relation_0_7",
+            "id": "alice-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_boolean": true
+          },
+          {
+            "table": "relation_0_7",
+            "id": "bob-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_boolean": true
+          },
+          {
+            "table": "relation_0_7",
+            "id": "bob-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "bob",
+            "field_0_boolean": false
+          },
+          {
+            "table": "relation_0_7",
+            "id": "bob-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_boolean": true
+          },
+          {
+            "table": "relation_1_0",
+            "id": "alice-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_integer": null,
+            "parentId": "alice-0"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "alice-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "alice",
+            "field_0_integer": -1,
+            "parentId": "alice-1"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "alice-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_integer": 2,
+            "parentId": "alice-2"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "bob-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_integer": null,
+            "parentId": "bob-0"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "bob-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "bob",
+            "field_0_integer": -1,
+            "parentId": "bob-1"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "bob-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_integer": 2,
+            "parentId": "bob-2"
+          }
+        ],
+        "nested": true
+      },
+      "sequence": {
+        "steps": [
+          {
+            "kind": "delete",
+            "target": 3,
+            "slot": 1,
+            "text": "界界a\"\"a\"é",
+            "rank": 3,
+            "outcome": "success",
+            "cross": true,
+            "failAfterCommit": true
+          },
+          {
+            "kind": "complete",
+            "target": 1,
+            "slot": 1,
+            "text": " ",
+            "rank": 0,
+            "outcome": "success",
+            "cross": true,
+            "failAfterCommit": true
+          },
+          {
+            "kind": "edit",
+            "target": 2,
+            "slot": 1,
+            "text": "é",
+            "rank": 0,
+            "outcome": "success",
+            "cross": true,
+            "failAfterCommit": true
+          }
+        ],
+        "writeOrder": [
+          0,
+          4,
+          4
+        ],
+        "deliveryOrder": [
+          1,
+          1,
+          18
+        ]
+      }
+    },
+    {
+      "program": {
+        "tables": [
+          {
+            "name": "relation_0_5",
+            "columns": [
+              {
+                "type": "boolean",
+                "nullable": true,
+                "name": "field_0_boolean"
+              },
+              {
+                "type": "text",
+                "nullable": false,
+                "name": "field_1_text"
+              }
+            ],
+            "parent": null
+          },
+          {
+            "name": "relation_1_0",
+            "columns": [
+              {
+                "type": "integer",
+                "nullable": false,
+                "name": "field_0_integer"
+              },
+              {
+                "type": "boolean",
+                "nullable": false,
+                "name": "field_1_boolean"
+              },
+              {
+                "type": "text",
+                "nullable": false,
+                "name": "field_2_text"
+              }
+            ],
+            "parent": 0
+          }
+        ],
+        "queries": [
+          {
+            "table": 0,
+            "predicate": null
+          },
+          {
+            "table": 1,
+            "predicate": null
+          },
+          {
+            "table": 0,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": false
+            }
+          },
+          {
+            "table": 0,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": true
+            }
+          },
+          {
+            "table": 1,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": false
+            }
+          },
+          {
+            "table": 1,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": true
+            }
+          }
+        ],
+        "scope": "alice",
+        "orders": [
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ]
+        ],
+        "initial": [
+          {
+            "table": "relation_0_5",
+            "id": "alice-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_boolean": null,
+            "field_1_text": "a"
+          },
+          {
+            "table": "relation_0_5",
+            "id": "alice-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "alice",
+            "field_0_boolean": false,
+            "field_1_text": "b"
+          },
+          {
+            "table": "relation_0_5",
+            "id": "alice-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_boolean": true,
+            "field_1_text": "é"
+          },
+          {
+            "table": "relation_0_5",
+            "id": "bob-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_boolean": null,
+            "field_1_text": "a"
+          },
+          {
+            "table": "relation_0_5",
+            "id": "bob-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "bob",
+            "field_0_boolean": false,
+            "field_1_text": "b"
+          },
+          {
+            "table": "relation_0_5",
+            "id": "bob-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_boolean": true,
+            "field_1_text": "é"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "alice-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_integer": 0,
+            "field_1_boolean": true,
+            "field_2_text": "a",
+            "parentId": "alice-0"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "alice-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "alice",
+            "field_0_integer": -1,
+            "field_1_boolean": false,
+            "field_2_text": "b",
+            "parentId": "alice-1"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "alice-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_integer": 2,
+            "field_1_boolean": true,
+            "field_2_text": "é",
+            "parentId": "alice-2"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "bob-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_integer": 0,
+            "field_1_boolean": true,
+            "field_2_text": "a",
+            "parentId": "bob-0"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "bob-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "bob",
+            "field_0_integer": -1,
+            "field_1_boolean": false,
+            "field_2_text": "b",
+            "parentId": "bob-1"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "bob-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_integer": 2,
+            "field_1_boolean": true,
+            "field_2_text": "é",
+            "parentId": "bob-2"
+          }
+        ],
+        "nested": false
+      },
+      "sequence": {
+        "steps": [
+          {
+            "kind": "insert",
+            "target": 1,
+            "slot": 3,
+            "text": "aé  éa界界\"",
+            "rank": 0,
+            "outcome": "reject",
+            "cross": true,
+            "failAfterCommit": false
+          },
+          {
+            "kind": "delete",
+            "target": 1,
+            "slot": 3,
+            "text": "",
+            "rank": 2,
+            "outcome": "success",
+            "cross": false,
+            "failAfterCommit": false
+          },
+          {
+            "kind": "complete",
+            "target": 1,
+            "slot": 1,
+            "text": " ",
+            "rank": 0,
+            "outcome": "reject",
+            "cross": false,
+            "failAfterCommit": false
+          }
+        ],
+        "writeOrder": [
+          2,
+          0,
+          16
+        ],
+        "deliveryOrder": [
+          20,
+          3,
+          2
+        ]
+      }
+    },
+    {
+      "program": {
+        "tables": [
+          {
+            "name": "relation_0_5",
+            "columns": [
+              {
+                "type": "boolean",
+                "nullable": true,
+                "name": "field_0_boolean"
+              },
+              {
+                "type": "text",
+                "nullable": false,
+                "name": "field_1_text"
+              }
+            ],
+            "parent": null
+          },
+          {
+            "name": "relation_1_0",
+            "columns": [
+              {
+                "type": "integer",
+                "nullable": false,
+                "name": "field_0_integer"
+              },
+              {
+                "type": "boolean",
+                "nullable": false,
+                "name": "field_1_boolean"
+              },
+              {
+                "type": "text",
+                "nullable": false,
+                "name": "field_2_text"
+              }
+            ],
+            "parent": 0
+          }
+        ],
+        "queries": [
+          {
+            "table": 0,
+            "predicate": null
+          },
+          {
+            "table": 1,
+            "predicate": null
+          },
+          {
+            "table": 0,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": false
+            }
+          },
+          {
+            "table": 0,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": true
+            }
+          },
+          {
+            "table": 1,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": false
+            }
+          },
+          {
+            "table": 1,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": true
+            }
+          }
+        ],
+        "scope": "alice",
+        "orders": [
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ]
+        ],
+        "initial": [
+          {
+            "table": "relation_0_5",
+            "id": "alice-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_boolean": null,
+            "field_1_text": "a"
+          },
+          {
+            "table": "relation_0_5",
+            "id": "alice-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "alice",
+            "field_0_boolean": false,
+            "field_1_text": "b"
+          },
+          {
+            "table": "relation_0_5",
+            "id": "alice-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_boolean": true,
+            "field_1_text": "é"
+          },
+          {
+            "table": "relation_0_5",
+            "id": "bob-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_boolean": null,
+            "field_1_text": "a"
+          },
+          {
+            "table": "relation_0_5",
+            "id": "bob-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "bob",
+            "field_0_boolean": false,
+            "field_1_text": "b"
+          },
+          {
+            "table": "relation_0_5",
+            "id": "bob-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_boolean": true,
+            "field_1_text": "é"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "alice-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_integer": 0,
+            "field_1_boolean": true,
+            "field_2_text": "a",
+            "parentId": "alice-0"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "alice-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "alice",
+            "field_0_integer": -1,
+            "field_1_boolean": false,
+            "field_2_text": "b",
+            "parentId": "alice-1"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "alice-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_integer": 2,
+            "field_1_boolean": true,
+            "field_2_text": "é",
+            "parentId": "alice-2"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "bob-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_integer": 0,
+            "field_1_boolean": true,
+            "field_2_text": "a",
+            "parentId": "bob-0"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "bob-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "bob",
+            "field_0_integer": -1,
+            "field_1_boolean": false,
+            "field_2_text": "b",
+            "parentId": "bob-1"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "bob-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_integer": 2,
+            "field_1_boolean": true,
+            "field_2_text": "é",
+            "parentId": "bob-2"
+          }
+        ],
+        "nested": false
+      },
+      "sequence": {
+        "steps": [
+          {
+            "kind": "edit",
+            "target": 2,
+            "slot": 3,
+            "text": "é",
+            "rank": 2,
+            "outcome": "success",
+            "cross": true,
+            "failAfterCommit": true
+          },
+          {
+            "kind": "edit",
+            "target": 2,
+            "slot": 2,
+            "text": "\"\" a\"界éa",
+            "rank": 0,
+            "outcome": "success",
+            "cross": true,
+            "failAfterCommit": true
+          },
+          {
+            "kind": "edit",
+            "target": 2,
+            "slot": 0,
+            "text": "éé",
+            "rank": 4,
+            "outcome": "success",
+            "cross": true,
+            "failAfterCommit": true
+          }
+        ],
+        "writeOrder": [
+          18,
+          19,
+          18
+        ],
+        "deliveryOrder": [
+          0,
+          0,
+          4
+        ]
+      }
+    },
+    {
+      "program": {
+        "tables": [
+          {
+            "name": "relation_0_5",
+            "columns": [
+              {
+                "type": "boolean",
+                "nullable": true,
+                "name": "field_0_boolean"
+              },
+              {
+                "type": "text",
+                "nullable": false,
+                "name": "field_1_text"
+              }
+            ],
+            "parent": null
+          },
+          {
+            "name": "relation_1_0",
+            "columns": [
+              {
+                "type": "integer",
+                "nullable": false,
+                "name": "field_0_integer"
+              },
+              {
+                "type": "boolean",
+                "nullable": false,
+                "name": "field_1_boolean"
+              },
+              {
+                "type": "text",
+                "nullable": false,
+                "name": "field_2_text"
+              }
+            ],
+            "parent": 0
+          }
+        ],
+        "queries": [
+          {
+            "table": 0,
+            "predicate": null
+          },
+          {
+            "table": 1,
+            "predicate": null
+          },
+          {
+            "table": 0,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": false
+            }
+          },
+          {
+            "table": 0,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": true
+            }
+          },
+          {
+            "table": 1,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": false
+            }
+          },
+          {
+            "table": 1,
+            "predicate": {
+              "op": "eq",
+              "column": "completed",
+              "value": true
+            }
+          }
+        ],
+        "scope": "alice",
+        "orders": [
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ],
+          [
+            "createdAt",
+            "id"
+          ]
+        ],
+        "initial": [
+          {
+            "table": "relation_0_5",
+            "id": "alice-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_boolean": null,
+            "field_1_text": "a"
+          },
+          {
+            "table": "relation_0_5",
+            "id": "alice-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "alice",
+            "field_0_boolean": false,
+            "field_1_text": "b"
+          },
+          {
+            "table": "relation_0_5",
+            "id": "alice-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_boolean": true,
+            "field_1_text": "é"
+          },
+          {
+            "table": "relation_0_5",
+            "id": "bob-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_boolean": null,
+            "field_1_text": "a"
+          },
+          {
+            "table": "relation_0_5",
+            "id": "bob-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "bob",
+            "field_0_boolean": false,
+            "field_1_text": "b"
+          },
+          {
+            "table": "relation_0_5",
+            "id": "bob-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_boolean": true,
+            "field_1_text": "é"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "alice-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_integer": 0,
+            "field_1_boolean": true,
+            "field_2_text": "a",
+            "parentId": "alice-0"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "alice-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "alice",
+            "field_0_integer": -1,
+            "field_1_boolean": false,
+            "field_2_text": "b",
+            "parentId": "alice-1"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "alice-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "alice",
+            "field_0_integer": 2,
+            "field_1_boolean": true,
+            "field_2_text": "é",
+            "parentId": "alice-2"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "bob-0",
+            "text": "row-0",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_integer": 0,
+            "field_1_boolean": true,
+            "field_2_text": "a",
+            "parentId": "bob-0"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "bob-1",
+            "text": "row-1",
+            "completed": true,
+            "createdAt": "2026-01-01T00:00:01.000Z",
+            "scope": "bob",
+            "field_0_integer": -1,
+            "field_1_boolean": false,
+            "field_2_text": "b",
+            "parentId": "bob-1"
+          },
+          {
+            "table": "relation_1_0",
+            "id": "bob-2",
+            "text": "row-2",
+            "completed": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "scope": "bob",
+            "field_0_integer": 2,
+            "field_1_boolean": true,
+            "field_2_text": "é",
+            "parentId": "bob-2"
+          }
+        ],
+        "nested": false
+      },
+      "sequence": {
+        "steps": [
+          {
+            "kind": "edit",
+            "target": 4,
+            "slot": 0,
+            "text": "\" \"éaa",
+            "rank": 1,
+            "outcome": "reject",
+            "cross": true,
+            "failAfterCommit": true
+          },
+          {
+            "kind": "insert",
+            "target": 1,
+            "slot": 3,
+            "text": "",
+            "rank": 4,
+            "outcome": "reject",
+            "cross": false,
+            "failAfterCommit": false
+          },
+          {
+            "kind": "insert",
+            "target": 4,
+            "slot": 1,
+            "text": "a ",
+            "rank": 4,
+            "outcome": "reject",
+            "cross": false,
+            "failAfterCommit": false
+          }
+        ],
+        "writeOrder": [
+          1,
+          12,
+          17
+        ],
+        "deliveryOrder": [
+          19,
+          11,
+          2
+        ]
+      }
+    }
+  ],
+  "property": {
+    "seed": 911034,
+    "path": null,
+    "runs": 3,
+    "shrinks": 0
+  },
+  "ok": true,
+  "coverage": [
+    {
+      "feature": "schema.multiple-tables",
+      "description": "Several independent relation identities",
+      "status": "tested",
+      "witnesses": [
+        "report.json#/successfulSequences/0",
+        "report.json#/successfulSequences/1",
+        "report.json#/successfulSequences/2",
+        "report.json#/successfulSequences/3",
+        "report.json#/successfulSequences/4",
+        "report.json#/successfulSequences/5",
+        "report.json#/successfulSequences/6",
+        "report.json#/successfulSequences/7",
+        "report.json#/successfulSequences/8"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "schema.foreign-key-set-null",
+      "description": "Server-only ON DELETE SET NULL effects",
+      "status": "tested",
+      "witnesses": [
+        "report.json#/successfulSequences/3",
+        "report.json#/successfulSequences/4",
+        "report.json#/successfulSequences/5",
+        "report.json#/successfulSequences/6",
+        "report.json#/successfulSequences/7",
+        "report.json#/successfulSequences/8"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "type.integer",
+      "description": "int4 values",
+      "status": "tested",
+      "witnesses": [
+        "report.json#/successfulSequences/0",
+        "report.json#/successfulSequences/1",
+        "report.json#/successfulSequences/2",
+        "report.json#/successfulSequences/3",
+        "report.json#/successfulSequences/4",
+        "report.json#/successfulSequences/5",
+        "report.json#/successfulSequences/6",
+        "report.json#/successfulSequences/7",
+        "report.json#/successfulSequences/8"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "type.text",
+      "description": "Text and Unicode values",
+      "status": "tested",
+      "witnesses": [
+        "report.json#/successfulSequences/0",
+        "report.json#/successfulSequences/1",
+        "report.json#/successfulSequences/2",
+        "report.json#/successfulSequences/6",
+        "report.json#/successfulSequences/7",
+        "report.json#/successfulSequences/8"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "type.boolean",
+      "description": "Boolean values",
+      "status": "tested",
+      "witnesses": [
+        "report.json#/successfulSequences/0",
+        "report.json#/successfulSequences/1",
+        "report.json#/successfulSequences/2",
+        "report.json#/successfulSequences/3",
+        "report.json#/successfulSequences/4",
+        "report.json#/successfulSequences/5",
+        "report.json#/successfulSequences/6",
+        "report.json#/successfulSequences/7",
+        "report.json#/successfulSequences/8"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "type.timestamp",
+      "description": "Timestamp transport and total createdAt/id order",
+      "status": "tested",
+      "witnesses": [
+        "report.json#/successfulSequences/0",
+        "report.json#/successfulSequences/1",
+        "report.json#/successfulSequences/2",
+        "report.json#/successfulSequences/3",
+        "report.json#/successfulSequences/4",
+        "report.json#/successfulSequences/5",
+        "report.json#/successfulSequences/6",
+        "report.json#/successfulSequences/7",
+        "report.json#/successfulSequences/8"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "schema.nullable",
+      "description": "Nullable generated scalar columns",
+      "status": "tested",
+      "witnesses": [
+        "report.json#/successfulSequences/0",
+        "report.json#/successfulSequences/1",
+        "report.json#/successfulSequences/2",
+        "report.json#/successfulSequences/3",
+        "report.json#/successfulSequences/4",
+        "report.json#/successfulSequences/5",
+        "report.json#/successfulSequences/6",
+        "report.json#/successfulSequences/7",
+        "report.json#/successfulSequences/8"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "schema.not-null",
+      "description": "NOT NULL generated scalar columns",
+      "status": "tested",
+      "witnesses": [
+        "report.json#/successfulSequences/3",
+        "report.json#/successfulSequences/4",
+        "report.json#/successfulSequences/5",
+        "report.json#/successfulSequences/6",
+        "report.json#/successfulSequences/7",
+        "report.json#/successfulSequences/8"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "predicate.eq",
+      "description": "Scalar equality",
+      "status": "tested",
+      "witnesses": [
+        "report.json#/successfulSequences/0",
+        "report.json#/successfulSequences/1",
+        "report.json#/successfulSequences/2",
+        "report.json#/successfulSequences/3",
+        "report.json#/successfulSequences/4",
+        "report.json#/successfulSequences/5",
+        "report.json#/successfulSequences/6",
+        "report.json#/successfulSequences/7",
+        "report.json#/successfulSequences/8"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "predicate.ne",
+      "description": "Scalar inequality",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.gt",
+      "description": "Integer greater-than",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.gte",
+      "description": "Integer greater-than-or-equal",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.lt",
+      "description": "Integer less-than",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.lte",
+      "description": "Integer less-than-or-equal",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.and",
+      "description": "Predicate conjunction",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.or",
+      "description": "Predicate disjunction",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.isNull",
+      "description": "SQL NULL membership",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "predicate.isNotNull",
+      "description": "SQL non-NULL membership",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "mutation.insert",
+      "description": "Insert",
+      "status": "tested",
+      "witnesses": [
+        "report.json#/successfulSequences/0",
+        "report.json#/successfulSequences/1",
+        "report.json#/successfulSequences/2",
+        "report.json#/successfulSequences/6",
+        "report.json#/successfulSequences/8"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "mutation.edit",
+      "description": "Column updates",
+      "status": "tested",
+      "witnesses": [
+        "report.json#/successfulSequences/1",
+        "report.json#/successfulSequences/2",
+        "report.json#/successfulSequences/3",
+        "report.json#/successfulSequences/4",
+        "report.json#/successfulSequences/5",
+        "report.json#/successfulSequences/7",
+        "report.json#/successfulSequences/8"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "mutation.complete",
+      "description": "Boolean updates",
+      "status": "tested",
+      "witnesses": [
+        "report.json#/successfulSequences/5",
+        "report.json#/successfulSequences/6"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "mutation.delete",
+      "description": "Delete",
+      "status": "tested",
+      "witnesses": [
+        "report.json#/successfulSequences/0",
+        "report.json#/successfulSequences/2",
+        "report.json#/successfulSequences/3",
+        "report.json#/successfulSequences/4",
+        "report.json#/successfulSequences/5",
+        "report.json#/successfulSequences/6"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "mutation.cross-table",
+      "description": "An opaque handler also changes another table",
+      "status": "tested",
+      "witnesses": [
+        "report.json#/successfulSequences/0",
+        "report.json#/successfulSequences/5",
+        "report.json#/successfulSequences/7"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "mutation.post-commit-error",
+      "description": "A handler errors after committed writes",
+      "status": "tested",
+      "witnesses": [
+        "report.json#/successfulSequences/1",
+        "report.json#/successfulSequences/2",
+        "report.json#/successfulSequences/5",
+        "report.json#/successfulSequences/7"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "mutation.rejected",
+      "description": "Rejected write restores optimistic state",
+      "status": "tested",
+      "witnesses": [
+        "report.json#/successfulSequences/0",
+        "report.json#/successfulSequences/1",
+        "report.json#/successfulSequences/2",
+        "report.json#/successfulSequences/3",
+        "report.json#/successfulSequences/4",
+        "report.json#/successfulSequences/6",
+        "report.json#/successfulSequences/8"
+      ],
+      "execution": "full-stack",
+      "optimism": "direct whole-row guesses; predicate propagation within one relation",
+      "affectedCollections": "conservative all retained",
+      "reconciliation": "full-result refresh",
+      "resultPatches": "not-tested",
+      "subsets": "deferred"
+    },
+    {
+      "feature": "mutation.foreign-key-conflict",
+      "description": "Concurrent parent deletion invalidates a child update",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.limit",
+      "description": "Finite result windows",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.join",
+      "description": "Joins and relationship projection",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.aggregate",
+      "description": "Grouping and aggregates",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.cte",
+      "description": "CTEs and recursive queries",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.window",
+      "description": "Window functions",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "query.set-operation",
+      "description": "UNION/INTERSECT/EXCEPT",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "type.numeric",
+      "description": "Exact numeric and bigint transport",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "type.json-array",
+      "description": "JSON and array expressions",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "schema.trigger",
+      "description": "User-defined trigger effects",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "effect.rewrite",
+      "description": "BEFORE UPDATE rewrites authored values",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "effect.suppress",
+      "description": "BEFORE UPDATE suppresses a row without an error",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "effect.reject",
+      "description": "Trigger rejects a statement and rolls back its changes",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "effect.fanout",
+      "description": "AFTER UPDATE changes all recipient rows in the caller scope",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "effect.transition",
+      "description": "Statement trigger reads NEW TABLE and changes another table",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "effect.deferred",
+      "description": "Constraint trigger runs at the implicit transaction commit",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "authority.external-writer",
+      "description": "External writers and replica visibility",
+      "status": "not-tested",
+      "witnesses": []
+    },
+    {
+      "feature": "demand.subset",
+      "description": "On-demand subset transport and refill",
+      "status": "not-tested",
+      "witnesses": []
+    }
+  ],
+  "productionClientArtifacts": 12
+}

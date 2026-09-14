@@ -1,0 +1,116 @@
+[
+  {
+    "id": "S1",
+    "path": "/Users/kylemathews/programs/kitchen-ai/.worktrees/codex-db-endpoints/src/endpoints/database.server.ts",
+    "sha256": "b9c76b82305e91380ed329e9dfe034bd1b8927eceaa42f114ed67ba0930823fb",
+    "coverage": "Entire requireUser: direct getSession then user/scope equality."
+  },
+  {
+    "id": "S2",
+    "path": "/Users/kylemathews/programs/kitchen-ai/.worktrees/codex-db-endpoints/src/endpoints/mutations.server.ts",
+    "sha256": "3c486608c690d2cacac0c007a19365f403c6a908ffcc61c3197d025ea240b05f",
+    "coverage": "Entire kitchenServices: direct getSession, scope equality, authenticated service construction."
+  },
+  {
+    "id": "S3",
+    "path": "/Users/kylemathews/programs/kitchen-ai/.worktrees/codex-db-endpoints/src/lib/auth.ts",
+    "sha256": "e3bb43536fcf1793c3aa497a7e05920763623f070388d92153a446f9f0cbe22f",
+    "coverage": "AST config keys and session subtree only; database adapter public setup. Secret/provider values excluded."
+  },
+  {
+    "id": "S4",
+    "path": "/Users/kylemathews/programs/kitchen-ai/node_modules/better-auth/dist/api/routes/session.mjs",
+    "sha256": "1751e7c2a86169f89e2964a9e35475c0a761a09fa2e8efbc16176af51bdc6a01",
+    "coverage": "Lines 1\u2013300: getSession paths and authoritative bypass helper."
+  },
+  {
+    "id": "S5",
+    "path": "/Users/kylemathews/programs/kitchen-ai/node_modules/better-auth/dist/db/internal-adapter.mjs",
+    "sha256": "ead6bf2c1a3358d030f142623fc2876f018adb207f58522abfba325ffb16e34d",
+    "coverage": "Lines 315\u2013490: findSession user join, updateSession and deleteSession hooks."
+  },
+  {
+    "id": "S6",
+    "path": "/Users/kylemathews/programs/kitchen-ai/node_modules/better-auth/dist/db/with-hooks.mjs",
+    "sha256": "1f386ad4f386b15d5e9bcd9ae53afef0a2cc93ca611886dee3f25b43eb9d855a",
+    "coverage": "Full module: before/after hooks; after-transaction queue scheduling. Queue implementation not examined."
+  },
+  {
+    "id": "S7",
+    "path": "/Users/kylemathews/programs/kitchen-ai/node_modules/better-auth/dist/context/create-context.mjs",
+    "sha256": "efa79252858c6545d5f165698bcc442a39b9ad7d1ad05d2aa79d15dcd9dfacc1",
+    "coverage": "Public session defaults, plugin assembly and hook configuration; not environment credentials."
+  },
+  {
+    "id": "S8",
+    "path": "/Users/kylemathews/programs/kitchen-ai/node_modules/better-auth/dist/api/dispatch.mjs",
+    "sha256": "478ece95424449d1931656c59f395ec8aaa1d1f5a00b83816c59aec43f3a99e8",
+    "coverage": "Full dispatch function 186\u2013275 and hook helpers 1\u201395: hooks and returnHeaders/asResponse behavior."
+  },
+  {
+    "id": "S9",
+    "path": "/Users/kylemathews/programs/kitchen-ai/node_modules/better-auth/dist/api/to-auth-endpoints.mjs",
+    "sha256": "ffd9ec062066f18a65071bc4f99eb6c1cd8b2f19617f94639e97560d23f517b7",
+    "coverage": "Full public API wrapper: dispatch and request context."
+  },
+  {
+    "id": "S10",
+    "path": "/Users/kylemathews/programs/kitchen-ai/.worktrees/codex-db-endpoints/src/endpoints/kitchen.endpoint.ts",
+    "sha256": "df1e8ff1ff24303b2b84d2ce90744178575f09dbb3e2bcf02017fb5f4cc05a84",
+    "coverage": "Eight query prefixes and mutation entry examples."
+  },
+  {
+    "id": "S11",
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/registry.server.ts",
+    "sha256": "b11b621be9349d0260750eb16a571acd8248136351e246d2404dd9ee058059d2",
+    "coverage": "Entire: admission is parse/identity; selective/revision skips bypass handler."
+  },
+  {
+    "id": "S12",
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/refresh.server.ts",
+    "sha256": "d8c3bdc7fade1d265a790f4d3e39d11d009dd0209bcbdb558960670f7889adc5",
+    "coverage": "Entire: mutation errors may have committed; retry reads; all-or-error refresh."
+  },
+  {
+    "id": "S13",
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/runtime.ts",
+    "sha256": "1c9924886ee269769b39d6049416bd09b16662bf4ef2c5e81a7fb0a492081bc3",
+    "coverage": "fail() and scoped endpoint setup: read errors and transaction settlement, no auth-specific purge."
+  },
+  {
+    "id": "S14",
+    "path": "/Users/kylemathews/programs/kitchen-ai/.worktrees/codex-db-endpoints/src/lib/collections.ts",
+    "sha256": "b5f02be2a47cd18d0f8765ff8b6825e53b4999c0320d375b336178de606d625f",
+    "coverage": "Entire: browser singleton per user, cleanup when changing user."
+  },
+  {
+    "id": "S15",
+    "path": "/Users/kylemathews/programs/kitchen-ai/.worktrees/codex-db-endpoints/src/db/auth-schema.ts",
+    "sha256": "a813430b5b6a1a36e8c96a1980b95d30a59ab5c96c8f9a5c9c64d7e2907d959e",
+    "coverage": "Table names and references only: users/sessions, cascade."
+  },
+  {
+    "id": "S16",
+    "path": "/Users/kylemathews/programs/kitchen-ai/node_modules/better-auth/dist/context/helpers.mjs",
+    "sha256": "fe94cb000f1fea64ab6cf5cbcecbf8b99261d3dcc7abde9d2b76a27522133c2c",
+    "coverage": "getInternalPlugins returns empty; runPluginInit adjacent hook assembly."
+  },
+  {
+    "id": "S17",
+    "path": "/Users/kylemathews/programs/kitchen-ai/node_modules/better-auth/package.json",
+    "sha256": "7e0bd8b3de4c5e5409fd7a0e2fa679657267fc88be67646ba943c75734519195",
+    "coverage": "Installed version 1.7.4."
+  },
+  {
+    "id": "S18",
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/field-trip-optimistic-coherence/auth-design/session-path-probe.mjs",
+    "sha256": "710cd9ce498acc972bac2583b171757ca174477c98578170f152ced7b8779265",
+    "coverage": "Full disposable public API probe, eight scenarios."
+  },
+  {
+    "id": "S19",
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/field-trip-optimistic-coherence/auth-design/session-path-results.json",
+    "sha256": "ed1146d1a329082543c31967471d97af2d26133b13031f67ea3049238e685a2e",
+    "coverage": "Full measured output; assertions passed."
+  }
+]

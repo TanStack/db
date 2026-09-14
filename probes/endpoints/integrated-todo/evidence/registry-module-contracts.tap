@@ -1,0 +1,29 @@
+✔ scalar queries retain relation identity and nullable predicate structure (19.734708ms)
+✔ unsupported SQL and untrusted operators remain explicit rejections (7.608709ms)
+✔ incompatible row projections on the same relation cannot share optimism (1.528292ms)
+✔ endpoint modules compile independently of the original filename (1.681125ms)
+✔ query parameters reach the server and instantiate client membership (1.679208ms)
+✔ registered query instances validate before a mutation starts (48.293625ms)
+✔ server registry discovers query modules absent from the current import graph (12.63875ms)
+✔ only declared scalar parameters enter the optimistic predicate (5.509042ms)
+✔ nested query modules resolve shared runtime and relation bindings (2.705208ms)
+✔ component declarations carry server order in priority order (89.054583ms)
+✔ sort columns must be selected (10.110708ms)
+✔ unsupported direction cannot silently lose client ordering (4.757208ms)
+✔ transformed responses cannot borrow intermediate query ordering (4.354459ms)
+✔ server handler cannot capture the bound client (4.245416ms)
+✔ server handler cannot capture component state (14.57475ms)
+✔ input validator cannot capture component state (4.255958ms)
+✔ optimistic callback stays within the component while RPCs move to module scope (10.394833ms)
+✔ a row predicate is carried as data without the server auth expression (7.982083ms)
+✔ unsupported query arguments fail before generating an incorrectly scoped request (4.540625ms)
+✔ same local names in separate lexical scopes have distinct stable identities (11.38775ms)
+✔ non-endpoint instrumentation does not change declaration identities (14.031958ms)
+ℹ tests 21
+ℹ suites 0
+ℹ pass 21
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 415.698083

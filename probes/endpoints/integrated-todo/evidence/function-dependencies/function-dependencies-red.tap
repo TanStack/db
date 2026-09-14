@@ -1,0 +1,123 @@
+TAP version 13
+# Subtest: compilation emits inspected read and write footprints, without catalog code
+ok 1 - compilation emits inspected read and write footprints, without catalog code
+  ---
+  duration_ms: 662.959708
+  ...
+# Subtest: absent connection configuration removes stale compilation evidence
+ok 2 - absent connection configuration removes stale compilation evidence
+  ---
+  duration_ms: 43.796959
+  ...
+# Subtest: follows aliased reexports, local helpers and transaction parameters
+not ok 3 - follows aliased reexports, local helpers and transaction parameters
+  ---
+  duration_ms: 424.363666
+  location: '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/function-dependencies.test.mjs:32:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    undefined !== 1
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 1
+  operator: 'strictEqual'
+  stack: |-
+    file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/function-dependencies.test.mjs:34:10
+    async fixture (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/function-dependencies.test.mjs:26:5)
+    async Test.run (node:internal/test_runner/test:932:9)
+    async Test.processPendingSubtests (node:internal/test_runner/test:629:7)
+  ...
+# Subtest: unions writes through branches and callbacks, including writes before failure
+not ok 4 - unions writes through branches and callbacks, including writes before failure
+  ---
+  duration_ms: 431.029167
+  location: '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/function-dependencies.test.mjs:39:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    undefined !== 2
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 2
+  operator: 'strictEqual'
+  stack: |-
+    file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/function-dependencies.test.mjs:41:10
+    async fixture (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/function-dependencies.test.mjs:26:5)
+    async Test.run (node:internal/test_runner/test:932:9)
+    async Test.processPendingSubtests (node:internal/test_runner/test:629:7)
+  ...
+# Subtest: follows returned service objects and query transforms
+not ok 5 - follows returned service objects and query transforms
+  ---
+  duration_ms: 365.226542
+  location: '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/function-dependencies.test.mjs:44:1'
+  failureType: 'testCodeFailure'
+  error: 'ENDPOINT_BOUND_UNSUPPORTED query input fields require params (empty query arguments only without params) at 1:193'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    fail (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/bound-transform.mjs:11:9)
+    VariableDeclarator (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/bound-transform.mjs:251:15)
+    NodePath._call (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+traverse@7.29.0/node_modules/@babel/traverse/lib/path/context.js:50:20)
+    NodePath.call (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+traverse@7.29.0/node_modules/@babel/traverse/lib/path/context.js:40:18)
+    NodePath.visit (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+traverse@7.29.0/node_modules/@babel/traverse/lib/path/context.js:87:31)
+    TraversalContext.visitQueue (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+traverse@7.29.0/node_modules/@babel/traverse/lib/context.js:96:16)
+    TraversalContext.visitMultiple (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+traverse@7.29.0/node_modules/@babel/traverse/lib/context.js:68:17)
+    TraversalContext.visit (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+traverse@7.29.0/node_modules/@babel/traverse/lib/context.js:117:19)
+    traverseNode (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+traverse@7.29.0/node_modules/@babel/traverse/lib/traverse-node.js:130:17)
+    NodePath.visit (/Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/@babel+traverse@7.29.0/node_modules/@babel/traverse/lib/path/context.js:93:52)
+  ...
+# Subtest: unknown effects, recursive calls and raw SQL cannot yield partial proofs
+ok 6 - unknown effects, recursive calls and raw SQL cannot yield partial proofs
+  ---
+  duration_ms: 384.467792
+  ...
+# Subtest: helper source changes invalidate endpoint versions
+not ok 7 - helper source changes invalidate endpoint versions
+  ---
+  duration_ms: 369.05175
+  location: '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/function-dependencies.test.mjs:58:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected "actual" to be strictly unequal to:
+    
+    'import {refreshRegisteredMutation as __boundRefresh} from "/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/function-dependencies-n1J9yu/src/registry.server.ts";\n' +
+      "import {createServerFn as __boundServerFn} from '@tanstack/react-start';\n" +
+      'import {bindQuery as __boundQuery,bindMutation as __boundMutation} from "./runtime";\n' +
+      "const __boundRpc0=__boundServerFn({method:'POST'}).inputValidator(z.object({scope:z.string().min(1),reads:z.array(z.object({id:z.string(),definition:z.string(),version:z.string(),params:z.unknown(),certificate:z.string().max(100).optional(),hasBaseline:z.boolean().optional(),optimistic:z.boolean().optional()}).strict()).max(100),input:z.object({value:z.number().int()})})).handler(async ({data})=>__boundRefresh(data.reads,(await import('virtual:endpoints-registry.server.ts')).registry,async()=>(async function(req,res){return res.json(await change(req.body))})({body:data.input,scope:data.scope,kind:'mutation',endpointSourceHash:'66b74dab58bbb65fb7b42224ce275449804d1ddcad422151215c9a212e57812d'},{json:value=>value}),{scope:data.scope},()=>null));\n" +
+      `import {z} from 'zod';import {endpoints} from './runtime';import {change} from './barrel.server';export function App(client){const {query,mutation}=endpoints(client);const action=__boundMutation(client,"bf22a3ad2a7a:App:action:mutation:0",__boundRpc0,function(){});return action}`
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: |-
+    import {refreshRegisteredMutation as __boundRefresh} from "/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/function-dependencies-n1J9yu/src/registry.server.ts";
+    import {createServerFn as __boundServerFn} from '@tanstack/react-start';
+    import {bindQuery as __boundQuery,bindMutation as __boundMutation} from "./runtime";
+    const __boundRpc0=__boundServerFn({method:'POST'}).inputValidator(z.object({scope:z.string().min(1),reads:z.array(z.object({id:z.string(),definition:z.string(),version:z.string(),params:z.unknown(),certificate:z.string().max(100).optional(),hasBaseline:z.boolean().optional(),optimistic:z.boolean().optional()}).strict()).max(100),input:z.object({value:z.number().int()})})).handler(async ({data})=>__boundRefresh(data.reads,(await import('virtual:endpoints-registry.server.ts')).registry,async()=>(async function(req,res){return res.json(await change(req.body))})({body:data.input,scope:data.scope,kind:'mutation',endpointSourceHash:'66b74dab58bbb65fb7b42224ce275449804d1ddcad422151215c9a212e57812d'},{json:value=>value}),{scope:data.scope},()=>null));
+    import {z} from 'zod';import {endpoints} from './runtime';import {change} from './barrel.server';export function App(client){const {query,mutation}=endpoints(client);const action=__boundMutation(client,"bf22a3ad2a7a:App:action:mutation:0",__boundRpc0,function(){});return action}
+  actual: |-
+    import {refreshRegisteredMutation as __boundRefresh} from "/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/function-dependencies-n1J9yu/src/registry.server.ts";
+    import {createServerFn as __boundServerFn} from '@tanstack/react-start';
+    import {bindQuery as __boundQuery,bindMutation as __boundMutation} from "./runtime";
+    const __boundRpc0=__boundServerFn({method:'POST'}).inputValidator(z.object({scope:z.string().min(1),reads:z.array(z.object({id:z.string(),definition:z.string(),version:z.string(),params:z.unknown(),certificate:z.string().max(100).optional(),hasBaseline:z.boolean().optional(),optimistic:z.boolean().optional()}).strict()).max(100),input:z.object({value:z.number().int()})})).handler(async ({data})=>__boundRefresh(data.reads,(await import('virtual:endpoints-registry.server.ts')).registry,async()=>(async function(req,res){return res.json(await change(req.body))})({body:data.input,scope:data.scope,kind:'mutation',endpointSourceHash:'66b74dab58bbb65fb7b42224ce275449804d1ddcad422151215c9a212e57812d'},{json:value=>value}),{scope:data.scope},()=>null));
+    import {z} from 'zod';import {endpoints} from './runtime';import {change} from './barrel.server';export function App(client){const {query,mutation}=endpoints(client);const action=__boundMutation(client,"bf22a3ad2a7a:App:action:mutation:0",__boundRpc0,function(){});return action}
+  operator: 'notStrictEqual'
+  stack: |-
+    file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/function-dependencies.test.mjs:61:10
+    async fixture (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/function-dependencies.test.mjs:26:5)
+    async Test.run (node:internal/test_runner/test:932:9)
+    async Test.processPendingSubtests (node:internal/test_runner/test:629:7)
+  ...
+1..7
+# tests 7
+# suites 0
+# pass 3
+# fail 4
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2904.041625

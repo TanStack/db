@@ -1,0 +1,47 @@
+{
+  "ok": true,
+  "seed": 9122602,
+  "scenarios": 5,
+  "sequences": 3,
+  "compilations": 8,
+  "operations": 71,
+  "authorityChecks": 181,
+  "resultReads": 94,
+  "skippedReads": 87,
+  "runtimeCatalogQueries": 0,
+  "evidence": {
+    "name": "endpoints.compiled-dependencies",
+    "cases": 8,
+    "witnesses": {
+      "[\"reference-baseline\",\"preload\",null]": 18,
+      "[\"optimistic-rows\",\"same-turn\",\"update\"]": 31,
+      "[\"settled-rows\",\"settled\",\"update\"]": 80,
+      "[\"optimistic-rows\",\"same-turn\",\"insert\"]": 25,
+      "[\"settled-rows\",\"settled\",\"insert\"]": 63,
+      "[\"optimistic-rows\",\"same-turn\",\"delete\"]": 15,
+      "[\"settled-rows\",\"settled\",\"delete\"]": 38
+    },
+    "faults": [],
+    "cleanupErrors": [],
+    "rejectedShrinks": [],
+    "generation": {
+      "seed": 9122602,
+      "path": null,
+      "runs": 5,
+      "shrinks": 0
+    },
+    "sources": {
+      "evidence.mjs": "8a7f32a5a13b13632bfac55fe216366e0d0e241928881ef0b8d2444ecf30d405",
+      "driver.mjs": "ce176d3c73dc50075650c0659219e0d4f7082d7a381de57a8ed21d050e61a3d8",
+      "program.mjs": "edbee062750f6e664878b8caad5a916dfdc44cf4ffafe0ff84e6b334e423395a",
+      "compiled-dependencies.mjs": "caf03fda60b9687c7f34dbaed9828116ac67dcdd6d45628586b7eb330452a247",
+      "dependencies.mjs": "686e5e1e833705cb780e6da04d23c403e0261f3cd92fcf404faff0cccacdf19f",
+      "concurrent.mjs": "f0a8469a6a2fda874678fa77f8b104c258aa3d5e195892e46a325cc87e4f0cb0",
+      "sql.mjs": "6224e6bf7378078c6bb8463b7074ac48a364b30f4a02c40dc612073ef28b9320",
+      "e2e.mjs": "3855eff505d20ee684aa5ed197cee962b73b3edf3f1da0fea21459e01d2f5f2e"
+    },
+    "node": "v24.5.0",
+    "fault": null
+  },
+  "outcome": "passed"
+}

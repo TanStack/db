@@ -1,0 +1,58 @@
+{
+  "postCommitHandlerFailure": {
+    "optimistic": [
+      "committed"
+    ],
+    "transaction": "failed",
+    "server": [
+      "committed"
+    ],
+    "client": [],
+    "totalReadCalls": 1,
+    "surfacedCommittedReadErrors": []
+  },
+  "duplicateIdentityRuntime": {
+    "sameHandle": true,
+    "first": [
+      {
+        "id": "active",
+        "text": "new",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "$synced": true,
+        "$origin": "remote",
+        "$key": "active",
+        "$collectionId": "collision:TodoApp:rows:alice"
+      }
+    ],
+    "second": [
+      {
+        "id": "active",
+        "text": "new",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "$synced": true,
+        "$origin": "remote",
+        "$key": "active",
+        "$collectionId": "collision:TodoApp:rows:alice"
+      }
+    ],
+    "expectedFirstKeys": [
+      "active"
+    ],
+    "expectedSecondKeys": [
+      "done"
+    ]
+  },
+  "unicodeOrder": {
+    "rpcOrder": [
+      "",
+      "𐀀"
+    ],
+    "collectionOrder": [
+      "𐀀",
+      ""
+    ]
+  },
+  "sourceExcludedInsertControl": "passed optimistic fanout and settlement"
+}

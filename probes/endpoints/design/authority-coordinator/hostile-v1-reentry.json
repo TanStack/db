@@ -1,0 +1,50 @@
+{
+  "rollbackEvents": [
+    [
+      2,
+      3
+    ],
+    [
+      2,
+      2
+    ]
+  ],
+  "emptyTransaction": {
+    "state": "completed",
+    "emptyRequests": 0
+  },
+  "evidence": "actual DB and Query adapter; outer context and nested fanout deferrals",
+  "events": [
+    {
+      "collection": "a",
+      "payloads": [
+        2
+      ],
+      "direct": [
+        2,
+        2
+      ]
+    },
+    {
+      "collection": "a",
+      "payloads": [
+        1
+      ],
+      "direct": [
+        2,
+        2
+      ]
+    },
+    {
+      "collection": "b",
+      "payloads": [
+        1,
+        2
+      ],
+      "direct": [
+        2,
+        2
+      ]
+    }
+  ]
+}

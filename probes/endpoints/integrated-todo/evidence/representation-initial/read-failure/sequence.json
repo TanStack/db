@@ -1,0 +1,70 @@
+{
+  "scenario": {
+    "program": {
+      "orders": [
+        [
+          "id",
+          "createdAt"
+        ]
+      ],
+      "scope": "bob",
+      "filters": [
+        true,
+        true,
+        false
+      ],
+      "retainWithoutSubscriber": true,
+      "canonicalize": true,
+      "initial": [
+        {
+          "id": "seed-0",
+          "text": " aéacé\" ",
+          "completed": true,
+          "createdAt": "2026-01-01T00:00:02.000Z",
+          "scope": "bob"
+        },
+        {
+          "id": "seed-1",
+          "text": "baba \"cc",
+          "completed": false,
+          "createdAt": "2026-01-01T00:00:01.000Z",
+          "scope": "bob"
+        }
+      ],
+      "unsubscribed": [
+        0
+      ]
+    },
+    "sequences": [
+      [
+        {
+          "kind": "delete",
+          "slot": 2,
+          "text": "cbcé\"\" ",
+          "rank": 2,
+          "target": 1,
+          "outcome": "read-failure",
+          "retryFailures": 1
+        },
+        {
+          "kind": "delete",
+          "slot": 3,
+          "text": "a",
+          "rank": 1,
+          "target": 2,
+          "outcome": "read-failure",
+          "retryFailures": 2
+        },
+        {
+          "kind": "edit",
+          "slot": 3,
+          "text": " cé",
+          "rank": 2,
+          "target": 0,
+          "outcome": "read-failure",
+          "retryFailures": 1
+        }
+      ]
+    ]
+  }
+}

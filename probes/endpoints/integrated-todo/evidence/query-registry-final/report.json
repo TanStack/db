@@ -1,0 +1,157 @@
+{
+  "ok": true,
+  "scope": "Compiled cross-module parameterized collections through real browser/server and independent PG",
+  "limits": [
+    "Two sibling endpoint modules; boolean filter instances.",
+    "String/integer input validation has focused contracts; no arbitrary nested/optional parameter grammar.",
+    "Scope authorization remains the existing Alice/Bob test fixture, not production authentication."
+  ],
+  "executed": {
+    "programsBuilt": 2,
+    "sequences": 2,
+    "operations": 12,
+    "checkpoints": 38,
+    "clientArtifacts": 8,
+    "transitions": {
+      "6 queries / edit / success": 4,
+      "6 queries / delete / success": 2,
+      "6 queries / insert / success": 2,
+      "6 queries / complete / reject": 2,
+      "6 queries / complete / success": 2
+    },
+    "wire": [
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 2620,
+        "responseBytes": 3163,
+        "elapsedMs": 162.60887500000172
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "delete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 2621,
+        "responseBytes": 2854,
+        "elapsedMs": 99.84304100000008
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "insert",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 2595,
+        "responseBytes": 3152,
+        "elapsedMs": 97.5919159999994
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 2611,
+        "responseBytes": 3147,
+        "elapsedMs": 115.38712499999929
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "complete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 2611,
+        "responseBytes": 3142,
+        "elapsedMs": 98.65754200000083
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "complete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 2595,
+        "responseBytes": 3165,
+        "elapsedMs": 98.72179099999994
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 2614,
+        "responseBytes": 3145,
+        "elapsedMs": 322.19650000000183
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "delete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 2615,
+        "responseBytes": 2840,
+        "elapsedMs": 99.02158300000156
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "insert",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 2591,
+        "responseBytes": 3138,
+        "elapsedMs": 98.97191699999894
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "edit",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 2603,
+        "responseBytes": 3133,
+        "elapsedMs": 115.19179200000144
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "complete",
+        "outcome": "reject",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 2605,
+        "responseBytes": 3128,
+        "elapsedMs": 132.65458300000319
+      },
+      {
+        "injectedDelayMs": 0,
+        "queries": 6,
+        "kind": "complete",
+        "outcome": "success",
+        "strategy": "inline",
+        "requests": 1,
+        "requestBytes": 2589,
+        "responseBytes": 3151,
+        "elapsedMs": 115.28883399999904
+      }
+    ]
+  }
+}

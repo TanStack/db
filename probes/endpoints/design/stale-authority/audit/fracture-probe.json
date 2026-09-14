@@ -1,0 +1,197 @@
+{
+  "evidence": "Constructed source-derived finite model; not actual Endpoints execution or independent range validation",
+  "histories": 34650,
+  "failures": {
+    "candidate": 0,
+    "arrival-wins": 10344,
+    "largest-invocation": 6708
+  },
+  "witnesses": {
+    "arrival-wins": {
+      "history": [
+        {
+          "op": 0,
+          "kind": "start"
+        },
+        {
+          "op": 0,
+          "kind": "commit"
+        },
+        {
+          "op": 0,
+          "kind": "observe"
+        },
+        {
+          "op": 0,
+          "kind": "deliver"
+        },
+        {
+          "op": 1,
+          "kind": "start"
+        },
+        {
+          "op": 1,
+          "kind": "commit"
+        },
+        {
+          "op": 1,
+          "kind": "observe"
+        },
+        {
+          "op": 2,
+          "kind": "start"
+        },
+        {
+          "op": 2,
+          "kind": "commit"
+        },
+        {
+          "op": 2,
+          "kind": "observe"
+        },
+        {
+          "op": 2,
+          "kind": "deliver"
+        },
+        {
+          "op": 1,
+          "kind": "deliver"
+        }
+      ],
+      "result": {
+        "regressed": true,
+        "converged": false,
+        "server": {
+          "revision": 3,
+          "value": "op2"
+        },
+        "baseline": {
+          "revision": 2,
+          "value": "op1"
+        },
+        "accepted": [
+          {
+            "why": "response 0",
+            "revision": 1,
+            "value": "op0"
+          },
+          {
+            "why": "response 2",
+            "revision": 3,
+            "value": "op2"
+          },
+          {
+            "why": "response 1",
+            "revision": 2,
+            "value": "op1"
+          }
+        ]
+      }
+    },
+    "largest-invocation": {
+      "history": [
+        {
+          "op": 0,
+          "kind": "start"
+        },
+        {
+          "op": 0,
+          "kind": "commit"
+        },
+        {
+          "op": 0,
+          "kind": "observe"
+        },
+        {
+          "op": 0,
+          "kind": "deliver"
+        },
+        {
+          "op": 1,
+          "kind": "start"
+        },
+        {
+          "op": 2,
+          "kind": "start"
+        },
+        {
+          "op": 2,
+          "kind": "commit"
+        },
+        {
+          "op": 2,
+          "kind": "observe"
+        },
+        {
+          "op": 1,
+          "kind": "commit"
+        },
+        {
+          "op": 1,
+          "kind": "observe"
+        },
+        {
+          "op": 1,
+          "kind": "deliver"
+        },
+        {
+          "op": 2,
+          "kind": "deliver"
+        }
+      ],
+      "result": {
+        "regressed": true,
+        "converged": false,
+        "server": {
+          "revision": 3,
+          "value": "op1"
+        },
+        "baseline": {
+          "revision": 2,
+          "value": "op2"
+        },
+        "accepted": [
+          {
+            "why": "invocation 1",
+            "revision": 1,
+            "value": "op0"
+          },
+          {
+            "why": "invocation 2",
+            "revision": 3,
+            "value": "op1"
+          },
+          {
+            "why": "invocation 3",
+            "revision": 2,
+            "value": "op2"
+          }
+        ]
+      }
+    }
+  },
+  "ordinaryRead": {
+    "tokenOnlyAdmits": true,
+    "coverageAdmits": false,
+    "classification": "counter-only implementation rejected by frozen coverage rule"
+  },
+  "continuousTraffic": {
+    "rounds": 100,
+    "acceptedQuietReads": 0,
+    "classification": "violates conditional progress premise; not an internal safety fracture"
+  },
+  "retirement": {
+    "trace": [
+      "B-guess",
+      "A-guess",
+      "B-server"
+    ],
+    "authorityThroughout": "B-server",
+    "classification": "visible publication obligation; atomic publication explicitly unresolved"
+  },
+  "limits": [
+    "Quiet reads in enumeration are immediate and globally coherent model observations",
+    "No unknown outcomes, GC, new-query support, query-adapter publication, reentrancy or actual DB overlays in enumeration",
+    "Separate hand traces cover selected boundaries only; no universal proof"
+  ]
+}

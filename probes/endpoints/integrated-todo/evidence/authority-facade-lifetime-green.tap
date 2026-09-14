@@ -1,0 +1,22 @@
+
+ RUN  v3.2.4 /Users/kylemathews/.codex/worktrees/e079/tanstack-db
+
+stderr | packages/db/tests/query/includes-collection-oracle.property.test.ts > Collection-valued includes oracle > fn.select rejects query values returned during include rematerialization
+[Live Query Error] Live query graph failed
+
+stderr | packages/db/tests/query/includes-collection-oracle.property.test.ts > Collection-valued includes oracle > rejects collapsed contributors that disagree by value, order, or outgoing route
+[Live Query Error] Live query graph failed
+
+stderr | packages/db/tests/query/includes-collection-oracle.property.test.ts > Collection-valued includes oracle > rejects collapsed contributors that disagree by value, order, or outgoing route
+[Live Query Error] Live query graph failed
+
+stderr | packages/db/tests/query/includes-collection-oracle.property.test.ts > Collection-valued includes oracle > rejects collapsed contributors that disagree by value, order, or outgoing route
+[Live Query Error] Live query graph failed
+
+ ✓ packages/db/tests/query/includes-collection-oracle.property.test.ts (28 tests) 680ms
+
+ Test Files  1 passed (1)
+      Tests  28 passed (28)
+   Start at  14:59:06
+   Duration  1.61s (transform 467ms, setup 0ms, collect 715ms, tests 680ms, environment 0ms, prepare 43ms)
+

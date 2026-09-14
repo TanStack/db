@@ -1,0 +1,34 @@
+
+ RUN  v3.2.4 /Users/kylemathews/.codex/worktrees/e079/tanstack-db
+
+ ❯ packages/query-db-collection/tests/authority-permit.test.ts (1 test | 1 failed) 13ms
+   × rejects obsolete observer data before rows or initial readiness publish 13ms
+     → expected 1 to be 2 // Object.is equality
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/query-db-collection/tests/authority-permit.test.ts > rejects obsolete observer data before rows or initial readiness publish
+AssertionError: expected 1 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ ❯ packages/query-db-collection/tests/authority-permit.test.ts:34:38
+     32|     await collection.utils.refetch({ throwOnError: true })
+     33|     await loading
+     34|     expect(collection.get(1)?.value).toBe(2)
+       |                                      ^
+     35|     expect(seen).toEqual([2])
+     36|   } finally { subscription.unsubscribe(); await collection.cleanup(); …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  14:54:45
+   Duration  851ms (transform 481ms, setup 0ms, collect 660ms, tests 13ms, environment 0ms, prepare 43ms)
+

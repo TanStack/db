@@ -1,0 +1,31 @@
+{
+  "scope": "one Todo table; sequential operation; one loaded query; nonempty coherent insert guess",
+  "observations": [
+    {
+      "case": "commit-then-handler-throw",
+      "result": "handler failed after its write committed",
+      "pgRows": [
+        {
+          "id": "a"
+        }
+      ],
+      "authoritativeReads": 0,
+      "interpretation": "The real server helper rejects without evaluating the retained read after an already committed write. Client rollback follows from runtime mutationFn rejection; not executed by this probe."
+    },
+    {
+      "case": "pre-write-rejection-control",
+      "pgRows": [],
+      "authoritativeReads": 0
+    },
+    {
+      "case": "successful-write-control",
+      "pgRows": [
+        {
+          "id": "b"
+        }
+      ],
+      "authoritativeReads": 1
+    }
+  ],
+  "status": "reproduced"
+}

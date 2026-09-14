@@ -1,0 +1,358 @@
+{
+  "program": {
+    "tables": [
+      {
+        "name": "relation_0_3",
+        "columns": [
+          {
+            "type": "text",
+            "nullable": false,
+            "name": "field_0_text"
+          },
+          {
+            "type": "boolean",
+            "nullable": true,
+            "name": "field_1_boolean"
+          },
+          {
+            "type": "text",
+            "nullable": false,
+            "name": "field_2_text"
+          }
+        ],
+        "parent": null
+      },
+      {
+        "name": "relation_1_0",
+        "columns": [
+          {
+            "type": "integer",
+            "nullable": true,
+            "name": "field_0_integer"
+          },
+          {
+            "type": "text",
+            "nullable": false,
+            "name": "field_1_text"
+          },
+          {
+            "type": "integer",
+            "nullable": true,
+            "name": "field_2_integer"
+          }
+        ],
+        "parent": 0
+      }
+    ],
+    "queries": [
+      {
+        "table": 0,
+        "predicate": null
+      },
+      {
+        "table": 0,
+        "predicate": {
+          "op": "or",
+          "args": [
+            {
+              "op": "ne",
+              "column": "field_0_text",
+              "value": "a"
+            },
+            {
+              "op": "isNull",
+              "column": "field_0_text"
+            }
+          ]
+        }
+      },
+      {
+        "table": 1,
+        "predicate": null
+      },
+      {
+        "table": 1,
+        "predicate": {
+          "op": "or",
+          "args": [
+            {
+              "op": "ne",
+              "column": "field_0_integer",
+              "value": 0
+            },
+            {
+              "op": "isNull",
+              "column": "field_0_integer"
+            }
+          ]
+        }
+      }
+    ],
+    "scope": "alice",
+    "orders": [
+      [
+        "createdAt",
+        "id"
+      ],
+      [
+        "id",
+        "createdAt"
+      ],
+      [
+        "createdAt",
+        "id"
+      ],
+      [
+        "id",
+        "createdAt"
+      ]
+    ],
+    "initial": [
+      {
+        "table": "relation_0_3",
+        "id": "alice-0",
+        "text": "row-0",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "alice",
+        "field_0_text": "a",
+        "field_1_boolean": null,
+        "field_2_text": "a"
+      },
+      {
+        "table": "relation_0_3",
+        "id": "alice-1",
+        "text": "row-1",
+        "completed": true,
+        "createdAt": "2026-01-01T00:00:01.000Z",
+        "scope": "alice",
+        "field_0_text": "b",
+        "field_1_boolean": false,
+        "field_2_text": "b"
+      },
+      {
+        "table": "relation_0_3",
+        "id": "alice-2",
+        "text": "row-2",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "alice",
+        "field_0_text": "é",
+        "field_1_boolean": true,
+        "field_2_text": "é"
+      },
+      {
+        "table": "relation_0_3",
+        "id": "bob-0",
+        "text": "row-0",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "bob",
+        "field_0_text": "a",
+        "field_1_boolean": null,
+        "field_2_text": "a"
+      },
+      {
+        "table": "relation_0_3",
+        "id": "bob-1",
+        "text": "row-1",
+        "completed": true,
+        "createdAt": "2026-01-01T00:00:01.000Z",
+        "scope": "bob",
+        "field_0_text": "b",
+        "field_1_boolean": false,
+        "field_2_text": "b"
+      },
+      {
+        "table": "relation_0_3",
+        "id": "bob-2",
+        "text": "row-2",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "bob",
+        "field_0_text": "é",
+        "field_1_boolean": true,
+        "field_2_text": "é"
+      },
+      {
+        "table": "relation_1_0",
+        "id": "alice-0",
+        "text": "row-0",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "alice",
+        "field_0_integer": null,
+        "field_1_text": "a",
+        "field_2_integer": null,
+        "parentId": "alice-0"
+      },
+      {
+        "table": "relation_1_0",
+        "id": "alice-1",
+        "text": "row-1",
+        "completed": true,
+        "createdAt": "2026-01-01T00:00:01.000Z",
+        "scope": "alice",
+        "field_0_integer": -1,
+        "field_1_text": "b",
+        "field_2_integer": -1,
+        "parentId": "alice-1"
+      },
+      {
+        "table": "relation_1_0",
+        "id": "alice-2",
+        "text": "row-2",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "alice",
+        "field_0_integer": 2,
+        "field_1_text": "é",
+        "field_2_integer": 2,
+        "parentId": "alice-2"
+      },
+      {
+        "table": "relation_1_0",
+        "id": "bob-0",
+        "text": "row-0",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "bob",
+        "field_0_integer": null,
+        "field_1_text": "a",
+        "field_2_integer": null,
+        "parentId": "bob-0"
+      },
+      {
+        "table": "relation_1_0",
+        "id": "bob-1",
+        "text": "row-1",
+        "completed": true,
+        "createdAt": "2026-01-01T00:00:01.000Z",
+        "scope": "bob",
+        "field_0_integer": -1,
+        "field_1_text": "b",
+        "field_2_integer": -1,
+        "parentId": "bob-1"
+      },
+      {
+        "table": "relation_1_0",
+        "id": "bob-2",
+        "text": "row-2",
+        "completed": false,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "scope": "bob",
+        "field_0_integer": 2,
+        "field_1_text": "é",
+        "field_2_integer": 2,
+        "parentId": "bob-2"
+      }
+    ],
+    "effect": "rewrite"
+  },
+  "sequences": [
+    [
+      {
+        "kind": "complete",
+        "target": 2,
+        "slot": 2,
+        "text": "é界",
+        "rank": 3,
+        "outcome": "success",
+        "cross": false,
+        "failAfterCommit": false
+      },
+      {
+        "kind": "complete",
+        "target": 1,
+        "slot": 2,
+        "text": "",
+        "rank": 1,
+        "outcome": "reject",
+        "cross": false,
+        "failAfterCommit": true
+      },
+      {
+        "kind": "edit",
+        "target": 0,
+        "slot": 1,
+        "text": "aaéa界 a",
+        "rank": 1,
+        "outcome": "reject",
+        "cross": false,
+        "failAfterCommit": true
+      },
+      {
+        "kind": "edit",
+        "target": 0,
+        "slot": 0,
+        "text": "a",
+        "rank": 0,
+        "outcome": "success",
+        "cross": false,
+        "failAfterCommit": false
+      },
+      {
+        "kind": "complete",
+        "target": 4,
+        "slot": 0,
+        "text": "éa界 é a\"",
+        "rank": 0,
+        "outcome": "success",
+        "cross": false,
+        "failAfterCommit": true
+      }
+    ],
+    [
+      {
+        "kind": "insert",
+        "target": 1,
+        "slot": 2,
+        "text": "界界界",
+        "rank": 4,
+        "outcome": "success",
+        "cross": false,
+        "failAfterCommit": true
+      },
+      {
+        "kind": "complete",
+        "target": 1,
+        "slot": 2,
+        "text": "aaa",
+        "rank": 2,
+        "outcome": "reject",
+        "cross": false,
+        "failAfterCommit": true
+      },
+      {
+        "kind": "complete",
+        "target": 0,
+        "slot": 3,
+        "text": "é\"界",
+        "rank": 0,
+        "outcome": "reject",
+        "cross": false,
+        "failAfterCommit": true
+      },
+      {
+        "kind": "edit",
+        "target": 0,
+        "slot": 1,
+        "text": "a a\"aa界",
+        "rank": 1,
+        "outcome": "success",
+        "cross": false,
+        "failAfterCommit": false
+      },
+      {
+        "kind": "delete",
+        "target": 1,
+        "slot": 1,
+        "text": "éé\"\"\"",
+        "rank": 3,
+        "outcome": "reject",
+        "cross": false,
+        "failAfterCommit": false
+      }
+    ]
+  ]
+}

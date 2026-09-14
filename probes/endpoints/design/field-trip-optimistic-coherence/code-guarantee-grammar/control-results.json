@@ -1,0 +1,55 @@
+{
+  "scope": "Compiler/schema controls only; not application auth execution or full-stack oracle",
+  "results": [
+    {
+      "id": "pure-helper",
+      "service": "import {db,a,b} from './database.server';export async function helper(){return db.select().from(a)}",
+      "dependencies": [
+        "[\"public\",\"a\"]"
+      ],
+      "reason": null,
+      "handlerBodyPreserved": true
+    },
+    {
+      "id": "opaque-prefix",
+      "service": "import {db,a,b} from './database.server';import {authorize} from 'opaque';export async function helper(){await authorize();return db.select().from(a)}",
+      "dependencies": null,
+      "reason": "External call: opaque.authorize",
+      "handlerBodyPreserved": true
+    },
+    {
+      "id": "opaque-suffix",
+      "service": "import {db,a,b} from './database.server';import {authorize} from 'opaque';export async function helper(){const rows=await db.select().from(a);await authorize();return rows}",
+      "dependencies": null,
+      "reason": "External call: opaque.authorize",
+      "handlerBodyPreserved": true
+    },
+    {
+      "id": "query-write",
+      "service": "import {db,a,b} from './database.server';export async function helper(){await db.update(b).set({value:1});return db.select().from(a)}",
+      "dependencies": null,
+      "reason": "Effectful query",
+      "handlerBodyPreserved": true
+    },
+    {
+      "id": "two-read-helper",
+      "service": "import {db,a,b} from './database.server';export async function helper(){await db.select().from(b);return db.select().from(a)}",
+      "dependencies": [
+        "[\"public\",\"a\"]",
+        "[\"public\",\"b\"]"
+      ],
+      "reason": null,
+      "handlerBodyPreserved": true
+    },
+    {
+      "id": "permission-named-pure-helper",
+      "service": "import {db,a,b} from './database.server';async function authorize(){return db.select().from(b)}export async function helper(){await authorize();return db.select().from(a)}",
+      "dependencies": [
+        "[\"public\",\"a\"]",
+        "[\"public\",\"b\"]"
+      ],
+      "reason": null,
+      "handlerBodyPreserved": true
+    }
+  ]
+}

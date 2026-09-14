@@ -1,0 +1,74 @@
+✔ overlapping actions use authority read after both handlers close (15.899792ms)
+✔ a held ordinary read cannot replace authority after its action retires (2.618041ms)
+✔ optimistic fanout publishes both collections before either subscriber runs (2.60625ms)
+✔ a collection created during a write joins authoritative coverage (1.663458ms)
+✔ reentrant actions preserve event order for every subscriber (2.474416ms)
+✔ local rollback publishes every recipient together and does not cancel remote coverage (2.766792ms)
+✔ a retired read cannot block initial coverage of the restarted collection (3.485333ms)
+✔ an unsent authored failure does not leave a remote obligation (1.484834ms)
+✔ a known read failure recovers without repeating its write (2.89825ms)
+✔ a later healthy response cannot discharge an unknown remote write (1.156333ms)
+✔ a new action invalidates an in-flight repair without waiting for its obsolete read (4.157542ms)
+✔ shared snapshots preserve extra columns and collection-local optimistic ownership (2.057ms)
+✔ malformed shared indexes reject before installing any authority (3.909125ms)
+✔ authority cannot silently omit a selected scalar column (0.7055ms)
+✔ parameterized collections have stable distinct identities and send every retained instance (2.518458ms)
+✔ registry admission rejection closes the operation and permits a later healthy mutation (0.858583ms)
+✖ incompatible cross-module projections reject before creating an optimistic recipient (0.888459ms)
+✔ authority is installed before a post-commit handler error retires the overlay (1.52ms)
+✔ client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs (1.290542ms)
+✔ malformed authority rejects before installing any collection snapshot (6.318458ms)
+✔ generated invalid snapshots cannot partly replace the confirmed baseline (115.611833ms)
+ℹ tests 21
+ℹ suites 0
+ℹ pass 20
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 181.293708
+
+✖ failing tests:
+
+test at ../../../../../../../../../private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-mh5KKq/runtime.mjs:54642:1
+✖ incompatible cross-module projections reject before creating an optimistic recipient (0.888459ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception.
+      at TestContext.<anonymous> (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-mh5KKq/runtime.mjs:54647:13)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: /projection/,
+    operator: 'throws'
+  }
+✖ actual collection runtime regressions against PostgreSQL order (964.333792ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1047.440708
+
+✖ failing tests:
+
+test at tests/runtime.test.mjs:13:1
+✖ actual collection runtime regressions against PostgreSQL order (964.333792ms)
+  Error: Command failed: /opt/homebrew/Cellar/node/24.5.0/bin/node /var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-mh5KKq/runtime.mjs ["a","é","","𐀀","􏿿"]
+      at genericNodeError (node:internal/errors:985:15)
+      at wrappedFn (node:internal/errors:539:14)
+      at checkExecSyncError (node:child_process:924:11)
+      at execFileSync (node:child_process:960:15)
+      at TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/runtime.test.mjs:35:9)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:332:3) {
+    status: 1,
+    signal: null,
+    output: [ null, "✔ overlapping actions use authority read after both handlers close (15.899792ms)\n✔ a held ordinary read cannot replace authority after its action retires (2.618041ms)\n✔ optimistic fanout publishes both collections before either subscriber runs (2.60625ms)\n✔ a collection created during a write joins authoritative coverage (1.663458ms)\n✔ reentrant actions preserve event order for every subscriber (2.474416ms)\n✔ local rollback publishes every recipient together and does not cancel remote coverage (2.766792ms)\n✔ a retired read cannot block initial coverage of the restarted collection (3.485333ms)\n✔ an unsent authored failure does not leave a remote obligation (1.484834ms)\n✔ a known read failure recovers without repeating its write (2.89825ms)\n✔ a later healthy response cannot discharge an unknown remote write (1.156333ms)\n✔ a new action invalidates an in-flight repair without waiting for its obsolete read (4.157542ms)\n✔ shared snapshots preserve extra columns and collection-local optimistic ownership (2.057ms)\n✔ malformed shared indexes reject before installing any authority (3.909125ms)\n✔ authority cannot silently omit a selected scalar column (0.7055ms)\n✔ parameterized collections have stable distinct identities and send every retained instance (2.518458ms)\n✔ registry admission rejection closes the operation and permits a later healthy mutation (0.858583ms)\n✖ incompatible cross-module projections reject before creating an optimistic recipient (0.888459ms)\n✔ authority is installed before a post-commit handler error retires the overlay (1.52ms)\n✔ client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs (1.290542ms)\n✔ malformed authority rejects before installing any collection snapshot (6.318458ms)\n✔ generated invalid snapshots cannot partly replace the confirmed baseline (115.611833ms)\nℹ tests 21\nℹ suites 0\nℹ pass 20\nℹ fail 1\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 181.293708\n\n✖ failing tests:\n\ntest at ../../../../../../../../../private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-mh5KKq/runtime.mjs:54642:1\n✖ incompatible cross-module projections reject before creating an optimistic recipient (0.888459ms)\n  AssertionError [ERR_ASSERTION]: Missing expected exception.\n      at TestContext.<anonymous> (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-mh5KKq/runtime.mjs:54647:13)\n      at async Test.run (node:internal/test_runner/test:1088:7)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: undefined,\n    expected: /projection/,\n    operator: 'throws'\n  }\n", '' ],
+    pid: 98804,
+    stdout: "✔ overlapping actions use authority read after both handlers close (15.899792ms)\n✔ a held ordinary read cannot replace authority after its action retires (2.618041ms)\n✔ optimistic fanout publishes both collections before either subscriber runs (2.60625ms)\n✔ a collection created during a write joins authoritative coverage (1.663458ms)\n✔ reentrant actions preserve event order for every subscriber (2.474416ms)\n✔ local rollback publishes every recipient together and does not cancel remote coverage (2.766792ms)\n✔ a retired read cannot block initial coverage of the restarted collection (3.485333ms)\n✔ an unsent authored failure does not leave a remote obligation (1.484834ms)\n✔ a known read failure recovers without repeating its write (2.89825ms)\n✔ a later healthy response cannot discharge an unknown remote write (1.156333ms)\n✔ a new action invalidates an in-flight repair without waiting for its obsolete read (4.157542ms)\n✔ shared snapshots preserve extra columns and collection-local optimistic ownership (2.057ms)\n✔ malformed shared indexes reject before installing any authority (3.909125ms)\n✔ authority cannot silently omit a selected scalar column (0.7055ms)\n✔ parameterized collections have stable distinct identities and send every retained instance (2.518458ms)\n✔ registry admission rejection closes the operation and permits a later healthy mutation (0.858583ms)\n✖ incompatible cross-module projections reject before creating an optimistic recipient (0.888459ms)\n✔ authority is installed before a post-commit handler error retires the overlay (1.52ms)\n✔ client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs (1.290542ms)\n✔ malformed authority rejects before installing any collection snapshot (6.318458ms)\n✔ generated invalid snapshots cannot partly replace the confirmed baseline (115.611833ms)\nℹ tests 21\nℹ suites 0\nℹ pass 20\nℹ fail 1\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 181.293708\n\n✖ failing tests:\n\ntest at ../../../../../../../../../private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-mh5KKq/runtime.mjs:54642:1\n✖ incompatible cross-module projections reject before creating an optimistic recipient (0.888459ms)\n  AssertionError [ERR_ASSERTION]: Missing expected exception.\n      at TestContext.<anonymous> (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-mh5KKq/runtime.mjs:54647:13)\n      at async Test.run (node:internal/test_runner/test:1088:7)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: undefined,\n    expected: /projection/,\n    operator: 'throws'\n  }\n",
+    stderr: ''
+  }

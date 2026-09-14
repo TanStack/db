@@ -1,0 +1,12 @@
+{
+  "analysisVersion": 1,
+  "frozenAt": "2026-09-11T18:32:49.442277+00:00",
+  "projectionStatus": "Analytical layers frozen before primary brief creation",
+  "files": {
+    "model.md": "9474d104413ec1c63d1d2200d0d601908b09fcb9952b7780f1eb47647bc64856",
+    "evidence.md": "ec2418a518aed005e5a2873a066256b2b1ba5e825471333b68b46f892502ecc5",
+    "process.md": "c6d089ba6614ce36fe16f15bf0ad523b71d0d06988574b64a74d2239b4a84e62",
+    "preservation.md": "5a1d9badb07d4254b9528bce8597164ba30720f6cd62ac62a433e88427307eb0",
+    "source-freeze.json": "779b870a9b9e34d5c9af482c34bc37a7d9cecabd06ff4a8648285346f39dbb17"
+  }
+}
