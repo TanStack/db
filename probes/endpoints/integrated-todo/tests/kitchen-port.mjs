@@ -244,20 +244,37 @@ try {
   await action('insertComment', {
     id: comment,
     recipe_id: recipe,
-    user_id: user,
+    user_id: other,
     made_it: true,
     rating: 4,
     comment: 'first',
-    created_at: now,
-    updated_at: now,
+    created_at: new Date(0),
+    updated_at: new Date(0),
   })
-  await action('saveComment', { id: comment, data: { comment: 'edited' } })
+  assert.equal(app.recipeCommentsCollection.get(comment).user_id, user)
+  assert.ok(app.recipeCommentsCollection.get(comment).created_at.getTime() > 0)
+  const commentCreatedAt = app.recipeCommentsCollection.get(comment).created_at
+  await action('saveComment', {
+    id: comment,
+    data: { comment: 'edited', user_id: other, created_at: new Date(0) },
+  })
+  assert.equal(app.recipeCommentsCollection.get(comment).user_id, user)
+  assert.deepEqual(
+    app.recipeCommentsCollection.get(comment).created_at,
+    commentCreatedAt,
+  )
   await action('changeTagAssignmentsAction', {
     target: { entity: 'recipe', entity_id: recipe },
-    new_tags: [{ id: tag, name: tag, user_id: user, created_at: now }],
-    links: [{ id: link, tag_id: tag, created_at: now }],
+    new_tags: [
+      { id: tag, name: `  ${tag}  `, user_id: other, created_at: new Date(0) },
+    ],
+    links: [{ id: link, tag_id: tag, created_at: new Date(0) }],
     removed_link_ids: [],
   })
+  assert.equal(app.tagsCollection.get(tag).name, tag)
+  assert.equal(app.tagsCollection.get(tag).user_id, user)
+  assert.ok(app.tagsCollection.get(tag).created_at.getTime() > 0)
+  assert.ok(app.recipeTagsCollection.get(link).created_at.getTime() > 0)
   loaded.setActor(other)
   await action('saveIngredient', { id: ingredient, data: { count: 99 } }, true)
   loaded.setActor(user)
