@@ -188,6 +188,63 @@ describe(`Query2 Compiler`, () => {
       })
     })
 
+    test(`implicit joined results expose their lexical aliases`, () => {
+      type Post = { id: number; userId: number; title: string }
+      const usersCollection = {
+        id: `users`,
+        config: { autoIndex: `off` },
+      } as CollectionImpl
+      const postsCollection = {
+        id: `posts`,
+        config: { autoIndex: `off` },
+      } as CollectionImpl
+
+      const resultKeys = (userAlias: string, postAlias: string) => {
+        const graph = new D2()
+        const usersInput = graph.newInput<[number, User]>()
+        const postsInput = graph.newInput<[number, Post]>()
+        const query: QueryIR = {
+          from: new CollectionRef(usersCollection, userAlias),
+          join: [
+            {
+              type: `inner`,
+              from: new CollectionRef(postsCollection, postAlias),
+              left: new PropRef([userAlias, `id`]),
+              right: new PropRef([postAlias, `userId`]),
+            },
+          ],
+        }
+        const { pipeline } = compileQuery(
+          query,
+          { [userAlias]: usersInput, [postAlias]: postsInput },
+          { users: usersCollection, posts: postsCollection },
+          {},
+          {},
+          new Set(),
+          {},
+          () => {},
+        )
+        const messages: Array<MultiSet<any>> = []
+        pipeline.pipe(output((message) => messages.push(message)))
+        graph.finalize()
+
+        usersInput.sendData(new MultiSet([[[1, sampleUsers[0]!], 1]]))
+        postsInput.sendData(
+          new MultiSet([[[10, { id: 10, userId: 1, title: `Hello` }], 1]]),
+        )
+        graph.run()
+
+        const result = messages
+          .flatMap((message) => message.getInner())
+          .map(([data]) => data[1][0])
+          .find((row) => row !== undefined)
+        return Object.keys(result).sort()
+      }
+
+      expect(resultKeys(`user`, `post`)).toEqual([`post`, `user`])
+      expect(resultKeys(`account`, `article`)).toEqual([`account`, `article`])
+    })
+
     test(`compiles a query with WHERE clause`, () => {
       const usersCollection = {
         id: `users`,

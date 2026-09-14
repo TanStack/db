@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import {
   CollectionInErrorStateError,
+  CollectionIsInErrorStateError,
   InvalidCollectionStatusTransitionError,
   SyncCleanupError,
 } from '../src/errors'
+import type { SyncConfig } from '../src/types'
 
 describe(`Collection Error Handling`, () => {
   let originalQueueMicrotask: typeof queueMicrotask
@@ -26,6 +28,107 @@ describe(`Collection Error Handling`, () => {
   })
 
   describe(`Cleanup Error Handling`, () => {
+    it.each([false, true])(
+      `finishes adapter resource cleanup after a failure, already released=%s`,
+      async (releaseBeforeThrow) => {
+        const resources = new Set<object>()
+        const failure = new Error(`adapter cleanup interrupted`)
+        let attempts = 0
+        const collection = createCollection<{ id: string }>({
+          getKey: (row) => row.id,
+          sync: {
+            sync: ({ markReady }) => {
+              const resource = {}
+              resources.add(resource)
+              markReady()
+              return () => {
+                attempts++
+                if (attempts === 1) {
+                  if (releaseBeforeThrow) resources.delete(resource)
+                  throw failure
+                }
+                resources.delete(resource)
+              }
+            },
+          },
+        })
+        collection.startSyncImmediate()
+        try {
+          expect(resources.size).toBe(1)
+          await collection.cleanup()
+          expect(collection.status).toBe(`cleaned-up`)
+          expect(resources.size).toBe(releaseBeforeThrow ? 0 : 1)
+          expect(mockQueueMicrotask).toHaveBeenCalledTimes(1)
+          expect(() => mockQueueMicrotask.mock.calls[0]![0]()).toThrow(
+            SyncCleanupError,
+          )
+
+          // The Collection's public status alone does not prove resource release.
+          await collection.cleanup()
+          expect(resources.size).toBe(0)
+          expect(attempts).toBe(2)
+          expect(mockQueueMicrotask).toHaveBeenCalledTimes(1)
+        } finally {
+          await collection.cleanup()
+        }
+      },
+    )
+
+    it.each([false, true])(
+      `retries failed cleanup only before replacement, restart after rejection=%s`,
+      async (restart) => {
+        const failure = new Error(`cleanup failed`)
+        const cleanups: Array<number> = []
+        let session = 0
+        const collection = createCollection<{ id: string }>({
+          id: `failed-cleanup-session-${restart}`,
+          getKey: ({ id }) => id,
+          sync: {
+            sync: ({ markReady }) => {
+              const currentSession = session++
+              markReady()
+              return () => {
+                cleanups.push(currentSession)
+                if (cleanups.length !== 1) return
+                if (restart) {
+                  void collection.cleanup()
+                  expect(() => collection.startSyncImmediate()).toThrow(
+                    `after cleanup() completes`,
+                  )
+                }
+                throw failure
+              }
+            },
+          },
+        })
+
+        collection.startSyncImmediate()
+        try {
+          await collection.cleanup()
+          expect(cleanups).toEqual([0])
+          expect(mockQueueMicrotask).toHaveBeenCalledTimes(1)
+          let reportedError: unknown
+          try {
+            mockQueueMicrotask.mock.calls[0]![0]()
+          } catch (error) {
+            reportedError = error
+          }
+          expect(reportedError).toBeInstanceOf(SyncCleanupError)
+          expect((reportedError as Error).cause).toBe(failure)
+
+          expect(session).toBe(1)
+          if (restart) collection.startSyncImmediate()
+          await collection.cleanup()
+          expect(cleanups).toEqual(restart ? [0, 1] : [0, 0])
+          await collection.cleanup()
+          expect(cleanups).toHaveLength(2)
+          expect(mockQueueMicrotask).toHaveBeenCalledTimes(1)
+        } finally {
+          await collection.cleanup()
+        }
+      },
+    )
+
     it(`should complete cleanup successfully even when sync cleanup function throws an Error`, async () => {
       const collection = createCollection<{ id: string; name: string }>({
         id: `error-test-collection`,
@@ -246,7 +349,186 @@ describe(`Collection Error Handling`, () => {
     })
   })
 
+  describe(`Sync Session Isolation`, () => {
+    it(`preserves an asynchronous sync error and removes its first-ready waiter`, async () => {
+      let markError: (error?: unknown) => void = () => {
+        throw new Error(`Sync has not started`)
+      }
+      const collection = createCollection<{ id: string }>({
+        id: `rejected-preload-waiter`,
+        getKey: (item) => item.id,
+        startSync: false,
+        sync: {
+          sync: (sync) => {
+            markError = sync.markError
+          },
+        },
+      })
+
+      const preload = collection.preload()
+      const stateWhenReady = collection.stateWhenReady()
+      const arrayWhenReady = collection.toArrayWhenReady()
+      expect(collection._lifecycle.onFirstReadyCallbacks).toHaveLength(1)
+
+      const syncError = new Error(`Asynchronous sync failed exactly`)
+      markError(syncError)
+      await expect(preload).rejects.toBe(syncError)
+      await expect(stateWhenReady).rejects.toBe(syncError)
+      await expect(arrayWhenReady).rejects.toBe(syncError)
+      await expect(collection.preload()).rejects.toBe(syncError)
+      expect(collection._lifecycle.onFirstReadyCallbacks).toHaveLength(0)
+
+      await collection.cleanup()
+    })
+
+    it(`uses the generic state error when asynchronous sync supplies no cause`, async () => {
+      let markError: (error?: unknown) => void = () => {
+        throw new Error(`Sync has not started`)
+      }
+      const collection = createCollection<{ id: string }>({
+        id: `generic-asynchronous-sync-error`,
+        getKey: (item) => item.id,
+        startSync: false,
+        sync: {
+          sync: (sync) => {
+            markError = sync.markError
+          },
+        },
+      })
+
+      const preload = collection.preload()
+      markError()
+
+      await expect(preload).rejects.toBeInstanceOf(
+        CollectionIsInErrorStateError,
+      )
+      await collection.cleanup()
+    })
+
+    it(`ignores an error callback retained after cleanup`, async () => {
+      let markError: () => void = () => {
+        throw new Error(`Sync has not started`)
+      }
+      const collection = createCollection<{ id: string }>({
+        id: `stale-error-after-cleanup`,
+        getKey: (item) => item.id,
+        startSync: false,
+        sync: {
+          sync: (sync) => {
+            markError = sync.markError
+          },
+        },
+      })
+      const preload = collection.preload()
+      const cancelled = expect(preload).rejects.toMatchObject({
+        name: `AbortError`,
+      })
+      await collection.cleanup()
+      await cancelled
+      markError()
+
+      expect(collection.status).toBe(`cleaned-up`)
+    })
+
+    it(`ignores an error callback retained by an earlier sync session`, async () => {
+      const sessions: Array<{
+        markError: () => void
+        markReady: () => void
+      }> = []
+      const collection = createCollection<{ id: string }>({
+        id: `stale-error-after-restart`,
+        getKey: (item) => item.id,
+        startSync: false,
+        sync: {
+          sync: ({ markError, markReady }) => {
+            sessions.push({ markError, markReady })
+          },
+        },
+      })
+
+      await collection.cleanup()
+      const preload = collection.preload()
+      expect(sessions).toHaveLength(1)
+      const first = sessions[0]!
+      const cancelled = expect(preload).rejects.toMatchObject({
+        name: `AbortError`,
+      })
+      await collection.cleanup()
+      await cancelled
+      const restartedPreload = collection.preload()
+      expect(sessions).toHaveLength(2)
+      const second = sessions[1]!
+
+      first.markError()
+      expect(collection.status).toBe(`loading`)
+
+      second.markReady()
+      await restartedPreload
+      expect(collection.status).toBe(`ready`)
+    })
+
+    it(`ignores transaction callbacks retained by an earlier sync session`, async () => {
+      type Item = { id: string }
+      type SyncMethods = Parameters<SyncConfig<Item>[`sync`]>[0]
+      const sessions: Array<SyncMethods> = []
+      const collection = createCollection<Item>({
+        id: `stale-transaction-after-restart`,
+        getKey: (item) => item.id,
+        startSync: false,
+        sync: {
+          sync: (sync) => {
+            sessions.push(sync)
+          },
+        },
+      })
+
+      const firstPreload = collection.preload()
+      const first = sessions[0]!
+      const cancelled = expect(firstPreload).rejects.toMatchObject({
+        name: `AbortError`,
+      })
+      await collection.cleanup()
+      await cancelled
+
+      const secondPreload = collection.preload()
+      const second = sessions[1]!
+      first.begin()
+      first.write({ type: `insert`, value: { id: `stale` } })
+      first.commit()
+      first.markReady()
+
+      expect(collection.status).toBe(`loading`)
+      expect(collection.get(`stale`)).toBeUndefined()
+
+      second.begin()
+      second.write({ type: `insert`, value: { id: `current` } })
+      second.commit()
+      second.markReady()
+      await secondPreload
+
+      expect(collection.status).toBe(`ready`)
+      expect(collection.get(`current`)).toMatchObject({ id: `current` })
+    })
+  })
+
   describe(`Operation Validation Errors`, () => {
+    it(`preserves a synchronous sync startup error`, async () => {
+      const startupError = new Error(`Sync initialization failed exactly`)
+      const collection = createCollection<{ id: string }>({
+        id: `exact-startup-error`,
+        getKey: (item) => item.id,
+        startSync: false,
+        sync: {
+          sync: () => {
+            throw startupError
+          },
+        },
+      })
+
+      await expect(collection.preload()).rejects.toBe(startupError)
+      expect(collection.status).toBe(`error`)
+    })
+
     it(`should throw helpful errors when trying to use operations on error status collection`, async () => {
       const collection = createCollection<{ id: string; name: string }>({
         id: `error-status-test`,
@@ -445,6 +727,9 @@ describe(`Collection Error Handling`, () => {
       ).not.toThrow()
       expect(() =>
         collectionImpl._lifecycle.validateStatusTransition(`error`, `idle`),
+      ).not.toThrow()
+      expect(() =>
+        collectionImpl._lifecycle.validateStatusTransition(`error`, `ready`),
       ).not.toThrow()
 
       // Valid transitions from cleaned-up (allow restart)

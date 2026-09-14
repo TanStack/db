@@ -433,6 +433,26 @@ export function localStorageCollectionOptions(
     return data ? new Blob([data]).size : 0
   }
 
+  const persistMutations = (
+    mutations: Array<PendingMutation<Record<string, unknown>>>,
+  ): void => {
+    const staged = new Map(lastKnownData)
+    for (const mutation of mutations) {
+      if (mutation.type === `delete`) staged.delete(mutation.key)
+      else
+        staged.set(mutation.key, {
+          versionKey: generateUuid(),
+          data: mutation.modified,
+        })
+    }
+    saveToStorage(staged)
+    // Sync and storage-event handling share this Map. Promote only after the
+    // write succeeds, so rejected mutations cannot contaminate a later save.
+    lastKnownData.clear()
+    for (const [key, value] of staged) lastKnownData.set(key, value)
+    sync.confirmOperationsSync(mutations)
+  }
+
   /*
    * Create wrapper handlers for direct persistence operations that perform actual storage operations
    * Wraps the user's onInsert handler to also save changes to localStorage
@@ -449,24 +469,7 @@ export function localStorageCollectionOptions(
       handlerResult = (await config.onInsert(params)) ?? {}
     }
 
-    // Always persist to storage
-    // Use lastKnownData (in-memory cache) instead of reading from storage
-    // Add new items with version keys
-    params.transaction.mutations.forEach((mutation) => {
-      // Use the engine's pre-computed key for consistency
-      const storedItem: StoredItem<any> = {
-        versionKey: generateUuid(),
-        data: mutation.modified,
-      }
-      lastKnownData.set(mutation.key, storedItem)
-    })
-
-    // Save to storage
-    saveToStorage(lastKnownData)
-
-    // Confirm mutations through sync interface (moves from optimistic to synced state)
-    // without reloading from storage
-    sync.confirmOperationsSync(params.transaction.mutations)
+    persistMutations(params.transaction.mutations)
 
     return handlerResult
   }
@@ -483,24 +486,7 @@ export function localStorageCollectionOptions(
       handlerResult = (await config.onUpdate(params)) ?? {}
     }
 
-    // Always persist to storage
-    // Use lastKnownData (in-memory cache) instead of reading from storage
-    // Update items with new version keys
-    params.transaction.mutations.forEach((mutation) => {
-      // Use the engine's pre-computed key for consistency
-      const storedItem: StoredItem<any> = {
-        versionKey: generateUuid(),
-        data: mutation.modified,
-      }
-      lastKnownData.set(mutation.key, storedItem)
-    })
-
-    // Save to storage
-    saveToStorage(lastKnownData)
-
-    // Confirm mutations through sync interface (moves from optimistic to synced state)
-    // without reloading from storage
-    sync.confirmOperationsSync(params.transaction.mutations)
+    persistMutations(params.transaction.mutations)
 
     return handlerResult
   }
@@ -512,20 +498,7 @@ export function localStorageCollectionOptions(
       handlerResult = (await config.onDelete(params)) ?? {}
     }
 
-    // Always persist to storage
-    // Use lastKnownData (in-memory cache) instead of reading from storage
-    // Remove items
-    params.transaction.mutations.forEach((mutation) => {
-      // Use the engine's pre-computed key for consistency
-      lastKnownData.delete(mutation.key)
-    })
-
-    // Save to storage
-    saveToStorage(lastKnownData)
-
-    // Confirm mutations through sync interface (moves from optimistic to synced state)
-    // without reloading from storage
-    sync.confirmOperationsSync(params.transaction.mutations)
+    persistMutations(params.transaction.mutations)
 
     return handlerResult
   }
@@ -579,33 +552,7 @@ export function localStorageCollectionOptions(
       }
     }
 
-    // Use lastKnownData (in-memory cache) instead of reading from storage
-    // Apply each mutation
-    for (const mutation of collectionMutations) {
-      // Use the engine's pre-computed key to avoid key derivation issues
-      switch (mutation.type) {
-        case `insert`:
-        case `update`: {
-          const storedItem: StoredItem<Record<string, unknown>> = {
-            versionKey: generateUuid(),
-            data: mutation.modified,
-          }
-          lastKnownData.set(mutation.key, storedItem)
-          break
-        }
-        case `delete`: {
-          lastKnownData.delete(mutation.key)
-          break
-        }
-      }
-    }
-
-    // Save to storage
-    saveToStorage(lastKnownData)
-
-    // Confirm the mutations in the collection to move them from optimistic to synced state
-    // This writes them through the sync interface to make them "synced" instead of "optimistic"
-    sync.confirmOperationsSync(collectionMutations)
+    persistMutations(collectionMutations)
   }
 
   const options = {

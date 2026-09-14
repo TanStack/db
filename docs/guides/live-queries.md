@@ -3,8 +3,6 @@ title: Live Queries
 id: live-queries
 ---
 
-# TanStack DB Live Queries
-
 TanStack DB provides a powerful, type-safe query system that allows you to fetch, filter, transform, and aggregate data from collections using a SQL-like fluent API. All queries are **live** by default, meaning they automatically update when the underlying data changes.
 
 The query system is built around an API similar to SQL query builders like Kysely or Drizzle where you chain methods together to compose your query. The query builder doesn't perform operations in the order of method calls - instead, it composes your query into an optimal incremental pipeline that gets compiled and executed efficiently. Each method returns a new query builder, allowing you to chain operations together.
@@ -454,11 +452,26 @@ function TodoList({ userId }: { userId: string }) {
 }
 ```
 
-The callback form can also return `undefined` or `null` to disable a query. This still uses derived identity, so captured structured values do not need a dependency array. When the query is disabled:
+The `query` callback can return `undefined` or `null` to disable a query. This still uses derived identity, so captured structured values do not need a dependency array:
+
+```tsx
+const { data, isEnabled, status } = useLiveQuery({
+  query: (q) => {
+    if (!userId) return undefined
+
+    return q
+      .from({ todos: todosCollection })
+      .where(({ todos }) => eq(todos.userId, userId))
+  },
+})
+```
+
+The top-level callback form supports the same behavior. When the query is disabled:
 - `status` is `'disabled'`
 - `data`, `state`, and `collection` are `undefined`
 - `isEnabled` is `false`
-- `isLoading`, `isReady`, `isIdle`, and `isError` are all `false`
+- `isReady` is `true`
+- `isLoading`, `isIdle`, `isError`, and `isCleanedUp` are all `false`
 
 ### Alternative Input Forms
 
@@ -1329,6 +1342,8 @@ const issuesWithProject = createLiveQueryCollection((q) =>
 The singleton vs. array result type is inferred from whether the wrapped query ends in `.findOne()` — no extra type annotation is required.
 
 Like `toArray()`, `materialize()` is only valid as a top-level value in `.select()` — it cannot be nested inside expression helpers such as `coalesce()` or `eq()`.
+
+Do not return child queries, `toArray()`, `materialize()`, or query expressions such as `eq()` and `caseWhen()` from `.fn.select()`. Functional select callbacks run after the compiler builds the query graph, so they cannot add query operations to it.
 
 ### Aggregates
 
@@ -2873,6 +2888,11 @@ The functional variant API provides an alternative to the standard API, offering
 > The functional variant API cannot be optimized by the query optimizer or use collection indexes. It is intended for use in rare cases where the standard API is not sufficient.
 
 ### Functional Select
+
+> [!WARNING]
+> `fn.select()` cannot consume Collection-valued includes, even when the callback ignores or passes through that field. This also applies to nested Collection-valued includes. Use `toArray()` or `materialize()` in the upstream `.select()` to provide inline child values. Keep these helpers outside the functional callback.
+
+Inline child updates rerun the functional projection. Arrays support JavaScript calculations, but do not expose Collection methods such as `get()`, `createIndex()`, or `subscribeChanges()`. To keep live child Collections, use standard `.select()`, or perform parent-only `.fn.select()` work before adding the child include.
 
 > [!WARNING]
 > `fn.select()` cannot be used with `groupBy()`. The `groupBy` operator needs to statically analyze the `select` clause to discover which aggregate functions to compute, which is not possible with an opaque JavaScript function. Use the standard `.select()` API for grouped queries.

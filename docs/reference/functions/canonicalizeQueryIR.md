@@ -9,7 +9,7 @@ title: canonicalizeQueryIR
 function canonicalizeQueryIR(query): StableIdentityValue;
 ```
 
-Defined in: [packages/db/src/query/ir-stable-identity.ts:50](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir-stable-identity.ts#L50)
+Defined in: [packages/db/src/query/ir-stable-identity.ts:165](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir-stable-identity.ts#L165)
 
 ## Parameters
 

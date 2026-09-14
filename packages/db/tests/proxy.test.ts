@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
 import {
   createArrayChangeProxy,
@@ -8,6 +8,32 @@ import {
 } from '../src/proxy'
 
 describe(`Proxy Library`, () => {
+  it.each([null, `true`])(
+    `tracks reads, writes and reverts without consulting DEBUG=%s`,
+    (debug) => {
+      const getItem = vi.fn(() => debug)
+      const log = vi.spyOn(console, `log`).mockImplementation(() => {})
+      vi.stubGlobal(`localStorage`, { getItem })
+      try {
+        const original = { value: 1, nested: { value: 2 } }
+        const { proxy, getChanges } = createChangeProxy(original)
+        expect(proxy.value).toBe(1)
+        proxy.value = 3
+        proxy.nested.value = 4
+        expect(getChanges()).toEqual({ value: 3, nested: { value: 4 } })
+        proxy.value = 1
+        proxy.nested.value = 2
+        expect(getChanges()).toEqual({})
+        expect(original).toEqual({ value: 1, nested: { value: 2 } })
+        expect(getItem).not.toHaveBeenCalled()
+        expect(log).not.toHaveBeenCalled()
+      } finally {
+        vi.unstubAllGlobals()
+        log.mockRestore()
+      }
+    },
+  )
+
   describe(`createChangeProxy`, () => {
     it(`should track changes to an object`, () => {
       const obj = { name: `John`, age: 30 }

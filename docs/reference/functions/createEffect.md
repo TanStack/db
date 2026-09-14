@@ -9,7 +9,7 @@ title: createEffect
 function createEffect<TRow, TKey>(config): Effect;
 ```
 
-Defined in: [packages/db/src/query/effect.ts:192](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L192)
+Defined in: [packages/db/src/query/effect.ts:194](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L194)
 
 Creates a reactive effect that fires handlers when rows enter, exit, or
 update within a query result. Effects process deltas only — they do not

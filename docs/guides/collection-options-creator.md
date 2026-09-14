@@ -2,8 +2,6 @@
 title: Creating a Collection Options Creator
 id: guide/collection-options-creator
 ---
-# Creating a Collection Options Creator
-
 A collection options creator is a factory function that generates configuration options for TanStack DB collections. It provides a standardized way to integrate different sync engines and data sources with TanStack DB's reactive sync-first architecture.
 
 ## Overview
@@ -73,10 +71,11 @@ The sync function must return a cleanup function for proper garbage collection:
 
 ```typescript
 const sync: SyncConfig<T>['sync'] = (params) => {
-  const { begin, write, commit, markReady, collection } = params
+  const { begin, write, commit, markReady, markError, collection } = params
   
   // 1. Initialize connection to your sync engine
   const connection = initializeConnection(config)
+  const initialSyncAbort = new AbortController()
   
   // 2. Set up real-time subscription FIRST (prevents race conditions)
   const eventBuffer: Array<any> = []
@@ -110,7 +109,7 @@ const sync: SyncConfig<T>['sync'] = (params) => {
   // 3. Perform initial data fetch
   async function initialSync() {
     try {
-      const data = await fetchInitialData()
+      const data = await fetchInitialData({ signal: initialSyncAbort.signal })
       
       begin() // Start a transaction
       
@@ -134,13 +133,16 @@ const sync: SyncConfig<T>['sync'] = (params) => {
         commit()
         eventBuffer.splice(0)
       }
-      
-    } catch (error) {
-      console.error('Initial sync failed:', error)
-      throw error
-    } finally {
-      // ALWAYS call markReady, even on error
+
+      // A complete initial snapshot is now available.
       markReady()
+    } catch (error) {
+      if (initialSyncAbort.signal.aborted) return
+      console.error('Initial sync failed:', error)
+      // No usable initial snapshot exists.
+      // Only initial startup owns collection readiness. A later refetch
+      // failure must keep the last ready snapshot usable.
+      if (collection.status === 'loading') markError(error)
     }
   }
 
@@ -148,6 +150,7 @@ const sync: SyncConfig<T>['sync'] = (params) => {
   
   // 4. Return cleanup function
   return () => {
+    initialSyncAbort.abort()
     connection.close()
     // Clean up any timers, intervals, or other resources
   }
@@ -163,7 +166,27 @@ The sync process follows this lifecycle:
 1. **begin()** - Start collecting changes
 2. **write()** - Add changes to the pending transaction (buffered until commit)
 3. **commit()** - Apply all changes atomically to the collection state
-4. **markReady()** - Signal that initial sync is complete
+4. **markReady()** - Signal that a usable initial or recovered snapshot exists
+5. **markError(error?)** - Signal that initial sync failed before producing a usable snapshot; pass the cause so readiness waits reject with it
+
+`commit()` returns `true` if its writes and events are already visible, or a
+promise that resolves when they become visible. A commit can wait behind a
+pending optimistic transaction; receiving a server response is not the same as
+applying its rows. A successful `loadSubset` must await or return every commit
+receipt that establishes its result. Do not use `begin({ immediate: true })` to
+bypass that ordering just to settle a load.
+
+For request-scoped writes, pass the request's abort signal to `commit(signal)`.
+Cancellation before application rejects the receipt with `AbortError`; aborting
+after application does not undo published rows. Do not attach one request's
+signal to a shared stream transaction.
+
+If an adapter supplies `unloadSubset`, release only the acquisition belonging to
+the supplied options. Release must be idempotent and non-throwing; the adapter
+owns any remote unsubscribe retry. A synchronous `loadSubset` throw must clean
+up resources acquired before it throws. Returning a promise transfers ownership
+even if that promise later rejects, so failed acquisitions must remain safe to
+release without affecting peers.
 
 **Race Condition Prevention:**
 Many sync engines start real-time subscriptions before the initial sync completes. Your implementation MUST deduplicate events that arrive via subscription that represent the same data as the initial sync. Consider:
@@ -900,8 +923,8 @@ const wrappedOnInsert = async (params) => {
 
 ## Best Practices
 
-1. **Always call markReady()** - This signals that the collection has initial data and is ready for use
-2. **Handle errors gracefully** - Call markReady() even on error to avoid blocking the app
+1. **Report initial sync status** - Call `markReady()` after a usable snapshot, or `markError(error)` if initial sync fails
+2. **Recover explicitly** - After an error, call `markReady()` only when a later sync has produced a usable snapshot
 3. **Clean up resources** - Return a cleanup function from sync to prevent memory leaks
 4. **Batch operations** - Use begin/commit to batch multiple changes for better performance
 5. **Race Conditions** - Start listeners before initial fetch and buffer events

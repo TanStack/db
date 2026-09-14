@@ -5,7 +5,7 @@ title: HavingRequiresGroupByError
 
 # Class: HavingRequiresGroupByError
 
-Defined in: [packages/db/src/errors.ts:493](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L493)
+Defined in: [packages/db/src/errors.ts:503](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L503)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: [packages/db/src/errors.ts:493](https://github.com/TanStack/db/blob/
 new HavingRequiresGroupByError(): HavingRequiresGroupByError;
 ```
 
-Defined in: [packages/db/src/errors.ts:494](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L494)
+Defined in: [packages/db/src/errors.ts:504](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L504)
 
 #### Returns
 

@@ -2,8 +2,6 @@
 title: Query Collection
 ---
 
-# Query Collection
-
 Query collections provide seamless integration between TanStack DB and TanStack Query, enabling automatic synchronization between your local database and remote data sources.
 
 ## Overview
@@ -138,33 +136,19 @@ function createProjectTodosDescriptor(
 }
 ```
 
-The scope is part of the descriptor identity. Memoize descriptors by a stable
-scope key; `DbClient` handles collection memoization and QueryClient ownership:
+The scope is part of the descriptor identity. `DbClient` resolves separately
+created descriptors with the same id to the same collection, so a React hook
+can create the descriptor from its current parameters:
 
 ```typescript
-type ProjectTodosDescriptor = ReturnType<typeof createProjectTodosDescriptor>
-
-const projectDescriptors = new Map<string, ProjectTodosDescriptor>()
-
-export function getProjectTodosDescriptor(
-  projectId: string,
-): ProjectTodosDescriptor {
-  let descriptor = projectDescriptors.get(projectId)
-  if (!descriptor) {
-    descriptor = createProjectTodosDescriptor(projectId)
-    projectDescriptors.set(projectId, descriptor)
-  }
-  return descriptor
+export function useProjectTodos(projectId: string) {
+  return useDbClient().collection(createProjectTodosDescriptor(projectId))
 }
-
-const todos = dbClient.collection(getProjectTodosDescriptor(projectId))
 ```
 
-For multiple scope values, use nested maps or a collision-safe stable key that
-includes every value. Do not create a descriptor on each render. In a
-long-lived app, user-selected scopes can make the map grow without bound; remove
-unused descriptors and call `await dbClient.cleanup()` when the client scope
-ends. Request-local maps can be discarded with the request.
+Only the first descriptor for an id is materialized. Include every scope value
+that changes the collection in both its descriptor id and Query key. Call
+`await dbClient.cleanup()` when the client scope ends.
 
 A business scope is separate from a **relational subset** requested by a live query. With `syncMode: "on-demand"`, `LoadSubsetOptions` describes predicates, ordering, limits, and offsets within one business-scoped collection. These options reach `queryFn` through `ctx.meta.loadSubsetOptions` and determine the subset Query keys. See [QueryFn and Predicate Push-Down](#queryfn-and-predicate-push-down).
 
@@ -424,6 +408,13 @@ Derived projections, such as `select: (response) => response.edges.map((edge) =>
 ## Extending Meta with Custom Properties
 
 The `meta` option allows you to pass additional metadata to your query function. By default, Query Collections automatically include `loadSubsetOptions` in the meta object, which contains filtering, sorting, and pagination options for on-demand queries.
+
+Treat `ctx.meta.loadSubsetOptions` and its nested request data as read-only.
+Do not edit expression nodes, ordering options, Dates, byte arrays, or membership
+arrays. Build separate API parameters instead. Core retains request data without
+cloning it; changing submitted data can make the request disagree with its cache
+key. To change a query constant, supply a new value rather than mutating the old
+one. Cancellation through the request's `AbortSignal` remains supported.
 
 ### Type-Safe Meta Access
 
@@ -757,21 +748,98 @@ const todosCollection = createCollection(
 todosCollection.insert({ text: "Buy milk", completed: false })
 ```
 
-### Example: Large Dataset Pagination
+### Server pagination with live queries
+
+`useLiveInfiniteQuery` in React, Vue, and Svelte grows a local ordered query
+window. It does not run TanStack Query's `InfiniteQueryObserver`. Query
+Collections use `QueryObserver`, so `queryFn` receives
+`meta.loadSubsetOptions`, not `pageParam`.
+
+The previously ignored `getNextPageParam` option has been removed. Delete it
+from your hook config; passing it at runtime now throws a clear error.
+`initialPageParam` labels result pages only. It does not set a remote offset
+or server cursor.
+
+For server loading, use `syncMode: 'on-demand'` and make `queryFn` fulfill the
+requested filter, order, offset, and limit. Use a deterministic total order
+(for example, a timestamp followed by a unique ID). The loader may request a
+prefix, a suffix, a tie group, or the full filtered source. A request is not
+necessarily one UI page: the hook fetches an extra row to determine
+`hasNextPage`. Returning one capped endpoint page can incorrectly make the
+query appear exhausted even when the server has more rows.
+
+#### Endpoints with fixed-size pages
+
+If your endpoint uses page numbers, drain enough server pages to fulfill each
+request. This example assumes a zero-based page API with a fixed size of 50.
+The endpoint must apply the supplied filters and sorts **before** pagination,
+keep a consistent ordered result while its pages are read, and return
+`nextPage: null` only when it has authoritatively exhausted that result.
+This example uses offset-based pagination. `api.listPosts` translates the full
+`where` expression and `orderBy` options into the endpoint's syntax, and rejects
+unsupported expressions. The separate `cursor` hints are deliberately unused;
+cursor-based adapters must handle those hints alongside `where`, not treat them
+as already included in it. See [QueryFn and Predicate Push-Down](#queryfn-and-predicate-push-down)
+for translation helpers. Do not drop predicates or filter after paginating:
+either changes the requested window.
 
 ```typescript
-// Load additional pages without refetching existing data
-const loadMoreTodos = async (page) => {
-  const newTodos = await api.getTodos({ page, limit: 50 })
+import { createCollection } from '@tanstack/db'
+import { queryCollectionOptions } from '@tanstack/query-db-collection'
 
-  // Add new items without affecting existing ones
-  todosCollection.utils.writeBatch(() => {
-    newTodos.forEach((todo) => {
-      todosCollection.utils.writeInsert(todo)
-    })
-  })
-}
+type Post = { id: number; createdAt: number; title: string }
+const serverPageSize = 50
+
+const postsCollection = createCollection(
+  queryCollectionOptions({
+    queryKey: ['posts'],
+    queryClient,
+    syncMode: 'on-demand',
+    getKey: (post: Post) => post.id,
+    queryFn: async (ctx): Promise<Array<Post>> => {
+      const { where, orderBy, offset = 0, limit } = ctx.meta?.loadSubsetOptions ?? {}
+      const skip = offset % serverPageSize
+      let page: number | null = Math.floor(offset / serverPageSize)
+      const gathered: Array<Post> = []
+
+      while (page !== null && (limit === undefined || gathered.length < skip + limit)) {
+        ctx.signal.throwIfAborted()
+        const response: { rows: Array<Post>; nextPage: number | null } =
+          await api.listPosts({
+            page,
+            pageSize: serverPageSize,
+            where,
+            orderBy,
+            signal: ctx.signal,
+          })
+        gathered.push(...response.rows)
+        page = response.nextPage
+      }
+
+      return gathered.slice(skip, limit === undefined ? undefined : skip + limit)
+    },
+  }),
+)
+
+// React example; the collection protocol is the same for Vue and Svelte.
+const { data, fetchNextPage, hasNextPage } = useLiveInfiniteQuery(
+  (q) => q.from({ post: postsCollection })
+    .orderBy(({ post }) => post.createdAt)
+    .orderBy(({ post }) => post.id),
+  { pageSize: 20 },
+)
 ```
+
+Reject failed requests instead of returning partial rows as success. An
+unlimited request must drain until the endpoint reports exhaustion. If the
+endpoint uses opaque cursors instead of page numbers, keep that cursor handling
+inside `queryFn` or its adapter; honoring a new offset may require starting at
+the beginning again. The hook does not maintain remote cursor history.
+
+Manually appending rows with `writeUpsert` is a separate, lower-level loading
+strategy. It does not make an eager `queryFn` incremental: a later successful
+refetch still replaces its complete state and can remove appended rows.
+`staleTime: Infinity` does not prevent explicit refetch or invalidation.
 
 ## Important Behaviors
 

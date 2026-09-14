@@ -8,6 +8,7 @@ import {
   createOptimisticAction,
   eq,
   gt,
+  toArray,
 } from '@tanstack/db'
 import {
   For,
@@ -2735,6 +2736,155 @@ describe(`Query Collections`, () => {
       })
 
       expect(rendered.result()).toBeUndefined()
+    })
+  })
+})
+
+describe(`includes subqueries`, () => {
+  type Project = {
+    id: number
+    name: string
+  }
+
+  type ProjectIssue = {
+    id: number
+    projectId: number
+    title: string
+  }
+
+  function includedIssues(value: unknown): Array<ProjectIssue> {
+    if (Array.isArray(value)) {
+      return value as Array<ProjectIssue>
+    }
+    if (
+      value !== null &&
+      typeof value === `object` &&
+      `toArray` in value &&
+      Array.isArray(value.toArray)
+    ) {
+      return value.toArray as Array<ProjectIssue>
+    }
+    return []
+  }
+
+  it(`updates a rendered array include after a child insert`, async () => {
+    const projects = createCollection(
+      mockSyncCollectionOptions<Project>({
+        id: `includes-solid-array-projects`,
+        getKey: (project) => project.id,
+        initialData: [
+          { id: 1, name: `Alpha` },
+          { id: 2, name: `Beta` },
+        ],
+      }),
+    )
+    const issues = createCollection(
+      mockSyncCollectionOptions<ProjectIssue>({
+        id: `includes-solid-array-issues`,
+        getKey: (issue) => issue.id,
+        initialData: [
+          { id: 10, projectId: 1, title: `Bug in Alpha` },
+          { id: 20, projectId: 2, title: `Bug in Beta` },
+        ],
+      }),
+    )
+
+    function TestComponent() {
+      const query = useLiveQuery((q) =>
+        q.from({ project: projects }).select(({ project }) => ({
+          id: project.id,
+          issueTitles: toArray(
+            q
+              .from({ issue: issues })
+              .where(({ issue }) => eq(issue.projectId, project.id))
+              .select(({ issue }) => ({
+                id: issue.id,
+                title: issue.title,
+              })),
+          ),
+        })),
+      )
+
+      return (
+        <For each={query()}>
+          {(project) => (
+            <p data-testid={`project-${project.id}`}>
+              {project.issueTitles.map((issue) => issue.title).join(`|`)}
+            </p>
+          )}
+        </For>
+      )
+    }
+
+    const rendered = render(() => <TestComponent />)
+    await waitFor(() => {
+      expect(rendered.getByTestId(`project-1`).textContent).toBe(`Bug in Alpha`)
+    })
+
+    issues.utils.begin()
+    issues.utils.write({
+      type: `insert`,
+      value: { id: 11, projectId: 1, title: `Feature for Alpha` },
+    })
+    issues.utils.commit()
+
+    await waitFor(() => {
+      expect(rendered.getByTestId(`project-1`).textContent).toBe(
+        `Bug in Alpha|Feature for Alpha`,
+      )
+    })
+  })
+
+  it(`populates an initially empty collection include after its first child insert`, async () => {
+    const projects = createCollection(
+      mockSyncCollectionOptions<Project>({
+        id: `includes-solid-empty-projects`,
+        getKey: (project) => project.id,
+        initialData: [{ id: 1, name: `Alpha` }],
+      }),
+    )
+    const issues = createCollection(
+      mockSyncCollectionOptions<ProjectIssue>({
+        id: `includes-solid-empty-issues`,
+        getKey: (issue) => issue.id,
+        initialData: [],
+      }),
+    )
+
+    const rendered = renderHook(() =>
+      useLiveQuery((q) =>
+        q.from({ project: projects }).select(({ project }) => ({
+          id: project.id,
+          issues: q
+            .from({ issue: issues })
+            .where(({ issue }) => eq(issue.projectId, project.id))
+            .select(({ issue }) => ({
+              id: issue.id,
+              projectId: issue.projectId,
+              title: issue.title,
+            })),
+        })),
+      ),
+    )
+
+    await waitFor(() => {
+      expect(rendered.result.isReady).toBe(true)
+      expect(includedIssues(rendered.result()[0]?.issues)).toEqual([])
+    })
+
+    issues.utils.begin()
+    issues.utils.write({
+      type: `insert`,
+      value: { id: 10, projectId: 1, title: `Bug in Alpha` },
+    })
+    issues.utils.commit()
+
+    await waitFor(() => {
+      expect(
+        includedIssues(rendered.result()[0]?.issues).map(
+          (issue) => issue.title,
+        ),
+      ).toEqual([`Bug in Alpha`])
     })
   })
 })

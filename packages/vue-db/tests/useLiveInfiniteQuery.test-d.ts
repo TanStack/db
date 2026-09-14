@@ -4,6 +4,7 @@ import { createCollection, createLiveQueryCollection } from '@tanstack/db'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import type { InitialQueryBuilder } from '@tanstack/db'
+import type { LiveInfiniteQueryConfig } from '../src/useLiveInfiniteQuery'
 
 type Post = {
   id: string
@@ -11,6 +12,12 @@ type Post = {
 }
 
 describe(`useLiveInfiniteQuery type assertions`, () => {
+  it(`does not advertise a server-page callback`, () => {
+    expectTypeOf<
+      Extract<keyof LiveInfiniteQueryConfig<Post>, `getNextPageParam`>
+    >().toEqualTypeOf<never>()
+  })
+
   it(`preserves query and pre-created collection result types`, () => {
     const posts = createCollection(
       mockSyncCollectionOptions<Post>({
@@ -34,7 +41,6 @@ describe(`useLiveInfiniteQuery type assertions`, () => {
     )
     const collectionResult = useLiveInfiniteQuery(shallowRef(livePosts), {
       pageSize: 5,
-      getNextPageParam: (lastPage) => lastPage[0]?.createdAt,
     })
 
     expectTypeOf(collectionResult.data.value[0]!.id).toEqualTypeOf<string>()

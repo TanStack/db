@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/db-ivm",
-  "version": "0.1.19",
+  "version": "0.1.20",
   "description": "Incremental View Maintenance for TanStack DB based on Differential Dataflow",
   "author": "Sam Willis",
   "license": "MIT",
@@ -22,7 +22,8 @@
     "build": "vite build",
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
-    "test": "vitest --run"
+    "test": "vitest --run",
+    "bench:hash": "vitest bench --run tests/hash.bench.ts --coverage.enabled=false"
   },
   "type": "module",
   "main": "dist/cjs/index.cjs",

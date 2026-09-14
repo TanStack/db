@@ -1,4 +1,4 @@
-import { MultiSet, serializeValue } from '@tanstack/db-ivm'
+import { MultiSet } from '@tanstack/db-ivm'
 import { UnsupportedRootScalarSelectError } from '../../errors.js'
 import { normalizeOrderByPaths } from '../compiler/expressions.js'
 import { buildQuery, getQueryIR } from '../builder/index.js'
@@ -9,7 +9,6 @@ import type { ChangeMessage } from '../../types.js'
 import type { InitialQueryBuilder, QueryBuilder } from '../builder/index.js'
 import type { Context } from '../builder/types.js'
 import type { OrderBy, QueryIR } from '../ir.js'
-import type { OrderByOptimizationInfo } from '../compiler/order-by.js'
 
 /**
  * Helper function to extract collections from a compiled query.
@@ -139,71 +138,35 @@ export function* splitUpdates<
   }
 }
 
-/**
- * Filter changes to prevent duplicate inserts to a D2 pipeline.
- * Maintains D2 multiplicity at 1 for visible items so that deletes
- * properly reduce multiplicity to 0.
- *
- * Mutates `sentKeys` in place: adds keys on insert, removes on delete.
- */
-export function filterDuplicateInserts(
-  changes: Array<ChangeMessage<any, string | number>>,
-  sentKeys: Set<string | number>,
-): Array<ChangeMessage<any, string | number>> {
-  const filtered: Array<ChangeMessage<any, string | number>> = []
+/** Keep each source key at one exact D2 contribution. */
+export function reconcileChangesForD2<
+  T extends object,
+  TKey extends string | number,
+>(
+  changes: Array<ChangeMessage<T, TKey>>,
+  sentRows: Map<TKey, T>,
+): Array<ChangeMessage<T, TKey>> {
+  const reconciled: Array<ChangeMessage<T, TKey>> = []
   for (const change of changes) {
+    const previousValue = sentRows.get(change.key)
     if (change.type === `insert`) {
-      if (sentKeys.has(change.key)) {
-        continue // Skip duplicate
-      }
-      sentKeys.add(change.key)
+      if (previousValue !== undefined) continue
+      sentRows.set(change.key, change.value)
+      reconciled.push(change)
     } else if (change.type === `delete`) {
-      sentKeys.delete(change.key)
-    }
-    filtered.push(change)
-  }
-  return filtered
-}
-
-/**
- * Track the biggest value seen in a stream of changes, used for cursor-based
- * pagination in ordered subscriptions. Returns whether the load request key
- * should be reset (allowing another load).
- *
- * @param changes   - changes to process (deletes are skipped)
- * @param current   - the current biggest value (or undefined if none)
- * @param sentKeys  - set of keys already sent to D2 (for new-key detection)
- * @param comparator - orderBy comparator
- * @returns `{ biggest, shouldResetLoadKey }` — the new biggest value and
- *          whether the caller should clear its last-load-request-key
- */
-export function trackBiggestSentValue(
-  changes: Array<ChangeMessage<any, string | number>>,
-  current: unknown | undefined,
-  sentKeys: Set<string | number>,
-  comparator: (a: any, b: any) => number,
-): { biggest: unknown; shouldResetLoadKey: boolean } {
-  let biggest = current
-  let shouldResetLoadKey = false
-
-  for (const change of changes) {
-    if (change.type === `delete`) continue
-
-    const isNewKey = !sentKeys.has(change.key)
-
-    if (biggest === undefined) {
-      biggest = change.value
-      shouldResetLoadKey = true
-    } else if (comparator(biggest, change.value) < 0) {
-      biggest = change.value
-      shouldResetLoadKey = true
-    } else if (isNewKey) {
-      // New key at same sort position — allow another load if needed
-      shouldResetLoadKey = true
+      if (previousValue === undefined) continue
+      sentRows.delete(change.key)
+      reconciled.push({ ...change, value: previousValue })
+    } else {
+      sentRows.set(change.key, change.value)
+      reconciled.push(
+        previousValue === undefined
+          ? { type: `insert`, key: change.key, value: change.value }
+          : { ...change, previousValue },
+      )
     }
   }
-
-  return { biggest, shouldResetLoadKey }
+  return reconciled
 }
 
 /**
@@ -238,59 +201,4 @@ export function computeSubscriptionOrderByHints(
     orderBy: canPassOrderBy ? normalizedOrderBy : undefined,
     limit: canPassOrderBy ? effectiveLimit : undefined,
   }
-}
-
-/**
- * Compute the cursor for loading the next batch of ordered data.
- * Extracts values from the biggest sent row and builds the `minValues`
- * array and a deduplication key.
- *
- * @returns `undefined` if the load should be skipped (duplicate request),
- *          otherwise `{ minValues, normalizedOrderBy, loadRequestKey }`.
- */
-export function computeOrderedLoadCursor(
-  orderByInfo: Pick<
-    OrderByOptimizationInfo,
-    'orderBy' | 'valueExtractorForRawRow' | 'offset'
-  >,
-  biggestSentRow: unknown | undefined,
-  lastLoadRequestKey: string | undefined,
-  alias: string,
-  limit: number,
-):
-  | {
-      minValues: Array<unknown> | undefined
-      normalizedOrderBy: OrderBy
-      loadRequestKey: string
-    }
-  | undefined {
-  const { orderBy, valueExtractorForRawRow, offset } = orderByInfo
-
-  // Extract all orderBy column values from the biggest sent row
-  // For single-column: returns single value, for multi-column: returns array
-  const extractedValues = biggestSentRow
-    ? valueExtractorForRawRow(biggestSentRow as Record<string, unknown>)
-    : undefined
-
-  // Normalize to array format for minValues
-  let minValues: Array<unknown> | undefined
-  if (extractedValues !== undefined) {
-    minValues = Array.isArray(extractedValues)
-      ? extractedValues
-      : [extractedValues]
-  }
-
-  // Deduplicate: skip if we already issued an identical load request
-  const loadRequestKey = serializeValue({
-    minValues: minValues ?? null,
-    offset,
-    limit,
-  })
-  if (lastLoadRequestKey === loadRequestKey) {
-    return undefined
-  }
-
-  const normalizedOrderBy = normalizeOrderByPaths(orderBy, alias)
-
-  return { minValues, normalizedOrderBy, loadRequestKey }
 }

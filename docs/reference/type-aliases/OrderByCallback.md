@@ -9,7 +9,7 @@ title: OrderByCallback
 type OrderByCallback<TContext> = (refs) => any;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:581](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L581)
+Defined in: [packages/db/src/query/builder/types.ts:576](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L576)
 
 OrderByCallback - Type for orderBy clause callback functions
 

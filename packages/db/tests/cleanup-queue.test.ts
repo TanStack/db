@@ -1,15 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CleanupQueue } from '../src/collection/cleanup-queue'
+import { resetCleanupQueue } from './utils'
 
 describe('CleanupQueue', () => {
   beforeEach(() => {
     vi.useFakeTimers()
-    CleanupQueue.resetInstance()
+    resetCleanupQueue()
   })
 
   afterEach(() => {
+    resetCleanupQueue()
+    vi.restoreAllMocks()
     vi.useRealTimers()
-    CleanupQueue.resetInstance()
   })
 
   it('batches setTimeout creations across multiple synchronous schedules', async () => {
@@ -57,6 +59,8 @@ describe('CleanupQueue', () => {
     await Promise.resolve()
 
     queue.cancel('key1')
+
+    expect(vi.getTimerCount()).toBe(0)
 
     vi.advanceTimersByTime(1000)
     expect(cb1).not.toHaveBeenCalled()

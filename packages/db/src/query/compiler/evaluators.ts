@@ -6,6 +6,7 @@ import {
 import {
   areValuesEqual,
   compareValues,
+  isUint8Array,
   isUnorderable,
   normalizeValue,
 } from '../../utils/comparison.js'
@@ -17,6 +18,11 @@ import type { NamespacedRow } from '../../types.js'
  */
 function isUnknown(value: any): boolean {
   return value === null || value === undefined
+}
+
+function normalizeEqualityOperand(value: unknown): unknown {
+  // Byte comparison needs no Map-key encoding, even for large binary values.
+  return isUint8Array(value) ? value : normalizeValue(value)
 }
 
 /**
@@ -245,8 +251,8 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       const argA = compiledArgs[0]!
       const argB = compiledArgs[1]!
       return (data) => {
-        const a = normalizeValue(argA(data))
-        const b = normalizeValue(argB(data))
+        const a = normalizeEqualityOperand(argA(data))
+        const b = normalizeEqualityOperand(argB(data))
         // In 3-valued logic, any comparison with null/undefined returns UNKNOWN
         if (isUnknown(a) || isUnknown(b)) {
           return null
@@ -392,7 +398,7 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       const valueEvaluator = compiledArgs[0]!
       const arrayEvaluator = compiledArgs[1]!
       return (data) => {
-        const value = normalizeValue(valueEvaluator(data))
+        const value = normalizeEqualityOperand(valueEvaluator(data))
         const array = arrayEvaluator(data)
         // In 3-valued logic, if the value is null/undefined, return UNKNOWN
         if (isUnknown(value)) {
@@ -401,7 +407,9 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         if (!Array.isArray(array)) {
           return false
         }
-        return array.some((item) => valuesEqual(normalizeValue(item), value))
+        return array.some((item) =>
+          valuesEqual(normalizeEqualityOperand(item), value),
+        )
       }
     }
 

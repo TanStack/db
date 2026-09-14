@@ -93,7 +93,7 @@ export type Source = {
   [alias: string]:
     | CollectionImpl<any, any>
     | CollectionOptionsIdentity<any, any, any, any, any>
-    | QueryBuilder<Context>
+    | QueryBuilder<any>
 }
 
 /**
@@ -168,7 +168,7 @@ export type ContextFromUnionSource<TSource extends Source> =
     : ContextFromSource<TSource>
 
 type ResultFromBranch<TBranch> =
-  TBranch extends QueryBuilder<infer TContext> ? GetResult<TContext> : never
+  TBranch extends QueryBuilder<infer TContext> ? GetRawResult<TContext> : never
 
 type UnionBranchResult<TBranches extends ReadonlyArray<QueryBuilder<any>>> =
   ResultFromBranch<TBranches[number]>
@@ -480,11 +480,6 @@ export type ResultTypeFromSelect<TSelectObject> =
                                         : never
         }>
       >
-
-export type SelectResult<TSelect> =
-  IsPlainObject<TSelect> extends true
-    ? ResultTypeFromSelect<TSelect>
-    : ResultTypeFromSelectValue<TSelect>
 
 // Distribute over caseWhen branch unions so projection branches remain a union
 // of branch result shapes instead of being merged as one object type.

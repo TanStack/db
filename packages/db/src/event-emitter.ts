@@ -5,7 +5,11 @@
 export class EventEmitter<TEvents extends Record<string, any>> {
   private listeners = new Map<
     keyof TEvents,
-    Set<(event: TEvents[keyof TEvents]) => void>
+    Map<(event: TEvents[keyof TEvents]) => void, object>
+  >()
+  private onceCallbacks = new WeakMap<
+    (event: TEvents[keyof TEvents]) => void,
+    (event: TEvents[keyof TEvents]) => void
   >()
 
   /**
@@ -19,12 +23,21 @@ export class EventEmitter<TEvents extends Record<string, any>> {
     callback: (event: TEvents[T]) => void,
   ): () => void {
     if (!this.listeners.has(event)) {
-      this.listeners.set(event, new Set())
+      this.listeners.set(event, new Map())
     }
-    this.listeners.get(event)!.add(callback as (event: any) => void)
+    const listeners = this.listeners.get(event)!
+    const registered = callback as (event: any) => void
+    let registration = listeners.get(registered)
+    if (!registration) {
+      registration = {}
+      listeners.set(registered, registration)
+    }
 
     return () => {
-      this.listeners.get(event)?.delete(callback as (event: any) => void)
+      const current = this.listeners.get(event)
+      if (current?.get(registered) === registration) {
+        current.delete(registered)
+      }
     }
   }
 
@@ -38,10 +51,16 @@ export class EventEmitter<TEvents extends Record<string, any>> {
     event: T,
     callback: (event: TEvents[T]) => void,
   ): () => void {
-    const unsubscribe = this.on(event, (eventPayload) => {
-      callback(eventPayload)
+    let unsubscribe = () => {}
+    const listener = (eventPayload: TEvents[T]) => {
       unsubscribe()
-    })
+      callback(eventPayload)
+    }
+    this.onceCallbacks.set(
+      listener as (event: TEvents[keyof TEvents]) => void,
+      callback as (event: TEvents[keyof TEvents]) => void,
+    )
+    unsubscribe = this.on(event, listener)
     return unsubscribe
   }
 
@@ -54,7 +73,16 @@ export class EventEmitter<TEvents extends Record<string, any>> {
     event: T,
     callback: (event: TEvents[T]) => void,
   ): void {
-    this.listeners.get(event)?.delete(callback as (event: any) => void)
+    const listeners = this.listeners.get(event)
+    if (!listeners) return
+    for (const listener of listeners.keys()) {
+      if (
+        listener === callback ||
+        this.onceCallbacks.get(listener) === callback
+      ) {
+        listeners.delete(listener)
+      }
+    }
   }
 
   /**
@@ -97,7 +125,20 @@ export class EventEmitter<TEvents extends Record<string, any>> {
     event: T,
     eventPayload: TEvents[T],
   ): void {
-    this.listeners.get(event)?.forEach((listener) => {
+    this.emitInnerWhile(event, eventPayload, () => true)
+  }
+
+  /** Emit until a reentrant callback invalidates the event being delivered. */
+  protected emitInnerWhile<T extends keyof TEvents>(
+    event: T,
+    eventPayload: TEvents[T],
+    isCurrent: () => boolean,
+  ): void {
+    const listeners = this.listeners.get(event)
+    if (!listeners) return
+    for (const [listener, registration] of [...listeners]) {
+      if (!isCurrent()) break
+      if (this.listeners.get(event)?.get(listener) !== registration) continue
       try {
         listener(eventPayload)
       } catch (error) {
@@ -106,7 +147,7 @@ export class EventEmitter<TEvents extends Record<string, any>> {
           throw error
         })
       }
-    })
+    }
   }
 
   /**

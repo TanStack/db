@@ -1,15 +1,17 @@
-import { serializeValue } from '@tanstack/db-ivm'
 import { inArray } from '../builder/functions.js'
 import { PropRef } from '../ir.js'
+import { createValueIdentity } from '../equality-value-identity.js'
+import type { ValueIdentity } from '../equality-value-identity.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
 import type { LazyDemandPlan } from '../compiler/joins.js'
 import type { BasicExpression } from '../ir.js'
+import type { LoadSubsetRequestResult } from '../../types.js'
 
 type DemandSegment = {
   keys: Map<string, unknown>
   where: BasicExpression<boolean>
   abortController: AbortController
-  ready: Promise<void> | true
+  ready: LoadSubsetRequestResult
   state: `pending` | `settled` | `failed`
 }
 
@@ -21,7 +23,7 @@ type DemandState = {
 export type DemandUpdate = {
   changed: boolean
   empty: boolean
-  ready: Promise<void> | true
+  ready: Promise<Array<unknown>> | true
 }
 
 /**
@@ -32,13 +34,14 @@ export type DemandUpdate = {
 export class SubsetDemandController {
   private readonly states = new Map<string, DemandState>()
   private readonly warnedPlans = new Set<string>()
+  private valueIdentity = createValueIdentity()
 
   setDemand(
     subscription: CollectionSubscription,
     plan: LazyDemandPlan,
     keys: Set<unknown>,
   ): DemandUpdate {
-    const nextKeys = canonicalizeKeys(keys)
+    const nextKeys = canonicalizeKeys(keys, this.valueIdentity)
     const previous = this.states.get(plan.id)
     const hasFailedCoverage = previous?.segments.some(
       (segment) =>
@@ -61,7 +64,13 @@ export class SubsetDemandController {
       }
 
       segment.abortController.abort()
-      subscription.releaseSnapshot(segment.where)
+      try {
+        subscription.releaseSnapshot(segment.where)
+      } catch {
+        // The subscription reports adapter cleanup failures after its one
+        // release attempt. Demand changes must still reach the graph instead
+        // of escaping the source commit; adapters own any remote retry.
+      }
     }
 
     const coveredKeys = new Set(
@@ -93,8 +102,7 @@ export class SubsetDemandController {
     return {
       changed: true,
       empty: nextKeys.size === 0,
-      ready:
-        pending.length > 0 ? Promise.all(pending).then(() => undefined) : true,
+      ready: pending.length > 0 ? Promise.all(pending) : true,
     }
   }
 
@@ -104,6 +112,7 @@ export class SubsetDemandController {
     }
     this.states.clear()
     this.warnedPlans.clear()
+    this.valueIdentity = createValueIdentity()
   }
 
   private warnUnoptimized(plan: LazyDemandPlan): void {
@@ -119,8 +128,13 @@ export class SubsetDemandController {
   }
 }
 
-function canonicalizeKeys(keys: Set<unknown>): Map<string, unknown> {
-  return new Map([...keys].map((key) => [serializeValue(key), key]))
+function canonicalizeKeys(
+  keys: Set<unknown>,
+  valueIdentity: ValueIdentity,
+): Map<string, unknown> {
+  return new Map(
+    [...keys].map((key) => [valueIdentity.serializeEquality(key), key]),
+  )
 }
 
 function equalKeySets(
@@ -147,7 +161,7 @@ function requestSegment(
 ): DemandSegment {
   const where = inArray(new PropRef(plan.path), [...keys.values()])
   const abortController = new AbortController()
-  const load = { ready: true as Promise<void> | true }
+  const load = { ready: true as LoadSubsetRequestResult }
   subscription.requestSnapshot({
     where,
     signal: abortController.signal,

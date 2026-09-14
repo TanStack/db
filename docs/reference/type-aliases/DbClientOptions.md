@@ -9,4 +9,4 @@ title: DbClientOptions
 type DbClientOptions = Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/client.ts:177](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L177)
+Defined in: [packages/db/src/client.ts:178](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L178)

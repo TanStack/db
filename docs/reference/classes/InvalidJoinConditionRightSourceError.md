@@ -5,7 +5,7 @@ title: InvalidJoinConditionRightSourceError
 
 # Class: InvalidJoinConditionRightSourceError
 
-Defined in: [packages/db/src/errors.ts:609](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L609)
+Defined in: [packages/db/src/errors.ts:619](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L619)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: [packages/db/src/errors.ts:609](https://github.com/TanStack/db/blob/
 new InvalidJoinConditionRightSourceError(sourceAlias): InvalidJoinConditionRightSourceError;
 ```
 
-Defined in: [packages/db/src/errors.ts:610](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L610)
+Defined in: [packages/db/src/errors.ts:620](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L620)
 
 #### Parameters
 

@@ -7,6 +7,7 @@ title: "@tanstack/react-db"
 
 ## Type Aliases
 
+- [ConditionalUseLiveQueryConfig](type-aliases/ConditionalUseLiveQueryConfig.md)
 - [DbProviderProps](type-aliases/DbProviderProps.md)
 - [HydrationBoundaryProps](type-aliases/HydrationBoundaryProps.md)
 - [LiveQueryKey](type-aliases/LiveQueryKey.md)

@@ -1,23 +1,27 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
-import { createCollection } from '../../src/collection/index.js'
 import {
+  add,
+  caseWhen,
   concat,
+  count,
   createLiveQueryCollection,
   eq,
+  gt,
+  lt,
   materialize,
+  multiply,
+  sum,
   toArray,
 } from '../../src/query/index.js'
 import { runTrace } from '../trace-runner.js'
 import { oraclePropertyOptions } from '../oracle-config.js'
-import {
-  flushPromises,
-  mockSyncCollectionOptions,
-  withExpectedRejection,
-} from '../utils.js'
+import { flushPromises, withExpectedRejection } from '../utils.js'
+import { createControlledCollection as createOracleControlledCollection } from './includes-oracle-helpers.js'
 import type { Collection } from '../../src/collection/index.js'
 import type { ChangeMessage } from '../../src/types.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
+import type { ControlledCollection } from './includes-oracle-helpers.js'
 
 type ParentRow = {
   id: number
@@ -50,19 +54,6 @@ type CollectionObservation = {
   publications: Array<Array<ProjectedParent>>
 }
 
-type ControlledCollection<T extends { id: number }> = {
-  collection: Collection<T>
-  write: (type: `insert` | `update` | `delete`, value: T) => void
-  writeBatch: (
-    changes: ReadonlyArray<{
-      type: `insert` | `update` | `delete`
-      value: T
-    }>,
-  ) => void
-  resolveSync: () => void
-  rejectSync: (error: Error) => void
-}
-
 type CollectionContext = {
   parents: ControlledCollection<ParentRow>
   children: ControlledCollection<ChildRow>
@@ -75,39 +66,21 @@ type CollectionContext = {
   subscription?: { unsubscribe: () => void }
 }
 
-let nextCollectionOracleId = 0
-
 function createControlledCollection<T extends { id: number }>(
   name: string,
   initialData: ReadonlyArray<T>,
 ): ControlledCollection<T> {
-  const options = mockSyncCollectionOptions<T>({
-    id: `${name}-${nextCollectionOracleId++}`,
-    getKey: (row) => row.id,
-    initialData: initialData.map((row) => ({ ...row })),
+  return createOracleControlledCollection(name, initialData, {
     autoIndex: `eager`,
+    rowUpdateMode: `full`,
   })
-  options.sync.rowUpdateMode = `full`
-  const collection = createCollection(options)
-  const writeBatch: ControlledCollection<T>[`writeBatch`] = (changes) => {
-    options.utils.begin()
-    for (const change of changes) {
-      options.utils.write({
-        type: change.type,
-        value: { ...change.value },
-      })
-    }
-    options.utils.commit()
-  }
+}
 
+function expectedMaterializations<T>(rows: ReadonlyArray<T>) {
   return {
-    collection,
-    write(type, value) {
-      writeBatch([{ type, value }])
-    },
-    writeBatch,
-    resolveSync: options.utils.resolveSync,
-    rejectSync: options.utils.rejectSync,
+    facade: [...rows],
+    array: [...rows],
+    materialized: [...rows],
   }
 }
 
@@ -328,6 +301,13 @@ const collectionScenarioArbitrary = fc.record({
   actions: fc.array(actionArbitrary, { minLength: 1, maxLength: 16 }),
 })
 
+const orderSwapArbitrary = fc.integer({ min: 2, max: 8 }).chain((length) =>
+  fc.integer({ min: 0, max: length - 2 }).map((swapIndex) => ({
+    length,
+    swapIndex,
+  })),
+)
+
 function enumerateActionSequences(
   actions: ReadonlyArray<CollectionAction>,
   maxLength: number,
@@ -353,7 +333,10 @@ const exhaustiveActions: ReadonlyArray<CollectionAction> = [
 ]
 
 describe(`Collection-valued includes oracle`, () => {
-  fcTest.prop([collectionScenarioArbitrary], oraclePropertyOptions(30))(
+  fcTest.prop(
+    [collectionScenarioArbitrary],
+    oraclePropertyOptions(30, `includes-collection.relationship-history`),
+  )(
     `keeps Collection, toArray, and materialize equivalent across generated relationship histories`,
     ({ parentGroup, childValue, actions }) =>
       runTrace({
@@ -792,6 +775,7 @@ describe(`Collection-valued includes oracle`, () => {
   fcTest(
     `outer fn.select recomputes nested values after a union branch include changes`,
     async () => {
+      const callbackRows: Array<Record<PropertyKey, unknown>> = []
       const messages = createControlledCollection(`fn-select-messages`, [
         { id: 1, group: 1 },
       ])
@@ -826,11 +810,14 @@ describe(`Collection-valued includes oracle`, () => {
             id: tool.id,
           }))
 
-        return q.unionAll(messageRows, toolRows).fn.select((row) => ({
-          kind: row.kind,
-          id: row.id,
-          payload: { children: row.children },
-        }))
+        return q.unionAll(messageRows, toolRows).fn.select((row) => {
+          callbackRows.push(row)
+          return {
+            kind: row.kind,
+            id: row.id,
+            payload: { children: row.children },
+          }
+        })
       })
 
       try {
@@ -846,6 +833,140 @@ describe(`Collection-valued includes oracle`, () => {
         expect(
           live.toArray.find((row) => row.kind === `message`)!.payload.children,
         ).toEqual([{ id: 10, value: 2 }])
+        expect(
+          callbackRows.flatMap((row) => Object.getOwnPropertySymbols(row)),
+        ).toEqual([])
+      } finally {
+        await Promise.all([
+          live.cleanup(),
+          messages.collection.cleanup(),
+          tools.collection.cleanup(),
+          children.collection.cleanup(),
+        ])
+      }
+    },
+  )
+
+  fcTest(
+    `outer fn.select rejects a bare union include before invoking the callback`,
+    async () => {
+      class Box {
+        constructor(readonly child: unknown) {}
+      }
+
+      const callbackChildren: Array<unknown> = []
+      const messages = createControlledCollection(`fn-select-bare-messages`, [
+        { id: 1, group: 1 },
+      ])
+      const tools = createControlledCollection(`fn-select-bare-tools`, [
+        { id: 2, group: 2 },
+      ])
+      const children = createControlledCollection(`fn-select-bare-children`, [
+        { id: 10, parentGroup: 1, value: 1 },
+        { id: 20, parentGroup: 2, value: 2 },
+      ])
+      const buildQuery = () =>
+        createLiveQueryCollection((q) => {
+          const messageRows = q
+            .from({ message: messages.collection })
+            .select(({ message }) => ({
+              kind: `message` as const,
+              id: message.id,
+              children: q
+                .from({ messageChild: children.collection })
+                .where(({ messageChild }) =>
+                  eq(messageChild.parentGroup, message.group),
+                ),
+            }))
+          const toolRows = q
+            .from({ tool: tools.collection })
+            .select(({ tool }) => ({
+              kind: `tool` as const,
+              id: tool.id,
+            }))
+
+          return q.unionAll(messageRows, toolRows).fn.select((row) => {
+            const child = `children` in row ? row.children : undefined
+            callbackChildren.push(child)
+            return { kind: row.kind, id: row.id, box: new Box(child) }
+          })
+        })
+
+      try {
+        expect(buildQuery).toThrow(
+          `fn.select() cannot consume Collection-valued includes`,
+        )
+        expect(callbackChildren).toEqual([])
+      } finally {
+        await Promise.all([
+          messages.collection.cleanup(),
+          tools.collection.cleanup(),
+          children.collection.cleanup(),
+        ])
+      }
+    },
+  )
+
+  fcTest(
+    `fn.select rejects query values returned during include rematerialization`,
+    async () => {
+      const messages = createControlledCollection(`fn-select-reject-messages`, [
+        { id: 1, group: 1 },
+      ])
+      const tools = createControlledCollection(`fn-select-reject-tools`, [
+        { id: 2, group: 2 },
+      ])
+      const children = createControlledCollection(`fn-select-reject-children`, [
+        { id: 10, parentGroup: 1, value: 1 },
+      ])
+      const live = createLiveQueryCollection((q) => {
+        const messageRows = q
+          .from({ message: messages.collection })
+          .select(({ message }) => ({
+            kind: `message` as const,
+            id: message.id,
+            children: toArray(
+              q
+                .from({ messageChild: children.collection })
+                .where(({ messageChild }) =>
+                  eq(messageChild.parentGroup, message.group),
+                ),
+            ),
+          }))
+        const toolRows = q
+          .from({ tool: tools.collection })
+          .select(({ tool }) => ({
+            kind: `tool` as const,
+            id: tool.id,
+          }))
+
+        return q.unionAll(messageRows, toolRows).fn.select((row) => {
+          const includedChildren =
+            row.kind === `message`
+              ? (row.children as typeof row.children | null)
+              : null
+
+          return {
+            kind: row.kind,
+            id: row.id,
+            leakedQuery:
+              includedChildren?.[0]?.value === 2
+                ? q.from({ child: children.collection })
+                : null,
+          } as any
+        })
+      })
+
+      try {
+        await live.preload()
+
+        expect(() =>
+          children.write(`update`, {
+            id: 10,
+            parentGroup: 1,
+            value: 2,
+          }),
+        ).toThrow(`fn.select() cannot return a child query builder`)
       } finally {
         await Promise.all([
           live.cleanup(),
@@ -997,6 +1118,75 @@ describe(`Collection-valued includes oracle`, () => {
   })
 
   fcTest(
+    `cleanup during root publication suppresses the prepared facade callback`,
+    async () => {
+      type NodeRow = {
+        id: number
+        kind: `parent` | `child`
+        group: number
+        value: number
+      }
+      const nodes = createControlledCollection<NodeRow>(`publication-cleanup`, [
+        { id: 1, kind: `parent`, group: 1, value: 1 },
+        { id: 10, kind: `child`, group: 1, value: 1 },
+      ])
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ parent: nodes.collection })
+          .where(({ parent }) => eq(parent.kind, `parent`))
+          .select(({ parent }) => ({
+            id: parent.id,
+            value: parent.value,
+            children: q
+              .from({ child: nodes.collection })
+              .where(({ child }) => eq(child.kind, `child`))
+              .where(({ child }) => eq(child.group, parent.group)),
+          })),
+      )
+
+      await live.preload()
+      const facade = live.get(1)!.children
+      const rootSnapshots: Array<Array<number>> = []
+      const facadeSnapshots: Array<Array<number>> = []
+      let cleanup: Promise<void> | undefined
+      const rootSubscription = live.subscribeChanges(
+        () => {
+          rootSnapshots.push(facade.toArray.map(({ value }) => value))
+          cleanup = facade.cleanup()
+        },
+        { includeInitialState: false },
+      )
+      const facadeSubscription = facade.subscribeChanges(
+        () => facadeSnapshots.push(facade.toArray.map(({ value }) => value)),
+        { includeInitialState: false },
+      )
+
+      try {
+        nodes.writeBatch([
+          {
+            type: `update`,
+            value: { id: 1, kind: `parent`, group: 1, value: 2 },
+          },
+          {
+            type: `update`,
+            value: { id: 10, kind: `child`, group: 1, value: 2 },
+          },
+        ])
+        await cleanup
+
+        expect(rootSnapshots).toEqual([[2]])
+        expect(facadeSnapshots).toEqual([])
+        expect(facade.status).toBe(`cleaned-up`)
+        expect(facade.toArray).toEqual([])
+      } finally {
+        rootSubscription.unsubscribe()
+        facadeSubscription.unsubscribe()
+        await Promise.all([live.cleanup(), nodes.collection.cleanup()])
+      }
+    },
+  )
+
+  fcTest(
     `shared facades remain active until their last parent departs`,
     async () => {
       const driver = createCollectionDriver(
@@ -1063,7 +1253,7 @@ describe(`Collection-valued includes oracle`, () => {
         wideId: fc.integer({ min: 10, max: 19 }),
       }),
     ],
-    oraclePropertyOptions(20),
+    oraclePropertyOptions(20, `includes-collection.public-key-order`),
   )(
     `uses one raw public-key order across Collection and inline materializations`,
     async ({ smallId, wideId }) => {
@@ -1124,6 +1314,613 @@ describe(`Collection-valued includes oracle`, () => {
   )
 
   fcTest.prop(
+    [orderSwapArbitrary],
+    oraclePropertyOptions(20, `includes-collection.layout-swap`),
+  )(
+    `propagates generated order-only child swaps through every materialization`,
+    async ({ length, swapIndex }) => {
+      type OrderedChild = ChildRow & { position: number; label: string }
+      const parents = createControlledCollection(`order-move-parents`, [
+        { id: 1, group: 1 },
+      ])
+      const initialRows: Array<OrderedChild> = Array.from(
+        { length },
+        (_, index) => ({
+          id: index + 1,
+          parentGroup: 1,
+          value: index + 1,
+          position: index,
+          label: String(index + 1),
+        }),
+      )
+      const children = createControlledCollection<OrderedChild>(
+        `order-move-children`,
+        initialRows,
+      )
+      const live = createLiveQueryCollection((q) =>
+        q.from({ parent: parents.collection }).select(({ parent }) => {
+          const childRows = () =>
+            q
+              .from({ child: children.collection })
+              .where(({ child }) => eq(child.parentGroup, parent.group))
+              .orderBy(({ child }) => child.position)
+              .orderBy(({ child }) => child.id)
+              .select(({ child }) => ({
+                id: child.id,
+                position: child.position,
+                label: child.label,
+              }))
+
+          return {
+            id: parent.id,
+            facade: childRows(),
+            array: toArray(childRows()),
+            materialized: materialize(childRows()),
+            first: materialize(childRows().findOne()),
+            joined: concat(
+              toArray(
+                q
+                  .from({ child: children.collection })
+                  .where(({ child }) => eq(child.parentGroup, parent.group))
+                  .orderBy(({ child }) => child.position)
+                  .orderBy(({ child }) => child.id)
+                  .select(({ child }) => child.label),
+              ),
+            ),
+          }
+        }),
+      )
+
+      const project = () => {
+        const row = live.get(1)!
+        return {
+          facade: row.facade.toArray.map(({ id }) => id),
+          array: row.array.map(({ id }) => id),
+          materialized: row.materialized.map(({ id }) => id),
+          first: row.first?.id,
+          joined: row.joined,
+        }
+      }
+
+      try {
+        await live.preload()
+        const facade = live.get(1)!.facade
+        const initialIds = initialRows.map(({ id }) => id)
+        expect(project()).toEqual({
+          ...expectedMaterializations(initialIds),
+          first: initialIds[0],
+          joined: initialRows.map(({ label }) => label).join(``),
+        })
+
+        const first = initialRows[swapIndex]!
+        const second = initialRows[swapIndex + 1]!
+        children.writeBatch([
+          { type: `update`, value: { ...first, position: second.position } },
+          { type: `update`, value: { ...second, position: first.position } },
+        ])
+        const expectedIds = [...initialIds]
+        ;[expectedIds[swapIndex], expectedIds[swapIndex + 1]] = [
+          expectedIds[swapIndex + 1]!,
+          expectedIds[swapIndex]!,
+        ]
+
+        expect(live.get(1)!.facade).toBe(facade)
+        expect(project()).toEqual({
+          ...expectedMaterializations(expectedIds),
+          first: expectedIds[0],
+          joined: expectedIds.join(``),
+        })
+      } finally {
+        await Promise.all([
+          live.cleanup(),
+          parents.collection.cleanup(),
+          children.collection.cleanup(),
+        ])
+      }
+    },
+  )
+
+  fcTest(
+    `reconstructs nested conditional includes through guard transitions`,
+    async () => {
+      type GuardedParent = ParentRow & { active: boolean }
+      const parents = createControlledCollection<GuardedParent>(
+        `guarded-parents`,
+        [{ id: 1, group: 1, active: true }],
+      )
+      const children = createControlledCollection(`guarded-children`, [
+        { id: 10, parentGroup: 1, value: 1 },
+      ])
+      const live = createLiveQueryCollection((q) =>
+        q.from({ parent: parents.collection }).select(({ parent }) => {
+          const childRows = () =>
+            q
+              .from({ child: children.collection })
+              .where(({ child }) => eq(child.parentGroup, parent.group))
+              .orderBy(({ child }) => child.id)
+              .select(({ child }) => ({
+                id: child.id,
+                parentGroup: child.parentGroup,
+                value: child.value,
+              }))
+
+          return {
+            id: parent.id,
+            profile: caseWhen(
+              eq(parent.active, true),
+              {
+                kind: `active` as const,
+                facade: childRows(),
+                array: toArray(childRows()),
+                materialized: materialize(childRows()),
+              },
+              { kind: `inactive` as const },
+            ),
+          }
+        }),
+      )
+
+      const project = () => {
+        const profile = live.get(1)!.profile
+        if (profile.kind === `inactive`) return profile
+        const rows = (values: Iterable<ChildRow>) =>
+          [...values].map(({ id, value }) => ({ id, value }))
+        return {
+          kind: profile.kind,
+          facade: rows(profile.facade.values()),
+          array: rows(profile.array),
+          materialized: rows(profile.materialized),
+        }
+      }
+
+      try {
+        await live.preload()
+        const initialProfile = live.get(1)!.profile
+        if (initialProfile.kind === `inactive`) {
+          throw new Error(
+            `Expected the initial conditional branch to be active`,
+          )
+        }
+        const initialFacade = initialProfile.facade
+        expect(project()).toEqual({
+          kind: `active`,
+          ...expectedMaterializations([{ id: 10, value: 1 }]),
+        })
+
+        parents.write(`update`, { id: 1, group: 1, active: false })
+        expect(project()).toEqual({ kind: `inactive` })
+        expect(initialFacade.toArray).toEqual([])
+        expect(initialFacade.status).toBe(`ready`)
+        children.write(`insert`, { id: 20, parentGroup: 1, value: 2 })
+        expect(project()).toEqual({ kind: `inactive` })
+
+        parents.write(`update`, { id: 1, group: 1, active: true })
+        const reactivatedProfile = live.get(1)!.profile
+        if (reactivatedProfile.kind === `inactive`) {
+          throw new Error(`Expected the conditional branch to reactivate`)
+        }
+        expect(reactivatedProfile.facade).not.toBe(initialFacade)
+        expect(project()).toEqual({
+          kind: `active`,
+          ...expectedMaterializations([
+            { id: 10, value: 1 },
+            { id: 20, value: 2 },
+          ]),
+        })
+      } finally {
+        await Promise.all([
+          live.cleanup(),
+          parents.collection.cleanup(),
+          children.collection.cleanup(),
+        ])
+      }
+    },
+  )
+
+  fcTest(
+    `matches recomputation for correlated aggregate child relations`,
+    async () => {
+      const parents = createControlledCollection(`aggregate-parents`, [
+        { id: 1, group: 1, factor: 1 },
+        { id: 2, group: 1, factor: -1 },
+        { id: 3, group: 2, factor: 2 },
+      ])
+      const children = createControlledCollection(`aggregate-children`, [
+        { id: 10, parentGroup: 1, value: 1 },
+        { id: 20, parentGroup: 1, value: 2 },
+        { id: 30, parentGroup: 2, value: 5 },
+      ])
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ parent: parents.collection })
+          .orderBy(({ parent }) => parent.id)
+          .select(({ parent }) => {
+            const summaries = () =>
+              q
+                .from({ child: children.collection })
+                .where(({ child }) => eq(child.parentGroup, parent.group))
+                .groupBy(({ child }) => child.parentGroup)
+                .select(({ child }) => ({
+                  parentGroup: child.parentGroup,
+                  count: count(child.id),
+                  total: sum(multiply(child.value, parent.factor)),
+                }))
+            const total = () =>
+              q
+                .from({ child: children.collection })
+                .where(({ child }) => eq(child.parentGroup, parent.group))
+                .select(({ child }) => ({
+                  count: count(child.id),
+                  total: sum(multiply(child.value, parent.factor)),
+                }))
+
+            return {
+              id: parent.id,
+              facade: summaries(),
+              array: toArray(summaries()),
+              materialized: materialize(summaries()),
+              implicit: materialize(total()),
+            }
+          }),
+      )
+
+      type Summary = { parentGroup: number; count: number; total: number }
+      const project = () =>
+        live.toArray.map((row) => {
+          const clean = (values: Iterable<Summary>) =>
+            [...values].map(({ parentGroup, count: size, total }) => ({
+              parentGroup,
+              count: size,
+              total,
+            }))
+          return {
+            id: row.id,
+            facade: clean(row.facade.values()),
+            array: clean(row.array),
+            materialized: clean(row.materialized),
+            implicit: row.implicit.map(({ count: size, total }) => ({
+              count: size,
+              total,
+            })),
+          }
+        })
+
+      const expected = (groupOneTotal: number, groupOneCount: number) => [
+        {
+          id: 1,
+          ...expectedMaterializations([
+            { parentGroup: 1, count: groupOneCount, total: groupOneTotal },
+          ]),
+          implicit: [{ count: groupOneCount, total: groupOneTotal }],
+        },
+        {
+          id: 2,
+          ...expectedMaterializations([
+            {
+              parentGroup: 1,
+              count: groupOneCount,
+              total: -groupOneTotal,
+            },
+          ]),
+          implicit: [{ count: groupOneCount, total: -groupOneTotal }],
+        },
+        {
+          id: 3,
+          ...expectedMaterializations([
+            { parentGroup: 2, count: 1, total: 10 },
+          ]),
+          implicit: [{ count: 1, total: 10 }],
+        },
+      ]
+
+      try {
+        await live.preload()
+        expect(project()).toEqual(expected(3, 2))
+
+        children.write(`update`, { id: 20, parentGroup: 1, value: 7 })
+        expect(project()).toEqual(expected(8, 2))
+
+        children.write(`delete`, { id: 10, parentGroup: 1, value: 1 })
+        expect(project()).toEqual(expected(7, 1))
+      } finally {
+        await Promise.all([
+          live.cleanup(),
+          parents.collection.cleanup(),
+          children.collection.cleanup(),
+        ])
+      }
+    },
+  )
+
+  fcTest(
+    `evaluates correlated having clauses with parent context`,
+    async () => {
+      type HavingParent = ParentRow & { threshold: number }
+      const parents = createControlledCollection<HavingParent>(
+        `having-parents`,
+        [
+          { id: 1, group: 1, threshold: 1 },
+          { id: 2, group: 1, threshold: 3 },
+        ],
+      )
+      const children = createControlledCollection(`having-children`, [
+        { id: 10, parentGroup: 1, value: 1 },
+        { id: 20, parentGroup: 1, value: 2 },
+      ])
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ parent: parents.collection })
+          .orderBy(({ parent }) => parent.id)
+          .select(({ parent }) => {
+            const summaries = () =>
+              q
+                .from({ child: children.collection })
+                .where(({ child }) => eq(child.parentGroup, parent.group))
+                .groupBy(({ child }) => child.parentGroup)
+                .having(({ child }) => gt(count(child.id), parent.threshold))
+                .select(({ child }) => ({ count: count(child.id) }))
+
+            return {
+              id: parent.id,
+              facade: summaries(),
+              array: toArray(summaries()),
+              materialized: materialize(summaries()),
+            }
+          }),
+      )
+
+      const project = () =>
+        live.toArray.map((row) => {
+          const counts = (values: Iterable<{ count: number }>) =>
+            [...values].map(({ count: size }) => size)
+          return {
+            id: row.id,
+            facade: counts(row.facade.values()),
+            array: counts(row.array),
+            materialized: counts(row.materialized),
+          }
+        })
+
+      try {
+        await live.preload()
+        expect(project()).toEqual([
+          { id: 1, ...expectedMaterializations([2]) },
+          { id: 2, ...expectedMaterializations([]) },
+        ])
+
+        parents.write(`update`, { id: 2, group: 1, threshold: 1 })
+        expect(project()).toEqual([
+          { id: 1, ...expectedMaterializations([2]) },
+          { id: 2, ...expectedMaterializations([2]) },
+        ])
+      } finally {
+        await Promise.all([
+          live.cleanup(),
+          parents.collection.cleanup(),
+          children.collection.cleanup(),
+        ])
+      }
+    },
+  )
+
+  fcTest(`routes changes to non-key parent filter inputs`, async () => {
+    type FilterParent = ParentRow & { threshold: number }
+    const parents = createControlledCollection<FilterParent>(
+      `parent-filter-input-parents`,
+      [{ id: 1, group: 1, threshold: 2 }],
+    )
+    const children = createControlledCollection(
+      `parent-filter-input-children`,
+      [
+        { id: 10, parentGroup: 1, value: 1 },
+        { id: 20, parentGroup: 1, value: 3 },
+      ],
+    )
+    const live = createLiveQueryCollection((q) =>
+      q.from({ parent: parents.collection }).select(({ parent }) => {
+        const childRows = () =>
+          q
+            .from({ child: children.collection })
+            .where(({ child }) => eq(child.parentGroup, parent.group))
+            .where(({ child }) => lt(child.value, parent.threshold))
+            .orderBy(({ child }) => child.id)
+            .select(({ child }) => ({ id: child.id, value: child.value }))
+
+        return {
+          id: parent.id,
+          facade: childRows(),
+          array: toArray(childRows()),
+          materialized: materialize(childRows()),
+        }
+      }),
+    )
+
+    const project = () => {
+      const row = live.get(1)!
+      const ids = (values: Iterable<{ id: number }>) =>
+        [...values].map(({ id }) => id)
+      return {
+        facade: ids(row.facade.values()),
+        array: ids(row.array),
+        materialized: ids(row.materialized),
+      }
+    }
+
+    try {
+      await live.preload()
+      expect(project()).toEqual(expectedMaterializations([10]))
+
+      parents.write(`update`, { id: 1, group: 1, threshold: 4 })
+      expect(project()).toEqual(expectedMaterializations([10, 20]))
+
+      parents.write(`update`, { id: 1, group: 1, threshold: 0 })
+      expect(project()).toEqual(expectedMaterializations([]))
+    } finally {
+      await Promise.all([
+        live.cleanup(),
+        parents.collection.cleanup(),
+        children.collection.cleanup(),
+      ])
+    }
+  })
+
+  fcTest(`routes changes to parent-dependent child ordering`, async () => {
+    type OrderingParent = ParentRow & { direction: number }
+    const parents = createControlledCollection<OrderingParent>(
+      `parent-order-input-parents`,
+      [
+        { id: 1, group: 1, direction: 1 },
+        { id: 2, group: 1, direction: -1 },
+      ],
+    )
+    const children = createControlledCollection(`parent-order-input-children`, [
+      { id: 10, parentGroup: 1, value: 1 },
+      { id: 20, parentGroup: 1, value: 2 },
+    ])
+    const live = createLiveQueryCollection((q) =>
+      q.from({ parent: parents.collection }).select(({ parent }) => {
+        const childRows = () =>
+          q
+            .from({ child: children.collection })
+            .where(({ child }) => eq(child.parentGroup, parent.group))
+            .orderBy(({ child }) => multiply(child.value, parent.direction))
+            .select(({ child }) => ({ id: child.id, value: child.value }))
+
+        return {
+          id: parent.id,
+          facade: childRows(),
+          array: toArray(childRows()),
+          materialized: materialize(childRows()),
+        }
+      }),
+    )
+
+    const project = (id: number) => {
+      const row = live.get(id)!
+      const rows = (values: Iterable<{ id: number; value: number }>) =>
+        [...values].map(({ id: childId, value }) => ({ id: childId, value }))
+      return {
+        facade: rows(row.facade.values()),
+        array: rows(row.array),
+        materialized: rows(row.materialized),
+      }
+    }
+
+    try {
+      await live.preload()
+      const ascendingFacade = live.get(1)!.facade
+      const descendingFacade = live.get(2)!.facade
+      expect(project(1)).toEqual(
+        expectedMaterializations([
+          { id: 10, value: 1 },
+          { id: 20, value: 2 },
+        ]),
+      )
+      expect(project(2)).toEqual(
+        expectedMaterializations([
+          { id: 20, value: 2 },
+          { id: 10, value: 1 },
+        ]),
+      )
+      expect(ascendingFacade).not.toBe(descendingFacade)
+
+      parents.write(`update`, { id: 1, group: 1, direction: -1 })
+      expect(live.get(1)!.facade).toBe(descendingFacade)
+      expect(ascendingFacade.toArray).toEqual([])
+      expect(project(1)).toEqual(
+        expectedMaterializations([
+          { id: 20, value: 2 },
+          { id: 10, value: 1 },
+        ]),
+      )
+    } finally {
+      await Promise.all([
+        live.cleanup(),
+        parents.collection.cleanup(),
+        children.collection.cleanup(),
+      ])
+    }
+  })
+
+  fcTest(`routes changes to parent-dependent child joins`, async () => {
+    type JoinParent = ParentRow & { offset: number }
+    type JoinedChild = ChildRow & { tagId: number }
+    type Tag = { id: number; label: string }
+    const parents = createControlledCollection<JoinParent>(
+      `parent-join-parents`,
+      [
+        { id: 1, group: 1, offset: 0 },
+        { id: 2, group: 1, offset: 1 },
+      ],
+    )
+    const children = createControlledCollection<JoinedChild>(
+      `parent-join-children`,
+      [{ id: 10, parentGroup: 1, value: 1, tagId: 1 }],
+    )
+    const tags = createControlledCollection<Tag>(`parent-join-tags`, [
+      { id: 1, label: `direct` },
+      { id: 2, label: `offset` },
+    ])
+    const live = createLiveQueryCollection((q) =>
+      q
+        .from({ parent: parents.collection })
+        .orderBy(({ parent }) => parent.id)
+        .select(({ parent }) => {
+          const childRows = () =>
+            q
+              .from({ child: children.collection })
+              .innerJoin({ tag: tags.collection }, ({ child, tag }) =>
+                eq(tag.id, add(child.tagId, parent.offset)),
+              )
+              .where(({ child }) => eq(child.parentGroup, parent.group))
+              .select(({ child, tag }) => ({
+                id: child.id,
+                label: tag.label,
+              }))
+
+          return {
+            id: parent.id,
+            facade: childRows(),
+            array: toArray(childRows()),
+            materialized: materialize(childRows()),
+          }
+        }),
+    )
+
+    const project = (id: number) => {
+      const row = live.get(id)!
+      const labels = (values: Iterable<{ label: string }>) =>
+        [...values].map(({ label }) => label)
+      return {
+        facade: labels(row.facade.values()),
+        array: labels(row.array),
+        materialized: labels(row.materialized),
+      }
+    }
+
+    try {
+      await live.preload()
+      const directFacade = live.get(1)!.facade
+      const offsetFacade = live.get(2)!.facade
+      expect(directFacade).not.toBe(offsetFacade)
+      expect(project(1)).toEqual(expectedMaterializations([`direct`]))
+      expect(project(2)).toEqual(expectedMaterializations([`offset`]))
+
+      parents.write(`update`, { id: 1, group: 1, offset: 1 })
+      expect(live.get(1)!.facade).toBe(offsetFacade)
+      expect(directFacade.toArray).toEqual([])
+      expect(project(1)).toEqual(expectedMaterializations([`offset`]))
+    } finally {
+      await Promise.all([
+        live.cleanup(),
+        parents.collection.cleanup(),
+        children.collection.cleanup(),
+        tags.collection.cleanup(),
+      ])
+    }
+  })
+
+  fcTest.prop(
     [
       fc.record({
         group: fc.integer({ min: -10, max: 10 }),
@@ -1132,7 +1929,7 @@ describe(`Collection-valued includes oracle`, () => {
         value: fc.integer({ min: -10, max: 10 }),
       }),
     ],
-    oraclePropertyOptions(20),
+    oraclePropertyOptions(20, `includes-collection.optimistic-child-history`),
   )(
     `matches recomputation through optimistic child insert and delete confirmation and rollback`,
     async ({ group, insertedId, confirmedId, value }) => {

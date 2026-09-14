@@ -5,7 +5,7 @@ title: SubscriptionUnsubscribedEvent
 
 # Interface: SubscriptionUnsubscribedEvent
 
-Defined in: [packages/db/src/types.ts:235](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L235)
+Defined in: [packages/db/src/types.ts:249](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L249)
 
 Event emitted when subscription is unsubscribed
 
@@ -17,7 +17,7 @@ Event emitted when subscription is unsubscribed
 subscription: Subscription;
 ```
 
-Defined in: [packages/db/src/types.ts:237](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L237)
+Defined in: [packages/db/src/types.ts:251](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L251)
 
 ***
 
@@ -27,4 +27,4 @@ Defined in: [packages/db/src/types.ts:237](https://github.com/TanStack/db/blob/m
 type: "unsubscribed";
 ```
 
-Defined in: [packages/db/src/types.ts:236](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L236)
+Defined in: [packages/db/src/types.ts:250](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L250)

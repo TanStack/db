@@ -2,8 +2,6 @@
 title: LocalStorage Collection
 ---
 
-# LocalStorage Collection
-
 LocalStorage collections store small amounts of local-only state that persists across browser sessions and syncs across browser tabs in real-time.
 
 ## Overview

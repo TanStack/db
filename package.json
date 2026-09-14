@@ -18,6 +18,7 @@
     "lint-all": "eslint . --fix",
     "prepare": "husky",
     "test": "pnpm --filter \"./packages/**\" test",
+    "test:oracles": "pnpm --filter @tanstack/db test:oracles && pnpm --filter @tanstack/query-db-collection test:oracles",
     "test:docs": "node scripts/verify-links.ts",
     "test:sherif": "sherif -i zod -p offline-transactions-react-native -p shopping-list-react-native",
     "generate-docs": "node scripts/generate-docs.ts"

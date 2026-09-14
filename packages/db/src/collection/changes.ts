@@ -1,5 +1,6 @@
 import { NegativeActiveSubscribersError } from '../errors'
-import { withPublicationContext } from '../scheduler.js'
+import { recordPublicationError, withPublicationContext } from '../scheduler.js'
+import { runAllCallbacks } from '../utils/callbacks.js'
 import {
   createSingleRowRefProxy,
   toExpression,
@@ -37,6 +38,8 @@ export class CollectionChangesManager<
   public shouldBatchEvents = false
   private publicationDeferralDepth = 0
   private discardDeferredPublications = false
+  private deferredStateRevision = 0
+  private deferredLayoutRevision = 0
   private deferredPublications: Array<{
     changes: Array<ChangeMessage<TOutput, TKey>>
     layoutChanged: boolean
@@ -45,7 +48,7 @@ export class CollectionChangesManager<
 
   /**
    * Monotonic revision of the collection's visible state, advanced once per
-   * committed batch of changes — including while nothing is subscribed.
+   * committed batch of changes and cleanup — including while nothing is subscribed.
    * Lets consumers (the live-query observer) cheaply detect "did the data
    * change" without subscribing, and stays untouched by subscription
    * bootstrap replays, which do not go through emitEvents.
@@ -83,8 +86,14 @@ export class CollectionChangesManager<
    */
   public emitEmptyReadyEvent(): void {
     withPublicationContext(() => {
-      for (const subscription of this.changeSubscriptions) {
-        subscription.emitEvents([])
+      try {
+        runAllCallbacks(
+          [...this.changeSubscriptions].map(
+            (subscription) => () => subscription.emitEvents([]),
+          ),
+        )
+      } catch (error) {
+        recordPublicationError(error)
       }
     })
   }
@@ -127,7 +136,21 @@ export class CollectionChangesManager<
       // buffered optimistic events with the final changes so subscribers see the
       // whole picture, even if the sync diff is empty.
       if (this.batchedEvents.length > 0) {
-        rawEvents = [...this.batchedEvents, ...changes]
+        const combined = new Map(
+          this.batchedEvents.map((change) => [change.key, change]),
+        )
+        for (const change of changes) {
+          const pending = combined.get(change.key)
+          // A buffered removal was never delivered. Re-insertion replaces the
+          // subscriber's old row rather than inserting an already-sent key.
+          combined.set(
+            change.key,
+            pending?.type === `delete` && change.type === `insert`
+              ? { ...change, type: `update`, previousValue: pending.value }
+              : change,
+          )
+        }
+        rawEvents = [...combined.values()]
       }
       this.batchedEvents = []
       this.shouldBatchEvents = false
@@ -147,6 +170,10 @@ export class CollectionChangesManager<
    * normal transaction boundaries.
    */
   public deferPublication(): PublicationDeferral {
+    if (this.publicationDeferralDepth === 0) {
+      this.deferredStateRevision = this.stateRevision
+      this.deferredLayoutRevision = this.layoutRevision
+    }
     this.publicationDeferralDepth++
     let closed = false
 
@@ -163,6 +190,8 @@ export class CollectionChangesManager<
       this.deferredPublications = []
       if (this.discardDeferredPublications) {
         this.discardDeferredPublications = false
+        this.stateRevision = this.deferredStateRevision
+        this.layoutRevision = this.deferredLayoutRevision
         return
       }
       this.publishEvents(
@@ -193,16 +222,19 @@ export class CollectionChangesManager<
 
     // Every subscriber sees one committed source batch before dependent query
     // graphs run. This keeps repeated aliases and sibling subqueries coherent.
+    const layoutListeners = [...this.layoutChangeListeners]
+    const subscriptions = [...this.changeSubscriptions]
     withPublicationContext(() => {
-      // Notify both internal layout consumers and the public subscription API.
-      // Public subscribers historically receive an empty batch for order-only
-      // moves because there is no row-value ChangeMessage to publish.
+      const callbacks: Array<() => void> = subscriptions.map(
+        (subscription) => () => subscription.emitEvents(enrichedEvents),
+      )
       if (rawEvents.length === 0) {
-        for (const listener of this.layoutChangeListeners) listener()
+        callbacks.unshift(...layoutListeners)
       }
-
-      for (const subscription of this.changeSubscriptions) {
-        subscription.emitEvents(enrichedEvents)
+      try {
+        runAllCallbacks(callbacks)
+      } catch (error) {
+        recordPublicationError(error)
       }
     })
   }
@@ -222,9 +254,6 @@ export class CollectionChangesManager<
     ) => void,
     options: SubscribeChangesOptions<TOutput, TKey> = {},
   ): CollectionSubscription {
-    // Start sync and track subscriber
-    this.addSubscriber()
-
     // Compile where callback to whereExpression if provided
     if (options.where && options.whereExpression) {
       throw new Error(
@@ -240,37 +269,58 @@ export class CollectionChangesManager<
       whereExpression = toExpression(result)
     }
 
-    const subscription = new CollectionSubscription(this.collection, callback, {
-      ...opts,
-      whereExpression,
-      onUnsubscribe: () => {
-        this.removeSubscriber()
-        this.changeSubscriptions.delete(subscription)
-      },
-    })
+    // Acquire ownership only after all fallible option validation and
+    // user-provided predicate compilation has completed.
+    this.addSubscriber()
 
-    // Register status listener BEFORE requesting snapshot to avoid race condition.
-    // This ensures the listener catches all status transitions, even if the
-    // loadSubset promise resolves synchronously or very quickly.
-    if (options.onStatusChange) {
-      subscription.on(`status:change`, options.onStatusChange)
-    }
-
-    if (options.includeInitialState) {
-      subscription.requestSnapshot({
-        trackLoadSubsetPromise: false,
-        orderBy: options.orderBy,
-        limit: options.limit,
-        onLoadSubsetResult: options.onLoadSubsetResult,
+    let subscription: CollectionSubscription | undefined
+    const setupState = { closed: false }
+    try {
+      subscription = new CollectionSubscription(this.collection, callback, {
+        ...opts,
+        whereExpression,
+        onUnsubscribe: () => {
+          setupState.closed = true
+          this.removeSubscriber()
+          if (subscription) this.changeSubscriptions.delete(subscription)
+        },
       })
-    } else if (options.includeInitialState === false) {
-      // When explicitly set to false (not just undefined), mark all state as "seen"
-      // so that all future changes (including deletes) pass through unfiltered.
-      subscription.markAllStateAsSeen()
-    }
 
-    // Add to batched listeners
-    this.changeSubscriptions.add(subscription)
+      // Register status listener BEFORE requesting snapshot to avoid race condition.
+      // This ensures the listener catches all status transitions, even if the
+      // loadSubset promise resolves synchronously or very quickly.
+      if (options.onStatusChange) {
+        subscription.on(`status:change`, options.onStatusChange)
+      }
+
+      if (options.includeInitialState) {
+        subscription.requestSnapshot({
+          trackLoadSubsetPromise: false,
+          orderBy: options.orderBy,
+          limit: options.limit,
+          onLoadSubsetResult: options.onLoadSubsetResult,
+        })
+      } else if (options.includeInitialState === false) {
+        // When explicitly set to false (not just undefined), mark all state as "seen"
+        // so that all future changes (including deletes) pass through unfiltered.
+        subscription.markAllStateAsSeen()
+      }
+
+      // Add to batched listeners
+      if (!setupState.closed) this.changeSubscriptions.add(subscription)
+    } catch (error) {
+      if (subscription) {
+        try {
+          subscription.unsubscribe()
+        } catch {
+          // Preserve the setup error. Cleanup still releases subscriber
+          // ownership and attempts every subset unload before it throws.
+        }
+      } else {
+        this.removeSubscriber()
+      }
+      throw error
+    }
 
     return subscription
   }
@@ -283,12 +333,20 @@ export class CollectionChangesManager<
     this.activeSubscribersCount++
     this.lifecycle.cancelGCTimer()
 
-    // Start sync if collection was cleaned up
-    if (
-      this.lifecycle.status === `cleaned-up` ||
-      this.lifecycle.status === `idle`
-    ) {
-      this.sync.startSync()
+    try {
+      // Start sync if collection was cleaned up
+      if (
+        this.lifecycle.status === `cleaned-up` ||
+        this.lifecycle.status === `idle`
+      ) {
+        this.sync.startSync()
+      }
+    } catch (error) {
+      this.activeSubscribersCount = previousSubscriberCount
+      if (this.activeSubscribersCount === 0) {
+        this.lifecycle.startGCTimer()
+      }
+      throw error
     }
 
     this.events.emitSubscribersChange(
@@ -321,6 +379,9 @@ export class CollectionChangesManager<
    * This can be called manually or automatically by garbage collection
    */
   public cleanup(): void {
+    // Cleanup clears visible state without publishing row changes. Detached
+    // consumers may miss every status transition before an empty restart.
+    this.stateRevision++
     this.batchedEvents = []
     this.shouldBatchEvents = false
     this.deferredPublications = []

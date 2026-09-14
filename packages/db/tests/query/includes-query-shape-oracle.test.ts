@@ -1,6 +1,5 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
-import { createCollection } from '../../src/collection/index.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import {
   createLiveQueryCollection,
@@ -9,34 +8,11 @@ import {
 } from '../../src/query/index.js'
 import { runTrace } from '../trace-runner.js'
 import { oracleRuns } from '../oracle-config.js'
-import { mockSyncCollectionOptions } from '../utils.js'
+import { createControlledCollection } from './includes-oracle-helpers.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
-
-let nextCollectionId = 0
 
 function rowsById<T extends { id: number }>(rows: Array<T>): Map<number, T> {
   return new Map(rows.map((row) => [row.id, row]))
-}
-
-function createControlledCollection<T extends { id: number }>(
-  name: string,
-  initialData: Array<T> = [],
-) {
-  const options = mockSyncCollectionOptions<T>({
-    id: `${name}-${nextCollectionId++}`,
-    getKey: (row) => row.id,
-    initialData,
-  })
-  const collection = createCollection(options)
-
-  return {
-    collection,
-    write(type: `insert` | `update` | `delete`, value: T): void {
-      options.utils.begin()
-      options.utils.write({ type, value })
-      options.utils.commit()
-    },
-  }
 }
 
 function stripVirtualProperties(value: unknown): unknown {

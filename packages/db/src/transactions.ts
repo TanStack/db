@@ -1,5 +1,6 @@
 import { createDeferred } from './deferred'
 import { safeRandomUUID } from './utils/uuid'
+import { normalizeError } from './utils/error.js'
 import './duplicate-instance-check'
 import {
   MissingMutationFunctionError,
@@ -535,6 +536,7 @@ class Transaction<T extends object = Record<string, unknown>> {
     if (this.state === `completed`) {
       throw new TransactionAlreadyCompletedRollbackError()
     }
+    if (this.state === `failed`) return this
 
     this.setState(`failed`)
 
@@ -635,15 +637,11 @@ class Transaction<T extends object = Record<string, unknown>> {
       await this.mutationFn({
         transaction: this as unknown as TransactionWithMutations<T>,
       })
-
-      this.setState(`completed`)
-      this.touchCollection()
-
-      this.isPersisted.resolve(this)
     } catch (error) {
+      if ((this.state as TransactionState) !== `persisting`) return this
+
       // Preserve the original error for rethrowing
-      const originalError =
-        error instanceof Error ? error : new Error(String(error))
+      const originalError = normalizeError(error)
 
       // Update transaction with error information
       this.error = {
@@ -656,6 +654,17 @@ class Transaction<T extends object = Record<string, unknown>> {
 
       // Re-throw the original error to preserve identity and stack
       throw originalError
+    }
+
+    if ((this.state as TransactionState) !== `persisting`) return this
+
+    this.setState(`completed`)
+    // Publication errors cannot undo persistence or leave its receipt pending.
+    // Keep normal publication queued before callers resume from the receipt.
+    try {
+      this.touchCollection()
+    } finally {
+      this.isPersisted.resolve(this)
     }
 
     return this

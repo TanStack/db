@@ -7,6 +7,12 @@ import type {
 import type { Context, InitialQueryBuilder } from '@tanstack/db'
 
 describe(`useLiveInfiniteQuery type assertions`, () => {
+  it(`does not advertise a server-page callback`, () => {
+    expectTypeOf<
+      Extract<keyof UseLiveInfiniteQueryConfig<Context>, `getNextPageParam`>
+    >().toEqualTypeOf<never>()
+  })
+
   it(`keeps legacy generic wrappers source-compatible`, () => {
     function acceptsContext<TContext extends Context>(
       _config: UseLiveInfiniteQueryConfig<TContext>,

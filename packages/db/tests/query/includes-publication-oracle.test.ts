@@ -1,6 +1,5 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
-import { createCollection } from '../../src/collection/index.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import {
   createLiveQueryCollection,
@@ -9,11 +8,8 @@ import {
 } from '../../src/query/index.js'
 import { runTrace } from '../trace-runner.js'
 import { oraclePropertyOptions } from '../oracle-config.js'
-import {
-  flushPromises,
-  mockSyncCollectionOptions,
-  withExpectedRejection,
-} from '../utils.js'
+import { flushPromises, withExpectedRejection } from '../utils.js'
+import { createControlledCollection } from './includes-oracle-helpers.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
 
 type ParentRow = {
@@ -53,11 +49,6 @@ const initialOtherChildren: ReadonlyArray<ChildRow> = [
   { id: 400, parentGroup: 20, value: 4 },
 ]
 
-type SyncChange<T> = {
-  type: `insert` | `update` | `delete`
-  value: T
-}
-
 type PublicationAction =
   | { type: `parentScalar`; value: number }
   | { type: `childScalar`; value: number }
@@ -68,34 +59,6 @@ type PublicationAction =
   | { type: `parentThenChild`; parentValue: number; childValue: number }
 
 let nextCollectionId = 0
-
-function createControlledCollection<T extends { id: number }>(
-  name: string,
-  initialData: ReadonlyArray<T>,
-) {
-  const options = mockSyncCollectionOptions<T>({
-    id: `${name}-${nextCollectionId++}`,
-    getKey: (row) => row.id,
-    initialData: initialData.map((row) => ({ ...row })),
-  })
-  const collection = createCollection(options)
-
-  const writeBatch = (changes: ReadonlyArray<SyncChange<T>>): void => {
-    options.utils.begin()
-    for (const change of changes) options.utils.write(change)
-    options.utils.commit()
-  }
-
-  return {
-    collection,
-    write(type: SyncChange<T>[`type`], value: T): void {
-      writeBatch([{ type, value: { ...value } }])
-    },
-    writeBatch,
-    resolveSync: options.utils.resolveSync,
-    rejectSync: options.utils.rejectSync,
-  }
-}
 
 function createLayeredQuery(
   parents: ReturnType<typeof createControlledCollection<ParentRow>>,
@@ -450,8 +413,14 @@ describe(`layered-query publication oracle`, () => {
 
   for (const q1Shape of q1Shapes) {
     for (const q2Shape of q2Shapes) {
-      fcTest.prop([changedValueArbitrary], oraclePropertyOptions(12))(
-        `publishes #1713 updates through a ${q1Shape} Q1 and ${q2Shape} Q2`,
+      fcTest.prop(
+        [changedValueArbitrary],
+        oraclePropertyOptions(
+          12,
+          `includes-publication.parent-scalar.${q1Shape}.${q2Shape}`,
+        ),
+      )(
+        `publishes parent scalar updates through a ${q1Shape} Q1 and ${q2Shape} Q2`,
         async (value) => {
           await expectPublicationMatches(
             { type: `parentScalar`, value },
@@ -464,7 +433,10 @@ describe(`layered-query publication oracle`, () => {
 
       fcTest.prop(
         [changedValueArbitrary, changedChildValueArbitrary],
-        oraclePropertyOptions(12),
+        oraclePropertyOptions(
+          12,
+          `includes-publication.parent-then-child.${q1Shape}.${q2Shape}`,
+        ),
       )(
         `recovers a ${q1Shape} Q1 and ${q2Shape} Q2 after a child update`,
         async (parentValue, childValue) => {
@@ -477,7 +449,13 @@ describe(`layered-query publication oracle`, () => {
         },
       )
 
-      fcTest.prop([changedValueArbitrary], oraclePropertyOptions(8))(
+      fcTest.prop(
+        [changedValueArbitrary],
+        oraclePropertyOptions(
+          8,
+          `includes-publication.optimistic-before-confirm.${q1Shape}.${q2Shape}`,
+        ),
+      )(
         `publishes optimistic state before confirmation through a ${q1Shape} Q1 and ${q2Shape} Q2`,
         async (value) => {
           await expectPublicationMatches(
@@ -489,7 +467,13 @@ describe(`layered-query publication oracle`, () => {
         },
       )
 
-      fcTest.prop([changedValueArbitrary], oraclePropertyOptions(8))(
+      fcTest.prop(
+        [changedValueArbitrary],
+        oraclePropertyOptions(
+          8,
+          `includes-publication.optimistic-after-confirm.${q1Shape}.${q2Shape}`,
+        ),
+      )(
         `publishes state after optimistic confirmation through a ${q1Shape} Q1 and ${q2Shape} Q2`,
         async (value) => {
           await expectPublicationMatches(
@@ -503,19 +487,22 @@ describe(`layered-query publication oracle`, () => {
     }
   }
 
-  fcTest.prop([changedChildValueArbitrary], oraclePropertyOptions(100))(
+  fcTest.prop(
+    [changedChildValueArbitrary],
+    oraclePropertyOptions(100, `includes-publication.child-scalar`),
+  )(
     `publishes child-only scalar updates through both layers`,
     async (value) => {
       await expectPublicationMatches({ type: `childScalar`, value })
     },
   )
 
-  fcTest.prop([fc.constantFrom(20, 30)], oraclePropertyOptions(100))(
-    `compares route transitions at both query layers`,
-    async (group) => {
-      await expectPublicationMatches({ type: `parentRoute`, group })
-    },
-  )
+  fcTest.prop(
+    [fc.constantFrom(20, 30)],
+    oraclePropertyOptions(100, `includes-publication.parent-route`),
+  )(`compares route transitions at both query layers`, async (group) => {
+    await expectPublicationMatches({ type: `parentRoute`, group })
+  })
 
   fcTest.prop(
     [
@@ -524,18 +511,21 @@ describe(`layered-query publication oracle`, () => {
         value: changedValueArbitrary,
       }),
     ],
-    oraclePropertyOptions(100),
+    oraclePropertyOptions(
+      100,
+      `includes-publication.atomic-parent-replacement`,
+    ),
   )(`compares atomic parent replacements at both query layers`, async (row) => {
     await expectPublicationMatches({ type: `atomicReplace`, ...row })
   })
 
-  fcTest.prop([changedValueArbitrary], oraclePropertyOptions(100))(
-    `publishes restored state after optimistic rollback`,
-    async (value) => {
-      await expectPublicationMatches({
-        type: `optimisticRollback`,
-        value,
-      })
-    },
-  )
+  fcTest.prop(
+    [changedValueArbitrary],
+    oraclePropertyOptions(100, `includes-publication.optimistic-rollback`),
+  )(`publishes restored state after optimistic rollback`, async (value) => {
+    await expectPublicationMatches({
+      type: `optimisticRollback`,
+      value,
+    })
+  })
 })

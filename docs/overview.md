@@ -3,8 +3,6 @@ title: Overview
 id: overview
 ---
 
-# TanStack DB - Documentation
-
 Welcome to the TanStack DB documentation.
 
 TanStack DB is the reactive client store for your API. It solves the problems of building fast, modern apps, helping you:

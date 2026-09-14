@@ -189,7 +189,7 @@ export class IncludesSubquery extends BaseExpression {
     public childCorrelationField: PropRef, // Child-side ref (e.g., issue.projectId)
     public fieldName: string, // Result field name (e.g., "issues")
     public parentFilters?: Array<Where>, // WHERE clauses referencing parent aliases (applied post-join)
-    public parentProjection?: Array<PropRef>, // Parent field refs used by parentFilters
+    public parentProjection?: Array<PropRef>, // Parent field refs used anywhere in the child plan
     public materialization: IncludesMaterialization = `collection`,
     public scalarField?: string,
   ) {
@@ -356,18 +356,21 @@ export function createResidualWhere(
   return { expression, residual: true }
 }
 
+/** Sources declared by a FROM clause. UnionAll branches own their sources. */
+export function getFromSources(from: From): Array<CollectionRef | QueryRef> {
+  if (from.type === `unionFrom`) return from.sources
+  if (from.type === `unionAll`) return []
+  return [from]
+}
+
 function getRefFromAlias(
   query: QueryIR,
   alias: string,
 ): CollectionRef | QueryRef | void {
-  if (query.from.type === `unionFrom`) {
-    for (const source of query.from.sources) {
-      if (source.alias === alias) {
-        return source
-      }
+  for (const source of getFromSources(query.from)) {
+    if (source.alias === alias) {
+      return source
     }
-  } else if (query.from.type !== `unionAll` && query.from.alias === alias) {
-    return query.from
   }
 
   for (const join of query.join || []) {

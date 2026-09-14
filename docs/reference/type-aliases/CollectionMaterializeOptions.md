@@ -9,7 +9,7 @@ title: CollectionMaterializeOptions
 type CollectionMaterializeOptions<T> = object;
 ```
 
-Defined in: [packages/db/src/client.ts:93](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L93)
+Defined in: [packages/db/src/client.ts:94](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L94)
 
 ## Type Parameters
 
@@ -25,4 +25,4 @@ Defined in: [packages/db/src/client.ts:93](https://github.com/TanStack/db/blob/m
 optional initialData: T[];
 ```
 
-Defined in: [packages/db/src/client.ts:94](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L94)
+Defined in: [packages/db/src/client.ts:95](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L95)

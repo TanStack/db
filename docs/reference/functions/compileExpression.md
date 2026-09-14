@@ -9,7 +9,7 @@ title: compileExpression
 function compileExpression(expr, isSingleRow): CompiledSingleRowExpression | CompiledExpression;
 ```
 
-Defined in: [packages/db/src/query/compiler/evaluators.ts:90](https://github.com/TanStack/db/blob/main/packages/db/src/query/compiler/evaluators.ts#L90)
+Defined in: [packages/db/src/query/compiler/evaluators.ts:96](https://github.com/TanStack/db/blob/main/packages/db/src/query/compiler/evaluators.ts#L96)
 
 Compiles an expression into an optimized evaluator function.
 This eliminates branching during evaluation by pre-compiling the expression structure.

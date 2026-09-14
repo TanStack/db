@@ -165,13 +165,18 @@ const { data, pages, fetchNextPage, hasNextPage } = useLiveInfiniteQuery(
     .orderBy(({ posts }) => posts.createdAt, 'desc'),
   {
     pageSize: 20,
-    getNextPageParam: (lastPage, allPages) =>
-      lastPage.length === 20 ? allPages.length : undefined
   }
 )
 ```
 
 `fetchNextPage()` returns a promise that resolves after the page request settles. Failures are exposed through the returned `error` value and do not reject the promise.
+
+This hook widens an ordered live query; it is not TanStack Query's
+`useInfiniteQuery`. `getNextPageParam` was previously ignored and is now rejected.
+`initialPageParam` only labels the returned pages; it does not set a server cursor
+or skip remote rows. For server pagination, use an on-demand Query Collection
+whose `queryFn` fulfills `meta.loadSubsetOptions`. See the
+[server pagination guide](../../collections/query-collection.md#server-pagination-with-live-queries).
 
 The deprecated dependency array is only available when using the query function variant, not when passing a pre-created collection.
 

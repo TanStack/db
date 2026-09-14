@@ -89,11 +89,13 @@ const { data } = useLiveQuery({
 const { data } = useLiveQuery(preloadedCollection)
 
 // Conditional query — derived identity handles enabled/disabled transitions
-const { data, status } = useLiveQuery((q) => {
-  if (!userId) return undefined
-  return q
-    .from({ todo: todoCollection })
-    .where(({ todo }) => eq(todo.userId, userId))
+const { data, status } = useLiveQuery({
+  query: (q) => {
+    if (!userId) return undefined
+    return q
+      .from({ todo: todoCollection })
+      .where(({ todo }) => eq(todo.userId, userId))
+  },
 })
 // When disabled: status='disabled', data=undefined
 ```
