@@ -1,5 +1,15 @@
 # @tanstack/electric-db-collection
 
+## 0.4.10
+
+### Patch Changes
+
+- Preserve nested boolean predicate grouping when compiling Electric subset SQL, ([#1816](https://github.com/TanStack/db/pull/1816))
+  including comparison results and NOT expressions used inside comparisons,
+  membership checks, and null tests.
+- Updated dependencies [[`3c4c35d`](https://github.com/TanStack/db/commit/3c4c35d5868c908979058c4dbeae7c4ac9eab88b)]:
+  - @tanstack/db@0.9.2
+
 ## 0.4.9
 
 ### Patch Changes

@@ -1,5 +1,12 @@
 # @tanstack/node-db-sqlite-persistence
 
+## 0.2.23
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.2.23
+
 ## 0.2.22
 
 ### Patch Changes
