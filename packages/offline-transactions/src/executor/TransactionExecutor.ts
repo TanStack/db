@@ -21,6 +21,7 @@ export class TransactionExecutor {
   private executionPromise: Promise<void> | null = null
   private offlineExecutor: TransactionSignaler
   private retryTimer: ReturnType<typeof setTimeout> | null = null
+  private acknowledgmentRevision = 0
 
   constructor(
     scheduler: KeyScheduler,
@@ -103,6 +104,7 @@ export class TransactionExecutor {
             try {
               // Replay can still see this ID until durable deletion settles.
               await this.outbox.remove(transaction.id)
+              this.acknowledgmentRevision++
             } finally {
               this.scheduler.markCompleted(transaction)
             }
@@ -230,7 +232,16 @@ export class TransactionExecutor {
   }
 
   async loadPendingTransactions(): Promise<void> {
-    const transactions = await this.outbox.getAll()
+    let transactions: Array<OfflineTransaction>
+    let revision: number
+    do {
+      revision = this.acknowledgmentRevision
+      transactions = await this.outbox.getAll()
+      const { isOfflineEnabled } = this.offlineExecutor
+      if (!isOfflineEnabled) return
+      // getAll can retain earlier rows while awaiting later storage reads.
+      // Reread after acknowledgment rather than readmit successfully deleted IDs.
+    } while (revision !== this.acknowledgmentRevision)
     let filteredTransactions = transactions
 
     if (this.config.beforeRetry) {

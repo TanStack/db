@@ -1226,11 +1226,11 @@ export class CollectionStateManager<
       // sync commit has been applied, stop retaining completed optimistic keys
       // that were not confirmed by this commit so the temporary row is removed.
       for (const key of this.pendingOptimisticDirectUpserts) {
-        // Truncate republishes this captured snapshot. Keep its existing
-        // retention marker so the next sync can also publish its removal.
+        // An active delete can hide an accepted snapshot. Retain it through
+        // truncate so rollback can restore it; ordinary sync still retires it.
         if (
           hasTruncateSync &&
-          truncateOptimisticSnapshot?.upserts.has(key) &&
+          this.pendingOptimisticUpserts.has(key) &&
           !changedKeys.has(key)
         )
           continue

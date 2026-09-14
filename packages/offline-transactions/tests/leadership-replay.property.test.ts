@@ -517,6 +517,183 @@ it.each(
   },
 )
 
+// A replay scan can capture A, then block on another storage read until A's
+// successful deletion. Pending-only dedupe no longer remembers A at admission.
+// Peers admitted only through this scan must still execute exactly once.
+it.each([20260919, undefined])(
+  `admits only unfinished work from delayed replay reads (seed %s)`,
+  async (seed) => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.record({
+          peers: fc.integer({ min: 1, max: 4 }),
+          scans: fc.integer({ min: 1, max: 3 }),
+          afterAcknowledgment: fc.boolean(),
+          payload: fc.string({ maxLength: 12 }),
+        }),
+        async ({ peers, scans, afterAcknowledgment, payload }) => {
+          const entered = gate()
+          const provider = gate()
+          const captured = gate()
+          const delivery = gate()
+          let hold = false
+          let captures = 0
+          class Storage extends FakeStorageAdapter {
+            override async get(key: string) {
+              const value = await super.get(key)
+              if (hold && key === `tx:peer-0`) {
+                if (++captures === scans) captured.resolve()
+                await delivery.promise
+              }
+              return value
+            }
+          }
+          const storage = new Storage()
+          const outbox = new OutboxManager(storage, {})
+          const transactions: Array<OfflineTransaction> = [
+            `active`,
+            ...Array.from({ length: peers }, (_, index) => `peer-${index}`),
+          ].map((id, index) => ({
+            id,
+            mutationFnName: `syncData`,
+            mutations: [],
+            keys: [],
+            idempotencyKey: `${id}/once`,
+            createdAt: new Date(index),
+            retryCount: 0,
+            nextAttemptAt: 0,
+            version: 1,
+            metadata: { payload },
+          }))
+          await outbox.add(transactions[0]!)
+          const loads = vi.spyOn(
+            TransactionExecutor.prototype,
+            `loadPendingTransactions`,
+          )
+          const executions = vi.spyOn(
+            TransactionExecutor.prototype,
+            `executeAll`,
+          )
+          const env = createTestOfflineEnvironment({
+            storage,
+            mutationFn: async ({ transaction }) => {
+              if (transaction.id === `active`) {
+                entered.resolve()
+                await provider.promise
+              }
+            },
+          })
+          const outcomes = transactions.map(({ id }) =>
+            env.executor.waitForTransactionCompletion(id),
+          )
+          // Observe rejection now, even if a preceding reach assertion fails.
+          for (const outcome of outcomes) void outcome.catch(() => {})
+          let hasPrimaryFailure = false
+          try {
+            await atOracleCheckpoint(
+              env.executor.waitForInit(),
+              `initial replay`,
+            )
+            await atOracleCheckpoint(entered.promise, `provider entered`)
+            for (const transaction of transactions.slice(1))
+              await outbox.add(transaction)
+            hold = true
+            const reads: Array<Promise<void>> = []
+            for (let index = 0; index < scans; index++) {
+              env.leader.setLeader(false)
+              env.leader.setLeader(true)
+              reads.push(loads.mock.results.at(-1)!.value)
+            }
+            await atOracleCheckpoint(
+              captured.promise,
+              `all reads captured active row`,
+            )
+            expect(captures).toBe(scans)
+            if (afterAcknowledgment) {
+              provider.resolve()
+              await atOracleCheckpoint(outcomes[0]!, `active row acknowledged`)
+              expect(await outbox.get(`active`)).toBeNull()
+              expect(
+                env.mutationCalls.map((call) => call.transaction.id),
+              ).toEqual([`active`])
+            }
+            hold = false
+            delivery.resolve()
+            await atOracleCheckpoint(
+              Promise.all(reads),
+              `replay reads delivered`,
+            )
+            provider.resolve()
+            await atOracleCheckpoint(
+              Promise.all(outcomes),
+              `all callers completed`,
+            )
+            await atOracleCheckpoint(
+              executions.mock.results.at(-1)!.value,
+              `replay drained`,
+            )
+            expect(
+              env.mutationCalls.map(({ transaction, idempotencyKey }) => ({
+                id: transaction.id,
+                key: idempotencyKey,
+                metadata: transaction.metadata,
+              })),
+            ).toEqual(
+              transactions.map(({ id, idempotencyKey, metadata }) => ({
+                id,
+                key: idempotencyKey,
+                metadata,
+              })),
+            )
+            expect(storage.snapshot()).toEqual({})
+            expect(env.executor.getPendingCount()).toBe(0)
+          } catch (error) {
+            hasPrimaryFailure = true
+            throw error
+          } finally {
+            hold = false
+            provider.resolve()
+            delivery.resolve()
+            await cleanupOfflineOracle(
+              [
+                () => env.executor.dispose(),
+                () => env.collection.cleanup(),
+                () => {
+                  loads.mockRestore()
+                  executions.mockRestore()
+                },
+              ],
+              hasPrimaryFailure,
+            )
+          }
+        },
+      ),
+      {
+        seed,
+        numRuns: 30,
+        examples: [
+          [
+            {
+              peers: 1,
+              scans: 1,
+              afterAcknowledgment: true,
+              payload: `witness`,
+            },
+          ],
+          [
+            {
+              peers: 1,
+              scans: 1,
+              afterAcknowledgment: false,
+              payload: `control`,
+            },
+          ],
+        ],
+      },
+    )
+  },
+)
+
 it.each([`keys`, `get`] as const)(
   `rejects initialization when storage %s fails without losing records`,
   async (operation) => {

@@ -239,7 +239,7 @@ function getCachedHash(input: object, context?: HashContext): number {
 
 function isReferenceHashedObject(input: object): boolean {
   return (
-    input instanceof File ||
+    (typeof File !== `undefined` && input instanceof File) ||
     (isBinaryValue(input) &&
       input.byteLength > UINT8ARRAY_CONTENT_HASH_THRESHOLD)
   )
@@ -302,6 +302,17 @@ export function equalHashValues(left: unknown, right: unknown): boolean {
         a[Symbol.toStringTag] === b[Symbol.toStringTag] &&
         a.toString() === b.toString()
       )
+    if (a instanceof RegExp || b instanceof RegExp) {
+      if (
+        !(a instanceof RegExp && b instanceof RegExp) ||
+        a.source !== b.source ||
+        a.flags !== b.flags ||
+        a.lastIndex !== b.lastIndex
+      )
+        return false
+    }
+    if (Array.isArray(a) && Array.isArray(b) && a.length !== b.length)
+      return false
 
     // Revisited pairs close cycles and avoid expanding shared subtrees.
     const peers = compared.get(a)

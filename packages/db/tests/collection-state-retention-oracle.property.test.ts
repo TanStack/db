@@ -902,6 +902,69 @@ const insertionPrefix: Array<OptimisticStep> = [
   { type: `edit`, key: 1, fields: { b: 2 }, optimistic: true },
   { type: `settle`, slot: 1, success: true, cascade: false },
 ]
+it.each(
+  [`before delete`, `during delete`, `after rollback`].flatMap((timing) =>
+    [86105, undefined].map((seed) => ({ timing, seed })),
+  ),
+)(
+  `retains an accepted snapshot with truncate $timing (seed $seed)`,
+  async ({ timing, seed }) => {
+    await fc.assert(
+      fc.asyncProperty(historyRow, fc.boolean(), async (row, reject) => {
+        const truncate: OptimisticStep = {
+          type: `sync`,
+          rows: [],
+          truncate: true,
+          immediate: false,
+          copies: 1,
+        }
+        const counts = await runOptimisticHistory(
+          [],
+          [
+            {
+              type: `edit`,
+              key: row.id,
+              fields: { a: row.a, b: row.b, c: row.c },
+              optimistic: true,
+            },
+            { type: `settle`, slot: 0, success: true, cascade: false },
+            ...(timing === `before delete` ? [truncate] : []),
+            { type: `delete`, key: row.id, optimistic: true },
+            ...(timing === `during delete` ? [truncate] : []),
+            {
+              type: `settle`,
+              slot: 0,
+              success: false,
+              cascade: false,
+              failure: reject ? `reject` : `rollback`,
+            },
+            ...(timing === `after rollback` ? [truncate] : []),
+            // Ordinary sync may retire the completed local snapshot. Preserve
+            // that boundary and later key reuse, not an immortal local row.
+            {
+              type: `sync`,
+              rows: [],
+              truncate: false,
+              immediate: false,
+              copies: 1,
+            },
+            {
+              type: `edit`,
+              key: row.id,
+              fields: { a: row.a + 1 },
+              optimistic: true,
+            },
+            { type: `settle`, slot: 0, success: true, cascade: false },
+          ],
+        )
+        expect(counts.deletes).toBe(1)
+        expect(counts.settlements).toBe(3)
+      }),
+      { seed, numRuns: oracleRuns(30) },
+    )
+  },
+)
+
 it.each([true, false])(
   `replays insert dependency settlement, accepted=%s`,
   async (success) => {
