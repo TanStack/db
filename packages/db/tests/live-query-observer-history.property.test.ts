@@ -143,7 +143,7 @@ function recordedChanges(
           type: change.type,
           key: change.key,
           version: change.value.version,
-          previousVersion: change.previousValue.version,
+          previousVersion: change.previousValue!.version,
         }
       : {
           type: change.type,
