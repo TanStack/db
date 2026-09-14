@@ -60,7 +60,7 @@ const referenceRead = (program, i) =>
     ? `SELECT a.id,a.value + coalesce((SELECT b.value FROM ${tableName(
         1,
       )} b WHERE b.id='row'),0) AS value FROM ${tableName(0)} a ORDER BY a.id`
-    : `SELECT id,value FROM ${tableName(i)} ORDER BY id`
+    : `SELECT id,value FROM ${tableName(program.peerQuery && i === program.count - 1 ? 0 : i)} ORDER BY id`
 const plain = (rows) =>
   rows
     .map(({ id, value }) => ({ id, value }))
@@ -244,7 +244,11 @@ async function execute(program, histories) {
         for (const [stepIndex, step] of history.entries()) {
           evidence.at({ operation: step.kind, step: stepIndex })
           evidence.record({ type: 'operation', step })
-          const target = step.table % program.count
+          const target =
+            step.table % (program.peerQuery ? program.count - 1 : program.count)
+          const receivesOptimism = (i) =>
+            i === target ||
+            (program.peerQuery && target === 0 && i === program.count - 1)
           const before = structuredClone(admitted)
           const action =
             app.actions[
@@ -260,7 +264,7 @@ async function execute(program, histories) {
               'invalid-input-optimism',
               app.collections.map((c) => plain([...c.values()])),
               before.map((rows, i) =>
-                i !== target
+                !receivesOptimism(i)
                   ? rows
                   : step.kind === 'delete'
                     ? []
@@ -342,7 +346,7 @@ async function execute(program, histories) {
             evidence.fault('omit-helper', { operation: step.kind })
           const tx = action(input)
           const expectedOptimism = before.map((rows, i) =>
-            i !== target
+            !receivesOptimism(i)
               ? rows
               : step.kind === 'delete'
                 ? []
@@ -405,7 +409,7 @@ async function execute(program, histories) {
               : Array.from(
                   { length: program.count },
                   (_, i) =>
-                    i === target ||
+                    receivesOptimism(i) ||
                     changed.has(i) ||
                     (program.pgFunctions && i === 0 && changed.has(1)),
                 ).filter(Boolean).length
@@ -459,6 +463,26 @@ try {
       (value) => scenario(value.program, value.histories),
     )
   else {
+    for (const queryStyle of ['full', 'projected']) {
+      await scenario(
+        {
+          count: 3,
+          peerQuery: true,
+          queryStyle,
+          queryBinding: 'local',
+          inlineSql: true,
+        },
+        [
+          [
+            { kind: 'update', table: 0, value: 7 },
+            { kind: 'delete', table: 0, value: 0 },
+            { kind: 'insert', table: 0, value: 8 },
+            { kind: 'invalid', table: 0, value: 9 },
+            { kind: 'update', table: 1, value: 10 },
+          ],
+        ],
+      )
+    }
     for (const unknown of ['strip', 'passthrough', 'strict']) {
       await scenario(
         {
@@ -542,6 +566,13 @@ try {
         await fc.check(
           fc.asyncProperty(
             fc.oneof(
+              fc.record({
+                peerQuery: fc.constant(true),
+                queryStyle: fc.constantFrom('full', 'projected'),
+                queryBinding: fc.constantFrom('local', 'direct'),
+                inlineSql: fc.boolean(),
+                count: fc.integer({ min: 2, max: 4 }),
+              }),
               fc.record({
                 pgFunctions: fc.boolean(),
                 opaqueIndex: fc.boolean(),

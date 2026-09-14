@@ -1,5 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { parse } from '@babel/parser'
+import { transformBoundEndpoints } from '../bound-transform.mjs'
 import { endpoints } from '../transform.mjs'
 const compilerPlugin = () => endpoints().find((plugin) => plugin.transform)
 
@@ -44,4 +46,59 @@ test('incompatible row projections on the same relation cannot share optimism', 
  }})\nreturn rows`,
   )
   assert.throws(() => compile(source), /projection/)
+})
+
+const unfilteredSource = (expression, prefix = 'await requireUser(req);') => `
+import {z} from 'zod';import {endpoints} from './runtime';
+import {db,items,other,requireUser} from './database.server';import {custom} from './helpers.server';
+function App(dbClient){const {query,mutation}=endpoints(dbClient);
+const rows=query({input:z.object({}),schema:z.object({id:z.string(),value:z.number()}),
+async handler(req,res){${prefix}return res.json(${expression})}});return rows}`
+const queryModel = (source) =>
+  transformBoundEndpoints(
+    source,
+    '/test/endpoint.tsx',
+    parse(source, { sourceType: 'module' }),
+  ).definitions[0].model
+
+test('unfiltered row collections retain identity without Todo fields or an auth result variable', () => {
+  for (const prefix of [
+    '',
+    'await requireUser(req);',
+    'const actor=await requireUser(req);',
+  ]) {
+    for (const selection of ['', '{id:items.id,value:items.value}']) {
+      const model = queryModel(
+        unfilteredSource(`await db.select(${selection}).from(items)`, prefix),
+      )
+      assert.ok(!model.relation.startsWith('opaque:'))
+      assert.deepEqual(model.order, [])
+      assert.deepEqual(model.membership, { kind: 'all' })
+    }
+  }
+})
+
+test('unfiltered recognition cannot erase membership, windows, transformations, or projection differences', () => {
+  for (const expression of [
+    'await db.select().from(items).where(custom(items))',
+    'await db.select().from(items).limit(1)',
+    'await db.select().from(items).orderBy(custom(items))',
+    '(await db.select().from(items)).filter(row=>row.value>0)',
+    'await db.select({id:items.id,value:items.other}).from(items)',
+    'await db.select({value:items.value}).from(items)',
+    'await db.select().from(items).innerJoin(other,custom(items))',
+  ]) {
+    assert.ok(
+      queryModel(unfilteredSource(expression)).relation.startsWith('opaque:'),
+    )
+  }
+  const full = queryModel(unfilteredSource('await db.select().from(items)'))
+  const projected = queryModel(
+    unfilteredSource(
+      'await db.select({id:items.id,value:items.value}).from(items)',
+    ),
+  )
+  assert.notEqual(full.relation, projected.relation)
+  assert.notEqual(full.relation, queryModel(specimen).relation)
+  assert.notEqual(projected.relation, queryModel(specimen).relation)
 })

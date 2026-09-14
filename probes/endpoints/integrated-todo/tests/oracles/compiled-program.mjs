@@ -48,14 +48,23 @@ export async function evidence(){await ready;return {ready:true}}
 `
 }
 export function endpointSource(program, browser = false) {
-  let declarations = Array.from(
-    { length: program.count },
-    (_, i) => `
-const q${i}=query({input:z.object({}),schema:z.object({id:z.string(),value:z.number()}),async handler(req,res){return res.json(await db.select({id:t${i}.id,value:t${i}.value}).from(t${i}))}});
+  let declarations = Array.from({ length: program.count }, (_, i) => {
+    const table = program.peerQuery && i === program.count - 1 ? 0 : i
+    const selection =
+      program.queryStyle === 'full'
+        ? ''
+        : `{id:t${table}.id,value:t${table}.value}`
+    const read = `await db.select(${selection}).from(t${table})`
+    const result =
+      program.queryBinding === 'local'
+        ? `const rows=${read};return res.json(rows)`
+        : `return res.json(${read})`
+    return `
+const q${i}=query({input:z.object({}),schema:z.object({id:z.string(),value:z.number()}),async handler(req,res){${result}}});
 const update${i}=mutation({input:${mutationInputSchema(program, true)},onMutate({input}){if(q${i}.has('row'))q${i}.update('row',d=>{d.value=input.value})},async handler(req,res){await db.update(t${i}).set({value:req.body.value}).where(eq(t${i}.id,'row'));return res.json({marker:${JSON.stringify(markers.join('|'))}})}});
 const delete${i}=mutation({input:${mutationInputSchema(program, false)},onMutate(){if(q${i}.has('row'))q${i}.delete('row')},async handler(req,res){await db.delete(t${i}).where(eq(t${i}.id,'row'));return res.json({ok:true})}});
-const insert${i}=mutation({input:${mutationInputSchema(program, true)},onMutate({input}){if(!q${i}.has('row'))q${i}.insert({id:'row',value:input.value})},async handler(req,res){await db.insert(t${i}).values({id:'row',value:req.body.value});return res.json({ok:true})}});`,
-  ).join('\n')
+const insert${i}=mutation({input:${mutationInputSchema(program, true)},onMutate({input}){if(!q${i}.has('row'))q${i}.insert({id:'row',value:input.value})},async handler(req,res){await db.insert(t${i}).values({id:'row',value:req.body.value});return res.json({ok:true})}});`
+  }).join('\n')
   if (program.inlineSql) {
     declarations = declarations.replaceAll(
       'async handler(req,res){',

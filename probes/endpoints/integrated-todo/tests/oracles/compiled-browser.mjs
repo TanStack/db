@@ -39,6 +39,19 @@ const report = {
 const evidence = driver.evidence
 const input = {
   programs: [
+    {
+      count: 3,
+      peerQuery: true,
+      queryStyle: 'full',
+      queryBinding: 'local',
+      moduleLevel: true,
+    },
+    {
+      count: 3,
+      peerQuery: true,
+      queryStyle: 'projected',
+      queryBinding: 'direct',
+    },
     { helpers: true, count: 3, trigger: false, foreignKey: true },
     { helpers: true, count: 3, trigger: true, foreignKey: false },
     { count: 3, pgFunctions: true, expressionIndex: true, opaqueIndex: true },
@@ -76,7 +89,7 @@ async function referenceRows(program) {
               )} b WHERE b.id='row'),0) AS value FROM ${tableName(
                 0,
               )} a ORDER BY a.id`
-            : `SELECT id,value FROM ${tableName(i)} ORDER BY id`,
+            : `SELECT id,value FROM ${tableName(program.peerQuery && i === program.count - 1 ? 0 : i)} ORDER BY id`,
         )
         .then((r) => r.rows),
     ),
@@ -133,7 +146,13 @@ async function execute(input) {
           await referenceRows(program),
           { checkpoint: 'initial-demand' },
         )
-        for (const [step, operation] of input.operations.entries()) {
+        for (const [step, original] of input.operations.entries()) {
+          const operation = {
+            ...original,
+            table: program.peerQuery
+              ? original.table % (program.count - 1)
+              : original.table,
+          }
           evidence.phase = 'execution'
           evidence.at({ program, operation: operation.kind, step })
           evidence.record({ type: 'operation', operation })
@@ -174,7 +193,12 @@ async function execute(input) {
             checkpoint: 'pre-action',
           })
           const optimistic = before.map((rows, i) =>
-            i !== operation.table
+            i !== operation.table &&
+            !(
+              program.peerQuery &&
+              operation.table === 0 &&
+              i === program.count - 1
+            )
               ? rows
               : operation.kind === 'delete'
                 ? []
@@ -247,19 +271,21 @@ async function execute(input) {
                 operation.table === 0,
             )
           const wanted =
-            program.trigger &&
-            operation.table === 0 &&
-            operation.kind === 'update'
-              ? 3
-              : program.foreignKey &&
-                  operation.kind === 'delete' &&
-                  operation.table === 0
-                ? 2
-                : program.pgFunctions &&
-                    operation.kind === 'update' &&
+            program.peerQuery && operation.table === 0
+              ? 2
+              : program.trigger &&
+                  operation.table === 0 &&
+                  operation.kind === 'update'
+                ? 3
+                : program.foreignKey &&
+                    operation.kind === 'delete' &&
                     operation.table === 0
                   ? 2
-                  : 1
+                  : program.pgFunctions &&
+                      operation.kind === 'update' &&
+                      operation.table === 0
+                    ? 2
+                    : 1
           evidence.check('read-obligation', reads, wanted, {
             checkpoint: 'settled',
           })

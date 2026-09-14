@@ -43,6 +43,17 @@ subscribing, or mutation reconciliation starts data loading. Lazy route modules
 can therefore register endpoints when their code loads. Server registry discovery
 still finds their query handlers before the browser imports them.
 
+Queries with an authored row schema also support direct unfiltered table reads,
+using either `res.json(await db.select().from(table))` or a local `rows` variable.
+They can retain an awaited imported guard without binding its result. Compatible
+whole-row queries share optimistic changes; direct same-name column projections
+share with matching projections. These forms do not require Todo fields or an
+invented server ordering. Different projections and the existing user-scoped
+query models keep separate identities. Filters, joins, ordering and transformed
+results still need their own supported analysis; this recognizer never drops
+those clauses to claim an unfiltered result. The existing scalar analyzer handles
+its supported filtered/ordered queries.
+
 An application may provide `endpointScope` as a string or a synchronous getter.
 The runtime resolves it when a read or action starts. Kitchen uses one client per
 browser page and waits for its session in the authenticated route. The client

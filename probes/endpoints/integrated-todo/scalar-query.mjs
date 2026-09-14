@@ -8,7 +8,128 @@ const member = (node, object, property) =>
   identifier(node.object, object) &&
   identifier(node.property, property)
 
-export function analyzeScalarQuery(path, fail, parameters = {}) {
+// A direct, unfiltered table result needs no Todo fields or auth binding. The
+// authored row schema supplies its runtime shape contract. Keep its projection
+// and unfiltered scope separate from the legacy scoped scalar model: sharing a
+// physical table alone does not make two returned row representations compatible.
+function analyzeUnfilteredQuery(path) {
+  const { params, body } = path.node
+  if (
+    params.length !== 2 ||
+    params.some((param) => param.type !== 'Identifier')
+  )
+    return null
+  const [request, response] = params
+  const statements = [...body.body]
+  const returned = statements.pop()
+  if (
+    returned?.type !== 'ReturnStatement' ||
+    returned.argument?.type !== 'CallExpression' ||
+    !member(returned.argument.callee, response.name, 'json') ||
+    returned.argument.arguments.length !== 1
+  )
+    return null
+  let read = returned.argument.arguments[0]
+  if (read.type === 'Identifier') {
+    const statement = statements.pop()
+    if (
+      statement?.type !== 'VariableDeclaration' ||
+      statement.kind !== 'const' ||
+      statement.declarations.length !== 1 ||
+      !identifier(statement.declarations[0].id, read.name)
+    )
+      return null
+    read = statement.declarations[0].init
+  }
+  // Preserve authored guards without interpreting their authorization policy.
+  // Only standalone awaited imported calls may precede this direct result.
+  for (const statement of statements) {
+    let guard =
+      statement.type === 'ExpressionStatement' ? statement.expression : null
+    if (
+      statement.type === 'VariableDeclaration' &&
+      statement.kind === 'const' &&
+      statement.declarations.length === 1 &&
+      statement.declarations[0].id.type === 'Identifier'
+    )
+      guard = statement.declarations[0].init
+    const call = guard?.type === 'AwaitExpression' ? guard.argument : null
+    if (
+      call?.type !== 'CallExpression' ||
+      call.callee.type !== 'Identifier' ||
+      !path.scope.getBinding(call.callee.name)?.path.isImportSpecifier() ||
+      call.arguments.length !== 1 ||
+      !identifier(call.arguments[0], request.name)
+    )
+      return null
+  }
+  if (read?.type !== 'AwaitExpression') return null
+  const from = read.argument
+  if (
+    from?.type !== 'CallExpression' ||
+    from.callee.type !== 'MemberExpression' ||
+    from.callee.computed ||
+    !identifier(from.callee.property, 'from') ||
+    from.arguments.length !== 1 ||
+    from.arguments[0].type !== 'Identifier'
+  )
+    return null
+  const select = from.callee.object
+  if (
+    select.type !== 'CallExpression' ||
+    !member(select.callee, 'db', 'select') ||
+    select.arguments.length > 1
+  )
+    return null
+  const database = path.scope.getBinding('db')
+  const table = path.scope.getBinding(from.arguments[0].name)
+  if (
+    !database?.path.isImportSpecifier() ||
+    database.path.node.imported.name !== 'db' ||
+    !table?.path.isImportSpecifier() ||
+    table.path.parent.source.value !== database.path.parent.source.value ||
+    !/^\.\.?\/(?:.*\/)?database\.server(?:\.ts)?$/.test(
+      database.path.parent.source.value,
+    )
+  )
+    return null
+  let fields
+  if (select.arguments.length) {
+    const projection = select.arguments[0]
+    if (projection.type !== 'ObjectExpression') return null
+    fields = []
+    for (const property of projection.properties) {
+      if (
+        property.type !== 'ObjectProperty' ||
+        property.computed ||
+        property.key.type !== 'Identifier' ||
+        ['__proto__', 'constructor', 'prototype'].includes(property.key.name) ||
+        !member(property.value, from.arguments[0].name, property.key.name)
+      )
+        return null
+      fields.push(property.key.name)
+    }
+    if (!fields.includes('id') || new Set(fields).size !== fields.length)
+      return null
+  }
+  return {
+    relation: `${table.path.node.imported.name}:unfiltered:${fields ? JSON.stringify([...fields].sort()) : '*'}`,
+    order: [],
+    membership: { kind: 'all' },
+    ...(fields ? { fields } : {}),
+  }
+}
+
+export function analyzeScalarQuery(
+  path,
+  fail,
+  parameters = {},
+  { rowSchema = false } = {},
+) {
+  if (rowSchema) {
+    const unfiltered = analyzeUnfilteredQuery(path)
+    if (unfiltered) return unfiltered
+  }
   const handler = path.node
   const reject = (message, node = handler) =>
     fail(`ENDPOINT_ORDER_NOT_CHECKED ${message}`, node)

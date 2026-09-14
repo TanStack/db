@@ -13,6 +13,15 @@ Production assets and source maps are scanned for server code in each program.
 The runtime lifecycle tests separately cover imports before a session exists,
 no reads before demand, synchronous actions, and rejecting scope changes.
 
+The compiled campaign also generates pairs of query collections reading the same
+table through plain whole-row or explicit column selections, direct returns or
+local variables, and optional awaited guards. Its independent PostgreSQL model
+requires both collections to reflect each optimistic CRUD operation and rejected
+input rollback. Other tables reuse row IDs to detect accidental propagation.
+Two browser programs exercise these peer queries through Start and retain the
+server-code exclusion checks. This closes a former gap: one query per table could
+pass while the compiler treated every non-Todo query as an opaque collection.
+
 The [SQL coverage and loading report](../../../SQL-COVERAGE-RESULTS.md) describes
 the new schema-first campaign. It generates 2–3 tables, nullable scalar columns,
 foreign keys, predicates and mutations. The same full-stack driver runs against

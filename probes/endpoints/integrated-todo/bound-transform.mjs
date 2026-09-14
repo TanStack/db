@@ -272,7 +272,9 @@ export function transformBoundEndpoints(
             if (values.params && !values.params.isObjectProperty())
               fail('params must be a client value', values.params.node)
             try {
-              model = analyzeScalarQuery(values.handler, fail, parameters)
+              model = analyzeScalarQuery(values.handler, fail, parameters, {
+                rowSchema: !!values.schema,
+              })
               model.relation =
                 createHash('sha256')
                   .update(
