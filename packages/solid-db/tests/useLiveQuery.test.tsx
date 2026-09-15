@@ -2284,6 +2284,95 @@ describe(`Query Collections`, () => {
       expect(keys).toEqual([`1`, `3`])
     })
 
+    it(`keeps custom-key rows distinct when an update changes rendered order`, async () => {
+      type CustomKeyItem = {
+        _id: string
+        name: string
+      }
+
+      const initialItems: Array<CustomKeyItem> = [
+        { _id: `bob1`, name: `Bob` },
+        { _id: `kevin1`, name: `Kevin` },
+        { _id: `stuart1`, name: `Stuart` },
+      ]
+      const reference = new Map(
+        initialItems.map((item) => [item._id, { ...item }]),
+      )
+      const expectedRows = () =>
+        Array.from(reference.values())
+          .sort(
+            (left, right) =>
+              left.name.localeCompare(right.name) ||
+              left._id.localeCompare(right._id),
+          )
+          .map((item) => ({
+            key: item._id,
+            text: `${item._id}:${item.name}`,
+          }))
+      const collection = createCollection(
+        mockSyncCollectionOptions<CustomKeyItem>({
+          id: `custom-key-rendered-reorder`,
+          getKey: (item) => item._id,
+          initialData: initialItems.map((item) => ({ ...item })),
+        }),
+      )
+      const renderedKeys: Array<string | number> = []
+
+      function TestComponent() {
+        const query = useLiveQuery((q) =>
+          q
+            .from({ items: collection })
+            .orderBy(({ items }) => items.name, `asc`),
+        )
+
+        return (
+          <ol
+            data-testid="custom-key-list"
+            data-ready={query.isReady ? `true` : `false`}
+          >
+            <For each={query()}>
+              {(item) => {
+                renderedKeys.push(item.$key)
+                return (
+                  <li data-row-key={item.$key}>
+                    {item._id}:{item.name}
+                  </li>
+                )
+              }}
+            </For>
+          </ol>
+        )
+      }
+
+      const rendered = render(() => <TestComponent />)
+      const readRenderedRows = () =>
+        Array.from(rendered.getByTestId(`custom-key-list`).children).map(
+          (element) => ({
+            key: element.getAttribute(`data-row-key`),
+            text: element.textContent,
+          }),
+        )
+
+      await waitFor(() => {
+        expect(rendered.getByTestId(`custom-key-list`).dataset.ready).toBe(
+          `true`,
+        )
+        expect(renderedKeys).toEqual([`bob1`, `kevin1`, `stuart1`])
+        expect(readRenderedRows()).toEqual(expectedRows())
+      })
+
+      const updatedItem = { _id: `stuart1`, name: `Alvin` }
+      reference.set(updatedItem._id, { ...updatedItem })
+      collection.utils.begin()
+      collection.utils.write({ type: `update`, value: updatedItem })
+      collection.utils.commit()
+
+      await waitFor(() => {
+        expect(collection.get(`stuart1`)?.name).toBe(`Alvin`)
+        expect(readRenderedRows()).toEqual(expectedRows())
+      })
+    })
+
     it(`should reflect optimistic inserts in the data array and reconcile after sync`, async () => {
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({
